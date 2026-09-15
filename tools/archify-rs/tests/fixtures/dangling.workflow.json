@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": { "title": "Dangling reference" },
+  "lanes": [ { "id": "main", "label": "Main" } ],
+  "nodes": [ { "id": "start", "lane": "main", "col": 0, "type": "frontend", "label": "Start" } ],
+  "edges": [ { "from": "start", "to": "ghost" } ]
+}

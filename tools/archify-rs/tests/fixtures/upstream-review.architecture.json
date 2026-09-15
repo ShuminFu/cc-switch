@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CC Switch Upstream Review — v3.17.0 to v3.20.3",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "switch-path",
+        "label": "Provider switch path",
+        "focus": [
+          "clients",
+          "ui",
+          "core",
+          "livecfg"
+        ],
+        "note": "One-click switching writes each managed app's own live config file."
+      },
+      {
+        "id": "routing-path",
+        "label": "Local routing path",
+        "focus": [
+          "core",
+          "proxy",
+          "auth",
+          "vendors"
+        ],
+        "note": "Proxy takeover converts protocols and injects the bound account's token."
+      },
+      {
+        "id": "usage-path",
+        "label": "Usage and pricing",
+        "focus": [
+          "clients",
+          "sessions",
+          "proxy",
+          "store",
+          "pricing"
+        ],
+        "note": "Two independent usage sources land in one ledger priced from models.dev."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "clients",
+      "type": "external",
+      "label": "Nine Managed Apps",
+      "sublabel": "Claude Code, Codex, Pi, Grok Build",
+      "tag": "+2 since v3.17",
+      "pos": [
+        40,
+        200
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "CC Switch Desktop",
+      "sublabel": "React 18 on Tauri 2",
+      "pos": [
+        415,
+        200
+      ],
+      "size": [
+        190,
+        76
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "Rust Core",
+      "sublabel": "provider, sync, migration",
+      "pos": [
+        760,
+        200
+      ],
+      "size": [
+        190,
+        76
+      ]
+    },
+    {
+      "id": "proxy",
+      "type": "backend",
+      "label": "Local Proxy",
+      "sublabel": "protocol conversion bridges",
+      "tag": "+20.4k lines",
+      "pos": [
+        1105,
+        200
+      ],
+      "size": [
+        190,
+        76
+      ]
+    },
+    {
+      "id": "livecfg",
+      "type": "database",
+      "label": "Live App Configs",
+      "sublabel": "~/.claude, ~/.codex, ~/.grok",
+      "pos": [
+        760,
+        50
+      ],
+      "size": [
+        190,
+        76
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "OAuth Auth Center",
+      "sublabel": "ChatGPT and xAI device code",
+      "tag": "multi-account",
+      "pos": [
+        1105,
+        50
+      ],
+      "size": [
+        190,
+        76
+      ]
+    },
+    {
+      "id": "sessions",
+      "type": "backend",
+      "label": "Session Importer",
+      "sublabel": "rollout and session logs",
+      "pos": [
+        40,
+        350
+      ],
+      "size": [
+        190,
+        76
+      ]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "SQLite Store",
+      "sublabel": "schema v16 to v17",
+      "pos": [
+        415,
+        350
+      ],
+      "size": [
+        190,
+        76
+      ]
+    },
+    {
+      "id": "pricing",
+      "type": "external",
+      "label": "models.dev",
+      "sublabel": "automatic price catalog",
+      "pos": [
+        760,
+        350
+      ],
+      "size": [
+        190,
+        76
+      ]
+    },
+    {
+      "id": "vendors",
+      "type": "cloud",
+      "label": "Upstream Vendors",
+      "sublabel": "Anthropic, OpenAI, xAI, GLM",
+      "pos": [
+        1105,
+        350
+      ],
+      "size": [
+        190,
+        76
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Local machine — CC Switch v3.20.3",
+      "wraps": [
+        "clients",
+        "ui",
+        "core",
+        "proxy",
+        "livecfg",
+        "auth",
+        "sessions",
+        "store"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Credentials stay in the provider table",
+      "wraps": [
+        "auth",
+        "proxy"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "manage",
+      "from": "clients",
+      "to": "ui",
+      "label": "one-click provider switch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ipc",
+      "from": "ui",
+      "to": "core",
+      "label": "Tauri IPC commands"
+    },
+    {
+      "id": "write-config",
+      "from": "core",
+      "to": "livecfg",
+      "label": "write live config",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "takeover",
+      "from": "core",
+      "to": "proxy",
+      "label": "takeover routing"
+    },
+    {
+      "id": "inject-token",
+      "from": "auth",
+      "to": "proxy",
+      "label": "inject access token",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "upstream",
+      "from": "proxy",
+      "to": "vendors",
+      "label": "converted HTTPS request",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 25
+    },
+    {
+      "id": "proxy-usage",
+      "from": "proxy",
+      "to": "store",
+      "label": "idempotent usage rows",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "log-scan",
+      "from": "clients",
+      "to": "sessions",
+      "label": "read rollout logs",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "import-usage",
+      "from": "sessions",
+      "to": "store",
+      "label": "import per-turn usage"
+    },
+    {
+      "id": "price-sync",
+      "from": "pricing",
+      "to": "store",
+      "label": "price sync every 6h",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Wider reach",
+      "items": [
+        "Grok Build became the 8th managed app in v3.18.0",
+        "Pi became the 9th managed app in v3.20.0"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Proxy correctness",
+      "items": [
+        "Tool-result images restored as native media, not text",
+        "Claude Code WebSearch bridged onto OpenAI Responses"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Security and data",
+      "items": [
+        "Skill install hardened against zip-slip and traversal",
+        "SQL backup import runs under a SQLite authorizer"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Fork status",
+      "items": [
+        "309 commits behind, no local divergence",
+        "528 files changed, +127,030 / -20,146 lines"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,262 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Catching This Fork Up to Upstream v3.20.3",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "sync",
+        "label": "Fast-forward",
+        "focus": [
+          "assess",
+          "fetch",
+          "ff"
+        ],
+        "note": "No local commits diverge, so the catch-up is a plain fast-forward."
+      },
+      {
+        "id": "verify",
+        "label": "Verify and migrate",
+        "focus": [
+          "ff",
+          "build",
+          "migrate",
+          "ship"
+        ],
+        "note": "The v16 to v17 migration backs up automatically before it runs."
+      },
+      {
+        "id": "risks",
+        "label": "Upgrade risks",
+        "focus": [
+          "ff",
+          "keys",
+          "migrate",
+          "rebuild"
+        ],
+        "note": "Two upstream advisories need an action that the merge itself cannot perform."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Catch-up"
+    },
+    {
+      "id": "risk",
+      "label": "Upgrade risks",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "survey",
+      "label": "Survey",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "merge",
+      "label": "Fast-forward",
+      "fromCol": 2,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "validate",
+      "label": "Validate",
+      "fromCol": 3,
+      "toCol": 4
+    },
+    {
+      "id": "shipit",
+      "label": "Ship",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "assess",
+    "fetch",
+    "ff",
+    "build",
+    "migrate",
+    "ship"
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "assess"
+    ],
+    "allowedTerminals": [
+      "ship",
+      "keys",
+      "rebuild"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "assess",
+      "lane": "main",
+      "col": 0,
+      "type": "frontend",
+      "label": "Assess divergence",
+      "sublabel": "309 commits behind",
+      "tag": "v3.17.0 head",
+      "width": 164
+    },
+    {
+      "id": "fetch",
+      "lane": "main",
+      "col": 1,
+      "type": "backend",
+      "label": "Fetch upstream",
+      "sublabel": "farion1231/cc-switch",
+      "width": 164
+    },
+    {
+      "id": "ff",
+      "lane": "main",
+      "col": 2,
+      "type": "backend",
+      "label": "Fast-forward main",
+      "sublabel": "no local commits",
+      "tag": "clean merge",
+      "width": 164
+    },
+    {
+      "id": "build",
+      "lane": "main",
+      "col": 3,
+      "type": "backend",
+      "label": "Build and test",
+      "sublabel": "vitest and cargo",
+      "width": 164
+    },
+    {
+      "id": "migrate",
+      "lane": "main",
+      "col": 4,
+      "type": "database",
+      "label": "Run migration",
+      "sublabel": "schema v16 to v17",
+      "tag": "auto backup",
+      "width": 164
+    },
+    {
+      "id": "ship",
+      "lane": "main",
+      "col": 5,
+      "type": "cloud",
+      "label": "Ship the fork",
+      "sublabel": "parity with v3.20.3",
+      "width": 164
+    },
+    {
+      "id": "keys",
+      "lane": "risk",
+      "col": 2,
+      "type": "security",
+      "label": "Rotate Gemini keys",
+      "sublabel": "shared-config leak",
+      "width": 164
+    },
+    {
+      "id": "rebuild",
+      "lane": "risk",
+      "col": 4,
+      "type": "security",
+      "label": "Rebuild Codex usage",
+      "sublabel": "double-count repair",
+      "width": 164
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-assess-fetch",
+      "from": "assess",
+      "to": "fetch",
+      "role": "main"
+    },
+    {
+      "id": "e-fetch-ff",
+      "from": "fetch",
+      "to": "ff",
+      "role": "main"
+    },
+    {
+      "id": "e-ff-build",
+      "from": "ff",
+      "to": "build",
+      "role": "main",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "e-build-migrate",
+      "from": "build",
+      "to": "migrate",
+      "role": "main"
+    },
+    {
+      "id": "e-migrate-ship",
+      "from": "migrate",
+      "to": "ship",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-ff-keys",
+      "from": "ff",
+      "to": "keys",
+      "label": "before first launch",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "e-migrate-rebuild",
+      "from": "migrate",
+      "to": "rebuild",
+      "label": "if history inflated",
+      "role": "error",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Where this fork stands",
+      "items": [
+        "HEAD is v3.17.0 at 613fef7, upstream is v3.20.3",
+        "309 commits and 528 files behind"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Do not skip these",
+      "items": [
+        "Rotate any key that ever entered the Gemini shared config",
+        "v3.20.0 migrates schema v16 to v17 and backs up first"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Then verify",
+      "items": [
+        "pnpm test:unit and the Rust backend suite",
+        "Backend checks now run on Windows and macOS in CI"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "What the fork gains",
+      "items": [
+        "Grok Build and Pi as the 8th and 9th managed apps",
+        "Tool-result images that no longer explode the context"
+      ]
+    }
+  ]
+}

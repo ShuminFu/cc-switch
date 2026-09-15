@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "CC Switch Local Proxy — Messages to Responses Bridge",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1280,
+      480
+    ],
+    "views": [
+      {
+        "id": "inbound",
+        "label": "Inbound conversion",
+        "focus": [
+          "cc",
+          "proxy",
+          "media",
+          "bridge"
+        ],
+        "note": "Tool results are restored to native media before any protocol mapping."
+      },
+      {
+        "id": "upstream",
+        "label": "Upstream call",
+        "focus": [
+          "bridge",
+          "vendor"
+        ],
+        "note": "The bridge speaks the vendor's own Responses protocol."
+      },
+      {
+        "id": "accounting",
+        "label": "Return and billing",
+        "focus": [
+          "vendor",
+          "bridge",
+          "cc",
+          "usage"
+        ],
+        "note": "Streamed deltas map back to Messages events and bill exactly once."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "cc",
+      "type": "external",
+      "label": "Claude Code"
+    },
+    {
+      "id": "proxy",
+      "type": "backend",
+      "label": "Local Proxy"
+    },
+    {
+      "id": "media",
+      "type": "backend",
+      "label": "Tool Media"
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "Protocol Bridge"
+    },
+    {
+      "id": "vendor",
+      "type": "cloud",
+      "label": "Upstream"
+    },
+    {
+      "id": "usage",
+      "type": "database",
+      "label": "Usage Ledger"
+    }
+  ],
+  "segments": [
+    {
+      "from": 168,
+      "to": 252,
+      "label": "Inbound conversion"
+    },
+    {
+      "from": 257,
+      "to": 345,
+      "label": "Upstream stream"
+    },
+    {
+      "from": 350,
+      "to": 400,
+      "label": "Return and billing"
+    }
+  ],
+  "messages": [
+    {
+      "id": "inbound-request",
+      "from": "cc",
+      "to": "proxy",
+      "y": 175,
+      "label": "POST /v1/messages",
+      "variant": "emphasis"
+    },
+    {
+      "id": "tool-results",
+      "from": "proxy",
+      "to": "media",
+      "y": 206,
+      "label": "restore tool_result images",
+      "variant": "default"
+    },
+    {
+      "id": "native-media",
+      "from": "media",
+      "to": "proxy",
+      "y": 237,
+      "label": "native image parts",
+      "variant": "return"
+    },
+    {
+      "id": "convert",
+      "from": "proxy",
+      "to": "bridge",
+      "y": 268,
+      "label": "convert to Responses",
+      "variant": "emphasis"
+    },
+    {
+      "id": "upstream-call",
+      "from": "bridge",
+      "to": "vendor",
+      "y": 299,
+      "label": "POST /v1/responses",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sse",
+      "from": "vendor",
+      "to": "bridge",
+      "y": 330,
+      "label": "SSE deltas",
+      "variant": "return"
+    },
+    {
+      "id": "stream-out",
+      "from": "bridge",
+      "to": "cc",
+      "y": 361,
+      "label": "tool calls keep id and order",
+      "variant": "return"
+    },
+    {
+      "id": "bill-once",
+      "from": "proxy",
+      "to": "usage",
+      "y": 392,
+      "label": "one usage row per response",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "cc",
+      "from": 170,
+      "to": 367,
+      "type": "external"
+    },
+    {
+      "participant": "proxy",
+      "from": 173,
+      "to": 398,
+      "type": "backend"
+    },
+    {
+      "participant": "media",
+      "from": 201,
+      "to": 243,
+      "type": "backend"
+    },
+    {
+      "participant": "bridge",
+      "from": 263,
+      "to": 367,
+      "type": "backend"
+    },
+    {
+      "participant": "vendor",
+      "from": 294,
+      "to": 336,
+      "type": "cloud"
+    },
+    {
+      "participant": "usage",
+      "from": 387,
+      "to": 398,
+      "type": "database"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "What the bridge now gets right",
+      "items": [
+        "Tool-result images travel as native media, not serialized text",
+        "Reasoning is attached forward across multi-turn conversions"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "New capability",
+      "items": [
+        "Claude Code WebSearch bridged onto OpenAI Responses",
+        "Codex Alpha Search registered as a semantic passthrough"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Accounting correctness",
+      "items": [
+        "Replayed responses no longer stack duplicate usage rows",
+        "Codex fork and sub-agent double count rooted out at the parser"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Conversion is shrinking",
+      "items": [
+        "DeepSeek, GLM, Qwen, MiniMax, MiMo, LongCat and Kimi go direct",
+        "Native Responses presets skip the bridge entirely"
+      ]
+    }
+  ]
+}

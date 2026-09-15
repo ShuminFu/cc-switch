@@ -1,0 +1,20 @@
+[package]
+name = "archify-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Typed-JSON diagram compiler: validates architecture, sequence and workflow specs and renders self-contained HTML/SVG"
+license = "MIT"
+
+[[bin]]
+name = "archify-rs"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+
+[profile.release]
+strip = true
+lto = true
