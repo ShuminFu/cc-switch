@@ -45,6 +45,7 @@ pnpm dev
 | `pnpm lint` | ESLint check |
 | `pnpm format` | Format code (Prettier) |
 | `pnpm format:check` | Check code formatting |
+| `pnpm icons:check` | Validate provider icon assets (Rust tool in `scripts/icon-tools`) |
 
 For Rust backend:
 
@@ -173,6 +174,7 @@ pnpm dev
 | `pnpm lint` | ESLint 检查 |
 | `pnpm format` | 格式化代码（Prettier） |
 | `pnpm format:check` | 检查代码格式 |
+| `pnpm icons:check` | 校验服务商图标资源（Rust 工具，位于 `scripts/icon-tools`） |
 
 Rust 后端命令：
 

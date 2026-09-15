@@ -103,3 +103,27 @@ jobs:
 
       - name: Run tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  icon-tools:
+    name: Icon Tools
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path scripts/icon-tools/Cargo.toml
+
+      - name: Clippy
+        run: cargo clippy --manifest-path scripts/icon-tools/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --manifest-path scripts/icon-tools/Cargo.toml
+
+      - name: Validate icon assets
+        run: cargo run --quiet --manifest-path scripts/icon-tools/Cargo.toml -- check
