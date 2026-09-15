@@ -103,3 +103,34 @@ jobs:
 
       - name: Run tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  tooling:
+    name: Icon Tooling Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo build
+        uses: actions/cache@v5
+        with:
+          path: scripts/icons/target
+          key: ${{ runner.os }}-icons-tool-${{ hashFiles('scripts/icons/Cargo.lock', 'scripts/icons/src/**') }}
+          restore-keys: ${{ runner.os }}-icons-tool-
+
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path scripts/icons/Cargo.toml
+
+      - name: Clippy
+        run: cargo clippy --manifest-path scripts/icons/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --manifest-path scripts/icons/Cargo.toml
+
+      - name: Verify icon index
+        run: cargo run --quiet --manifest-path scripts/icons/Cargo.toml -- check

@@ -1,0 +1,16 @@
+[package]
+name = "cc-switch-icons"
+version = "0.1.0"
+edition = "2021"
+description = "Maintenance tool for the provider icons bundled in src/icons/extracted"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "cc-switch-icons"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+strip = true

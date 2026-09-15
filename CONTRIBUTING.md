@@ -45,6 +45,9 @@ pnpm dev
 | `pnpm lint` | ESLint check |
 | `pnpm format` | Format code (Prettier) |
 | `pnpm format:check` | Check code formatting |
+| `pnpm icons:check` | Verify the bundled provider icons match `index.ts` / `metadata.ts` |
+| `pnpm icons:extract` | Pull icons from `@lobehub/icons-static-svg` and register new ones |
+| `pnpm icons:filter` | Preview unused icon files (add `--apply` to delete them) |
 
 For Rust backend:
 
@@ -173,6 +176,9 @@ pnpm dev
 | `pnpm lint` | ESLint 检查 |
 | `pnpm format` | 格式化代码（Prettier） |
 | `pnpm format:check` | 检查代码格式 |
+| `pnpm icons:check` | 校验内置供应商图标与 `index.ts` / `metadata.ts` 是否一致 |
+| `pnpm icons:extract` | 从 `@lobehub/icons-static-svg` 提取图标并登记新增项 |
+| `pnpm icons:filter` | 预览未使用的图标文件（追加 `--apply` 执行删除） |
 
 Rust 后端命令：
 

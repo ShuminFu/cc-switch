@@ -13,7 +13,10 @@
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
     "test:unit": "vitest run",
-    "test:unit:watch": "vitest watch"
+    "test:unit:watch": "vitest watch",
+    "icons:extract": "cargo run --quiet --manifest-path scripts/icons/Cargo.toml -- extract",
+    "icons:filter": "cargo run --quiet --manifest-path scripts/icons/Cargo.toml -- filter",
+    "icons:check": "cargo run --quiet --manifest-path scripts/icons/Cargo.toml -- check"
   },
   "keywords": [],
   "author": "Jason Young",
