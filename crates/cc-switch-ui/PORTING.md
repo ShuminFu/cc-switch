@@ -42,7 +42,9 @@ src/events.rs          use_tauri_event::<Payload, _>(events::NAME, handler)
   `widgets::ProviderIcon`.
 - Tests: pure logic (sorting, filtering, mapping) gets `#[cfg(test)]` unit tests
   and runs natively with `cargo test -p cc-switch-ui`; user flows are covered by
-  `e2e/smoke.mjs` against the Tauri mock (`e2e/tauri-mock.js`, extend `handlers`).
+  `e2e/run.mjs`: add a scenario file under `e2e/scenarios/` and an area
+  handlers file under `e2e/handlers/` (registered with
+  `window.__TAURI_MOCK__.register({...})`); never edit another area's files.
 - Before finishing: `cargo fmt --all`, `cargo clippy -p cc-switch-ui --target
   wasm32-unknown-unknown -- -D warnings`, `cargo test -p cc-switch-ui`, and
   `dx build --platform web --release` from `crates/cc-switch-ui`.

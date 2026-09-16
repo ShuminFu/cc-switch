@@ -83,7 +83,7 @@ pub fn App() -> Element {
 fn ViewRouter(view: View) -> Element {
     match view {
         View::Providers => rsx! { crate::views::providers::ProvidersView {} },
-        View::Settings => rsx! { views::SettingsView {} },
+        View::Settings => rsx! { crate::views::settings::SettingsView {} },
         other => rsx! { views::PlaceholderView { view: other } },
     }
 }

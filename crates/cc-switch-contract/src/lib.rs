@@ -9,10 +9,19 @@
 
 pub mod app;
 pub mod commands;
+pub mod config;
 pub mod error;
 pub mod events;
+pub mod mcp;
+pub mod profiles;
+pub mod prompts;
 pub mod provider;
+pub mod proxy;
+pub mod sessions;
 pub mod settings;
+pub mod skills;
+pub mod universal;
+pub mod usage;
 
 pub use app::AppId;
 pub use error::IpcError;

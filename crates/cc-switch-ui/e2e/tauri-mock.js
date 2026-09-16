@@ -1,6 +1,9 @@
 // Minimal stand-in for the Tauri runtime injected into the webview, so the
-// Dioxus bundle can be exercised in a plain headless browser. Extend the
-// `handlers` table as views are ported.
+// Dioxus bundle can be exercised in a plain headless browser.
+//
+// Handlers are registered per area from e2e/handlers/*.js via
+// `window.__TAURI_MOCK__.register({ command: (args) => result })`; `state`
+// is shared mutable fixture data.
 (() => {
   const listeners = new Map();
   const state = {
@@ -22,30 +25,26 @@
       webdavSync: { enabled: false },
     },
   };
-  state.providers = {
-    claude: {
-      "p-official": { id: "p-official", name: "Anthropic Official", settingsConfig: { env: {} }, websiteUrl: "https://anthropic.com", icon: "anthropic", sortIndex: 1, category: "official" },
-      "p-kimi": { id: "p-kimi", name: "Kimi For Coding", settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://api.kimi.com/coding" } }, websiteUrl: "https://kimi.com", icon: "kimi", sortIndex: 0, notes: "team account", meta: { isPartner: true } },
-    },
-    codex: {},
-  };
-  state.current = { claude: "p-official", codex: "" };
   const handlers = {
     get_settings: () => state.settings,
-    get_providers: ({ app }) => state.providers[app] ?? {},
-    get_current_provider: ({ app }) => state.current[app] ?? "",
-    switch_provider: ({ app, id }) => { state.current[app] = id; return { warnings: [] }; },
-    delete_provider: ({ app, id }) => { delete state.providers[app][id]; return true; },
-    open_external: () => null,
     save_settings: ({ settings }) => { state.settings = settings; return true; },
     set_window_theme: () => null,
     get_init_error: () => null,
+    open_external: () => null,
+    update_tray_menu: () => null,
   };
-  window.__TAURI_MOCK__ = { state, handlers, calls: [] };
+  const mock = {
+    state,
+    handlers,
+    calls: [],
+    register: (more) => Object.assign(handlers, more),
+    emit: async (name, payload) => { for (const cb of listeners.get(name) ?? []) cb({ event: name, payload }); },
+  };
+  window.__TAURI_MOCK__ = mock;
   window.__TAURI__ = {
     core: {
       invoke: async (cmd, args) => {
-        window.__TAURI_MOCK__.calls.push({ cmd, args });
+        mock.calls.push({ cmd, args });
         const handler = handlers[cmd];
         if (!handler) throw `mock: unknown command ${cmd}`;
         return handler(args ?? {});
@@ -57,9 +56,7 @@
         listeners.get(name).add(cb);
         return () => listeners.get(name).delete(cb);
       },
-      emit: async (name, payload) => {
-        for (const cb of listeners.get(name) ?? []) cb({ event: name, payload });
-      },
+      emit: mock.emit,
     },
   };
 })();
