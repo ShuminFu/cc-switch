@@ -7,6 +7,7 @@
 mod api;
 #[allow(dead_code, unused_imports)]
 mod components;
+mod editor;
 mod events;
 mod i18n;
 mod icons;

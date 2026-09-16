@@ -39,7 +39,7 @@ impl Theme {
     }
 }
 
-fn system_prefers_dark() -> bool {
+pub fn system_prefers_dark() -> bool {
     web_sys::window()
         .and_then(|w| w.match_media("(prefers-color-scheme: dark)").ok().flatten())
         .map(|mq| mq.matches())
