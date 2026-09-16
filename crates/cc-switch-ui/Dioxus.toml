@@ -1,0 +1,19 @@
+[application]
+name = "cc-switch-ui"
+
+[web.app]
+title = "CC Switch"
+base_path = ""
+
+[web.watcher]
+watch_path = ["src", "assets", "tailwind.css"]
+reload_html = true
+index_on_404 = true
+
+[web.resource]
+style = []
+script = []
+
+[web.resource.dev]
+style = []
+script = []

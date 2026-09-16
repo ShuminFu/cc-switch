@@ -1,0 +1,629 @@
+//! Names of the Tauri commands invoked by the frontend, grouped like the
+//! former `src/lib/api/*.ts` modules. Generated from the React API layer at
+//! the start of the Dioxus migration; keep in sync with
+//! `tauri::generate_handler!` in `src-tauri/src/lib.rs` (a backend test
+//! checks this).
+
+pub mod auth {
+    pub const AUTH_GET_STATUS: &str = "auth_get_status";
+    pub const AUTH_LIST_ACCOUNTS: &str = "auth_list_accounts";
+    pub const AUTH_LOGOUT: &str = "auth_logout";
+    pub const AUTH_POLL_FOR_ACCOUNT: &str = "auth_poll_for_account";
+    pub const AUTH_REMOVE_ACCOUNT: &str = "auth_remove_account";
+    pub const AUTH_SET_DEFAULT_ACCOUNT: &str = "auth_set_default_account";
+    pub const AUTH_START_LOGIN: &str = "auth_start_login";
+}
+
+pub mod config {
+    pub const EXTRACT_COMMON_CONFIG_SNIPPET: &str = "extract_common_config_snippet";
+    pub const GET_CLAUDE_COMMON_CONFIG_SNIPPET: &str = "get_claude_common_config_snippet";
+    pub const GET_COMMON_CONFIG_SNIPPET: &str = "get_common_config_snippet";
+    pub const SET_CLAUDE_COMMON_CONFIG_SNIPPET: &str = "set_claude_common_config_snippet";
+    pub const SET_COMMON_CONFIG_SNIPPET: &str = "set_common_config_snippet";
+    pub const UPDATE_TOML_COMMON_CONFIG_SNIPPET: &str = "update_toml_common_config_snippet";
+}
+
+pub mod connectivity_check {
+    pub const GET_STREAM_CHECK_CONFIG: &str = "get_stream_check_config";
+    pub const SAVE_STREAM_CHECK_CONFIG: &str = "save_stream_check_config";
+    pub const STREAM_CHECK_ALL_PROVIDERS: &str = "stream_check_all_providers";
+    pub const STREAM_CHECK_PROVIDER: &str = "stream_check_provider";
+}
+
+pub mod copilot {
+    pub const COPILOT_GET_AUTH_STATUS: &str = "copilot_get_auth_status";
+    pub const COPILOT_GET_MODELS: &str = "copilot_get_models";
+    pub const COPILOT_GET_MODELS_FOR_ACCOUNT: &str = "copilot_get_models_for_account";
+    pub const COPILOT_GET_TOKEN: &str = "copilot_get_token";
+    pub const COPILOT_GET_TOKEN_FOR_ACCOUNT: &str = "copilot_get_token_for_account";
+    pub const COPILOT_GET_USAGE: &str = "copilot_get_usage";
+    pub const COPILOT_GET_USAGE_FOR_ACCOUNT: &str = "copilot_get_usage_for_account";
+    pub const COPILOT_IS_AUTHENTICATED: &str = "copilot_is_authenticated";
+    pub const COPILOT_LIST_ACCOUNTS: &str = "copilot_list_accounts";
+    pub const COPILOT_LOGOUT: &str = "copilot_logout";
+    pub const COPILOT_POLL_FOR_ACCOUNT: &str = "copilot_poll_for_account";
+    pub const COPILOT_POLL_FOR_AUTH: &str = "copilot_poll_for_auth";
+    pub const COPILOT_REMOVE_ACCOUNT: &str = "copilot_remove_account";
+    pub const COPILOT_SET_DEFAULT_ACCOUNT: &str = "copilot_set_default_account";
+    pub const COPILOT_START_DEVICE_FLOW: &str = "copilot_start_device_flow";
+}
+
+pub mod deeplink {
+    pub const IMPORT_FROM_DEEPLINK_UNIFIED: &str = "import_from_deeplink_unified";
+    pub const MERGE_DEEPLINK_CONFIG: &str = "merge_deeplink_config";
+    pub const PARSE_DEEPLINK: &str = "parse_deeplink";
+}
+
+pub mod env {
+    pub const CHECK_ENV_CONFLICTS: &str = "check_env_conflicts";
+    pub const DELETE_ENV_VARS: &str = "delete_env_vars";
+    pub const RESTORE_ENV_BACKUP: &str = "restore_env_backup";
+}
+
+pub mod failover {
+    pub const ADD_TO_FAILOVER_QUEUE: &str = "add_to_failover_queue";
+    pub const GET_AUTO_FAILOVER_ENABLED: &str = "get_auto_failover_enabled";
+    pub const GET_AVAILABLE_PROVIDERS_FOR_FAILOVER: &str = "get_available_providers_for_failover";
+    pub const GET_CIRCUIT_BREAKER_CONFIG: &str = "get_circuit_breaker_config";
+    pub const GET_CIRCUIT_BREAKER_STATS: &str = "get_circuit_breaker_stats";
+    pub const GET_FAILOVER_QUEUE: &str = "get_failover_queue";
+    pub const GET_PROVIDER_HEALTH: &str = "get_provider_health";
+    pub const REMOVE_FROM_FAILOVER_QUEUE: &str = "remove_from_failover_queue";
+    pub const RESET_CIRCUIT_BREAKER: &str = "reset_circuit_breaker";
+    pub const SET_AUTO_FAILOVER_ENABLED: &str = "set_auto_failover_enabled";
+    pub const UPDATE_CIRCUIT_BREAKER_CONFIG: &str = "update_circuit_breaker_config";
+}
+
+pub mod global_proxy {
+    pub const GET_GLOBAL_PROXY_URL: &str = "get_global_proxy_url";
+    pub const GET_UPSTREAM_PROXY_STATUS: &str = "get_upstream_proxy_status";
+    pub const SCAN_LOCAL_PROXIES: &str = "scan_local_proxies";
+    pub const SET_GLOBAL_PROXY_URL: &str = "set_global_proxy_url";
+    pub const TEST_PROXY_URL: &str = "test_proxy_url";
+}
+
+pub mod hermes {
+    pub const GET_HERMES_MEMORY: &str = "get_hermes_memory";
+    pub const GET_HERMES_MEMORY_LIMITS: &str = "get_hermes_memory_limits";
+    pub const GET_HERMES_MODEL_CONFIG: &str = "get_hermes_model_config";
+    pub const LAUNCH_HERMES_DASHBOARD: &str = "launch_hermes_dashboard";
+    pub const OPEN_HERMES_WEB_UI: &str = "open_hermes_web_ui";
+    pub const SET_HERMES_MEMORY: &str = "set_hermes_memory";
+    pub const SET_HERMES_MEMORY_ENABLED: &str = "set_hermes_memory_enabled";
+}
+
+pub mod mcp {
+    pub const DELETE_CLAUDE_MCP_SERVER: &str = "delete_claude_mcp_server";
+    pub const DELETE_MCP_SERVER: &str = "delete_mcp_server";
+    pub const DELETE_MCP_SERVER_IN_CONFIG: &str = "delete_mcp_server_in_config";
+    pub const GET_CLAUDE_MCP_STATUS: &str = "get_claude_mcp_status";
+    pub const GET_MCP_CONFIG: &str = "get_mcp_config";
+    pub const GET_MCP_SERVERS: &str = "get_mcp_servers";
+    pub const IMPORT_MCP_FROM_APPS: &str = "import_mcp_from_apps";
+    pub const READ_CLAUDE_MCP_CONFIG: &str = "read_claude_mcp_config";
+    pub const SET_MCP_ENABLED: &str = "set_mcp_enabled";
+    pub const TOGGLE_MCP_APP: &str = "toggle_mcp_app";
+    pub const UPSERT_CLAUDE_MCP_SERVER: &str = "upsert_claude_mcp_server";
+    pub const UPSERT_MCP_SERVER: &str = "upsert_mcp_server";
+    pub const UPSERT_MCP_SERVER_IN_CONFIG: &str = "upsert_mcp_server_in_config";
+    pub const VALIDATE_MCP_COMMAND: &str = "validate_mcp_command";
+}
+
+pub mod model_fetch {
+    pub const FETCH_MODELS_FOR_CONFIG: &str = "fetch_models_for_config";
+    pub const GET_CODEX_OAUTH_MODELS: &str = "get_codex_oauth_models";
+}
+
+pub mod omo {
+    pub const DISABLE_CURRENT_OMO: &str = "disable_current_omo";
+    pub const DISABLE_CURRENT_OMO_SLIM: &str = "disable_current_omo_slim";
+    pub const GET_CURRENT_OMO_PROVIDER_ID: &str = "get_current_omo_provider_id";
+    pub const GET_CURRENT_OMO_SLIM_PROVIDER_ID: &str = "get_current_omo_slim_provider_id";
+    pub const READ_OMO_LOCAL_FILE: &str = "read_omo_local_file";
+    pub const READ_OMO_SLIM_LOCAL_FILE: &str = "read_omo_slim_local_file";
+}
+
+pub mod openclaw {
+    pub const GET_OPENCLAW_AGENTS_DEFAULTS: &str = "get_openclaw_agents_defaults";
+    pub const GET_OPENCLAW_DEFAULT_MODEL: &str = "get_openclaw_default_model";
+    pub const GET_OPENCLAW_ENV: &str = "get_openclaw_env";
+    pub const GET_OPENCLAW_LIVE_PROVIDER: &str = "get_openclaw_live_provider";
+    pub const GET_OPENCLAW_MODEL_CATALOG: &str = "get_openclaw_model_catalog";
+    pub const GET_OPENCLAW_TOOLS: &str = "get_openclaw_tools";
+    pub const SCAN_OPENCLAW_CONFIG_HEALTH: &str = "scan_openclaw_config_health";
+    pub const SET_OPENCLAW_AGENTS_DEFAULTS: &str = "set_openclaw_agents_defaults";
+    pub const SET_OPENCLAW_DEFAULT_MODEL: &str = "set_openclaw_default_model";
+    pub const SET_OPENCLAW_ENV: &str = "set_openclaw_env";
+    pub const SET_OPENCLAW_MODEL_CATALOG: &str = "set_openclaw_model_catalog";
+    pub const SET_OPENCLAW_TOOLS: &str = "set_openclaw_tools";
+}
+
+pub mod profiles {
+    pub const APPLY_PROFILE: &str = "apply_profile";
+    pub const CLEAR_CURRENT_PROFILE: &str = "clear_current_profile";
+    pub const CREATE_PROFILE: &str = "create_profile";
+    pub const DELETE_PROFILE: &str = "delete_profile";
+    pub const LIST_PROFILES: &str = "list_profiles";
+    pub const UPDATE_PROFILE: &str = "update_profile";
+}
+
+pub mod prompts {
+    pub const DELETE_PROMPT: &str = "delete_prompt";
+    pub const ENABLE_PROMPT: &str = "enable_prompt";
+    pub const GET_CURRENT_PROMPT_FILE_CONTENT: &str = "get_current_prompt_file_content";
+    pub const GET_PROMPTS: &str = "get_prompts";
+    pub const IMPORT_PROMPT_FROM_FILE: &str = "import_prompt_from_file";
+    pub const UPSERT_PROMPT: &str = "upsert_prompt";
+}
+
+pub mod providers {
+    pub const ADD_PROVIDER: &str = "add_provider";
+    pub const DELETE_PROVIDER: &str = "delete_provider";
+    pub const DELETE_UNIVERSAL_PROVIDER: &str = "delete_universal_provider";
+    pub const ENSURE_CLAUDE_DESKTOP_OFFICIAL_PROVIDER: &str =
+        "ensure_claude_desktop_official_provider";
+    pub const ENSURE_CODEX_OFFICIAL_PROVIDER: &str = "ensure_codex_official_provider";
+    pub const GET_CLAUDE_DESKTOP_DEFAULT_ROUTES: &str = "get_claude_desktop_default_routes";
+    pub const GET_CLAUDE_DESKTOP_STATUS: &str = "get_claude_desktop_status";
+    pub const GET_CURRENT_PROVIDER: &str = "get_current_provider";
+    pub const GET_HERMES_LIVE_PROVIDER_IDS: &str = "get_hermes_live_provider_ids";
+    pub const GET_OPENCLAW_LIVE_PROVIDER_IDS: &str = "get_openclaw_live_provider_ids";
+    pub const GET_OPENCODE_LIVE_PROVIDER_IDS: &str = "get_opencode_live_provider_ids";
+    pub const GET_PROVIDERS: &str = "get_providers";
+    pub const GET_UNIVERSAL_PROVIDER: &str = "get_universal_provider";
+    pub const GET_UNIVERSAL_PROVIDERS: &str = "get_universal_providers";
+    pub const IMPORT_CLAUDE_DESKTOP_PROVIDERS_FROM_CLAUDE: &str =
+        "import_claude_desktop_providers_from_claude";
+    pub const IMPORT_DEFAULT_CONFIG: &str = "import_default_config";
+    pub const IMPORT_HERMES_PROVIDERS_FROM_LIVE: &str = "import_hermes_providers_from_live";
+    pub const IMPORT_OPENCLAW_PROVIDERS_FROM_LIVE: &str = "import_openclaw_providers_from_live";
+    pub const IMPORT_OPENCODE_PROVIDERS_FROM_LIVE: &str = "import_opencode_providers_from_live";
+    pub const OPEN_PROVIDER_TERMINAL: &str = "open_provider_terminal";
+    pub const REMOVE_PROVIDER_FROM_LIVE_CONFIG: &str = "remove_provider_from_live_config";
+    pub const SWITCH_PROVIDER: &str = "switch_provider";
+    pub const SYNC_UNIVERSAL_PROVIDER: &str = "sync_universal_provider";
+    pub const UPDATE_PROVIDER: &str = "update_provider";
+    pub const UPDATE_PROVIDERS_SORT_ORDER: &str = "update_providers_sort_order";
+    pub const UPDATE_TRAY_MENU: &str = "update_tray_menu";
+    pub const UPSERT_UNIVERSAL_PROVIDER: &str = "upsert_universal_provider";
+}
+
+pub mod proxy {
+    pub const GET_DEFAULT_COST_MULTIPLIER: &str = "get_default_cost_multiplier";
+    pub const GET_GLOBAL_PROXY_CONFIG: &str = "get_global_proxy_config";
+    pub const GET_PRICING_MODEL_SOURCE: &str = "get_pricing_model_source";
+    pub const GET_PROXY_CONFIG: &str = "get_proxy_config";
+    pub const GET_PROXY_CONFIG_FOR_APP: &str = "get_proxy_config_for_app";
+    pub const GET_PROXY_STATUS: &str = "get_proxy_status";
+    pub const GET_PROXY_TAKEOVER_STATUS: &str = "get_proxy_takeover_status";
+    pub const IS_LIVE_TAKEOVER_ACTIVE: &str = "is_live_takeover_active";
+    pub const IS_PROXY_RUNNING: &str = "is_proxy_running";
+    pub const SET_DEFAULT_COST_MULTIPLIER: &str = "set_default_cost_multiplier";
+    pub const SET_PRICING_MODEL_SOURCE: &str = "set_pricing_model_source";
+    pub const SET_PROXY_TAKEOVER_FOR_APP: &str = "set_proxy_takeover_for_app";
+    pub const START_PROXY_SERVER: &str = "start_proxy_server";
+    pub const STOP_PROXY_SERVER: &str = "stop_proxy_server";
+    pub const STOP_PROXY_WITH_RESTORE: &str = "stop_proxy_with_restore";
+    pub const SWITCH_PROXY_PROVIDER: &str = "switch_proxy_provider";
+    pub const UPDATE_GLOBAL_PROXY_CONFIG: &str = "update_global_proxy_config";
+    pub const UPDATE_PROXY_CONFIG: &str = "update_proxy_config";
+    pub const UPDATE_PROXY_CONFIG_FOR_APP: &str = "update_proxy_config_for_app";
+}
+
+pub mod sessions {
+    pub const DELETE_SESSION: &str = "delete_session";
+    pub const DELETE_SESSIONS: &str = "delete_sessions";
+    pub const GET_SESSION_MESSAGES: &str = "get_session_messages";
+    pub const LAUNCH_SESSION_TERMINAL: &str = "launch_session_terminal";
+    pub const LIST_SESSIONS: &str = "list_sessions";
+}
+
+pub mod settings {
+    pub const APPLY_CLAUDE_ONBOARDING_SKIP: &str = "apply_claude_onboarding_skip";
+    pub const APPLY_CLAUDE_PLUGIN_CONFIG: &str = "apply_claude_plugin_config";
+    pub const CHECK_FOR_UPDATES: &str = "check_for_updates";
+    pub const CLEAR_CLAUDE_ONBOARDING_SKIP: &str = "clear_claude_onboarding_skip";
+    pub const CREATE_DB_BACKUP: &str = "create_db_backup";
+    pub const DELETE_DB_BACKUP: &str = "delete_db_backup";
+    pub const EXPORT_CONFIG_TO_FILE: &str = "export_config_to_file";
+    pub const GET_APP_CONFIG_DIR_OVERRIDE: &str = "get_app_config_dir_override";
+    pub const GET_APP_CONFIG_PATH: &str = "get_app_config_path";
+    pub const GET_AUTO_LAUNCH_STATUS: &str = "get_auto_launch_status";
+    pub const GET_CLAUDE_CODE_CONFIG_PATH: &str = "get_claude_code_config_path";
+    pub const GET_CONFIG_DIR: &str = "get_config_dir";
+    pub const GET_LOG_CONFIG: &str = "get_log_config";
+    pub const GET_OPTIMIZER_CONFIG: &str = "get_optimizer_config";
+    pub const GET_RECTIFIER_CONFIG: &str = "get_rectifier_config";
+    pub const GET_SETTINGS: &str = "get_settings";
+    pub const GET_TOOL_VERSIONS: &str = "get_tool_versions";
+    pub const HAS_CODEX_UNIFY_HISTORY_BACKUP: &str = "has_codex_unify_history_backup";
+    pub const IMPORT_CONFIG_FROM_FILE: &str = "import_config_from_file";
+    pub const INSTALL_UPDATE_AND_RESTART: &str = "install_update_and_restart";
+    pub const IS_PORTABLE_MODE: &str = "is_portable_mode";
+    pub const LIST_DB_BACKUPS: &str = "list_db_backups";
+    pub const OPEN_APP_CONFIG_FOLDER: &str = "open_app_config_folder";
+    pub const OPEN_CONFIG_FOLDER: &str = "open_config_folder";
+    pub const OPEN_EXTERNAL: &str = "open_external";
+    pub const OPEN_FILE_DIALOG: &str = "open_file_dialog";
+    pub const PICK_DIRECTORY: &str = "pick_directory";
+    pub const PROBE_TOOL_INSTALLATIONS: &str = "probe_tool_installations";
+    pub const RENAME_DB_BACKUP: &str = "rename_db_backup";
+    pub const RESTART_APP: &str = "restart_app";
+    pub const RESTORE_CODEX_UNIFIED_HISTORY: &str = "restore_codex_unified_history";
+    pub const RESTORE_DB_BACKUP: &str = "restore_db_backup";
+    pub const RUN_TOOL_LIFECYCLE_ACTION: &str = "run_tool_lifecycle_action";
+    pub const SAVE_FILE_DIALOG: &str = "save_file_dialog";
+    pub const SAVE_SETTINGS: &str = "save_settings";
+    pub const SET_APP_CONFIG_DIR_OVERRIDE: &str = "set_app_config_dir_override";
+    pub const SET_AUTO_LAUNCH: &str = "set_auto_launch";
+    pub const SET_LOG_CONFIG: &str = "set_log_config";
+    pub const SET_OPTIMIZER_CONFIG: &str = "set_optimizer_config";
+    pub const SET_RECTIFIER_CONFIG: &str = "set_rectifier_config";
+    pub const SYNC_CURRENT_PROVIDERS_LIVE: &str = "sync_current_providers_live";
+    pub const WEBDAV_SYNC_DOWNLOAD: &str = "webdav_sync_download";
+    pub const WEBDAV_SYNC_FETCH_REMOTE_INFO: &str = "webdav_sync_fetch_remote_info";
+    pub const WEBDAV_SYNC_SAVE_SETTINGS: &str = "webdav_sync_save_settings";
+    pub const WEBDAV_SYNC_UPLOAD: &str = "webdav_sync_upload";
+    pub const WEBDAV_TEST_CONNECTION: &str = "webdav_test_connection";
+}
+
+pub mod skills {
+    pub const ADD_SKILL_REPO: &str = "add_skill_repo";
+    pub const CHECK_SKILL_UPDATES: &str = "check_skill_updates";
+    pub const DELETE_SKILL_BACKUP: &str = "delete_skill_backup";
+    pub const DISCOVER_AVAILABLE_SKILLS: &str = "discover_available_skills";
+    pub const GET_INSTALLED_SKILLS: &str = "get_installed_skills";
+    pub const GET_SKILL_BACKUPS: &str = "get_skill_backups";
+    pub const GET_SKILL_REPOS: &str = "get_skill_repos";
+    pub const GET_SKILLS: &str = "get_skills";
+    pub const GET_SKILLS_FOR_APP: &str = "get_skills_for_app";
+    pub const IMPORT_SKILLS_FROM_APPS: &str = "import_skills_from_apps";
+    pub const INSTALL_SKILL: &str = "install_skill";
+    pub const INSTALL_SKILL_FOR_APP: &str = "install_skill_for_app";
+    pub const INSTALL_SKILL_UNIFIED: &str = "install_skill_unified";
+    pub const INSTALL_SKILLS_FROM_ZIP: &str = "install_skills_from_zip";
+    pub const MIGRATE_SKILL_STORAGE: &str = "migrate_skill_storage";
+    pub const OPEN_ZIP_FILE_DIALOG: &str = "open_zip_file_dialog";
+    pub const REMOVE_SKILL_REPO: &str = "remove_skill_repo";
+    pub const RESTORE_SKILL_BACKUP: &str = "restore_skill_backup";
+    pub const SCAN_UNMANAGED_SKILLS: &str = "scan_unmanaged_skills";
+    pub const SEARCH_SKILLS_SH: &str = "search_skills_sh";
+    pub const TOGGLE_SKILL_APP: &str = "toggle_skill_app";
+    pub const UNINSTALL_SKILL: &str = "uninstall_skill";
+    pub const UNINSTALL_SKILL_FOR_APP: &str = "uninstall_skill_for_app";
+    pub const UNINSTALL_SKILL_UNIFIED: &str = "uninstall_skill_unified";
+    pub const UPDATE_SKILL: &str = "update_skill";
+}
+
+pub mod subscription {
+    pub const GET_BALANCE: &str = "get_balance";
+    pub const GET_CODEX_OAUTH_QUOTA: &str = "get_codex_oauth_quota";
+    pub const GET_CODING_PLAN_QUOTA: &str = "get_coding_plan_quota";
+    pub const GET_SUBSCRIPTION_QUOTA: &str = "get_subscription_quota";
+}
+
+pub mod usage {
+    pub const CHECK_PROVIDER_LIMITS: &str = "check_provider_limits";
+    pub const DELETE_MODEL_PRICING: &str = "delete_model_pricing";
+    pub const GET_MODEL_PRICING: &str = "get_model_pricing";
+    pub const GET_MODEL_STATS: &str = "get_model_stats";
+    pub const GET_PROVIDER_STATS: &str = "get_provider_stats";
+    pub const GET_REQUEST_DETAIL: &str = "get_request_detail";
+    pub const GET_REQUEST_LOGS: &str = "get_request_logs";
+    pub const GET_USAGE_DATA_SOURCES: &str = "get_usage_data_sources";
+    pub const GET_USAGE_SUMMARY: &str = "get_usage_summary";
+    pub const GET_USAGE_SUMMARY_BY_APP: &str = "get_usage_summary_by_app";
+    pub const GET_USAGE_TRENDS: &str = "get_usage_trends";
+    pub const QUERY_PROVIDER_USAGE: &str = "queryProviderUsage";
+    pub const SYNC_SESSION_USAGE: &str = "sync_session_usage";
+    pub const TEST_USAGE_SCRIPT: &str = "testUsageScript";
+    pub const UPDATE_MODEL_PRICING: &str = "update_model_pricing";
+}
+
+pub mod vscode {
+    pub const ADD_CUSTOM_ENDPOINT: &str = "add_custom_endpoint";
+    pub const EXPORT_CONFIG_TO_FILE: &str = "export_config_to_file";
+    pub const GET_CUSTOM_ENDPOINTS: &str = "get_custom_endpoints";
+    pub const IMPORT_CONFIG_FROM_FILE: &str = "import_config_from_file";
+    pub const OPEN_FILE_DIALOG: &str = "open_file_dialog";
+    pub const READ_LIVE_PROVIDER_SETTINGS: &str = "read_live_provider_settings";
+    pub const REMOVE_CUSTOM_ENDPOINT: &str = "remove_custom_endpoint";
+    pub const SAVE_FILE_DIALOG: &str = "save_file_dialog";
+    pub const TEST_API_ENDPOINTS: &str = "test_api_endpoints";
+    pub const UPDATE_ENDPOINT_LAST_USED: &str = "update_endpoint_last_used";
+}
+
+pub mod workspace {
+    pub const DELETE_DAILY_MEMORY_FILE: &str = "delete_daily_memory_file";
+    pub const LIST_DAILY_MEMORY_FILES: &str = "list_daily_memory_files";
+    pub const OPEN_WORKSPACE_DIRECTORY: &str = "open_workspace_directory";
+    pub const READ_DAILY_MEMORY_FILE: &str = "read_daily_memory_file";
+    pub const READ_WORKSPACE_FILE: &str = "read_workspace_file";
+    pub const SEARCH_DAILY_MEMORY_FILES: &str = "search_daily_memory_files";
+    pub const WRITE_DAILY_MEMORY_FILE: &str = "write_daily_memory_file";
+    pub const WRITE_WORKSPACE_FILE: &str = "write_workspace_file";
+}
+
+pub mod app {
+    pub const CHECK_APP_UPDATE_AVAILABLE: &str = "check_app_update_available";
+    pub const COPY_TEXT_TO_CLIPBOARD: &str = "copy_text_to_clipboard";
+    pub const GET_INIT_ERROR: &str = "get_init_error";
+    pub const GET_MIGRATION_RESULT: &str = "get_migration_result";
+    pub const GET_SKILLS_MIGRATION_RESULT: &str = "get_skills_migration_result";
+    pub const INSTALL_UPDATE_AND_RESTART: &str = "install_update_and_restart";
+    pub const OPEN_APP_CONFIG_FOLDER: &str = "open_app_config_folder";
+    pub const OPEN_EXTERNAL: &str = "open_external";
+    pub const SET_WINDOW_THEME: &str = "set_window_theme";
+}
+
+/// Every command name the frontend invokes.
+pub const ALL: &[&str] = &[
+    "add_custom_endpoint",
+    "add_provider",
+    "add_skill_repo",
+    "add_to_failover_queue",
+    "apply_claude_onboarding_skip",
+    "apply_claude_plugin_config",
+    "apply_profile",
+    "auth_get_status",
+    "auth_list_accounts",
+    "auth_logout",
+    "auth_poll_for_account",
+    "auth_remove_account",
+    "auth_set_default_account",
+    "auth_start_login",
+    "check_app_update_available",
+    "check_env_conflicts",
+    "check_for_updates",
+    "check_provider_limits",
+    "check_skill_updates",
+    "clear_claude_onboarding_skip",
+    "clear_current_profile",
+    "copilot_get_auth_status",
+    "copilot_get_models",
+    "copilot_get_models_for_account",
+    "copilot_get_token",
+    "copilot_get_token_for_account",
+    "copilot_get_usage",
+    "copilot_get_usage_for_account",
+    "copilot_is_authenticated",
+    "copilot_list_accounts",
+    "copilot_logout",
+    "copilot_poll_for_account",
+    "copilot_poll_for_auth",
+    "copilot_remove_account",
+    "copilot_set_default_account",
+    "copilot_start_device_flow",
+    "copy_text_to_clipboard",
+    "create_db_backup",
+    "create_profile",
+    "delete_claude_mcp_server",
+    "delete_daily_memory_file",
+    "delete_db_backup",
+    "delete_env_vars",
+    "delete_mcp_server",
+    "delete_mcp_server_in_config",
+    "delete_model_pricing",
+    "delete_profile",
+    "delete_prompt",
+    "delete_provider",
+    "delete_session",
+    "delete_sessions",
+    "delete_skill_backup",
+    "delete_universal_provider",
+    "disable_current_omo",
+    "disable_current_omo_slim",
+    "discover_available_skills",
+    "enable_prompt",
+    "ensure_claude_desktop_official_provider",
+    "ensure_codex_official_provider",
+    "export_config_to_file",
+    "extract_common_config_snippet",
+    "fetch_models_for_config",
+    "get_app_config_dir_override",
+    "get_app_config_path",
+    "get_auto_failover_enabled",
+    "get_auto_launch_status",
+    "get_available_providers_for_failover",
+    "get_balance",
+    "get_circuit_breaker_config",
+    "get_circuit_breaker_stats",
+    "get_claude_code_config_path",
+    "get_claude_common_config_snippet",
+    "get_claude_desktop_default_routes",
+    "get_claude_desktop_status",
+    "get_claude_mcp_status",
+    "get_codex_oauth_models",
+    "get_codex_oauth_quota",
+    "get_coding_plan_quota",
+    "get_common_config_snippet",
+    "get_config_dir",
+    "get_current_omo_provider_id",
+    "get_current_omo_slim_provider_id",
+    "get_current_prompt_file_content",
+    "get_current_provider",
+    "get_custom_endpoints",
+    "get_default_cost_multiplier",
+    "get_failover_queue",
+    "get_global_proxy_config",
+    "get_global_proxy_url",
+    "get_hermes_live_provider_ids",
+    "get_hermes_memory",
+    "get_hermes_memory_limits",
+    "get_hermes_model_config",
+    "get_init_error",
+    "get_installed_skills",
+    "get_log_config",
+    "get_mcp_config",
+    "get_mcp_servers",
+    "get_migration_result",
+    "get_model_pricing",
+    "get_model_stats",
+    "get_openclaw_agents_defaults",
+    "get_openclaw_default_model",
+    "get_openclaw_env",
+    "get_openclaw_live_provider",
+    "get_openclaw_live_provider_ids",
+    "get_openclaw_model_catalog",
+    "get_openclaw_tools",
+    "get_opencode_live_provider_ids",
+    "get_optimizer_config",
+    "get_pricing_model_source",
+    "get_prompts",
+    "get_provider_health",
+    "get_provider_stats",
+    "get_providers",
+    "get_proxy_config",
+    "get_proxy_config_for_app",
+    "get_proxy_status",
+    "get_proxy_takeover_status",
+    "get_rectifier_config",
+    "get_request_detail",
+    "get_request_logs",
+    "get_session_messages",
+    "get_settings",
+    "get_skill_backups",
+    "get_skill_repos",
+    "get_skills",
+    "get_skills_for_app",
+    "get_skills_migration_result",
+    "get_stream_check_config",
+    "get_subscription_quota",
+    "get_tool_versions",
+    "get_universal_provider",
+    "get_universal_providers",
+    "get_upstream_proxy_status",
+    "get_usage_data_sources",
+    "get_usage_summary",
+    "get_usage_summary_by_app",
+    "get_usage_trends",
+    "has_codex_unify_history_backup",
+    "import_claude_desktop_providers_from_claude",
+    "import_config_from_file",
+    "import_default_config",
+    "import_from_deeplink_unified",
+    "import_hermes_providers_from_live",
+    "import_mcp_from_apps",
+    "import_openclaw_providers_from_live",
+    "import_opencode_providers_from_live",
+    "import_prompt_from_file",
+    "import_skills_from_apps",
+    "install_skill",
+    "install_skill_for_app",
+    "install_skill_unified",
+    "install_skills_from_zip",
+    "install_update_and_restart",
+    "is_live_takeover_active",
+    "is_portable_mode",
+    "is_proxy_running",
+    "launch_hermes_dashboard",
+    "launch_session_terminal",
+    "list_daily_memory_files",
+    "list_db_backups",
+    "list_profiles",
+    "list_sessions",
+    "merge_deeplink_config",
+    "migrate_skill_storage",
+    "open_app_config_folder",
+    "open_config_folder",
+    "open_external",
+    "open_file_dialog",
+    "open_hermes_web_ui",
+    "open_provider_terminal",
+    "open_workspace_directory",
+    "open_zip_file_dialog",
+    "parse_deeplink",
+    "pick_directory",
+    "probe_tool_installations",
+    "queryProviderUsage",
+    "read_claude_mcp_config",
+    "read_daily_memory_file",
+    "read_live_provider_settings",
+    "read_omo_local_file",
+    "read_omo_slim_local_file",
+    "read_workspace_file",
+    "remove_custom_endpoint",
+    "remove_from_failover_queue",
+    "remove_provider_from_live_config",
+    "remove_skill_repo",
+    "rename_db_backup",
+    "reset_circuit_breaker",
+    "restart_app",
+    "restore_codex_unified_history",
+    "restore_db_backup",
+    "restore_env_backup",
+    "restore_skill_backup",
+    "run_tool_lifecycle_action",
+    "save_file_dialog",
+    "save_settings",
+    "save_stream_check_config",
+    "scan_local_proxies",
+    "scan_openclaw_config_health",
+    "scan_unmanaged_skills",
+    "search_daily_memory_files",
+    "search_skills_sh",
+    "set_app_config_dir_override",
+    "set_auto_failover_enabled",
+    "set_auto_launch",
+    "set_claude_common_config_snippet",
+    "set_common_config_snippet",
+    "set_default_cost_multiplier",
+    "set_global_proxy_url",
+    "set_hermes_memory",
+    "set_hermes_memory_enabled",
+    "set_log_config",
+    "set_mcp_enabled",
+    "set_openclaw_agents_defaults",
+    "set_openclaw_default_model",
+    "set_openclaw_env",
+    "set_openclaw_model_catalog",
+    "set_openclaw_tools",
+    "set_optimizer_config",
+    "set_pricing_model_source",
+    "set_proxy_takeover_for_app",
+    "set_rectifier_config",
+    "set_window_theme",
+    "start_proxy_server",
+    "stop_proxy_server",
+    "stop_proxy_with_restore",
+    "stream_check_all_providers",
+    "stream_check_provider",
+    "switch_provider",
+    "switch_proxy_provider",
+    "sync_current_providers_live",
+    "sync_session_usage",
+    "sync_universal_provider",
+    "testUsageScript",
+    "test_api_endpoints",
+    "test_proxy_url",
+    "toggle_mcp_app",
+    "toggle_skill_app",
+    "uninstall_skill",
+    "uninstall_skill_for_app",
+    "uninstall_skill_unified",
+    "update_circuit_breaker_config",
+    "update_endpoint_last_used",
+    "update_global_proxy_config",
+    "update_model_pricing",
+    "update_profile",
+    "update_provider",
+    "update_providers_sort_order",
+    "update_proxy_config",
+    "update_proxy_config_for_app",
+    "update_skill",
+    "update_toml_common_config_snippet",
+    "update_tray_menu",
+    "upsert_claude_mcp_server",
+    "upsert_mcp_server",
+    "upsert_mcp_server_in_config",
+    "upsert_prompt",
+    "upsert_universal_provider",
+    "validate_mcp_command",
+    "webdav_sync_download",
+    "webdav_sync_fetch_remote_info",
+    "webdav_sync_save_settings",
+    "webdav_sync_upload",
+    "webdav_test_connection",
+    "write_daily_memory_file",
+    "write_workspace_file",
+];

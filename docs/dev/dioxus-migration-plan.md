@@ -1,6 +1,10 @@
 # Dioxus Frontend Migration Plan
 
-Status: proposal, not started. Branch: `claude/modest-turing-ywec52`.
+Status: in progress on branch `claude/modest-turing-ywec52`. Phase 0 done
+(see `dioxus-dev-setup.md`); Phase 1 next.
+
+Deviation from §3.1: `src-tauri` stays a standalone package and the new
+crates form their own workspace under `crates/` (see the setup doc for why).
 
 This document plans the rewrite of the cc-switch frontend from React/TypeScript
 to Rust with [Dioxus](https://github.com/DioxusLabs/dioxus), while keeping the

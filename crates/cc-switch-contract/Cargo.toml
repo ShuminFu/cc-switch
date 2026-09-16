@@ -1,0 +1,12 @@
+[package]
+name = "cc-switch-contract"
+version = "0.1.0"
+description = "Wire types, command names and events shared by the cc-switch backend and its Rust frontend"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

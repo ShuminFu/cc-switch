@@ -127,3 +127,46 @@ jobs:
 
       - name: Validate icon assets
         run: cargo run --quiet --manifest-path scripts/icon-tools/Cargo.toml -- check
+
+  ui-dioxus:
+    name: Dioxus UI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/target
+          key: ${{ runner.os }}-crates-${{ hashFiles('crates/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-crates-
+
+      - name: Install Dioxus CLI
+        run: |
+          curl -sSL -o dx.tar.gz https://github.com/DioxusLabs/dioxus/releases/download/v0.7.10/dx-x86_64-unknown-linux-gnu.tar.gz
+          tar xzf dx.tar.gz
+          install -m 755 dx "$HOME/.cargo/bin/dx"
+          dx --version
+
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path crates/Cargo.toml --all
+
+      - name: Contract tests
+        run: cargo test --manifest-path crates/Cargo.toml -p cc-switch-contract
+
+      - name: Clippy (wasm32)
+        run: cargo clippy --manifest-path crates/Cargo.toml -p cc-switch-ui --target wasm32-unknown-unknown -- -D warnings
+
+      - name: Build Dioxus web bundle
+        working-directory: crates/cc-switch-ui
+        run: dx build --platform web --release

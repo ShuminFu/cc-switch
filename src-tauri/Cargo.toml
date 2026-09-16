@@ -112,3 +112,4 @@ strip = "symbols"
 [dev-dependencies]
 serial_test = "3"
 tempfile = "3"
+cc-switch-contract = { path = "../crates/cc-switch-contract" }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "frontendDist": "../crates/target/dx/cc-switch-ui/release/web/public",
+    "devUrl": "http://localhost:3001",
+    "beforeDevCommand": "pnpm run dev:dioxus-renderer",
+    "beforeBuildCommand": "pnpm run build:dioxus-renderer"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https: http:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https: http:"
+    }
+  }
+}

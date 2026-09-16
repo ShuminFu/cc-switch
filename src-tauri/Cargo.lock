@@ -768,6 +768,7 @@ dependencies = [
  "base64 0.22.1",
  "brotli 7.0.0",
  "bytes",
+ "cc-switch-contract",
  "chrono",
  "dirs 5.0.1",
  "flate2",
@@ -827,6 +828,14 @@ dependencies = [
  "winreg 0.52.0",
  "zip 2.4.2",
  "zstd",
+]
+
+[[package]]
+name = "cc-switch-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
