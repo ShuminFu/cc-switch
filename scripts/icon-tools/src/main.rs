@@ -48,6 +48,11 @@ COMMANDS:
                 --strict            Treat warnings as errors
                 --scaffold-metadata Print metadata.ts entries for icons lacking one
     index     Render an index.ts from the files in a directory
+    emit-rust Emit the curated icon set as a Rust module for crates/cc-switch-ui
+                --dir <DIR>         Icon directory
+                --out <FILE>        Rust file to write (default: crates/cc-switch-ui/src/icons/generated.rs)
+                --assets <DIR>      Where URL icon files are copied (default: crates/cc-switch-ui/assets/icons)
+                --asset-prefix <P>  Published prefix of --assets (default: /assets/icons)
                 --dir <DIR>         Icon directory
                 --out <FILE>        Write to FILE (default: stdout)
                 --write             Overwrite <DIR>/index.ts
@@ -67,6 +72,8 @@ EXIT CODES:
 
 const VALUE_FLAGS: &[&str] = &[
     "root",
+    "assets",
+    "asset-prefix",
     "source",
     "out",
     "dir",
@@ -194,6 +201,7 @@ fn main() -> ExitCode {
         "filter" => cmd_filter(&root, &args),
         "check" => cmd_check(&root, &args),
         "index" => cmd_index(&root, &args),
+        "emit-rust" => cmd_emit_rust(&root, &args),
         other => Err(CliError::usage(format!("unknown command `{other}`"))),
     };
 
@@ -459,6 +467,43 @@ fn cmd_index(root: &Path, args: &Args) -> Result<(), CliError> {
         }
         None => emit!("{source}"),
     }
+    Ok(())
+}
+
+fn cmd_emit_rust(root: &Path, args: &Args) -> Result<(), CliError> {
+    let dir = icon_dir(root, args);
+    let out = args
+        .value("out")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("crates/cc-switch-ui/src/icons/generated.rs"));
+    let assets = args
+        .value("assets")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join("crates/cc-switch-ui/assets/icons"));
+    let prefix = args.value("asset-prefix").unwrap_or("/assets/icons");
+
+    let index_src = fs::read_to_string(dir.join("index.ts"))
+        .map_err(|e| CliError::io(format!("{}: {e}", dir.join("index.ts").display())))?;
+    let parsed = index::parse_index(&index_src).map_err(CliError::io)?;
+    let metadata_src = fs::read_to_string(dir.join("metadata.ts"))
+        .map_err(|e| CliError::io(format!("{}: {e}", dir.join("metadata.ts").display())))?;
+    let metadata = icon_tools::rust_out::parse_metadata(&metadata_src);
+
+    let source = icon_tools::rust_out::render_rust(&parsed, &metadata, prefix);
+    if let Some(parent) = out.parent() {
+        fs::create_dir_all(parent).map_err(|e| CliError::io(e.to_string()))?;
+    }
+    fs::write(&out, source).map_err(|e| CliError::io(format!("{}: {e}", out.display())))?;
+    let copied = icon_tools::rust_out::copy_url_assets(&dir, &parsed, &assets)
+        .map_err(|e| CliError::io(format!("copying icon assets: {e}")))?;
+    say!(
+        "Wrote {} ({} inline icons, {} url icons, {} metadata entries); copied {copied} files to {}",
+        out.display(),
+        parsed.inline.len(),
+        parsed.urls.len(),
+        metadata.len(),
+        assets.display()
+    );
     Ok(())
 }
 

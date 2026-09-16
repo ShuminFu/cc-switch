@@ -22,9 +22,24 @@
       webdavSync: { enabled: false },
     },
   };
+  state.providers = {
+    claude: {
+      "p-official": { id: "p-official", name: "Anthropic Official", settingsConfig: { env: {} }, websiteUrl: "https://anthropic.com", icon: "anthropic", sortIndex: 1, category: "official" },
+      "p-kimi": { id: "p-kimi", name: "Kimi For Coding", settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://api.kimi.com/coding" } }, websiteUrl: "https://kimi.com", icon: "kimi", sortIndex: 0, notes: "team account", meta: { isPartner: true } },
+    },
+    codex: {},
+  };
+  state.current = { claude: "p-official", codex: "" };
   const handlers = {
     get_settings: () => state.settings,
+    get_providers: ({ app }) => state.providers[app] ?? {},
+    get_current_provider: ({ app }) => state.current[app] ?? "",
+    switch_provider: ({ app, id }) => { state.current[app] = id; return { warnings: [] }; },
+    delete_provider: ({ app, id }) => { delete state.providers[app][id]; return true; },
+    open_external: () => null,
     save_settings: ({ settings }) => { state.settings = settings; return true; },
+    set_window_theme: () => null,
+    get_init_error: () => null,
   };
   window.__TAURI_MOCK__ = { state, handlers, calls: [] };
   window.__TAURI__ = {

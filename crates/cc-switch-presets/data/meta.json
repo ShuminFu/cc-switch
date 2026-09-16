@@ -1,0 +1,671 @@
+{
+  "claudeDesktopRoleRouteIds": {
+    "sonnet": "claude-sonnet-5",
+    "opus": "claude-opus-4-8",
+    "fable": "claude-fable-5",
+    "haiku": "claude-haiku-4-5"
+  },
+  "opencodeNpmPackages": [
+    {
+      "value": "@ai-sdk/openai",
+      "label": "OpenAI Responses"
+    },
+    {
+      "value": "@ai-sdk/openai-compatible",
+      "label": "OpenAI Compatible"
+    },
+    {
+      "value": "@ai-sdk/anthropic",
+      "label": "Anthropic"
+    },
+    {
+      "value": "@ai-sdk/amazon-bedrock",
+      "label": "Amazon Bedrock"
+    },
+    {
+      "value": "@ai-sdk/google",
+      "label": "Google (Gemini)"
+    }
+  ],
+  "opencodePresetModelVariants": {
+    "@ai-sdk/openai-compatible": [
+      {
+        "id": "MiniMax-M2.7",
+        "name": "MiniMax M2.7",
+        "contextLimit": 204800,
+        "outputLimit": 131072,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "glm-5.1",
+        "name": "GLM 5.1",
+        "contextLimit": 204800,
+        "outputLimit": 131072,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "kimi-k2.6",
+        "name": "Kimi K2.6",
+        "contextLimit": 262144,
+        "outputLimit": 262144,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "video"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "step-3.5-flash-2603",
+        "name": "Step 3.5 Flash 2603",
+        "contextLimit": 262144
+      },
+      {
+        "id": "step-3.5-flash",
+        "name": "Step 3.5 Flash",
+        "contextLimit": 262144
+      }
+    ],
+    "@ai-sdk/google": [
+      {
+        "id": "gemini-2.5-flash-lite",
+        "name": "Gemini 2.5 Flash Lite",
+        "contextLimit": 1048576,
+        "outputLimit": 65536,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf",
+            "video",
+            "audio"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": {
+          "auto": {
+            "thinkingConfig": {
+              "includeThoughts": true,
+              "thinkingBudget": -1
+            }
+          },
+          "no-thinking": {
+            "thinkingConfig": {
+              "thinkingBudget": 0
+            }
+          }
+        }
+      },
+      {
+        "id": "gemini-3.5-flash",
+        "name": "Gemini 3.5 Flash",
+        "contextLimit": 1048576,
+        "outputLimit": 65536,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf",
+            "video",
+            "audio"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": {
+          "minimal": {
+            "thinkingConfig": {
+              "includeThoughts": true,
+              "thinkingLevel": "minimal"
+            }
+          },
+          "low": {
+            "thinkingConfig": {
+              "includeThoughts": true,
+              "thinkingLevel": "low"
+            }
+          },
+          "medium": {
+            "thinkingConfig": {
+              "includeThoughts": true,
+              "thinkingLevel": "medium"
+            }
+          },
+          "high": {
+            "thinkingConfig": {
+              "includeThoughts": true,
+              "thinkingLevel": "high"
+            }
+          }
+        }
+      }
+    ],
+    "@ai-sdk/openai": [
+      {
+        "id": "gpt-5.5",
+        "name": "GPT-5.5",
+        "contextLimit": 400000,
+        "outputLimit": 128000,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": {
+          "low": {
+            "reasoningEffort": "low",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium"
+          },
+          "medium": {
+            "reasoningEffort": "medium",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium"
+          },
+          "high": {
+            "reasoningEffort": "high",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium"
+          },
+          "xhigh": {
+            "reasoningEffort": "xhigh",
+            "reasoningSummary": "auto",
+            "textVerbosity": "medium"
+          }
+        }
+      }
+    ],
+    "@ai-sdk/amazon-bedrock": [
+      {
+        "id": "global.anthropic.claude-opus-4-8",
+        "name": "Claude Opus 4.8",
+        "contextLimit": 1000000,
+        "outputLimit": 128000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "global.anthropic.claude-sonnet-5",
+        "name": "Claude Sonnet 5",
+        "contextLimit": 1000000,
+        "outputLimit": 64000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "name": "Claude Haiku 4.5",
+        "contextLimit": 200000,
+        "outputLimit": 64000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "us.amazon.nova-pro-v1:0",
+        "name": "Amazon Nova Pro",
+        "contextLimit": 300000,
+        "outputLimit": 5000,
+        "modalities": {
+          "input": [
+            "text",
+            "image"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "us.meta.llama4-maverick-17b-instruct-v1:0",
+        "name": "Meta Llama 4 Maverick",
+        "contextLimit": 131072,
+        "outputLimit": 131072,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "us.deepseek.r1-v1:0",
+        "name": "DeepSeek R1",
+        "contextLimit": 131072,
+        "outputLimit": 131072,
+        "modalities": {
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      }
+    ],
+    "@ai-sdk/anthropic": [
+      {
+        "id": "claude-sonnet-4-5-20250929",
+        "name": "Claude Sonnet 4.5",
+        "contextLimit": 200000,
+        "outputLimit": 64000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": {
+          "low": {
+            "effort": "low"
+          },
+          "medium": {
+            "effort": "medium"
+          },
+          "high": {
+            "effort": "high"
+          }
+        }
+      },
+      {
+        "id": "claude-opus-4-5-20251101",
+        "name": "Claude Opus 4.5",
+        "contextLimit": 200000,
+        "outputLimit": 64000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": {
+          "low": {
+            "thinking": {
+              "budgetTokens": 5000,
+              "type": "enabled"
+            }
+          },
+          "medium": {
+            "thinking": {
+              "budgetTokens": 13000,
+              "type": "enabled"
+            }
+          },
+          "high": {
+            "thinking": {
+              "budgetTokens": 18000,
+              "type": "enabled"
+            }
+          }
+        }
+      },
+      {
+        "id": "claude-opus-4-8",
+        "name": "Claude Opus 4.8",
+        "contextLimit": 1000000,
+        "outputLimit": 128000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": {
+          "low": {
+            "effort": "low"
+          },
+          "medium": {
+            "effort": "medium"
+          },
+          "high": {
+            "effort": "high"
+          },
+          "max": {
+            "effort": "max"
+          }
+        }
+      },
+      {
+        "id": "claude-haiku-4-5-20251001",
+        "name": "Claude Haiku 4.5",
+        "contextLimit": 200000,
+        "outputLimit": 64000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        }
+      },
+      {
+        "id": "gemini-claude-opus-4-5-thinking",
+        "name": "Antigravity - Claude Opus 4.5",
+        "contextLimit": 200000,
+        "outputLimit": 64000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": {
+          "low": {
+            "effort": "low"
+          },
+          "medium": {
+            "effort": "medium"
+          },
+          "high": {
+            "effort": "high"
+          }
+        }
+      },
+      {
+        "id": "gemini-claude-sonnet-4-5-thinking",
+        "name": "Antigravity - Claude Sonnet 4.5",
+        "contextLimit": 200000,
+        "outputLimit": 64000,
+        "modalities": {
+          "input": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": {
+          "low": {
+            "thinking": {
+              "budgetTokens": 5000,
+              "type": "enabled"
+            }
+          },
+          "medium": {
+            "thinking": {
+              "budgetTokens": 13000,
+              "type": "enabled"
+            }
+          },
+          "high": {
+            "thinking": {
+              "budgetTokens": 18000,
+              "type": "enabled"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "openclawApiProtocols": [
+    {
+      "value": "openai-completions",
+      "label": "OpenAI Completions"
+    },
+    {
+      "value": "openai-responses",
+      "label": "OpenAI Responses"
+    },
+    {
+      "value": "anthropic-messages",
+      "label": "Anthropic Messages"
+    },
+    {
+      "value": "google-generative-ai",
+      "label": "Google Generative AI"
+    },
+    {
+      "value": "bedrock-converse-stream",
+      "label": "AWS Bedrock"
+    }
+  ],
+  "hermesApiModes": [
+    {
+      "value": "chat_completions",
+      "labelKey": "hermes.form.apiModeChatCompletions"
+    },
+    {
+      "value": "anthropic_messages",
+      "labelKey": "hermes.form.apiModeAnthropicMessages"
+    },
+    {
+      "value": "codex_responses",
+      "labelKey": "hermes.form.apiModeCodexResponses"
+    },
+    {
+      "value": "bedrock_converse",
+      "labelKey": "hermes.form.apiModeBedrockConverse"
+    }
+  ],
+  "hermesDefaultApiMode": "chat_completions",
+  "hermesProviderSource": {
+    "field": "_cc_source",
+    "customList": "custom_providers",
+    "dict": "providers_dict"
+  },
+  "userAgentPresets": [
+    "claude-cli/2.1.161 (external, cli)",
+    "claude-cli/2.1.161",
+    "claude-code/1.0.0",
+    "claude-code/0.1.0",
+    "Kilo-Code/1.0"
+  ],
+  "codexCustomTemplate": {
+    "auth": {
+      "OPENAI_API_KEY": ""
+    },
+    "config": "model_provider = \"custom\"\nmodel = \"gpt-5.6\"\nmodel_reasoning_effort = \"high\"\ndisable_response_storage = true\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true"
+  },
+  "codexThirdPartyExample": {
+    "auth": {
+      "OPENAI_API_KEY": "sk-test"
+    },
+    "config": "model_provider = \"custom\"\nmodel = \"gpt-5.5\"\nmodel_reasoning_effort = \"high\"\ndisable_response_storage = true\n\n[model_providers.custom]\nname = \"Example Provider\"\nbase_url = \"https://api.example.com/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true",
+    "configWithModel": "model_provider = \"custom\"\nmodel = \"gpt-5.5-mini\"\nmodel_reasoning_effort = \"high\"\ndisable_response_storage = true\n\n[model_providers.custom]\nname = \"Example Provider\"\nbase_url = \"https://api.example.com/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true"
+  },
+  "codingPlanProviders": [
+    {
+      "id": "kimi",
+      "label": "Kimi For Coding",
+      "pattern": "api\\.kimi\\.com\\/coding",
+      "flags": "i"
+    },
+    {
+      "id": "zhipu",
+      "label": "Zhipu GLM (智谱)",
+      "pattern": "bigmodel\\.cn|api\\.z\\.ai",
+      "flags": "i"
+    },
+    {
+      "id": "zhipu_team",
+      "label": "Zhipu GLM Team (智谱团队)",
+      "pattern": "bigmodel\\.cn",
+      "flags": "i"
+    },
+    {
+      "id": "minimax",
+      "label": "MiniMax",
+      "pattern": "api\\.minimaxi?\\.com|api\\.minimax\\.io",
+      "flags": "i"
+    },
+    {
+      "id": "zenmux",
+      "label": "ZenMux",
+      "pattern": "zenmux\\.",
+      "flags": "i"
+    },
+    {
+      "id": "volcengine",
+      "label": "火山方舟 (Volcengine)",
+      "pattern": "volces\\.com\\/api\\/coding",
+      "flags": "i"
+    }
+  ],
+  "mcpPresets": [
+    {
+      "id": "fetch",
+      "name": "mcp-server-fetch",
+      "tags": [
+        "stdio",
+        "http",
+        "web"
+      ],
+      "server": {
+        "type": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-fetch"
+        ]
+      },
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch"
+    },
+    {
+      "id": "time",
+      "name": "@modelcontextprotocol/server-time",
+      "tags": [
+        "stdio",
+        "time",
+        "utility"
+      ],
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-time"
+        ]
+      },
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/time"
+    },
+    {
+      "id": "memory",
+      "name": "@modelcontextprotocol/server-memory",
+      "tags": [
+        "stdio",
+        "memory",
+        "graph"
+      ],
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-memory"
+        ]
+      },
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory"
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "@modelcontextprotocol/server-sequential-thinking",
+      "tags": [
+        "stdio",
+        "thinking",
+        "reasoning"
+      ],
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-sequential-thinking"
+        ]
+      },
+      "homepage": "https://github.com/modelcontextprotocol/servers",
+      "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking"
+    },
+    {
+      "id": "context7",
+      "name": "@upstash/context7-mcp",
+      "tags": [
+        "stdio",
+        "docs",
+        "search"
+      ],
+      "server": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@upstash/context7-mcp"
+        ]
+      },
+      "homepage": "https://context7.com",
+      "docs": "https://github.com/upstash/context7/blob/master/README.md"
+    }
+  ]
+}

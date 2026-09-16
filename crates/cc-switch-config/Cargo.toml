@@ -1,0 +1,15 @@
+[package]
+name = "cc-switch-config"
+version = "0.1.0"
+description = "Pure-Rust config manipulation helpers (JSON/TOML text edits, Codex/Grok config, semver) shared by the cc-switch backend and its Rust frontend"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml = { version = "0.8", features = ["preserve_order"] }
+indexmap = { version = "2", features = ["serde"] }
+regex = "1"

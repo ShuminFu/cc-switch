@@ -138,6 +138,37 @@ pub fn fallback_keys() -> impl Iterator<Item = &'static str> {
     table(Locale::FALLBACK).keys().map(String::as_str)
 }
 
+// ---------------------------------------------------------------------------
+// Component helpers
+// ---------------------------------------------------------------------------
+
+/// Translates `key` in the current locale. Reading the locale signal inside
+/// a component subscribes it to language changes.
+pub fn t(key: &str) -> String {
+    t_args(key, &[])
+}
+
+pub fn t_args(key: &str, args: &[(&str, &str)]) -> String {
+    let locale = dioxus::prelude::try_use_context::<crate::state::AppState>()
+        .map(|s| (s.locale)())
+        .unwrap_or(Locale::DEFAULT);
+    translate(locale, key, args)
+}
+
+/// `t!("key")` or `t!("key", name = value, count = n)`; values are
+/// formatted with `Display`.
+#[macro_export]
+macro_rules! t {
+    ($key:expr) => {
+        $crate::i18n::t($key)
+    };
+    ($key:expr, $($name:ident = $value:expr),+ $(,)?) => {{
+        let owned: Vec<(&str, String)> = vec![$((stringify!($name), $value.to_string())),+];
+        let borrowed: Vec<(&str, &str)> = owned.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        $crate::i18n::t_args($key, &borrowed)
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

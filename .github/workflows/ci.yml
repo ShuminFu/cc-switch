@@ -53,6 +53,11 @@ jobs:
       - name: Unit tests
         run: pnpm test:unit
 
+      - name: Preset JSON is up to date
+        run: |
+          pnpm presets:dump
+          git diff --exit-code -- crates/cc-switch-presets/data
+
   backend:
     name: Backend Checks
     runs-on: ${{ matrix.os }}
@@ -161,8 +166,11 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --check --manifest-path crates/Cargo.toml --all
 
-      - name: Contract tests
-        run: cargo test --manifest-path crates/Cargo.toml -p cc-switch-contract
+      - name: Workspace tests (contract, presets, config, ui)
+        run: cargo test --manifest-path crates/Cargo.toml --workspace
+
+      - name: Clippy (native)
+        run: cargo clippy --manifest-path crates/Cargo.toml --workspace --all-targets -- -D warnings
 
       - name: Clippy (wasm32)
         run: cargo clippy --manifest-path crates/Cargo.toml -p cc-switch-ui --target wasm32-unknown-unknown -- -D warnings

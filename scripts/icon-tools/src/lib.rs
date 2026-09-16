@@ -13,10 +13,12 @@
 //! * [`check`] validates that `index.ts`, `metadata.ts` and the files on disk
 //!   agree with each other.
 //! * [`index`] renders a fresh `index.ts` from the files in a directory.
+//! * [`rust_out`] emits the icon set as a Rust module for the Dioxus UI.
 
 pub mod check;
 pub mod extract;
 pub mod filter;
 pub mod index;
+pub mod rust_out;
 pub mod svg;
 pub mod util;

@@ -1,7 +1,15 @@
 # Dioxus Frontend Migration Plan
 
 Status: in progress on branch `claude/modest-turing-ywec52`. Phase 0 done
-(see `dioxus-dev-setup.md`); Phase 1 next.
+(see `dioxus-dev-setup.md`); Phase 1 in progress.
+
+Deviation from §4: the presets and config utilities move into shared Rust
+crates (`crates/cc-switch-presets`, `crates/cc-switch-config`) that both the
+backend and the wasm32 frontend can link, instead of behind new Tauri
+commands. The Dioxus UI gets synchronous access like the React app had, and
+the backend can adopt the same crates later. The React app keeps its TS
+copies until Phase 6; `pnpm presets:dump` regenerates the JSON from the TS
+catalogs and CI fails when they drift.
 
 Deviation from §3.1: `src-tauri` stays a standalone package and the new
 crates form their own workspace under `crates/` (see the setup doc for why).

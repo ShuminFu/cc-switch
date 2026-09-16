@@ -44,6 +44,17 @@ system CA bundle; place the binaries there by hand:
 ~/.local/share/.dx/tools/tailwindcss-v3.4.15/tailwindcss         # tailwindcss standalone v3.4.15
 ```
 
+## Generated sources
+
+| Generator | Output | Source of truth (until Phase 6) |
+|---|---|---|
+| `python3 scripts/gen-contract-commands.py` | `crates/cc-switch-contract/src/commands.rs` | `src/lib/api/*.ts` invoke calls |
+| `node crates/cc-switch-ui/tools/gen_api.mjs` | `crates/cc-switch-ui/src/api/*.rs` (except `app.rs`) | `src/lib/api/*.ts` method signatures |
+| `pnpm presets:dump` | `crates/cc-switch-presets/data/*.json` | `src/config/*Presets.ts` |
+| `pnpm icons:emit-rust` | `crates/cc-switch-ui/src/icons/generated.rs`, `assets/icons/` | `src/icons/extracted/{index,metadata}.ts` |
+
+Locale files are embedded directly from `src/i18n/locales/*.json`.
+
 ## Commands
 
 ```bash

@@ -4,7 +4,7 @@
 # through a path dependency.
 [workspace]
 resolver = "2"
-members = ["cc-switch-contract", "cc-switch-ui"]
+members = ["cc-switch-contract", "cc-switch-presets", "cc-switch-config", "cc-switch-ui"]
 
 [workspace.package]
 edition = "2021"
