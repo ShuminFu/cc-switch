@@ -9,3 +9,4 @@ remain authoritative until Phase 6, after which this directory is deleted.
 - `settings-area.md`: Settings page, tabs, save flow, About, usage tab
 - `providers-list.md`: provider list, cards, actions, header toggles, add/edit entry points
 - `remaining-views.md`: MCP, skills, prompts, sessions, workspace, universal, OpenClaw, Hermes, profiles, deep links, startup flows
+- `usage-and-proxy.md`: usage dashboard, quota footers, usage-script modal, proxy/failover panels
