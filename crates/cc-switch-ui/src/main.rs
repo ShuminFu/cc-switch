@@ -5,6 +5,10 @@
 // Phase 2. Keep clippy quiet until then.
 #[allow(dead_code)]
 mod api;
+#[allow(dead_code, unused_imports)]
+mod components;
+#[allow(dead_code)]
+mod i18n;
 #[allow(dead_code)]
 mod ipc;
 
@@ -13,6 +17,7 @@ use dioxus::prelude::*;
 
 const BASE_CSS: Asset = asset!("/assets/base.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+const COMPONENTS_CSS: Asset = asset!("/assets/dx-components-theme.css");
 
 fn main() {
     dioxus::launch(App);
@@ -32,6 +37,7 @@ fn App() -> Element {
     rsx! {
         document::Stylesheet { href: BASE_CSS }
         document::Stylesheet { href: TAILWIND_CSS }
+        document::Stylesheet { href: COMPONENTS_CSS }
         div { class: "min-h-screen bg-background text-foreground",
             header {
                 class: "glass-header flex h-16 items-center justify-between border-b border-border px-6",
