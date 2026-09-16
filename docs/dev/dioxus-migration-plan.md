@@ -1,7 +1,10 @@
 # Dioxus Frontend Migration Plan
 
-Status: in progress on branch `claude/modest-turing-ywec52`. Phase 0 done
-(see `dioxus-dev-setup.md`); Phase 1 in progress.
+Status: in progress on branch `claude/modest-turing-ywec52`. Phases 0, 1 and 2
+are done (see `dioxus-dev-setup.md` and `crates/cc-switch-ui/PORTING.md`);
+Phase 3 (providers) and Phase 4 (settings) are being ported in parallel from
+the specs in `docs/dev/specs/`. The CodeMirror interop from §5 exists as
+`crates/cc-switch-ui/src/editor`.
 
 Deviation from §4: the presets and config utilities move into shared Rust
 crates (`crates/cc-switch-presets`, `crates/cc-switch-config`) that both the
