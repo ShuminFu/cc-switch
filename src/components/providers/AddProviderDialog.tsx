@@ -200,6 +200,22 @@ export function AddProviderDialog({
                 preset.endpointCandidates.forEach(addUrl);
               }
             }
+          } else if (appId === "grokbuild") {
+            // Grok Build reuses the Codex preset list (ids are grokbuild-<index>)
+            const presets = codexProviderPresets;
+            const presetIndex = parseInt(
+              values.presetId.replace("grokbuild-", ""),
+            );
+            if (
+              !isNaN(presetIndex) &&
+              presetIndex >= 0 &&
+              presetIndex < presets.length
+            ) {
+              const preset = presets[presetIndex];
+              if (Array.isArray(preset.endpointCandidates)) {
+                preset.endpointCandidates.forEach(addUrl);
+              }
+            }
           } else if (appId === "gemini") {
             const presets = geminiProviderPresets;
             const presetIndex = parseInt(

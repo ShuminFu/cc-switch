@@ -128,6 +128,105 @@ describe("GrokBuildProviderForm", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("keeps unparseable raw TOML and refuses to submit it", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { container } = render(
+      <GrokBuildProviderForm
+        submitLabel="Save"
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+
+    fireEvent.change(
+      container.querySelector<HTMLInputElement>('input[name="name"]')!,
+      { target: { value: "Example Relay" } },
+    );
+    fireEvent.change(
+      container.querySelector<HTMLInputElement>("#codexBaseUrl")!,
+      {
+        target: { value: "https://relay.example.com/v1" },
+      },
+    );
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "secret-key" },
+    });
+
+    const brokenToml = '[models\n[mcp_servers.echo]\ncommand = "echo"\n';
+    fireEvent.change(screen.getByLabelText("raw-config"), {
+      target: { value: brokenToml },
+    });
+    // A structured edit must not regenerate (and discard) the broken raw text.
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "another-key" },
+    });
+    expect(
+      (screen.getByLabelText("raw-config") as HTMLTextAreaElement).value,
+    ).toBe(brokenToml);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("switches to another existing profile instead of overwriting it", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const config = `[models]
+default = "a"
+
+[model.a]
+model = "upstream-a"
+base_url = "https://a.example.com/v1"
+name = "Relay A"
+api_key = "a-key"
+api_backend = "responses"
+context_window = 100000
+
+[model.b]
+model = "upstream-b"
+base_url = "https://b.example.com/v1"
+name = "Relay B"
+api_key = "b-key"
+api_backend = "chat_completions"
+context_window = 200000
+`;
+    const { container } = render(
+      <GrokBuildProviderForm
+        providerId="existing-provider"
+        submitLabel="Save"
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+        initialData={{ name: "Relay A", settingsConfig: { config } }}
+      />,
+    );
+
+    fireEvent.change(
+      container.querySelector<HTMLInputElement>("#grokbuild-profile")!,
+      { target: { value: "b" } },
+    );
+    expect(
+      container.querySelector<HTMLInputElement>("#codexBaseUrl")?.value,
+    ).toBe("https://b.example.com/v1");
+    expect(
+      container.querySelector<HTMLInputElement>("#grokbuild-api-backend")
+        ?.value,
+    ).toBe("chat_completions");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const submitted = onSubmit.mock.calls[0][0];
+    const parsed = parseToml(
+      JSON.parse(submitted.settingsConfig).config,
+    ) as any;
+    expect(parsed.models.default).toBe("b");
+    expect(parsed.model.a.base_url).toBe("https://a.example.com/v1");
+    expect(parsed.model.b.base_url).toBe("https://b.example.com/v1");
+    expect(parsed.model.b.api_key).toBe("b-key");
+    expect(submitted.meta.apiFormat).toBe("openai_chat");
+  });
+
   it("loads edit-mode values and does not resubmit stale custom endpoints", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

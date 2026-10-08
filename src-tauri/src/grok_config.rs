@@ -200,10 +200,9 @@ pub fn extract_base_url(config_toml: &str) -> Option<String> {
     Some(extract_model_config(config_toml)?.base_url)
 }
 
-fn update_selected_model_string(
+fn edit_selected_model_table(
     config_toml: &str,
-    field: &str,
-    value: &str,
+    edit: impl FnOnce(&mut dyn toml_edit::TableLike),
 ) -> Result<String, AppError> {
     let mut document = config_toml
         .parse::<toml_edit::DocumentMut>()
@@ -240,8 +239,24 @@ fn update_selected_model_string(
                 format!("Grok Build configuration is missing [model.\"{default_model}\"]"),
             )
         })?;
-    selected_model.insert(field, toml_edit::value(value));
+    edit(selected_model);
     Ok(document.to_string())
+}
+
+fn update_selected_model_string(
+    config_toml: &str,
+    field: &str,
+    value: &str,
+) -> Result<String, AppError> {
+    edit_selected_model_table(config_toml, |selected_model| {
+        selected_model.insert(field, toml_edit::value(value));
+    })
+}
+
+fn remove_selected_model_field(config_toml: &str, field: &str) -> Result<String, AppError> {
+    edit_selected_model_table(config_toml, |selected_model| {
+        selected_model.remove(field);
+    })
 }
 
 pub fn apply_proxy_takeover(
@@ -250,7 +265,24 @@ pub fn apply_proxy_takeover(
     token_placeholder: &str,
 ) -> Result<String, AppError> {
     let updated = update_selected_model_string(config_toml, "base_url", proxy_base_url)?;
+    // The local proxy only serves the Responses protocol under `/grokbuild/v1`;
+    // Chat/Anthropic upstreams are bridged inside the proxy from provider meta.
+    // Force the client-facing backend so a Chat/Messages profile keeps working
+    // under takeover (mirrors the Codex `wire_api = "responses"` projection).
+    let updated = update_selected_model_string(&updated, "api_backend", DEFAULT_API_BACKEND)?;
     update_selected_model_string(&updated, "api_key", token_placeholder)
+}
+
+/// Drop the selected profile's `base_url` when it matches `predicate`
+/// (used to clear a stale local proxy route once takeover is released).
+pub fn remove_base_url_if(
+    config_toml: &str,
+    predicate: impl FnOnce(&str) -> bool,
+) -> Result<String, AppError> {
+    if !base_url_matches(config_toml, predicate) {
+        return Ok(config_toml.to_string());
+    }
+    remove_selected_model_field(config_toml, "base_url")
 }
 
 pub fn update_api_key(config_toml: &str, api_key: &str) -> Result<String, AppError> {
@@ -429,6 +461,53 @@ context_window = 500000
         assert_eq!(selected.base_url, "http://127.0.0.1:15721/grokbuild/v1");
         assert_eq!(selected.api_key.as_deref(), Some("PROXY_MANAGED"));
         assert!(has_proxy_placeholder(&updated, "PROXY_MANAGED"));
+    }
+
+    #[test]
+    fn takeover_forces_responses_backend_for_chat_profiles() {
+        let chat_config = valid_config().replace(
+            "api_backend = \"responses\"",
+            "api_backend = \"chat_completions\"",
+        );
+        assert_eq!(
+            extract_model_config(&chat_config)
+                .expect("chat profile")
+                .api_backend,
+            "chat_completions"
+        );
+
+        let updated = apply_proxy_takeover(
+            &chat_config,
+            "http://127.0.0.1:15721/grokbuild/v1",
+            "PROXY_MANAGED",
+        )
+        .expect("takeover config");
+        let selected = extract_model_config(&updated).expect("updated selected model");
+        // The proxy only exposes /grokbuild/v1/responses; the Chat upstream is bridged inside.
+        assert_eq!(selected.api_backend, DEFAULT_API_BACKEND);
+        assert_eq!(selected.base_url, "http://127.0.0.1:15721/grokbuild/v1");
+        assert_eq!(selected.api_key.as_deref(), Some("PROXY_MANAGED"));
+    }
+
+    #[test]
+    fn remove_base_url_if_only_strips_matching_selected_profile() {
+        let taken_over = apply_proxy_takeover(
+            valid_env_key_config(),
+            "http://127.0.0.1:15721/grokbuild/v1",
+            "PROXY_MANAGED",
+        )
+        .expect("takeover config");
+        let cleared = update_api_key(&taken_over, "").expect("clear token");
+
+        let untouched = remove_base_url_if(&cleared, |_| false).expect("predicate false");
+        assert_eq!(untouched, cleared);
+
+        let stripped = remove_base_url_if(&cleared, |url| url.starts_with("http://127.0.0.1"))
+            .expect("strip local base_url");
+        assert!(!stripped.contains("base_url"));
+        assert!(stripped.contains("env_key = \"GROK_TEST_API_KEY\""));
+        assert!(stripped.contains("[model.\"grok-env\"]"));
+        assert!(validate_config_toml(&stripped).is_err());
     }
 
     #[test]

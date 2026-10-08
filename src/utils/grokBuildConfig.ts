@@ -46,30 +46,72 @@ export function parseGrokBuildConfig(
     const models = asRecord(root?.models);
     const defaultModel = asString(models?.default, GROK_BUILD_DEFAULT_MODEL);
     const modelTables = asRecord(root?.model);
-    const selectedModel = asRecord(modelTables?.[defaultModel]);
-    const rawContextWindow = selectedModel?.context_window;
-
-    return {
-      model: defaultModel,
-      upstreamModel: asString(selectedModel?.model, defaultModel),
-      baseUrl: asString(selectedModel?.base_url),
-      name: asString(selectedModel?.name, fallbackName),
-      apiKey: asString(selectedModel?.api_key),
-      envKey: asString(selectedModel?.env_key),
-      apiBackend: asString(
-        selectedModel?.api_backend,
-        GROK_BUILD_DEFAULT_API_BACKEND,
-      ),
-      contextWindow:
-        typeof rawContextWindow === "number" &&
-        Number.isInteger(rawContextWindow) &&
-        rawContextWindow > 0
-          ? rawContextWindow
-          : GROK_BUILD_DEFAULT_CONTEXT_WINDOW,
-    };
+    return valuesFromModelTable(
+      defaultModel,
+      asRecord(modelTables?.[defaultModel]),
+      fallbackName,
+    );
   } catch {
     return fallback;
   }
+}
+
+/**
+ * Values of a specific `[model.<profile>]` table, or undefined when the config
+ * does not parse or has no such table.
+ */
+export function parseGrokBuildProfile(
+  configToml: string | undefined,
+  profile: string,
+  fallbackName = "",
+): GrokBuildConfigValues | undefined {
+  if (!configToml?.trim()) return undefined;
+  try {
+    const root = asRecord(parseToml(configToml));
+    const selectedModel = asRecord(asRecord(root?.model)?.[profile]);
+    if (!selectedModel) return undefined;
+    return valuesFromModelTable(profile, selectedModel, fallbackName);
+  } catch {
+    return undefined;
+  }
+}
+
+/** TOML syntax error message for the raw editor contents, or null when it parses. */
+export function getGrokBuildConfigSyntaxError(
+  configToml: string,
+): string | null {
+  try {
+    parseToml(configToml);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : "Invalid TOML";
+  }
+}
+
+function valuesFromModelTable(
+  profile: string,
+  selectedModel: Record<string, unknown> | undefined,
+  fallbackName: string,
+): GrokBuildConfigValues {
+  const rawContextWindow = selectedModel?.context_window;
+  return {
+    model: profile,
+    upstreamModel: asString(selectedModel?.model, profile),
+    baseUrl: asString(selectedModel?.base_url),
+    name: asString(selectedModel?.name, fallbackName),
+    apiKey: asString(selectedModel?.api_key),
+    envKey: asString(selectedModel?.env_key),
+    apiBackend: asString(
+      selectedModel?.api_backend,
+      GROK_BUILD_DEFAULT_API_BACKEND,
+    ),
+    contextWindow:
+      typeof rawContextWindow === "number" &&
+      Number.isInteger(rawContextWindow) &&
+      rawContextWindow > 0
+        ? rawContextWindow
+        : GROK_BUILD_DEFAULT_CONTEXT_WINDOW,
+  };
 }
 
 export function buildGrokBuildConfig(values: GrokBuildConfigValues): string {
@@ -95,6 +137,14 @@ export function updateGrokBuildConfig(
   config.models = { ...existingModels, default: profile };
 
   const modelTables = asRecord(config.model) ?? {};
+  if (profile !== previousProfile && asRecord(modelTables[profile])) {
+    // Pointing [models].default at another existing profile is a switch, not a
+    // rename: keep every table intact instead of overwriting the target with the
+    // previous profile's values and deleting the previous table. Callers reload
+    // the target's values via parseGrokBuildProfile.
+    config.model = modelTables;
+    return `${stringifyToml(config).trim()}\n`;
+  }
   const existingSelected =
     asRecord(modelTables[profile]) ??
     asRecord(modelTables[previousProfile]) ??

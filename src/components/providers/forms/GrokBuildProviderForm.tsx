@@ -44,7 +44,9 @@ import {
 } from "@/utils/providerConfigUtils";
 import {
   buildGrokBuildConfig,
+  getGrokBuildConfigSyntaxError,
   parseGrokBuildConfig,
+  parseGrokBuildProfile,
   updateGrokBuildConfig,
   validateGrokBuildConfig,
 } from "@/utils/grokBuildConfig";
@@ -63,6 +65,21 @@ export const grokApiBackendFromApiFormat = (format: CodexApiFormat): string => {
   if (format === "openai_chat") return "chat_completions";
   if (format === "anthropic") return "messages";
   return "responses";
+};
+
+/**
+ * Inverse of grokApiBackendFromApiFormat so a hand-edited `api_backend` keeps
+ * `meta.apiFormat` (which drives the proxy bridge) in sync. Unknown values
+ * leave the current format untouched.
+ */
+export const grokApiFormatFromApiBackend = (
+  backend: string,
+): CodexApiFormat | undefined => {
+  const normalized = backend.trim().toLowerCase();
+  if (normalized === "chat_completions") return "openai_chat";
+  if (normalized === "messages") return "anthropic";
+  if (normalized === "responses") return "openai_responses";
+  return undefined;
 };
 
 export function GrokBuildProviderForm({
@@ -110,6 +127,7 @@ export function GrokBuildProviderForm({
   );
   const [apiFormat, setApiFormat] = useState<CodexApiFormat>(
     (initialData?.meta?.apiFormat as CodexApiFormat | undefined) ??
+      grokApiFormatFromApiBackend(initialConfig.apiBackend) ??
       "openai_responses",
   );
   const [anthropicAuthField, setAnthropicAuthField] =
@@ -220,7 +238,13 @@ export function GrokBuildProviderForm({
       contextWindow: Number.parseInt(contextWindow, 10),
       ...overrides,
     };
-    setRawConfig((current) => updateGrokBuildConfig(current, next));
+    // While the raw editor holds unparseable TOML, regenerating would silently
+    // replace the user's text with a minimal config; keep it until it is fixed.
+    setRawConfig((current) =>
+      getGrokBuildConfigSyntaxError(current)
+        ? current
+        : updateGrokBuildConfig(current, next),
+    );
   };
 
   const handlePresetChange = (presetId: string) => {
@@ -286,6 +310,8 @@ export function GrokBuildProviderForm({
     setBaseUrl(parsed.baseUrl);
     setApiKey(parsed.apiKey);
     setApiBackend(parsed.apiBackend);
+    const parsedApiFormat = grokApiFormatFromApiBackend(parsed.apiBackend);
+    if (parsedApiFormat) setApiFormat(parsedApiFormat);
     setContextWindow(String(parsed.contextWindow));
     if (parsed.name) form.setValue("name", parsed.name);
   };
@@ -311,6 +337,18 @@ export function GrokBuildProviderForm({
       toast.error(
         t("grokBuild.contextWindowInvalid", {
           defaultValue: "上下文窗口必须是正整数",
+        }),
+      );
+      return;
+    }
+    // updateGrokBuildConfig cannot merge into unparseable TOML; refuse to save
+    // rather than silently discarding the user's raw edits.
+    const syntaxError = getGrokBuildConfigSyntaxError(rawConfig);
+    if (syntaxError) {
+      toast.error(
+        t("grokBuild.invalidToml", {
+          error: syntaxError,
+          defaultValue: `config.toml 格式错误: ${syntaxError}`,
         }),
       );
       return;
@@ -422,7 +460,33 @@ export function GrokBuildProviderForm({
               onChange={(event) => {
                 const value = event.target.value;
                 setProfile(value);
-                syncStructuredConfig({ model: value });
+                const existingProfile =
+                  value !== profile
+                    ? parseGrokBuildProfile(
+                        rawConfig,
+                        value,
+                        form.getValues("name"),
+                      )
+                    : undefined;
+                if (!existingProfile) {
+                  syncStructuredConfig({ model: value });
+                  return;
+                }
+                // Selecting another existing [model.<profile>] table switches to
+                // it: load its values instead of overwriting it with ours.
+                setUpstreamModel(existingProfile.upstreamModel ?? value);
+                setBaseUrl(existingProfile.baseUrl);
+                setApiKey(existingProfile.apiKey);
+                setApiBackend(existingProfile.apiBackend);
+                const existingApiFormat = grokApiFormatFromApiBackend(
+                  existingProfile.apiBackend,
+                );
+                if (existingApiFormat) setApiFormat(existingApiFormat);
+                setContextWindow(String(existingProfile.contextWindow));
+                if (existingProfile.name) {
+                  form.setValue("name", existingProfile.name);
+                }
+                syncStructuredConfig({ ...existingProfile, model: value });
               }}
               placeholder="grok-4.5"
               autoComplete="off"
@@ -439,6 +503,8 @@ export function GrokBuildProviderForm({
               onChange={(event) => {
                 const value = event.target.value;
                 setApiBackend(value);
+                const nextApiFormat = grokApiFormatFromApiBackend(value);
+                if (nextApiFormat) setApiFormat(nextApiFormat);
                 syncStructuredConfig({ apiBackend: value });
               }}
               placeholder="responses"

@@ -3,7 +3,9 @@ import { parse as parseToml } from "smol-toml";
 import {
   buildGrokBuildConfig,
   extractGrokBuildBaseUrl,
+  getGrokBuildConfigSyntaxError,
   parseGrokBuildConfig,
+  parseGrokBuildProfile,
   updateGrokBuildConfig,
   validateGrokBuildConfig,
 } from "./grokBuildConfig";
@@ -116,6 +118,66 @@ context_window = 500000
         ),
       ),
     ).toBe("context_window must be a positive integer");
+  });
+
+  it("switches to an existing profile without touching either table", () => {
+    const config = `[models]
+default = "a"
+
+[model.a]
+model = "upstream-a"
+base_url = "https://a.example.com/v1"
+name = "A"
+api_key = "a-key"
+api_backend = "responses"
+context_window = 100000
+
+[model.b]
+model = "upstream-b"
+base_url = "https://b.example.com/v1"
+name = "B"
+api_key = "b-key"
+api_backend = "chat_completions"
+context_window = 200000
+`;
+
+    const switched = updateGrokBuildConfig(config, {
+      ...parseGrokBuildConfig(config),
+      model: "b",
+    });
+    const parsed = parseToml(switched) as any;
+
+    expect(parsed.models.default).toBe("b");
+    expect(parsed.model.a.base_url).toBe("https://a.example.com/v1");
+    expect(parsed.model.b).toEqual({
+      model: "upstream-b",
+      base_url: "https://b.example.com/v1",
+      name: "B",
+      api_key: "b-key",
+      api_backend: "chat_completions",
+      context_window: 200000,
+    });
+
+    expect(parseGrokBuildProfile(config, "b")).toEqual({
+      model: "b",
+      upstreamModel: "upstream-b",
+      baseUrl: "https://b.example.com/v1",
+      name: "B",
+      apiKey: "b-key",
+      envKey: "",
+      apiBackend: "chat_completions",
+      contextWindow: 200000,
+    });
+    expect(parseGrokBuildProfile(config, "missing")).toBeUndefined();
+    expect(parseGrokBuildProfile("[models", "a")).toBeUndefined();
+  });
+
+  it("reports TOML syntax errors separately from semantic validation", () => {
+    expect(getGrokBuildConfigSyntaxError("[models")).not.toBeNull();
+    expect(
+      getGrokBuildConfigSyntaxError('[models]\ndefault = "x"\n'),
+    ).toBeNull();
+    expect(getGrokBuildConfigSyntaxError("")).toBeNull();
   });
 
   it("renames the selected profile without leaving the old table behind", () => {

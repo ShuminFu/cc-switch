@@ -245,8 +245,8 @@ pub fn extract_session_id(
         }
     }
 
-    // Codex 请求特殊处理
-    if client_format == "codex" || client_format == "openai" {
+    // Codex 请求特殊处理（Grok Build 复用 Codex 的 Responses 协议与会话头）
+    if matches!(client_format, "codex" | "openai" | "grokbuild") {
         if let Some(result) = extract_codex_session(headers, body) {
             return result;
         }
@@ -587,6 +587,31 @@ mod tests {
         assert!(!result.session_id.is_empty());
         assert_eq!(result.source, SessionIdSource::Generated);
         assert!(!result.client_provided);
+    }
+
+    #[test]
+    fn test_grokbuild_reuses_codex_session_extraction() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "session_id",
+            "550e8400-e29b-41d4-a716-446655440000".parse().unwrap(),
+        );
+        let body = json!({"model": "grok-4.5", "input": "Hello"});
+
+        let result = extract_session_id(&headers, &body, "grokbuild");
+
+        assert_eq!(
+            result.session_id,
+            "codex_550e8400-e29b-41d4-a716-446655440000"
+        );
+        assert_eq!(result.source, SessionIdSource::Header);
+        assert!(result.client_provided);
+
+        let body = json!({"metadata": {"session_id": "grok-session-12345"}});
+        let result = extract_session_id(&HeaderMap::new(), &body, "grokbuild");
+        assert_eq!(result.session_id, "codex_grok-session-12345");
+        assert_eq!(result.source, SessionIdSource::MetadataSessionId);
+        assert!(result.client_provided);
     }
 
     #[test]

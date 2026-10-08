@@ -228,7 +228,11 @@ export function ProviderCard({
   const isCodexOauth =
     provider.meta?.providerType === PROVIDER_TYPES.CODEX_OAUTH;
   const codexNeedsRouting = useMemo(() => {
-    if (appId !== "codex" || provider.category === "official") return false;
+    if (
+      (appId !== "codex" && appId !== "grokbuild") ||
+      provider.category === "official"
+    )
+      return false;
     if (
       provider.meta?.apiFormat === "openai_chat" ||
       provider.meta?.apiFormat === "anthropic"

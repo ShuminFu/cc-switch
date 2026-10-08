@@ -2131,6 +2131,10 @@ impl ProxyService {
         // Clearing the token prevents a stale local route from looking usable.
         let updated = crate::grok_config::update_api_key(config_toml, "")
             .map_err(|e| format!("清理 Grok Build 接管占位符失败: {e}"))?;
+        // Mirror Codex/Gemini: an env_key profile would otherwise keep sending its
+        // real key to the dead local route, so drop the proxy base_url as well.
+        let updated = crate::grok_config::remove_base_url_if(&updated, Self::is_local_proxy_url)
+            .map_err(|e| format!("清理 Grok Build 接管地址失败: {e}"))?;
         crate::config::write_text_file(&crate::grok_config::get_grok_config_path(), &updated)
             .map_err(|e| format!("写入 Grok Build 配置失败: {e}"))
     }
@@ -7067,6 +7071,46 @@ experimental_bearer_token = "PROXY_MANAGED"
                 "must not overwrite good backup for {app_type} with proxy placeholder"
             );
         }
+    }
+
+    #[test]
+    #[serial]
+    fn grok_takeover_cleanup_removes_placeholder_and_local_base_url() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        let service = ProxyService::new(db);
+        crate::config::write_text_file(
+            &crate::grok_config::get_grok_config_path(),
+            "[models]\ndefault = \"grok-4.5\"\n\n[model.\"grok-4.5\"]\nmodel = \"grok-4.5\"\nbase_url = \"http://127.0.0.1:15721/grokbuild/v1\"\nname = \"Grok\"\nenv_key = \"XAI_API_KEY\"\napi_key = \"PROXY_MANAGED\"\napi_backend = \"responses\"\ncontext_window = 500000\n",
+        )
+        .expect("seed taken-over Grok live config");
+
+        assert!(
+            service.detect_takeover_in_live_config_for_app(&AppType::GrokBuild),
+            "placeholder should be detected before cleanup"
+        );
+
+        service
+            .cleanup_grok_takeover_placeholders_in_live()
+            .expect("cleanup Grok takeover placeholders");
+
+        let live_config = std::fs::read_to_string(crate::grok_config::get_grok_config_path())
+            .expect("read live config");
+        assert!(
+            !live_config.contains(PROXY_TOKEN_PLACEHOLDER),
+            "cleanup should remove the proxy token placeholder"
+        );
+        assert!(
+            !live_config.contains("http://127.0.0.1:15721"),
+            "cleanup should not leave the env_key profile pointed at the dead local route"
+        );
+        assert!(
+            live_config.contains("env_key = \"XAI_API_KEY\""),
+            "cleanup should preserve the user's env_key credential"
+        );
+        assert!(!service.detect_takeover_in_live_config_for_app(&AppType::GrokBuild));
     }
 
     fn grok_provider_config(base_url: &str, api_key: &str) -> Value {
