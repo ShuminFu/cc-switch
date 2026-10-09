@@ -344,9 +344,9 @@ fn build_claude_settings(request: &DeepLinkImportRequest) -> serde_json::Value {
 fn extract_claude_config_env(
     request: &DeepLinkImportRequest,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
-    // Only the inline base64 config carries an env block. Remote config_url
-    // is not implemented yet (see parse_and_merge_config), so nothing else to
-    // try here.
+    // Only the inline base64 config carries an env block. A remote config_url
+    // has already been folded into `config` by `resolve_remote_config`, so
+    // nothing else to try here.
     let config_b64 = request.config.as_ref()?;
 
     // Honor the declared format; default to JSON like parse_and_merge_config does.
@@ -591,10 +591,13 @@ pub fn parse_and_merge_config(
         let decoded = decode_base64_param("config", config_b64)?;
         String::from_utf8(decoded)
             .map_err(|e| AppError::InvalidInput(format!("Invalid UTF-8 in config: {e}")))?
-    } else if let Some(_config_url) = &request.config_url {
-        // Fetch remote config (TODO: implement remote fetching in next phase)
+    } else if request.config_url.is_some() {
+        // Remote documents are fetched up front by `resolve_remote_config`
+        // (see the deep link commands), which folds them into `config`.
+        // Reaching this branch means that step was skipped or failed.
         return Err(AppError::InvalidInput(
-            "Remote config URL is not yet supported. Use inline config instead.".to_string(),
+            "Remote configUrl has not been loaded yet; reopen the link or use an inline config."
+                .to_string(),
         ));
     } else {
         return Ok(request.clone());

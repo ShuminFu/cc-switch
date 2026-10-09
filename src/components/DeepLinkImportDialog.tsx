@@ -222,7 +222,7 @@ export function DeepLinkImportDialog() {
 
   // Parse config file content for display
   interface ParsedConfig {
-    type: "claude" | "codex" | "gemini";
+    type: "claude" | "codex" | "gemini" | "grokbuild";
     env?: Record<string, string>;
     auth?: Record<string, string>;
     tomlConfig?: string;
@@ -267,6 +267,16 @@ export function DeepLinkImportDialog() {
         return {
           type: "gemini",
           env: parsed as Record<string, string>,
+          raw: parsed,
+        };
+      } else if (request.app === "grokbuild") {
+        // Grok Build 格式: { config: "TOML string" }，或直接给出 TOML 的 JSON 形态
+        return {
+          type: "grokbuild",
+          tomlConfig:
+            typeof parsed.config === "string"
+              ? parsed.config
+              : JSON.stringify(parsed, null, 2),
           raw: parsed,
         };
       }
@@ -543,8 +553,9 @@ export function DeepLinkImportDialog() {
                               </div>
                             )}
 
-                          {/* Codex config */}
-                          {parsedConfig.type === "codex" && (
+                          {/* Codex / Grok Build config */}
+                          {(parsedConfig.type === "codex" ||
+                            parsedConfig.type === "grokbuild") && (
                             <div className="space-y-2">
                               {parsedConfig.auth &&
                                 Object.keys(parsedConfig.auth).length > 0 && (

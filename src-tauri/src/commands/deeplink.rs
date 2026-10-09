@@ -1,6 +1,6 @@
 use crate::deeplink::{
     import_mcp_from_deeplink, import_prompt_from_deeplink, import_provider_from_deeplink,
-    import_skill_from_deeplink, parse_deeplink_url, DeepLinkImportRequest,
+    import_skill_from_deeplink, parse_deeplink_url, resolve_remote_config, DeepLinkImportRequest,
 };
 use crate::store::AppState;
 use tauri::State;
@@ -14,18 +14,24 @@ pub fn parse_deeplink(url: String) -> Result<DeepLinkImportRequest, String> {
 
 /// Merge configuration from Base64/URL into a deep link request
 /// This is used by the frontend to show the complete configuration in the confirmation dialog
+///
+/// A `configUrl` is fetched here (HTTPS, or HTTP on localhost) and folded into
+/// the inline `config` so the returned request is self-contained.
 #[tauri::command]
-pub fn merge_deeplink_config(
+pub async fn merge_deeplink_config(
     request: DeepLinkImportRequest,
 ) -> Result<DeepLinkImportRequest, String> {
     log::info!("Merging config for deep link request: {:?}", request.name);
+    let request = resolve_remote_config(&request)
+        .await
+        .map_err(|e| e.to_string())?;
     crate::deeplink::parse_and_merge_config(&request).map_err(|e| e.to_string())
 }
 
 /// Import a provider from a deep link request (legacy, kept for compatibility)
 #[tauri::command]
-pub fn import_from_deeplink(
-    state: State<AppState>,
+pub async fn import_from_deeplink(
+    state: State<'_, AppState>,
     request: DeepLinkImportRequest,
 ) -> Result<String, String> {
     log::info!(
@@ -34,6 +40,12 @@ pub fn import_from_deeplink(
         request.app
     );
 
+    // The preview normally resolves `configUrl` already; do it again here so an
+    // import still works when the preview merge failed and fell back to the
+    // raw request.
+    let request = resolve_remote_config(&request)
+        .await
+        .map_err(|e| e.to_string())?;
     let provider_id = import_provider_from_deeplink(&state, request).map_err(|e| e.to_string())?;
 
     log::info!("Successfully imported provider with ID: {provider_id}");
@@ -51,6 +63,9 @@ pub async fn import_from_deeplink_unified(
 
     match request.resource.as_str() {
         "provider" => {
+            let request = resolve_remote_config(&request)
+                .await
+                .map_err(|e| e.to_string())?;
             let provider_id =
                 import_provider_from_deeplink(&state, request).map_err(|e| e.to_string())?;
             Ok(serde_json::json!({
