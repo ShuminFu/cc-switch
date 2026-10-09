@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Trash2, ExternalLink, Plus } from "lucide-react";
 import { settingsApi } from "@/lib/api";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
@@ -13,6 +14,8 @@ interface RepoManagerPanelProps {
   skills: DiscoverableSkill[];
   onAdd: (repo: SkillRepo) => Promise<void>;
   onRemove: (owner: string, name: string) => Promise<void>;
+  /** Enable / disable a repository without removing it (disabled repos are hidden from discovery) */
+  onToggle?: (repo: SkillRepo, enabled: boolean) => Promise<void>;
   onClose: () => void;
 }
 
@@ -21,6 +24,7 @@ export function RepoManagerPanel({
   skills,
   onAdd,
   onRemove,
+  onToggle,
   onClose,
 }: RepoManagerPanelProps) {
   const { t } = useTranslation();
@@ -149,11 +153,20 @@ export function RepoManagerPanel({
             {repos.map((repo) => (
               <div
                 key={`${repo.owner}/${repo.name}`}
-                className="flex items-center justify-between glass-card rounded-xl px-4 py-3"
+                className={`flex items-center justify-between glass-card rounded-xl px-4 py-3${
+                  repo.enabled === false ? " opacity-60" : ""
+                }`}
               >
                 <div>
                   <div className="text-sm font-medium text-foreground">
                     {repo.owner}/{repo.name}
+                    {repo.enabled === false && (
+                      <span className="ml-2 inline-flex items-center rounded-full border border-border-default px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
+                        {t("skills.repo.disabledBadge", {
+                          defaultValue: "已停用",
+                        })}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {t("skills.repo.branch")}: {repo.branch || "main"}
@@ -164,7 +177,21 @@ export function RepoManagerPanel({
                     </span>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                  {onToggle && (
+                    <Switch
+                      checked={repo.enabled !== false}
+                      onCheckedChange={(checked) =>
+                        void onToggle(repo, checked)
+                      }
+                      aria-label={t("skills.repo.enabledToggle", {
+                        defaultValue: "参与技能发现",
+                      })}
+                      title={t("skills.repo.enabledToggle", {
+                        defaultValue: "参与技能发现",
+                      })}
+                    />
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"

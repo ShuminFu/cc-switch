@@ -1,7 +1,15 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Save, Plus, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Save,
+  Plus,
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -23,6 +31,7 @@ import { normalizeTomlText } from "@/utils/textNormalization";
 import { parseSmartMcpJson } from "@/utils/formatters";
 import { useMcpValidation } from "./useMcpValidation";
 import { useUpsertMcpServer } from "@/hooks/useMcp";
+import { mcpApi } from "@/lib/api/mcp";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 
 interface McpFormModalProps {
@@ -284,6 +293,46 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
     } else {
       setFormConfig(json);
       setConfigError(validateJsonConfig(json));
+    }
+  };
+
+  // 当前草稿里的 stdio 命令（解析失败或非 stdio 时为 null），用于按需的 PATH 检查
+  const draftStdioCommand = useMemo(() => {
+    if (!formConfig.trim()) return null;
+    try {
+      const spec = (
+        useToml
+          ? tomlToMcpServer(formConfig)
+          : (parseSmartMcpJson(formConfig).config as McpServerSpec)
+      ) as McpServerSpec | undefined;
+      if (!spec || (spec.type && spec.type !== "stdio")) return null;
+      const command = spec.command?.trim();
+      return command || null;
+    } catch {
+      return null;
+    }
+  }, [formConfig, useToml]);
+
+  const [commandCheck, setCommandCheck] = useState<{
+    command: string;
+    found: boolean;
+  } | null>(null);
+  const [isCheckingCommand, setIsCheckingCommand] = useState(false);
+
+  useEffect(() => {
+    setCommandCheck(null);
+  }, [draftStdioCommand]);
+
+  const handleCheckCommand = async () => {
+    if (!draftStdioCommand) return;
+    setIsCheckingCommand(true);
+    try {
+      const found = await mcpApi.validateCommand(draftStdioCommand);
+      setCommandCheck({ command: draftStdioCommand, found });
+    } catch (error) {
+      toast.error(extractErrorMessage(error), { duration: 4000 });
+    } finally {
+      setIsCheckingCommand(false);
     }
   };
 
@@ -697,15 +746,32 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
               <label className="text-sm font-medium text-foreground">
                 {useToml ? t("mcp.form.tomlConfig") : t("mcp.form.jsonConfig")}
               </label>
-              {(isEditing || selectedPreset === -1) && (
-                <button
-                  type="button"
-                  onClick={() => setIsWizardOpen(true)}
-                  className="text-sm text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
-                >
-                  {t("mcp.form.useWizard")}
-                </button>
-              )}
+              <div className="flex items-center gap-4">
+                {draftStdioCommand && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCheckCommand()}
+                    disabled={isCheckingCommand}
+                    className="inline-flex items-center gap-1 text-sm text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors disabled:opacity-60"
+                  >
+                    {isCheckingCommand && (
+                      <Loader2 size={14} className="animate-spin" />
+                    )}
+                    {t("mcp.form.checkCommand", {
+                      defaultValue: "检查命令",
+                    })}
+                  </button>
+                )}
+                {(isEditing || selectedPreset === -1) && (
+                  <button
+                    type="button"
+                    onClick={() => setIsWizardOpen(true)}
+                    className="text-sm text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                  >
+                    {t("mcp.form.useWizard")}
+                  </button>
+                )}
+              </div>
             </div>
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 min-h-0">
@@ -728,6 +794,34 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
                 <div className="flex items-center gap-2 mt-2 text-red-500 dark:text-red-400 text-sm flex-shrink-0">
                   <AlertCircle size={16} />
                   <span>{configError}</span>
+                </div>
+              )}
+              {commandCheck && !configError && (
+                <div
+                  role="status"
+                  className={
+                    commandCheck.found
+                      ? "flex items-center gap-2 mt-2 text-sm text-emerald-600 dark:text-emerald-400 flex-shrink-0"
+                      : "flex items-center gap-2 mt-2 text-sm text-amber-600 dark:text-amber-400 flex-shrink-0"
+                  }
+                >
+                  {commandCheck.found ? (
+                    <CheckCircle2 size={16} />
+                  ) : (
+                    <AlertCircle size={16} />
+                  )}
+                  <span>
+                    {commandCheck.found
+                      ? t("mcp.form.commandFound", {
+                          defaultValue: "命令 {{command}} 已在 PATH 中找到",
+                          command: commandCheck.command,
+                        })
+                      : t("mcp.form.commandMissing", {
+                          defaultValue:
+                            "PATH 中未找到命令 {{command}}；工具自身的 shell 环境可能仍能解析到它",
+                          command: commandCheck.command,
+                        })}
+                  </span>
                 </div>
               )}
             </div>

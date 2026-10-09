@@ -306,6 +306,27 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
       }
     };
 
+    const handleToggleRepo = async (repo: SkillRepo, enabled: boolean) => {
+      try {
+        // save_skill_repo 是 (owner, name) 上的 upsert，直接复用新增通道改写 enabled
+        await addRepoMutation.mutateAsync({ ...repo, enabled });
+        await Promise.all([refetchRepos(), refetchDiscoverable()]);
+        toast.success(
+          t(
+            enabled
+              ? "skills.repo.enabledSuccess"
+              : "skills.repo.disabledSuccess",
+            { owner: repo.owner, name: repo.name },
+          ),
+          { closeButton: true },
+        );
+      } catch (error) {
+        toast.error(t("common.error"), {
+          description: String(error),
+        });
+      }
+    };
+
     const handleRemoveRepo = async (owner: string, name: string) => {
       try {
         await removeRepoMutation.mutateAsync({ owner, name });
@@ -652,6 +673,7 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
             skills={skills}
             onAdd={handleAddRepo}
             onRemove={handleRemoveRepo}
+            onToggle={handleToggleRepo}
             onClose={() => setRepoManagerOpen(false)}
           />
         )}

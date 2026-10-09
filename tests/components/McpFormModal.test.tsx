@@ -128,6 +128,13 @@ vi.mock("@/components/mcp/McpWizardModal", () => ({
     ) : null,
 }));
 
+const validateCommandMock = vi.fn();
+vi.mock("@/lib/api/mcp", () => ({
+  mcpApi: {
+    validateCommand: (...args: unknown[]) => validateCommandMock(...args),
+  },
+}));
+
 vi.mock("@/hooks/useMcp", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/useMcp")>("@/hooks/useMcp");
@@ -167,6 +174,39 @@ describe("McpFormModal", () => {
     );
     return { onSave, onClose };
   };
+
+  it("checks whether the stdio command exists on PATH on demand", async () => {
+    validateCommandMock.mockReset();
+    validateCommandMock
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    renderForm();
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText("mcp.form.titlePlaceholder"),
+      ).toBeInTheDocument(),
+    );
+
+    // No stdio command drafted yet → no check affordance
+    expect(screen.queryByText(/^mcp\.form\.checkCommand/)).toBeNull();
+
+    fireEvent.click(screen.getByText("preset-stdio"));
+    const checkButton = await screen.findByText(/^mcp\.form\.checkCommand/);
+
+    fireEvent.click(checkButton);
+    await waitFor(() =>
+      expect(validateCommandMock).toHaveBeenCalledWith("preset-cmd"),
+    );
+    expect(
+      await screen.findByText(/^mcp\.form\.commandMissing/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(checkButton);
+    expect(
+      await screen.findByText(/^mcp\.form\.commandFound/),
+    ).toBeInTheDocument();
+    expect(validateCommandMock).toHaveBeenCalledTimes(2);
+  });
 
   it("应用预设后填充 ID 与配置内容", async () => {
     renderForm();
