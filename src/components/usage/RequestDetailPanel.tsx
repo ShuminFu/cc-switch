@@ -77,6 +77,14 @@ export function RequestDetailPanel({
                 </dt>
                 <dd className="font-mono">{request.requestId}</dd>
               </div>
+              {request.sessionId && (
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t("usage.sessionId", "会话 ID")}
+                  </dt>
+                  <dd className="font-mono break-all">{request.sessionId}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-muted-foreground">
                   {t("usage.time", "时间")}

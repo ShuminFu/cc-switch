@@ -1633,6 +1633,7 @@
     "avgLatency": "平均レイテンシ",
     "successRate": "成功率",
     "requestId": "リクエスト ID",
+    "sessionId": "セッション ID",
     "never": "なし",
     "modelId": "モデル ID",
     "modelIdRequired": "モデル ID は必須です",

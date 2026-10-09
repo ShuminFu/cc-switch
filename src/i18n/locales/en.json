@@ -1633,6 +1633,7 @@
     "avgLatency": "Average Latency",
     "successRate": "Success Rate",
     "requestId": "Request ID",
+    "sessionId": "Session ID",
     "never": "Never",
     "modelId": "Model ID",
     "modelIdRequired": "Model ID is required",

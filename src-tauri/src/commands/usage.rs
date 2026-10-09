@@ -151,13 +151,19 @@ pub async fn export_usage_data(
         ));
     }
     let path = PathBuf::from(target);
-    let (document, rows, truncated) = render_export(&state.db, kind, &filters, format)?;
-    crate::config::write_text_file(&path, &document)?;
-    Ok(UsageExportResult {
-        path: path.to_string_lossy().to_string(),
-        rows,
-        truncated,
+    let db = state.db.clone();
+    // 渲染 + 写文件可能涉及数十万行，放到阻塞线程池，避免占住 Tauri 异步运行时
+    tauri::async_runtime::spawn_blocking(move || -> Result<UsageExportResult, AppError> {
+        let (document, rows, truncated) = render_export(&db, kind, &filters, format)?;
+        crate::config::write_text_file(&path, &document)?;
+        Ok(UsageExportResult {
+            path: path.to_string_lossy().to_string(),
+            rows,
+            truncated,
+        })
     })
+    .await
+    .map_err(|e| AppError::Message(format!("Failed to export usage data: {e}")))?
 }
 
 /// 获取单个请求详情

@@ -1633,6 +1633,7 @@
     "avgLatency": "平均延迟",
     "successRate": "成功率",
     "requestId": "请求 ID",
+    "sessionId": "会话 ID",
     "never": "从不",
     "modelId": "模型 ID",
     "modelIdRequired": "模型 ID 不能为空",

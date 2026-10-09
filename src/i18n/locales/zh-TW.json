@@ -1605,6 +1605,7 @@
     "avgLatency": "平均延遲",
     "successRate": "成功率",
     "requestId": "請求 ID",
+    "sessionId": "對話 ID",
     "never": "從不",
     "modelId": "模型 ID",
     "modelIdRequired": "模型 ID 不能為空",

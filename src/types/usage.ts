@@ -34,6 +34,8 @@ export interface RequestLog {
   errorMessage?: string;
   createdAt: number;
   dataSource?: string;
+  /** 代理 / 会话日志记录的会话 ID（Codex 代理行带 codex_ 前缀） */
+  sessionId?: string;
 }
 
 export interface SessionSyncResult {

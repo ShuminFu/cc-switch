@@ -80,12 +80,27 @@ pub struct UsageExportResult {
     pub truncated: bool,
 }
 
-/// RFC 4180 quoting: wrap when the field holds a separator, quote or newline.
+/// RFC 4180 quoting, plus a leading apostrophe for cells a spreadsheet would
+/// otherwise evaluate as a formula (`=`, `+`, `-`, `@`, tab, CR). Plain
+/// numbers such as `-1.5` are left untouched. Provider names, model ids and
+/// upstream error messages are user- or network-controlled, so this guard
+/// keeps an exported file from executing anything when opened in Excel or
+/// Sheets.
 pub fn csv_escape(value: &str) -> String {
-    if value.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", value.replace('"', "\"\""))
+    let formula_like = value
+        .chars()
+        .next()
+        .is_some_and(|c| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r'))
+        && value.trim().parse::<f64>().is_err();
+    let body = if formula_like {
+        format!("'{value}")
     } else {
         value.to_string()
+    };
+    if formula_like || body.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", body.replace('"', "\"\""))
+    } else {
+        body
     }
 }
 
@@ -137,6 +152,7 @@ const LOG_COLUMNS: &[&str] = &[
     "latency_ms",
     "first_token_ms",
     "data_source",
+    "session_id",
     "error_message",
 ];
 
@@ -169,6 +185,7 @@ fn log_row(log: &RequestLogDetail) -> Vec<String> {
             .map(|v| v.to_string())
             .unwrap_or_default(),
         opt(&log.data_source),
+        opt(&log.session_id),
         opt(&log.error_message),
     ]
 }
@@ -430,6 +447,20 @@ mod tests {
         assert_eq!(csv_escape("a,b"), "\"a,b\"");
         assert_eq!(csv_escape("say \"hi\""), "\"say \"\"hi\"\"\"");
         assert_eq!(csv_escape("line\nbreak"), "\"line\nbreak\"");
+    }
+
+    #[test]
+    fn neutralises_spreadsheet_formulas() {
+        assert_eq!(
+            csv_escape("=HYPERLINK(\"http://x\")"),
+            "\"'=HYPERLINK(\"\"http://x\"\")\""
+        );
+        assert_eq!(csv_escape("+high"), "\"'+high\"");
+        assert_eq!(csv_escape("-high"), "\"'-high\"");
+        assert_eq!(csv_escape("@user"), "\"'@user\"");
+        // Numbers keep their sign and stay unquoted.
+        assert_eq!(csv_escape("-1.5"), "-1.5");
+        assert_eq!(csv_escape("+0.25"), "+0.25");
     }
 
     #[test]
