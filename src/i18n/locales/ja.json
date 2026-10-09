@@ -1494,6 +1494,7 @@
       "claude": "Claude Code",
       "codex": "Codex",
       "gemini": "Gemini",
+      "grokbuild": "Grok Build",
       "opencode": "OpenCode"
     },
     "rawInputLabel": "原始",
