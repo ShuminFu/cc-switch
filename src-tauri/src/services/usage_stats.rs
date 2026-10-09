@@ -295,6 +295,26 @@ fn push_provider_model_filters(
 }
 
 pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
+    usage_log_dedup_filter(log_alias, "")
+}
+
+/// 会话归集专用去重：只有当重复的代理行也带着同一会话 ID 时才丢弃会话日志行。
+///
+/// 代理只能从 Claude / Codex 请求里提取会话 ID；Gemini CLI、OpenCode 等经代理的
+/// 流量其代理行 session_id 为空，若沿用仪表盘口径会把唯一带会话 ID 的本地日志行
+/// 去掉，导致这些会话完全无法归集。
+pub(crate) fn session_attribution_log_filter(log_alias: &str) -> String {
+    let extra = format!(
+        "AND proxy_dedup.session_id IS NOT NULL
+                  AND (
+                      proxy_dedup.session_id = {log_alias}.session_id
+                      OR proxy_dedup.session_id = 'codex_' || {log_alias}.session_id
+                  )"
+    );
+    usage_log_dedup_filter(log_alias, &extra)
+}
+
+fn usage_log_dedup_filter(log_alias: &str, extra_proxy_condition: &str) -> String {
     let data_source = data_source_expr(log_alias);
     let proxy_data_source = data_source_expr("proxy_dedup");
     format!(
@@ -325,6 +345,7 @@ pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
                       OR LOWER(proxy_dedup.model) = 'unknown'
                       OR LOWER({log_alias}.model) = 'unknown'
                   )
+                  {extra_proxy_condition}
             )
         )"
     )
@@ -1606,7 +1627,7 @@ impl Database {
     ) -> Result<Vec<SessionUsageStat>, AppError> {
         let conn = lock_conn!(self.conn);
         let fresh_input = fresh_input_sql("l");
-        let filter = effective_usage_log_filter("l");
+        let filter = session_attribution_log_filter("l");
         let mut out: Vec<SessionUsageStat> = Vec::new();
 
         let mut seen = std::collections::HashSet::new();
@@ -4242,6 +4263,61 @@ mod tests {
         let result = find_model_pricing_row(&conn, "unknown-model-123")?;
         assert!(result.is_none(), "不应该匹配不存在的模型");
 
+        Ok(())
+    }
+
+    #[test]
+    fn session_usage_keeps_session_log_rows_when_proxy_row_lacks_session_id() -> Result<(), AppError>
+    {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            let insert = |request_id: &str,
+                          app_type: &str,
+                          data_source: &str,
+                          session_id: Option<&str>,
+                          cost: &str|
+             -> Result<(), AppError> {
+                conn.execute(
+                    "INSERT INTO proxy_request_logs (
+                        request_id, provider_id, app_type, model, request_model,
+                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                        total_cost_usd, latency_ms, status_code, created_at, data_source, session_id
+                    ) VALUES (?, 'p', ?, 'm', 'm', 10, 2, 0, 0, ?, 100, 200, 1000, ?, ?)",
+                    params![request_id, app_type, cost, data_source, session_id],
+                )?;
+                Ok(())
+            };
+            // Gemini CLI 经代理：代理行无会话 ID，本地会话日志行带会话 ID
+            insert("g-proxy", "gemini", "proxy", None, "0.5")?;
+            insert("g-session", "gemini", "gemini_session", Some("g1"), "0.5")?;
+            // Claude 经代理：两行都带同一会话 ID，只应计一次
+            insert("c-proxy", "claude", "proxy", Some("c1"), "0.4")?;
+            insert("c-session", "claude", "session_log", Some("c1"), "0.4")?;
+            // Codex：代理行带 codex_ 前缀，会话日志行用裸 thread id
+            insert("x-proxy", "codex", "proxy", Some("codex_t1"), "0.3")?;
+            insert("x-session", "codex", "codex_session", Some("t1"), "0.3")?;
+        }
+
+        let stats =
+            db.get_session_usage(&["g1".to_string(), "c1".to_string(), "t1".to_string()])?;
+        let find = |id: &str| stats.iter().find(|s| s.session_id == id).cloned();
+
+        let g = find("g1").expect("gemini session attributed");
+        assert_eq!(g.requests, 1);
+        assert_eq!(g.total_cost_usd, "0.500000");
+
+        let c = find("c1").expect("claude session attributed");
+        assert_eq!(c.requests, 1);
+        assert_eq!(c.total_cost_usd, "0.400000");
+
+        let x = find("t1").expect("codex thread attributed");
+        assert_eq!(x.requests, 1);
+        assert_eq!(x.total_cost_usd, "0.300000");
+
+        // 仪表盘口径不受影响：Gemini 会话日志行仍被代理行去重
+        let summary = db.get_usage_summary(None, None, Some("gemini"), None, None)?;
+        assert_eq!(summary.total_requests, 1);
         Ok(())
     }
 
