@@ -49,6 +49,20 @@ export interface DataSourceSummary {
   totalCostUsd: string;
 }
 
+/** 按会话归集的费用（会话管理器用） */
+export interface SessionUsageStat {
+  sessionId: string;
+  requests: number;
+  totalCostUsd: string;
+  /** 不含缓存命中的新鲜输入 token */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  firstSeenAt: number;
+  lastSeenAt: number;
+}
+
 export interface PaginatedLogs {
   data: RequestLog[];
   total: number;

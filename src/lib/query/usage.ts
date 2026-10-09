@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usageApi } from "@/lib/api/usage";
 import { resolveUsageRange } from "@/lib/usageRange";
@@ -145,6 +146,8 @@ export const usageKeys = {
   pricing: () => [...usageKeys.all, "pricing"] as const,
   limits: (providerId: string, appType: string) =>
     [...usageKeys.all, "limits", providerId, appType] as const,
+  sessions: (sessionIds: string[]) =>
+    [...usageKeys.all, "sessions", sessionIds.join("|")] as const,
   script: (providerId: string, appType: string) =>
     [...usageKeys.all, providerId, appType] as const,
 };
@@ -356,6 +359,27 @@ export function useProviderLimits(
     queryFn: () => usageApi.checkProviderLimits(providerId, appType),
     enabled: !!providerId && !!appType && (options?.enabled ?? true),
     refetchInterval: options?.refetchInterval,
+  });
+}
+
+/** 会话管理器：按会话 ID 批量归集费用（去重、排序后作为 query key） */
+export function useSessionUsage(
+  sessionIds: string[],
+  options?: { enabled?: boolean },
+) {
+  const normalizedIds = useMemo(
+    () =>
+      Array.from(
+        new Set(sessionIds.map((id) => id.trim()).filter(Boolean)),
+      ).sort(),
+    [sessionIds],
+  );
+  return useQuery({
+    queryKey: usageKeys.sessions(normalizedIds),
+    queryFn: () => usageApi.getSessionUsage(normalizedIds),
+    enabled: normalizedIds.length > 0 && (options?.enabled ?? true),
+    staleTime: 60 * 1000,
+    retry: false,
   });
 }
 

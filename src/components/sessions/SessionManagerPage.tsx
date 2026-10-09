@@ -29,6 +29,9 @@ import {
   useSessionMessagesQuery,
   useSessionsQuery,
 } from "@/lib/query";
+import { useSessionUsage } from "@/lib/query/usage";
+import { SessionUsageSummary } from "./SessionUsageSummary";
+import type { SessionUsageStat } from "@/types/usage";
 import { sessionsApi } from "@/lib/api";
 import type { TranscriptFormat } from "@/lib/api/sessions";
 import {
@@ -201,6 +204,18 @@ export function SessionManagerPage({ appId }: { appId: string }) {
   const queryClient = useQueryClient();
   const { data, isLoading, refetch } = useSessionsQuery();
   const sessions = data ?? [];
+  const sessionIds = useMemo(
+    () => sessions.map((session) => session.sessionId),
+    [sessions],
+  );
+  const { data: sessionUsageData } = useSessionUsage(sessionIds);
+  const usageBySession = useMemo(() => {
+    const map = new Map<string, SessionUsageStat>();
+    for (const stat of sessionUsageData ?? []) {
+      map.set(stat.sessionId, stat);
+    }
+    return map;
+  }, [sessionUsageData]);
   const detailRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [activeMessageIndex, setActiveMessageIndex] = useState<number | null>(
@@ -749,6 +764,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         searchQuery={search}
         isChecked={selectedSessionKeys.has(sessionKey)}
         isCheckDisabled={!session.sourcePath}
+        usage={usageBySession.get(session.sessionId)}
         onSelect={setSelectedKey}
         onToggleChecked={(checked) => toggleSessionChecked(session, checked)}
       />
@@ -1516,6 +1532,11 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               )}
                             </span>
                           </div>
+                          <SessionUsageSummary
+                            usage={usageBySession.get(
+                              selectedSession.sessionId,
+                            )}
+                          />
                           {selectedSession.projectDir && (
                             <Tooltip>
                               <TooltipTrigger asChild>

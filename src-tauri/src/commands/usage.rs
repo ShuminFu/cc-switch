@@ -372,6 +372,15 @@ pub fn sync_session_usage(
     Ok(result)
 }
 
+/// 按会话 ID 归集费用（会话管理器用）
+#[tauri::command]
+pub fn get_session_usage(
+    state: State<'_, AppState>,
+    session_ids: Vec<String>,
+) -> Result<Vec<SessionUsageStat>, AppError> {
+    state.db.get_session_usage(&session_ids)
+}
+
 /// 获取数据来源分布
 #[tauri::command]
 pub fn get_usage_data_sources(

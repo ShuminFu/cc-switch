@@ -1,4 +1,4 @@
-import { ChevronRight, Clock } from "lucide-react";
+import { ChevronRight, Clock, Coins } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -9,8 +9,10 @@ import {
 import { cn } from "@/lib/utils";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import type { SessionMeta } from "@/types";
+import type { SessionUsageStat } from "@/types/usage";
 import {
   formatRelativeTime,
+  formatSessionCost,
   formatSessionTitle,
   getProviderIconName,
   getProviderLabel,
@@ -25,6 +27,8 @@ interface SessionItemProps {
   isChecked: boolean;
   isCheckDisabled?: boolean;
   searchQuery?: string;
+  /** 该会话归集到的费用；无记录时不显示 */
+  usage?: SessionUsageStat;
   onSelect: (key: string) => void;
   onToggleChecked: (checked: boolean) => void;
 }
@@ -36,6 +40,7 @@ export function SessionItem({
   isChecked,
   isCheckDisabled = false,
   searchQuery,
+  usage,
   onSelect,
   onToggleChecked,
 }: SessionItemProps) {
@@ -103,6 +108,21 @@ export function SessionItem({
               ? formatRelativeTime(lastActive, t)
               : t("common.unknown")}
           </span>
+          {usage && (
+            <>
+              <span className="text-muted-foreground/40">·</span>
+              <span
+                className="flex items-center gap-0.5"
+                title={t("sessionManager.usageCostTooltip", {
+                  defaultValue: "会话估算费用",
+                })}
+                data-testid="session-item-cost"
+              >
+                <Coins className="size-3" />
+                {formatSessionCost(usage.totalCostUsd)}
+              </span>
+            </>
+          )}
         </div>
       </button>
     </div>

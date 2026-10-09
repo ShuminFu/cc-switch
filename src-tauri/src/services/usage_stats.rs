@@ -1595,6 +1595,84 @@ impl Database {
         }
     }
 
+    /// 按会话 ID 归集费用（代理日志 + 本地会话日志，按仪表盘口径去重）。
+    ///
+    /// 代理记录的 Codex 会话 ID 带 `codex_` 前缀，这里会剥掉前缀与会话管理器
+    /// 的 thread id 对齐。明细行滚入日汇总（默认 30 天）后不再可按会话归集，
+    /// 该会话此时不会出现在结果里。
+    pub fn get_session_usage(
+        &self,
+        session_ids: &[String],
+    ) -> Result<Vec<SessionUsageStat>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let fresh_input = fresh_input_sql("l");
+        let filter = effective_usage_log_filter("l");
+        let mut out: Vec<SessionUsageStat> = Vec::new();
+
+        let mut seen = std::collections::HashSet::new();
+        let ids: Vec<&str> = session_ids
+            .iter()
+            .map(|id| id.trim())
+            .filter(|id| !id.is_empty() && seen.insert(*id))
+            .collect();
+
+        for chunk in ids.chunks(200) {
+            let placeholders = vec!["?"; chunk.len()].join(", ");
+            let sql = format!(
+                "SELECT sid,
+                        COUNT(*),
+                        COALESCE(SUM(CAST(total_cost_usd AS REAL)), 0),
+                        COALESCE(SUM(fresh_input), 0),
+                        COALESCE(SUM(output_tokens), 0),
+                        COALESCE(SUM(cache_read_tokens), 0),
+                        COALESCE(SUM(cache_creation_tokens), 0),
+                        MIN(created_at),
+                        MAX(created_at)
+                 FROM (
+                     SELECT CASE WHEN l.session_id LIKE 'codex_%' THEN substr(l.session_id, 7)
+                                 ELSE l.session_id END AS sid,
+                            l.total_cost_usd,
+                            {fresh_input} AS fresh_input,
+                            l.output_tokens,
+                            l.cache_read_tokens,
+                            l.cache_creation_tokens,
+                            l.created_at
+                     FROM proxy_request_logs l
+                     WHERE l.session_id IS NOT NULL
+                       AND {filter}
+                 )
+                 WHERE sid IN ({placeholders})
+                 GROUP BY sid"
+            );
+            let mut stmt = conn
+                .prepare(&sql)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let params: Vec<&dyn rusqlite::ToSql> =
+                chunk.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+            let rows = stmt
+                .query_map(params.as_slice(), |row| {
+                    let cost: f64 = row.get(2)?;
+                    Ok(SessionUsageStat {
+                        session_id: row.get(0)?,
+                        requests: row.get::<_, i64>(1)?.max(0) as u64,
+                        total_cost_usd: format!("{cost:.6}"),
+                        input_tokens: row.get::<_, i64>(3)?.max(0) as u64,
+                        output_tokens: row.get::<_, i64>(4)?.max(0) as u64,
+                        cache_read_tokens: row.get::<_, i64>(5)?.max(0) as u64,
+                        cache_creation_tokens: row.get::<_, i64>(6)?.max(0) as u64,
+                        first_seen_at: row.get(7)?,
+                        last_seen_at: row.get(8)?,
+                    })
+                })
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for row in rows {
+                out.push(row.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+        }
+
+        Ok(out)
+    }
+
     /// 检查 Provider 使用限额
     pub fn check_provider_limits(
         &self,
@@ -1683,6 +1761,22 @@ impl Database {
             monthly_exceeded,
         })
     }
+}
+
+/// 单个会话的费用归集结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUsageStat {
+    pub session_id: String,
+    pub requests: u64,
+    pub total_cost_usd: String,
+    /// 不含缓存命中的新鲜输入 token
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub first_seen_at: i64,
+    pub last_seen_at: i64,
 }
 
 /// Provider 限额状态
@@ -4148,6 +4242,67 @@ mod tests {
         let result = find_model_pricing_row(&conn, "unknown-model-123")?;
         assert!(result.is_none(), "不应该匹配不存在的模型");
 
+        Ok(())
+    }
+
+    #[test]
+    fn session_usage_groups_by_session_and_strips_codex_prefix() -> Result<(), AppError> {
+        use crate::proxy::usage::logger::{RequestLog, UsageLogger};
+        use crate::proxy::usage::TokenUsage;
+
+        let db = Database::memory()?;
+        let logger = UsageLogger::new(&db);
+        let seed = |request_id: &str, session_id: Option<&str>, output: u32| RequestLog {
+            request_id: request_id.to_string(),
+            provider_id: "relay".to_string(),
+            app_type: "claude".to_string(),
+            model: "claude-sonnet-4-5".to_string(),
+            request_model: "claude-sonnet-4-5".to_string(),
+            pricing_model: String::new(),
+            usage: TokenUsage {
+                input_tokens: 100,
+                output_tokens: output,
+                ..TokenUsage::default()
+            },
+            cost: None,
+            latency_ms: 1,
+            first_token_ms: None,
+            status_code: 200,
+            error_message: None,
+            session_id: session_id.map(|s| s.to_string()),
+            provider_type: None,
+            is_streaming: false,
+            cost_multiplier: "1".to_string(),
+        };
+        logger.log_request(&seed("r1", Some("sess-a"), 10))?;
+        logger.log_request(&seed("r2", Some("sess-a"), 20))?;
+        logger.log_request(&seed("r3", Some("codex_thread-b"), 5))?;
+        logger.log_request(&seed("r4", Some("other"), 7))?;
+        logger.log_request(&seed("r5", None, 9))?;
+
+        let stats = db.get_session_usage(&[
+            "sess-a".to_string(),
+            "thread-b".to_string(),
+            " ".to_string(),
+            "missing".to_string(),
+            "sess-a".to_string(),
+        ])?;
+        assert_eq!(stats.len(), 2);
+        let a = stats
+            .iter()
+            .find(|s| s.session_id == "sess-a")
+            .expect("sess-a");
+        assert_eq!(a.requests, 2);
+        assert_eq!(a.output_tokens, 30);
+        assert_eq!(a.input_tokens, 200);
+        let b = stats
+            .iter()
+            .find(|s| s.session_id == "thread-b")
+            .expect("codex thread");
+        assert_eq!(b.requests, 1);
+        assert_eq!(b.output_tokens, 5);
+
+        assert!(db.get_session_usage(&[])?.is_empty());
         Ok(())
     }
 }

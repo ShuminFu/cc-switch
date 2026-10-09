@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTranscriptFileName,
   extractCodexPromptPreview,
+  formatSessionCost,
   formatSessionMessagePreview,
   groupSessionsByProviderAndDirectory,
   shouldHideCodexMessageFromToc,
@@ -251,5 +252,20 @@ describe("session utils", () => {
     expect(
       groups[0].directories[0].sessions.map((session) => session.sessionId),
     ).toEqual(["newest", "oldest"]);
+  });
+});
+
+describe("formatSessionCost", () => {
+  it("keeps four decimals for sub-dollar sessions and two above a dollar", () => {
+    expect(formatSessionCost("0.004200")).toBe("$0.0042");
+    expect(formatSessionCost(0.5)).toBe("$0.5000");
+    expect(formatSessionCost("1.234567")).toBe("$1.23");
+    expect(formatSessionCost(12)).toBe("$12.00");
+  });
+
+  it("falls back for missing or invalid values", () => {
+    expect(formatSessionCost(undefined)).toBe("--");
+    expect(formatSessionCost("abc")).toBe("--");
+    expect(formatSessionCost(-1)).toBe("--");
   });
 });

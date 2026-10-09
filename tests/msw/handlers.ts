@@ -8,6 +8,7 @@ import {
   getCurrentProviderId,
   getLiveProviderIds,
   getSessionMessages,
+  getSessionUsage,
   getProviders,
   listProviders,
   listSessions,
@@ -126,6 +127,11 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/open_external`, () => success(true)),
 
   http.post(`${TAURI_ENDPOINT}/list_sessions`, () => success(listSessions())),
+
+  http.post(`${TAURI_ENDPOINT}/get_session_usage`, async ({ request }) => {
+    const { sessionIds } = await withJson<{ sessionIds: string[] }>(request);
+    return success(getSessionUsage(sessionIds ?? []));
+  }),
 
   http.post(`${TAURI_ENDPOINT}/get_session_messages`, async ({ request }) => {
     const { providerId, sourcePath } = await withJson<{

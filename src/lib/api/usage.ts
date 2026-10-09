@@ -15,6 +15,7 @@ import type {
   UsageExportFormat,
   UsageExportKind,
   UsageExportResult,
+  SessionUsageStat,
 } from "@/types/usage";
 import type { UsageResult } from "@/types";
 import type { AppId } from "./types";
@@ -185,6 +186,14 @@ export const usageApi = {
 
   getDataSourceBreakdown: async (): Promise<DataSourceSummary[]> => {
     return invoke("get_usage_data_sources");
+  },
+
+  /** 按会话 ID 归集费用；空列表直接返回空数组，不触发后端调用 */
+  getSessionUsage: async (
+    sessionIds: string[],
+  ): Promise<SessionUsageStat[]> => {
+    if (sessionIds.length === 0) return [];
+    return invoke("get_session_usage", { sessionIds });
   },
 
   // Usage export (CSV / JSON)

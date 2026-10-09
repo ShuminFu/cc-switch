@@ -1418,6 +1418,7 @@ pub fn run() {
             commands::update_model_pricing,
             commands::delete_model_pricing,
             commands::check_provider_limits,
+            commands::get_session_usage,
             // Session usage sync
             commands::sync_session_usage,
             commands::get_usage_data_sources,

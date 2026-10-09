@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
 import { sessionsApi } from "@/lib/api/sessions";
 import type { SessionMessage, SessionMeta } from "@/types";
-import { setSessionFixtures } from "../msw/state";
+import { setSessionFixtures, setSessionUsageFixtures } from "../msw/state";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -219,6 +219,36 @@ describe("SessionManagerPage", () => {
     };
 
     setSessionFixtures(sessions, messages);
+  });
+
+  it("shows attributed usage cost for sessions that have request logs", async () => {
+    setSessionUsageFixtures([
+      {
+        sessionId: "codex-session-1",
+        requests: 4,
+        totalCostUsd: "1.500000",
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        firstSeenAt: 1,
+        lastSeenAt: 2,
+      },
+    ]);
+    renderPage();
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Alpha Session" }),
+      ).toBeInTheDocument(),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("session-usage-summary")).toHaveTextContent(
+        "$1.50",
+      ),
+    );
+    expect(screen.getAllByTestId("session-item-cost")).toHaveLength(1);
   });
 
   it("deletes the selected session and selects the next visible session", async () => {

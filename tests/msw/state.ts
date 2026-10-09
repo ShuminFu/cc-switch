@@ -6,6 +6,7 @@ import type {
   SessionMeta,
   Settings,
 } from "@/types";
+import type { SessionUsageStat } from "@/types/usage";
 import { deepClone } from "@/utils/deepClone";
 
 type ProvidersByApp = Record<AppId, Record<string, Provider>>;
@@ -152,6 +153,7 @@ const createDefaultSessionMessages = (): Record<string, SessionMessage[]> => ({
 
 let sessionsState = createDefaultSessions();
 let sessionMessagesState = createDefaultSessionMessages();
+let sessionUsageState: SessionUsageStat[] = [];
 let mcpConfigs: McpConfigState = {
   claude: {
     sample: {
@@ -212,6 +214,7 @@ export const resetProviderState = () => {
   };
   sessionsState = createDefaultSessions();
   sessionMessagesState = createDefaultSessionMessages();
+  sessionUsageState = [];
   settingsState = {
     showInTray: true,
     minimizeToTrayOnClose: true,
@@ -434,4 +437,15 @@ export const setSessionFixtures = (
     string,
     SessionMessage[]
   >;
+};
+
+export const setSessionUsageFixtures = (usage: SessionUsageStat[]) => {
+  sessionUsageState = deepClone(usage) as SessionUsageStat[];
+};
+
+export const getSessionUsage = (sessionIds: string[]) => {
+  const wanted = new Set(sessionIds);
+  return deepClone(
+    sessionUsageState.filter((stat) => wanted.has(stat.sessionId)),
+  ) as SessionUsageStat[];
 };

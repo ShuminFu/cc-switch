@@ -164,6 +164,13 @@ export const buildTranscriptFileName = (
   return `${session.providerId}-${base}.${format === "json" ? "json" : "md"}`;
 };
 
+/** 会话费用展示：≥ $1 保留两位小数，否则保留四位，避免小额会话显示为 $0.00 */
+export const formatSessionCost = (value: string | number | undefined) => {
+  const num = typeof value === "number" ? value : Number(value ?? NaN);
+  if (!Number.isFinite(num) || num < 0) return "--";
+  return `$${num.toFixed(num >= 1 ? 2 : 4)}`;
+};
+
 export const formatSessionTitle = (session: SessionMeta) => {
   return (
     session.title ||
