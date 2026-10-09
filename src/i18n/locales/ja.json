@@ -144,6 +144,14 @@
     "sortUpdateFailed": "並び順の更新に失敗しました",
     "configureUsage": "利用状況を設定",
     "share": "リンクを共有",
+    "ruleBadge": {
+      "label": "ルール切り替え",
+      "tooltip": "使用量ルールにより自動で切り替え（{{reason}}）",
+      "revertAt": "{{time}} に戻します",
+      "revertPending": "戻し待ち",
+      "keepCurrent": "現状を維持",
+      "keepCurrentHint": "自動の復帰を取り消し、このプロバイダーを維持します"
+    },
     "shareDialog": {
       "title": "{{name}} を共有",
       "description": "ccswitch:// ディープリンクを生成します。CC Switch をインストールした端末で開くと、このプロバイダーをワンクリックで取り込めます。",

@@ -144,6 +144,14 @@
     "sortUpdateFailed": "排序更新失败",
     "configureUsage": "配置用量查询",
     "share": "分享链接",
+    "ruleBadge": {
+      "label": "规则切换",
+      "tooltip": "由额度规则自动切换（{{reason}}）",
+      "revertAt": "将于 {{time}} 切回",
+      "revertPending": "等待切回",
+      "keepCurrent": "保持当前",
+      "keepCurrentHint": "取消自动切回，保持当前供应商"
+    },
     "shareDialog": {
       "title": "分享供应商 {{name}}",
       "description": "生成 ccswitch:// 深链，接收方在安装了 CC Switch 的设备上打开即可一键导入。",

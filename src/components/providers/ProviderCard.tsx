@@ -19,6 +19,8 @@ import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
 import { ProviderSpendLimitBadge } from "@/components/providers/ProviderSpendLimitBadge";
+import { ProviderRuleBadge } from "@/components/providers/ProviderRuleBadge";
+import type { SwitchRuleState } from "@/lib/api/switchRules";
 import { ShareProviderDialog } from "@/components/providers/ShareProviderDialog";
 import { isShareableApp } from "@/utils/providerDeepLink";
 import { useProviderLimits } from "@/lib/query/usage";
@@ -73,6 +75,8 @@ interface ProviderCardProps {
   isInFailoverQueue?: boolean; // 是否在故障转移队列中
   onToggleFailover?: (enabled: boolean) => void; // 切换故障转移队列
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
+  /** 当前供应商是额度规则自动切过来的（仅 isCurrent 时有意义） */
+  ruleArmed?: SwitchRuleState;
   // OpenClaw: default model
   isDefaultModel?: boolean;
   onSetAsDefault?: () => void;
@@ -172,6 +176,7 @@ export function ProviderCard({
   isInFailoverQueue = false,
   onToggleFailover,
   activeProviderId,
+  ruleArmed,
   // OpenClaw: default model
   isDefaultModel,
   onSetAsDefault,
@@ -512,6 +517,10 @@ export function ProviderCard({
 
               {hasSpendLimit && spendLimitStatus && (
                 <ProviderSpendLimitBadge status={spendLimitStatus} />
+              )}
+
+              {isCurrent && ruleArmed && (
+                <ProviderRuleBadge state={ruleArmed} />
               )}
 
               {provider.category === "third_party" &&

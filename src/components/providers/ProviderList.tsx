@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Provider } from "@/types";
+import type { SwitchRuleState } from "@/lib/api/switchRules";
 import type { AppId } from "@/lib/api";
 import { providersApi } from "@/lib/api/providers";
 import { useDragSort } from "@/hooks/useDragSort";
@@ -30,6 +31,7 @@ import {
   useHermesModelConfig,
 } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
+import { useSwitchRuleStates, useSwitchRules } from "@/lib/query/switchRules";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
@@ -148,6 +150,19 @@ export function ProviderList({
   // 故障转移相关
   const { data: isAutoFailoverEnabled } = useAutoFailoverEnabled(appId);
   const { data: failoverQueue } = useFailoverQueue(appId);
+  // 额度规则：当前供应商若是规则自动切过来的，在卡片上标出并允许取消回切
+  const { data: switchRules } = useSwitchRules(appId);
+  const { data: switchRuleStates } = useSwitchRuleStates();
+  const ruleArmedForCurrent = useMemo(() => {
+    if (!switchRules?.length || !switchRuleStates?.length) return undefined;
+    const ruleIds = new Set(
+      switchRules.filter((r) => r.appType === appId).map((r) => r.id),
+    );
+    return switchRuleStates.find(
+      (state) =>
+        ruleIds.has(state.ruleId) && state.switchedTo === currentProviderId,
+    );
+  }, [switchRules, switchRuleStates, appId, currentProviderId]);
   const addToQueue = useAddToFailoverQueue();
   const removeFromQueue = useRemoveFromFailoverQueue();
 
@@ -421,6 +436,11 @@ export function ProviderList({
                 isAutoFailoverEnabled={isFailoverModeActive}
                 failoverPriority={getFailoverPriority(provider.id)}
                 isInFailoverQueue={isInFailoverQueue(provider.id)}
+                ruleArmed={
+                  provider.id === currentProviderId
+                    ? ruleArmedForCurrent
+                    : undefined
+                }
                 onToggleFailover={(enabled) =>
                   handleToggleFailover(provider.id, enabled)
                 }
@@ -562,6 +582,7 @@ interface SortableProviderCardProps {
   isInFailoverQueue: boolean;
   onToggleFailover: (enabled: boolean) => void;
   activeProviderId?: string;
+  ruleArmed?: SwitchRuleState;
   // OpenClaw: default model
   isDefaultModel?: boolean;
   onSetAsDefault?: () => void;
@@ -593,6 +614,7 @@ function SortableProviderCard({
   isInFailoverQueue,
   onToggleFailover,
   activeProviderId,
+  ruleArmed,
   isDefaultModel,
   onSetAsDefault,
 }: SortableProviderCardProps) {
@@ -643,6 +665,7 @@ function SortableProviderCard({
         isAutoFailoverEnabled={isAutoFailoverEnabled}
         failoverPriority={failoverPriority}
         isInFailoverQueue={isInFailoverQueue}
+        ruleArmed={ruleArmed}
         onToggleFailover={onToggleFailover}
         activeProviderId={activeProviderId}
         // OpenClaw: default model

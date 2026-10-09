@@ -144,6 +144,14 @@
     "sortUpdateFailed": "Failed to update sort order",
     "configureUsage": "Configure usage query",
     "share": "Share link",
+    "ruleBadge": {
+      "label": "Rule switch",
+      "tooltip": "Switched automatically by a quota rule ({{reason}})",
+      "revertAt": "switches back at {{time}}",
+      "revertPending": "waiting to switch back",
+      "keepCurrent": "Keep current",
+      "keepCurrentHint": "Cancel the automatic switch-back and keep this provider"
+    },
     "shareDialog": {
       "title": "Share {{name}}",
       "description": "Generate a ccswitch:// link; opening it on a device with CC Switch installed imports this provider in one click.",
