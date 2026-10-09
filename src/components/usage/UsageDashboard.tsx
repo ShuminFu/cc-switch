@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils";
 import { getLocaleFromLanguage } from "./format";
 import { getUsageRangePresetLabel, resolveUsageRange } from "@/lib/usageRange";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
+import { UsageExportMenu } from "./UsageExportMenu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const APP_FILTER_OPTIONS: AppTypeFilter[] = ["all", ...KNOWN_APP_TYPES];
@@ -141,6 +142,16 @@ export function UsageDashboard({
   const language = i18n.resolvedLanguage || i18n.language || "en";
   const locale = getLocaleFromLanguage(language);
   const resolvedRange = useMemo(() => resolveUsageRange(range), [range]);
+  const exportFilters = useMemo(
+    () => ({
+      appType: appType === "all" ? undefined : appType,
+      providerName: providerName ?? undefined,
+      model: model ?? undefined,
+      startDate: resolvedRange.startDate,
+      endDate: resolvedRange.endDate,
+    }),
+    [appType, providerName, model, resolvedRange],
+  );
   const rangeLabel = useMemo(() => {
     if (range.preset !== "custom") {
       return getUsageRangePresetLabel(range.preset, t);
@@ -327,6 +338,8 @@ export function UsageDashboard({
               triggerLabel={rangeLabel}
               onApply={(nextRange) => setRange(nextRange)}
             />
+
+            <UsageExportMenu filters={exportFilters} />
           </div>
         </div>
       </div>

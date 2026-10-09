@@ -1,11 +1,16 @@
 //! 使用统计相关命令
 
 use crate::error::AppError;
+use crate::services::usage_export::{
+    render_export, UsageExportFormat, UsageExportKind, UsageExportResult,
+};
 use crate::services::usage_stats::*;
 use crate::store::AppState;
 use rust_decimal::Decimal;
+use std::path::PathBuf;
 use std::str::FromStr;
 use tauri::State;
+use tauri_plugin_dialog::DialogExt;
 
 /// 获取使用量汇总
 #[tauri::command]
@@ -109,6 +114,50 @@ pub fn get_request_logs(
     page_size: u32,
 ) -> Result<PaginatedLogs, AppError> {
     state.db.get_request_logs(&filters, page, page_size)
+}
+
+/// 导出使用数据前的保存对话框（按格式设置扩展名过滤）
+#[tauri::command]
+pub async fn save_usage_export_dialog<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    default_name: String,
+    format: String,
+) -> Result<Option<String>, AppError> {
+    let format: UsageExportFormat = format.parse()?;
+    let result = app
+        .dialog()
+        .file()
+        .add_filter(format.dialog_label(), &[format.extension()])
+        .set_file_name(&default_name)
+        .blocking_save_file();
+    Ok(result.map(|p| p.to_string()))
+}
+
+/// 将请求日志或账单汇总渲染为 CSV / JSON 并原子写入目标路径
+#[tauri::command]
+pub async fn export_usage_data(
+    state: State<'_, AppState>,
+    kind: String,
+    format: String,
+    filters: LogFilters,
+    target_path: String,
+) -> Result<UsageExportResult, AppError> {
+    let kind: UsageExportKind = kind.parse()?;
+    let format: UsageExportFormat = format.parse()?;
+    let target = target_path.trim();
+    if target.is_empty() {
+        return Err(AppError::InvalidInput(
+            "Export target path is empty".to_string(),
+        ));
+    }
+    let path = PathBuf::from(target);
+    let (document, rows, truncated) = render_export(&state.db, kind, &filters, format)?;
+    crate::config::write_text_file(&path, &document)?;
+    Ok(UsageExportResult {
+        path: path.to_string_lossy().to_string(),
+        rows,
+        truncated,
+    })
 }
 
 /// 获取单个请求详情

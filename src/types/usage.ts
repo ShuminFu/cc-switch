@@ -122,6 +122,17 @@ export interface LogFilters {
   endDate?: number;
 }
 
+/** 导出内容：逐条请求日志，或按供应商 / 模型汇总的账单 */
+export type UsageExportKind = "logs" | "statement";
+export type UsageExportFormat = "csv" | "json";
+
+export interface UsageExportResult {
+  path: string;
+  rows: number;
+  /** 日志行数超过后端上限（200k）时为 true，文件只包含前面的行 */
+  truncated: boolean;
+}
+
 /**
  * Dashboard 顶栏的全局筛选维度，作用于 Hero / 趋势图 / 三个统计 Tab。
  *
@@ -146,7 +157,15 @@ export interface ProviderLimitStatus {
   monthlyExceeded: boolean;
 }
 
-export type UsageRangePreset = "today" | "1d" | "7d" | "14d" | "30d" | "custom";
+export type UsageRangePreset =
+  | "today"
+  | "1d"
+  | "7d"
+  | "14d"
+  | "30d"
+  | "thisMonth"
+  | "lastMonth"
+  | "custom";
 
 export interface UsageRangeSelection {
   preset: UsageRangePreset;

@@ -1481,6 +1481,8 @@
     "preset7d": "7d",
     "preset14d": "14d",
     "preset30d": "30d",
+    "presetThisMonth": "本月",
+    "presetLastMonth": "上月",
     "totalRequests": "总请求数",
     "totalCost": "总成本",
     "cost": "成本",
@@ -1519,6 +1521,18 @@
     "costLabel": "总成本",
     "unpriced": "未定价",
     "unpricedAddHint": "点击为该模型添加定价，保存后会回填历史费用",
+    "export": {
+      "menu": "导出",
+      "tooltip": "按当前筛选条件导出请求日志或账单汇总",
+      "scopeHint": "使用当前时间范围与筛选条件",
+      "logsCsv": "请求日志 (CSV)",
+      "logsJson": "请求日志 (JSON)",
+      "statementCsv": "账单汇总 (CSV)",
+      "statementJson": "账单汇总 (JSON)",
+      "success": "已导出 {{rows}} 行到 {{path}}",
+      "truncated": "日志超过 {{max}} 行，仅导出了前 {{max}} 行，请缩小时间范围",
+      "failed": "导出失败"
+    },
     "appFilter": {
       "all": "全部",
       "claude": "Claude Code",

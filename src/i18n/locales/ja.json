@@ -1481,6 +1481,8 @@
     "preset7d": "7d",
     "preset14d": "14d",
     "preset30d": "30d",
+    "presetThisMonth": "今月",
+    "presetLastMonth": "先月",
     "totalRequests": "総リクエスト数",
     "totalCost": "総コスト",
     "cost": "コスト",
@@ -1519,6 +1521,18 @@
     "costLabel": "合計コスト",
     "unpriced": "価格未設定",
     "unpricedAddHint": "このモデルの価格を追加します。保存すると過去のリクエスト費用が再計算されます",
+    "export": {
+      "menu": "エクスポート",
+      "tooltip": "現在のフィルター条件でリクエストログまたは明細をエクスポート",
+      "scopeHint": "現在の期間とフィルター条件を使用",
+      "logsCsv": "リクエストログ (CSV)",
+      "logsJson": "リクエストログ (JSON)",
+      "statementCsv": "明細 (CSV)",
+      "statementJson": "明細 (JSON)",
+      "success": "{{rows}} 行を {{path}} にエクスポートしました",
+      "truncated": "{{max}} 行を超えたため先頭 {{max}} 行のみエクスポートしました。期間を狭めてください",
+      "failed": "エクスポートに失敗しました"
+    },
     "appFilter": {
       "all": "すべて",
       "claude": "Claude Code",

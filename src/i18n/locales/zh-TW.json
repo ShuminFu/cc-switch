@@ -1453,6 +1453,8 @@
     "preset7d": "7d",
     "preset14d": "14d",
     "preset30d": "30d",
+    "presetThisMonth": "本月",
+    "presetLastMonth": "上月",
     "totalRequests": "總請求數",
     "totalCost": "總成本",
     "cost": "成本",
@@ -1491,6 +1493,18 @@
     "costLabel": "總成本",
     "unpriced": "未定價",
     "unpricedAddHint": "點擊為該模型新增定價，儲存後會回填歷史費用",
+    "export": {
+      "menu": "匯出",
+      "tooltip": "依目前篩選條件匯出請求日誌或帳單彙總",
+      "scopeHint": "使用目前時間範圍與篩選條件",
+      "logsCsv": "請求日誌 (CSV)",
+      "logsJson": "請求日誌 (JSON)",
+      "statementCsv": "帳單彙總 (CSV)",
+      "statementJson": "帳單彙總 (JSON)",
+      "success": "已匯出 {{rows}} 列到 {{path}}",
+      "truncated": "日誌超過 {{max}} 列，僅匯出了前 {{max}} 列，請縮小時間範圍",
+      "failed": "匯出失敗"
+    },
     "appFilter": {
       "all": "全部",
       "claude": "Claude Code",

@@ -69,6 +69,10 @@ vi.mock("@/components/usage/PricingConfigPanel", () => ({
   PricingConfigPanel: () => <div data-testid="pricing-config-panel" />,
 }));
 
+vi.mock("@/components/usage/UsageExportMenu", () => ({
+  UsageExportMenu: () => <div data-testid="usage-export-menu" />,
+}));
+
 vi.mock("@/components/usage/UsageDateRangePicker", () => ({
   UsageDateRangePicker: () => <button type="button">date-range</button>,
 }));

@@ -13,8 +13,16 @@ function getStartOfLocalDayDate(nowMs: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+function getStartOfLocalMonthDate(nowMs: number, monthOffset = 0): Date {
+  const date = new Date(nowMs);
+  return new Date(date.getFullYear(), date.getMonth() + monthOffset, 1);
+}
+
 function getPresetLookbackStart(
-  preset: Exclude<UsageRangePreset, "today" | "1d" | "custom">,
+  preset: Exclude<
+    UsageRangePreset,
+    "today" | "1d" | "thisMonth" | "lastMonth" | "custom"
+  >,
   nowMs: number,
 ): number {
   const dayCount = preset === "7d" ? 7 : preset === "14d" ? 14 : 30;
@@ -47,6 +55,23 @@ export function resolveUsageRange(
         startDate: getPresetLookbackStart(selection.preset, nowMs),
         endDate,
       };
+    case "thisMonth":
+      return {
+        startDate: Math.floor(getStartOfLocalMonthDate(nowMs).getTime() / 1000),
+        endDate,
+      };
+    case "lastMonth": {
+      // 上月 1 日 00:00 起，到本月 1 日 00:00 的前一秒止
+      const thisMonthStart = Math.floor(
+        getStartOfLocalMonthDate(nowMs).getTime() / 1000,
+      );
+      return {
+        startDate: Math.floor(
+          getStartOfLocalMonthDate(nowMs, -1).getTime() / 1000,
+        ),
+        endDate: thisMonthStart - 1,
+      };
+    }
     case "custom": {
       const startDate = selection.customStartDate ?? endDate - DAY_SECONDS;
       const customEndDate = selection.liveEndTime
@@ -75,6 +100,10 @@ export function getUsageRangePresetLabel(
       return t("usage.preset14d", { defaultValue: "14d" });
     case "30d":
       return t("usage.preset30d", { defaultValue: "30d" });
+    case "thisMonth":
+      return t("usage.presetThisMonth", { defaultValue: "本月" });
+    case "lastMonth":
+      return t("usage.presetLastMonth", { defaultValue: "上月" });
     case "custom":
       return t("usage.customRange", { defaultValue: "日历筛选" });
   }

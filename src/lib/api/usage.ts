@@ -12,6 +12,9 @@ import type {
   PaginatedLogs,
   SessionSyncResult,
   DataSourceSummary,
+  UsageExportFormat,
+  UsageExportKind,
+  UsageExportResult,
 } from "@/types/usage";
 import type { UsageResult } from "@/types";
 import type { AppId } from "./types";
@@ -182,5 +185,22 @@ export const usageApi = {
 
   getDataSourceBreakdown: async (): Promise<DataSourceSummary[]> => {
     return invoke("get_usage_data_sources");
+  },
+
+  // Usage export (CSV / JSON)
+  saveUsageExportDialog: async (
+    defaultName: string,
+    format: UsageExportFormat,
+  ): Promise<string | null> => {
+    return invoke("save_usage_export_dialog", { defaultName, format });
+  },
+
+  exportUsageData: async (params: {
+    kind: UsageExportKind;
+    format: UsageExportFormat;
+    filters: LogFilters;
+    targetPath: string;
+  }): Promise<UsageExportResult> => {
+    return invoke("export_usage_data", params);
   },
 };

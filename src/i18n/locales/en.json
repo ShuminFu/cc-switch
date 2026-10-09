@@ -1481,6 +1481,8 @@
     "preset7d": "7d",
     "preset14d": "14d",
     "preset30d": "30d",
+    "presetThisMonth": "This month",
+    "presetLastMonth": "Last month",
     "totalRequests": "Total Requests",
     "totalCost": "Total Cost",
     "cost": "Cost",
@@ -1519,6 +1521,18 @@
     "costLabel": "total cost",
     "unpriced": "Unpriced",
     "unpricedAddHint": "Add pricing for this model; saving backfills the cost of its past requests",
+    "export": {
+      "menu": "Export",
+      "tooltip": "Export request logs or a statement for the current filters",
+      "scopeHint": "Uses the current time range and filters",
+      "logsCsv": "Request logs (CSV)",
+      "logsJson": "Request logs (JSON)",
+      "statementCsv": "Statement (CSV)",
+      "statementJson": "Statement (JSON)",
+      "success": "Exported {{rows}} rows to {{path}}",
+      "truncated": "More than {{max}} rows matched; only the first {{max}} were exported. Narrow the time range.",
+      "failed": "Export failed"
+    },
     "appFilter": {
       "all": "All",
       "claude": "Claude Code",
