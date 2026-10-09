@@ -18,6 +18,8 @@ import { PROVIDER_TYPES, TEMPLATE_TYPES } from "@/config/constants";
 import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
+import { ProviderSpendLimitBadge } from "@/components/providers/ProviderSpendLimitBadge";
+import { useProviderLimits } from "@/lib/query/usage";
 import {
   extractCodexBaseUrl,
   extractCodexExperimentalBearerToken,
@@ -180,6 +182,13 @@ export function ProviderCard({
   const isAdditiveMode = appId === "opencode" && !isAnyOmo;
 
   const { data: health } = useProviderHealth(provider.id, appId);
+  const hasSpendLimit = Boolean(
+    provider.meta?.limitDailyUsd || provider.meta?.limitMonthlyUsd,
+  );
+  const { data: spendLimitStatus } = useProviderLimits(provider.id, appId, {
+    enabled: hasSpendLimit,
+    refetchInterval: 60_000,
+  });
   // 熔断器内存状态只在代理运行且该供应商已熔断时才值得轮询
   const circuitTripped =
     isProxyRunning && isInFailoverQueue && health?.is_healthy === false;
@@ -495,6 +504,10 @@ export function ProviderCard({
                 failoverPriority && (
                   <FailoverPriorityBadge priority={failoverPriority} />
                 )}
+
+              {hasSpendLimit && spendLimitStatus && (
+                <ProviderSpendLimitBadge status={spendLimitStatus} />
+              )}
 
               {provider.category === "third_party" &&
                 provider.meta?.isPartner && (

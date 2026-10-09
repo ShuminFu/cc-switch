@@ -1271,6 +1271,13 @@
     "empty": "No endpoints"
   },
   "providerAdvanced": {
+    "spendLimits": "Spend Limits",
+    "spendLimitsActive": "Set",
+    "spendLimitsDesc": "Today's and this month's spend are summed from proxy request logs; the provider card warns when a limit is exceeded. Requests are not blocked. Leave empty for no limit.",
+    "dailyLimit": "Daily limit (USD)",
+    "monthlyLimit": "Monthly limit (USD)",
+    "limitPlaceholder": "No limit",
+    "limitInvalid": "Spend limits must be non-negative numbers",
     "pricingConfig": "Pricing Config",
     "useCustomPricing": "Use separate config",
     "pricingConfigDesc": "Configure separate pricing parameters for this provider. Uses global defaults when disabled.",
@@ -2478,6 +2485,12 @@
   },
   "agents": {
     "title": "Agents"
+  },
+  "spendLimit": {
+    "daily": "Today {{used}} / {{limit}}",
+    "monthly": "This month {{used}} / {{limit}}",
+    "exceeded": "Spend limit exceeded",
+    "overBudget": "Over budget"
   },
   "health": {
     "state": {

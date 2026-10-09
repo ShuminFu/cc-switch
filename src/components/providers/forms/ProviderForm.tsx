@@ -84,6 +84,7 @@ import { OmoFormFields } from "./OmoFormFields";
 import { parseOmoOtherFieldsObject } from "@/types/omo";
 import {
   ProviderAdvancedConfig,
+  type ProviderSpendLimits,
   type PricingModelSourceOption,
 } from "./ProviderAdvancedConfig";
 import {
@@ -330,6 +331,10 @@ function ProviderFormFull({
       initialData?.meta?.pricingModelSource,
     ),
   }));
+  const [spendLimits, setSpendLimits] = useState<ProviderSpendLimits>(() => ({
+    dailyUsd: initialData?.meta?.limitDailyUsd,
+    monthlyUsd: initialData?.meta?.limitMonthlyUsd,
+  }));
 
   const { category } = useProviderCategory({
     appId,
@@ -360,6 +365,10 @@ function ProviderFormFull({
       pricingModelSource: normalizePricingSource(
         initialData?.meta?.pricingModelSource,
       ),
+    });
+    setSpendLimits({
+      dailyUsd: initialData?.meta?.limitDailyUsd,
+      monthlyUsd: initialData?.meta?.limitMonthlyUsd,
     });
     setCodexChatReasoning(initialData?.meta?.codexChatReasoning ?? {});
     setPromptCacheRouting(initialData?.meta?.promptCacheRouting ?? "auto");
@@ -1051,6 +1060,20 @@ function ProviderFormFull({
       return;
     }
 
+    const dailyLimit = spendLimits.dailyUsd?.trim();
+    const monthlyLimit = spendLimits.monthlyUsd?.trim();
+    if (
+      (dailyLimit && !isNonNegativeDecimalString(dailyLimit)) ||
+      (monthlyLimit && !isNonNegativeDecimalString(monthlyLimit))
+    ) {
+      toast.error(
+        t("providerAdvanced.limitInvalid", {
+          defaultValue: "支出上限必须为非负数",
+        }),
+      );
+      return;
+    }
+
     // opencode / openclaw / hermes: providerKey 相关
     // A 类（空）归到 issues；B 类（正则不合法 / 重复 / 状态加载中）仍硬拒绝
     const keyPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -1517,6 +1540,8 @@ function ProviderFormFull({
         pricingConfig.enabled && pricingConfig.pricingModelSource !== "inherit"
           ? pricingConfig.pricingModelSource
           : undefined,
+      limitDailyUsd: spendLimits.dailyUsd?.trim() || undefined,
+      limitMonthlyUsd: spendLimits.monthlyUsd?.trim() || undefined,
       apiFormat:
         appId === "claude" && category !== "official"
           ? localApiFormat
@@ -2487,6 +2512,8 @@ function ProviderFormFull({
               <ProviderAdvancedConfig
                 pricingConfig={pricingConfig}
                 onPricingConfigChange={setPricingConfig}
+                spendLimits={spendLimits}
+                onSpendLimitsChange={setSpendLimits}
               />
             )}
 

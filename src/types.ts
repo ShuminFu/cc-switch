@@ -190,6 +190,9 @@ export interface ProviderMeta {
   costMultiplier?: string;
   // 供应商计费模式来源
   pricingModelSource?: string;
+  // 每日 / 每月支出上限（USD，十进制字符串；为空表示不限）
+  limitDailyUsd?: string;
+  limitMonthlyUsd?: string;
   // API 格式（Claude / Codex 供应商使用）
   // - "anthropic": 原生 Anthropic Messages API 格式，直接透传
   // - "openai_chat": OpenAI Chat Completions 格式，需要格式转换

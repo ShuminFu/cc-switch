@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
-import { ChevronDown, ChevronRight, Coins } from "lucide-react";
+import { ChevronDown, ChevronRight, Coins, Wallet } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -20,19 +20,34 @@ interface ProviderPricingConfig {
   pricingModelSource: PricingModelSourceOption;
 }
 
+export interface ProviderSpendLimits {
+  /** 每日支出上限（USD），空字符串/undefined 表示不限 */
+  dailyUsd?: string;
+  /** 每月支出上限（USD） */
+  monthlyUsd?: string;
+}
+
 interface ProviderAdvancedConfigProps {
   pricingConfig: ProviderPricingConfig;
   onPricingConfigChange: (config: ProviderPricingConfig) => void;
+  spendLimits?: ProviderSpendLimits;
+  onSpendLimitsChange?: (limits: ProviderSpendLimits) => void;
 }
 
 export function ProviderAdvancedConfig({
   pricingConfig,
   onPricingConfigChange,
+  spendLimits,
+  onSpendLimitsChange,
 }: ProviderAdvancedConfigProps) {
   const { t } = useTranslation();
   const [isPricingConfigOpen, setIsPricingConfigOpen] = useState(
     pricingConfig.enabled,
   );
+  const hasSpendLimits = Boolean(
+    spendLimits?.dailyUsd?.trim() || spendLimits?.monthlyUsd?.trim(),
+  );
+  const [isSpendLimitsOpen, setIsSpendLimitsOpen] = useState(hasSpendLimits);
 
   useEffect(() => {
     setIsPricingConfigOpen(pricingConfig.enabled);
@@ -177,6 +192,105 @@ export function ProviderAdvancedConfig({
           </div>
         </div>
       </div>
+
+      {/* 支出上限（后端 check_provider_limits 消费 meta.limitDailyUsd / limitMonthlyUsd） */}
+      {onSpendLimitsChange && (
+        <div className="rounded-lg border border-border/50 bg-muted/20">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between p-4 hover:bg-muted/30 transition-colors"
+            onClick={() => setIsSpendLimitsOpen(!isSpendLimitsOpen)}
+          >
+            <div className="flex items-center gap-3">
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">
+                {t("providerAdvanced.spendLimits", {
+                  defaultValue: "支出上限",
+                })}
+              </span>
+              {hasSpendLimits && (
+                <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  {t("providerAdvanced.spendLimitsActive", {
+                    defaultValue: "已设置",
+                  })}
+                </span>
+              )}
+            </div>
+            {isSpendLimitsOpen ? (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            )}
+          </button>
+          <div
+            className={cn(
+              "overflow-hidden transition-all duration-200",
+              isSpendLimitsOpen
+                ? "max-h-[500px] opacity-100"
+                : "max-h-0 opacity-0",
+            )}
+          >
+            <div className="border-t border-border/50 p-4 space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {t("providerAdvanced.spendLimitsDesc", {
+                  defaultValue:
+                    "按代理记录的费用统计今日 / 本月支出，超过上限时在供应商卡片上提示；不会拦截请求。留空表示不限。",
+                })}
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="spend-limit-daily">
+                    {t("providerAdvanced.dailyLimit", {
+                      defaultValue: "每日上限（USD）",
+                    })}
+                  </Label>
+                  <Input
+                    id="spend-limit-daily"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    inputMode="decimal"
+                    value={spendLimits?.dailyUsd ?? ""}
+                    onChange={(e) =>
+                      onSpendLimitsChange({
+                        ...spendLimits,
+                        dailyUsd: e.target.value || undefined,
+                      })
+                    }
+                    placeholder={t("providerAdvanced.limitPlaceholder", {
+                      defaultValue: "不限",
+                    })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="spend-limit-monthly">
+                    {t("providerAdvanced.monthlyLimit", {
+                      defaultValue: "每月上限（USD）",
+                    })}
+                  </Label>
+                  <Input
+                    id="spend-limit-monthly"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    inputMode="decimal"
+                    value={spendLimits?.monthlyUsd ?? ""}
+                    onChange={(e) =>
+                      onSpendLimitsChange({
+                        ...spendLimits,
+                        monthlyUsd: e.target.value || undefined,
+                      })
+                    }
+                    placeholder={t("providerAdvanced.limitPlaceholder", {
+                      defaultValue: "不限",
+                    })}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

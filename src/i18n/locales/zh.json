@@ -1271,6 +1271,13 @@
     "empty": "暂无端点"
   },
   "providerAdvanced": {
+    "spendLimits": "支出上限",
+    "spendLimitsActive": "已设置",
+    "spendLimitsDesc": "按代理记录的费用统计今日 / 本月支出，超过上限时在供应商卡片上提示；不会拦截请求。留空表示不限。",
+    "dailyLimit": "每日上限（USD）",
+    "monthlyLimit": "每月上限（USD）",
+    "limitPlaceholder": "不限",
+    "limitInvalid": "支出上限必须为非负数",
     "pricingConfig": "计费配置",
     "useCustomPricing": "使用单独配置",
     "pricingConfigDesc": "为此供应商配置单独的计费参数，不启用时使用全局默认配置。",
@@ -2478,6 +2485,12 @@
   },
   "agents": {
     "title": "智能体"
+  },
+  "spendLimit": {
+    "daily": "今日 {{used}} / {{limit}}",
+    "monthly": "本月 {{used}} / {{limit}}",
+    "exceeded": "已超出支出上限",
+    "overBudget": "超支"
   },
   "health": {
     "state": {

@@ -1271,6 +1271,13 @@
     "empty": "エンドポイントがありません"
   },
   "providerAdvanced": {
+    "spendLimits": "支出上限",
+    "spendLimitsActive": "設定済み",
+    "spendLimitsDesc": "プロキシのリクエストログから今日・今月の支出を集計し、上限を超えるとプロバイダーカードに警告を表示します。リクエストは遮断しません。空欄で無制限。",
+    "dailyLimit": "1 日の上限（USD）",
+    "monthlyLimit": "月の上限（USD）",
+    "limitPlaceholder": "無制限",
+    "limitInvalid": "支出上限は 0 以上の数値で指定してください",
     "pricingConfig": "課金設定",
     "useCustomPricing": "個別設定を使用",
     "pricingConfigDesc": "このプロバイダーに個別の課金パラメータを設定します。無効の場合はグローバル設定を使用します。",
@@ -2478,6 +2485,12 @@
   },
   "agents": {
     "title": "エージェント"
+  },
+  "spendLimit": {
+    "daily": "今日 {{used}} / {{limit}}",
+    "monthly": "今月 {{used}} / {{limit}}",
+    "exceeded": "支出上限を超えました",
+    "overBudget": "予算超過"
   },
   "health": {
     "state": {

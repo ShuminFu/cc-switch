@@ -1243,6 +1243,13 @@
     "empty": "暫無端點"
   },
   "providerAdvanced": {
+    "spendLimits": "支出上限",
+    "spendLimitsActive": "已設定",
+    "spendLimitsDesc": "依代理記錄的費用統計今日 / 本月支出，超過上限時在供應商卡片上提示；不會攔截請求。留空表示不限。",
+    "dailyLimit": "每日上限（USD）",
+    "monthlyLimit": "每月上限（USD）",
+    "limitPlaceholder": "不限",
+    "limitInvalid": "支出上限必須為非負數",
     "pricingConfig": "計費設定",
     "useCustomPricing": "使用獨立設定",
     "pricingConfigDesc": "為此供應商設定獨立的計費參數，不啟用時使用全域預設設定。",
@@ -2450,6 +2457,12 @@
   },
   "agents": {
     "title": "Agent"
+  },
+  "spendLimit": {
+    "daily": "今日 {{used}} / {{limit}}",
+    "monthly": "本月 {{used}} / {{limit}}",
+    "exceeded": "已超出支出上限",
+    "overBudget": "超支"
   },
   "health": {
     "state": {
