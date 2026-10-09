@@ -1517,6 +1517,8 @@
     "source": "ソース",
     "requestsLabel": "リクエスト",
     "costLabel": "合計コスト",
+    "unpriced": "価格未設定",
+    "unpricedAddHint": "このモデルの価格を追加します。保存すると過去のリクエスト費用が再計算されます",
     "appFilter": {
       "all": "すべて",
       "claude": "Claude Code",

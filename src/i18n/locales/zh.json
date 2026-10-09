@@ -1517,6 +1517,8 @@
     "source": "来源",
     "requestsLabel": "次请求",
     "costLabel": "总成本",
+    "unpriced": "未定价",
+    "unpricedAddHint": "点击为该模型添加定价，保存后会回填历史费用",
     "appFilter": {
       "all": "全部",
       "claude": "Claude Code",

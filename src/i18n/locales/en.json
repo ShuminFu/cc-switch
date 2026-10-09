@@ -1517,6 +1517,8 @@
     "source": "Source",
     "requestsLabel": "requests",
     "costLabel": "total cost",
+    "unpriced": "Unpriced",
+    "unpricedAddHint": "Add pricing for this model; saving backfills the cost of its past requests",
     "appFilter": {
       "all": "All",
       "claude": "Claude Code",

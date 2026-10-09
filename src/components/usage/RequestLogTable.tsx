@@ -22,10 +22,12 @@ import {
   getFreshInputTokens,
   isUnpricedUsage,
   type LogFilters,
+  type ModelPricing,
   type UsageRangeSelection,
 } from "@/types/usage";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
+import { PricingEditModal } from "./PricingEditModal";
 import {
   fmtInt,
   fmtUsd,
@@ -58,6 +60,8 @@ export function RequestLogTable({
   // 这里只保留日志特有的状态码筛选。
   const [statusCode, setStatusCode] = useState<number | undefined>(undefined);
   const [page, setPage] = useState(0);
+  // 未定价行 → 直接打开定价表单（isNew），保存后 update_model_pricing 会回填历史费用
+  const [pricingTarget, setPricingTarget] = useState<ModelPricing | null>(null);
   const [pageInput, setPageInput] = useState("");
   const pageSize = 20;
 
@@ -276,9 +280,34 @@ export function RequestLogTable({
                               unpriced ? "text-muted-foreground" : ""
                             }`}
                           >
-                            {unpriced
-                              ? t("usage.unpriced", "未定价")
-                              : fmtUsd(log.totalCostUsd, 4)}
+                            {unpriced ? (
+                              <button
+                                type="button"
+                                className="underline decoration-dotted underline-offset-2 hover:text-foreground transition-colors"
+                                title={t(
+                                  "usage.unpricedAddHint",
+                                  "点击为该模型添加定价，保存后会回填历史费用",
+                                )}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  const modelId = (
+                                    log.pricingModel || log.model
+                                  ).trim();
+                                  setPricingTarget({
+                                    modelId,
+                                    displayName: modelId,
+                                    inputCostPerMillion: "0",
+                                    outputCostPerMillion: "0",
+                                    cacheReadCostPerMillion: "0",
+                                    cacheCreationCostPerMillion: "0",
+                                  });
+                                }}
+                              >
+                                {t("usage.unpriced", "未定价")}
+                              </button>
+                            ) : (
+                              fmtUsd(log.totalCostUsd, 4)
+                            )}
                           </div>
                           {parseFiniteNumber(log.costMultiplier) != null &&
                             parseFiniteNumber(log.costMultiplier) !== 1 && (
@@ -398,6 +427,15 @@ export function RequestLogTable({
             </div>
           </div>
         </>
+      )}
+
+      {pricingTarget && (
+        <PricingEditModal
+          open
+          model={pricingTarget}
+          isNew
+          onClose={() => setPricingTarget(null)}
+        />
       )}
     </div>
   );

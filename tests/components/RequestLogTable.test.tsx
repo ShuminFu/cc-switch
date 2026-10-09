@@ -23,6 +23,19 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/lib/query/usage", () => ({
   useRequestLogs: (args: unknown) => useRequestLogsMock(args),
 }));
+vi.mock("@/components/usage/PricingEditModal", () => ({
+  PricingEditModal: ({
+    model,
+    isNew,
+  }: {
+    model: { modelId: string; displayName: string };
+    isNew?: boolean;
+  }) => (
+    <div data-testid="pricing-modal">
+      {model.modelId}|{model.displayName}|{isNew ? "new" : "edit"}
+    </div>
+  ),
+}));
 
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children, ...props }: any) => (
@@ -157,5 +170,57 @@ describe("RequestLogTable", () => {
         }),
       );
     });
+  });
+  it("opens a prefilled pricing form from an unpriced request", async () => {
+    useRequestLogsMock.mockImplementation(() => ({
+      data: {
+        data: [
+          {
+            requestId: "req-1",
+            providerId: "p1",
+            providerName: "Relay",
+            appType: "claude",
+            model: "mystery-model",
+            pricingModel: "mystery-model-v2",
+            costMultiplier: "1",
+            inputTokens: 120,
+            outputTokens: 30,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            inputCostUsd: "0",
+            outputCostUsd: "0",
+            cacheReadCostUsd: "0",
+            cacheCreationCostUsd: "0",
+            totalCostUsd: "0",
+            isStreaming: false,
+            latencyMs: 1200,
+            statusCode: 200,
+            createdAt: 1_710_000_000,
+          },
+        ],
+        total: 1,
+        page: 0,
+        pageSize: 20,
+      },
+      isLoading: false,
+    }));
+
+    render(
+      <RequestLogTable
+        range={{ preset: "today" }}
+        rangeLabel="Today"
+        appType="all"
+        refreshIntervalMs={0}
+      />,
+    );
+
+    expect(screen.queryByTestId("pricing-modal")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "usage.unpriced" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pricing-modal")).toHaveTextContent(
+        "mystery-model-v2|mystery-model-v2|new",
+      ),
+    );
   });
 });

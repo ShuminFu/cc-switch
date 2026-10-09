@@ -1489,6 +1489,8 @@
     "source": "來源",
     "requestsLabel": "次請求",
     "costLabel": "總成本",
+    "unpriced": "未定價",
+    "unpricedAddHint": "點擊為該模型新增定價，儲存後會回填歷史費用",
     "appFilter": {
       "all": "全部",
       "claude": "Claude Code",
