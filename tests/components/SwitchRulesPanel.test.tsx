@@ -36,6 +36,11 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+const subscriptionQuotaMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/query/subscription", () => ({
+  useSubscriptionQuota: () => ({ data: subscriptionQuotaMock() }),
+}));
+
 vi.mock("@/lib/query/queries", () => ({
   useProvidersQuery: () => ({
     data: {
@@ -121,6 +126,7 @@ const renderPanel = (disabled = false) => {
 describe("SwitchRulesPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    subscriptionQuotaMock.mockReturnValue(undefined);
     apiMock.list.mockResolvedValue([]);
     apiMock.getStates.mockResolvedValue([]);
     apiMock.upsert.mockImplementation(async (draft) => ({
@@ -244,6 +250,19 @@ describe("SwitchRulesPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "删除规则" }));
     await waitFor(() => expect(apiMock.delete).toHaveBeenCalledWith("r1"));
+  });
+
+  it("shows the live utilization of the watched window next to a subscription rule", async () => {
+    apiMock.list.mockResolvedValue([rule]);
+    subscriptionQuotaMock.mockReturnValue({
+      success: true,
+      tiers: [{ name: "five_hour", utilization: 83.6, resetsAt: null }],
+    });
+    renderPanel();
+    const chip = await screen.findByTestId("switch-rule-live-r1");
+    expect(chip).toHaveTextContent("当前 84%");
+
+    subscriptionQuotaMock.mockReturnValue({ success: false, tiers: [] });
   });
 
   it("evaluates rules on demand and reports the outcome", async () => {

@@ -123,3 +123,16 @@ export interface DeepLinkSwitchRequest {
   currentProviderName?: string | null;
   alreadyCurrent: boolean;
 }
+
+/**
+ * `ccswitch://v1/apply?profile=…&scope=…` resolved by the backend
+ * (event `deeplink-apply-profile`). Nothing is applied until the user confirms.
+ */
+export interface DeepLinkApplyProfileRequest {
+  profileId: string;
+  profileName: string;
+  scope: "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild";
+  currentProfileId?: string | null;
+  currentProfileName?: string | null;
+  alreadyCurrent: boolean;
+}

@@ -87,6 +87,7 @@ import {
   shouldHideCodexMessageFromToc,
   type SessionDirectoryGroup,
   type SessionProviderGroup,
+  formatSessionCost,
 } from "./utils";
 
 const SESSION_LIST_VIEW_MODE_STORAGE_KEY =
@@ -224,6 +225,24 @@ export function SessionManagerPage({
     }
     return map;
   }, [sessionUsageData]);
+  /** 分组小计：仅累加有归集记录的会话，返回 undefined 表示该组没有任何记录 */
+  const groupCost = useCallback(
+    (groupSessions: SessionMeta[]): number | undefined => {
+      let total = 0;
+      let attributed = 0;
+      for (const session of groupSessions) {
+        const stat = usageBySession.get(session.sessionId);
+        if (!stat) continue;
+        const cost = Number(stat.totalCostUsd);
+        if (Number.isFinite(cost)) {
+          total += cost;
+          attributed += 1;
+        }
+      }
+      return attributed > 0 ? total : undefined;
+    },
+    [usageBySession],
+  );
   const detailRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [activeMessageIndex, setActiveMessageIndex] = useState<number | null>(
@@ -1378,6 +1397,26 @@ export function SessionManagerPage({
                                     <span className="min-w-0 flex-1 truncate text-sm font-medium">
                                       {providerLabel}
                                     </span>
+                                    {(() => {
+                                      const cost = groupCost(
+                                        providerGroup.sessions,
+                                      );
+                                      return cost === undefined ? null : (
+                                        <span
+                                          className="shrink-0 text-xs tabular-nums text-muted-foreground"
+                                          title={t(
+                                            "sessionManager.groupCostHint",
+                                            {
+                                              defaultValue:
+                                                "该分组内已归集会话的费用合计",
+                                            },
+                                          )}
+                                          data-testid={`session-group-cost-${providerGroup.providerId}`}
+                                        >
+                                          {formatSessionCost(cost)}
+                                        </span>
+                                      );
+                                    })()}
                                     {renderGroupSelectionBadge(
                                       providerSelectionState,
                                       providerGroup.sessions.length,
@@ -1455,6 +1494,20 @@ export function SessionManagerPage({
                                                   </p>
                                                 </TooltipContent>
                                               </Tooltip>
+                                              {(() => {
+                                                const cost = groupCost(
+                                                  directoryGroup.sessions,
+                                                );
+                                                return cost ===
+                                                  undefined ? null : (
+                                                  <span
+                                                    className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+                                                    data-testid={`session-directory-cost-${directoryGroup.key}`}
+                                                  >
+                                                    {formatSessionCost(cost)}
+                                                  </span>
+                                                );
+                                              })()}
                                               {renderGroupSelectionBadge(
                                                 directorySelectionState,
                                                 directoryGroup.sessions.length,

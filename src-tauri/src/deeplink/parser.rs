@@ -2,6 +2,7 @@
 //!
 //! Parses ccswitch:// URLs into DeepLinkImportRequest structures.
 
+use super::profile::{parse_profile_params, DeepLinkProfileRequest};
 use super::switch::{parse_switch_params, DeepLinkSwitchRequest};
 use super::utils::validate_url;
 use super::DeepLinkImportRequest;
@@ -16,6 +17,8 @@ pub enum DeepLinkAction {
     Import(Box<DeepLinkImportRequest>),
     /// `ccswitch://v1/switch?app=...&provider=...`
     Switch(DeepLinkSwitchRequest),
+    /// `ccswitch://v1/apply?profile=...&scope=...`
+    ApplyProfile(DeepLinkProfileRequest),
 }
 
 /// Parse a ccswitch:// import URL into a DeepLinkImportRequest
@@ -30,6 +33,9 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
         DeepLinkAction::Import(request) => Ok(*request),
         DeepLinkAction::Switch(_) => Err(AppError::InvalidInput(
             "Invalid path: expected '/import', got '/switch'".to_string(),
+        )),
+        DeepLinkAction::ApplyProfile(_) => Err(AppError::InvalidInput(
+            "Invalid path: expected '/import', got '/apply'".to_string(),
         )),
     }
 }
@@ -69,9 +75,10 @@ pub fn parse_deeplink_action(url_str: &str) -> Result<DeepLinkAction, AppError> 
     match path {
         "/import" => {}
         "/switch" => return Ok(DeepLinkAction::Switch(parse_switch_params(&params)?)),
+        "/apply" => return Ok(DeepLinkAction::ApplyProfile(parse_profile_params(&params)?)),
         other => {
             return Err(AppError::InvalidInput(format!(
-                "Invalid path: expected '/import' or '/switch', got '{other}'"
+                "Invalid path: expected '/import', '/switch' or '/apply', got '{other}'"
             )))
         }
     }

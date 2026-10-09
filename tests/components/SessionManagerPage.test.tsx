@@ -251,6 +251,47 @@ describe("SessionManagerPage", () => {
     expect(screen.getAllByTestId("session-item-cost")).toHaveLength(1);
   });
 
+  it("sums attributed cost per provider and directory group in grouped view", async () => {
+    setSessionUsageFixtures([
+      {
+        sessionId: "codex-session-1",
+        requests: 1,
+        totalCostUsd: "1.250000",
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        firstSeenAt: 1,
+        lastSeenAt: 2,
+      },
+      {
+        sessionId: "codex-session-2",
+        requests: 1,
+        totalCostUsd: "0.750000",
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        firstSeenAt: 1,
+        lastSeenAt: 2,
+      },
+    ]);
+    renderPage();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Alpha Session" }),
+      ).toBeInTheDocument(),
+    );
+    await switchToGroupedView();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("session-group-cost-codex")).toHaveTextContent(
+        "$2.00",
+      ),
+    );
+    expect(screen.queryByTestId("session-group-cost-claude")).toBeNull();
+  });
+
   it("deletes the selected session and selects the next visible session", async () => {
     renderPage();
 

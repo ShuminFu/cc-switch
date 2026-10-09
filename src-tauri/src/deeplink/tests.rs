@@ -2,6 +2,7 @@
 
 use super::mcp::parse_mcp_apps;
 use super::parser::{parse_deeplink_action, parse_deeplink_url, DeepLinkAction};
+use super::profile::{resolve_profile_request, DeepLinkProfileRequest};
 use super::prompt::import_prompt_from_deeplink;
 use super::provider::parse_and_merge_config;
 use super::switch::{resolve_switch_request, DeepLinkSwitchRequest};
@@ -991,4 +992,70 @@ fn test_resolve_switch_request_by_id_or_name() {
         provider: "x".to_string(),
     };
     assert!(resolve_switch_request(&db, &unknown).is_err());
+}
+
+#[test]
+fn test_parse_apply_profile_deeplink() {
+    match parse_deeplink_action("ccswitch://v1/apply?profile=Work%20Project&scope=codex").unwrap() {
+        DeepLinkAction::ApplyProfile(request) => {
+            assert_eq!(request.profile, "Work Project");
+            assert_eq!(request.scope, "codex");
+        }
+        other => panic!("expected apply action, got {other:?}"),
+    }
+    // `app` is accepted as an alias and normalized to the profile scope
+    match parse_deeplink_action("ccswitch://v1/apply?profile=p&app=claude_desktop").unwrap() {
+        DeepLinkAction::ApplyProfile(request) => assert_eq!(request.scope, "claude-desktop"),
+        other => panic!("unexpected {other:?}"),
+    }
+    assert!(parse_deeplink_action("ccswitch://v1/apply?profile=p&scope=opencode").is_err());
+    assert!(parse_deeplink_action("ccswitch://v1/apply?scope=claude").is_err());
+    assert!(parse_deeplink_action("ccswitch://v1/apply?profile=p").is_err());
+    assert!(parse_deeplink_url("ccswitch://v1/apply?profile=p&scope=claude").is_err());
+}
+
+#[test]
+#[serial_test::serial]
+fn test_resolve_profile_request_by_id_or_name() {
+    let _guard = TestHomeGuard::new();
+    let db = Database::memory().expect("memory db");
+    let profile = |id: &str, name: &str| crate::database::Profile {
+        id: id.to_string(),
+        name: name.to_string(),
+        payload: "{}".to_string(),
+        sort_order: None,
+        created_at: Some(1),
+        updated_at: Some(1),
+    };
+    db.save_profile(&profile("prof-1", "Work Project"))
+        .expect("save prof-1");
+    db.save_profile(&profile("prof-2", "Side Project"))
+        .expect("save prof-2");
+    db.set_current_profile_id("codex", Some("prof-2"))
+        .expect("set current");
+
+    let request = |profile: &str, scope: &str| DeepLinkProfileRequest {
+        profile: profile.to_string(),
+        scope: scope.to_string(),
+    };
+
+    let by_id = resolve_profile_request(&db, &request("prof-1", "codex")).expect("by id");
+    assert_eq!(by_id.profile_name, "Work Project");
+    assert_eq!(by_id.current_profile_id.as_deref(), Some("prof-2"));
+    assert_eq!(by_id.current_profile_name.as_deref(), Some("Side Project"));
+    assert!(!by_id.already_current);
+
+    let by_name =
+        resolve_profile_request(&db, &request(" work project ", "codex")).expect("by name");
+    assert_eq!(by_name.profile_id, "prof-1");
+
+    let same = resolve_profile_request(&db, &request("Side Project", "codex")).expect("current");
+    assert!(same.already_current);
+
+    // another scope has no current profile
+    let other_scope = resolve_profile_request(&db, &request("prof-1", "claude")).expect("claude");
+    assert_eq!(other_scope.current_profile_id, None);
+
+    assert!(resolve_profile_request(&db, &request("missing", "codex")).is_err());
+    assert!(resolve_profile_request(&db, &request("prof-1", "opencode")).is_err());
 }

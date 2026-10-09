@@ -82,6 +82,7 @@ import {
 import UnifiedSkillsPanel from "@/components/skills/UnifiedSkillsPanel";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { DeepLinkSwitchDialog } from "@/components/DeepLinkSwitchDialog";
+import { DeepLinkApplyProfileDialog } from "@/components/DeepLinkApplyProfileDialog";
 import { QuickSwitcher } from "@/components/providers/QuickSwitcher";
 import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
 import { AgentsPanel } from "@/components/agents/AgentsPanel";
@@ -1764,6 +1765,7 @@ function App() {
 
       <DeepLinkImportDialog />
       <DeepLinkSwitchDialog />
+      <DeepLinkApplyProfileDialog />
       <QuickSwitcher
         open={quickSwitchOpen}
         onOpenChange={setQuickSwitchOpen}

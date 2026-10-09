@@ -47,8 +47,8 @@ pub use config::{get_claude_mcp_path, get_claude_settings_path, read_json_file};
 pub use database::{Database, Profile};
 pub use deeplink::{
     import_provider_from_deeplink, parse_deeplink_action, parse_deeplink_url,
-    resolve_switch_request, DeepLinkAction, DeepLinkImportRequest, DeepLinkSwitchRequest,
-    ResolvedSwitchRequest,
+    resolve_profile_request, resolve_switch_request, DeepLinkAction, DeepLinkImportRequest,
+    DeepLinkProfileRequest, DeepLinkSwitchRequest, ResolvedProfileRequest, ResolvedSwitchRequest,
 };
 pub use error::AppError;
 pub use mcp::{
@@ -196,6 +196,43 @@ fn handle_deeplink_url(
                 }
                 Err(e) => {
                     log::warn!("✗ Switch deep link could not be resolved: {e}");
+                    if let Err(emit_err) = app.emit(
+                        "deeplink-error",
+                        serde_json::json!({ "url": url_str, "error": e }),
+                    ) {
+                        log::error!("✗ Failed to emit deeplink-error event: {emit_err}");
+                    }
+                }
+            }
+            if focus_main_window {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        }
+        Ok(crate::deeplink::DeepLinkAction::ApplyProfile(request)) => {
+            log::info!(
+                "✓ Parsed apply-profile deep link: profile={}, scope={}",
+                request.profile,
+                request.scope
+            );
+            let resolved = app
+                .try_state::<AppState>()
+                .ok_or_else(|| "AppState unavailable".to_string())
+                .and_then(|state| {
+                    crate::deeplink::resolve_profile_request(&state.db, &request)
+                        .map_err(|e| e.to_string())
+                });
+            match resolved {
+                Ok(resolved) => {
+                    if let Err(e) = app.emit("deeplink-apply-profile", &resolved) {
+                        log::error!("✗ Failed to emit deeplink-apply-profile event: {e}");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("✗ Apply-profile deep link could not be resolved: {e}");
                     if let Err(emit_err) = app.emit(
                         "deeplink-error",
                         serde_json::json!({ "url": url_str, "error": e }),

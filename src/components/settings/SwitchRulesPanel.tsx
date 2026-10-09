@@ -26,7 +26,9 @@ import {
 import type { SwitchRule, SwitchRuleSource } from "@/lib/api/switchRules";
 import type { AppId } from "@/lib/api/types";
 import { TIER_I18N_KEYS } from "@/components/SubscriptionQuotaFooter";
+import { useSubscriptionQuota } from "@/lib/query/subscription";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { cn } from "@/lib/utils";
 
 /** 支持规则的应用：有「当前供应商」概念且有官方订阅 / Coding Plan 额度 */
 export const SWITCH_RULE_APPS: AppId[] = ["claude", "codex", "gemini"];
@@ -79,6 +81,8 @@ export function SwitchRulesPanel({
   const { data: rules = [], isLoading } = useSwitchRules(appType);
   const { data: states = [] } = useSwitchRuleStates();
   const { data: providersData } = useProvidersQuery(appType);
+  // 官方订阅的最新额度快照：让用户看到规则离触发还有多远
+  const { data: subscriptionQuota } = useSubscriptionQuota(appType, true);
   const upsertRule = useUpsertSwitchRule();
   const deleteRule = useDeleteSwitchRule();
   const setEnabled = useSetSwitchRuleEnabled();
@@ -191,6 +195,15 @@ export function SwitchRulesPanel({
           t("switchRules.evaluateFailed", { defaultValue: "评估失败" }),
       );
     }
+  };
+
+  /** 订阅规则：被监控窗口的当前利用率（无快照或窗口不存在时为 undefined） */
+  const liveUtilization = (rule: SwitchRule): number | undefined => {
+    if (rule.source !== "subscription" || !subscriptionQuota?.success) {
+      return undefined;
+    }
+    return subscriptionQuota.tiers.find((tier) => tier.name === rule.tierName)
+      ?.utilization;
   };
 
   const describeRule = (rule: SwitchRule) => {
@@ -423,6 +436,32 @@ export function SwitchRulesPanel({
                     <span className="truncate text-sm font-medium">
                       {describeRule(rule)}
                     </span>
+                    {(() => {
+                      const now = liveUtilization(rule);
+                      if (now === undefined) return null;
+                      const nearThreshold = now >= rule.thresholdPct - 10;
+                      return (
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+                            now >= rule.thresholdPct
+                              ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                              : nearThreshold
+                                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                          )}
+                          title={t("switchRules.liveUtilizationHint", {
+                            defaultValue: "被监控窗口的最新利用率",
+                          })}
+                          data-testid={`switch-rule-live-${rule.id}`}
+                        >
+                          {t("switchRules.liveUtilization", {
+                            defaultValue: "当前 {{pct}}%",
+                            pct: Math.round(now),
+                          })}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {rule.revertOnReset

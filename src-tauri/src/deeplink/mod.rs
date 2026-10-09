@@ -10,6 +10,7 @@
 
 mod mcp;
 mod parser;
+mod profile;
 mod prompt;
 mod provider;
 mod remote;
@@ -25,6 +26,7 @@ use serde::{Deserialize, Serialize};
 // Re-export public API
 pub use mcp::import_mcp_from_deeplink;
 pub use parser::{parse_deeplink_action, parse_deeplink_url, DeepLinkAction};
+pub use profile::{resolve_profile_request, DeepLinkProfileRequest, ResolvedProfileRequest};
 pub use prompt::import_prompt_from_deeplink;
 pub use provider::{import_provider_from_deeplink, parse_and_merge_config};
 pub use remote::resolve_remote_config;
