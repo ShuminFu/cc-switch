@@ -6,7 +6,6 @@ use crate::database::{ProxyEvent, SwitchRule, SwitchRuleState};
 use crate::proxy::types::{AppProxyConfig, ProxyStatus, ProxyTakeoverStatus};
 use crate::store::AppState;
 use std::fmt::Write as _;
-use tauri::Manager;
 
 /// 时间线取最近多少条
 pub const RECENT_EVENTS: u32 = 30;
