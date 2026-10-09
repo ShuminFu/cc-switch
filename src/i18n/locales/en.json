@@ -143,6 +143,18 @@
     "duplicate": "Duplicate",
     "sortUpdateFailed": "Failed to update sort order",
     "configureUsage": "Configure usage query",
+    "share": "Share link",
+    "shareDialog": {
+      "title": "Share {{name}}",
+      "description": "Generate a ccswitch:// link; opening it on a device with CC Switch installed imports this provider in one click.",
+      "includeApiKey": "Include the API key in the link",
+      "includeApiKeyHint": "The key is written into the link in plain text. Share it only with people allowed to use it; without it, recipients enter their own key after importing.",
+      "linkLabel": "Deep link",
+      "lengthHint": "{{count}} characters",
+      "copyLink": "Copy link",
+      "copied": "Link copied",
+      "copyFailed": "Copy failed: {{detail}}"
+    },
     "officialPartner": "Official Partner",
     "managedByHermes": "Hermes Managed",
     "managedByHermesHint": "Defined in Hermes' providers: dict. Edit or remove it via Hermes Web UI.",

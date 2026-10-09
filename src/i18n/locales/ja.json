@@ -143,6 +143,18 @@
     "duplicate": "複製",
     "sortUpdateFailed": "並び順の更新に失敗しました",
     "configureUsage": "利用状況を設定",
+    "share": "リンクを共有",
+    "shareDialog": {
+      "title": "{{name}} を共有",
+      "description": "ccswitch:// ディープリンクを生成します。CC Switch をインストールした端末で開くと、このプロバイダーをワンクリックで取り込めます。",
+      "includeApiKey": "リンクに API キーを含める",
+      "includeApiKeyHint": "キーは平文でリンクに書き込まれます。利用を許可された相手にだけ共有してください。含めない場合、受け取った側は取り込み後に自分のキーを入力します。",
+      "linkLabel": "ディープリンク",
+      "lengthHint": "{{count}} 文字",
+      "copyLink": "リンクをコピー",
+      "copied": "リンクをコピーしました",
+      "copyFailed": "コピーに失敗しました: {{detail}}"
+    },
     "officialPartner": "公式パートナー",
     "managedByHermes": "Hermes 管理",
     "managedByHermesHint": "Hermes の providers: dict で定義されています。Hermes Web UI で編集または削除してください。",

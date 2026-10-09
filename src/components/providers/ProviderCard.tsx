@@ -19,6 +19,8 @@ import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
 import { ProviderSpendLimitBadge } from "@/components/providers/ProviderSpendLimitBadge";
+import { ShareProviderDialog } from "@/components/providers/ShareProviderDialog";
+import { isShareableApp } from "@/utils/providerDeepLink";
 import { useProviderLimits } from "@/lib/query/usage";
 import {
   extractCodexBaseUrl,
@@ -181,6 +183,9 @@ export function ProviderCard({
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
   const isAdditiveMode = appId === "opencode" && !isAnyOmo;
 
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  // 官方供应商没有可分享的端点 / 密钥；仅主流四个应用的配置形态能可靠生成深链
+  const canShare = isShareableApp(appId) && provider.category !== "official";
   const { data: health } = useProviderHealth(provider.id, appId);
   const hasSpendLimit = Boolean(
     provider.meta?.limitDailyUsd || provider.meta?.limitMonthlyUsd,
@@ -636,6 +641,7 @@ export function ProviderCard({
               onSwitch={() => onSwitch(provider)}
               onEdit={() => onEdit(provider)}
               onDuplicate={() => onDuplicate(provider)}
+              onShare={canShare ? () => setIsShareOpen(true) : undefined}
               onTest={
                 // 连通检测对第三方/自定义/Copilot/Codex-OAuth 供应商开放（这些正是旧的
                 // 真实请求探测会误报、而可达性探测能正确处理的对象）。官方供应商
@@ -686,6 +692,15 @@ export function ProviderCard({
             inline={false}
           />
         </div>
+      )}
+
+      {canShare && isShareableApp(appId) && isShareOpen && (
+        <ShareProviderDialog
+          provider={provider}
+          appId={appId}
+          open={isShareOpen}
+          onOpenChange={setIsShareOpen}
+        />
       )}
     </div>
   );

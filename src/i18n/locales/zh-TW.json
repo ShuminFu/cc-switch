@@ -143,6 +143,18 @@
     "duplicate": "複製",
     "sortUpdateFailed": "排序更新失敗",
     "configureUsage": "設定用量查詢",
+    "share": "分享連結",
+    "shareDialog": {
+      "title": "分享供應商 {{name}}",
+      "description": "產生 ccswitch:// 深層連結，接收方在安裝了 CC Switch 的裝置上開啟即可一鍵匯入。",
+      "includeApiKey": "在連結中包含 API Key",
+      "includeApiKeyHint": "金鑰會以明文寫入連結，只分享給允許使用該金鑰的人。未勾選時接收方匯入後需自行填寫金鑰。",
+      "linkLabel": "深層連結",
+      "lengthHint": "{{count}} 個字元",
+      "copyLink": "複製連結",
+      "copied": "連結已複製",
+      "copyFailed": "複製失敗：{{detail}}"
+    },
     "officialPartner": "官方合作夥伴",
     "managedByHermes": "Hermes 託管",
     "managedByHermesHint": "該專案定義於 Hermes 的 providers: dict，請在 Hermes Web UI 中編輯或刪除。",
