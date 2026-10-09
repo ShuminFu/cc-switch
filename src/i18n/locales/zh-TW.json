@@ -1772,6 +1772,10 @@
     "import": "匯入",
     "syncNow": "同步到應用",
     "syncNowHint": "將 CC Switch 中啟用的 MCP 伺服器重新寫入各應用設定",
+    "shareLink": "複製匯入連結",
+    "shareCopied": "連結已複製",
+    "shareCopiedEnvOmitted": "連結已複製（已移除環境變數，請另行分享金鑰）",
+    "shareFailed": "複製連結失敗",
     "importExisting": "匯入已有",
     "addMcp": "新增 MCP",
     "claudeTitle": "Claude Code MCP 管理",
@@ -1940,6 +1944,9 @@
     "addTitle": "新增 {{appName}} 提示詞",
     "editTitle": "編輯 {{appName}} 提示詞",
     "importHint": "把目前應用的全域提示詞檔案匯入為一條新提示詞",
+    "shareLink": "複製匯入連結",
+    "shareCopied": "連結已複製",
+    "shareFailed": "複製連結失敗",
     "import": "匯入現有",
     "count": "共 {{count}} 個提示詞",
     "enabled": "已啟用",
@@ -2571,6 +2578,14 @@
     "keepCurrent": "保持目前",
     "enabled": "啟用規則",
     "delete": "刪除規則"
+  },
+  "quickSwitch": {
+    "title": "快速切換 {{app}} 供應商",
+    "placeholder": "搜尋 {{app}} 供應商…",
+    "empty": "沒有符合的供應商",
+    "current": "目前",
+    "hint": "↑↓ 選擇 · Enter 切換 · Esc 關閉",
+    "openTooltip": "快速切換供應商（⌘K / Ctrl+K）"
   },
   "health": {
     "state": {

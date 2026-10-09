@@ -7,6 +7,9 @@ import { useTauriEvent } from "@/hooks/useTauriEvent";
 import PromptListItem from "./PromptListItem";
 import PromptFormPanel from "./PromptFormPanel";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { toast } from "sonner";
+import { copyText } from "@/lib/clipboard";
+import { buildPromptDeepLink } from "@/utils/shareDeepLinks";
 
 interface PromptPanelProps {
   open: boolean;
@@ -84,6 +87,23 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       setIsFormOpen(true);
     };
 
+    const handleShare = async (id: string) => {
+      const prompt = prompts[id];
+      if (!prompt) return;
+      try {
+        await copyText(buildPromptDeepLink(prompt, appId));
+        toast.success(
+          t("prompts.shareCopied", { defaultValue: "链接已复制" }),
+          { closeButton: true },
+        );
+      } catch (error) {
+        toast.error(
+          t("prompts.shareFailed", { defaultValue: "复制链接失败" }),
+          { description: String(error) },
+        );
+      }
+    };
+
     const handleDelete = (id: string) => {
       const prompt = prompts[id];
       setConfirmDialog({
@@ -143,6 +163,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
                   prompt={prompt}
                   onToggle={toggleEnabled}
                   onEdit={handleEdit}
+                  onShare={(promptId) => void handleShare(promptId)}
                   onDelete={handleDelete}
                 />
               ))}

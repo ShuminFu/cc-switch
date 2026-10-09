@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Edit3, Trash2 } from "lucide-react";
+import { Edit3, Share2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Prompt } from "@/lib/api";
 import PromptToggle from "./PromptToggle";
@@ -10,6 +10,7 @@ interface PromptListItemProps {
   prompt: Prompt;
   onToggle: (id: string, enabled: boolean) => void;
   onEdit: (id: string) => void;
+  onShare?: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -18,6 +19,7 @@ const PromptListItem: React.FC<PromptListItemProps> = ({
   prompt,
   onToggle,
   onEdit,
+  onShare,
   onDelete,
 }) => {
   const { t } = useTranslation();
@@ -54,6 +56,20 @@ const PromptListItem: React.FC<PromptListItemProps> = ({
           >
             <Edit3 size={16} />
           </Button>
+          {onShare && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => onShare(id)}
+              title={t("prompts.shareLink", { defaultValue: "复制导入链接" })}
+              aria-label={t("prompts.shareLink", {
+                defaultValue: "复制导入链接",
+              })}
+            >
+              <Share2 size={16} />
+            </Button>
+          )}
           <Button
             type="button"
             variant="ghost"

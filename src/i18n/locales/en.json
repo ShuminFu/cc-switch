@@ -1800,6 +1800,10 @@
     "import": "Import",
     "syncNow": "Sync to apps",
     "syncNowHint": "Write the MCP servers enabled in CC Switch back into every app's config",
+    "shareLink": "Copy import link",
+    "shareCopied": "Link copied",
+    "shareCopiedEnvOmitted": "Link copied (environment variables left out, share secrets separately)",
+    "shareFailed": "Failed to copy link",
     "importExisting": "Import Existing",
     "addMcp": "Add MCP",
     "claudeTitle": "Claude Code MCP Management",
@@ -1968,6 +1972,9 @@
     "addTitle": "Add {{appName}} Prompt",
     "editTitle": "Edit {{appName}} Prompt",
     "importHint": "Import the app's current global prompt file as a new prompt",
+    "shareLink": "Copy import link",
+    "shareCopied": "Link copied",
+    "shareFailed": "Failed to copy link",
     "import": "Import Existing",
     "count": "{{count}} prompts",
     "enabled": "Enabled",
@@ -2599,6 +2606,14 @@
     "keepCurrent": "Keep current",
     "enabled": "Enable rule",
     "delete": "Delete rule"
+  },
+  "quickSwitch": {
+    "title": "Quick switch {{app}} provider",
+    "placeholder": "Search {{app}} providers…",
+    "empty": "No matching provider",
+    "current": "current",
+    "hint": "↑↓ select · Enter switch · Esc close",
+    "openTooltip": "Quick switch provider (⌘K / Ctrl+K)"
   },
   "health": {
     "state": {

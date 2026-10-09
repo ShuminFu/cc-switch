@@ -26,6 +26,7 @@ import {
   Cpu,
   LayoutDashboard,
   RefreshCw,
+  Zap,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
@@ -81,6 +82,7 @@ import {
 import UnifiedSkillsPanel from "@/components/skills/UnifiedSkillsPanel";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { DeepLinkSwitchDialog } from "@/components/DeepLinkSwitchDialog";
+import { QuickSwitcher } from "@/components/providers/QuickSwitcher";
 import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
 import { AgentsPanel } from "@/components/agents/AgentsPanel";
 import { UniversalProviderPanel } from "@/components/universal";
@@ -180,6 +182,8 @@ function App() {
   const [skillsDiscoverySource, setSkillsDiscoverySource] =
     useState<SkillsPageSource>("repos");
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
+  // ⌘K / Ctrl+K 供应商快速切换
+  const [quickSwitchOpen, setQuickSwitchOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
 
@@ -640,6 +644,16 @@ function App() {
       if (event.key === "," && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         setCurrentView("settings");
+        return;
+      }
+
+      if (
+        (event.key === "k" || event.key === "K") &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        setQuickSwitchOpen((current) => !current);
         return;
       }
 
@@ -1253,6 +1267,20 @@ function App() {
                 <Button
                   variant="ghost"
                   size="icon"
+                  onClick={() => setQuickSwitchOpen(true)}
+                  title={t("quickSwitch.openTooltip", {
+                    defaultValue: "快速切换供应商（⌘K / Ctrl+K）",
+                  })}
+                  aria-label={t("quickSwitch.openTooltip", {
+                    defaultValue: "快速切换供应商（⌘K / Ctrl+K）",
+                  })}
+                  className="hover:bg-black/5 dark:hover:bg-white/5"
+                >
+                  <Zap className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => {
                     setSettingsDefaultTab("general");
                     setCurrentView("settings");
@@ -1736,6 +1764,19 @@ function App() {
 
       <DeepLinkImportDialog />
       <DeepLinkSwitchDialog />
+      <QuickSwitcher
+        open={quickSwitchOpen}
+        onOpenChange={setQuickSwitchOpen}
+        appLabel={t(`apps.${activeApp}`, { defaultValue: activeApp })}
+        providers={providers}
+        currentProviderId={currentProviderId}
+        onSelect={(provider) => {
+          setQuickSwitchOpen(false);
+          if (provider.id !== currentProviderId) {
+            void switchProvider(provider);
+          }
+        }}
+      />
       <FirstRunNoticeDialog />
     </div>
   );

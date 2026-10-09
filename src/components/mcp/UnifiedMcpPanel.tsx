@@ -14,10 +14,12 @@ import type { McpServer } from "@/types";
 import type { AppId } from "@/lib/api/types";
 import McpFormModal from "./McpFormModal";
 import { ConfirmDialog } from "../ConfirmDialog";
-import { Edit3, Trash2, ExternalLink } from "lucide-react";
+import { Edit3, Trash2, ExternalLink, Share2 } from "lucide-react";
 import { settingsApi } from "@/lib/api";
 import { mcpPresets } from "@/config/mcpPresets";
 import { toast } from "sonner";
+import { copyText } from "@/lib/clipboard";
+import { buildMcpDeepLink } from "@/utils/shareDeepLinks";
 import { MCP_APP_IDS } from "@/config/appConfig";
 import { AppCountBar } from "@/components/common/AppCountBar";
 import { AppToggleGroup } from "@/components/common/AppToggleGroup";
@@ -91,6 +93,28 @@ const UnifiedMcpPanel = React.forwardRef<
   const handleEdit = (id: string) => {
     setEditingId(id);
     setIsFormOpen(true);
+  };
+
+  /** 复制该服务器的 ccswitch:// 导入链接（默认不带 env，避免泄露密钥） */
+  const handleShare = async (id: string) => {
+    const server = serversMap?.[id];
+    if (!server) return;
+    try {
+      const { url, envOmitted } = buildMcpDeepLink(server);
+      await copyText(url);
+      toast.success(
+        envOmitted
+          ? t("mcp.shareCopiedEnvOmitted", {
+              defaultValue: "链接已复制（已去掉环境变量，请另行分享密钥）",
+            })
+          : t("mcp.shareCopied", { defaultValue: "链接已复制" }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(t("mcp.shareFailed", { defaultValue: "复制链接失败" }), {
+        description: String(error),
+      });
+    }
   };
 
   const handleAdd = () => {
@@ -188,6 +212,7 @@ const UnifiedMcpPanel = React.forwardRef<
                   server={server}
                   onToggleApp={handleToggleApp}
                   onEdit={handleEdit}
+                  onShare={(serverId) => void handleShare(serverId)}
                   onDelete={handleDelete}
                   isLast={index === serverEntries.length - 1}
                 />
@@ -233,6 +258,7 @@ interface UnifiedMcpListItemProps {
   server: McpServer;
   onToggleApp: (serverId: string, app: AppId, enabled: boolean) => void;
   onEdit: (id: string) => void;
+  onShare?: (id: string) => void;
   onDelete: (id: string) => void;
   isLast?: boolean;
 }
@@ -242,6 +268,7 @@ const UnifiedMcpListItem: React.FC<UnifiedMcpListItemProps> = ({
   server,
   onToggleApp,
   onEdit,
+  onShare,
   onDelete,
   isLast,
 }) => {
@@ -314,6 +341,19 @@ const UnifiedMcpListItem: React.FC<UnifiedMcpListItemProps> = ({
         >
           <Edit3 size={14} />
         </Button>
+        {onShare && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => onShare(id)}
+            title={t("mcp.shareLink", { defaultValue: "复制导入链接" })}
+            aria-label={t("mcp.shareLink", { defaultValue: "复制导入链接" })}
+          >
+            <Share2 size={14} />
+          </Button>
+        )}
         <Button
           type="button"
           variant="ghost"

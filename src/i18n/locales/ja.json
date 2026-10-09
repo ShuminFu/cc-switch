@@ -1800,6 +1800,10 @@
     "import": "インポート",
     "syncNow": "アプリへ同期",
     "syncNowHint": "CC Switch で有効な MCP サーバーを各アプリの設定へ書き戻します",
+    "shareLink": "インポートリンクをコピー",
+    "shareCopied": "リンクをコピーしました",
+    "shareCopiedEnvOmitted": "リンクをコピーしました（環境変数は除外。シークレットは別途共有してください）",
+    "shareFailed": "リンクのコピーに失敗しました",
     "importExisting": "既存をインポート",
     "addMcp": "MCPを追加",
     "claudeTitle": "Claude Code MCP 管理",
@@ -1968,6 +1972,9 @@
     "addTitle": "{{appName}} プロンプトを追加",
     "editTitle": "{{appName}} プロンプトを編集",
     "importHint": "アプリの現在のグローバルプロンプトファイルを新しいプロンプトとして取り込みます",
+    "shareLink": "インポートリンクをコピー",
+    "shareCopied": "リンクをコピーしました",
+    "shareFailed": "リンクのコピーに失敗しました",
     "import": "既存をインポート",
     "count": "{{count}} 件のプロンプト",
     "enabled": "有効",
@@ -2599,6 +2606,14 @@
     "keepCurrent": "現状を維持",
     "enabled": "ルールを有効化",
     "delete": "ルールを削除"
+  },
+  "quickSwitch": {
+    "title": "{{app}} のプロバイダーをクイック切り替え",
+    "placeholder": "{{app}} のプロバイダーを検索…",
+    "empty": "一致するプロバイダーがありません",
+    "current": "現在",
+    "hint": "↑↓ 選択 · Enter 切り替え · Esc 閉じる",
+    "openTooltip": "プロバイダーをクイック切り替え（⌘K / Ctrl+K）"
   },
   "health": {
     "state": {
