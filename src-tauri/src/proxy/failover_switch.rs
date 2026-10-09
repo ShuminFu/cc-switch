@@ -123,6 +123,7 @@ impl FailoverSwitchManager {
             let event_data = serde_json::json!({
                 "appType": app_type,
                 "providerId": provider_id,
+                "providerName": provider_name,
                 "source": "failover"  // 标识来源是故障转移
             });
             if let Err(e) = app.emit("provider-switched", event_data) {

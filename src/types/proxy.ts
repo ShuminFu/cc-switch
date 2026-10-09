@@ -80,6 +80,8 @@ export interface CircuitBreakerStats {
   consecutiveSuccesses: number;
   totalRequests: number;
   failedRequests: number;
+  /** Seconds until an open breaker allows a half-open probe; null otherwise */
+  retryAfterSeconds?: number | null;
 }
 
 // 供应商健康状态枚举

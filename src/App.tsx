@@ -356,6 +356,18 @@ function App() {
       try {
         const off = await providersApi.onSwitched(
           async (event: ProviderSwitchEvent) => {
+            if (event.source === "failover") {
+              // 自动故障转移此前只静默刷新列表；明确告知用户切到了哪个供应商。
+              toast.warning(
+                t("failover.autoSwitched", {
+                  defaultValue: "{{app}} 已自动故障转移到 {{provider}}",
+                  app: t(`apps.${event.appType}`, {
+                    defaultValue: event.appType,
+                  }),
+                  provider: event.providerName ?? event.providerId,
+                }),
+              );
+            }
             if (event.appType === activeApp) {
               await refetch();
             }
@@ -376,7 +388,7 @@ function App() {
       active = false;
       unsubscribe?.();
     };
-  }, [activeApp, refetch]);
+  }, [activeApp, refetch, t]);
 
   useTauriEvent("universal-provider-synced", async () => {
     await queryClient.invalidateQueries({ queryKey: ["providers"] });

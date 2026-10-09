@@ -26,7 +26,13 @@ import {
   isCodexChatWireApi,
 } from "@/utils/providerConfigUtils";
 import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
-import { useProviderHealth } from "@/lib/query/failover";
+import {
+  useCircuitBreakerStats,
+  useProviderHealth,
+  useResetCircuitBreaker,
+} from "@/lib/query/failover";
+import { toast } from "sonner";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import { useUsageQuery } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
 
@@ -174,6 +180,36 @@ export function ProviderCard({
   const isAdditiveMode = appId === "opencode" && !isAnyOmo;
 
   const { data: health } = useProviderHealth(provider.id, appId);
+  // 熔断器内存状态只在代理运行且该供应商已熔断时才值得轮询
+  const circuitTripped =
+    isProxyRunning && isInFailoverQueue && health?.is_healthy === false;
+  const { data: breakerStats } = useCircuitBreakerStats(provider.id, appId, {
+    enabled: circuitTripped,
+  });
+  const resetBreaker = useResetCircuitBreaker();
+  const handleResetBreaker = () => {
+    resetBreaker.mutate(
+      { providerId: provider.id, appType: appId },
+      {
+        onSuccess: () => {
+          toast.success(
+            t("health.resetSuccess", {
+              defaultValue: "已重置 {{provider}} 的熔断器",
+              provider: provider.name,
+            }),
+          );
+        },
+        onError: (error: unknown) => {
+          toast.error(
+            t("health.resetFailed", {
+              defaultValue: "重置失败：{{detail}}",
+              detail: extractErrorMessage(error),
+            }),
+          );
+        },
+      },
+    );
+  };
 
   const fallbackUrlText = t("provider.notConfigured", {
     defaultValue: "未配置接口地址",
@@ -447,6 +483,10 @@ export function ProviderCard({
                 <ProviderHealthBadge
                   consecutiveFailures={health.consecutive_failures}
                   isHealthy={health.is_healthy}
+                  stats={circuitTripped ? breakerStats : undefined}
+                  lastError={health.last_error}
+                  onReset={handleResetBreaker}
+                  isResetting={resetBreaker.isPending}
                 />
               )}
 

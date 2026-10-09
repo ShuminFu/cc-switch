@@ -15,6 +15,10 @@ export interface ProviderSortUpdate {
 export interface ProviderSwitchEvent {
   appType: AppId;
   providerId: string;
+  /** Display name, present on failover-originated switches */
+  providerName?: string;
+  /** "failover" when the proxy switched automatically */
+  source?: string;
 }
 
 export interface SwitchResult {

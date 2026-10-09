@@ -296,12 +296,27 @@ impl CircuitBreaker {
     /// 获取统计信息
     #[allow(dead_code)]
     pub async fn get_stats(&self) -> CircuitBreakerStats {
+        let state = *self.state.read().await;
+        // Open 状态下报告距离允许半开探测还有多少秒，供 UI 展示"何时重试"。
+        let retry_after_seconds = if state == CircuitState::Open {
+            let timeout_seconds = self.config.read().await.timeout_seconds;
+            let elapsed_seconds = self
+                .last_opened_at
+                .read()
+                .await
+                .map(|opened_at| opened_at.elapsed().as_secs())
+                .unwrap_or(0);
+            Some(timeout_seconds.saturating_sub(elapsed_seconds))
+        } else {
+            None
+        };
         CircuitBreakerStats {
-            state: *self.state.read().await,
+            state,
             consecutive_failures: self.consecutive_failures.load(Ordering::SeqCst),
             consecutive_successes: self.consecutive_successes.load(Ordering::SeqCst),
             total_requests: self.total_requests.load(Ordering::SeqCst),
             failed_requests: self.failed_requests.load(Ordering::SeqCst),
+            retry_after_seconds,
         }
     }
 
@@ -396,6 +411,8 @@ pub struct CircuitBreakerStats {
     pub consecutive_successes: u32,
     pub total_requests: u32,
     pub failed_requests: u32,
+    /// Open 状态下距离允许半开探测的剩余秒数；其他状态为 None
+    pub retry_after_seconds: Option<u64>,
 }
 
 #[cfg(test)]
@@ -422,6 +439,36 @@ mod tests {
         // 应该转换到打开状态
         assert_eq!(breaker.get_state().await, CircuitState::Open);
         assert!(!breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_stats_report_retry_window_only_while_open() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 60,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.state, CircuitState::Closed);
+        assert_eq!(stats.retry_after_seconds, None);
+
+        breaker.record_failure(false).await;
+
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.state, CircuitState::Open);
+        assert_eq!(stats.failed_requests, 1);
+        let retry = stats
+            .retry_after_seconds
+            .expect("open breaker reports the remaining retry window");
+        assert!(
+            (58..=60).contains(&retry),
+            "unexpected retry window {retry}"
+        );
+
+        breaker.reset().await;
+        assert_eq!(breaker.get_stats().await.retry_after_seconds, None);
     }
 
     #[tokio::test]

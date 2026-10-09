@@ -2429,6 +2429,17 @@
     "title": "Agent"
   },
   "health": {
+    "state": {
+      "closed": "已閉合",
+      "open": "已斷路",
+      "halfOpen": "半開（探測中）"
+    },
+    "circuitState": "斷路器：{{state}}",
+    "retryIn": "{{seconds}} 秒後再次探測",
+    "lastError": "最近錯誤：{{error}}",
+    "reset": "重置斷路器",
+    "resetSuccess": "已重置 {{provider}} 的斷路器",
+    "resetFailed": "重置失敗：{{detail}}",
     "operational": "正常",
     "degraded": "降級",
     "failed": "失敗",
@@ -2436,6 +2447,7 @@
     "consecutiveFailures": "連續失敗 {{count}} 次"
   },
   "failover": {
+    "autoSwitched": "{{app}} 已自動故障轉移到 {{provider}}",
     "enabled": "{{app}} 故障轉移已啟用",
     "disabled": "{{app}} 故障轉移已關閉",
     "toggleFailed": "操作失敗：{{detail}}",
@@ -2462,7 +2474,9 @@
         "activeConnections": "活躍連線",
         "totalRequests": "總請求數",
         "successRate": "成功率",
-        "uptime": "運作時間"
+        "uptime": "運作時間",
+        "failoverCount": "故障轉移次數",
+        "lastError": "最近錯誤"
       }
     },
     "settings": {

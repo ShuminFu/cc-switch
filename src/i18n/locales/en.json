@@ -2457,6 +2457,17 @@
     "title": "Agents"
   },
   "health": {
+    "state": {
+      "closed": "Closed",
+      "open": "Open",
+      "halfOpen": "Half-open (probing)"
+    },
+    "circuitState": "Circuit breaker: {{state}}",
+    "retryIn": "Next probe in {{seconds}}s",
+    "lastError": "Last error: {{error}}",
+    "reset": "Reset circuit breaker",
+    "resetSuccess": "Circuit breaker reset for {{provider}}",
+    "resetFailed": "Reset failed: {{detail}}",
     "operational": "Operational",
     "degraded": "Degraded",
     "failed": "Failed",
@@ -2464,6 +2475,7 @@
     "consecutiveFailures": "{{count}} consecutive failures"
   },
   "failover": {
+    "autoSwitched": "{{app}}: auto failover switched to {{provider}}",
     "enabled": "{{app}} failover enabled",
     "disabled": "{{app}} failover disabled",
     "toggleFailed": "Operation failed: {{detail}}",
@@ -2490,7 +2502,9 @@
         "activeConnections": "Active Connections",
         "totalRequests": "Total Requests",
         "successRate": "Success Rate",
-        "uptime": "Uptime"
+        "uptime": "Uptime",
+        "failoverCount": "Failovers",
+        "lastError": "Last error"
       }
     },
     "settings": {

@@ -2457,6 +2457,17 @@
     "title": "エージェント"
   },
   "health": {
+    "state": {
+      "closed": "クローズ",
+      "open": "オープン",
+      "halfOpen": "ハーフオープン（検証中）"
+    },
+    "circuitState": "サーキットブレーカー: {{state}}",
+    "retryIn": "{{seconds}} 秒後に再検証",
+    "lastError": "最新のエラー: {{error}}",
+    "reset": "サーキットブレーカーをリセット",
+    "resetSuccess": "{{provider}} のサーキットブレーカーをリセットしました",
+    "resetFailed": "リセットに失敗しました: {{detail}}",
     "operational": "正常",
     "degraded": "低下",
     "failed": "失敗",
@@ -2464,6 +2475,7 @@
     "consecutiveFailures": "{{count}} 回連続失敗"
   },
   "failover": {
+    "autoSwitched": "{{app}}: 自動フェイルオーバーで {{provider}} に切り替えました",
     "enabled": "{{app}} フェイルオーバーが有効になりました",
     "disabled": "{{app}} フェイルオーバーが無効になりました",
     "toggleFailed": "操作に失敗しました: {{detail}}",
@@ -2490,7 +2502,9 @@
         "activeConnections": "アクティブ接続",
         "totalRequests": "総リクエスト数",
         "successRate": "成功率",
-        "uptime": "稼働時間"
+        "uptime": "稼働時間",
+        "failoverCount": "フェイルオーバー回数",
+        "lastError": "最新のエラー"
       }
     },
     "settings": {

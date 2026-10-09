@@ -3180,6 +3180,23 @@ impl ProxyService {
         }
         Ok(())
     }
+
+    /// 获取运行中代理的供应商熔断器统计；代理未运行或熔断器尚未创建时返回 None
+    pub async fn get_provider_circuit_breaker_stats(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> Option<crate::proxy::CircuitBreakerStats> {
+        let server = self.server.read().await;
+        match server.as_ref() {
+            Some(server) => {
+                server
+                    .get_provider_circuit_breaker_stats(provider_id, app_type)
+                    .await
+            }
+            None => None,
+        }
+    }
 }
 
 #[cfg(test)]

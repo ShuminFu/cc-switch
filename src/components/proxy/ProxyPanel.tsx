@@ -511,6 +511,31 @@ export function ProxyPanel({
                 value={formatUptime(status.uptime_seconds)}
               />
             </div>
+
+            {/* [7b] Failover telemetry — computed by the backend, previously never shown */}
+            {(status.failover_count > 0 || status.last_error) && (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                {status.failover_count > 0 && (
+                  <span>
+                    {t("proxy.panel.stats.failoverCount", {
+                      defaultValue: "故障转移次数",
+                    })}
+                    : {status.failover_count}
+                  </span>
+                )}
+                {status.last_error && (
+                  <span
+                    className="min-w-0 max-w-full truncate"
+                    title={status.last_error}
+                  >
+                    {t("proxy.panel.stats.lastError", {
+                      defaultValue: "最近错误",
+                    })}
+                    : {status.last_error}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-6">

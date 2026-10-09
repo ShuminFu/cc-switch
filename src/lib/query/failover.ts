@@ -80,11 +80,15 @@ export function useUpdateCircuitBreakerConfig() {
 /**
  * 获取熔断器统计信息
  */
-export function useCircuitBreakerStats(providerId: string, appType: string) {
+export function useCircuitBreakerStats(
+  providerId: string,
+  appType: string,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ["circuitBreakerStats", providerId, appType],
     queryFn: () => failoverApi.getCircuitBreakerStats(providerId, appType),
-    enabled: !!providerId && !!appType,
+    enabled: !!providerId && !!appType && (options?.enabled ?? true),
     refetchInterval: 5000, // 每 5 秒刷新一次
   });
 }

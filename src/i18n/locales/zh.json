@@ -2457,6 +2457,17 @@
     "title": "智能体"
   },
   "health": {
+    "state": {
+      "closed": "已闭合",
+      "open": "已熔断",
+      "halfOpen": "半开（探测中）"
+    },
+    "circuitState": "熔断器：{{state}}",
+    "retryIn": "{{seconds}} 秒后再次探测",
+    "lastError": "最近错误：{{error}}",
+    "reset": "重置熔断器",
+    "resetSuccess": "已重置 {{provider}} 的熔断器",
+    "resetFailed": "重置失败：{{detail}}",
     "operational": "正常",
     "degraded": "降级",
     "failed": "失败",
@@ -2464,6 +2475,7 @@
     "consecutiveFailures": "连续失败 {{count}} 次"
   },
   "failover": {
+    "autoSwitched": "{{app}} 已自动故障转移到 {{provider}}",
     "enabled": "{{app}} 故障转移已启用",
     "disabled": "{{app}} 故障转移已关闭",
     "toggleFailed": "操作失败: {{detail}}",
@@ -2490,7 +2502,9 @@
         "activeConnections": "活跃连接",
         "totalRequests": "总请求数",
         "successRate": "成功率",
-        "uptime": "运行时间"
+        "uptime": "运行时间",
+        "failoverCount": "故障转移次数",
+        "lastError": "最近错误"
       }
     },
     "settings": {

@@ -448,8 +448,10 @@ pub async fn get_circuit_breaker_stats(
     provider_id: String,
     app_type: String,
 ) -> Result<Option<CircuitBreakerStats>, String> {
-    // 这个功能需要访问运行中的代理服务器的内存状态
-    // 目前先返回 None，后续可以通过 ProxyService 暴露接口来实现
-    let _ = (state, provider_id, app_type);
-    Ok(None)
+    // 熔断器状态只存在于运行中代理服务器的内存里；未运行或该供应商尚未处理过
+    // 请求（熔断器未创建）时返回 None，前端据此只展示数据库里的健康摘要。
+    Ok(state
+        .proxy_service
+        .get_provider_circuit_breaker_stats(&provider_id, &app_type)
+        .await)
 }
