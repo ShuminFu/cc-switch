@@ -1764,6 +1764,8 @@
   "mcp": {
     "title": "MCP Management",
     "import": "Import",
+    "syncNow": "Sync to apps",
+    "syncNowHint": "Write the MCP servers enabled in CC Switch back into every app's config",
     "importExisting": "Import Existing",
     "addMcp": "Add MCP",
     "claudeTitle": "Claude Code MCP Management",
@@ -1777,6 +1779,7 @@
       "deleteConfirm": "Are you sure you want to delete server \"{{id}}\"? This action cannot be undone.",
       "noServers": "No servers yet",
       "enabledApps": "Enabled Apps",
+      "syncSuccess": "MCP servers were re-synced to every app's config",
       "noImportFound": "No MCP servers to import found. All servers are already managed by CC Switch.",
       "importSuccess": "Successfully imported {{count}} MCP servers",
       "apps": {

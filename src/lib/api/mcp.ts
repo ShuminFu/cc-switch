@@ -123,6 +123,11 @@ export const mcpApi = {
   /**
    * 从所有应用导入 MCP 服务器
    */
+  /** Re-project every enabled server into each app's live config (best-effort; partial failures reject) */
+  async syncToApps(): Promise<void> {
+    await invoke("sync_mcp_to_apps");
+  },
+
   async importFromApps(): Promise<number> {
     return await invoke("import_mcp_from_apps");
   },

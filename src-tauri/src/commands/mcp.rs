@@ -199,3 +199,12 @@ pub async fn toggle_mcp_app(
 pub async fn import_mcp_from_apps(state: State<'_, AppState>) -> Result<usize, String> {
     McpService::import_from_all_apps(&state).map_err(|e| e.to_string())
 }
+
+/// 手动把数据库中的 MCP 服务器重新投影到所有应用的 live 配置。
+///
+/// 用户直接改过 ~/.claude.json / config.toml 等文件、或怀疑投影陈旧时的
+/// 显式修复入口；后端是 best-effort，部分应用失败会聚合成一个错误返回。
+#[tauri::command]
+pub async fn sync_mcp_to_apps(state: State<'_, AppState>) -> Result<(), String> {
+    McpService::sync_all_enabled(&state).map_err(|e| e.to_string())
+}

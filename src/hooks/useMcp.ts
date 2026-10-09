@@ -63,6 +63,16 @@ export function useDeleteMcpServer() {
 /**
  * 从所有应用导入 MCP 服务器
  */
+export function useSyncMcpToApps() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => mcpApi.syncToApps(),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
+    },
+  });
+}
+
 export function useImportMcpFromApps() {
   const queryClient = useQueryClient();
   return useMutation({

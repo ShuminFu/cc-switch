@@ -8,6 +8,7 @@ import {
   useToggleMcpApp,
   useDeleteMcpServer,
   useImportMcpFromApps,
+  useSyncMcpToApps,
 } from "@/hooks/useMcp";
 import type { McpServer } from "@/types";
 import type { AppId } from "@/lib/api/types";
@@ -49,6 +50,7 @@ const UnifiedMcpPanel = React.forwardRef<
   const toggleAppMutation = useToggleMcpApp();
   const deleteServerMutation = useDeleteMcpServer();
   const importMutation = useImportMcpFromApps();
+  const syncMutation = useSyncMcpToApps();
 
   const serverEntries = useMemo((): Array<[string, McpServer]> => {
     if (!serversMap) return [];
@@ -113,9 +115,20 @@ const UnifiedMcpPanel = React.forwardRef<
     }
   };
 
+  const handleSync = async () => {
+    try {
+      await syncMutation.mutateAsync();
+      toast.success(t("mcp.unifiedPanel.syncSuccess"), { closeButton: true });
+    } catch (error) {
+      // 后端 best-effort：错误信息已列出失败的应用，其余应用已同步完成
+      toast.error(t("common.error"), { description: String(error) });
+    }
+  };
+
   React.useImperativeHandle(ref, () => ({
     openAdd: handleAdd,
     openImport: handleImport,
+    syncToApps: handleSync,
   }));
 
   const handleDelete = (id: string) => {

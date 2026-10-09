@@ -1764,6 +1764,8 @@
   "mcp": {
     "title": "MCP 管理",
     "import": "インポート",
+    "syncNow": "アプリへ同期",
+    "syncNowHint": "CC Switch で有効な MCP サーバーを各アプリの設定へ書き戻します",
     "importExisting": "既存をインポート",
     "addMcp": "MCPを追加",
     "claudeTitle": "Claude Code MCP 管理",
@@ -1777,6 +1779,7 @@
       "deleteConfirm": "サーバー「{{id}}」を削除しますか？この操作は元に戻せません。",
       "noServers": "まだサーバーがありません",
       "enabledApps": "有効なアプリ",
+      "syncSuccess": "MCP サーバーを各アプリの設定へ再同期しました",
       "noImportFound": "インポートする MCP サーバーが見つかりませんでした。すべてのサーバーは CC Switch で管理されています。",
       "importSuccess": "{{count}} 個の MCP サーバーをインポートしました",
       "apps": {

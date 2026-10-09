@@ -25,6 +25,7 @@ import {
   Shield,
   Cpu,
   LayoutDashboard,
+  RefreshCw,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
@@ -1310,6 +1311,19 @@ function App() {
                 )}
                 {currentView === "mcp" && (
                   <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => mcpPanelRef.current?.syncToApps()}
+                      className="hover:bg-black/5 dark:hover:bg-white/5"
+                      title={t("mcp.syncNowHint", {
+                        defaultValue:
+                          "将 CC Switch 中启用的 MCP 服务器重新写入各应用配置",
+                      })}
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      {t("mcp.syncNow", { defaultValue: "同步到应用" })}
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"

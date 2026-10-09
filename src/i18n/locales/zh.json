@@ -1764,6 +1764,8 @@
   "mcp": {
     "title": "MCP 管理",
     "import": "导入",
+    "syncNow": "同步到应用",
+    "syncNowHint": "将 CC Switch 中启用的 MCP 服务器重新写入各应用配置",
     "importExisting": "导入已有",
     "addMcp": "添加MCP",
     "claudeTitle": "Claude Code MCP 管理",
@@ -1777,6 +1779,7 @@
       "deleteConfirm": "确定要删除服务器 \"{{id}}\" 吗？此操作无法撤销。",
       "noServers": "暂无服务器",
       "enabledApps": "启用的应用",
+      "syncSuccess": "已把 MCP 服务器重新同步到各应用配置",
       "noImportFound": "未发现需要导入的 MCP 服务器。所有服务器已在 CC Switch 统一管理中。",
       "importSuccess": "成功导入 {{count}} 个 MCP 服务器",
       "apps": {
