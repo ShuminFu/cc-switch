@@ -17,8 +17,11 @@ export interface ProviderSwitchEvent {
   providerId: string;
   /** Display name, present on failover-originated switches */
   providerName?: string;
-  /** "failover" when the proxy switched automatically */
+  /** "failover" when the proxy switched automatically; "rule" / "rule-revert" for quota rules */
   source?: string;
+  /** Why a quota rule fired, e.g. "five_hour 92%" */
+  reason?: string;
+  ruleId?: string;
 }
 
 export interface SwitchResult {

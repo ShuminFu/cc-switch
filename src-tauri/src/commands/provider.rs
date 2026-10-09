@@ -396,8 +396,14 @@ pub async fn queryProviderUsage(
     //      不写失败快照、不 emit：保留上一份托盘快照，与前端 react-query reject
     //      保留上次 data 的语义一致；否则失败快照会经 useUsageCacheBridge 盲写
     //      回 query 缓存，抹掉 reject 本该保留的旧值。
-    let inner =
-        query_provider_usage_inner(&state, &copilot_state, app_type.clone(), &providerId).await;
+    let inner = query_provider_usage_inner(
+        &state,
+        &copilot_state,
+        app_type.clone(),
+        &providerId,
+        Some(&app_handle),
+    )
+    .await;
     if let Ok(snapshot) = &inner {
         let payload = serde_json::json!({
             "kind": "script",
@@ -465,6 +471,7 @@ async fn query_provider_usage_inner(
     copilot_state: &CopilotAuthState,
     app_type: AppType,
     provider_id: &str,
+    app_handle: Option<&tauri::AppHandle>,
 ) -> Result<crate::provider::UsageResult, String> {
     // 从数据库读取供应商信息，检查特殊模板类型
     let providers = state
@@ -541,6 +548,17 @@ async fn query_provider_usage_inner(
         )
         .await
         .map_err(|e| format!("Failed to query coding plan: {e}"))?;
+
+        // 配额规则：Coding Plan 窗口越过阈值时自动切换（后台评估，不阻塞查询）。
+        // 在转换为 UsageResult（会丢掉 resets_at）之前挂钩。
+        if let Some(app) = app_handle {
+            crate::services::switch_rules::spawn_evaluation(
+                app.clone(),
+                app_type.clone(),
+                Some(provider_id.to_string()),
+                quota.clone(),
+            );
+        }
 
         // 将 SubscriptionQuota 转换为 UsageResult
         if !quota.success {

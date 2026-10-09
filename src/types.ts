@@ -379,6 +379,10 @@ export interface Settings {
   unifyCodexMigrateExisting?: boolean;
   // User has confirmed the failover toggle first-run notice
   failoverConfirmed?: boolean;
+  // Quota-aware switch rules master toggle (device-level)
+  switchRulesEnabled?: boolean;
+  // User has confirmed the switch rules first-run notice
+  switchRulesConfirmed?: boolean;
   // User has confirmed the first-run welcome notice
   firstRunNoticeConfirmed?: boolean;
   // User has confirmed the auto-sync traffic warning

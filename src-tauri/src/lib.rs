@@ -1088,6 +1088,9 @@ pub fn run() {
                     }
                 });
 
+                // 配额规则：重新武装上次运行期间触发、重置时间尚未到的回切定时器
+                crate::services::switch_rules::rearm_pending_reverts(app_handle.clone());
+
                 // Session log usage sync: 启动时同步一次，之后每 60 秒检查
                 let db_for_session_sync = state.db.clone();
                 tauri::async_runtime::spawn(async move {
@@ -1404,6 +1407,13 @@ pub fn run() {
             commands::remove_from_failover_queue,
             commands::get_auto_failover_enabled,
             commands::set_auto_failover_enabled,
+            commands::list_switch_rules,
+            commands::upsert_switch_rule,
+            commands::delete_switch_rule,
+            commands::set_switch_rule_enabled,
+            commands::get_switch_rule_states,
+            commands::cancel_switch_rule_revert,
+            commands::evaluate_switch_rules_now,
             // Usage statistics
             commands::get_usage_summary,
             commands::get_usage_summary_by_app,

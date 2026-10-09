@@ -128,6 +128,9 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/list_sessions`, () => success(listSessions())),
 
+  http.post(`${TAURI_ENDPOINT}/list_switch_rules`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_switch_rule_states`, () => success([])),
+
   http.post(`${TAURI_ENDPOINT}/get_session_usage`, async ({ request }) => {
     const { sessionIds } = await withJson<{ sessionIds: string[] }>(request);
     return success(getSessionUsage(sessionIds ?? []));

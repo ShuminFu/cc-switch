@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { Activity, Gauge, Globe, Server, ShieldAlert, Zap } from "lucide-react";
+import {
+  Activity,
+  Gauge,
+  Globe,
+  Server,
+  ShieldAlert,
+  Sparkles,
+  Zap,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,6 +23,10 @@ import { AutoFailoverConfigPanel } from "@/components/proxy/AutoFailoverConfigPa
 import { FailoverQueueManager } from "@/components/proxy/FailoverQueueManager";
 import { RectifierConfigPanel } from "@/components/settings/RectifierConfigPanel";
 import { CopilotOptimizerPanel } from "@/components/settings/CopilotOptimizerPanel";
+import {
+  SwitchRulesPanel,
+  SWITCH_RULE_APPS,
+} from "@/components/settings/SwitchRulesPanel";
 import { GlobalProxySettings } from "@/components/settings/GlobalProxySettings";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ToggleRow } from "@/components/ui/toggle-row";
@@ -33,6 +45,7 @@ export function ProxyTabContent({
   const { t } = useTranslation();
   const [showProxyConfirm, setShowProxyConfirm] = useState(false);
   const [showFailoverConfirm, setShowFailoverConfirm] = useState(false);
+  const [showSwitchRulesConfirm, setShowSwitchRulesConfirm] = useState(false);
 
   const {
     isRunning,
@@ -71,6 +84,26 @@ export function ProxyTabContent({
       setShowFailoverConfirm(true);
     } else {
       void onAutoSave({ enableFailoverToggle: checked });
+    }
+  };
+
+  const handleSwitchRulesToggleChange = (checked: boolean) => {
+    if (checked && !settings?.switchRulesConfirmed) {
+      setShowSwitchRulesConfirm(true);
+    } else {
+      void onAutoSave({ switchRulesEnabled: checked });
+    }
+  };
+
+  const handleSwitchRulesConfirm = async () => {
+    setShowSwitchRulesConfirm(false);
+    try {
+      await onAutoSave({
+        switchRulesConfirmed: true,
+        switchRulesEnabled: true,
+      });
+    } catch (error) {
+      console.error("Switch rules confirm failed:", error);
     }
   };
 
@@ -218,6 +251,65 @@ export function ProxyTabContent({
           </AccordionContent>
         </AccordionItem>
 
+        {/* Quota-aware switch rules */}
+        <AccordionItem
+          value="switchRules"
+          className="rounded-xl glass-card overflow-hidden"
+        >
+          <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/50">
+            <div className="flex items-center gap-3">
+              <Sparkles className="h-5 w-5 text-amber-500" />
+              <div className="text-left">
+                <h3 className="text-base font-semibold">
+                  {t("settings.advanced.switchRules.title", {
+                    defaultValue: "额度规则",
+                  })}
+                </h3>
+                <p className="text-sm text-muted-foreground font-normal">
+                  {t("settings.advanced.switchRules.description", {
+                    defaultValue:
+                      "订阅或 Coding Plan 额度用到阈值时自动切换到备用供应商，窗口重置后切回",
+                  })}
+                </p>
+              </div>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50">
+            <div className="space-y-6">
+              <ToggleRow
+                icon={<Sparkles className="h-4 w-4 text-amber-500" />}
+                title={t("settings.advanced.switchRules.enableToggle", {
+                  defaultValue: "启用额度规则",
+                })}
+                description={t(
+                  "settings.advanced.switchRules.enableToggleDescription",
+                  {
+                    defaultValue:
+                      "关闭时规则保留但不会触发。切换会改写该应用的实时配置；Codex / Grok Build 需要重启 CLI 才生效。",
+                  },
+                )}
+                checked={settings?.switchRulesEnabled ?? false}
+                onCheckedChange={handleSwitchRulesToggleChange}
+              />
+              <Tabs defaultValue="claude" className="w-full">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="claude">Claude</TabsTrigger>
+                  <TabsTrigger value="codex">Codex</TabsTrigger>
+                  <TabsTrigger value="gemini">Gemini</TabsTrigger>
+                </TabsList>
+                {SWITCH_RULE_APPS.map((appType) => (
+                  <TabsContent key={appType} value={appType} className="mt-4">
+                    <SwitchRulesPanel
+                      appType={appType}
+                      disabled={!(settings?.switchRulesEnabled ?? false)}
+                    />
+                  </TabsContent>
+                ))}
+              </Tabs>
+            </div>
+          </AccordionContent>
+        </AccordionItem>
+
         {/* Rectifier */}
         <AccordionItem
           value="rectifier"
@@ -296,6 +388,23 @@ export function ProxyTabContent({
         confirmText={t("confirm.proxy.confirm")}
         onConfirm={() => void handleProxyConfirm()}
         onCancel={() => setShowProxyConfirm(false)}
+      />
+
+      <ConfirmDialog
+        isOpen={showSwitchRulesConfirm}
+        variant="info"
+        title={t("confirm.switchRules.title", {
+          defaultValue: "启用额度规则",
+        })}
+        message={t("confirm.switchRules.message", {
+          defaultValue:
+            "额度规则会在没有任何点击的情况下改写应用的实时配置，正在进行的会话会随之换到另一个供应商和模型。\n\n切换与回切都会弹出提示并更新托盘；手动切换会取消待回切。",
+        })}
+        confirmText={t("confirm.switchRules.confirm", {
+          defaultValue: "我已了解，启用",
+        })}
+        onConfirm={() => void handleSwitchRulesConfirm()}
+        onCancel={() => setShowSwitchRulesConfirm(false)}
       />
 
       <ConfirmDialog

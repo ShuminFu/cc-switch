@@ -293,6 +293,11 @@
       "message": "ローカルルーティングは上級機能です。有効にする前に、その仕組みを理解していることをご確認ください。\n\n適切な設定方法については、関連ドキュメントまたはプロバイダーにご相談ください。",
       "confirm": "理解しました、有効にする"
     },
+    "switchRules": {
+      "title": "使用量ルールを有効化",
+      "message": "使用量ルールはクリックなしでアプリのライブ設定を書き換えるため、進行中のセッションは別のプロバイダーとモデルに移ります。\n\n切り替えと復帰のたびに通知が表示されトレイが更新されます。手動で切り替えると復帰待ちは取り消されます。",
+      "confirm": "理解しました、有効化"
+    },
     "failover": {
       "title": "フェイルオーバーの有効化",
       "message": "フェイルオーバーは上級機能です。有効にする前に、その仕組みを理解していることをご確認ください。\n\nフェイルオーバーキューでプロバイダーの優先順位を先に設定することをお勧めします。",
@@ -382,6 +387,12 @@
       "cloudSync": {
         "title": "クラウド同期",
         "description": "WebDAV でデバイス間のデータを同期"
+      },
+      "switchRules": {
+        "title": "使用量ルール",
+        "description": "サブスクリプションや Coding Plan の使用量がしきい値に達したら予備プロバイダーへ切り替え、リセット時に戻します",
+        "enableToggle": "使用量ルールを有効化",
+        "enableToggleDescription": "オフの間はルールは保持されますが発動しません。切り替えはアプリのライブ設定を書き換えます。Codex / Grok Build は CLI の再起動が必要です。"
       },
       "copilotOptimizer": {
         "title": "Copilot オプティマイザー",
@@ -2543,6 +2554,41 @@
     "monthly": "今月 {{used}} / {{limit}}",
     "exceeded": "支出上限を超えました",
     "overBudget": "予算超過"
+  },
+  "switchRules": {
+    "autoSwitched": "{{app}}: 使用量ルールにより {{provider}} に切り替えました（{{reason}}）",
+    "autoReverted": "{{app}}: 使用量ウィンドウがリセットされ、{{provider}} に戻しました",
+    "hint": "公式サブスクリプションのルールは使用量更新のたびに評価され、Coding Plan のルールはそのプロバイダーの使用量照会時に評価されます。切り替え後はウィンドウのリセット時に自動で戻ります（無効化可）。",
+    "evaluateNow": "今すぐ評価",
+    "add": "ルールを追加",
+    "watched": "監視する使用量",
+    "officialPlan": "公式サブスクリプション",
+    "codingPlanOf": "{{name}}（Coding Plan）",
+    "tier": "使用量ウィンドウ",
+    "tierPlaceholder": "ウィンドウを選択",
+    "threshold": "しきい値（%）",
+    "target": "切り替え先",
+    "targetPlaceholder": "予備プロバイダーを選択",
+    "revertOnReset": "ウィンドウのリセット時に戻す",
+    "saved": "ルールを保存しました",
+    "saveFailed": "ルールの保存に失敗しました",
+    "invalidThreshold": "しきい値は 1〜100 の範囲で指定してください",
+    "tierRequired": "使用量ウィンドウを選択してください",
+    "targetRequired": "予備プロバイダーを選択してください",
+    "evaluatedFired": "評価しました：{{count}} 件のルールが発動",
+    "evaluatedIdle": "評価しました：発動するルールはありません",
+    "evaluateFailed": "評価に失敗しました",
+    "empty": "ルールはまだありません。使用量が上限に近づいたら自動で予備プロバイダーへ切り替えるルールを追加しましょう。",
+    "ruleSummary": "{{watched}} の {{tier}} が {{threshold}}% 以上なら {{target}} に切り替え",
+    "revertEnabled": "ウィンドウのリセット時に戻す",
+    "revertDisabled": "自動では戻さない",
+    "lastFired": "前回発動 {{time}}",
+    "armed": "発動済み（{{reason}}）：{{from}} → {{to}}、{{revert}}",
+    "revertAt": "{{time}} に戻します",
+    "revertPending": "戻し待ち",
+    "keepCurrent": "現状を維持",
+    "enabled": "ルールを有効化",
+    "delete": "ルールを削除"
   },
   "health": {
     "state": {

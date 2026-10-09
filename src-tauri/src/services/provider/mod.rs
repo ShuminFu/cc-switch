@@ -2507,6 +2507,12 @@ impl ProviderService {
             .get(id)
             .ok_or_else(|| AppError::Message(format!("供应商 {id} 不存在")))?;
 
+        // 任何切换（手动 / 托盘 / 项目 / 规则本身）都取消该应用规则的待回切；
+        // 规则触发后会在切换完成后重新写入自己的状态。
+        if let Err(e) = state.db.clear_switch_rule_states_for_app(app_type.as_str()) {
+            log::warn!("清除 {} 配额规则状态失败: {e}", app_type.as_str());
+        }
+
         // OMO providers are switched through their own exclusive path.
         if matches!(app_type, AppType::OpenCode) && _provider.category.as_deref() == Some("omo") {
             return Self::switch_normal(state, app_type, id, &providers);

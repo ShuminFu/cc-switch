@@ -293,6 +293,11 @@
       "message": "本地路由是一项高级功能，启用前请确保您已了解其工作原理。\n\n建议先查阅相关文档或咨询您的供应商，以获取正确的配置方式。",
       "confirm": "我已了解，继续启用"
     },
+    "switchRules": {
+      "title": "启用额度规则",
+      "message": "额度规则会在没有任何点击的情况下改写应用的实时配置，正在进行的会话会随之换到另一个供应商和模型。\n\n切换与回切都会弹出提示并更新托盘；手动切换会取消待回切。",
+      "confirm": "我已了解，启用"
+    },
     "failover": {
       "title": "启用故障转移功能",
       "message": "故障转移是一项高级功能，启用前请确保您已了解其工作原理。\n\n建议先在故障转移队列中配置好供应商优先级。",
@@ -382,6 +387,12 @@
       "cloudSync": {
         "title": "云同步",
         "description": "通过 WebDAV 在多设备间同步数据"
+      },
+      "switchRules": {
+        "title": "额度规则",
+        "description": "订阅或 Coding Plan 额度用到阈值时自动切换到备用供应商，窗口重置后切回",
+        "enableToggle": "启用额度规则",
+        "enableToggleDescription": "关闭时规则保留但不会触发。切换会改写该应用的实时配置；Codex / Grok Build 需要重启 CLI 才生效。"
       },
       "copilotOptimizer": {
         "title": "Copilot 优化器",
@@ -2543,6 +2554,41 @@
     "monthly": "本月 {{used}} / {{limit}}",
     "exceeded": "已超出支出上限",
     "overBudget": "超支"
+  },
+  "switchRules": {
+    "autoSwitched": "{{app}} 已按额度规则切换到 {{provider}}（{{reason}}）",
+    "autoReverted": "{{app}} 额度窗口已重置，已切回 {{provider}}",
+    "hint": "官方订阅规则在每次额度刷新时评估；Coding Plan 规则在该供应商的用量查询时评估。切换后会在窗口重置时自动回切（可关闭）。",
+    "evaluateNow": "立即评估",
+    "add": "添加规则",
+    "watched": "监控的额度",
+    "officialPlan": "官方订阅",
+    "codingPlanOf": "{{name}}（Coding Plan）",
+    "tier": "额度窗口",
+    "tierPlaceholder": "选择窗口",
+    "threshold": "触发阈值（%）",
+    "target": "切换到",
+    "targetPlaceholder": "选择备用供应商",
+    "revertOnReset": "窗口重置后自动切回",
+    "saved": "规则已保存",
+    "saveFailed": "保存规则失败",
+    "invalidThreshold": "阈值需在 1 到 100 之间",
+    "tierRequired": "请选择额度窗口",
+    "targetRequired": "请选择备用供应商",
+    "evaluatedFired": "已评估，触发了 {{count}} 条规则",
+    "evaluatedIdle": "已评估，暂无规则需要触发",
+    "evaluateFailed": "评估失败",
+    "empty": "还没有规则。添加一条，让额度用尽时自动切到备用供应商。",
+    "ruleSummary": "{{watched}} 的 {{tier}} ≥ {{threshold}}% 时切换到 {{target}}",
+    "revertEnabled": "窗口重置后自动切回",
+    "revertDisabled": "不自动切回",
+    "lastFired": "上次触发 {{time}}",
+    "armed": "已触发（{{reason}}），{{from}} → {{to}}，{{revert}}",
+    "revertAt": "将于 {{time}} 切回",
+    "revertPending": "等待切回",
+    "keepCurrent": "保持当前",
+    "enabled": "启用规则",
+    "delete": "删除规则"
   },
   "health": {
     "state": {

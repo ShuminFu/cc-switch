@@ -122,6 +122,9 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        // 7b. 配额规则表（订阅 / Coding Plan 窗口越过阈值时自动切换供应商）
+        Self::create_switch_rules_tables(conn)?;
+
         // 8. Proxy Config 表（三行结构，app_type 主键）
         conn.execute("CREATE TABLE IF NOT EXISTS proxy_config (
             app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
@@ -505,6 +508,11 @@ impl Database {
                         log::info!("迁移数据库从 v14 到 v15（Skills/MCP 添加 Grok Build 支持）");
                         Self::migrate_v14_to_v15(conn)?;
                         Self::set_user_version(conn, 15)?;
+                    }
+                    15 => {
+                        log::info!("迁移数据库从 v15 到 v16（添加配额规则表）");
+                        Self::migrate_v15_to_v16(conn)?;
+                        Self::set_user_version(conn, 16)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -1490,6 +1498,55 @@ impl Database {
     }
 
     /// v14 -> v15: persist Grok Build enablement for unified Skills and MCP.
+    /// 配额规则表：`switch_rules` 随 providers 同步，`switch_rule_state` 为设备本地状态
+    /// （见 backup.rs 的 SYNC_SKIP_TABLES / SYNC_PRESERVE_TABLES）。
+    pub(crate) fn create_switch_rules_tables(conn: &Connection) -> Result<(), AppError> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS switch_rules (
+                id TEXT PRIMARY KEY,
+                app_type TEXT NOT NULL,
+                watched_provider_id TEXT,
+                source TEXT NOT NULL DEFAULT 'subscription',
+                tier_name TEXT NOT NULL,
+                threshold_pct REAL NOT NULL DEFAULT 90,
+                target_provider_id TEXT NOT NULL,
+                revert_on_reset INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                sort_index INTEGER NOT NULL DEFAULT 0,
+                last_fired_at INTEGER,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_switch_rules_app_enabled
+             ON switch_rules(app_type, enabled)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS switch_rule_state (
+                rule_id TEXT PRIMARY KEY,
+                fired_at INTEGER NOT NULL,
+                resets_at INTEGER,
+                switched_from TEXT NOT NULL,
+                switched_to TEXT NOT NULL,
+                last_utilization REAL NOT NULL DEFAULT 0,
+                reason TEXT
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// v15 -> v16 迁移：添加配额规则表
+    fn migrate_v15_to_v16(conn: &Connection) -> Result<(), AppError> {
+        Self::create_switch_rules_tables(conn)
+    }
+
     fn migrate_v14_to_v15(conn: &Connection) -> Result<(), AppError> {
         if Self::table_exists(conn, "mcp_servers")? {
             Self::add_column_if_missing(
@@ -2971,6 +3028,35 @@ mod tests {
         )?;
         assert_eq!(codex_values, (1, 9));
 
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_v15_to_v16_creates_switch_rules_tables() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE providers (id TEXT PRIMARY KEY, app_type TEXT NOT NULL);",
+        )?;
+        conn.execute(
+            "INSERT INTO providers (id, app_type) VALUES ('p1', 'claude')",
+            [],
+        )?;
+        Database::set_user_version(&conn, 15)?;
+
+        Database::apply_schema_migrations_on_conn(&conn)?;
+
+        assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+        assert!(Database::table_exists(&conn, "switch_rules")?);
+        assert!(Database::table_exists(&conn, "switch_rule_state")?);
+        let index_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_switch_rules_app_enabled'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(index_count, 1);
+        let provider_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0))?;
+        assert_eq!(provider_count, 1);
         Ok(())
     }
 

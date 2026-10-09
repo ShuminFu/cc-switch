@@ -369,6 +369,29 @@ function App() {
                 }),
               );
             }
+            if (event.source === "rule") {
+              toast.warning(
+                t("switchRules.autoSwitched", {
+                  defaultValue:
+                    "{{app}} 已按额度规则切换到 {{provider}}（{{reason}}）",
+                  app: t(`apps.${event.appType}`, {
+                    defaultValue: event.appType,
+                  }),
+                  provider: event.providerName ?? event.providerId,
+                  reason: event.reason ?? "",
+                }),
+              );
+            } else if (event.source === "rule-revert") {
+              toast.success(
+                t("switchRules.autoReverted", {
+                  defaultValue: "{{app}} 额度窗口已重置，已切回 {{provider}}",
+                  app: t(`apps.${event.appType}`, {
+                    defaultValue: event.appType,
+                  }),
+                  provider: event.providerName ?? event.providerId,
+                }),
+              );
+            }
             if (event.appType === activeApp) {
               await refetch();
             }

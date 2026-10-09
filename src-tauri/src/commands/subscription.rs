@@ -34,8 +34,15 @@ pub async fn get_subscription_quota(
             }
             state
                 .usage_cache
-                .put_subscription(app_type, snapshot.clone());
+                .put_subscription(app_type.clone(), snapshot.clone());
             crate::tray::schedule_tray_refresh(&app);
+            // 配额规则：官方订阅窗口越过阈值时自动切换（后台评估，不阻塞查询）
+            crate::services::switch_rules::spawn_evaluation(
+                app.clone(),
+                app_type,
+                None,
+                snapshot.clone(),
+            );
         }
     }
     inner

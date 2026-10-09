@@ -293,6 +293,11 @@
       "message": "Local routing is an advanced feature. Please make sure you understand how it works before enabling.\n\nWe recommend consulting the relevant documentation or your provider for proper configuration.",
       "confirm": "I understand, enable"
     },
+    "switchRules": {
+      "title": "Enable quota rules",
+      "message": "Quota rules rewrite an app's live config without a click, so an in-progress session moves to another provider and model.\n\nEvery switch and switch-back shows a notice and updates the tray; a manual switch cancels a pending switch-back.",
+      "confirm": "I understand, enable"
+    },
     "failover": {
       "title": "Enable Failover",
       "message": "Failover is an advanced feature. Please make sure you understand how it works before enabling.\n\nWe recommend configuring provider priorities in the failover queue first.",
@@ -382,6 +387,12 @@
       "cloudSync": {
         "title": "Cloud Sync",
         "description": "Sync data across devices via WebDAV"
+      },
+      "switchRules": {
+        "title": "Quota Rules",
+        "description": "Switch to a fallback provider when a subscription or coding-plan window hits a threshold, and switch back when it resets",
+        "enableToggle": "Enable quota rules",
+        "enableToggleDescription": "Rules are kept but never fire while this is off. A switch rewrites the app's live config; Codex and Grok Build need a CLI restart to pick it up."
       },
       "copilotOptimizer": {
         "title": "Copilot Optimizer",
@@ -2543,6 +2554,41 @@
     "monthly": "This month {{used}} / {{limit}}",
     "exceeded": "Spend limit exceeded",
     "overBudget": "Over budget"
+  },
+  "switchRules": {
+    "autoSwitched": "{{app}}: quota rule switched to {{provider}} ({{reason}})",
+    "autoReverted": "{{app}}: quota window reset, switched back to {{provider}}",
+    "hint": "Official subscription rules are evaluated whenever the quota refreshes; coding-plan rules are evaluated when that provider's usage is queried. After a switch the app switches back when the window resets (optional).",
+    "evaluateNow": "Evaluate now",
+    "add": "Add rule",
+    "watched": "Watched quota",
+    "officialPlan": "Official subscription",
+    "codingPlanOf": "{{name}} (Coding Plan)",
+    "tier": "Quota window",
+    "tierPlaceholder": "Select a window",
+    "threshold": "Threshold (%)",
+    "target": "Switch to",
+    "targetPlaceholder": "Select a fallback provider",
+    "revertOnReset": "Switch back when the window resets",
+    "saved": "Rule saved",
+    "saveFailed": "Failed to save rule",
+    "invalidThreshold": "Threshold must be between 1 and 100",
+    "tierRequired": "Select a quota window",
+    "targetRequired": "Select a fallback provider",
+    "evaluatedFired": "Evaluated: {{count}} rule(s) fired",
+    "evaluatedIdle": "Evaluated: nothing to fire",
+    "evaluateFailed": "Evaluation failed",
+    "empty": "No rules yet. Add one to move to a fallback provider automatically when a quota window fills up.",
+    "ruleSummary": "When {{watched}} {{tier}} ≥ {{threshold}}%, switch to {{target}}",
+    "revertEnabled": "Switches back when the window resets",
+    "revertDisabled": "Does not switch back",
+    "lastFired": "last fired {{time}}",
+    "armed": "Fired ({{reason}}): {{from}} → {{to}}, {{revert}}",
+    "revertAt": "switching back at {{time}}",
+    "revertPending": "waiting to switch back",
+    "keepCurrent": "Keep current",
+    "enabled": "Enable rule",
+    "delete": "Delete rule"
   },
   "health": {
     "state": {

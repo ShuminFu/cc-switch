@@ -394,6 +394,12 @@ pub struct AppSettings {
     /// User has confirmed the failover toggle first-run notice
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failover_confirmed: Option<bool>,
+    /// 配额规则自动切换总开关（设备级，不同步）
+    #[serde(default)]
+    pub switch_rules_enabled: bool,
+    /// User has confirmed the switch rules first-run notice
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switch_rules_confirmed: Option<bool>,
     /// User has confirmed the first-run welcome notice
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_run_notice_confirmed: Option<bool>,
@@ -522,6 +528,8 @@ impl Default for AppSettings {
             unify_codex_session_history: false,
             unify_codex_migrate_existing: None,
             failover_confirmed: None,
+            switch_rules_enabled: false,
+            switch_rules_confirmed: None,
             first_run_notice_confirmed: None,
             common_config_confirmed: None,
             language: None,
