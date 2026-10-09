@@ -1299,15 +1299,30 @@ function App() {
                 style={{ WebkitAppRegion: "no-drag" } as any}
               >
                 {currentView === "prompts" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => promptPanelRef.current?.openAdd()}
-                    className="hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    {t("prompts.add")}
-                  </Button>
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => promptPanelRef.current?.openImport()}
+                      className="hover:bg-black/5 dark:hover:bg-white/5"
+                      title={t("prompts.importHint", {
+                        defaultValue:
+                          "把当前应用的全局提示词文件导入为一条新提示词",
+                      })}
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      {t("prompts.import")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => promptPanelRef.current?.openAdd()}
+                      className="hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      {t("prompts.add")}
+                    </Button>
+                  </>
                 )}
                 {currentView === "mcp" && (
                   <>

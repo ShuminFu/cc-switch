@@ -1935,6 +1935,7 @@
     "edit": "プロンプトを編集",
     "addTitle": "{{appName}} プロンプトを追加",
     "editTitle": "{{appName}} プロンプトを編集",
+    "importHint": "アプリの現在のグローバルプロンプトファイルを新しいプロンプトとして取り込みます",
     "import": "既存をインポート",
     "count": "{{count}} 件のプロンプト",
     "enabled": "有効",

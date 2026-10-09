@@ -16,6 +16,8 @@ interface PromptPanelProps {
 
 export interface PromptPanelHandle {
   openAdd: () => void;
+  /** 从当前应用的全局提示词文件（CLAUDE.md / AGENTS.md / …）导入为一条新提示词 */
+  openImport: () => void;
 }
 
 const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
@@ -38,6 +40,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       savePrompt,
       deletePrompt,
       toggleEnabled,
+      importFromFile,
     } = usePromptActions(appId);
 
     useEffect(() => {
@@ -70,6 +73,10 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
 
     React.useImperativeHandle(ref, () => ({
       openAdd: handleAdd,
+      // importFromFile 已自带成功 / 失败 toast，这里只需吞掉 rejected promise
+      openImport: () => {
+        void importFromFile().catch(() => undefined);
+      },
     }));
 
     const handleEdit = (id: string) => {

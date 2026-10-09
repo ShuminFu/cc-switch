@@ -1935,6 +1935,7 @@
     "edit": "编辑提示词",
     "addTitle": "添加 {{appName}} 提示词",
     "editTitle": "编辑 {{appName}} 提示词",
+    "importHint": "把当前应用的全局提示词文件导入为一条新提示词",
     "import": "导入现有",
     "count": "共 {{count}} 个提示词",
     "enabled": "已启用",

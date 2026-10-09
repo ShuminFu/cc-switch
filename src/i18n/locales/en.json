@@ -1935,6 +1935,7 @@
     "edit": "Edit Prompt",
     "addTitle": "Add {{appName}} Prompt",
     "editTitle": "Edit {{appName}} Prompt",
+    "importHint": "Import the app's current global prompt file as a new prompt",
     "import": "Import Existing",
     "count": "{{count}} prompts",
     "enabled": "Enabled",

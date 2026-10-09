@@ -1907,6 +1907,7 @@
     "edit": "編輯提示詞",
     "addTitle": "新增 {{appName}} 提示詞",
     "editTitle": "編輯 {{appName}} 提示詞",
+    "importHint": "把目前應用的全域提示詞檔案匯入為一條新提示詞",
     "import": "匯入現有",
     "count": "共 {{count}} 個提示詞",
     "enabled": "已啟用",
