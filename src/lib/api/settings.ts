@@ -61,6 +61,19 @@ export const settingsApi = {
     await invoke("check_for_updates");
   },
 
+  /** 诊断报告（Markdown，不含密钥） */
+  async getDiagnosticsReport(): Promise<string> {
+    return await invoke("get_diagnostics_report");
+  },
+
+  async saveDiagnosticsDialog(defaultName: string): Promise<string | null> {
+    return await invoke("save_diagnostics_dialog", { defaultName });
+  },
+
+  async exportDiagnosticsReport(targetPath: string): Promise<string> {
+    return await invoke("export_diagnostics_report", { targetPath });
+  },
+
   async isPortable(): Promise<boolean> {
     return await invoke("is_portable_mode");
   },

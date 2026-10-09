@@ -14,6 +14,7 @@ import {
   ArrowUpCircle,
   ChevronDown,
   Stethoscope,
+  ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +39,7 @@ import appIcon from "@/assets/icons/app-icon.png";
 import { APP_ICON_MAP } from "@/config/appConfig";
 import type { AppId } from "@/lib/api/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { copyText } from "@/lib/clipboard";
 import { isWindows } from "@/lib/platform";
 import { isUpdateAvailable } from "@/lib/version";
 import { ToolUpgradeConfirmDialog } from "./ToolUpgradeConfirmDialog";
@@ -536,6 +538,55 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
 
   // 顶部按钮：一次性诊断全部 6 个工具，有冲突的写入各自卡片，
   // 全部无冲突时给一条 info toast。后端逐工具枚举所有安装并判定分歧。
+  const [isBuildingDiagnostics, setIsBuildingDiagnostics] = useState(false);
+
+  const handleCopyDiagnostics = useCallback(async () => {
+    setIsBuildingDiagnostics(true);
+    try {
+      const report = await settingsApi.getDiagnosticsReport();
+      await copyText(report);
+      toast.success(
+        t("settings.diagnosticsCopied", {
+          defaultValue: "诊断报告已复制到剪贴板",
+        }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(
+        t("settings.diagnosticsFailed", { defaultValue: "生成诊断报告失败" }),
+        { description: extractErrorMessage(error) || undefined },
+      );
+    } finally {
+      setIsBuildingDiagnostics(false);
+    }
+  }, [t]);
+
+  const handleSaveDiagnostics = useCallback(async () => {
+    setIsBuildingDiagnostics(true);
+    try {
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const target = await settingsApi.saveDiagnosticsDialog(
+        `cc-switch-diagnostics-${stamp}.md`,
+      );
+      if (!target) return;
+      const saved = await settingsApi.exportDiagnosticsReport(target);
+      toast.success(
+        t("settings.diagnosticsSaved", {
+          defaultValue: "诊断报告已保存到 {{path}}",
+          path: saved,
+        }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(
+        t("settings.diagnosticsFailed", { defaultValue: "生成诊断报告失败" }),
+        { description: extractErrorMessage(error) || undefined },
+      );
+    } finally {
+      setIsBuildingDiagnostics(false);
+    }
+  }, [t]);
+
   const handleDiagnoseAll = useCallback(async () => {
     setIsDiagnosingAll(true);
     try {
@@ -896,6 +947,36 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             >
               <ExternalLink className="h-3.5 w-3.5" />
               {t("settings.releaseNotes")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleCopyDiagnostics()}
+              disabled={isBuildingDiagnostics}
+              className="h-8 gap-1.5 text-xs"
+              title={t("settings.diagnosticsHint", {
+                defaultValue:
+                  "汇总版本、代理 / 接管状态、供应商与规则概况、最近事件（不含密钥），便于提交 issue",
+              })}
+            >
+              {isBuildingDiagnostics ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ClipboardList className="h-3.5 w-3.5" />
+              )}
+              {t("settings.copyDiagnostics", { defaultValue: "复制诊断报告" })}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleSaveDiagnostics()}
+              disabled={isBuildingDiagnostics}
+              className="h-8 gap-1.5 text-xs"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {t("settings.saveDiagnostics", { defaultValue: "保存诊断报告…" })}
             </Button>
             <Button
               type="button"
