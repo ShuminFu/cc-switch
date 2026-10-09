@@ -353,6 +353,20 @@ fn format_usage_suffix(
     None
 }
 
+/// 当前有「已触发、等待回切」额度规则的应用集合（读失败视为空）
+fn armed_rule_apps(db: &crate::database::Database) -> std::collections::HashSet<String> {
+    let mut apps = std::collections::HashSet::new();
+    let Ok(states) = db.list_switch_rule_states() else {
+        return apps;
+    };
+    for state in states {
+        if let Ok(Some(rule)) = db.get_switch_rule(&state.rule_id) {
+            apps.insert(rule.app_type);
+        }
+    }
+    apps
+}
+
 /// 对供应商列表排序：sort_index → created_at → name
 fn sort_providers(
     providers: &indexmap::IndexMap<String, crate::provider::Provider>,
@@ -673,6 +687,8 @@ pub fn create_tray_menu(
 
     // Pre-compute proxy running state (used to disable official providers in tray menu)
     let is_proxy_running = futures::executor::block_on(app_state.proxy_service.is_running());
+    // 额度规则已触发、等待回切的应用：子菜单标题加 ⚡ 提示这次切换是自动的
+    let armed_rule_apps = armed_rule_apps(&app_state.db);
 
     // 每个应用类型折叠为子菜单，避免供应商过多时菜单过长
     for section in TRAY_SECTIONS.iter() {
@@ -701,7 +717,15 @@ pub fn create_tray_menu(
                 Some(p) => {
                     let suffix = format_usage_suffix(app_state, &section.app_type, p, &current_id)
                         .unwrap_or_default();
-                    format!("{} · {}{}", section.header_label, p.name, suffix)
+                    let rule_marker = if armed_rule_apps.contains(app_type_str) {
+                        " \u{26A1}" // ⚡ switched by a quota rule, reverts when the window resets
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "{} · {}{}{}",
+                        section.header_label, p.name, suffix, rule_marker
+                    )
                 }
                 None => section.header_label.to_string(),
             };
@@ -1130,6 +1154,47 @@ mod tests {
         TIER_GEMINI_FLASH_LITE, TIER_GEMINI_PRO, TIER_MONTHLY, TIER_SEVEN_DAY, TIER_SEVEN_DAY_OPUS,
         TIER_SEVEN_DAY_SONNET, TIER_THIRTY_DAY, TIER_WEEKLY_LIMIT,
     };
+
+    #[test]
+    fn armed_rule_apps_follow_rule_states() {
+        use crate::database::{Database, SwitchRule, SwitchRuleState};
+        let db = Database::memory().expect("memory db");
+        assert!(super::armed_rule_apps(&db).is_empty());
+
+        db.upsert_switch_rule(&SwitchRule {
+            id: "r1".to_string(),
+            app_type: "codex".to_string(),
+            watched_provider_id: None,
+            source: "subscription".to_string(),
+            tier_name: "five_hour".to_string(),
+            threshold_pct: 90.0,
+            target_provider_id: "backup".to_string(),
+            revert_on_reset: true,
+            enabled: true,
+            sort_index: 0,
+            last_fired_at: None,
+            created_at: 1,
+        })
+        .expect("save rule");
+        assert!(
+            super::armed_rule_apps(&db).is_empty(),
+            "rule alone is not armed"
+        );
+
+        db.set_switch_rule_state(&SwitchRuleState {
+            rule_id: "r1".to_string(),
+            fired_at: 1,
+            resets_at: None,
+            switched_from: "official".to_string(),
+            switched_to: "backup".to_string(),
+            last_utilization: 95.0,
+            reason: None,
+        })
+        .expect("arm rule");
+        let armed = super::armed_rule_apps(&db);
+        assert!(armed.contains("codex"));
+        assert!(!armed.contains("claude"));
+    }
 
     #[test]
     fn tray_id_is_unique_to_app() {
