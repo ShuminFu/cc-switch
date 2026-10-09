@@ -371,6 +371,28 @@
         "title": "Cloud Sync",
         "description": "Sync data across devices via WebDAV"
       },
+      "copilotOptimizer": {
+        "title": "Copilot Optimizer",
+        "description": "Reduce GitHub Copilot premium request consumption when Claude Code is routed through Copilot",
+        "enabled": "Enable Copilot optimizer",
+        "enabledDescription": "Master switch; every optimization below is skipped when off",
+        "requestClassification": "Request classification",
+        "requestClassificationDescription": "Tag requests with x-initiator so Copilot can tell user turns from automatic follow-ups",
+        "toolResultMerging": "Merge tool results",
+        "toolResultMergingDescription": "Merge consecutive tool-result messages before forwarding",
+        "compactDetection": "Compaction detection",
+        "compactDetectionDescription": "Recognize context-compaction requests and mark them as agent-initiated",
+        "deterministicRequestId": "Deterministic request IDs",
+        "deterministicRequestIdDescription": "Derive stable request IDs so retries are not counted as new interactions",
+        "subagentDetection": "Subagent detection",
+        "subagentDetectionDescription": "Mark Claude Code subagent requests as agent-initiated conversations",
+        "warmupDowngrade": "Downgrade warmup requests",
+        "warmupDowngradeDescription": "Send Claude Code's warmup probes to a small model instead of the premium one",
+        "warmupModel": "Warmup model",
+        "warmupModelDescription": "Model used for downgraded warmup requests",
+        "stripThinking": "Strip thinking blocks",
+        "stripThinkingDescription": "Remove thinking blocks from assistant history before sending; avoids a rejected first attempt that still costs a request"
+      },
       "rectifier": {
         "title": "Rectifier",
         "description": "Automatically fix API request compatibility issues",

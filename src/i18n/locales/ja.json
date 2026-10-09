@@ -371,6 +371,28 @@
         "title": "クラウド同期",
         "description": "WebDAV でデバイス間のデータを同期"
       },
+      "copilotOptimizer": {
+        "title": "Copilot オプティマイザー",
+        "description": "Claude Code を Copilot 経由でルーティングする際の GitHub Copilot プレミアムリクエスト消費を抑えます",
+        "enabled": "Copilot オプティマイザーを有効化",
+        "enabledDescription": "マスタースイッチ。オフにすると以下の最適化はすべてスキップされます",
+        "requestClassification": "リクエスト分類",
+        "requestClassificationDescription": "x-initiator を付与し、ユーザーのターンと自動フォローアップを Copilot が区別できるようにします",
+        "toolResultMerging": "ツール結果の結合",
+        "toolResultMergingDescription": "転送前に連続するツール結果メッセージを結合します",
+        "compactDetection": "コンパクト要求の検出",
+        "compactDetectionDescription": "コンテキスト圧縮リクエストを検出し、エージェント起点として扱います",
+        "deterministicRequestId": "決定的なリクエスト ID",
+        "deterministicRequestIdDescription": "安定したリクエスト ID を生成し、再試行が新しいインタラクションとして数えられないようにします",
+        "subagentDetection": "サブエージェント検出",
+        "subagentDetectionDescription": "Claude Code のサブエージェントリクエストをエージェント起点の会話として扱います",
+        "warmupDowngrade": "ウォームアップの降格",
+        "warmupDowngradeDescription": "Claude Code のウォームアップ探査をプレミアムモデルではなく小型モデルへ送ります",
+        "warmupModel": "ウォームアップモデル",
+        "warmupModelDescription": "降格したウォームアップリクエストに使うモデル",
+        "stripThinking": "thinking ブロックの除去",
+        "stripThinkingDescription": "送信前に assistant 履歴から thinking ブロックを取り除き、拒否されてもリクエストが課金される初回失敗を防ぎます"
+      },
       "rectifier": {
         "title": "整流器",
         "description": "API リクエストの互換性問題を自動修正",

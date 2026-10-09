@@ -371,6 +371,28 @@
         "title": "雲端同步",
         "description": "透過 WebDAV 在多裝置間同步資料"
       },
+      "copilotOptimizer": {
+        "title": "Copilot 最佳化器",
+        "description": "透過 Copilot 路由 Claude Code 時，減少 GitHub Copilot 進階請求的消耗",
+        "enabled": "啟用 Copilot 最佳化器",
+        "enabledDescription": "總開關，關閉後以下最佳化全部略過",
+        "requestClassification": "請求分類",
+        "requestClassificationDescription": "為請求加上 x-initiator 標記，讓 Copilot 區分使用者回合與自動跟進",
+        "toolResultMerging": "合併工具結果",
+        "toolResultMergingDescription": "轉發前合併連續的工具結果訊息",
+        "compactDetection": "識別壓縮請求",
+        "compactDetectionDescription": "識別上下文壓縮請求並標記為代理發起",
+        "deterministicRequestId": "確定性請求 ID",
+        "deterministicRequestIdDescription": "產生穩定的請求 ID，避免重試被計為新的互動",
+        "subagentDetection": "子代理識別",
+        "subagentDetectionDescription": "將 Claude Code 子代理請求標記為代理發起的對話",
+        "warmupDowngrade": "預熱請求降級",
+        "warmupDowngradeDescription": "將 Claude Code 的預熱探測請求改送到小模型，而不是進階模型",
+        "warmupModel": "預熱模型",
+        "warmupModelDescription": "降級後的預熱請求使用的模型",
+        "stripThinking": "剝離 thinking 區塊",
+        "stripThinkingDescription": "傳送前移除歷史 assistant 訊息中的 thinking 區塊，避免首次請求被拒絕卻仍計費"
+      },
       "rectifier": {
         "title": "整流器",
         "description": "自動修復 API 請求中的相容性問題",

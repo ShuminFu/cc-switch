@@ -371,6 +371,28 @@
         "title": "云同步",
         "description": "通过 WebDAV 在多设备间同步数据"
       },
+      "copilotOptimizer": {
+        "title": "Copilot 优化器",
+        "description": "通过 Copilot 路由 Claude Code 时，减少 GitHub Copilot 高级请求的消耗",
+        "enabled": "启用 Copilot 优化器",
+        "enabledDescription": "总开关，关闭后以下优化全部跳过",
+        "requestClassification": "请求分类",
+        "requestClassificationDescription": "为请求加上 x-initiator 标记，让 Copilot 区分用户回合与自动跟进",
+        "toolResultMerging": "合并工具结果",
+        "toolResultMergingDescription": "转发前合并连续的工具结果消息",
+        "compactDetection": "识别压缩请求",
+        "compactDetectionDescription": "识别上下文压缩请求并标记为代理发起",
+        "deterministicRequestId": "确定性请求 ID",
+        "deterministicRequestIdDescription": "生成稳定的请求 ID，避免重试被计为新的交互",
+        "subagentDetection": "子代理识别",
+        "subagentDetectionDescription": "将 Claude Code 子代理请求标记为代理发起的会话",
+        "warmupDowngrade": "预热请求降级",
+        "warmupDowngradeDescription": "将 Claude Code 的预热探测请求改发到小模型，而不是高级模型",
+        "warmupModel": "预热模型",
+        "warmupModelDescription": "降级后的预热请求使用的模型",
+        "stripThinking": "剥离 thinking 块",
+        "stripThinkingDescription": "发送前移除历史 assistant 消息中的 thinking 块，避免首次请求被拒绝却仍计费"
+      },
       "rectifier": {
         "title": "整流器",
         "description": "自动修复 API 请求中的兼容性问题",

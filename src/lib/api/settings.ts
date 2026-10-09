@@ -292,6 +292,16 @@ export const settingsApi = {
     return await invoke("set_optimizer_config", { config });
   },
 
+  async getCopilotOptimizerConfig(): Promise<CopilotOptimizerConfig> {
+    return await invoke("get_copilot_optimizer_config");
+  },
+
+  async setCopilotOptimizerConfig(
+    config: CopilotOptimizerConfig,
+  ): Promise<boolean> {
+    return await invoke("set_copilot_optimizer_config", { config });
+  },
+
   async getLogConfig(): Promise<LogConfig> {
     return await invoke("get_log_config");
   },
@@ -333,6 +343,19 @@ export interface OptimizerConfig {
   enabled: boolean;
   thinkingOptimizer: boolean;
   cacheInjection: boolean;
+}
+
+/** Mirrors src-tauri/src/proxy/types.rs CopilotOptimizerConfig (settings key copilot_optimizer_config) */
+export interface CopilotOptimizerConfig {
+  enabled: boolean;
+  requestClassification: boolean;
+  toolResultMerging: boolean;
+  compactDetection: boolean;
+  deterministicRequestId: boolean;
+  subagentDetection: boolean;
+  warmupDowngrade: boolean;
+  warmupModel: string;
+  stripThinking: boolean;
 }
 
 export interface LogConfig {
