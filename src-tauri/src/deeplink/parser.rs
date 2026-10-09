@@ -2,17 +2,40 @@
 //!
 //! Parses ccswitch:// URLs into DeepLinkImportRequest structures.
 
+use super::switch::{parse_switch_params, DeepLinkSwitchRequest};
 use super::utils::validate_url;
 use super::DeepLinkImportRequest;
 use crate::error::AppError;
 use std::collections::HashMap;
 use url::Url;
 
-/// Parse a ccswitch:// URL into a DeepLinkImportRequest
+/// What a ccswitch:// link asks for
+#[derive(Debug, Clone)]
+pub enum DeepLinkAction {
+    /// `ccswitch://v1/import?...` (boxed: the import request is much larger than a switch)
+    Import(Box<DeepLinkImportRequest>),
+    /// `ccswitch://v1/switch?app=...&provider=...`
+    Switch(DeepLinkSwitchRequest),
+}
+
+/// Parse a ccswitch:// import URL into a DeepLinkImportRequest
 ///
 /// Expected format:
 /// ccswitch://v1/import?resource={type}&...
+///
+/// A `/switch` link is rejected here; use [`parse_deeplink_action`] when both
+/// kinds are acceptable.
 pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppError> {
+    match parse_deeplink_action(url_str)? {
+        DeepLinkAction::Import(request) => Ok(*request),
+        DeepLinkAction::Switch(_) => Err(AppError::InvalidInput(
+            "Invalid path: expected '/import', got '/switch'".to_string(),
+        )),
+    }
+}
+
+/// Parse any supported ccswitch:// URL
+pub fn parse_deeplink_action(url_str: &str) -> Result<DeepLinkAction, AppError> {
     // Parse URL
     let url = Url::parse(url_str)
         .map_err(|e| AppError::InvalidInput(format!("Invalid deep link URL: {e}")))?;
@@ -38,16 +61,20 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
         )));
     }
 
-    // Extract path (should be "/import")
-    let path = url.path();
-    if path != "/import" {
-        return Err(AppError::InvalidInput(format!(
-            "Invalid path: expected '/import', got '{path}'"
-        )));
-    }
-
     // Parse query parameters
     let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+
+    // Dispatch on path
+    let path = url.path();
+    match path {
+        "/import" => {}
+        "/switch" => return Ok(DeepLinkAction::Switch(parse_switch_params(&params)?)),
+        other => {
+            return Err(AppError::InvalidInput(format!(
+                "Invalid path: expected '/import' or '/switch', got '{other}'"
+            )))
+        }
+    }
 
     // Extract and validate resource type
     let resource = params
@@ -56,15 +83,18 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
         .clone();
 
     // Dispatch to appropriate parser based on resource type
-    match resource.as_str() {
-        "provider" => parse_provider_deeplink(&params, version, resource),
-        "prompt" => parse_prompt_deeplink(&params, version, resource),
-        "mcp" => parse_mcp_deeplink(&params, version, resource),
-        "skill" => parse_skill_deeplink(&params, version, resource),
-        _ => Err(AppError::InvalidInput(format!(
-            "Unsupported resource type: {resource}"
-        ))),
-    }
+    let request = match resource.as_str() {
+        "provider" => parse_provider_deeplink(&params, version, resource)?,
+        "prompt" => parse_prompt_deeplink(&params, version, resource)?,
+        "mcp" => parse_mcp_deeplink(&params, version, resource)?,
+        "skill" => parse_skill_deeplink(&params, version, resource)?,
+        _ => {
+            return Err(AppError::InvalidInput(format!(
+                "Unsupported resource type: {resource}"
+            )))
+        }
+    };
+    Ok(DeepLinkAction::Import(Box::new(request)))
 }
 
 /// Parse provider deep link parameters

@@ -80,6 +80,7 @@ import {
 } from "@/components/skills/SkillsPage";
 import UnifiedSkillsPanel from "@/components/skills/UnifiedSkillsPanel";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
+import { DeepLinkSwitchDialog } from "@/components/DeepLinkSwitchDialog";
 import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
 import { AgentsPanel } from "@/components/agents/AgentsPanel";
 import { UniversalProviderPanel } from "@/components/universal";
@@ -1729,6 +1730,7 @@ function App() {
       />
 
       <DeepLinkImportDialog />
+      <DeepLinkSwitchDialog />
       <FirstRunNoticeDialog />
     </div>
   );

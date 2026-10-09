@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { AppId } from "./types";
 
 export type ResourceType = "provider" | "prompt" | "mcp" | "skill";
 
@@ -109,3 +110,16 @@ export const deeplinkApi = {
     return invoke("import_from_deeplink_unified", { request });
   },
 };
+
+/**
+ * `ccswitch://v1/switch?app=…&provider=…` resolved by the backend
+ * (event `deeplink-switch`). Nothing is switched until the user confirms.
+ */
+export interface DeepLinkSwitchRequest {
+  app: AppId;
+  providerId: string;
+  providerName: string;
+  currentProviderId?: string | null;
+  currentProviderName?: string | null;
+  alreadyCurrent: boolean;
+}

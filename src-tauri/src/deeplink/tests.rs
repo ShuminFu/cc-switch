@@ -1,9 +1,10 @@
 //! Deep link module tests
 
 use super::mcp::parse_mcp_apps;
-use super::parser::parse_deeplink_url;
+use super::parser::{parse_deeplink_action, parse_deeplink_url, DeepLinkAction};
 use super::prompt::import_prompt_from_deeplink;
 use super::provider::parse_and_merge_config;
+use super::switch::{resolve_switch_request, DeepLinkSwitchRequest};
 use super::utils::{infer_homepage_from_endpoint, validate_url};
 use super::DeepLinkImportRequest;
 use crate::AppType;
@@ -905,4 +906,88 @@ fn test_infer_homepage_from_endpoint_without_homepage() {
         infer_homepage_from_endpoint("https://cubence.com"),
         Some("https://cubence.com".to_string())
     );
+}
+
+#[test]
+fn test_parse_switch_deeplink() {
+    let action = parse_deeplink_action("ccswitch://v1/switch?app=claude&provider=My%20Relay")
+        .expect("parse switch link");
+    match action {
+        DeepLinkAction::Switch(request) => {
+            assert_eq!(request.app, "claude");
+            assert_eq!(request.provider, "My Relay");
+        }
+        other => panic!("expected switch action, got {other:?}"),
+    }
+
+    // app is normalized through AppType (aliases accepted, additive apps rejected)
+    match parse_deeplink_action("ccswitch://v1/switch?app=claude_desktop&provider=x").unwrap() {
+        DeepLinkAction::Switch(request) => assert_eq!(request.app, "claude-desktop"),
+        other => panic!("unexpected {other:?}"),
+    }
+    assert!(parse_deeplink_action("ccswitch://v1/switch?app=opencode&provider=x").is_err());
+    assert!(parse_deeplink_action("ccswitch://v1/switch?app=claude").is_err());
+    assert!(parse_deeplink_action("ccswitch://v1/switch?provider=x").is_err());
+    assert!(parse_deeplink_action("ccswitch://v1/switch?app=claude&provider=%20").is_err());
+
+    // the import-only parser keeps rejecting switch links
+    let err = parse_deeplink_url("ccswitch://v1/switch?app=claude&provider=x").unwrap_err();
+    assert!(err.to_string().contains("expected '/import'"));
+
+    // imports still flow through the action parser
+    assert!(matches!(
+        parse_deeplink_action("ccswitch://v1/import?resource=provider&app=claude&name=X").unwrap(),
+        DeepLinkAction::Import(_)
+    ));
+    assert!(parse_deeplink_action("ccswitch://v1/other?app=claude").is_err());
+}
+
+#[test]
+fn test_resolve_switch_request_by_id_or_name() {
+    let _guard = TestHomeGuard::new();
+    let db = Database::memory().expect("memory db");
+    let provider = |id: &str, name: &str| {
+        crate::provider::Provider::with_id(
+            id.to_string(),
+            name.to_string(),
+            serde_json::json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "t" } }),
+            None,
+        )
+    };
+    db.save_provider("claude", &provider("relay-1", "My Relay"))
+        .expect("save relay-1");
+    db.save_provider("claude", &provider("relay-2", "Other"))
+        .expect("save relay-2");
+    db.set_current_provider("claude", "relay-2")
+        .expect("set current");
+
+    let request = |provider: &str| DeepLinkSwitchRequest {
+        app: "claude".to_string(),
+        provider: provider.to_string(),
+    };
+
+    let by_id = resolve_switch_request(&db, &request("relay-1")).expect("resolve by id");
+    assert_eq!(by_id.provider_id, "relay-1");
+    assert_eq!(by_id.provider_name, "My Relay");
+    assert_eq!(by_id.current_provider_id.as_deref(), Some("relay-2"));
+    assert_eq!(by_id.current_provider_name.as_deref(), Some("Other"));
+    assert!(!by_id.already_current);
+
+    let by_name = resolve_switch_request(&db, &request("  my relay ")).expect("resolve by name");
+    assert_eq!(by_name.provider_id, "relay-1");
+
+    let same = resolve_switch_request(&db, &request("Other")).expect("resolve current");
+    assert!(same.already_current);
+
+    let err = resolve_switch_request(&db, &request("missing")).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("No claude provider matches 'missing'"));
+
+    // unknown app ids never reach the provider lookup
+    let unknown = DeepLinkSwitchRequest {
+        app: "not-an-app".to_string(),
+        provider: "x".to_string(),
+    };
+    assert!(resolve_switch_request(&db, &unknown).is_err());
 }

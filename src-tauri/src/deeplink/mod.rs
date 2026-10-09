@@ -14,6 +14,7 @@ mod prompt;
 mod provider;
 mod remote;
 mod skill;
+mod switch;
 mod utils;
 
 #[cfg(test)]
@@ -23,11 +24,12 @@ use serde::{Deserialize, Serialize};
 
 // Re-export public API
 pub use mcp::import_mcp_from_deeplink;
-pub use parser::parse_deeplink_url;
+pub use parser::{parse_deeplink_action, parse_deeplink_url, DeepLinkAction};
 pub use prompt::import_prompt_from_deeplink;
 pub use provider::{import_provider_from_deeplink, parse_and_merge_config};
 pub use remote::resolve_remote_config;
 pub use skill::import_skill_from_deeplink;
+pub use switch::{resolve_switch_request, DeepLinkSwitchRequest, ResolvedSwitchRequest};
 
 /// Deep link import request model
 ///
