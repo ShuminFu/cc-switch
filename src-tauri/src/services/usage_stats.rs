@@ -1711,6 +1711,92 @@ impl Database {
         Ok(out)
     }
 
+    /// 时间范围内费用最高的会话（会话归集口径，见 `get_session_usage`）
+    pub fn get_top_sessions(
+        &self,
+        start_date: Option<i64>,
+        end_date: Option<i64>,
+        app_type: Option<&str>,
+        provider_name: Option<&str>,
+        model: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<SessionUsageStat>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let fresh_input = fresh_input_sql("l");
+        let mut conditions = vec![
+            session_attribution_log_filter("l"),
+            "l.session_id IS NOT NULL AND l.session_id != ''".to_string(),
+        ];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(start) = start_date {
+            conditions.push("l.created_at >= ?".to_string());
+            params.push(Box::new(start));
+        }
+        if let Some(end) = end_date {
+            conditions.push("l.created_at <= ?".to_string());
+            params.push(Box::new(end));
+        }
+        if let Some(at) = app_type {
+            conditions.push(format!("{} = ?", folded_app_type_sql("l.app_type")));
+            params.push(Box::new(at.to_string()));
+        }
+        push_provider_model_filters(&mut conditions, &mut params, "l", "p", provider_name, model);
+        let limit = limit.clamp(1, 500) as i64;
+        params.push(Box::new(limit));
+
+        let sql = format!(
+            "SELECT sid,
+                    COUNT(*),
+                    COALESCE(SUM(cost), 0),
+                    COALESCE(SUM(fresh_input), 0),
+                    COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(cache_read_tokens), 0),
+                    COALESCE(SUM(cache_creation_tokens), 0),
+                    MIN(created_at),
+                    MAX(created_at)
+             FROM (
+                 SELECT CASE WHEN l.session_id LIKE 'codex_%' THEN substr(l.session_id, 7)
+                             ELSE l.session_id END AS sid,
+                        CAST(l.total_cost_usd AS REAL) AS cost,
+                        {fresh_input} AS fresh_input,
+                        l.output_tokens,
+                        l.cache_read_tokens,
+                        l.cache_creation_tokens,
+                        l.created_at
+                 FROM proxy_request_logs l
+                 LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
+                 WHERE {}
+             )
+             GROUP BY sid
+             ORDER BY SUM(cost) DESC, MAX(created_at) DESC
+             LIMIT ?",
+            conditions.join(" AND ")
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt
+            .query_map(params_refs.as_slice(), |row| {
+                let cost: f64 = row.get(2)?;
+                Ok(SessionUsageStat {
+                    session_id: row.get(0)?,
+                    requests: row.get::<_, i64>(1)?.max(0) as u64,
+                    total_cost_usd: format!("{cost:.6}"),
+                    input_tokens: row.get::<_, i64>(3)?.max(0) as u64,
+                    output_tokens: row.get::<_, i64>(4)?.max(0) as u64,
+                    cache_read_tokens: row.get::<_, i64>(5)?.max(0) as u64,
+                    cache_creation_tokens: row.get::<_, i64>(6)?.max(0) as u64,
+                    first_seen_at: row.get(7)?,
+                    last_seen_at: row.get(8)?,
+                })
+            })
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(rows)
+    }
+
     /// 检查 Provider 使用限额
     pub fn check_provider_limits(
         &self,
@@ -4392,6 +4478,54 @@ mod tests {
             db.get_request_logs(&empty, 0, 20)?.total,
             4,
             "blank filter is ignored"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn top_sessions_rank_by_cost_within_filters() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            let insert = |request_id: &str,
+                          app_type: &str,
+                          session_id: &str,
+                          cost: &str,
+                          created_at: i64|
+             -> Result<(), AppError> {
+                conn.execute(
+                    "INSERT INTO proxy_request_logs (
+                        request_id, provider_id, app_type, model, request_model,
+                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                        total_cost_usd, latency_ms, status_code, created_at, data_source, session_id
+                    ) VALUES (?, 'p', ?, 'm', 'm', 10, 2, 0, 0, ?, 100, 200, ?, 'proxy', ?)",
+                    params![request_id, app_type, cost, created_at, session_id],
+                )?;
+                Ok(())
+            };
+            insert("a1", "claude", "sess-a", "0.5", 1000)?;
+            insert("a2", "claude", "sess-a", "0.5", 1100)?;
+            insert("b1", "claude", "sess-b", "2.0", 1200)?;
+            insert("c1", "codex", "codex_thread-c", "0.1", 1300)?;
+            insert("old", "claude", "sess-old", "9.0", 10)?;
+        }
+
+        let top = db.get_top_sessions(Some(500), None, None, None, None, 10)?;
+        assert_eq!(
+            top.iter()
+                .map(|s| s.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["sess-b", "sess-a", "thread-c"],
+            "ordered by cost, codex prefix stripped, old row excluded"
+        );
+        assert_eq!(top[1].requests, 2);
+        assert_eq!(top[1].total_cost_usd, "1.000000");
+
+        let claude_only = db.get_top_sessions(None, None, Some("claude"), None, None, 10)?;
+        assert_eq!(claude_only.len(), 3);
+        assert_eq!(
+            db.get_top_sessions(None, None, None, None, None, 1)?.len(),
+            1
         );
         Ok(())
     }

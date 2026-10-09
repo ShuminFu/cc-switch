@@ -1515,6 +1515,10 @@
     "costLabel": "總成本",
     "unpriced": "未定價",
     "unpricedAddHint": "點擊為該模型新增定價，儲存後會回填歷史費用",
+    "sessionStats": "對話",
+    "sessionsHint": "依對話 ID 歸集的費用（代理與本機對話記錄）；30 天前的明細已彙總，不再按對話統計。",
+    "lastSeen": "最近活動",
+    "showRequests": "檢視此對話的請求",
     "export": {
       "menu": "匯出",
       "tooltip": "依目前篩選條件匯出請求日誌或帳單彙總",

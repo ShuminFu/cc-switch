@@ -188,6 +188,25 @@ export const usageApi = {
     return invoke("get_usage_data_sources");
   },
 
+  /** 时间范围内费用最高的会话 */
+  getTopSessions: async (
+    startDate?: number,
+    endDate?: number,
+    appType?: string,
+    providerName?: string,
+    model?: string,
+    limit = 50,
+  ): Promise<SessionUsageStat[]> => {
+    return invoke("get_top_sessions", {
+      startDate,
+      endDate,
+      appType,
+      providerName,
+      model,
+      limit,
+    });
+  },
+
   /** 按会话 ID 归集费用；空列表直接返回空数组，不触发后端调用 */
   getSessionUsage: async (
     sessionIds: string[],

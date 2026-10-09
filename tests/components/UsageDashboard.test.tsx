@@ -61,6 +61,10 @@ vi.mock("@/components/usage/ProviderStatsTable", () => ({
   ProviderStatsTable: () => <div data-testid="provider-stats-table" />,
 }));
 
+vi.mock("@/components/usage/SessionStatsTable", () => ({
+  SessionStatsTable: () => <div data-testid="session-stats-table" />,
+}));
+
 vi.mock("@/components/usage/ModelStatsTable", () => ({
   ModelStatsTable: () => <div data-testid="model-stats-table" />,
 }));

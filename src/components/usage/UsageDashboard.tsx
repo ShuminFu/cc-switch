@@ -5,6 +5,8 @@ import { UsageTrendChart } from "./UsageTrendChart";
 import { RequestLogTable } from "./RequestLogTable";
 import { ProviderStatsTable } from "./ProviderStatsTable";
 import { ModelStatsTable } from "./ModelStatsTable";
+import { SessionStatsTable } from "./SessionStatsTable";
+import { requestLogSessionFilter } from "@/lib/usageNavigation";
 import {
   KNOWN_APP_TYPES,
   type AppType,
@@ -19,6 +21,7 @@ import {
   RefreshCw,
   Coins,
   LayoutGrid,
+  MessageSquare,
 } from "lucide-react";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import {
@@ -87,6 +90,7 @@ export function UsageDashboard({
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const [range, setRange] = useState<UsageRangeSelection>({ preset: "today" });
+  const [activeTab, setActiveTab] = useState("logs");
   const [appType, setAppType] = useState<AppTypeFilter>("all");
   const [providerName, setProviderName] = useState<string | undefined>(
     undefined,
@@ -362,7 +366,7 @@ export function UsageDashboard({
       />
 
       <div className="space-y-4">
-        <Tabs defaultValue="logs" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="flex items-center justify-between mb-4">
             <TabsList className="bg-muted/50">
               <TabsTrigger value="logs" className="gap-2">
@@ -376,6 +380,10 @@ export function UsageDashboard({
               <TabsTrigger value="models" className="gap-2">
                 <BarChart3 className="h-4 w-4" />
                 {t("usage.modelStats")}
+              </TabsTrigger>
+              <TabsTrigger value="sessions" className="gap-2">
+                <MessageSquare className="h-4 w-4" />
+                {t("usage.sessionStats", "会话")}
               </TabsTrigger>
             </TabsList>
           </div>
@@ -414,6 +422,20 @@ export function UsageDashboard({
                 providerName={providerName}
                 model={model}
                 refreshIntervalMs={refreshIntervalMs}
+              />
+            </TabsContent>
+
+            <TabsContent value="sessions" className="mt-0">
+              <SessionStatsTable
+                range={range}
+                appType={appType}
+                providerName={providerName}
+                model={model}
+                refreshIntervalMs={refreshIntervalMs}
+                onShowRequests={(sessionId) => {
+                  requestLogSessionFilter(sessionId);
+                  setActiveTab("logs");
+                }}
               />
             </TabsContent>
           </motion.div>

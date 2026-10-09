@@ -148,6 +148,26 @@ export const usageKeys = {
     [...usageKeys.all, "limits", providerId, appType] as const,
   sessions: (sessionIds: string[]) =>
     [...usageKeys.all, "sessions", sessionIds.join("|")] as const,
+  topSessions: (
+    preset: UsageRangeSelection["preset"],
+    customStartDate: number | undefined,
+    customEndDate: number | undefined,
+    filters?: UsageScopeFilters,
+    liveEndTime?: boolean,
+    limit?: number,
+  ) =>
+    [
+      ...usageKeys.all,
+      "top-sessions",
+      preset,
+      customStartDate ?? 0,
+      customEndDate ?? 0,
+      liveEndTime ?? false,
+      filters?.appType ?? null,
+      filters?.providerName ?? null,
+      filters?.model ?? null,
+      limit ?? 50,
+    ] as const,
   script: (providerId: string, appType: string) =>
     [...usageKeys.all, providerId, appType] as const,
 };
@@ -359,6 +379,39 @@ export function useProviderLimits(
     queryFn: () => usageApi.checkProviderLimits(providerId, appType),
     enabled: !!providerId && !!appType && (options?.enabled ?? true),
     refetchInterval: options?.refetchInterval,
+  });
+}
+
+/** 用量页「会话」标签：时间范围内费用最高的会话 */
+export function useTopSessions(
+  range: UsageRangeSelection,
+  filters?: UsageScopeFilters,
+  options?: UsageQueryOptions & { limit?: number },
+) {
+  const effective = normalizeScopeFilters(filters);
+  const limit = options?.limit ?? 50;
+  return useQuery({
+    queryKey: usageKeys.topSessions(
+      range.preset,
+      range.customStartDate,
+      range.customEndDate,
+      effective,
+      range.liveEndTime,
+      limit,
+    ),
+    queryFn: () => {
+      const { startDate, endDate } = resolveUsageRange(range);
+      return usageApi.getTopSessions(
+        startDate,
+        endDate,
+        effective.appType,
+        effective.providerName,
+        effective.model,
+        limit,
+      );
+    },
+    refetchInterval: options?.refetchInterval ?? DEFAULT_REFETCH_INTERVAL_MS,
+    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? false,
   });
 }
 

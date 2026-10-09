@@ -1543,6 +1543,10 @@
     "costLabel": "总成本",
     "unpriced": "未定价",
     "unpricedAddHint": "点击为该模型添加定价，保存后会回填历史费用",
+    "sessionStats": "会话",
+    "sessionsHint": "按会话 ID 归集的费用（代理与本地会话日志）；30 天前的明细已汇总，不再按会话统计。",
+    "lastSeen": "最近活动",
+    "showRequests": "查看该会话的请求",
     "export": {
       "menu": "导出",
       "tooltip": "按当前筛选条件导出请求日志或账单汇总",

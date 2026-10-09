@@ -1543,6 +1543,10 @@
     "costLabel": "total cost",
     "unpriced": "Unpriced",
     "unpricedAddHint": "Add pricing for this model; saving backfills the cost of its past requests",
+    "sessionStats": "Sessions",
+    "sessionsHint": "Cost attributed per session id from proxy and local session logs. Detail rows older than 30 days are rolled up and no longer counted per session.",
+    "lastSeen": "Last activity",
+    "showRequests": "Show this session's requests",
     "export": {
       "menu": "Export",
       "tooltip": "Export request logs or a statement for the current filters",

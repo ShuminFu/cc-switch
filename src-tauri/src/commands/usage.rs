@@ -387,6 +387,27 @@ pub fn get_session_usage(
     state.db.get_session_usage(&session_ids)
 }
 
+/// 时间范围内费用最高的会话
+#[tauri::command]
+pub fn get_top_sessions(
+    state: State<'_, AppState>,
+    start_date: Option<i64>,
+    end_date: Option<i64>,
+    app_type: Option<String>,
+    provider_name: Option<String>,
+    model: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<SessionUsageStat>, AppError> {
+    state.db.get_top_sessions(
+        start_date,
+        end_date,
+        app_type.as_deref(),
+        provider_name.as_deref(),
+        model.as_deref(),
+        limit.unwrap_or(50),
+    )
+}
+
 /// 获取数据来源分布
 #[tauri::command]
 pub fn get_usage_data_sources(
