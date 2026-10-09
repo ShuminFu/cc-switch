@@ -2730,6 +2730,25 @@
       "restartRequired": "修改地址或端口后需要重启路由服务才能生效"
     },
     "switchFailed": "切换失败: {{error}}",
+    "events": {
+      "title": "最近事件",
+      "allApps": "全部",
+      "clear": "清空",
+      "empty": "还没有事件。故障转移、熔断、接管与额度规则的动作都会记录在这里。",
+      "kinds": {
+        "proxy_start": "代理已启动",
+        "proxy_stop": "代理已停止",
+        "takeover_on": "开启接管",
+        "takeover_off": "关闭接管",
+        "failover_switch": "故障转移切换",
+        "breaker_open": "熔断器打开",
+        "breaker_half_open": "熔断器半开（探测中）",
+        "breaker_closed": "熔断器关闭（已恢复）",
+        "breaker_reset": "手动重置熔断器",
+        "rule_switch": "额度规则切换",
+        "rule_revert": "额度规则回切"
+      }
+    },
     "takeover": {
       "hint": "选择要路由的应用，启用后该应用的请求将通过本地路由转发",
       "enabled": "{{app}} 路由已启用",

@@ -344,6 +344,20 @@ pub async fn reset_circuit_breaker(
         .reset_provider_circuit_breaker(&provider_id, &app_type)
         .await?;
 
+    let provider_name = db
+        .get_all_providers(&app_type)
+        .ok()
+        .and_then(|providers| providers.get(&provider_id).map(|p| p.name.clone()));
+    if let Err(e) = db.record_proxy_event(
+        &app_type,
+        crate::database::proxy_event_kind::BREAKER_RESET,
+        Some(&provider_id),
+        provider_name.as_deref(),
+        None,
+    ) {
+        log::warn!("[ProxyEvents] 记录熔断重置事件失败: {e}");
+    }
+
     // 3. 检查是否应该切回优先级更高的供应商（从 proxy_config 表读取）
     // 只有当该应用已被代理接管（enabled=true）且开启了自动故障转移时才执行
     let (app_enabled, auto_failover_enabled) = match db.get_proxy_config_for_app(&app_type).await {
@@ -454,4 +468,28 @@ pub async fn get_circuit_breaker_stats(
         .proxy_service
         .get_provider_circuit_breaker_stats(&provider_id, &app_type)
         .await)
+}
+
+/// 最近的代理事件（故障转移、熔断、接管、规则切换、启停），新→旧
+#[tauri::command]
+pub async fn get_proxy_events(
+    state: tauri::State<'_, AppState>,
+    app_type: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<crate::database::ProxyEvent>, String> {
+    state
+        .db
+        .list_proxy_events(app_type.as_deref(), limit.unwrap_or(100))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn clear_proxy_events(
+    state: tauri::State<'_, AppState>,
+    app_type: Option<String>,
+) -> Result<usize, String> {
+    state
+        .db
+        .clear_proxy_events(app_type.as_deref())
+        .map_err(|e| e.to_string())
 }

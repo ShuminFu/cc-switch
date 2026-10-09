@@ -943,6 +943,7 @@ fn test_parse_switch_deeplink() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_resolve_switch_request_by_id_or_name() {
     let _guard = TestHomeGuard::new();
     let db = Database::memory().expect("memory db");

@@ -141,3 +141,28 @@ export interface AppProxyConfig {
   circuitErrorRateThreshold: number;
   circuitMinRequests: number;
 }
+
+export type ProxyEventKind =
+  | "proxy_start"
+  | "proxy_stop"
+  | "takeover_on"
+  | "takeover_off"
+  | "failover_switch"
+  | "breaker_open"
+  | "breaker_half_open"
+  | "breaker_closed"
+  | "breaker_reset"
+  | "rule_switch"
+  | "rule_revert";
+
+/** 代理事件时间线条目（设备本地，后端最多保留最近 1000 条） */
+export interface ProxyEvent {
+  id: number;
+  createdAt: number;
+  /** 应用 id；代理启停等全局事件为 "*" */
+  appType: string;
+  kind: ProxyEventKind | string;
+  providerId?: string;
+  providerName?: string;
+  detail?: string;
+}

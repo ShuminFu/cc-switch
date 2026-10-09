@@ -245,6 +245,15 @@ pub async fn on_quota_snapshot(
             &decision.rule.id,
         );
         crate::tray::schedule_tray_refresh(app);
+        if let Err(e) = state.db.record_proxy_event(
+            app_key,
+            crate::database::proxy_event_kind::RULE_SWITCH,
+            Some(&target),
+            Some(&provider_name),
+            Some(&decision.reason),
+        ) {
+            log::warn!("[ProxyEvents] 记录规则切换事件失败: {e}");
+        }
         if decision.rule.revert_on_reset {
             arm_revert(
                 app.clone(),
@@ -373,6 +382,15 @@ pub async fn revert_rule(app: &AppHandle, rule_id: &str, fired_at: i64) -> Resul
         rule_id,
     );
     crate::tray::schedule_tray_refresh(app);
+    if let Err(e) = state.db.record_proxy_event(
+        &rule.app_type,
+        crate::database::proxy_event_kind::RULE_REVERT,
+        Some(&from),
+        Some(&provider_name),
+        Some(&reason),
+    ) {
+        log::warn!("[ProxyEvents] 记录规则回切事件失败: {e}");
+    }
     Ok(true)
 }
 

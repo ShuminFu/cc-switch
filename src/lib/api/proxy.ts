@@ -6,6 +6,7 @@ import type {
   ProxyTakeoverStatus,
   GlobalProxyConfig,
   AppProxyConfig,
+  ProxyEvent,
 } from "@/types/proxy";
 
 export const proxyApi = {
@@ -49,6 +50,15 @@ export const proxyApi = {
   // 获取各应用接管状态
   async getProxyTakeoverStatus(): Promise<ProxyTakeoverStatus> {
     return invoke("get_proxy_takeover_status");
+  },
+
+  /** 最近的代理事件（故障转移 / 熔断 / 接管 / 规则切换 / 启停），新→旧 */
+  async getProxyEvents(appType?: string, limit = 100): Promise<ProxyEvent[]> {
+    return invoke("get_proxy_events", { appType, limit });
+  },
+
+  async clearProxyEvents(appType?: string): Promise<number> {
+    return invoke("clear_proxy_events", { appType });
   },
 
   // 为指定应用开启/关闭接管

@@ -90,7 +90,12 @@ pub struct CircuitBreaker {
     config: Arc<RwLock<CircuitBreakerConfig>>,
     /// 半开状态已放行的请求数（用于限流）
     half_open_requests: Arc<AtomicU32>,
+    /// 状态变化回调（事件时间线等），不影响熔断逻辑
+    transition_sink: Arc<RwLock<Option<TransitionSink>>>,
 }
+
+/// 熔断器状态变化回调
+pub type TransitionSink = Arc<dyn Fn(CircuitState) + Send + Sync>;
 
 /// 熔断器放行结果
 ///
@@ -114,6 +119,19 @@ impl CircuitBreaker {
             last_opened_at: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(config)),
             half_open_requests: Arc::new(AtomicU32::new(0)),
+            transition_sink: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// 注册状态变化回调（Open / HalfOpen / Closed 之间每次切换都会调用）
+    pub async fn set_transition_sink(&self, sink: TransitionSink) {
+        *self.transition_sink.write().await = Some(sink);
+    }
+
+    async fn notify_transition(&self, state: CircuitState) {
+        let sink = self.transition_sink.read().await.clone();
+        if let Some(sink) = sink {
+            sink(state);
         }
     }
 
@@ -376,19 +394,23 @@ impl CircuitBreaker {
         *self.last_opened_at.write().await = Some(Instant::now());
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
+        self.notify_transition(CircuitState::Open).await;
     }
 
     /// 转换到半开状态
     async fn transition_to_half_open(&self) {
-        let mut state = self.state.write().await;
-        if *state != CircuitState::Open {
-            return;
-        }
+        {
+            let mut state = self.state.write().await;
+            if *state != CircuitState::Open {
+                return;
+            }
 
-        *state = CircuitState::HalfOpen;
-        self.consecutive_successes.store(0, Ordering::SeqCst);
-        // 重置半开状态的请求限流计数
-        self.half_open_requests.store(0, Ordering::SeqCst);
+            *state = CircuitState::HalfOpen;
+            self.consecutive_successes.store(0, Ordering::SeqCst);
+            // 重置半开状态的请求限流计数
+            self.half_open_requests.store(0, Ordering::SeqCst);
+        }
+        self.notify_transition(CircuitState::HalfOpen).await;
     }
 
     /// 转换到关闭状态
@@ -399,6 +421,7 @@ impl CircuitBreaker {
         // 重置计数器
         self.total_requests.store(0, Ordering::SeqCst);
         self.failed_requests.store(0, Ordering::SeqCst);
+        self.notify_transition(CircuitState::Closed).await;
     }
 }
 
@@ -439,6 +462,39 @@ mod tests {
         // 应该转换到打开状态
         assert_eq!(breaker.get_state().await, CircuitState::Open);
         assert!(!breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_transition_sink_sees_every_state_change() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 2,
+            success_threshold: 1,
+            timeout_seconds: 0,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+        let seen: Arc<std::sync::Mutex<Vec<CircuitState>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink_seen = seen.clone();
+        breaker
+            .set_transition_sink(Arc::new(move |state| {
+                sink_seen.lock().unwrap().push(state);
+            }))
+            .await;
+
+        breaker.record_failure(false).await;
+        breaker.record_failure(false).await; // -> Open
+        assert!(breaker.allow_request().await.allowed); // timeout 0 -> HalfOpen probe
+        breaker.record_success(true).await; // -> Closed
+
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                CircuitState::Open,
+                CircuitState::HalfOpen,
+                CircuitState::Closed
+            ]
+        );
     }
 
     #[tokio::test]

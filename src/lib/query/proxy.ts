@@ -1,4 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import { proxyApi } from "@/lib/api/proxy";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -14,6 +19,40 @@ export function useProxyStatus() {
     queryKey: ["proxyStatus"],
     queryFn: () => proxyApi.getProxyStatus(),
     refetchInterval: 5000, // 每 5 秒刷新一次
+  });
+}
+
+export const proxyEventKeys = {
+  all: ["proxyEvents"] as const,
+  list: (appType?: string, limit?: number) =>
+    [...proxyEventKeys.all, appType ?? "all", limit ?? 100] as const,
+};
+
+/**
+ * 代理事件时间线（每 10 秒刷新；provider-switched 事件也会触发失效）
+ */
+export function useProxyEvents(
+  appType?: string,
+  options?: { limit?: number; enabled?: boolean; refetchInterval?: number },
+) {
+  return useQuery({
+    queryKey: proxyEventKeys.list(appType, options?.limit),
+    queryFn: () => proxyApi.getProxyEvents(appType, options?.limit ?? 100),
+    enabled: options?.enabled ?? true,
+    refetchInterval: options?.refetchInterval ?? 10000,
+    // 切换应用筛选时保留上一份列表，避免闪烁
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export function useClearProxyEvents() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (appType?: string) => proxyApi.clearProxyEvents(appType),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: proxyEventKeys.all });
+    },
   });
 }
 

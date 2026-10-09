@@ -393,6 +393,7 @@ function App() {
                 }),
               );
             }
+            void queryClient.invalidateQueries({ queryKey: ["proxyEvents"] });
             if (event.appType === activeApp) {
               await refetch();
             }

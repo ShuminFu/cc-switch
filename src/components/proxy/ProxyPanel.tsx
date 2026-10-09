@@ -19,6 +19,7 @@ import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { toast } from "sonner";
 import { useFailoverQueue } from "@/lib/query/failover";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
+import { ProxyEventTimeline } from "@/components/proxy/ProxyEventTimeline";
 import { useProviderHealth } from "@/lib/query/failover";
 import {
   useProxyTakeoverStatus,
@@ -645,6 +646,9 @@ export function ProxyPanel({
             </div>
           </div>
         )}
+
+        {/* [9] Event timeline — persisted, survives toasts and restarts */}
+        <ProxyEventTimeline />
       </section>
     </>
   );

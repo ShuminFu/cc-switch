@@ -263,6 +263,43 @@ impl ProviderRouter {
         };
 
         let breaker = Arc::new(CircuitBreaker::new(config));
+
+        // 状态变化写入事件时间线（设备本地），便于事后回看“为什么切到了 P2”
+        {
+            let db = self.db.clone();
+            let app_type = app_type.to_string();
+            let provider_id = key
+                .split_once(':')
+                .map(|(_, id)| id)
+                .unwrap_or(key)
+                .to_string();
+            breaker
+                .set_transition_sink(Arc::new(move |state| {
+                    use crate::database::proxy_event_kind as kind;
+                    let kind = match state {
+                        crate::proxy::circuit_breaker::CircuitState::Open => kind::BREAKER_OPEN,
+                        crate::proxy::circuit_breaker::CircuitState::HalfOpen => {
+                            kind::BREAKER_HALF_OPEN
+                        }
+                        crate::proxy::circuit_breaker::CircuitState::Closed => kind::BREAKER_CLOSED,
+                    };
+                    let provider_name = db
+                        .get_all_providers(&app_type)
+                        .ok()
+                        .and_then(|providers| providers.get(&provider_id).map(|p| p.name.clone()));
+                    if let Err(e) = db.record_proxy_event(
+                        &app_type,
+                        kind,
+                        Some(&provider_id),
+                        provider_name.as_deref(),
+                        None,
+                    ) {
+                        log::warn!("[ProxyEvents] 记录熔断事件失败: {e}");
+                    }
+                }))
+                .await;
+        }
+
         breakers.insert(key.to_string(), breaker.clone());
 
         breaker

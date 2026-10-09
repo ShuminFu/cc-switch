@@ -2702,6 +2702,25 @@
       "restartRequired": "修改位址或連接埠後需要重新啟動路由服務才能生效"
     },
     "switchFailed": "切換失敗：{{error}}",
+    "events": {
+      "title": "最近事件",
+      "allApps": "全部",
+      "clear": "清空",
+      "empty": "還沒有事件。故障轉移、熔斷、接管與額度規則的動作都會記錄在這裡。",
+      "kinds": {
+        "proxy_start": "代理已啟動",
+        "proxy_stop": "代理已停止",
+        "takeover_on": "開啟接管",
+        "takeover_off": "關閉接管",
+        "failover_switch": "故障轉移切換",
+        "breaker_open": "熔斷器開啟",
+        "breaker_half_open": "熔斷器半開（探測中）",
+        "breaker_closed": "熔斷器關閉（已恢復）",
+        "breaker_reset": "手動重設熔斷器",
+        "rule_switch": "額度規則切換",
+        "rule_revert": "額度規則切回"
+      }
+    },
     "takeover": {
       "hint": "選擇要路由的應用程式，啟用後該應用程式的請求將透過本地路由轉發",
       "enabled": "{{app}} 路由已啟用",

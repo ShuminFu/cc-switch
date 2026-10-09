@@ -516,6 +516,25 @@ impl ProxyService {
 
     /// 启动代理服务器
     pub async fn start(&self) -> Result<ProxyServerInfo, String> {
+        let was_running = self.is_running().await;
+        let info = self.start_inner().await?;
+        if !was_running {
+            self.record_event("*", crate::database::proxy_event_kind::PROXY_START, None);
+        }
+        Ok(info)
+    }
+
+    /// 写入事件时间线（设备本地），失败只记日志
+    fn record_event(&self, app_type: &str, kind: &str, detail: Option<&str>) {
+        if let Err(e) = self
+            .db
+            .record_proxy_event(app_type, kind, None, None, detail)
+        {
+            log::warn!("[ProxyEvents] 记录事件失败: {e}");
+        }
+    }
+
+    async fn start_inner(&self) -> Result<ProxyServerInfo, String> {
         // 1. 启动时自动设置 proxy_enabled = true
         let mut global_config = self
             .db
@@ -728,6 +747,28 @@ impl ProxyService {
     /// - 开启：自动启动代理服务，仅接管当前 app 的 Live 配置
     /// - 关闭：仅恢复当前 app 的 Live 配置；若无其它接管，则自动停止代理服务
     pub async fn set_takeover_for_app(&self, app_type: &str, enabled: bool) -> Result<(), String> {
+        let was_enabled = self.db.get_proxy_flags_sync(app_type).0;
+        self.set_takeover_for_app_inner(app_type, enabled).await?;
+        if was_enabled != enabled {
+            use crate::database::proxy_event_kind as kind;
+            self.record_event(
+                app_type,
+                if enabled {
+                    kind::TAKEOVER_ON
+                } else {
+                    kind::TAKEOVER_OFF
+                },
+                None,
+            );
+        }
+        Ok(())
+    }
+
+    async fn set_takeover_for_app_inner(
+        &self,
+        app_type: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
         let app = AppType::from_str(app_type).map_err(|e| format!("无效的应用类型: {e}"))?;
         let app_type_str = app.as_str();
         let _guard = self.switch_locks.lock_for_app(app_type_str).await;
@@ -1259,6 +1300,12 @@ impl ProxyService {
 
     /// 停止代理服务器
     pub async fn stop(&self) -> Result<(), String> {
+        self.stop_inner().await?;
+        self.record_event("*", crate::database::proxy_event_kind::PROXY_STOP, None);
+        Ok(())
+    }
+
+    async fn stop_inner(&self) -> Result<(), String> {
         if let Some(server) = self.server.write().await.take() {
             server
                 .stop()

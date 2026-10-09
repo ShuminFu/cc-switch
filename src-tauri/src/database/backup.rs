@@ -23,6 +23,7 @@ const SYNC_SKIP_TABLES: &[&str] = &[
     "proxy_live_backup",
     "usage_daily_rollups",
     "switch_rule_state",
+    "proxy_events",
 ];
 
 /// Tables whose local data is preserved (restored from local snapshot) during WebDAV import.
@@ -33,6 +34,7 @@ const SYNC_PRESERVE_TABLES: &[&str] = &[
     "proxy_live_backup",
     "usage_daily_rollups",
     "switch_rule_state",
+    "proxy_events",
 ];
 
 /// A database backup entry for the UI

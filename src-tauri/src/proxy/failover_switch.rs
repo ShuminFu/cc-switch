@@ -110,6 +110,16 @@ impl FailoverSwitchManager {
                     return Ok(false);
                 }
 
+                if let Err(e) = self.db.record_proxy_event(
+                    app_type,
+                    crate::database::proxy_event_kind::FAILOVER_SWITCH,
+                    Some(provider_id),
+                    Some(provider_name),
+                    None,
+                ) {
+                    log::warn!("[ProxyEvents] 记录故障转移事件失败: {e}");
+                }
+
                 if let Ok(new_menu) = crate::tray::create_tray_menu(app, app_state.inner()) {
                     if let Some(tray) = app.tray_by_id(crate::tray::TRAY_ID) {
                         if let Err(e) = tray.set_menu(Some(new_menu)) {

@@ -2730,6 +2730,25 @@
       "restartRequired": "Restart routing service for address or port changes to take effect"
     },
     "switchFailed": "Switch failed: {{error}}",
+    "events": {
+      "title": "Recent events",
+      "allApps": "All",
+      "clear": "Clear",
+      "empty": "No events yet. Failover, circuit breaker, takeover and quota-rule actions are recorded here.",
+      "kinds": {
+        "proxy_start": "Proxy started",
+        "proxy_stop": "Proxy stopped",
+        "takeover_on": "Takeover enabled",
+        "takeover_off": "Takeover disabled",
+        "failover_switch": "Failover switch",
+        "breaker_open": "Circuit breaker opened",
+        "breaker_half_open": "Circuit breaker half-open (probing)",
+        "breaker_closed": "Circuit breaker closed (recovered)",
+        "breaker_reset": "Circuit breaker reset manually",
+        "rule_switch": "Quota rule switch",
+        "rule_revert": "Quota rule switch-back"
+      }
+    },
     "takeover": {
       "hint": "Select apps to route — once enabled, requests from that app will go through local routing",
       "enabled": "{{app}} routing enabled",

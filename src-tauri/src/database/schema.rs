@@ -125,6 +125,9 @@ impl Database {
         // 7b. 配额规则表（订阅 / Coding Plan 窗口越过阈值时自动切换供应商）
         Self::create_switch_rules_tables(conn)?;
 
+        // 7c. 代理事件时间线（故障转移、熔断、接管、规则切换；设备本地）
+        Self::create_proxy_events_table(conn)?;
+
         // 8. Proxy Config 表（三行结构，app_type 主键）
         conn.execute("CREATE TABLE IF NOT EXISTS proxy_config (
             app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
@@ -513,6 +516,11 @@ impl Database {
                         log::info!("迁移数据库从 v15 到 v16（添加配额规则表）");
                         Self::migrate_v15_to_v16(conn)?;
                         Self::set_user_version(conn, 16)?;
+                    }
+                    16 => {
+                        log::info!("迁移数据库从 v16 到 v17（添加代理事件时间线表）");
+                        Self::migrate_v16_to_v17(conn)?;
+                        Self::set_user_version(conn, 17)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -1545,6 +1553,35 @@ impl Database {
     /// v15 -> v16 迁移：添加配额规则表
     fn migrate_v15_to_v16(conn: &Connection) -> Result<(), AppError> {
         Self::create_switch_rules_tables(conn)
+    }
+
+    /// 代理事件时间线表。设备本地（见 backup.rs），按 id 保留最近 N 条。
+    pub(crate) fn create_proxy_events_table(conn: &Connection) -> Result<(), AppError> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS proxy_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at INTEGER NOT NULL,
+                app_type TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                provider_id TEXT,
+                provider_name TEXT,
+                detail TEXT
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_proxy_events_app_created
+             ON proxy_events(app_type, created_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// v16 -> v17 迁移：添加代理事件时间线表
+    fn migrate_v16_to_v17(conn: &Connection) -> Result<(), AppError> {
+        Self::create_proxy_events_table(conn)
     }
 
     fn migrate_v14_to_v15(conn: &Connection) -> Result<(), AppError> {
@@ -3028,6 +3065,28 @@ mod tests {
         )?;
         assert_eq!(codex_values, (1, 9));
 
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_v16_to_v17_creates_proxy_events_table() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE switch_rules (id TEXT PRIMARY KEY);
+             CREATE TABLE switch_rule_state (rule_id TEXT PRIMARY KEY);",
+        )?;
+        Database::set_user_version(&conn, 16)?;
+
+        Database::apply_schema_migrations_on_conn(&conn)?;
+
+        assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+        assert!(Database::table_exists(&conn, "proxy_events")?);
+        let index_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_proxy_events_app_created'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(index_count, 1);
         Ok(())
     }
 
