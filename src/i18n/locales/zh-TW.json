@@ -886,6 +886,15 @@
     "invalidToml": "config.toml 格式錯誤：{{error}}"
   },
   "sessionManager": {
+    "export": "匯出",
+    "exportMarkdown": "Markdown (.md)",
+    "exportJson": "JSON (.json)",
+    "exportTooltip": "匯出此對話記錄",
+    "exported": "對話已匯出到 {{path}}",
+    "exportFailed": "匯出失敗：{{detail}}",
+    "revealInFileManager": "在檔案管理員中顯示",
+    "revealSourceInFileManager": "在檔案管理員中顯示來源檔案",
+    "revealFailed": "無法開啟檔案管理員：{{detail}}",
     "title": "工作階段管理",
     "subtitle": "管理 Claude Code、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw 與 Hermes 工作階段紀錄",
     "searchPlaceholder": "搜尋對話內容、目錄或 ID",

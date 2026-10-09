@@ -12,6 +12,8 @@ export interface DeleteSessionResult extends DeleteSessionOptions {
   error?: string;
 }
 
+export type TranscriptFormat = "markdown" | "json";
+
 export const sessionsApi = {
   async list(): Promise<SessionMeta[]> {
     return await invoke("list_sessions");
@@ -37,6 +39,31 @@ export const sessionsApi = {
     items: DeleteSessionOptions[],
   ): Promise<DeleteSessionResult[]> {
     return await invoke("delete_sessions", { items });
+  },
+
+  /** Save dialog filtered to the transcript format; null when cancelled */
+  async saveTranscriptDialog(
+    defaultName: string,
+    format: TranscriptFormat,
+  ): Promise<string | null> {
+    return await invoke("save_session_transcript_dialog", {
+      defaultName,
+      format,
+    });
+  },
+
+  /** Render the session's messages and write them to targetPath; resolves to the written path */
+  async exportTranscript(options: {
+    session: SessionMeta;
+    targetPath: string;
+    format: TranscriptFormat;
+  }): Promise<string> {
+    return await invoke("export_session_transcript", options);
+  },
+
+  /** Open a project directory, or reveal a source file, in the system file manager */
+  async revealPath(path: string): Promise<void> {
+    await invoke("reveal_session_path", { path });
   },
 
   async launchTerminal(options: {

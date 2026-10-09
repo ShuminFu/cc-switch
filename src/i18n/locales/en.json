@@ -915,6 +915,15 @@
     "invalidToml": "Invalid config.toml: {{error}}"
   },
   "sessionManager": {
+    "export": "Export",
+    "exportMarkdown": "Markdown (.md)",
+    "exportJson": "JSON (.json)",
+    "exportTooltip": "Export this session's transcript",
+    "exported": "Transcript saved to {{path}}",
+    "exportFailed": "Export failed: {{detail}}",
+    "revealInFileManager": "Show in file manager",
+    "revealSourceInFileManager": "Show source file in file manager",
+    "revealFailed": "Could not open the file manager: {{detail}}",
     "title": "Session Manager",
     "subtitle": "Manage Claude Code, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw and Hermes sessions",
     "searchPlaceholder": "Search by content, directory, or ID",

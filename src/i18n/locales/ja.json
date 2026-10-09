@@ -915,6 +915,15 @@
     "invalidToml": "config.toml の形式が不正です: {{error}}"
   },
   "sessionManager": {
+    "export": "エクスポート",
+    "exportMarkdown": "Markdown (.md)",
+    "exportJson": "JSON (.json)",
+    "exportTooltip": "このセッションの記録をエクスポート",
+    "exported": "記録を {{path}} に保存しました",
+    "exportFailed": "エクスポートに失敗しました: {{detail}}",
+    "revealInFileManager": "ファイルマネージャーで表示",
+    "revealSourceInFileManager": "ソースファイルをファイルマネージャーで表示",
+    "revealFailed": "ファイルマネージャーを開けませんでした: {{detail}}",
     "title": "セッション管理",
     "subtitle": "Claude Code / Codex / Gemini CLI / Grok Build / OpenCode / OpenClaw / Hermes のセッションを管理",
     "searchPlaceholder": "内容・ディレクトリ・ID で検索",

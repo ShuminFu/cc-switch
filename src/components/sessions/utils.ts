@@ -146,6 +146,24 @@ export const getRoleLabel = (role: string, t: (key: string) => string) => {
   return role;
 };
 
+const TRANSCRIPT_NAME_MAX_CHARS = 80;
+
+/** Default file name for an exported transcript, safe for every desktop file system. */
+export const buildTranscriptFileName = (
+  session: SessionMeta,
+  format: "markdown" | "json",
+) => {
+  const base =
+    (session.title?.trim() || session.sessionId)
+      // Strip path separators, Windows-reserved characters and control characters.
+      .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, TRANSCRIPT_NAME_MAX_CHARS)
+      .trim() || session.sessionId;
+  return `${session.providerId}-${base}.${format === "json" ? "json" : "md"}`;
+};
+
 export const formatSessionTitle = (session: SessionMeta) => {
   return (
     session.title ||

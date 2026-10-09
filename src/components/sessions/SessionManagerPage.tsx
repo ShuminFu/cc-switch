@@ -5,22 +5,24 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  Copy,
-  RefreshCw,
-  Search,
-  Play,
-  Trash2,
-  MessageSquare,
-  Clock,
-  FolderOpen,
-  FileText,
-  X,
   CheckSquare,
-  ListTree,
-  List,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
+  Clock,
+  Copy,
+  Download,
+  ExternalLink,
+  FileText,
+  FolderOpen,
+  List,
+  ListTree,
+  MessageSquare,
+  Play,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
 } from "lucide-react";
 import {
   useDeleteSessionMutation,
@@ -28,6 +30,13 @@ import {
   useSessionsQuery,
 } from "@/lib/query";
 import { sessionsApi } from "@/lib/api";
+import type { TranscriptFormat } from "@/lib/api/sessions";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { SessionMeta } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,6 +69,7 @@ import { SessionItem } from "./SessionItem";
 import { SessionMessageItem } from "./SessionMessageItem";
 import { SessionTocDialog, SessionTocSidebar } from "./SessionToc";
 import {
+  buildTranscriptFileName,
   extractCodexPromptPreview,
   formatSessionMessagePreview,
   formatSessionTitle,
@@ -70,9 +80,9 @@ import {
   getSessionDirectoryGroupKey,
   getSessionKey,
   groupSessionsByProviderAndDirectory,
+  shouldHideCodexMessageFromToc,
   type SessionDirectoryGroup,
   type SessionProviderGroup,
-  shouldHideCodexMessageFromToc,
 } from "./utils";
 
 const SESSION_LIST_VIEW_MODE_STORAGE_KEY =
@@ -414,6 +424,53 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     },
     [handleCopy, t],
   );
+
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = async (format: TranscriptFormat) => {
+    if (!selectedSession?.sourcePath) return;
+    try {
+      const targetPath = await sessionsApi.saveTranscriptDialog(
+        buildTranscriptFileName(selectedSession, format),
+        format,
+      );
+      if (!targetPath) return;
+      setIsExporting(true);
+      const savedPath = await sessionsApi.exportTranscript({
+        session: selectedSession,
+        targetPath,
+        format,
+      });
+      toast.success(
+        t("sessionManager.exported", {
+          defaultValue: "会话已导出到 {{path}}",
+          path: savedPath,
+        }),
+      );
+    } catch (error) {
+      toast.error(
+        t("sessionManager.exportFailed", {
+          defaultValue: "导出失败：{{detail}}",
+          detail: extractErrorMessage(error),
+        }),
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleReveal = async (path: string) => {
+    try {
+      await sessionsApi.revealPath(path);
+    } catch (error) {
+      toast.error(
+        t("sessionManager.revealFailed", {
+          defaultValue: "无法打开文件管理器：{{detail}}",
+          detail: extractErrorMessage(error),
+        }),
+      );
+    }
+  };
 
   const handleResume = async () => {
     if (!selectedSession?.resumeCommand) return;
@@ -1128,6 +1185,16 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                 <span>Gemini CLI</span>
                               </div>
                             </SelectItem>
+                            <SelectItem value="hermes">
+                              <div className="flex items-center gap-2">
+                                <ProviderIcon
+                                  icon="hermes"
+                                  name="hermes"
+                                  size={14}
+                                />
+                                <span>Hermes</span>
+                              </div>
+                            </SelectItem>
                           </SelectContent>
                         </Select>
 
@@ -1481,6 +1548,24 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               </TooltipContent>
                             </Tooltip>
                           )}
+                          {selectedSession.projectDir && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleReveal(selectedSession.projectDir!)
+                              }
+                              className="-ml-3 hover:text-foreground transition-colors"
+                              title={t("sessionManager.revealInFileManager", {
+                                defaultValue: "在文件管理器中显示",
+                              })}
+                              aria-label={t(
+                                "sessionManager.revealInFileManager",
+                                { defaultValue: "在文件管理器中显示" },
+                              )}
+                            >
+                              <ExternalLink className="size-3" />
+                            </button>
+                          )}
                           {selectedSession.sourcePath && (
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -1513,11 +1598,67 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               </TooltipContent>
                             </Tooltip>
                           )}
+                          {selectedSession.sourcePath && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleReveal(selectedSession.sourcePath!)
+                              }
+                              className="-ml-3 hover:text-foreground transition-colors"
+                              title={t("sessionManager.revealInFileManager", {
+                                defaultValue: "在文件管理器中显示",
+                              })}
+                              aria-label={t(
+                                "sessionManager.revealSourceInFileManager",
+                                { defaultValue: "在文件管理器中显示源文件" },
+                              )}
+                            >
+                              <ExternalLink className="size-3" />
+                            </button>
+                          )}
                         </div>
                       </div>
 
                       {/* 右侧：操作按钮组 */}
                       <div className="flex items-center gap-2 shrink-0">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              disabled={
+                                !selectedSession.sourcePath || isExporting
+                              }
+                              title={t("sessionManager.exportTooltip", {
+                                defaultValue: "导出此会话记录",
+                              })}
+                            >
+                              <Download className="size-3.5" />
+                              <span className="hidden sm:inline">
+                                {t("sessionManager.export", {
+                                  defaultValue: "导出",
+                                })}
+                              </span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onSelect={() => void handleExport("markdown")}
+                            >
+                              {t("sessionManager.exportMarkdown", {
+                                defaultValue: "Markdown (.md)",
+                              })}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => void handleExport("json")}
+                            >
+                              {t("sessionManager.exportJson", {
+                                defaultValue: "JSON (.json)",
+                              })}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         {isMac() && (
                           <Tooltip>
                             <TooltipTrigger asChild>

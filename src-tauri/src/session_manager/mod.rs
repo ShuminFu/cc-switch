@@ -1,3 +1,4 @@
+pub mod export;
 pub mod providers;
 pub mod terminal;
 
@@ -6,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use providers::{claude, codex, gemini, grokbuild, hermes, openclaw, opencode};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionMeta {
     pub provider_id: String,

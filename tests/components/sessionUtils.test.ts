@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildTranscriptFileName,
   extractCodexPromptPreview,
   formatSessionMessagePreview,
   groupSessionsByProviderAndDirectory,
@@ -8,6 +9,36 @@ import {
 import type { SessionMeta } from "@/types";
 
 describe("session utils", () => {
+  it("builds a safe transcript file name from the title or session id", () => {
+    const titled: SessionMeta = {
+      providerId: "codex",
+      sessionId: "sess-123",
+      title: 'Fix: build/"release" <v2>?',
+    };
+    expect(buildTranscriptFileName(titled, "markdown")).toBe(
+      "codex-Fix build release v2.md",
+    );
+    expect(buildTranscriptFileName(titled, "json")).toBe(
+      "codex-Fix build release v2.json",
+    );
+
+    const untitled: SessionMeta = {
+      providerId: "claude",
+      sessionId: "abc",
+      title: "   ",
+    };
+    expect(buildTranscriptFileName(untitled, "markdown")).toBe("claude-abc.md");
+
+    const long: SessionMeta = {
+      providerId: "gemini",
+      sessionId: "x",
+      title: "a".repeat(200),
+    };
+    expect(buildTranscriptFileName(long, "markdown")).toBe(
+      `gemini-${"a".repeat(80)}.md`,
+    );
+  });
+
   it("extracts Codex VS Code prompts after the request marker", () => {
     const content = [
       "# Context from my IDE setup:",

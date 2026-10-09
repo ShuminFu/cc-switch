@@ -915,6 +915,15 @@
     "invalidToml": "config.toml 格式错误：{{error}}"
   },
   "sessionManager": {
+    "export": "导出",
+    "exportMarkdown": "Markdown (.md)",
+    "exportJson": "JSON (.json)",
+    "exportTooltip": "导出此会话记录",
+    "exported": "会话已导出到 {{path}}",
+    "exportFailed": "导出失败：{{detail}}",
+    "revealInFileManager": "在文件管理器中显示",
+    "revealSourceInFileManager": "在文件管理器中显示源文件",
+    "revealFailed": "无法打开文件管理器：{{detail}}",
     "title": "会话管理",
     "subtitle": "管理 Claude Code、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw 与 Hermes 会话记录",
     "searchPlaceholder": "搜索会话内容、目录或 ID",
