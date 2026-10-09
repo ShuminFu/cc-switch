@@ -166,3 +166,10 @@ export interface ProxyEvent {
   providerName?: string;
   detail?: string;
 }
+
+/** reapply_proxy_takeover 的单个应用结果 */
+export interface TakeoverReapplyResult {
+  appType: string;
+  ok: boolean;
+  error?: string;
+}

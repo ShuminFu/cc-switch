@@ -942,6 +942,7 @@
     "exportMarkdown": "Markdown (.md)",
     "exportJson": "JSON (.json)",
     "exportTooltip": "Export this session's transcript",
+    "viewRequests": "Show this session's requests in Usage",
     "usageSummary": "{{cost}} · {{requests}} requests · {{tokens}} tokens",
     "usageTooltip": "Estimated cost attributed from proxy and local session logs. Detail rows older than 30 days are rolled up and no longer attributable per session.",
     "usageCostTooltip": "Estimated session cost",
@@ -1645,6 +1646,8 @@
     "successRate": "Success Rate",
     "requestId": "Request ID",
     "sessionId": "Session ID",
+    "sessionFilterPlaceholder": "Session ID",
+    "clearSessionFilter": "Clear session filter",
     "never": "Never",
     "modelId": "Model ID",
     "modelIdRequired": "Model ID is required",
@@ -2750,6 +2753,11 @@
       }
     },
     "takeover": {
+      "reapply": "Re-apply takeover",
+      "reapplyHint": "Re-verify and rebuild the live config of every taken-over app (use after editing a config by hand, changing the port, or losing a backup)",
+      "reapplied": "Takeover re-applied for {{apps}}",
+      "reapplyFailed": "Re-applying takeover failed for some apps: {{detail}}",
+      "reapplyNothing": "No app is currently taken over",
       "hint": "Select apps to route — once enabled, requests from that app will go through local routing",
       "enabled": "{{app}} routing enabled",
       "disabled": "{{app}} routing disabled",

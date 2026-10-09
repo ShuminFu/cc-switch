@@ -995,6 +995,10 @@ function App() {
             <SessionManagerPage
               key={sharedFeatureApp}
               appId={sharedFeatureApp}
+              onOpenUsage={() => {
+                setSettingsDefaultTab("usage");
+                setCurrentView("settings");
+              }}
             />
           );
         case "workspace":

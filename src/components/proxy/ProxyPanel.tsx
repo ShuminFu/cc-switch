@@ -9,6 +9,7 @@ import {
   Loader2,
   Zap,
   Power,
+  RotateCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -24,9 +25,11 @@ import { useProviderHealth } from "@/lib/query/failover";
 import {
   useProxyTakeoverStatus,
   useSetProxyTakeoverForApp,
+  useReapplyProxyTakeover,
   useGlobalProxyConfig,
   useUpdateGlobalProxyConfig,
 } from "@/lib/query/proxy";
+import { summarizeReapply } from "@/components/proxy/reapplyTakeover";
 import type { ProxyStatus } from "@/types/proxy";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
@@ -51,6 +54,51 @@ export function ProxyPanel({
   // 获取应用接管状态
   const { data: takeoverStatus } = useProxyTakeoverStatus();
   const setTakeoverForApp = useSetProxyTakeoverForApp();
+  const reapplyTakeover = useReapplyProxyTakeover();
+  const anyTakeoverEnabled = Boolean(
+    takeoverStatus &&
+      (["claude", "codex", "gemini", "grokbuild"] as const).some(
+        (app) => takeoverStatus[app],
+      ),
+  );
+
+  const handleReapplyTakeover = async () => {
+    try {
+      const summary = summarizeReapply(await reapplyTakeover.mutateAsync());
+      if (summary.kind === "nothing") {
+        toast.info(
+          t("proxy.takeover.reapplyNothing", {
+            defaultValue: "当前没有已接管的应用",
+          }),
+        );
+      } else if (summary.kind === "ok") {
+        toast.success(
+          t("proxy.takeover.reapplied", {
+            defaultValue: "已重新应用接管：{{apps}}",
+            apps: summary.apps.join(", "),
+          }),
+          { closeButton: true },
+        );
+      } else {
+        toast.error(
+          t("proxy.takeover.reapplyFailed", {
+            defaultValue: "部分应用重建接管失败：{{detail}}",
+            detail: summary.failures
+              .map((f) => `${f.appType}: ${f.error ?? ""}`)
+              .join("; "),
+          }),
+          { closeButton: true, duration: 10000 },
+        );
+      }
+    } catch (error) {
+      toast.error(
+        t("proxy.takeover.reapplyFailed", {
+          defaultValue: "部分应用重建接管失败：{{detail}}",
+          detail: extractErrorMessage(error),
+        }),
+      );
+    }
+  };
 
   // 获取全局代理配置
   const { data: globalConfig } = useGlobalProxyConfig();
@@ -301,12 +349,35 @@ export function ProxyPanel({
                     },
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("proxy.takeover.hint", {
-                    defaultValue:
-                      "选择要接管的应用，启用后该应用的请求将通过本地代理转发",
-                  })}
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {t("proxy.takeover.hint", {
+                      defaultValue:
+                        "选择要接管的应用，启用后该应用的请求将通过本地代理转发",
+                    })}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 gap-1.5 text-xs"
+                    disabled={!anyTakeoverEnabled || reapplyTakeover.isPending}
+                    title={t("proxy.takeover.reapplyHint", {
+                      defaultValue:
+                        "重新校验并重建已接管应用的实时配置（手改配置、端口变更或备份丢失后使用）",
+                    })}
+                    onClick={() => void handleReapplyTakeover()}
+                  >
+                    {reapplyTakeover.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RotateCw className="h-3.5 w-3.5" />
+                    )}
+                    {t("proxy.takeover.reapply", {
+                      defaultValue: "重新应用接管",
+                    })}
+                  </Button>
+                </div>
               </div>
             </motion.div>
           )}

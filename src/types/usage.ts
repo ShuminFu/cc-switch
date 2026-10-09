@@ -136,6 +136,8 @@ export interface LogFilters {
   statusCode?: number;
   startDate?: number;
   endDate?: number;
+  /** 会话 ID（后端同时匹配代理记录的 codex_<id> 形式） */
+  sessionId?: string;
 }
 
 /** 导出内容：逐条请求日志，或按供应商 / 模型汇总的账单 */

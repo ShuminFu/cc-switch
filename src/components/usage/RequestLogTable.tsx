@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  subscribeSessionFilter,
+  takePendingSessionFilter,
+} from "@/lib/usageNavigation";
+import {
   Table,
   TableBody,
   TableCell,
@@ -25,7 +29,7 @@ import {
   type ModelPricing,
   type UsageRangeSelection,
 } from "@/types/usage";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import { PricingEditModal } from "./PricingEditModal";
 import {
@@ -59,7 +63,35 @@ export function RequestLogTable({
   // 应用/Provider/模型筛选已上移到 Dashboard 顶栏（全局生效）；
   // 这里只保留日志特有的状态码筛选。
   const [statusCode, setStatusCode] = useState<number | undefined>(undefined);
+  // 会话筛选：可由会话管理器的「查看请求」预填，也可手动输入
+  const [sessionId, setSessionId] = useState<string | undefined>(
+    () => takePendingSessionFilter() ?? undefined,
+  );
+  const [sessionInput, setSessionInput] = useState(() => sessionId ?? "");
   const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    return subscribeSessionFilter((next) => {
+      takePendingSessionFilter();
+      setSessionId(next);
+      setSessionInput(next);
+      setPage(0);
+    });
+  }, []);
+
+  const applySessionInput = () => {
+    const next = sessionInput.trim() || undefined;
+    if (next !== sessionId) {
+      setSessionId(next);
+      setPage(0);
+    }
+  };
+
+  const clearSessionFilter = () => {
+    setSessionInput("");
+    setSessionId(undefined);
+    setPage(0);
+  };
   // 未定价行 → 直接打开定价表单（isNew），保存后 update_model_pricing 会回填历史费用
   const [pricingTarget, setPricingTarget] = useState<ModelPricing | null>(null);
   const [pageInput, setPageInput] = useState("");
@@ -73,6 +105,7 @@ export function RequestLogTable({
     providerName,
     model,
     statusCode,
+    sessionId,
   };
 
   const { data: result, isLoading } = useRequestLogs({
@@ -95,6 +128,7 @@ export function RequestLogTable({
     dashboardAppType,
     providerName,
     model,
+    sessionId,
     range.customEndDate,
     range.customStartDate,
     range.preset,
@@ -139,6 +173,40 @@ export function RequestLogTable({
               <SelectItem value="500">500</SelectItem>
             </SelectContent>
           </Select>
+
+          {/* Session id */}
+          <div className="flex items-center gap-1">
+            <Input
+              value={sessionInput}
+              onChange={(e) => setSessionInput(e.target.value)}
+              onBlur={applySessionInput}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") applySessionInput();
+              }}
+              placeholder={t("usage.sessionFilterPlaceholder", {
+                defaultValue: "会话 ID",
+              })}
+              aria-label={t("usage.sessionFilterPlaceholder", {
+                defaultValue: "会话 ID",
+              })}
+              className="h-8 w-[200px] bg-background font-mono text-xs"
+              data-testid="request-log-session-filter"
+            />
+            {sessionId && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs"
+                onClick={clearSessionFilter}
+                aria-label={t("usage.clearSessionFilter", {
+                  defaultValue: "清除会话筛选",
+                })}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
 
           {onRangeChange && (
             <UsageDateRangePicker

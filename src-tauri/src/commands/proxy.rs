@@ -493,3 +493,43 @@ pub async fn clear_proxy_events(
         .clear_proxy_events(app_type.as_deref())
         .map_err(|e| e.to_string())
 }
+
+/// 单个应用的接管重建结果
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TakeoverReapplyResult {
+    pub app_type: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// 为所有已接管的应用重新校验并重建接管（备份缺失、实时文件被手改、端口变更后
+/// 占位符不匹配等都会被修复）。未接管的应用不受影响。
+#[tauri::command]
+pub async fn reapply_proxy_takeover(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<TakeoverReapplyResult>, String> {
+    let status = state.proxy_service.get_takeover_status().await?;
+    let enabled_apps: Vec<&str> = [
+        ("claude", status.claude),
+        ("codex", status.codex),
+        ("gemini", status.gemini),
+        ("grokbuild", status.grokbuild),
+    ]
+    .into_iter()
+    .filter(|(_, enabled)| *enabled)
+    .map(|(app, _)| app)
+    .collect();
+
+    let mut results = Vec::with_capacity(enabled_apps.len());
+    for app in enabled_apps {
+        let outcome = state.proxy_service.set_takeover_for_app(app, true).await;
+        results.push(TakeoverReapplyResult {
+            app_type: app.to_string(),
+            ok: outcome.is_ok(),
+            error: outcome.err(),
+        });
+    }
+    Ok(results)
+}

@@ -1,4 +1,4 @@
-import { Coins } from "lucide-react";
+import { Coins, ListFilter } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   Tooltip,
@@ -11,10 +11,15 @@ import { formatSessionCost } from "./utils";
 
 interface SessionUsageSummaryProps {
   usage?: SessionUsageStat;
+  /** 打开用量页并按该会话筛选请求日志 */
+  onViewRequests?: () => void;
 }
 
 /** 会话详情头部的费用归集（无记录时不渲染） */
-export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
+export function SessionUsageSummary({
+  usage,
+  onViewRequests,
+}: SessionUsageSummaryProps) {
   const { t, i18n } = useTranslation();
   if (!usage) return null;
 
@@ -44,6 +49,22 @@ export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
           </span>
         </span>
       </TooltipTrigger>
+      {onViewRequests && (
+        <button
+          type="button"
+          onClick={onViewRequests}
+          className="flex items-center gap-1 hover:text-foreground transition-colors"
+          title={t("sessionManager.viewRequests", {
+            defaultValue: "在用量页查看该会话的请求",
+          })}
+          aria-label={t("sessionManager.viewRequests", {
+            defaultValue: "在用量页查看该会话的请求",
+          })}
+          data-testid="session-view-requests"
+        >
+          <ListFilter className="size-3" />
+        </button>
+      )}
       <TooltipContent side="bottom" className="max-w-xs">
         <p>
           {t("sessionManager.usageTooltip", {

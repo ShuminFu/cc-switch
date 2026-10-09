@@ -7,6 +7,7 @@ import type {
   GlobalProxyConfig,
   AppProxyConfig,
   ProxyEvent,
+  TakeoverReapplyResult,
 } from "@/types/proxy";
 
 export const proxyApi = {
@@ -59,6 +60,11 @@ export const proxyApi = {
 
   async clearProxyEvents(appType?: string): Promise<number> {
     return invoke("clear_proxy_events", { appType });
+  },
+
+  /** 为所有已接管的应用重新校验并重建接管 */
+  async reapplyProxyTakeover(): Promise<TakeoverReapplyResult[]> {
+    return invoke("reapply_proxy_takeover");
   },
 
   // 为指定应用开启/关闭接管

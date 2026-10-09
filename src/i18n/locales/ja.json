@@ -942,6 +942,7 @@
     "exportMarkdown": "Markdown (.md)",
     "exportJson": "JSON (.json)",
     "exportTooltip": "このセッションの記録をエクスポート",
+    "viewRequests": "使用量ページでこのセッションのリクエストを表示",
     "usageSummary": "{{cost}} · {{requests}} リクエスト · {{tokens}} トークン",
     "usageTooltip": "プロキシとローカルセッションログから推定した費用です。30 日より前の明細は集約済みのためセッション別には表示されません。",
     "usageCostTooltip": "セッションの推定費用",
@@ -1645,6 +1646,8 @@
     "successRate": "成功率",
     "requestId": "リクエスト ID",
     "sessionId": "セッション ID",
+    "sessionFilterPlaceholder": "セッション ID",
+    "clearSessionFilter": "セッションフィルターを解除",
     "never": "なし",
     "modelId": "モデル ID",
     "modelIdRequired": "モデル ID は必須です",
@@ -2750,6 +2753,11 @@
       }
     },
     "takeover": {
+      "reapply": "引き継ぎを再適用",
+      "reapplyHint": "引き継ぎ中の全アプリのライブ設定を再検証して再構築します（設定を手で編集した後、ポート変更後、バックアップ消失後に使用）",
+      "reapplied": "引き継ぎを再適用しました：{{apps}}",
+      "reapplyFailed": "一部のアプリで引き継ぎの再構築に失敗しました：{{detail}}",
+      "reapplyNothing": "引き継ぎ中のアプリはありません",
       "hint": "ルーティングするアプリを選択します。有効にすると、そのアプリのリクエストはローカルルーティング経由で転送されます",
       "enabled": "{{app}} ルーティング有効",
       "disabled": "{{app}} ルーティング無効",

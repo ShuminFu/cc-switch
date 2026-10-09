@@ -2,6 +2,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RequestLogTable } from "@/components/usage/RequestLogTable";
 import type { UsageRangeSelection } from "@/types/usage";
+import {
+  requestLogSessionFilter,
+  resetSessionFilterForTests,
+} from "@/lib/usageNavigation";
 
 const useRequestLogsMock = vi.hoisted(() => vi.fn());
 
@@ -70,6 +74,7 @@ vi.mock("@/components/ui/table", () => ({
 
 describe("RequestLogTable", () => {
   beforeEach(() => {
+    resetSessionFilterForTests();
     useRequestLogsMock.mockReset();
     useRequestLogsMock.mockImplementation(
       ({ page = 0, pageSize = 20 }: { page?: number; pageSize?: number }) => ({
@@ -220,6 +225,55 @@ describe("RequestLogTable", () => {
     await waitFor(() =>
       expect(screen.getByTestId("pricing-modal")).toHaveTextContent(
         "mystery-model-v2|mystery-model-v2|new",
+      ),
+    );
+  });
+
+  it("consumes a pending session filter from the session manager on mount", () => {
+    requestLogSessionFilter("sess-42");
+    render(
+      <RequestLogTable
+        range={{ preset: "today" } as UsageRangeSelection}
+        rangeLabel="today"
+        refreshIntervalMs={0}
+      />,
+    );
+    expect(useRequestLogsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filters: expect.objectContaining({ sessionId: "sess-42" }),
+      }),
+    );
+    expect(screen.getByTestId("request-log-session-filter")).toHaveValue(
+      "sess-42",
+    );
+  });
+
+  it("applies a typed session id on Enter and clears it again", async () => {
+    render(
+      <RequestLogTable
+        range={{ preset: "today" } as UsageRangeSelection}
+        rangeLabel="today"
+        refreshIntervalMs={0}
+      />,
+    );
+    const input = screen.getByTestId("request-log-session-filter");
+    fireEvent.change(input, { target: { value: " abc-1 " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(useRequestLogsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          filters: expect.objectContaining({ sessionId: "abc-1" }),
+          page: 0,
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "清除会话筛选" }));
+    await waitFor(() =>
+      expect(useRequestLogsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          filters: expect.objectContaining({ sessionId: undefined }),
+        }),
       ),
     );
   });

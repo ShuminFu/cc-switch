@@ -30,6 +30,7 @@ import {
   useSessionsQuery,
 } from "@/lib/query";
 import { useSessionUsage } from "@/lib/query/usage";
+import { requestLogSessionFilter } from "@/lib/usageNavigation";
 import { SessionUsageSummary } from "./SessionUsageSummary";
 import type { SessionUsageStat } from "@/types/usage";
 import { sessionsApi } from "@/lib/api";
@@ -199,7 +200,14 @@ const filterSetToAllowedValues = (
   return changed ? next : current;
 };
 
-export function SessionManagerPage({ appId }: { appId: string }) {
+export function SessionManagerPage({
+  appId,
+  onOpenUsage,
+}: {
+  appId: string;
+  /** 打开用量统计页（「查看请求」会先写入会话筛选再调用） */
+  onOpenUsage?: () => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data, isLoading, refetch } = useSessionsQuery();
@@ -1536,6 +1544,16 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             usage={usageBySession.get(
                               selectedSession.sessionId,
                             )}
+                            onViewRequests={
+                              onOpenUsage
+                                ? () => {
+                                    requestLogSessionFilter(
+                                      selectedSession.sessionId,
+                                    );
+                                    onOpenUsage();
+                                  }
+                                : undefined
+                            }
                           />
                           {selectedSession.projectDir && (
                             <Tooltip>

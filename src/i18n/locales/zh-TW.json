@@ -913,6 +913,7 @@
     "exportMarkdown": "Markdown (.md)",
     "exportJson": "JSON (.json)",
     "exportTooltip": "匯出此對話記錄",
+    "viewRequests": "在用量頁檢視此對話的請求",
     "usageSummary": "{{cost}} · {{requests}} 次請求 · {{tokens}} tokens",
     "usageTooltip": "依代理與本機對話記錄歸集的估算費用；30 天前的明細已彙總，不再按對話統計。",
     "usageCostTooltip": "對話估算費用",
@@ -1617,6 +1618,8 @@
     "successRate": "成功率",
     "requestId": "請求 ID",
     "sessionId": "對話 ID",
+    "sessionFilterPlaceholder": "對話 ID",
+    "clearSessionFilter": "清除對話篩選",
     "never": "從不",
     "modelId": "模型 ID",
     "modelIdRequired": "模型 ID 不能為空",
@@ -2722,6 +2725,11 @@
       }
     },
     "takeover": {
+      "reapply": "重新套用接管",
+      "reapplyHint": "重新校驗並重建已接管應用的即時設定（手改設定、連接埠變更或備份遺失後使用）",
+      "reapplied": "已重新套用接管：{{apps}}",
+      "reapplyFailed": "部分應用重建接管失敗：{{detail}}",
+      "reapplyNothing": "目前沒有已接管的應用",
       "hint": "選擇要路由的應用程式，啟用後該應用程式的請求將透過本地路由轉發",
       "enabled": "{{app}} 路由已啟用",
       "disabled": "{{app}} 路由已關閉",

@@ -108,6 +108,9 @@ pub struct LogFilters {
     pub status_code: Option<u16>,
     pub start_date: Option<i64>,
     pub end_date: Option<i64>,
+    /// 会话 ID（同时匹配代理记录的 `codex_<id>` 形式）
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// 分页请求日志响应
@@ -1518,6 +1521,16 @@ impl Database {
         if let Some(status) = filters.status_code {
             conditions.push("l.status_code = ?".to_string());
             params.push(Box::new(status as i64));
+        }
+        if let Some(session_id) = filters
+            .session_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            conditions.push("(l.session_id = ? OR l.session_id = 'codex_' || ?)".to_string());
+            params.push(Box::new(session_id.to_string()));
+            params.push(Box::new(session_id.to_string()));
         }
         if let Some(start) = filters.start_date {
             conditions.push("l.created_at >= ?".to_string());
@@ -4322,6 +4335,64 @@ mod tests {
         // 仪表盘口径不受影响：Gemini 会话日志行仍被代理行去重
         let summary = db.get_usage_summary(None, None, Some("gemini"), None, None)?;
         assert_eq!(summary.total_requests, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn request_logs_filter_by_session_id_including_codex_prefix() -> Result<(), AppError> {
+        use crate::proxy::usage::logger::{RequestLog, UsageLogger};
+        use crate::proxy::usage::TokenUsage;
+
+        let db = Database::memory()?;
+        let logger = UsageLogger::new(&db);
+        let seed = |request_id: &str, session_id: Option<&str>| RequestLog {
+            request_id: request_id.to_string(),
+            provider_id: "relay".to_string(),
+            app_type: "codex".to_string(),
+            model: "gpt-5".to_string(),
+            request_model: "gpt-5".to_string(),
+            pricing_model: String::new(),
+            usage: TokenUsage {
+                input_tokens: 1,
+                output_tokens: 1,
+                ..TokenUsage::default()
+            },
+            cost: None,
+            latency_ms: 1,
+            first_token_ms: None,
+            status_code: 200,
+            error_message: None,
+            session_id: session_id.map(|s| s.to_string()),
+            provider_type: None,
+            is_streaming: false,
+            cost_multiplier: "1".to_string(),
+        };
+        logger.log_request(&seed("r1", Some("codex_thread-1")))?;
+        logger.log_request(&seed("r2", Some("thread-1")))?;
+        logger.log_request(&seed("r3", Some("thread-2")))?;
+        logger.log_request(&seed("r4", None))?;
+
+        let filters = LogFilters {
+            session_id: Some(" thread-1 ".to_string()),
+            ..Default::default()
+        };
+        let page = db.get_request_logs(&filters, 0, 20)?;
+        assert_eq!(page.total, 2);
+        assert!(page
+            .data
+            .iter()
+            .all(|log| log.session_id.as_deref() == Some("thread-1")
+                || log.session_id.as_deref() == Some("codex_thread-1")));
+
+        let empty = LogFilters {
+            session_id: Some("   ".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            db.get_request_logs(&empty, 0, 20)?.total,
+            4,
+            "blank filter is ignored"
+        );
         Ok(())
     }
 

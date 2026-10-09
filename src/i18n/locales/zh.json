@@ -942,6 +942,7 @@
     "exportMarkdown": "Markdown (.md)",
     "exportJson": "JSON (.json)",
     "exportTooltip": "导出此会话记录",
+    "viewRequests": "在用量页查看该会话的请求",
     "usageSummary": "{{cost}} · {{requests}} 次请求 · {{tokens}} tokens",
     "usageTooltip": "按代理与本地会话日志归集的估算费用；30 天前的明细已汇总，不再按会话统计。",
     "usageCostTooltip": "会话估算费用",
@@ -1645,6 +1646,8 @@
     "successRate": "成功率",
     "requestId": "请求 ID",
     "sessionId": "会话 ID",
+    "sessionFilterPlaceholder": "会话 ID",
+    "clearSessionFilter": "清除会话筛选",
     "never": "从不",
     "modelId": "模型 ID",
     "modelIdRequired": "模型 ID 不能为空",
@@ -2750,6 +2753,11 @@
       }
     },
     "takeover": {
+      "reapply": "重新应用接管",
+      "reapplyHint": "重新校验并重建已接管应用的实时配置（手改配置、端口变更或备份丢失后使用）",
+      "reapplied": "已重新应用接管：{{apps}}",
+      "reapplyFailed": "部分应用重建接管失败：{{detail}}",
+      "reapplyNothing": "当前没有已接管的应用",
       "hint": "选择要路由的应用，启用后该应用的请求将通过本地路由转发",
       "enabled": "{{app}} 路由已启用",
       "disabled": "{{app}} 路由已关闭",

@@ -142,6 +142,23 @@ export function useSetProxyTakeoverForApp() {
 }
 
 /**
+ * 重新应用接管：校验并重建所有已接管应用的实时配置
+ */
+export function useReapplyProxyTakeover() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => proxyApi.reapplyProxyTakeover(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+      queryClient.invalidateQueries({ queryKey: ["liveTakeoverActive"] });
+      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      queryClient.invalidateQueries({ queryKey: proxyEventKeys.all });
+    },
+  });
+}
+
+/**
  * 代理模式下切换供应商
  */
 export function useSwitchProxyProvider() {

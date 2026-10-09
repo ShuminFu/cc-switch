@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SessionUsageSummary } from "@/components/sessions/SessionUsageSummary";
 import { SessionItem } from "@/components/sessions/SessionItem";
@@ -39,6 +39,18 @@ describe("SessionUsageSummary", () => {
   it("renders nothing without attributed usage", () => {
     const { container } = render(<SessionUsageSummary />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("offers a jump to the request log only when a handler is given", () => {
+    const onViewRequests = vi.fn();
+    const { rerender } = render(<SessionUsageSummary usage={usage} />);
+    expect(screen.queryByTestId("session-view-requests")).toBeNull();
+
+    rerender(
+      <SessionUsageSummary usage={usage} onViewRequests={onViewRequests} />,
+    );
+    fireEvent.click(screen.getByTestId("session-view-requests"));
+    expect(onViewRequests).toHaveBeenCalledTimes(1);
   });
 
   it("shows cost, request count and total tokens", () => {
