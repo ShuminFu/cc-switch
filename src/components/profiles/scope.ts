@@ -10,6 +10,8 @@ export const APP_PROFILE_SCOPE: Partial<Record<AppId, ProfileScope>> = {
   claude: "claude",
   "claude-desktop": "claude-desktop",
   codex: "codex",
+  gemini: "gemini",
+  grokbuild: "grokbuild",
 };
 
 /** 分组内的 payload 槽位 key（后端 ProfileScope::apps 的前端镜像） */
@@ -17,6 +19,8 @@ const SCOPE_SLOT_KEYS: Record<ProfileScope, (keyof PerApp<unknown>)[]> = {
   claude: ["claude"],
   "claude-desktop": ["claude-desktop"],
   codex: ["codex"],
+  gemini: ["gemini"],
+  grokbuild: ["grokbuild"],
 };
 
 /**
@@ -26,11 +30,12 @@ const SCOPE_SLOT_KEYS: Record<ProfileScope, (keyof PerApp<unknown>)[]> = {
  */
 export function hasScopeSnapshot(profile: Profile, scope: ProfileScope) {
   const { providers, mcp, skills, prompts } = profile.payload;
+  // 旧版快照没有 gemini / grokbuild 槽位：undefined 与 null 一样视为未拍过
   return SCOPE_SLOT_KEYS[scope].some(
     (app) =>
-      providers[app] !== null ||
-      mcp[app] !== null ||
-      skills[app] !== null ||
-      prompts[app] !== null,
+      providers[app] != null ||
+      mcp[app] != null ||
+      skills[app] != null ||
+      prompts[app] != null,
   );
 }

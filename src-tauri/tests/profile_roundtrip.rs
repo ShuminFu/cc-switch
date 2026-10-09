@@ -812,3 +812,132 @@ fn claude_desktop_profile_scope_is_independent() {
         "desktop scope marker set"
     );
 }
+
+fn gemini_provider(id: &str, key: &str) -> Provider {
+    Provider::with_id(
+        id.to_string(),
+        id.to_uppercase(),
+        json!({
+            "env": {
+                "GEMINI_API_KEY": key,
+                "GOOGLE_GEMINI_BASE_URL": "https://gemini.test"
+            }
+        }),
+        Some("https://gemini.test".to_string()),
+    )
+}
+
+/// Gemini 组：快照 / 应用只动 gemini 槽位与 ~/.gemini 实时文件，Claude 侧原样不动
+#[test]
+fn gemini_scope_snapshot_and_apply_are_isolated() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+    let state = create_test_state().expect("create test state");
+
+    // Claude 侧种子：验证 gemini 组操作不会串台
+    state
+        .db
+        .save_provider(AppType::Claude.as_str(), &claude_provider("p1", "key-1"))
+        .expect("save claude provider");
+    state
+        .db
+        .set_current_provider(AppType::Claude.as_str(), "p1")
+        .expect("set claude current");
+
+    // Gemini 侧：两个供应商、一个 MCP（gemini 启用）、一个 prompt
+    for (id, key) in [("g1", "gk-1"), ("g2", "gk-2")] {
+        state
+            .db
+            .save_provider(AppType::Gemini.as_str(), &gemini_provider(id, key))
+            .expect("save gemini provider");
+    }
+    ProviderService::switch(&state, AppType::Gemini, "g1").expect("switch gemini to g1");
+    let gemini_mcp: McpServer = serde_json::from_value(json!({
+        "id": "gm1",
+        "name": "gm1",
+        "server": { "command": "echo", "args": [] },
+        "apps": { "gemini": true }
+    }))
+    .expect("construct gemini mcp");
+    state
+        .db
+        .save_mcp_server(&gemini_mcp)
+        .expect("save gemini mcp");
+    state
+        .db
+        .save_prompt(AppType::Gemini.as_str(), &prompt("gp1", false))
+        .expect("save gemini prompt");
+    PromptService::enable_prompt(&state, AppType::Gemini, "gp1").expect("enable gemini prompt");
+
+    // 在 Gemini 页创建项目：只拍 gemini 槽位
+    let project = ProfileService::create(&state, "Gemini Project", ProfileScope::Gemini)
+        .expect("create gemini project");
+    let payload: ProfilePayload =
+        serde_json::from_str(&project.payload).expect("parse project payload");
+    assert_eq!(payload.providers.gemini, Some("g1".to_string()));
+    assert_eq!(payload.mcp.gemini, Some(vec!["gm1".to_string()]));
+    assert_eq!(payload.prompts.gemini, Some("gp1".to_string()));
+    assert_eq!(payload.providers.claude, None, "claude slot untouched");
+    assert_eq!(
+        payload.providers.grokbuild, None,
+        "grokbuild slot untouched"
+    );
+
+    // 改动 Gemini 当前状态：切到 g2、关掉 MCP
+    ProviderService::switch(&state, AppType::Gemini, "g2").expect("switch gemini to g2");
+    McpService::toggle_app(&state, "gm1", AppType::Gemini, false).expect("disable gemini mcp");
+    let env = fs::read_to_string(home.join(".gemini").join(".env")).expect("read gemini .env");
+    assert!(env.contains("gk-2"), "live .env follows g2: {env}");
+
+    // 应用项目：恢复 g1 + MCP，Claude 侧与 current 标记都不受影响
+    let (warnings, _) = ProfileService::apply(&state, &project.id, ProfileScope::Gemini)
+        .expect("apply gemini project");
+    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+    assert_eq!(
+        state
+            .db
+            .get_current_provider(AppType::Gemini.as_str())
+            .expect("gemini current")
+            .as_deref(),
+        Some("g1")
+    );
+    let env = fs::read_to_string(home.join(".gemini").join(".env")).expect("read gemini .env");
+    assert!(env.contains("gk-1"), "live .env restored to g1: {env}");
+    let servers = state.db.get_all_mcp_servers().expect("get mcp servers");
+    assert!(
+        servers.get("gm1").expect("gm1").apps.gemini,
+        "gemini MCP re-enabled"
+    );
+    assert_eq!(
+        state
+            .db
+            .get_current_profile_id("gemini")
+            .expect("gemini current profile")
+            .as_deref(),
+        Some(project.id.as_str())
+    );
+    assert_eq!(
+        state
+            .db
+            .get_current_provider(AppType::Claude.as_str())
+            .expect("claude current")
+            .as_deref(),
+        Some("p1"),
+        "claude untouched by gemini-side apply"
+    );
+    assert_eq!(
+        state
+            .db
+            .get_current_profile_id("claude")
+            .expect("claude current profile"),
+        None
+    );
+    assert_eq!(
+        state
+            .db
+            .get_current_profile_id("grokbuild")
+            .expect("grokbuild current profile"),
+        None
+    );
+}

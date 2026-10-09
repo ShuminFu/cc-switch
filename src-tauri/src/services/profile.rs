@@ -35,14 +35,22 @@ pub enum ProfileScope {
     #[serde(rename = "claude-desktop")]
     ClaudeDesktop,
     Codex,
+    Gemini,
+    #[serde(rename = "grokbuild")]
+    GrokBuild,
 }
 
 impl ProfileScope {
     /// 全部分组（扩展新分组时同步扩展 apps/for_app 与前端 scope.ts 镜像）
-    pub const ALL: [ProfileScope; 3] = [
+    ///
+    /// 只有「有当前供应商」概念的应用才有分组；OpenCode / OpenClaw / Hermes
+    /// 是叠加式配置，没有可切换的当前供应商，因此不支持项目。
+    pub const ALL: [ProfileScope; 5] = [
         ProfileScope::Claude,
         ProfileScope::ClaudeDesktop,
         ProfileScope::Codex,
+        ProfileScope::Gemini,
+        ProfileScope::GrokBuild,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -50,6 +58,8 @@ impl ProfileScope {
             ProfileScope::Claude => "claude",
             ProfileScope::ClaudeDesktop => "claude-desktop",
             ProfileScope::Codex => "codex",
+            ProfileScope::Gemini => "gemini",
+            ProfileScope::GrokBuild => "grokbuild",
         }
     }
 
@@ -58,6 +68,8 @@ impl ProfileScope {
             "claude" => Ok(ProfileScope::Claude),
             "claude-desktop" => Ok(ProfileScope::ClaudeDesktop),
             "codex" => Ok(ProfileScope::Codex),
+            "gemini" => Ok(ProfileScope::Gemini),
+            "grokbuild" => Ok(ProfileScope::GrokBuild),
             other => Err(AppError::InvalidInput(format!(
                 "Unknown profile scope: {other}"
             ))),
@@ -70,6 +82,8 @@ impl ProfileScope {
             ProfileScope::Claude => &[AppType::Claude],
             ProfileScope::ClaudeDesktop => &[AppType::ClaudeDesktop],
             ProfileScope::Codex => &[AppType::Codex],
+            ProfileScope::Gemini => &[AppType::Gemini],
+            ProfileScope::GrokBuild => &[AppType::GrokBuild],
         }
     }
 
@@ -79,6 +93,8 @@ impl ProfileScope {
             AppType::Claude => Some(ProfileScope::Claude),
             AppType::ClaudeDesktop => Some(ProfileScope::ClaudeDesktop),
             AppType::Codex => Some(ProfileScope::Codex),
+            AppType::Gemini => Some(ProfileScope::Gemini),
+            AppType::GrokBuild => Some(ProfileScope::GrokBuild),
             _ => None,
         }
     }
@@ -92,6 +108,8 @@ pub struct PerApp<T> {
     #[serde(rename = "claude-desktop")]
     pub claude_desktop: T,
     pub codex: T,
+    pub gemini: T,
+    pub grokbuild: T,
 }
 
 impl<T> PerApp<T> {
@@ -100,6 +118,8 @@ impl<T> PerApp<T> {
             AppType::Claude => Some(&self.claude),
             AppType::ClaudeDesktop => Some(&self.claude_desktop),
             AppType::Codex => Some(&self.codex),
+            AppType::Gemini => Some(&self.gemini),
+            AppType::GrokBuild => Some(&self.grokbuild),
             _ => None,
         }
     }
@@ -109,6 +129,8 @@ impl<T> PerApp<T> {
             AppType::Claude => Some(&mut self.claude),
             AppType::ClaudeDesktop => Some(&mut self.claude_desktop),
             AppType::Codex => Some(&mut self.codex),
+            AppType::Gemini => Some(&mut self.gemini),
+            AppType::GrokBuild => Some(&mut self.grokbuild),
             _ => None,
         }
     }
@@ -480,21 +502,29 @@ mod tests {
                 claude: Some("p1".into()),
                 claude_desktop: Some("d1".into()),
                 codex: None,
+                gemini: Some("g1".into()),
+                grokbuild: None,
             },
             mcp: PerApp {
                 claude: Some(ids(&["m1", "m2"])),
                 claude_desktop: Some(vec![]),
                 codex: None,
+                gemini: None,
+                grokbuild: Some(ids(&["m3"])),
             },
             skills: PerApp {
                 claude: Some(vec![]),
                 claude_desktop: Some(vec![]),
                 codex: Some(ids(&["s1"])),
+                gemini: Some(vec![]),
+                grokbuild: None,
             },
             prompts: PerApp {
                 claude: None,
                 claude_desktop: None,
                 codex: Some("pr1".into()),
+                gemini: Some("pr2".into()),
+                grokbuild: None,
             },
         };
         let json = serde_json::to_string(&payload).unwrap();
@@ -502,6 +532,8 @@ mod tests {
         assert!(json.contains("\"claude\""));
         assert!(json.contains("\"claude-desktop\""));
         assert!(json.contains("\"codex\""));
+        assert!(json.contains("\"gemini\""));
+        assert!(json.contains("\"grokbuild\""));
         let back: ProfilePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back, payload);
     }
@@ -520,6 +552,10 @@ mod tests {
         assert_eq!(back.mcp.claude_desktop, None);
         assert_eq!(back.mcp.codex, None, "missing slot means untouched");
         assert_eq!(back.prompts.codex, None);
+        // v3.17 之前的快照没有 gemini / grokbuild 槽位：落到 None，应用时不动
+        assert_eq!(back.providers.gemini, None);
+        assert_eq!(back.providers.grokbuild, None);
+        assert_eq!(back.mcp.grokbuild, None);
 
         let empty: ProfilePayload = serde_json::from_str("{}").unwrap();
         assert_eq!(empty, ProfilePayload::default());
@@ -533,11 +569,14 @@ mod tests {
                 claude: Some("p1".into()),
                 claude_desktop: Some("d1".into()),
                 codex: Some("c1".into()),
+                gemini: Some("g1".into()),
+                ..Default::default()
             },
             mcp: PerApp {
                 claude: Some(ids(&["m1"])),
                 claude_desktop: Some(vec![]),
                 codex: Some(ids(&["m9"])),
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -547,11 +586,14 @@ mod tests {
                 claude: Some("p2".into()),
                 claude_desktop: None,
                 codex: Some("SHOULD-NOT-LEAK".into()),
+                gemini: Some("SHOULD-NOT-LEAK".into()),
+                ..Default::default()
             },
             mcp: PerApp {
                 claude: Some(ids(&["m2"])),
                 claude_desktop: Some(vec![]),
                 codex: None,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -564,9 +606,10 @@ mod tests {
             "claude-desktop slot is in its own scope, untouched by claude merge"
         );
         assert_eq!(payload.mcp.claude, Some(ids(&["m2"])));
-        // codex 侧完好：既没被覆盖也没被 fresh 的值污染
+        // codex / gemini 侧完好：既没被覆盖也没被 fresh 的值污染
         assert_eq!(payload.providers.codex, Some("c1".to_string()));
         assert_eq!(payload.mcp.codex, Some(ids(&["m9"])));
+        assert_eq!(payload.providers.gemini, Some("g1".to_string()));
     }
 
     #[test]
@@ -587,6 +630,13 @@ mod tests {
         desktop_only.providers.claude_desktop = Some("d1".into());
         assert!(desktop_only.scope_captured(ProfileScope::ClaudeDesktop));
         assert!(!desktop_only.scope_captured(ProfileScope::Claude));
+
+        // Gemini / Grok Build 各自独立成组
+        let mut grok_only = ProfilePayload::default();
+        grok_only.prompts.grokbuild = Some("pr1".into());
+        assert!(grok_only.scope_captured(ProfileScope::GrokBuild));
+        assert!(!grok_only.scope_captured(ProfileScope::Gemini));
+        assert!(!grok_only.scope_captured(ProfileScope::Codex));
     }
 
     #[test]
@@ -595,7 +645,12 @@ mod tests {
         assert!(per.get(&AppType::Claude).is_some());
         assert!(per.get(&AppType::ClaudeDesktop).is_some());
         assert!(per.get(&AppType::Codex).is_some());
-        assert!(per.get(&AppType::Gemini).is_none());
+        assert!(per.get(&AppType::Gemini).is_some());
+        assert!(per.get(&AppType::GrokBuild).is_some());
+        // 叠加式应用没有当前供应商，不支持项目
+        assert!(per.get(&AppType::OpenCode).is_none());
+        assert!(per.get(&AppType::OpenClaw).is_none());
+        assert!(per.get(&AppType::Hermes).is_none());
     }
 
     #[test]
@@ -608,7 +663,12 @@ mod tests {
             );
             assert_eq!(ProfileScope::parse(scope.as_str()).unwrap(), scope);
         }
-        assert!(ProfileScope::parse("gemini").is_err());
+        assert_eq!(ProfileScope::parse("gemini").unwrap(), ProfileScope::Gemini);
+        assert_eq!(
+            ProfileScope::parse("grokbuild").unwrap(),
+            ProfileScope::GrokBuild
+        );
+        assert!(ProfileScope::parse("opencode").is_err());
         assert!(ProfileScope::parse("").is_err());
     }
 
@@ -622,12 +682,15 @@ mod tests {
             &[AppType::ClaudeDesktop]
         );
         assert_eq!(ProfileScope::Codex.apps(), &[AppType::Codex]);
+        assert_eq!(ProfileScope::Gemini.apps(), &[AppType::Gemini]);
+        assert_eq!(ProfileScope::GrokBuild.apps(), &[AppType::GrokBuild]);
         for scope in ProfileScope::ALL {
             for app in scope.apps() {
                 assert_eq!(ProfileScope::for_app(app), Some(scope));
             }
         }
-        assert_eq!(ProfileScope::for_app(&AppType::Gemini), None);
+        assert_eq!(ProfileScope::for_app(&AppType::OpenCode), None);
+        assert_eq!(ProfileScope::for_app(&AppType::Hermes), None);
     }
 
     #[test]

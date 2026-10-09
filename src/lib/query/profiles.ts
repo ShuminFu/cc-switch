@@ -127,6 +127,12 @@ export const useApplyProfileMutation = () => {
         queryKey: ["providers", "claude-desktop"],
       });
       await queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["providers", "gemini"],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["providers", "grokbuild"],
+      });
       await queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
       await updateTrayMenuSafely();
