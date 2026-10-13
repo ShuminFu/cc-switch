@@ -8,6 +8,7 @@ use crate::services::sql_helpers::{INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMA
 use crate::services::usage_stats::{find_model_pricing_row, is_placeholder_pricing_model};
 use rust_decimal::Decimal;
 use std::str::FromStr;
+use std::sync::Arc;
 
 /// 请求日志
 #[derive(Debug, Clone)]
@@ -40,6 +41,20 @@ pub struct RequestLog {
 /// 使用量记录器
 pub struct UsageLogger<'a> {
     db: &'a Database,
+}
+
+/// 在阻塞线程池中执行同步的使用量写入（定价查询 + INSERT）。
+///
+/// `UsageLogger` 的写入方法会持有全局 SQLite 连接的 `std::sync::Mutex`。
+/// 在代理请求的 tokio 任务中直接调用时，若该锁正被耗时的统计查询占用，
+/// 会把 tokio worker 线程一起阻塞，拖慢同一运行时上的其他代理请求。
+pub(crate) async fn with_logger_blocking<F>(db: Arc<Database>, job: F) -> Result<(), AppError>
+where
+    F: FnOnce(&UsageLogger<'_>) -> Result<(), AppError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || job(&UsageLogger::new(&db)))
+        .await
+        .map_err(|e| AppError::Message(format!("使用量记录任务执行失败: {e}")))?
 }
 
 impl<'a> UsageLogger<'a> {

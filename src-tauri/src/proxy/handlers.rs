@@ -2396,7 +2396,7 @@ async fn log_usage(
     status_code: u16,
     session_id: Option<String>,
 ) {
-    use super::usage::logger::UsageLogger;
+    use super::usage::logger::{with_logger_blocking, UsageLogger};
 
     if !usage_logging_enabled(state) {
         return;
@@ -2414,22 +2414,31 @@ async fn log_usage(
 
     let request_id = usage.dedup_request_id();
 
-    if let Err(e) = logger.log_with_calculation(
-        request_id,
-        provider_id.to_string(),
-        app_type.to_string(),
-        model.to_string(),
-        request_model.to_string(),
-        pricing_model.to_string(),
-        usage,
-        multiplier,
-        latency_ms,
-        first_token_ms,
-        status_code,
-        session_id,
-        None, // provider_type
-        is_streaming,
-    ) {
+    let provider_id = provider_id.to_string();
+    let app_type = app_type.to_string();
+    let model = model.to_string();
+    let request_model = request_model.to_string();
+    let pricing_model = pricing_model.to_string();
+    let result = with_logger_blocking(state.db.clone(), move |logger| {
+        logger.log_with_calculation(
+            request_id,
+            provider_id,
+            app_type,
+            model,
+            request_model,
+            pricing_model,
+            usage,
+            multiplier,
+            latency_ms,
+            first_token_ms,
+            status_code,
+            session_id,
+            None, // provider_type
+            is_streaming,
+        )
+    })
+    .await;
+    if let Err(e) = result {
         log::warn!("[USG-001] 记录使用量失败: {e}");
     }
 }
