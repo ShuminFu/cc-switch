@@ -201,11 +201,16 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
     let reader = BufReader::new(file);
 
     let mut line_offset: i64 = 0;
+    let mut incomplete_tail = false;
     let mut messages: HashMap<String, ParsedAssistantUsage> = HashMap::new();
     let mut current_session_id: Option<String> = None;
 
-    for line_result in reader.lines() {
+    for (line_result, terminated) in JsonlLines::new(reader) {
         line_offset += 1;
+        if !terminated {
+            // Only the final line can be unterminated: it may still be being written.
+            incomplete_tail = true;
+        }
 
         // 跳过已处理的行
         if line_offset <= last_offset {
@@ -350,8 +355,13 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
         }
     }
 
-    // 更新同步状态
-    update_sync_state(db, &file_path_str, file_modified, line_offset)?;
+    // 更新同步状态（未以换行结尾的末行可能尚未写完，下次重新解析）
+    let synced_offset = if incomplete_tail {
+        line_offset - 1
+    } else {
+        line_offset
+    };
+    update_sync_state(db, &file_path_str, file_modified, synced_offset)?;
 
     Ok((imported, skipped))
 }
@@ -404,6 +414,63 @@ pub(crate) fn update_sync_state(
     )
     .map_err(|e| AppError::Database(format!("更新同步状态失败: {e}")))?;
     Ok(())
+}
+
+/// Iterate a JSONL reader line by line, like `BufRead::lines()`, but also
+/// report whether each line was terminated by `\n`.
+///
+/// Session files are appended to while we read them, so the last line may be
+/// a partially written record. Callers must not advance their persisted line
+/// offset past an unterminated line, otherwise that record is skipped forever
+/// once the writer finishes it.
+pub(crate) struct JsonlLines<R> {
+    reader: R,
+    buf: Vec<u8>,
+    failed: bool,
+}
+
+impl<R: BufRead> JsonlLines<R> {
+    pub(crate) fn new(reader: R) -> Self {
+        Self {
+            reader,
+            buf: Vec::new(),
+            failed: false,
+        }
+    }
+}
+
+impl<R: BufRead> Iterator for JsonlLines<R> {
+    /// (line content without the line terminator, whether it ended with `\n`)
+    type Item = (std::io::Result<String>, bool);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        self.buf.clear();
+        match self.reader.read_until(b'\n', &mut self.buf) {
+            Ok(0) => None,
+            Ok(_) => {
+                let terminated = self.buf.ends_with(b"\n");
+                let mut line = self.buf.as_slice();
+                if terminated {
+                    line = &line[..line.len() - 1];
+                    if line.ends_with(b"\r") {
+                        line = &line[..line.len() - 1];
+                    }
+                }
+                let line = String::from_utf8(line.to_vec())
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+                Some((line, terminated))
+            }
+            Err(e) => {
+                // An I/O error is not recoverable mid-stream; stop here and
+                // treat the line as incomplete so it is retried next sync.
+                self.failed = true;
+                Some((Err(e), false))
+            }
+        }
+    }
 }
 
 /// 插入单条会话日志到 proxy_request_logs，返回是否成功插入 (true=新插入, false=已存在)
@@ -794,5 +861,56 @@ mod tests {
 
         fs::remove_dir_all(&tmp).ok();
         Ok(())
+    }
+
+    #[test]
+    fn test_sync_does_not_skip_partially_written_last_line() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("session.jsonl");
+        let file_str = file.to_string_lossy().to_string();
+
+        let first = r#"{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","usage":{"input_tokens":5,"output_tokens":7},"stop_reason":"end_turn"},"timestamp":"2026-06-07T13:01:23Z","sessionId":"s"}"#;
+        let second = r#"{"type":"assistant","message":{"id":"msg_b","model":"claude-opus-4-8","usage":{"input_tokens":11,"output_tokens":13},"stop_reason":"end_turn"},"timestamp":"2026-06-07T13:01:24Z","sessionId":"s"}"#;
+        let (head, rest) = second.split_at(40);
+
+        // Writer is mid-way through appending the second record.
+        fs::write(&file, format!("{first}\n{head}")).unwrap();
+        let (imported, _) = sync_single_file(&db, &file)?;
+        assert_eq!(imported, 1);
+        assert_eq!(get_sync_state(&db, &file_str)?.1, 1);
+
+        // Writer finishes the record; simulate the mtime change.
+        fs::write(&file, format!("{first}\n{head}{rest}\n")).unwrap();
+        update_sync_state(&db, &file_str, 0, 1)?;
+        let (imported, _) = sync_single_file(&db, &file)?;
+        assert_eq!(imported, 1, "the completed record must be imported");
+        assert_eq!(get_sync_state(&db, &file_str)?.1, 2);
+
+        let conn = lock_conn!(db.conn);
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM proxy_request_logs WHERE request_id = 'session:msg_b')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(exists);
+        Ok(())
+    }
+
+    #[test]
+    fn test_jsonl_lines_reports_termination() {
+        let input = b"a\r\nb\n\nc";
+        let lines: Vec<(String, bool)> = JsonlLines::new(&input[..])
+            .map(|(line, terminated)| (line.unwrap(), terminated))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                ("a".to_string(), true),
+                ("b".to_string(), true),
+                (String::new(), true),
+                ("c".to_string(), false),
+            ]
+        );
     }
 }

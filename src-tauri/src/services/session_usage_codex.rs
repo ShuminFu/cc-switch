@@ -19,7 +19,7 @@ use crate::error::AppError;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
+    get_sync_state, metadata_modified_nanos, update_sync_state, JsonlLines, SessionSyncResult,
 };
 use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
@@ -416,11 +416,16 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
     };
 
     let mut line_offset: i64 = 0;
+    let mut incomplete_tail = false;
     let mut imported: u32 = 0;
     let mut skipped: u32 = 0;
 
-    for line_result in reader.lines() {
+    for (line_result, terminated) in JsonlLines::new(reader) {
         line_offset += 1;
+        if !terminated {
+            // Only the final line can be unterminated: it may still be being written.
+            incomplete_tail = true;
+        }
 
         let line = match line_result {
             Ok(l) => l,
@@ -585,8 +590,13 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
         }
     }
 
-    // 更新同步状态
-    update_sync_state(db, &file_path_str, file_modified, line_offset)?;
+    // 更新同步状态（未以换行结尾的末行可能尚未写完，下次重新解析）
+    let synced_offset = if incomplete_tail {
+        line_offset - 1
+    } else {
+        line_offset
+    };
+    update_sync_state(db, &file_path_str, file_modified, synced_offset)?;
 
     Ok((imported, skipped))
 }
@@ -962,6 +972,44 @@ mod tests {
             ]
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_partially_written_token_count_is_imported_once_complete() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = temp.path().join("rollout-partial.jsonl");
+        let file_str = file.to_string_lossy().to_string();
+        let complete = [
+            session_meta("parent", "parent").to_string(),
+            turn_context().to_string(),
+            token_count(100, 50, 10).to_string(),
+        ]
+        .join("\n");
+        let last = token_count(250, 120, 30).to_string();
+        let (head, rest) = last.split_at(last.len() / 2);
+
+        // Codex is mid-way through appending the second token_count event.
+        fs::write(&file, format!("{complete}\n{head}")).unwrap();
+        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        assert_eq!(get_sync_state(&db, &file_str)?.1, 3);
+
+        // The event is completed; simulate the mtime change.
+        fs::write(&file, format!("{complete}\n{head}{rest}\n")).unwrap();
+        update_sync_state(&db, &file_str, 0, 3)?;
+        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        assert_eq!(get_sync_state(&db, &file_str)?.1, 4);
+
+        let conn = lock_conn!(db.conn);
+        let usage: (i64, i64, i64) = conn.query_row(
+            "SELECT input_tokens, cache_read_tokens, output_tokens
+             FROM proxy_request_logs
+             WHERE request_id = 'codex_session:thread-v1:parent:2'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(usage, (150, 70, 20));
         Ok(())
     }
 
