@@ -15,6 +15,19 @@ fn get_unix_timestamp() -> Result<i64, AppError> {
         .map_err(|e| AppError::Message(format!("Failed to get system time: {e}")))
 }
 
+/// 生成不会在同一秒内碰撞的提示词 ID：`{prefix}-{毫秒时间戳}-{8 位随机串}`。
+///
+/// 历史 ID 形如 `imported-{秒}`，同一秒内两次导入/备份会生成相同 ID，后者
+/// 通过 upsert 静默覆盖前者。ID 只作为不透明字符串使用，旧格式的 ID 照常加载。
+fn unique_prompt_id(prefix: &str) -> String {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    format!("{prefix}-{millis}-{}", &nonce[..8])
+}
+
 pub struct PromptService;
 
 impl PromptService {
@@ -137,7 +150,7 @@ impl PromptService {
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
                                 .as_secs() as i64;
-                            let backup_id = format!("backup-{timestamp}");
+                            let backup_id = unique_prompt_id("backup");
                             let backup_prompt = Prompt {
                                 id: backup_id.clone(),
                                 name: format!(
@@ -192,7 +205,7 @@ impl PromptService {
             std::fs::read_to_string(&file_path).map_err(|e| AppError::io(&file_path, e))?;
         let timestamp = get_unix_timestamp()?;
 
-        let id = format!("imported-{timestamp}");
+        let id = unique_prompt_id("imported");
         let prompt = Prompt {
             id: id.clone(),
             name: format!(
@@ -257,7 +270,7 @@ impl PromptService {
 
         // 创建提示词对象
         let timestamp = get_unix_timestamp()?;
-        let id = format!("auto-imported-{timestamp}");
+        let id = unique_prompt_id("auto-imported");
         let prompt = Prompt {
             id: id.clone(),
             name: format!(

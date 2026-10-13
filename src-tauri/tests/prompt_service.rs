@@ -59,3 +59,49 @@ fn disabling_with_edited_content_keeps_editor_content() {
     let prompts = PromptService::get_prompts(&state, AppType::Claude).expect("prompts");
     assert_eq!(prompts["a"].content, "editor");
 }
+
+#[test]
+fn importing_twice_in_the_same_second_keeps_both_prompts() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+    let state = create_test_state().expect("create test state");
+
+    let live_path = home.join(".claude").join("CLAUDE.md");
+    std::fs::create_dir_all(live_path.parent().expect("parent")).expect("create claude dir");
+    std::fs::write(&live_path, "first").expect("write live");
+    let first = PromptService::import_from_file(&state, AppType::Claude).expect("first import");
+    std::fs::write(&live_path, "second").expect("rewrite live");
+    let second = PromptService::import_from_file(&state, AppType::Claude).expect("second import");
+
+    assert_ne!(first, second, "import IDs must not collide");
+    let prompts = PromptService::get_prompts(&state, AppType::Claude).expect("prompts");
+    assert_eq!(prompts[&first].content, "first");
+    assert_eq!(prompts[&second].content, "second");
+}
+
+#[test]
+fn legacy_second_resolution_prompt_ids_still_load_and_enable() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+    let state = create_test_state().expect("create test state");
+
+    for id in [
+        "imported-1700000000",
+        "backup-1700000001",
+        "auto-imported-1700000002",
+    ] {
+        PromptService::upsert_prompt(&state, AppType::Claude, id, prompt(id, id, false))
+            .expect("save legacy prompt");
+    }
+    let prompts = PromptService::get_prompts(&state, AppType::Claude).expect("prompts");
+    assert_eq!(prompts.len(), 3);
+
+    PromptService::enable_prompt(&state, AppType::Claude, "imported-1700000000")
+        .expect("enable legacy prompt");
+    assert_eq!(
+        std::fs::read_to_string(home.join(".claude").join("CLAUDE.md")).expect("read live"),
+        "imported-1700000000"
+    );
+}
