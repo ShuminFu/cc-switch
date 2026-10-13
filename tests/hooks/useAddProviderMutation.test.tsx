@@ -54,7 +54,9 @@ function createWrapper() {
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
 
-  return { wrapper };
+  const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+  return { wrapper, invalidateSpy };
 }
 
 beforeEach(() => {
@@ -167,4 +169,33 @@ describe("useAddProviderMutation", () => {
     expect(apiMocks.add).not.toHaveBeenCalled();
     expect(persistedProvider).toEqual(seedProvider);
   });
+
+  it.each([
+    ["opencode", ["opencodeLiveProviderIds"]],
+    ["openclaw", ["openclaw", "liveProviderIds"]],
+  ] as const)(
+    "refreshes %s live provider ids after adding to live config",
+    async (appId, liveKey) => {
+      const { wrapper, invalidateSpy } = createWrapper();
+      const { result } = renderHook(() => useAddProviderMutation(appId), {
+        wrapper,
+      });
+
+      await act(async () =>
+        result.current.mutateAsync({
+          name: "Additive provider",
+          settingsConfig: {},
+          providerKey: "my-provider",
+          addToLive: true,
+        }),
+      );
+
+      expect(apiMocks.add).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "my-provider" }),
+        appId,
+        true,
+      );
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: liveKey });
+    },
+  );
 });

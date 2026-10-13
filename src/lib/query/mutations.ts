@@ -1,4 +1,8 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { providersApi, sessionsApi, settingsApi, type AppId } from "@/lib/api";
@@ -11,6 +15,27 @@ import { openclawKeys } from "@/hooks/useOpenClaw";
 import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
 import { usageKeys } from "@/lib/query/usage";
 import { CODEX_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
+
+/**
+ * Additive-mode apps (OpenCode/OpenClaw) write providers straight into their
+ * live config file on add/update/delete. ProviderList derives the "in config"
+ * state from these cached id lists, so they must be refreshed as well or the
+ * card keeps showing the wrong add/remove button until the window refocuses.
+ */
+const invalidateAdditiveLiveProviderIds = async (
+  queryClient: QueryClient,
+  appId: AppId,
+) => {
+  if (appId === "opencode") {
+    await queryClient.invalidateQueries({
+      queryKey: ["opencodeLiveProviderIds"],
+    });
+  } else if (appId === "openclaw") {
+    await queryClient.invalidateQueries({
+      queryKey: openclawKeys.liveProviderIds,
+    });
+  }
+};
 
 export const useAddProviderMutation = (appId: AppId) => {
   const queryClient = useQueryClient();
@@ -84,6 +109,7 @@ export const useAddProviderMutation = (appId: AppId) => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      await invalidateAdditiveLiveProviderIds(queryClient, appId);
 
       if (appId === "opencode") {
         await queryClient.invalidateQueries({
@@ -157,6 +183,7 @@ export const useUpdateProviderMutation = (appId: AppId) => {
     },
     onSuccess: async (provider, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      await invalidateAdditiveLiveProviderIds(queryClient, appId);
       await queryClient.invalidateQueries({
         queryKey: usageKeys.script(provider.id, appId),
       });
@@ -204,6 +231,7 @@ export const useDeleteProviderMutation = (appId: AppId) => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      await invalidateAdditiveLiveProviderIds(queryClient, appId);
 
       if (appId === "opencode") {
         await queryClient.invalidateQueries({
