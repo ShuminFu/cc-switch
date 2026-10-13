@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
@@ -13,6 +13,8 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./tests/setupGlobals.ts", "./tests/setupTests.ts"],
     globals: true,
+    // Agent worktrees under .claude/ contain full repo copies; never collect their tests.
+    exclude: [...configDefaults.exclude, ".claude/**"],
     coverage: {
       reporter: ["text", "lcov"],
     },
