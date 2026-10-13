@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { parseNonNegativeIntInput } from "@/utils/numberInput";
 import {
   useState,
   useRef,
@@ -506,7 +507,7 @@ export function HermesFormFields({
                         handleModelChange(
                           index,
                           "context_length",
-                          e.target.value ? parseInt(e.target.value) : undefined,
+                          parseNonNegativeIntInput(e.target.value),
                         )
                       }
                       placeholder="200000"

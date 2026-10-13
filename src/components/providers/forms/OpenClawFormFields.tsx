@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { parseNonNegativeIntInput } from "@/utils/numberInput";
 import { useState, useRef, useCallback } from "react";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -538,9 +539,7 @@ export function OpenClawFormFields({
                             handleModelChange(
                               index,
                               "contextWindow",
-                              e.target.value
-                                ? parseInt(e.target.value)
-                                : undefined,
+                              parseNonNegativeIntInput(e.target.value),
                             )
                           }
                           placeholder="200000"
@@ -559,9 +558,7 @@ export function OpenClawFormFields({
                             handleModelChange(
                               index,
                               "maxTokens",
-                              e.target.value
-                                ? parseInt(e.target.value)
-                                : undefined,
+                              parseNonNegativeIntInput(e.target.value),
                             )
                           }
                           placeholder="32000"
