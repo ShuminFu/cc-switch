@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   FileCode,
   Heart,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { workspaceApi } from "@/lib/api/workspace";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import WorkspaceFileEditor from "./WorkspaceFileEditor";
 import DailyMemoryPanel from "./DailyMemoryPanel";
 
@@ -86,7 +88,13 @@ const WorkspaceFilesPanel: React.FC = () => {
     <div className="px-6 pt-4 pb-8">
       <p
         className="text-sm text-muted-foreground mb-6 cursor-pointer hover:text-foreground transition-colors inline-flex items-center gap-1"
-        onClick={() => workspaceApi.openDirectory("workspace")}
+        onClick={() =>
+          workspaceApi
+            .openDirectory("workspace")
+            .catch((error) =>
+              toast.error(extractErrorMessage(error) || t("common.error")),
+            )
+        }
         title={t("workspace.openDirectory")}
       >
         ~/.openclaw/workspace/
