@@ -2721,6 +2721,96 @@ fn provider_service_switch_codex_missing_auth_returns_error() {
 }
 
 #[test]
+fn provider_service_switch_failed_live_write_keeps_previous_current_and_does_not_corrupt_target() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let _home = ensure_test_home();
+
+    let a_auth = json!({ "OPENAI_API_KEY": "a-key" });
+    let a_config = "model_provider = \"a\"\n[model_providers.a]\nname = \"a\"\nbase_url = \"https://a.example/v1\"\nwire_api = \"responses\"\n";
+    write_codex_live_atomic(&a_auth, Some(a_config)).expect("seed codex live");
+
+    let mut config = MultiAppConfig::default();
+    {
+        let manager = config
+            .get_manager_mut(&AppType::Codex)
+            .expect("codex manager");
+        manager.current = "a".to_string();
+        manager.providers.insert(
+            "a".to_string(),
+            Provider::with_id(
+                "a".to_string(),
+                "A".to_string(),
+                json!({ "auth": a_auth, "config": a_config }),
+                None,
+            ),
+        );
+        // Broken provider: no `auth`, so the live write fails.
+        manager.providers.insert(
+            "broken".to_string(),
+            Provider::with_id(
+                "broken".to_string(),
+                "Broken".to_string(),
+                json!({ "config": "model = \"broken-model\"\n" }),
+                None,
+            ),
+        );
+        manager.providers.insert(
+            "c".to_string(),
+            Provider::with_id(
+                "c".to_string(),
+                "C".to_string(),
+                json!({
+                    "auth": { "OPENAI_API_KEY": "c-key" },
+                    "config": "model_provider = \"c\"\n[model_providers.c]\nname = \"c\"\nbase_url = \"https://c.example/v1\"\nwire_api = \"responses\"\n"
+                }),
+                None,
+            ),
+        );
+    }
+    let state = create_test_state_with_config(&config).expect("create test state");
+    ProviderService::switch(&state, AppType::Codex, "a").expect("switch to a");
+
+    ProviderService::switch(&state, AppType::Codex, "broken")
+        .expect_err("switch to broken provider should fail");
+
+    assert_eq!(
+        ProviderService::current(&state, AppType::Codex).expect("current"),
+        "a",
+        "failed live write must not leave the broken provider marked current"
+    );
+    assert_eq!(
+        state
+            .db
+            .get_current_provider(AppType::Codex.as_str())
+            .expect("db current")
+            .as_deref(),
+        Some("a")
+    );
+
+    ProviderService::switch(&state, AppType::Codex, "c").expect("switch to c");
+
+    let providers = state
+        .db
+        .get_all_providers(AppType::Codex.as_str())
+        .expect("providers");
+    let broken = providers.get("broken").expect("broken provider");
+    assert!(
+        broken.settings_config.get("auth").is_none(),
+        "provider A's live credentials must not be backfilled into the broken provider: {:?}",
+        broken.settings_config
+    );
+    let a = providers.get("a").expect("provider a");
+    assert_eq!(
+        a.settings_config
+            .get("auth")
+            .and_then(|v| v.get("OPENAI_API_KEY"))
+            .and_then(|v| v.as_str()),
+        Some("a-key")
+    );
+}
+
+#[test]
 fn provider_service_delete_codex_removes_provider_and_files() {
     let _guard = test_mutex().lock().expect("acquire test mutex");
     reset_test_fs();

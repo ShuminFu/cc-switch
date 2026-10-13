@@ -2667,6 +2667,13 @@ impl ProviderService {
             }
         }
 
+        // Remember the previous current pointers so a failed live write can be
+        // rolled back. Otherwise the target would be marked current while live
+        // still holds the old provider's config, and the next switch-away would
+        // backfill that foreign live config into the target provider.
+        let previous_local_current = crate::settings::get_current_provider(&app_type);
+        let previous_db_current = state.db.get_current_provider(app_type.as_str())?;
+
         // Additive mode apps skip setting is_current (no such concept)
         if !app_type.is_additive_mode() {
             // Update local settings (device-level, takes priority)
@@ -2677,7 +2684,31 @@ impl ProviderService {
         }
 
         // Sync to live (write_gemini_live handles security flag internally for Gemini)
-        write_live_with_common_config(state.db.as_ref(), &app_type, provider)?;
+        if let Err(err) = write_live_with_common_config(state.db.as_ref(), &app_type, provider) {
+            if !app_type.is_additive_mode() {
+                if let Err(rollback_err) = crate::settings::set_current_provider(
+                    &app_type,
+                    previous_local_current.as_deref(),
+                ) {
+                    log::warn!(
+                        "Failed to roll back local current provider for {} after live write error: {rollback_err}",
+                        app_type.as_str()
+                    );
+                }
+                if let Some(previous_db_current) = previous_db_current.as_deref() {
+                    if let Err(rollback_err) = state
+                        .db
+                        .set_current_provider(app_type.as_str(), previous_db_current)
+                    {
+                        log::warn!(
+                            "Failed to roll back DB current provider for {} after live write error: {rollback_err}",
+                            app_type.as_str()
+                        );
+                    }
+                }
+            }
+            return Err(err);
+        }
 
         // Hermes is additive, so "switching" doesn't overwrite a live config file
         // — we instead update the top-level `model:` section to point at this
