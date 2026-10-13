@@ -387,11 +387,24 @@ export function SessionManagerPage({ appId }: { appId: string }) {
       });
   }, [isCodexSession, messages]);
 
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    },
+    [],
+  );
+
   const scrollToMessage = (index: number) => {
     virtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
     setActiveMessageIndex(index);
     setTocDialogOpen(false);
-    setTimeout(() => setActiveMessageIndex(null), 2000);
+    // 连续点击时取消上一次的定时器，避免提前清除最新的高亮
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => {
+      highlightTimerRef.current = null;
+      setActiveMessageIndex(null);
+    }, 2000);
   };
 
   const handleCopy = useCallback(
