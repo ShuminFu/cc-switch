@@ -1,6 +1,5 @@
 use serde_json::json;
 use std::fs;
-use std::path::PathBuf;
 
 use cc_switch_lib::{
     get_claude_settings_path, read_json_file, AppError, AppType, ConfigService, MultiAppConfig,
