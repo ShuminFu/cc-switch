@@ -744,34 +744,7 @@ pub fn create_logged_passthrough_stream(
 
                         // 尝试解析并记录完整的 SSE 事件
                         while let Some(event_text) = take_sse_block(&mut buffer) {
-                            if !event_text.trim().is_empty() {
-                                // 提取 data 部分；只有 usage collector 存在时才解析 JSON。
-                                for line in event_text.lines() {
-                                    if let Some(data) = strip_sse_field(line, "data") {
-                                        if data.trim() != "[DONE]" {
-                                            let collected = match &collector {
-                                                Some(c) if c.should_collect(data) => {
-                                                    match serde_json::from_str::<Value>(data) {
-                                                        Ok(json_value) => {
-                                                            c.push(json_value).await;
-                                                            true
-                                                        }
-                                                        Err(_) => false,
-                                                    }
-                                                }
-                                                _ => false,
-                                            };
-                                            if collected {
-                                                log::debug!("[{tag}] <<< SSE 事件: {data}");
-                                            } else {
-                                                log::debug!("[{tag}] <<< SSE 数据: {data}");
-                                            }
-                                        } else {
-                                            log::debug!("[{tag}] <<< SSE: [DONE]");
-                                        }
-                                    }
-                                }
-                            }
+                            inspect_passthrough_sse_block(&event_text, collector.as_ref(), tag).await;
                         }
                     }
 
@@ -783,7 +756,13 @@ pub fn create_logged_passthrough_stream(
                     break;
                 }
                 None => {
-                    // 流正常结束
+                    // 流正常结束。最后一个事件可能缺少结尾空行（常见于缓冲型反代），
+                    // 仍需检查，否则 Responses 的 response.completed 等携带 usage 的
+                    // 终止事件会被丢弃，导致用量漏记。
+                    if inspect_sse_events && !buffer.trim().is_empty() {
+                        let event_text = std::mem::take(&mut buffer);
+                        inspect_passthrough_sse_block(&event_text, collector.as_ref(), tag).await;
+                    }
                     break;
                 }
             }
@@ -794,6 +773,43 @@ pub fn create_logged_passthrough_stream(
         }
         if let Some(guard) = &mut finish_guard {
             guard.disarm();
+        }
+    }
+}
+
+/// 检查透传流中的单个 SSE 块：记录 data 行，并在存在 usage collector 时收集 JSON 事件。
+async fn inspect_passthrough_sse_block(
+    event_text: &str,
+    collector: Option<&SseUsageCollector>,
+    tag: &str,
+) {
+    if event_text.trim().is_empty() {
+        return;
+    }
+    // 提取 data 部分；只有 usage collector 存在时才解析 JSON。
+    for line in event_text.lines() {
+        if let Some(data) = strip_sse_field(line, "data") {
+            if data.trim() != "[DONE]" {
+                let collected = match collector {
+                    Some(c) if c.should_collect(data) => {
+                        match serde_json::from_str::<Value>(data) {
+                            Ok(json_value) => {
+                                c.push(json_value).await;
+                                true
+                            }
+                            Err(_) => false,
+                        }
+                    }
+                    _ => false,
+                };
+                if collected {
+                    log::debug!("[{tag}] <<< SSE 事件: {data}");
+                } else {
+                    log::debug!("[{tag}] <<< SSE 数据: {data}");
+                }
+            } else {
+                log::debug!("[{tag}] <<< SSE: [DONE]");
+            }
         }
     }
 }
@@ -980,6 +996,44 @@ mod tests {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_passthrough_collects_final_event_without_trailing_blank_line() {
+        use futures::StreamExt;
+
+        let collected: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+        let sink = collected.clone();
+        let collector =
+            SseUsageCollector::new(std::time::Instant::now(), None, move |events, _| {
+                sink.lock().unwrap().extend(events);
+            });
+
+        let upstream = futures::stream::iter(vec![
+            Ok::<_, std::io::Error>(Bytes::from_static(
+                b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
+            )),
+            Ok(Bytes::from_static(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":7}}}",
+            )),
+        ]);
+        let stream = create_logged_passthrough_stream(
+            upstream,
+            "test",
+            Some(collector),
+            StreamingTimeoutConfig {
+                first_byte_timeout: 0,
+                idle_timeout: 0,
+            },
+            None,
+        );
+        let chunks: Vec<_> = stream.collect().await;
+        assert_eq!(chunks.len(), 2);
+
+        let events = collected.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1]["type"], "response.completed");
+        assert_eq!(events[1]["response"]["usage"]["input_tokens"], 7);
     }
 
     #[tokio::test]
