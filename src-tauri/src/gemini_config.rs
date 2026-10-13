@@ -36,8 +36,8 @@ pub fn parse_env_file(content: &str) -> HashMap<String, String> {
 
         // 解析 KEY=VALUE
         if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim().to_string();
-            let value = value.trim().to_string();
+            let key = strip_export_prefix(key.trim()).to_string();
+            let value = unquote_env_value(value.trim());
 
             // 验证 key 是否有效（不为空，只包含字母、数字和下划线）
             if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') {
@@ -47,6 +47,54 @@ pub fn parse_env_file(content: &str) -> HashMap<String, String> {
     }
 
     map
+}
+
+/// 去掉 dotenv 支持的 `export ` 前缀（如 `export GEMINI_API_KEY=...`）
+fn strip_export_prefix(key: &str) -> &str {
+    match key.strip_prefix("export") {
+        Some(rest) if rest.starts_with(char::is_whitespace) => rest.trim_start(),
+        _ => key,
+    }
+}
+
+/// 按 dotenv（Gemini CLI 使用的解析器）语义去掉值两侧成对的引号。
+///
+/// Gemini CLI 文档推荐写法为 `GEMINI_API_KEY="your-key"`，若不去引号，
+/// 引号会被当作密钥的一部分导入并在之后被使用。
+/// 双引号内的 `\n` / `\r` 会被展开，与 dotenv 行为一致。
+fn unquote_env_value(value: &str) -> String {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if first == last && matches!(first, b'"' | b'\'' | b'`') {
+            let inner = &value[1..value.len() - 1];
+            if first == b'"' {
+                return inner.replace("\\n", "\n").replace("\\r", "\r");
+            }
+            return inner.to_string();
+        }
+    }
+    value.to_string()
+}
+
+/// 序列化单个值：仅在 dotenv 会误解析时加引号
+/// （包含 `#`、首尾空白、换行或以引号开头的值）。
+fn quote_env_value(value: &str) -> String {
+    let has_newline = value.contains('\n') || value.contains('\r');
+    let needs_quotes = has_newline
+        || value.contains('#')
+        || value.trim() != value
+        || value.starts_with(['"', '\'', '`']);
+    if !needs_quotes {
+        return value.to_string();
+    }
+    if !has_newline && !value.contains('\'') {
+        // 单引号内为字面量，无需任何转义
+        return format!("'{value}'");
+    }
+    let escaped = value.replace('\n', "\\n").replace('\r', "\\r");
+    format!("\"{escaped}\"")
 }
 
 /// 严格解析 .env 文件内容，返回详细的错误信息
@@ -132,7 +180,7 @@ pub fn serialize_env_file(map: &HashMap<String, String>) -> String {
 
     for key in keys {
         if let Some(value) = map.get(key) {
-            lines.push(format!("{key}={value}"));
+            lines.push(format!("{key}={}", quote_env_value(value)));
         }
     }
 
@@ -397,6 +445,47 @@ GEMINI_MODEL=gemini-3.5-flash
             map.get("GEMINI_MODEL"),
             Some(&"gemini-3.5-flash".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_env_file_strips_quotes_and_export() {
+        let content = r#"
+GEMINI_API_KEY="sk-quoted"
+GEMINI_MODEL='gemini-2.5-pro'
+export GOOGLE_GEMINI_BASE_URL=https://example.com
+EMPTY=""
+LONE="
+MULTI="a\nb"
+"#;
+        let map = parse_env_file(content);
+        assert_eq!(map.get("GEMINI_API_KEY"), Some(&"sk-quoted".to_string()));
+        assert_eq!(map.get("GEMINI_MODEL"), Some(&"gemini-2.5-pro".to_string()));
+        assert_eq!(
+            map.get("GOOGLE_GEMINI_BASE_URL"),
+            Some(&"https://example.com".to_string())
+        );
+        assert_eq!(map.get("EMPTY"), Some(&String::new()));
+        assert_eq!(map.get("LONE"), Some(&"\"".to_string()));
+        assert_eq!(map.get("MULTI"), Some(&"a\nb".to_string()));
+    }
+
+    #[test]
+    fn test_serialize_env_file_round_trips_special_values() {
+        let mut map = HashMap::new();
+        map.insert("HASH".to_string(), "abc#def".to_string());
+        map.insert("SPACE".to_string(), " padded ".to_string());
+        map.insert("QUOTE".to_string(), "\"starts-with-quote".to_string());
+        map.insert("BOTH".to_string(), "it's #1".to_string());
+        map.insert("NEWLINE".to_string(), "line1\nline2".to_string());
+        map.insert("PLAIN".to_string(), "sk-plain".to_string());
+
+        let content = serialize_env_file(&map);
+        assert!(content.lines().any(|l| l == "PLAIN=sk-plain"));
+        assert!(content.lines().any(|l| l == "HASH='abc#def'"));
+        assert_eq!(content.lines().count(), map.len());
+
+        let parsed = parse_env_file(&content);
+        assert_eq!(parsed, map);
     }
 
     #[test]
