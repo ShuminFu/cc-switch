@@ -393,6 +393,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_proxy_points_to_loopback() {
         // 设置 CC Switch 代理端口为 15721（默认值）
         set_proxy_port(15721);
@@ -412,6 +413,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_system_proxy_points_to_loopback() {
         let _guard = env_lock().lock().unwrap();
 

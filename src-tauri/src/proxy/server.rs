@@ -140,6 +140,10 @@ impl ProxyServer {
         let state = self.state.clone();
         let handle = tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
+            // 通知已建立的连接停止服务。没有它，停止代理只会关闭 listener：
+            // 客户端的 keep-alive 连接仍由旧的 ProxyState 继续转发请求，
+            // 出现 "代理已停止但请求仍被代理" 的不一致（重启后也会落到旧实例上）。
+            let (conn_shutdown_tx, _) = tokio::sync::watch::channel(false);
             loop {
                 tokio::select! {
                     result = listener.accept() => {
@@ -153,12 +157,17 @@ impl ProxyServer {
                         };
 
                         let app = app.clone();
+                        let mut conn_shutdown_rx = conn_shutdown_tx.subscribe();
                         tokio::spawn(async move {
                             // Peek raw TCP bytes to capture original header casing
                             // before hyper parses (and lowercases) the header names.
                             let original_cases = {
                                 let mut peek_buf = vec![0u8; 8192];
-                                match stream.peek(&mut peek_buf).await {
+                                let peeked = tokio::select! {
+                                    peeked = stream.peek(&mut peek_buf) => peeked,
+                                    _ = conn_shutdown_rx.changed() => return,
+                                };
+                                match peeked {
                                     Ok(n) => {
                                         let cases = super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..n]);
                                         log::debug!(
@@ -191,11 +200,21 @@ impl ProxyServer {
                                 }
                             });
 
-                            if let Err(e) = hyper::server::conn::http1::Builder::new()
+                            let conn = hyper::server::conn::http1::Builder::new()
                                 .preserve_header_case(true)
-                                .serve_connection(TokioIo::new(stream), service)
-                                .await
-                            {
+                                .serve_connection(TokioIo::new(stream), service);
+                            tokio::pin!(conn);
+
+                            let result = tokio::select! {
+                                result = conn.as_mut() => result,
+                                _ = conn_shutdown_rx.changed() => {
+                                    // 优雅关闭：进行中的请求（含流式响应）继续完成，
+                                    // 空闲的 keep-alive 连接立即关闭，且不再接受新请求。
+                                    conn.as_mut().graceful_shutdown();
+                                    conn.await
+                                }
+                            };
+                            if let Err(e) = result {
                                 // Connection reset / broken pipe 等在代理场景下很常见，debug 级别
                                 log::debug!("[{SRV}] connection error: {e}", SRV = log_srv::CONN_ERR);
                             }
@@ -206,6 +225,8 @@ impl ProxyServer {
                     }
                 }
             }
+
+            let _ = conn_shutdown_tx.send(true);
 
             // 服务器停止后更新状态
             state.status.write().await.running = false;
@@ -401,5 +422,67 @@ impl ProxyServer {
             .provider_router
             .reset_provider_breaker(provider_id, app_type)
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn read_http_response(stream: &mut tokio::net::TcpStream) -> String {
+        let mut buf = vec![0u8; 4096];
+        let mut out = Vec::new();
+        loop {
+            let n = stream.read(&mut buf).await.expect("read response");
+            assert!(n > 0, "connection closed before a response arrived");
+            out.extend_from_slice(&buf[..n]);
+            let text = String::from_utf8_lossy(&out);
+            if let Some(header_end) = text.find("\r\n\r\n") {
+                let content_length = text[..header_end]
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                if out.len() >= header_end + 4 + content_length {
+                    return text.into_owned();
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn stop_closes_idle_keep_alive_connections() {
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let config = ProxyConfig {
+            listen_port: 0,
+            ..Default::default()
+        };
+        let server = ProxyServer::new(config, db, None);
+        let info = server.start().await.expect("start proxy");
+
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .expect("connect");
+        let request = "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n";
+        stream.write_all(request.as_bytes()).await.expect("write");
+        let response = read_http_response(&mut stream).await;
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+
+        server.stop().await.expect("stop proxy");
+
+        // The idle keep-alive connection must be closed so a stopped proxy can no
+        // longer forward requests through it.
+        let mut buf = [0u8; 64];
+        let read = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf))
+            .await
+            .expect("keep-alive connection was not closed after stop");
+        assert!(matches!(read, Ok(0) | Err(_)), "unexpected data: {read:?}");
     }
 }
