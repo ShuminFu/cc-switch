@@ -2393,6 +2393,7 @@
     "import": "Import",
     "importing": "Importing...",
     "warning": "Please confirm the information above is correct before importing. You can edit or delete it later in the provider list.",
+    "providerEnabledWarning": "After import, this provider becomes the active provider immediately and the app's live config is rewritten to use its endpoint and key. Only continue if you trust the source of this link.",
     "parseError": "Failed to parse deep link",
     "importSuccess": "Import successful",
     "importSuccessDescription": "Provider \"{{name}}\" has been successfully imported",

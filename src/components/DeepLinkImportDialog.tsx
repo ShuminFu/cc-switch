@@ -706,6 +706,16 @@ export function DeepLinkImportDialog() {
                   <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 p-3 text-sm text-yellow-800 dark:text-yellow-200">
                     {t("deeplink.warning")}
                   </div>
+
+                  {/* The link asks to switch the active provider on import */}
+                  {request.enabled && (
+                    <div
+                      role="alert"
+                      className="rounded-lg bg-red-50 dark:bg-red-900/20 p-3 text-sm font-medium text-red-800 dark:text-red-200"
+                    >
+                      {t("deeplink.providerEnabledWarning")}
+                    </div>
+                  )}
                 </>
               )}
             </div>
