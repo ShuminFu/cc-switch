@@ -483,10 +483,12 @@ fn backup_generation_matches_dir(generation: &Path, codex_dir_key: &str) -> bool
 }
 
 fn collect_official_session_ids_from_backup(path: &Path, session_ids: &mut HashSet<String>) {
-    let Ok(content) = fs::read_to_string(path) else {
+    let Ok(bytes) = fs::read(path) else {
         log::debug!("Failed to read unify backup file {}", path.display());
         return;
     };
+    // 与迁移一致：容忍非 UTF-8 片段，只影响坏行本身，不丢整份账本。
+    let content = String::from_utf8_lossy(&bytes);
     for line in content.lines() {
         if !line.contains("\"session_meta\"") || !line.contains("\"model_provider\"") {
             continue;
@@ -1028,33 +1030,43 @@ fn rewrite_codex_session_file_lines(
     let metadata_before = fs::metadata(path).map_err(|e| AppError::io(path, e))?;
     let modified_before = metadata_before.modified().ok();
     let len_before = metadata_before.len();
-    let content = fs::read_to_string(path).map_err(|e| AppError::io(path, e))?;
+    // 按字节读取：会话文件可能含非 UTF-8 片段（如 Codex 写入中途被杀，截断在多字节
+    // 字符中间）。整文件 read_to_string 会直接报错，令整个迁移每次启动都失败。
+    let content = fs::read(path).map_err(|e| AppError::io(path, e))?;
 
-    let mut rewritten = String::with_capacity(content.len());
-    let mut changed = false;
-    for segment in content.split_inclusive('\n') {
-        let (line, newline) = segment
-            .strip_suffix('\n')
-            .map(|line| (line, "\n"))
-            .unwrap_or((segment, ""));
-        if let Some(next_line) = rewrite_line(line) {
-            rewritten.push_str(&next_line);
-            changed = true;
-        } else {
-            rewritten.push_str(line);
-        }
-        rewritten.push_str(newline);
-    }
-
-    if !changed {
+    let Some(rewritten) = rewrite_jsonl_bytes(&content, rewrite_line) else {
         return Ok(false);
-    }
+    };
 
     ensure_codex_session_file_unchanged(path, modified_before, len_before)?;
     backup_codex_jsonl_file(path, codex_dir, backup_root)?;
     ensure_codex_session_file_unchanged(path, modified_before, len_before)?;
-    atomic_write(path, rewritten.as_bytes())?;
+    atomic_write(path, &rewritten)?;
     Ok(true)
+}
+
+/// 逐行改写 jsonl 字节内容；非 UTF-8 的行原样保留。没有任何行被改写时返回 `None`。
+fn rewrite_jsonl_bytes(
+    content: &[u8],
+    rewrite_line: impl Fn(&str) -> Option<String>,
+) -> Option<Vec<u8>> {
+    let mut rewritten = Vec::with_capacity(content.len());
+    let mut changed = false;
+    for segment in content.split_inclusive(|byte| *byte == b'\n') {
+        let (line, newline): (&[u8], &[u8]) = match segment.strip_suffix(b"\n") {
+            Some(line) => (line, b"\n"),
+            None => (segment, b""),
+        };
+        match std::str::from_utf8(line).ok().and_then(&rewrite_line) {
+            Some(next_line) => {
+                rewritten.extend_from_slice(next_line.as_bytes());
+                changed = true;
+            }
+            None => rewritten.extend_from_slice(line),
+        }
+        rewritten.extend_from_slice(newline);
+    }
+    changed.then_some(rewritten)
 }
 
 fn ensure_codex_session_file_unchanged(
@@ -1307,6 +1319,41 @@ mod tests {
                 std::env::remove_var(self.key);
             }
         }
+    }
+
+    #[test]
+    fn rewrite_jsonl_bytes_keeps_non_utf8_lines_and_migrates_valid_ones() {
+        let sources: HashSet<String> = ["rightcode".to_string()].into_iter().collect();
+        let meta = r#"{"type":"session_meta","payload":{"id":"s1","model_provider":"rightcode"}}"#;
+        // 末行截断在多字节字符 "中"(E4 B8 AD) 中间，且没有结尾换行。
+        let mut content = Vec::new();
+        content.extend_from_slice(meta.as_bytes());
+        content.push(b'\n');
+        content.extend_from_slice(b"{\"type\":\"response_item\",\"text\":\"\xE4\xB8");
+
+        let rewritten = rewrite_jsonl_bytes(&content, |line| {
+            rewrite_codex_session_meta_line(line, &sources)
+        })
+        .expect("session_meta line should be rewritten");
+
+        let newline = rewritten
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .expect("newline kept");
+        let first: Value = serde_json::from_slice(&rewritten[..newline]).expect("first line json");
+        assert_eq!(
+            first["payload"]["model_provider"],
+            CC_SWITCH_CODEX_MODEL_PROVIDER_ID
+        );
+        assert_eq!(
+            &rewritten[newline + 1..],
+            b"{\"type\":\"response_item\",\"text\":\"\xE4\xB8"
+        );
+
+        assert!(rewrite_jsonl_bytes(b"\xFF\xFE\n", |line| {
+            rewrite_codex_session_meta_line(line, &sources)
+        })
+        .is_none());
     }
 
     fn source_ids(values: &[&str]) -> BTreeSet<String> {
