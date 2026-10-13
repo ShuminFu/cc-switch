@@ -26,6 +26,10 @@ export function useManagedAuth(
     null,
   );
   const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Incremented on every start/cancel/unmount. A login attempt only touches
+  // polling state while its id is still current, so a late startLogin response
+  // (or an in-flight poll) can't resurrect polling after cancel/unmount.
+  const loginAttemptRef = useRef(0);
 
   const {
     data: authStatus,
@@ -50,13 +54,18 @@ export function useManagedAuth(
 
   useEffect(() => {
     return () => {
+      loginAttemptRef.current += 1;
       stopPolling();
     };
   }, [stopPolling]);
 
   const startLoginMutation = useMutation({
-    mutationFn: () => authApi.authStartLogin(authProvider, githubDomain),
-    onSuccess: async (response) => {
+    mutationFn: (_attemptId: number) =>
+      authApi.authStartLogin(authProvider, githubDomain),
+    onSuccess: async (response, attemptId) => {
+      const isStale = () => loginAttemptRef.current !== attemptId;
+      if (isStale()) return;
+
       setDeviceCode(response);
       setPollingState("polling");
       setError(null);
@@ -73,12 +82,17 @@ export function useManagedAuth(
         console.debug("[ManagedAuth] Failed to open browser:", e);
       }
 
+      // The user may have cancelled (or the component unmounted) while we
+      // were copying the code / opening the browser.
+      if (isStale()) return;
+
       // Add a small buffer on top of GitHub's suggested interval to avoid
       // hitting slow_down responses too aggressively during device polling.
       const interval = Math.max((response.interval || 5) + 3, 8) * 1000;
       const expiresAt = Date.now() + response.expires_in * 1000;
 
       const pollOnce = async () => {
+        if (isStale()) return;
         if (Date.now() > expiresAt) {
           stopPolling();
           setPollingState("error");
@@ -92,6 +106,7 @@ export function useManagedAuth(
             response.device_code,
             githubDomain,
           );
+          if (isStale()) return;
           if (newAccount) {
             stopPolling();
             setPollingState("success");
@@ -101,6 +116,7 @@ export function useManagedAuth(
             setDeviceCode(null);
           }
         } catch (e) {
+          if (isStale()) return;
           const errorMessage = e instanceof Error ? e.message : String(e);
           if (
             !errorMessage.includes("pending") &&
@@ -121,7 +137,8 @@ export function useManagedAuth(
         setError("Device code expired. Please try again.");
       }, response.expires_in * 1000);
     },
-    onError: (e) => {
+    onError: (e, attemptId) => {
+      if (loginAttemptRef.current !== attemptId) return;
       setPollingState("error");
       setError(e instanceof Error ? e.message : String(e));
     },
@@ -182,10 +199,12 @@ export function useManagedAuth(
     setDeviceCode(null);
     setError(null);
     stopPolling();
-    startLoginMutation.mutate();
+    loginAttemptRef.current += 1;
+    startLoginMutation.mutate(loginAttemptRef.current);
   }, [startLoginMutation, stopPolling]);
 
   const cancelAuth = useCallback(() => {
+    loginAttemptRef.current += 1;
     stopPolling();
     setPollingState("idle");
     setDeviceCode(null);
