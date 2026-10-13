@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
@@ -7,6 +7,7 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 import { Button } from "@/components/ui/button";
 import JsonEditor from "@/components/JsonEditor";
 import { parseOpenClawEnvEditorValue } from "./utils";
+import { useDirtyTracker } from "./hooks/useDirtyTracker";
 
 const EnvPanel: React.FC = () => {
   const { t } = useTranslation();
@@ -14,14 +15,30 @@ const EnvPanel: React.FC = () => {
   const saveEnvMutation = useSaveOpenClawEnv();
   const [editorValue, setEditorValue] = useState("{}");
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDirty, markDirty, beginSave, markSaved } = useDirtyTracker();
+  // Last value we pushed into the editor programmatically. JsonEditor echoes
+  // external value changes back through onChange, which must not count as a
+  // user edit.
+  const seededValueRef = useRef("{}");
 
   useEffect(() => {
+    // Don't clobber unsaved edits when the query refetches.
+    if (isDirty()) return;
     const nextValue =
       envData && Object.keys(envData).length > 0
         ? JSON.stringify(envData, null, 2)
         : "{}";
+    seededValueRef.current = nextValue;
     setEditorValue(nextValue);
-  }, [envData]);
+  }, [envData, isDirty]);
+
+  const handleEditorChange = useCallback(
+    (value: string) => {
+      setEditorValue(value);
+      if (value !== seededValueRef.current) markDirty();
+    },
+    [markDirty],
+  );
 
   useEffect(() => {
     setIsDarkMode(document.documentElement.classList.contains("dark"));
@@ -41,7 +58,9 @@ const EnvPanel: React.FC = () => {
   const handleSave = async () => {
     try {
       const env = parseOpenClawEnvEditorValue(editorValue);
+      const saveToken = beginSave();
       await saveEnvMutation.mutateAsync(env);
+      markSaved(saveToken);
       toast.success(t("openclaw.env.saveSuccess"));
     } catch (error) {
       const detail = extractErrorMessage(error);
@@ -90,7 +109,7 @@ const EnvPanel: React.FC = () => {
 
       <JsonEditor
         value={editorValue}
-        onChange={setEditorValue}
+        onChange={handleEditorChange}
         darkMode={isDarkMode}
         rows={18}
         showValidation={true}

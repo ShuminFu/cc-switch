@@ -21,6 +21,7 @@ import {
 import type { OpenClawAgentsDefaults } from "@/types";
 import { useOpenClawModelOptions } from "./hooks/useOpenClawModelOptions";
 import { getOpenClawTimeoutInputValue } from "./utils";
+import { useDirtyTracker } from "./hooks/useDirtyTracker";
 
 const UNSET_SENTINEL = "__unset__";
 
@@ -40,10 +41,13 @@ const AgentsDefaultsPanel: React.FC = () => {
   const [timeout, setTimeout_] = useState("");
   const [contextTokens, setContextTokens] = useState("");
   const [maxConcurrent, setMaxConcurrent] = useState("");
+  const { isDirty, markDirty, beginSave, markSaved } = useDirtyTracker();
 
   useEffect(() => {
     // agentsData is undefined while loading, null when config section is absent
     if (agentsData === undefined) return;
+    // Keep unsaved edits when the query refetches; re-seed once saved/clean.
+    if (isDirty()) return;
     setDefaults(agentsData);
 
     if (agentsData) {
@@ -63,7 +67,7 @@ const AgentsDefaultsPanel: React.FC = () => {
       setContextTokens("");
       setMaxConcurrent("");
     }
-  }, [agentsData]);
+  }, [agentsData, isDirty]);
 
   // Build primary options, including a "not in list" entry if current value is missing
   const primaryOptions = useMemo(() => {
@@ -112,14 +116,17 @@ const AgentsDefaultsPanel: React.FC = () => {
   };
 
   const handleAddFallback = () => {
+    markDirty();
     setFallbacks((prev) => [...prev, ""]);
   };
 
   const handleRemoveFallback = (index: number) => {
+    markDirty();
     setFallbacks((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleFallbackChange = (index: number, value: string) => {
+    markDirty();
     setFallbacks((prev) => {
       const next = [...prev];
       next[index] = value;
@@ -169,7 +176,9 @@ const AgentsDefaultsPanel: React.FC = () => {
       if (concNum !== undefined) updated.maxConcurrent = concNum;
       else delete updated.maxConcurrent;
 
+      const saveToken = beginSave();
       await saveAgentsMutation.mutateAsync(updated);
+      markSaved(saveToken);
       toast.success(t("openclaw.agents.saveSuccess"));
     } catch (error) {
       const detail = extractErrorMessage(error);
@@ -241,9 +250,10 @@ const AgentsDefaultsPanel: React.FC = () => {
             ) : (
               <Select
                 value={primaryModel || UNSET_SENTINEL}
-                onValueChange={(v) =>
-                  setPrimaryModel(v === UNSET_SENTINEL ? "" : v)
-                }
+                onValueChange={(v) => {
+                  markDirty();
+                  setPrimaryModel(v === UNSET_SENTINEL ? "" : v);
+                }}
               >
                 <SelectTrigger className="font-mono text-xs">
                   <SelectValue />
@@ -348,7 +358,10 @@ const AgentsDefaultsPanel: React.FC = () => {
             </Label>
             <Input
               value={workspace}
-              onChange={(e) => setWorkspace(e.target.value)}
+              onChange={(e) => {
+                markDirty();
+                setWorkspace(e.target.value);
+              }}
               placeholder="~/projects"
               className="font-mono text-xs"
             />
@@ -361,7 +374,10 @@ const AgentsDefaultsPanel: React.FC = () => {
             <Input
               type="number"
               value={timeout}
-              onChange={(e) => setTimeout_(e.target.value)}
+              onChange={(e) => {
+                markDirty();
+                setTimeout_(e.target.value);
+              }}
               placeholder="300"
               className="font-mono text-xs"
             />
@@ -374,7 +390,10 @@ const AgentsDefaultsPanel: React.FC = () => {
             <Input
               type="number"
               value={contextTokens}
-              onChange={(e) => setContextTokens(e.target.value)}
+              onChange={(e) => {
+                markDirty();
+                setContextTokens(e.target.value);
+              }}
               placeholder="200000"
               className="font-mono text-xs"
             />
@@ -387,7 +406,10 @@ const AgentsDefaultsPanel: React.FC = () => {
             <Input
               type="number"
               value={maxConcurrent}
-              onChange={(e) => setMaxConcurrent(e.target.value)}
+              onChange={(e) => {
+                markDirty();
+                setMaxConcurrent(e.target.value);
+              }}
               placeholder="4"
               className="font-mono text-xs"
             />

@@ -23,6 +23,7 @@ import {
   OPENCLAW_UNSET_PROFILE,
   OPENCLAW_UNSUPPORTED_PROFILE,
 } from "./utils";
+import { useDirtyTracker } from "./hooks/useDirtyTracker";
 
 interface ListItem {
   id: string;
@@ -36,9 +37,12 @@ const ToolsPanel: React.FC = () => {
   const [config, setConfig] = useState<OpenClawToolsConfig>({});
   const [allowList, setAllowList] = useState<ListItem[]>([]);
   const [denyList, setDenyList] = useState<ListItem[]>([]);
+  const { isDirty, markDirty, beginSave, markSaved } = useDirtyTracker();
 
   useEffect(() => {
-    if (toolsData) {
+    // Only (re)seed while the form has no unsaved edits, so a refetch does
+    // not wipe out what the user is typing.
+    if (toolsData && !isDirty()) {
       setConfig(toolsData);
       setAllowList(
         (toolsData.allow ?? []).map((value) => ({
@@ -53,7 +57,7 @@ const ToolsPanel: React.FC = () => {
         })),
       );
     }
-  }, [toolsData]);
+  }, [toolsData, isDirty]);
 
   const unsupportedProfile = getOpenClawUnsupportedProfile(config.profile);
 
@@ -85,7 +89,9 @@ const ToolsPanel: React.FC = () => {
         deny: denyList.map((item) => item.value).filter((s) => s.trim()),
       };
 
+      const saveToken = beginSave();
       await saveToolsMutation.mutateAsync(newConfig);
+      markSaved(saveToken);
       toast.success(t("openclaw.tools.saveSuccess"));
     } catch (error) {
       const detail = extractErrorMessage(error);
@@ -100,6 +106,7 @@ const ToolsPanel: React.FC = () => {
     index: number,
     value: string,
   ) => {
+    markDirty();
     setList((prev) =>
       prev.map((item, i) => (i === index ? { ...item, value } : item)),
     );
@@ -109,6 +116,7 @@ const ToolsPanel: React.FC = () => {
     setList: React.Dispatch<React.SetStateAction<ListItem[]>>,
     index: number,
   ) => {
+    markDirty();
     setList((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -152,6 +160,7 @@ const ToolsPanel: React.FC = () => {
           value={getOpenClawToolsProfileSelectValue(config.profile)}
           onValueChange={(value) => {
             if (value === OPENCLAW_UNSUPPORTED_PROFILE) return;
+            markDirty();
             if (value === OPENCLAW_UNSET_PROFILE) {
               setConfig((prev) => ({ ...prev, profile: undefined }));
               return;
@@ -214,12 +223,13 @@ const ToolsPanel: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() =>
+            onClick={() => {
+              markDirty();
               setAllowList((prev) => [
                 ...prev,
                 { id: crypto.randomUUID(), value: "" },
-              ])
-            }
+              ]);
+            }}
           >
             <Plus className="w-4 h-4 mr-1" />
             {t("openclaw.tools.addAllow")}
@@ -253,12 +263,13 @@ const ToolsPanel: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() =>
+            onClick={() => {
+              markDirty();
               setDenyList((prev) => [
                 ...prev,
                 { id: crypto.randomUUID(), value: "" },
-              ])
-            }
+              ]);
+            }}
           >
             <Plus className="w-4 h-4 mr-1" />
             {t("openclaw.tools.addDeny")}
