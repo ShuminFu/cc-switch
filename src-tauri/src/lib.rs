@@ -1103,6 +1103,10 @@ pub fn run() {
                 });
 
                 // Session log usage sync: 启动时同步一次，之后每 60 秒检查
+                //
+                // 同步过程会扫描大量 JSONL/SQLite 会话文件并写入数据库，属于阻塞
+                // IO。放在 spawn_blocking 中执行，避免占用 tokio worker（代理服务器
+                // 与其他异步命令共用同一运行时）。
                 let db_for_session_sync = state.db.clone();
                 tauri::async_runtime::spawn(async move {
                     const SESSION_SYNC_INTERVAL_SECS: u64 = 60;
@@ -1113,29 +1117,38 @@ pub fn run() {
                         }
                     }
 
-                    let db = &db_for_session_sync;
+                    fn run_session_sync(db: &crate::database::Database, phase: &str) {
+                        run_step(
+                            &format!("Session usage {phase} sync"),
+                            crate::services::session_usage::sync_claude_session_logs(db),
+                        );
+                        run_step(
+                            &format!("Codex usage {phase} sync"),
+                            crate::services::session_usage_codex::sync_codex_usage(db),
+                        );
+                        run_step(
+                            &format!("Gemini usage {phase} sync"),
+                            crate::services::session_usage_gemini::sync_gemini_usage(db),
+                        );
+                        run_step(
+                            &format!("OpenCode usage {phase} sync"),
+                            crate::services::session_usage_opencode::sync_opencode_usage(db),
+                        );
+                    }
 
                     // 首次同步
-                    run_step(
-                        "Usage cost startup backfill",
-                        db.backfill_missing_usage_costs(),
-                    );
-                    run_step(
-                        "Session usage initial sync",
-                        crate::services::session_usage::sync_claude_session_logs(db),
-                    );
-                    run_step(
-                        "Codex usage initial sync",
-                        crate::services::session_usage_codex::sync_codex_usage(db),
-                    );
-                    run_step(
-                        "Gemini usage initial sync",
-                        crate::services::session_usage_gemini::sync_gemini_usage(db),
-                    );
-                    run_step(
-                        "OpenCode usage initial sync",
-                        crate::services::session_usage_opencode::sync_opencode_usage(db),
-                    );
+                    let db = db_for_session_sync.clone();
+                    let initial = tauri::async_runtime::spawn_blocking(move || {
+                        run_step(
+                            "Usage cost startup backfill",
+                            db.backfill_missing_usage_costs(),
+                        );
+                        run_session_sync(&db, "initial");
+                    })
+                    .await;
+                    if let Err(e) = initial {
+                        log::warn!("Session usage initial sync task failed: {e}");
+                    }
 
                     // 定期同步
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(
@@ -1144,22 +1157,14 @@ pub fn run() {
                     interval.tick().await; // skip immediate first tick
                     loop {
                         interval.tick().await;
-                        run_step(
-                            "Session usage periodic sync",
-                            crate::services::session_usage::sync_claude_session_logs(db),
-                        );
-                        run_step(
-                            "Codex usage periodic sync",
-                            crate::services::session_usage_codex::sync_codex_usage(db),
-                        );
-                        run_step(
-                            "Gemini usage periodic sync",
-                            crate::services::session_usage_gemini::sync_gemini_usage(db),
-                        );
-                        run_step(
-                            "OpenCode usage periodic sync",
-                            crate::services::session_usage_opencode::sync_opencode_usage(db),
-                        );
+                        let db = db_for_session_sync.clone();
+                        let periodic = tauri::async_runtime::spawn_blocking(move || {
+                            run_session_sync(&db, "periodic");
+                        })
+                        .await;
+                        if let Err(e) = periodic {
+                            log::warn!("Session usage periodic sync task failed: {e}");
+                        }
                     }
                 });
             });

@@ -57,6 +57,42 @@ struct ParsedAssistantUsage {
     session_id: Option<String>,
 }
 
+impl SessionSyncResult {
+    fn absorb(&mut self, label: &str, other: Result<SessionSyncResult, AppError>) {
+        match other {
+            Ok(other) => {
+                self.imported += other.imported;
+                self.skipped += other.skipped;
+                self.files_scanned += other.files_scanned;
+                self.errors.extend(other.errors);
+            }
+            Err(e) => self.errors.push(format!("{label} 同步失败: {e}")),
+        }
+    }
+}
+
+/// 同步所有会话日志来源（Claude / Codex / Gemini / OpenCode）。
+///
+/// 该函数会进行大量文件 IO 与 SQLite 写入，必须在阻塞线程池中调用，
+/// 不能直接放在 UI 主线程或 tokio worker 上执行。
+/// Claude 同步失败会直接返回错误；其余来源的失败记录到 `errors` 中。
+pub fn sync_all_session_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
+    let mut result = sync_claude_session_logs(db)?;
+    result.absorb(
+        "Codex",
+        crate::services::session_usage_codex::sync_codex_usage(db),
+    );
+    result.absorb(
+        "Gemini",
+        crate::services::session_usage_gemini::sync_gemini_usage(db),
+    );
+    result.absorb(
+        "OpenCode",
+        crate::services::session_usage_opencode::sync_opencode_usage(db),
+    );
+    Ok(result)
+}
+
 /// 同步 Claude Code 会话日志到使用统计数据库
 pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppError> {
     let projects_dir = get_claude_config_dir().join("projects");
@@ -912,5 +948,33 @@ mod tests {
                 ("c".to_string(), false),
             ]
         );
+    }
+
+    #[test]
+    fn test_sync_result_absorb_merges_counts_and_errors() {
+        let mut total = SessionSyncResult {
+            imported: 1,
+            skipped: 2,
+            files_scanned: 3,
+            errors: vec!["claude".to_string()],
+        };
+        total.absorb(
+            "Codex",
+            Ok(SessionSyncResult {
+                imported: 10,
+                skipped: 20,
+                files_scanned: 30,
+                errors: vec!["codex-file".to_string()],
+            }),
+        );
+        total.absorb("Gemini", Err(AppError::Message("boom".to_string())));
+
+        assert_eq!(total.imported, 11);
+        assert_eq!(total.skipped, 22);
+        assert_eq!(total.files_scanned, 33);
+        assert_eq!(total.errors.len(), 3);
+        assert_eq!(total.errors[1], "codex-file");
+        assert!(total.errors[2].starts_with("Gemini 同步失败"));
+        assert!(total.errors[2].contains("boom"));
     }
 }
