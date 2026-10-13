@@ -1,9 +1,37 @@
 use rquickjs::{Context, Function, Runtime};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use url::{Host, Url};
 
 use crate::error::AppError;
+
+/// Wall-clock budget for each synchronous JS evaluation phase (config
+/// extraction / extractor). Usage scripts only build a request object and map
+/// a JSON response, so this is generous; it exists so `while(1){}` (e.g. from
+/// an imported deep link) cannot pin a thread forever.
+const SCRIPT_CPU_BUDGET: Duration = Duration::from_secs(5);
+/// Max heap the JS runtime may allocate.
+const SCRIPT_MEMORY_LIMIT: usize = 64 * 1024 * 1024;
+/// Max native stack the JS runtime may use (guards runaway recursion).
+const SCRIPT_MAX_STACK_SIZE: usize = 1024 * 1024;
+
+/// Create a QuickJS runtime with an execution deadline, memory limit and stack
+/// limit. The deadline starts when the runtime is created.
+fn create_sandboxed_runtime(budget: Duration) -> Result<Runtime, AppError> {
+    let runtime = Runtime::new().map_err(|e| {
+        AppError::localized(
+            "usage_script.runtime_create_failed",
+            format!("创建 JS 运行时失败: {e}"),
+            format!("Failed to create JS runtime: {e}"),
+        )
+    })?;
+    runtime.set_memory_limit(SCRIPT_MEMORY_LIMIT);
+    runtime.set_max_stack_size(SCRIPT_MAX_STACK_SIZE);
+    let deadline = Instant::now() + budget;
+    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    Ok(runtime)
+}
 
 /// 执行用量查询脚本
 pub async fn execute_usage_script(
@@ -31,13 +59,7 @@ pub async fn execute_usage_script(
 
     // 3. 在独立作用域中提取 request 配置（确保 Runtime/Context 在 await 前释放）
     let request_config = {
-        let runtime = Runtime::new().map_err(|e| {
-            AppError::localized(
-                "usage_script.runtime_create_failed",
-                format!("创建 JS 运行时失败: {e}"),
-                format!("Failed to create JS runtime: {e}"),
-            )
-        })?;
+        let runtime = create_sandboxed_runtime(SCRIPT_CPU_BUDGET)?;
         let context = Context::full(&runtime).map_err(|e| {
             AppError::localized(
                 "usage_script.context_create_failed",
@@ -112,13 +134,7 @@ pub async fn execute_usage_script(
 
     // 7. 在独立作用域中执行 extractor（确保 Runtime/Context 在函数结束前释放）
     let result: Value = {
-        let runtime = Runtime::new().map_err(|e| {
-            AppError::localized(
-                "usage_script.runtime_create_failed",
-                format!("创建 JS 运行时失败: {e}"),
-                format!("Failed to create JS runtime: {e}"),
-            )
-        })?;
+        let runtime = create_sandboxed_runtime(SCRIPT_CPU_BUDGET)?;
         let context = Context::full(&runtime).map_err(|e| {
             AppError::localized(
                 "usage_script.context_create_failed",
@@ -573,6 +589,45 @@ fn is_loopback_host(url: &Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn eval_in_sandbox(budget: Duration, code: &str) -> Result<(), String> {
+        let runtime = create_sandboxed_runtime(budget).unwrap();
+        let context = Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            ctx.eval::<rquickjs::Value, _>(code)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    #[test]
+    fn sandbox_interrupts_infinite_loop() {
+        let start = Instant::now();
+        let result = eval_in_sandbox(Duration::from_millis(200), "while (true) {}");
+        assert!(result.is_err(), "infinite loop must be interrupted");
+        assert!(start.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn sandbox_limits_memory_and_recursion() {
+        let oom = eval_in_sandbox(
+            Duration::from_secs(5),
+            "let a = []; while (true) { a.push('x'.repeat(1 << 20)); }",
+        );
+        assert!(oom.is_err(), "unbounded allocation must fail");
+
+        let deep = eval_in_sandbox(Duration::from_secs(5), "function f() { return f(); } f();");
+        assert!(deep.is_err(), "unbounded recursion must fail");
+    }
+
+    #[test]
+    fn sandbox_runs_normal_scripts() {
+        assert!(eval_in_sandbox(
+            Duration::from_secs(5),
+            "({ request: { url: 'https://x', method: 'GET' }, extractor: function (r) { return r; } })"
+        )
+        .is_ok());
+    }
 
     #[test]
     fn test_https_bypass_prevention() {
