@@ -415,7 +415,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_system_proxy_points_to_loopback() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
 
         // 设置 CC Switch 代理端口
         set_proxy_port(15721);

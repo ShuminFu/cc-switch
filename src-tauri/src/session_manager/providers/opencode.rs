@@ -785,7 +785,9 @@ mod tests {
     #[test]
     #[allow(deprecated)] // set_var/remove_var deprecated since Rust 1.81; safe here under mutex
     fn scan_sessions_sqlite_reads_temp_database() {
-        let _guard = opencode_env_lock().lock().expect("lock");
+        let _guard = opencode_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let temp = tempdir().expect("tempdir");
         let original_xdg = std::env::var_os("XDG_DATA_HOME");
         std::env::set_var("XDG_DATA_HOME", temp.path());
@@ -899,7 +901,9 @@ mod tests {
 
     #[test]
     fn delete_session_sqlite_removes_session() {
-        let _guard = opencode_env_lock().lock().expect("lock");
+        let _guard = opencode_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let temp = tempdir().expect("tempdir");
         let original_xdg = std::env::var_os("XDG_DATA_HOME");
         #[allow(deprecated)]
@@ -969,7 +973,9 @@ mod tests {
 
     #[test]
     fn delete_session_sqlite_rejects_foreign_db_path() {
-        let _guard = opencode_env_lock().lock().expect("lock");
+        let _guard = opencode_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let temp = tempdir().expect("tempdir");
         let original_xdg = std::env::var_os("XDG_DATA_HOME");
         #[allow(deprecated)]

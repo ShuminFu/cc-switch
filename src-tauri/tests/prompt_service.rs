@@ -18,7 +18,7 @@ fn prompt(id: &str, content: &str, enabled: bool) -> Prompt {
 
 #[test]
 fn disabling_enabled_prompt_backfills_live_edits_before_clearing_file() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let home = ensure_test_home();
     let state = create_test_state().expect("create test state");
@@ -43,7 +43,7 @@ fn disabling_enabled_prompt_backfills_live_edits_before_clearing_file() {
 
 #[test]
 fn disabling_with_edited_content_keeps_editor_content() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let home = ensure_test_home();
     let state = create_test_state().expect("create test state");

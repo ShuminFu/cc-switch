@@ -6,7 +6,9 @@ use cc_switch_lib::{hermes_config, update_settings, AppSettings};
 /// （例如 `rate_limit_delay`、`key_env`）必须透传，不能因为 UI 不感知就静默丢弃。
 /// 否则用户在 Hermes Web UI 配置的高级字段会在 CC Switch 编辑后消失。
 fn with_temp_hermes_dir<F: FnOnce(&std::path::Path)>(f: F) {
-    let guard = support::test_mutex().lock().expect("test mutex poisoned");
+    let guard = support::test_mutex()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let home = support::ensure_test_home();
     support::reset_test_fs();
 

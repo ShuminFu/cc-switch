@@ -24,7 +24,7 @@ fn sanitize_provider_name(name: &str) -> String {
 
 #[test]
 fn migrate_legacy_common_config_usage_marks_historical_provider_enabled() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -98,7 +98,7 @@ fn migrate_legacy_common_config_usage_marks_historical_provider_enabled() {
 
 #[test]
 fn provider_service_switch_codex_updates_live_and_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
@@ -248,7 +248,7 @@ command = "say"
 
 #[test]
 fn provider_service_switch_codex_preserves_user_model_provider_id_after_migration() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -356,7 +356,7 @@ requires_openai_auth = true
 
 #[test]
 fn provider_service_switch_codex_preserves_oauth_and_backfills_api_key_from_live_token() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
@@ -530,7 +530,7 @@ requires_openai_auth = true
     reason = "this integration-style test must serialize global test HOME and settings mutations across async takeover calls"
 )]
 async fn codex_official_to_deepseek_then_takeover_enters_and_restores_proxy_managed_live_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
@@ -707,7 +707,7 @@ wire_api = "responses"
 
 #[test]
 fn provider_service_switch_codex_default_overwrites_official_auth_when_preservation_off() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     // Intentionally do NOT enable preservation: this locks the default opt-out
     // behavior where switching to a third-party provider rewrites auth.json,
@@ -795,7 +795,7 @@ requires_openai_auth = true
 
 #[test]
 fn provider_service_switch_codex_supports_official_login_provider_without_auth_write() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -884,7 +884,7 @@ requires_openai_auth = true
 
 #[test]
 fn reapply_codex_official_live_resyncs_mcp_servers() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -983,7 +983,7 @@ fn reapply_codex_official_live_resyncs_mcp_servers() {
 /// Codex MCP 静默消失。这里用坏 JSON 的 ~/.claude.json 复现该场景。
 #[test]
 fn reapply_codex_official_live_projects_mcp_despite_broken_claude_json() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -1088,7 +1088,7 @@ fn reapply_codex_official_live_projects_mcp_despite_broken_claude_json() {
 /// 落盘，切换事实上成功，报错只制造分裂假象。
 #[test]
 fn switch_codex_projects_mcp_despite_broken_claude_json() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -1170,7 +1170,7 @@ fn switch_codex_projects_mcp_despite_broken_claude_json() {
 /// 状态永远陈旧。
 #[test]
 fn sync_all_enabled_reports_broken_app_but_projects_the_rest() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -1226,7 +1226,7 @@ fn sync_all_enabled_reports_broken_app_but_projects_the_rest() {
 
 #[test]
 fn provider_service_switch_codex_official_accounts_write_auth_json() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -1319,7 +1319,7 @@ fn provider_service_switch_codex_official_accounts_write_auth_json() {
 
 #[test]
 fn provider_service_switch_codex_backfill_keeps_provider_specific_model_provider_id() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -1446,7 +1446,7 @@ requires_openai_auth = true
 
 #[test]
 fn sync_current_provider_for_app_keeps_live_takeover_and_updates_restore_backup() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -1545,7 +1545,7 @@ fn sync_current_provider_for_app_keeps_live_takeover_and_updates_restore_backup(
 
 #[test]
 fn switch_codex_provider_with_takeover_live_but_stopped_proxy_keeps_proxy_live_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
@@ -1697,7 +1697,7 @@ wire_api = "responses"
 
 #[test]
 fn explicitly_cleared_common_snippet_is_not_auto_extracted() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -1735,7 +1735,7 @@ fn explicitly_cleared_common_snippet_is_not_auto_extracted() {
 
 #[test]
 fn legacy_common_config_migration_flag_roundtrip() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -1776,7 +1776,7 @@ fn legacy_common_config_migration_flag_roundtrip() {
 
 #[test]
 fn switch_packycode_gemini_updates_security_selected_type() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let home = ensure_test_home();
 
@@ -1829,7 +1829,7 @@ fn switch_packycode_gemini_updates_security_selected_type() {
 
 #[test]
 fn packycode_partner_meta_triggers_security_flag_even_without_keywords() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let home = ensure_test_home();
 
@@ -1884,7 +1884,7 @@ fn packycode_partner_meta_triggers_security_flag_even_without_keywords() {
 
 #[test]
 fn switch_google_official_gemini_preserves_env_vars() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let home = ensure_test_home();
 
@@ -1947,7 +1947,7 @@ fn switch_google_official_gemini_preserves_env_vars() {
 
 #[test]
 fn provider_service_switch_claude_updates_live_and_state() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2043,7 +2043,7 @@ fn provider_service_switch_claude_updates_live_and_state() {
 /// （用户直接在应用内装插件/改偏好）捕获进通用配置片段，并带到下一个供应商。
 #[test]
 fn switch_claude_syncs_new_shared_keys_from_live_into_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2167,7 +2167,7 @@ fn switch_claude_syncs_new_shared_keys_from_live_into_common_config() {
 /// 且不会在切到下一个供应商时被重新注入（否则会"删不掉"）。
 #[test]
 fn switch_claude_syncs_deletions_from_live_into_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2259,7 +2259,7 @@ fn switch_claude_syncs_deletions_from_live_into_common_config() {
 /// 回填后旧供应商的存储配置不残留片段内容（autosync 先于 strip，值必然匹配）。
 #[test]
 fn switch_codex_syncs_shared_keys_from_live_into_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2437,7 +2437,7 @@ command = "ghost-cmd"
 /// 同步进通用配置，且不会在切到下一个供应商时被重新注入（否则"删不掉"）。
 #[test]
 fn switch_codex_syncs_deletions_from_live_into_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2519,7 +2519,7 @@ wire_api = "responses"
 /// 未勾选"写入通用配置"的供应商，其 live 改动不应自动污染通用配置片段。
 #[test]
 fn switch_claude_does_not_sync_common_config_for_opted_out_provider() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2596,7 +2596,7 @@ fn switch_claude_does_not_sync_common_config_for_opted_out_provider() {
 /// 用户显式清空过通用配置（_cleared）后，切换不应把片段重新塞回来。
 #[test]
 fn switch_claude_respects_explicitly_cleared_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2664,7 +2664,7 @@ fn switch_claude_respects_explicitly_cleared_common_config() {
 
 #[test]
 fn provider_service_switch_missing_provider_returns_error() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2685,7 +2685,7 @@ fn provider_service_switch_missing_provider_returns_error() {
 
 #[test]
 fn provider_service_switch_codex_missing_auth_returns_error() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2722,7 +2722,7 @@ fn provider_service_switch_codex_missing_auth_returns_error() {
 
 #[test]
 fn provider_service_switch_failed_live_write_keeps_previous_current_and_does_not_corrupt_target() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2812,7 +2812,7 @@ fn provider_service_switch_failed_live_write_keeps_previous_current_and_does_not
 
 #[test]
 fn provider_service_delete_codex_removes_provider_and_files() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let home = ensure_test_home();
 
@@ -2875,7 +2875,7 @@ fn provider_service_delete_codex_removes_provider_and_files() {
 
 #[test]
 fn provider_service_delete_claude_removes_provider_files() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let home = ensure_test_home();
 
@@ -2935,7 +2935,7 @@ fn provider_service_delete_claude_removes_provider_files() {
 
 #[test]
 fn provider_service_delete_current_provider_returns_error() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
@@ -2984,7 +2984,7 @@ fn provider_service_delete_current_provider_returns_error() {
 
 #[test]
 fn recover_from_crash_without_backup_cleans_placeholder_instead_of_writing_it_back() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();
     let _home = ensure_test_home();
 
