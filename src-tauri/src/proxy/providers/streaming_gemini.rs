@@ -256,12 +256,23 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
         let mut latest_usage: Option<Value> = None;
         let mut latest_finish_reason: Option<String> = None;
         let mut blocked_text: Option<String> = None;
+        // Append an EOF sentinel so a final SSE event that omitted its trailing
+        // blank line (typically the chunk carrying finishReason/usageMetadata)
+        // is still processed.
+        let stream = stream
+            .map(|result| (result, false))
+            .chain(futures::stream::once(async {
+                (Ok::<Bytes, E>(Bytes::new()), true)
+            }));
         tokio::pin!(stream);
 
-        while let Some(chunk) = stream.next().await {
+        while let Some((chunk, is_eof)) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
+                    if is_eof && !buffer.trim().is_empty() {
+                        buffer.push_str("\n\n");
+                    }
 
                     while let Some(block) = take_sse_block(&mut buffer) {
                         if block.trim().is_empty() {
@@ -597,6 +608,21 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("")
         })
+    }
+
+    #[test]
+    fn final_event_without_trailing_blank_line_is_processed() {
+        let output = collect_stream_output(vec![
+            "data: {\"responseId\":\"r1\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n\n",
+            "data: {\"responseId\":\"r1\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]},\"finishReason\":\"MAX_TOKENS\"}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":9,\"totalTokenCount\":12}}",
+        ]);
+
+        assert!(output.contains("\"text\":\" world\""), "{output}");
+        assert!(
+            output.contains("\"stop_reason\":\"max_tokens\""),
+            "{output}"
+        );
+        assert!(output.contains("\"output_tokens\":9"), "{output}");
     }
 
     fn collect_stream_output_with_shadow(
