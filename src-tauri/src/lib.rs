@@ -350,7 +350,7 @@ pub fn run() {
                 let log_file_path = log_dir.join("cc-switch.log");
                 let _ = std::fs::remove_file(&log_file_path);
 
-                app.handle().plugin(
+                let file_logger_result = app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         // 初始化为 Trace，允许后续通过 log::set_max_level() 动态调整级别
                         .level(log::LevelFilter::Trace)
@@ -369,7 +369,21 @@ pub fn run() {
                         .max_file_size(1024 * 1024 * 1024)
                         .timezone_strategy(TimezoneStrategy::UseLocal)
                         .build(),
-                )?;
+                );
+                // 日志文件打不开（目录无写权限 / 只读文件系统等）时插件 setup 会失败；
+                // 若直接 `?` 传播，整个应用启动失败。降级为仅 stdout 日志继续启动。
+                if let Err(e) = file_logger_result {
+                    eprintln!("初始化文件日志失败，降级为仅输出到 stdout: {e}");
+                    if let Err(e) = app.handle().plugin(
+                        tauri_plugin_log::Builder::default()
+                            .level(log::LevelFilter::Trace)
+                            .targets([Target::new(TargetKind::Stdout)])
+                            .timezone_strategy(TimezoneStrategy::UseLocal)
+                            .build(),
+                    ) {
+                        eprintln!("初始化 stdout 日志失败，日志已禁用: {e}");
+                    }
+                }
             }
 
             // 注入 AppHandle 给 usage_events，让无 AppHandle 持有的写日志路径
