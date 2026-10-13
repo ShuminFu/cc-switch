@@ -667,7 +667,18 @@ function App() {
     if (action === "remove") {
       // Remove from live config only (for additive mode apps like OpenCode/OpenClaw)
       // Does NOT delete from database - provider remains in the list
-      await providersApi.removeFromLiveConfig(provider.id, activeApp);
+      try {
+        await providersApi.removeFromLiveConfig(provider.id, activeApp);
+      } catch (error) {
+        console.error("[App] Failed to remove provider from config", error);
+        toast.error(
+          t("notifications.removeFromConfigFailed", {
+            defaultValue: "从配置移除失败: {{error}}",
+            error: extractErrorMessage(error) || t("common.unknown"),
+          }),
+        );
+        return;
+      }
       // Invalidate queries to refresh the isInConfig state
       if (activeApp === "opencode") {
         await queryClient.invalidateQueries({
@@ -692,7 +703,13 @@ function App() {
         { closeButton: true },
       );
     } else {
-      await deleteProvider(provider.id);
+      try {
+        await deleteProvider(provider.id);
+      } catch (error) {
+        // useDeleteProviderMutation already surfaces the error toast
+        console.error("[App] Failed to delete provider", error);
+        return;
+      }
     }
     setConfirmAction(null);
   };

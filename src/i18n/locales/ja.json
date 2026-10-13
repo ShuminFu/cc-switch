@@ -238,6 +238,7 @@
     "claudeDesktopProxyRestartRequired": "切り替えました。CC Switch を起動したまま Claude Desktop を再起動してください",
     "addToConfigSuccess": "設定に追加しました",
     "removeFromConfigSuccess": "設定から削除しました",
+    "removeFromConfigFailed": "設定からの削除に失敗しました: {{error}}",
     "switchFailedTitle": "切り替えに失敗しました",
     "switchFailed": "切り替えに失敗しました: {{error}}",
     "autoImported": "既存設定からデフォルトプロバイダーを自動作成しました",

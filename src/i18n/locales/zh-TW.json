@@ -238,6 +238,7 @@
     "claudeDesktopProxyRestartRequired": "切換成功，請保持 CC Switch 執行，並重新啟動 Claude Desktop 後生效",
     "addToConfigSuccess": "已新增至設定",
     "removeFromConfigSuccess": "已從設定移除",
+    "removeFromConfigFailed": "從設定移除失敗：{{error}}",
     "switchFailedTitle": "切換失敗",
     "switchFailed": "切換失敗：{{error}}",
     "autoImported": "已從現有設定建立預設供應商",
