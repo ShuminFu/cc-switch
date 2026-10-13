@@ -100,20 +100,33 @@ export function GlobalProxySettings() {
     }
   }, [savedUrl]);
 
+  // 错误提示由各 mutation 的 onError 统一处理（toast），这里只需吞掉
+  // rejection，避免 unhandled promise rejection，并保持 dirty 状态以便重试。
   const handleSave = async () => {
-    await setMutation.mutateAsync(fullUrl);
-    setDirty(false);
+    try {
+      await setMutation.mutateAsync(fullUrl);
+      setDirty(false);
+    } catch {
+      // handled by onError toast
+    }
   };
 
   const handleTest = async () => {
-    if (fullUrl) {
+    if (!fullUrl) return;
+    try {
       await testMutation.mutateAsync(fullUrl);
+    } catch {
+      // handled by onError toast
     }
   };
 
   const handleScan = async () => {
-    const result = await scanMutation.mutateAsync();
-    setDetected(result);
+    try {
+      const result = await scanMutation.mutateAsync();
+      setDetected(result);
+    } catch {
+      // handled by onError toast
+    }
   };
 
   const handleSelect = (proxyUrl: string) => {
@@ -134,7 +147,7 @@ export function GlobalProxySettings() {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && dirty && !setMutation.isPending) {
-      handleSave();
+      void handleSave();
     }
   };
 
