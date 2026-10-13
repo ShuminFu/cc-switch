@@ -211,6 +211,38 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                             if let Some(data) = strip_sse_field(l, "data") {
                                 if data.trim() == "[DONE]" {
                                     log::debug!("[Claude/OpenRouter] <<< OpenAI SSE: [DONE]");
+                                    if has_sent_message_stop {
+                                        continue;
+                                    }
+
+                                    // 上游未发送 finish_reason 就直接 [DONE]：仍需关闭已打开的
+                                    // content block 并补发 message_delta，否则客户端收到的是
+                                    // 未闭合 block 且缺少 stop_reason/usage 的消息。
+                                    if has_sent_message_start && !has_emitted_message_delta {
+                                        has_emitted_message_delta = true;
+                                        let mut indices: Vec<u32> =
+                                            open_tool_block_indices.drain().collect();
+                                        if let Some(index) = current_non_tool_block_index.take() {
+                                            indices.push(index);
+                                        }
+                                        current_non_tool_block_type = None;
+                                        indices.sort_unstable();
+                                        for index in indices {
+                                            let event = json!({
+                                                "type": "content_block_stop",
+                                                "index": index
+                                            });
+                                            let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
+                                                serde_json::to_string(&event).unwrap_or_default());
+                                            yield Ok(Bytes::from(sse_data));
+                                        }
+                                        let has_tool_use = tool_blocks_by_index
+                                            .values()
+                                            .any(|state| state.started);
+                                        let stop_reason = if has_tool_use { "tool_use" } else { "end_turn" };
+                                        pending_message_delta =
+                                            Some((Some(stop_reason.to_string()), latest_usage.clone()));
+                                    }
 
                                     // 流正常结束，发出缓存的 message_delta（含完整 usage）。
                                     if let Some((stop_reason, usage_json)) = pending_message_delta.take() {
@@ -1324,5 +1356,33 @@ mod tests {
         assert_eq!(delta["delta"]["stop_reason"], "end_turn");
         assert_eq!(delta["usage"]["output_tokens"], 1);
         assert!(events.iter().any(|e| event_type(e) == Some("message_stop")));
+    }
+
+    #[tokio::test]
+    async fn test_done_without_finish_reason_closes_blocks_and_emits_message_delta() {
+        let input = concat!(
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_0\",\"function\":{\"name\":\"t\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2}}\n\n",
+            "data: [DONE]\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+        let types: Vec<&str> = events.iter().filter_map(event_type).collect();
+        let starts = types
+            .iter()
+            .filter(|t| **t == "content_block_start")
+            .count();
+        let stops = types.iter().filter(|t| **t == "content_block_stop").count();
+        assert_eq!(starts, 2);
+        assert_eq!(stops, 2, "every opened block must be closed: {types:?}");
+
+        let delta_pos = types.iter().position(|t| *t == "message_delta").unwrap();
+        let stop_pos = types.iter().position(|t| *t == "message_stop").unwrap();
+        assert!(delta_pos < stop_pos);
+        assert_eq!(types.iter().filter(|t| **t == "message_stop").count(), 1);
+        assert_eq!(events[delta_pos]["delta"]["stop_reason"], "tool_use");
+        assert_eq!(events[delta_pos]["usage"]["output_tokens"], 2);
     }
 }
