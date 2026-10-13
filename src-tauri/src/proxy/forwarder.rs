@@ -2127,6 +2127,13 @@ impl RequestForwarder {
             is_copilot,
         );
 
+        // 等待上游响应头的时长：流式请求受首包超时约束，两条发送路径保持一致。
+        let header_timeout = upstream_response_header_timeout(
+            request_is_streaming,
+            timeout,
+            self.streaming_first_byte_timeout,
+        );
+
         // 发送请求
         let response = if is_socks_proxy || !preserve_exact_header_case {
             // OpenAI / Copilot / Codex 类后端不依赖原始 header 大小写；走 reqwest
@@ -2148,11 +2155,6 @@ impl RequestForwarder {
             }
             let send = request.body(body_bytes).send();
             let send_result = if request_is_streaming {
-                let header_timeout = if self.streaming_first_byte_timeout.is_zero() {
-                    timeout
-                } else {
-                    self.streaming_first_byte_timeout
-                };
                 tokio::time::timeout(header_timeout, send)
                     .await
                     .map_err(|_| {
@@ -2178,7 +2180,7 @@ impl RequestForwarder {
                 ordered_headers,
                 extensions.clone(),
                 body_bytes,
-                timeout,
+                header_timeout,
                 upstream_proxy_url.as_deref(),
             )
             .await?
@@ -3151,6 +3153,24 @@ fn headers_contain_proxy_placeholder(headers: &http::HeaderMap) -> bool {
     })
 }
 
+/// 等待上游返回响应头的超时。
+///
+/// 流式请求在配置了首包超时时以它为准，否则退回整请求超时。hyper raw-write
+/// 路径（Claude 原生 Anthropic 格式，最主要的流量）此前直接使用非流式超时
+/// （默认 600 秒），导致挂起不回响应头的上游要等 10 分钟才故障转移，
+/// 首包超时设置在该路径上完全失效。
+fn upstream_response_header_timeout(
+    request_is_streaming: bool,
+    request_timeout: std::time::Duration,
+    streaming_first_byte_timeout: std::time::Duration,
+) -> std::time::Duration {
+    if request_is_streaming && !streaming_first_byte_timeout.is_zero() {
+        streaming_first_byte_timeout
+    } else {
+        request_timeout
+    }
+}
+
 fn should_preserve_exact_header_case(
     adapter_name: &str,
     provider: &Provider,
@@ -3526,6 +3546,28 @@ mod tests {
             streaming_first_byte_timeout,
             max_attempts: 1,
         }
+    }
+
+    #[test]
+    fn streaming_header_timeout_uses_first_byte_timeout() {
+        use std::time::Duration;
+        let request_timeout = Duration::from_secs(600);
+        let first_byte = Duration::from_secs(30);
+
+        assert_eq!(
+            upstream_response_header_timeout(true, request_timeout, first_byte),
+            first_byte
+        );
+        // 首包超时禁用（0）时退回整请求超时
+        assert_eq!(
+            upstream_response_header_timeout(true, request_timeout, Duration::ZERO),
+            request_timeout
+        );
+        // 非流式请求始终使用整请求超时
+        assert_eq!(
+            upstream_response_header_timeout(false, request_timeout, first_byte),
+            request_timeout
+        );
     }
 
     #[test]
