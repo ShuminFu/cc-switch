@@ -4,7 +4,7 @@ use super::mcp::parse_mcp_apps;
 use super::parser::parse_deeplink_url;
 use super::prompt::import_prompt_from_deeplink;
 use super::provider::parse_and_merge_config;
-use super::utils::{infer_homepage_from_endpoint, validate_url};
+use super::utils::{decode_base64_param, infer_homepage_from_endpoint, validate_url};
 use super::DeepLinkImportRequest;
 use crate::AppType;
 use crate::{store::AppState, Database};
@@ -935,5 +935,63 @@ fn test_infer_homepage_from_endpoint_without_homepage() {
     assert_eq!(
         infer_homepage_from_endpoint("https://cubence.com"),
         Some("https://cubence.com".to_string())
+    );
+}
+
+// =============================================================================
+// decode_base64_param
+// =============================================================================
+
+/// Payload whose standard encoding contains both '+' and '/', so the URL-safe
+/// and "plus decoded as space" variants are all actually exercised.
+const B64_PAYLOAD: &str = r#"{"k":">>>???~~~","名":"值"}"#;
+
+#[test]
+fn test_decode_base64_param_standard_and_url_safe() {
+    let standard = BASE64_STANDARD.encode(B64_PAYLOAD);
+    assert!(standard.contains('+') && standard.contains('/'));
+    for encoded in [
+        standard.clone(),
+        BASE64_STANDARD_NO_PAD.encode(B64_PAYLOAD),
+        BASE64_URL_SAFE.encode(B64_PAYLOAD),
+        BASE64_URL_SAFE_NO_PAD.encode(B64_PAYLOAD),
+    ] {
+        let decoded = decode_base64_param("config", &encoded).unwrap();
+        assert_eq!(
+            String::from_utf8(decoded).unwrap(),
+            B64_PAYLOAD,
+            "{encoded}"
+        );
+    }
+}
+
+#[test]
+fn test_decode_base64_param_restores_plus_from_space_and_strips_newlines() {
+    let standard = BASE64_STANDARD.encode(B64_PAYLOAD);
+    let mangled = format!("{}\r\n", standard.replace('+', " "));
+    let decoded = decode_base64_param("config", &mangled).unwrap();
+    assert_eq!(String::from_utf8(decoded).unwrap(), B64_PAYLOAD);
+}
+
+#[test]
+fn test_decode_base64_param_rejects_empty_and_garbage() {
+    let err = decode_base64_param("content", "").unwrap_err().to_string();
+    assert!(err.contains("content"), "{err}");
+    assert!(decode_base64_param("content", "\r\n").is_err());
+    assert!(decode_base64_param("content", "!!!not-base64!!!").is_err());
+}
+
+#[test]
+fn test_infer_homepage_edge_cases() {
+    assert_eq!(infer_homepage_from_endpoint("not a url"), None);
+    assert_eq!(infer_homepage_from_endpoint(""), None);
+    // Host is lower-cased by the URL parser; only a leading api./api- is stripped
+    assert_eq!(
+        infer_homepage_from_endpoint("https://API.Example.COM/v1/"),
+        Some("https://example.com".to_string())
+    );
+    assert_eq!(
+        infer_homepage_from_endpoint("https://gateway.api.example.com"),
+        Some("https://gateway.api.example.com".to_string())
     );
 }

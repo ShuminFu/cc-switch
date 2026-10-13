@@ -67,3 +67,66 @@ pub fn extract_server_spec(entry: &Value) -> Result<Value, AppError> {
 
     Ok(server.clone())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn missing_type_is_treated_as_stdio() {
+        assert!(validate_server_spec(&json!({"command": "npx"})).is_ok());
+        assert!(validate_server_spec(&json!({"url": "https://x"})).is_err());
+    }
+
+    #[test]
+    fn stdio_requires_non_blank_command() {
+        for spec in [
+            json!({"type": "stdio"}),
+            json!({"type": "stdio", "command": "   "}),
+            json!({"type": "stdio", "command": 42}),
+        ] {
+            assert!(validate_server_spec(&spec).is_err(), "{spec}");
+        }
+        assert!(validate_server_spec(&json!({"type": "stdio", "command": "uvx"})).is_ok());
+    }
+
+    #[test]
+    fn http_and_sse_require_non_blank_url() {
+        for t in ["http", "sse"] {
+            assert!(validate_server_spec(&json!({"type": t, "url": "https://x/mcp"})).is_ok());
+            let err = validate_server_spec(&json!({"type": t, "url": " "}))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(t), "{err}");
+            // A command alone does not satisfy a remote transport
+            assert!(validate_server_spec(&json!({"type": t, "command": "npx"})).is_err());
+        }
+    }
+
+    #[test]
+    fn unknown_type_is_rejected() {
+        assert!(validate_server_spec(&json!({"type": "websocket", "url": "ws://x"})).is_err());
+        // Type matching is exact; upper-case variants are not silently accepted
+        assert!(validate_server_spec(&json!({"type": "HTTP", "url": "https://x"})).is_err());
+    }
+
+    #[test]
+    fn non_object_spec_is_rejected() {
+        for spec in [json!(null), json!("npx"), json!(["npx"])] {
+            assert!(validate_server_spec(&spec).is_err(), "{spec}");
+        }
+    }
+
+    #[test]
+    fn extract_server_spec_requires_object_server_field() {
+        let entry = json!({"id": "a", "server": {"command": "npx"}});
+        assert_eq!(
+            extract_server_spec(&entry).unwrap(),
+            json!({"command": "npx"})
+        );
+        assert!(extract_server_spec(&json!({"id": "a"})).is_err());
+        assert!(extract_server_spec(&json!({"server": "npx"})).is_err());
+        assert!(extract_server_spec(&json!([])).is_err());
+    }
+}
