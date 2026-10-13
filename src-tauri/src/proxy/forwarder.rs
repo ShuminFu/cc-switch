@@ -1830,6 +1830,8 @@ impl RequestForwarder {
         let mut saw_anthropic_beta = false;
         let mut saw_anthropic_version = false;
 
+        let connection_listed = super::response_processor::connection_listed_headers(headers);
+
         for (key, value) in headers {
             let key_str = key.as_str();
 
@@ -1840,6 +1842,11 @@ impl RequestForwarder {
                         ordered_headers.append(key.clone(), hv);
                     }
                 }
+                continue;
+            }
+
+            // --- hop-by-hop / 客户端 IP — 只属于客户端到本地代理这一跳，不得转发 ---
+            if is_hop_by_hop_request_header(key, &connection_listed) {
                 continue;
             }
 
@@ -3174,6 +3181,20 @@ fn upstream_response_header_timeout(
     }
 }
 
+/// 请求侧不应转发给上游的头：RFC 7230 hop-by-hop 头（含 `Proxy-Authorization`）、
+/// `Connection` 中点名的扩展头，以及暴露客户端地址的 `X-Forwarded-For` / `X-Real-IP`。
+///
+/// 与响应侧 `strip_hop_by_hop_response_headers` 对称。`Host` 由调用方单独改写。
+fn is_hop_by_hop_request_header(
+    name: &http::HeaderName,
+    connection_listed: &[http::HeaderName],
+) -> bool {
+    let name_str = name.as_str();
+    super::response_processor::HOP_BY_HOP_RESPONSE_HEADERS.contains(&name_str)
+        || matches!(name_str, "x-forwarded-for" | "x-real-ip")
+        || connection_listed.iter().any(|listed| listed == name)
+}
+
 fn should_preserve_exact_header_case(
     adapter_name: &str,
     provider: &Provider,
@@ -3665,6 +3686,48 @@ mod tests {
             upstream_response_header_timeout(false, request_timeout, first_byte),
             request_timeout
         );
+    }
+
+    #[test]
+    fn hop_by_hop_request_headers_are_not_forwarded() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::CONNECTION,
+            HeaderValue::from_static("keep-alive, X-Client-Hop"),
+        );
+        let listed = super::super::response_processor::connection_listed_headers(&headers);
+
+        for name in [
+            "connection",
+            "keep-alive",
+            "proxy-authorization",
+            "proxy-connection",
+            "te",
+            "trailer",
+            "upgrade",
+            "x-forwarded-for",
+            "x-real-ip",
+            "x-client-hop",
+        ] {
+            let name = http::HeaderName::from_static(name);
+            assert!(
+                is_hop_by_hop_request_header(&name, &listed),
+                "{name} must not be forwarded"
+            );
+        }
+
+        for name in [
+            "authorization",
+            "anthropic-version",
+            "user-agent",
+            "content-type",
+        ] {
+            let name = http::HeaderName::from_static(name);
+            assert!(
+                !is_hop_by_hop_request_header(&name, &listed),
+                "{name} must be forwarded"
+            );
+        }
     }
 
     #[test]

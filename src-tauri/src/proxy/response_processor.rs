@@ -33,7 +33,7 @@ use tokio::sync::Mutex;
 // ============================================================================
 
 /// RFC 2616 / RFC 7230 中定义的不应被代理继续转发的响应头。
-const HOP_BY_HOP_RESPONSE_HEADERS: &[&str] = &[
+pub(crate) const HOP_BY_HOP_RESPONSE_HEADERS: &[&str] = &[
     "connection",
     "keep-alive",
     "proxy-authenticate",
@@ -46,9 +46,9 @@ const HOP_BY_HOP_RESPONSE_HEADERS: &[&str] = &[
     "upgrade",
 ];
 
-/// 移除响应侧 hop-by-hop 头，以及 `Connection` 中点名的扩展头。
-pub(crate) fn strip_hop_by_hop_response_headers(headers: &mut HeaderMap) {
-    let connection_listed_headers: Vec<HeaderName> = headers
+/// 解析 `Connection` 头中点名的扩展头（RFC 7230 §6.1），这些头同样是 hop-by-hop。
+pub(crate) fn connection_listed_headers(headers: &HeaderMap) -> Vec<HeaderName> {
+    headers
         .get_all(axum::http::header::CONNECTION)
         .iter()
         .filter_map(|value| value.to_str().ok())
@@ -56,7 +56,12 @@ pub(crate) fn strip_hop_by_hop_response_headers(headers: &mut HeaderMap) {
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .filter_map(|name| HeaderName::from_bytes(name.as_bytes()).ok())
-        .collect();
+        .collect()
+}
+
+/// 移除响应侧 hop-by-hop 头，以及 `Connection` 中点名的扩展头。
+pub(crate) fn strip_hop_by_hop_response_headers(headers: &mut HeaderMap) {
+    let connection_listed_headers = connection_listed_headers(headers);
 
     for name in HOP_BY_HOP_RESPONSE_HEADERS {
         headers.remove(*name);
