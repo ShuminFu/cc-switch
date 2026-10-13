@@ -23,19 +23,47 @@ enum BalanceProvider {
     NovitaAI,
 }
 
+/// Host of `base_url`, lower-cased. Accepts scheme-less input such as
+/// `api.deepseek.com/v1` by assuming https.
+fn base_url_host(base_url: &str) -> Option<String> {
+    let trimmed = base_url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let parsed = url::Url::parse(trimmed)
+        .ok()
+        .filter(|u| u.host_str().is_some())
+        .or_else(|| url::Url::parse(&format!("https://{trimmed}")).ok())?;
+    parsed
+        .host_str()
+        .map(|h| h.trim_end_matches('.').to_ascii_lowercase())
+}
+
+/// True when `host` is `domain` itself or one of its subdomains.
+fn host_matches(host: &str, domain: &str) -> bool {
+    host == domain
+        || host
+            .strip_suffix(domain)
+            .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+/// Match on the parsed host only: the API key is sent to the vendor's own
+/// balance endpoint, so a relay whose path or query merely mentions a vendor
+/// domain must never be treated as that vendor.
 fn detect_provider(base_url: &str) -> Option<BalanceProvider> {
-    let url = base_url.to_lowercase();
-    if url.contains("api.deepseek.com") {
+    let host = base_url_host(base_url)?;
+    let is = |domain: &str| host_matches(&host, domain);
+    if is("api.deepseek.com") {
         Some(BalanceProvider::DeepSeek)
-    } else if url.contains("api.stepfun.ai") || url.contains("api.stepfun.com") {
+    } else if is("api.stepfun.ai") || is("api.stepfun.com") {
         Some(BalanceProvider::StepFun)
-    } else if url.contains("api.siliconflow.cn") {
+    } else if is("api.siliconflow.cn") {
         Some(BalanceProvider::SiliconFlow)
-    } else if url.contains("api.siliconflow.com") {
+    } else if is("api.siliconflow.com") {
         Some(BalanceProvider::SiliconFlowEn)
-    } else if url.contains("openrouter.ai") {
+    } else if is("openrouter.ai") {
         Some(BalanceProvider::OpenRouter)
-    } else if url.contains("api.novita.ai") {
+    } else if is("api.novita.ai") {
         Some(BalanceProvider::NovitaAI)
     } else {
         None
@@ -500,6 +528,43 @@ mod tests {
         assert!(detect_provider("https://api.anthropic.com").is_none());
         // Bare marketing domains are not the API host
         assert!(detect_provider("https://deepseek.com").is_none());
+    }
+
+    #[test]
+    fn detect_provider_matches_host_not_path_or_query() {
+        // Relays that only mention a vendor domain in the path/query/userinfo
+        // must not have their key sent to that vendor.
+        for url in [
+            "https://relay.example.com/openrouter.ai/api/v1",
+            "https://relay.example.com/v1?upstream=api.deepseek.com",
+            "https://proxy.example.com/api.siliconflow.cn/v1",
+            "https://user:api.novita.ai@relay.example.com/v1",
+        ] {
+            assert!(detect_provider(url).is_none(), "{url}");
+        }
+        // Look-alike hosts sharing a suffix or prefix are different domains
+        assert!(detect_provider("https://evilopenrouter.ai/api/v1").is_none());
+        assert!(detect_provider("https://api.deepseek.com.evil.example/v1").is_none());
+    }
+
+    #[test]
+    fn detect_provider_accepts_subdomains_ports_and_schemeless_urls() {
+        assert!(matches!(
+            detect_provider("https://eu.openrouter.ai/api/v1"),
+            Some(BalanceProvider::OpenRouter)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.deepseek.com:443/v1"),
+            Some(BalanceProvider::DeepSeek)
+        ));
+        assert!(matches!(
+            detect_provider("  api.deepseek.com/anthropic  "),
+            Some(BalanceProvider::DeepSeek)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.deepseek.com./v1"),
+            Some(BalanceProvider::DeepSeek)
+        ));
     }
 
     #[test]
