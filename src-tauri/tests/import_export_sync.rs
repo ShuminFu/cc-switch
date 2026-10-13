@@ -1166,15 +1166,18 @@ fn export_sql_writes_to_target_path() {
 fn export_sql_returns_error_for_invalid_path() {
     let _guard = test_mutex().lock().expect("acquire test mutex");
     reset_test_fs();
-    let _home = ensure_test_home();
+    let home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
 
-    // Try to export to an invalid path (nonexistent parent or invalid name on Windows)
+    // Try to export to an invalid path (parent is a regular file, or invalid name on Windows).
+    // A file-as-parent fails even when running as root, unlike a missing absolute directory.
     let invalid_parent = if cfg!(windows) {
         std::env::temp_dir().join("cc-switch-test-invalid<>dir")
     } else {
-        PathBuf::from("/nonexistent/directory")
+        let blocker = home.join("not-a-directory");
+        fs::write(&blocker, "").expect("create blocker file");
+        blocker.join("directory")
     };
     let invalid_path = invalid_parent.join("export.sql");
     let err = state
