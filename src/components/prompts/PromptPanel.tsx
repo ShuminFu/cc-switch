@@ -77,6 +77,12 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       setIsFormOpen(true);
     };
 
+    // toggleEnabled rolls back + toasts on failure and then rethrows; swallow
+    // here so a failed toggle doesn't surface as an unhandled rejection.
+    const handleToggle = (id: string, enabled: boolean) => {
+      toggleEnabled(id, enabled).catch(() => {});
+    };
+
     const handleDelete = (id: string) => {
       const prompt = prompts[id];
       setConfirmDialog({
@@ -134,7 +140,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
                   key={id}
                   id={id}
                   prompt={prompt}
-                  onToggle={toggleEnabled}
+                  onToggle={handleToggle}
                   onEdit={handleEdit}
                   onDelete={handleDelete}
                 />
