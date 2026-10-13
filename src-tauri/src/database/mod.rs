@@ -92,6 +92,34 @@ fn register_db_change_hook(conn: &Connection) {
     ));
 }
 
+/// Strip group/other permission bits from `path` on Unix (dir → ≤0700,
+/// file → ≤0600). The app config dir holds the SQLite DB, its backups and the
+/// log file, all of which can contain API keys; with a typical 0022 umask and
+/// a world-traversable home directory they would otherwise be readable by
+/// other local users. Best effort: failures are logged, never fatal.
+pub(crate) fn restrict_to_owner(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(meta) = std::fs::metadata(path) else {
+            return;
+        };
+        let mode = meta.permissions().mode();
+        let restricted = mode & !0o077;
+        if restricted != mode {
+            if let Err(e) =
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(restricted))
+            {
+                log::warn!("无法收紧权限 {}: {e}", path.display());
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
 impl Database {
     /// 初始化数据库连接并创建表
     ///
@@ -106,6 +134,15 @@ impl Database {
         }
 
         let conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
+
+        // 数据库、备份与日志中包含 API Key，限制为仅当前用户可访问
+        // 目录只在默认位置（~/.cc-switch）时收紧，避免改动用户自定义目录的权限
+        if crate::app_store::get_app_config_dir_override().is_none() {
+            if let Some(parent) = db_path.parent() {
+                restrict_to_owner(parent);
+            }
+        }
+        restrict_to_owner(&db_path);
 
         // 启用外键约束
         conn.execute("PRAGMA foreign_keys = ON;", [])

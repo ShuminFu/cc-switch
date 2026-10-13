@@ -350,7 +350,17 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     tmp.push(format!("{file_name}.tmp.{ts}"));
 
     let write_result = (|| -> Result<(), AppError> {
-        let mut f = fs::File::create(&tmp).map_err(|e| AppError::io(&tmp, e))?;
+        // 这些文件（settings.json / auth.json / config.toml 等）常含 API Key：
+        // Unix 上临时文件以 0600 创建，避免在 umask 0022 下对其他用户可读。
+        // 若目标文件已存在，下面会沿用其原有权限。
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp).map_err(|e| AppError::io(&tmp, e))?;
         f.write_all(data).map_err(|e| AppError::io(&tmp, e))?;
         f.flush().map_err(|e| AppError::io(&tmp, e))?;
         Ok(())
@@ -442,6 +452,26 @@ mod tests {
             .map(|e| e.expect("entry").file_name())
             .collect();
         assert_eq!(names, vec![std::ffi::OsString::from("a.json")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_creates_new_files_owner_only_and_preserves_existing_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+
+        let new_file = dir.path().join("settings.json");
+        atomic_write(&new_file, b"{\"token\":\"sk-secret\"}").unwrap();
+        let mode = fs::metadata(&new_file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        let existing = dir.path().join("CLAUDE.md");
+        fs::write(&existing, b"old").unwrap();
+        fs::set_permissions(&existing, fs::Permissions::from_mode(0o644)).unwrap();
+        atomic_write(&existing, b"new").unwrap();
+        let mode = fs::metadata(&existing).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644);
+        assert_eq!(fs::read(&existing).unwrap(), b"new");
     }
 
     #[test]
