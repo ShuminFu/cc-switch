@@ -265,3 +265,70 @@ pub fn remove_plugins_by_prefixes(prefixes: &[&str]) -> Result<(), AppError> {
 
     write_opencode_config(&config)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_prefix_matches_exact_name_or_version_suffix_only() {
+        assert!(matches_plugin_prefix("oh-my-opencode", "oh-my-opencode"));
+        assert!(matches_plugin_prefix(
+            "oh-my-opencode@1.2.3",
+            "oh-my-opencode"
+        ));
+        assert!(matches_plugin_prefix(
+            "oh-my-opencode@latest",
+            "oh-my-opencode"
+        ));
+        // A longer package name sharing the prefix is a different plugin
+        assert!(!matches_plugin_prefix(
+            "oh-my-opencode-slim",
+            "oh-my-opencode"
+        ));
+        assert!(!matches_plugin_prefix(
+            "oh-my-opencode-slim@1.0",
+            "oh-my-opencode"
+        ));
+        assert!(!matches_plugin_prefix("oh-my-open", "oh-my-opencode"));
+        assert!(!matches_plugin_prefix("", "oh-my-opencode"));
+    }
+
+    #[test]
+    fn standard_and_slim_prefix_sets_are_disjoint() {
+        for name in ["oh-my-opencode", "oh-my-openagent@2.0.0"] {
+            assert!(matches_any_plugin_prefix(
+                name,
+                &STANDARD_OMO_PLUGIN_PREFIXES
+            ));
+            assert!(!matches_any_plugin_prefix(name, &SLIM_OMO_PLUGIN_PREFIXES));
+        }
+        let slim = "oh-my-opencode-slim@0.3.1";
+        assert!(matches_any_plugin_prefix(slim, &SLIM_OMO_PLUGIN_PREFIXES));
+        assert!(!matches_any_plugin_prefix(
+            slim,
+            &STANDARD_OMO_PLUGIN_PREFIXES
+        ));
+    }
+
+    #[test]
+    fn canonicalize_renames_legacy_package_but_keeps_slim_and_others() {
+        assert_eq!(
+            canonicalize_plugin_name("oh-my-opencode"),
+            "oh-my-openagent"
+        );
+        assert_eq!(
+            canonicalize_plugin_name("oh-my-opencode@1.2.3"),
+            "oh-my-openagent@1.2.3"
+        );
+        assert_eq!(
+            canonicalize_plugin_name("oh-my-opencode-slim@1.0"),
+            "oh-my-opencode-slim@1.0"
+        );
+        assert_eq!(
+            canonicalize_plugin_name("oh-my-openagent"),
+            "oh-my-openagent"
+        );
+        assert_eq!(canonicalize_plugin_name("other-plugin"), "other-plugin");
+    }
+}

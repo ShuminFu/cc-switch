@@ -452,3 +452,87 @@ pub async fn get_balance(base_url: &str, api_key: &str) -> Result<UsageResult, S
         BalanceProvider::NovitaAI => query_novita(api_key).await,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn detect_provider_by_base_url_case_insensitively() {
+        assert!(matches!(
+            detect_provider("https://api.deepseek.com/anthropic"),
+            Some(BalanceProvider::DeepSeek)
+        ));
+        assert!(matches!(
+            detect_provider("HTTPS://API.STEPFUN.COM/v1/"),
+            Some(BalanceProvider::StepFun)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.stepfun.ai/v1"),
+            Some(BalanceProvider::StepFun)
+        ));
+        assert!(matches!(
+            detect_provider("https://openrouter.ai/api/v1"),
+            Some(BalanceProvider::OpenRouter)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.novita.ai/openai"),
+            Some(BalanceProvider::NovitaAI)
+        ));
+    }
+
+    #[test]
+    fn detect_provider_distinguishes_siliconflow_regions() {
+        assert!(matches!(
+            detect_provider("https://api.siliconflow.cn/v1"),
+            Some(BalanceProvider::SiliconFlow)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.siliconflow.com/v1"),
+            Some(BalanceProvider::SiliconFlowEn)
+        ));
+    }
+
+    #[test]
+    fn detect_provider_returns_none_for_unknown_or_empty() {
+        assert!(detect_provider("").is_none());
+        assert!(detect_provider("https://api.anthropic.com").is_none());
+        // Bare marketing domains are not the API host
+        assert!(detect_provider("https://deepseek.com").is_none());
+    }
+
+    #[test]
+    fn parse_f64_field_accepts_numbers_and_numeric_strings() {
+        let obj = json!({
+            "num": 12.5,
+            "int": 3,
+            "str": "110.00",
+            "neg": "-0.5",
+            "bad": "N/A",
+            "empty": "",
+            "nested": {"x": 1},
+            "null": null
+        });
+        assert_eq!(parse_f64_field(&obj, "num"), Some(12.5));
+        assert_eq!(parse_f64_field(&obj, "int"), Some(3.0));
+        assert_eq!(parse_f64_field(&obj, "str"), Some(110.0));
+        assert_eq!(parse_f64_field(&obj, "neg"), Some(-0.5));
+        assert_eq!(parse_f64_field(&obj, "bad"), None);
+        assert_eq!(parse_f64_field(&obj, "empty"), None);
+        assert_eq!(parse_f64_field(&obj, "nested"), None);
+        assert_eq!(parse_f64_field(&obj, "null"), None);
+        assert_eq!(parse_f64_field(&obj, "missing"), None);
+    }
+
+    #[tokio::test]
+    async fn get_balance_reports_deterministic_failures_without_network() {
+        let empty_key = get_balance("https://api.deepseek.com", "  ").await.unwrap();
+        assert!(!empty_key.success);
+        assert_eq!(empty_key.error.as_deref(), Some("API key is empty"));
+
+        let unknown = get_balance("https://example.com", "sk-x").await.unwrap();
+        assert!(!unknown.success);
+        assert_eq!(unknown.error.as_deref(), Some("Unknown balance provider"));
+    }
+}
