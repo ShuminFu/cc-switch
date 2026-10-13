@@ -31,6 +31,7 @@ import { PricingEditModal } from "./PricingEditModal";
 import { isNonNegativeDecimalString, type ModelPricing } from "@/types/usage";
 import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import { proxyApi } from "@/lib/api/proxy";
 
 const PRICING_APPS = ["claude", "codex", "gemini", "grokbuild"] as const;
@@ -184,6 +185,11 @@ export function PricingConfigPanel() {
   const handleDelete = (modelId: string) => {
     deleteMutation.mutate(modelId, {
       onSuccess: () => setDeleteConfirm(null),
+      onError: (error) => {
+        toast.error(t("common.error"), {
+          description: extractErrorMessage(error) || t("common.unknown"),
+        });
+      },
     });
   };
 
