@@ -9,14 +9,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+/// Deserialize a field that upstreams may send as explicit `null`, falling back
+/// to `T::default()`. `#[serde(default)]` alone only covers a *missing* key; a
+/// `null` would make the whole chunk fail to parse and be silently dropped.
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 /// OpenAI 流式响应数据结构
 #[derive(Debug, Deserialize)]
 struct OpenAIStreamChunk {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     model: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     choices: Vec<StreamChoice>,
     #[serde(default)]
     usage: Option<Usage>,
@@ -24,12 +35,15 @@ struct OpenAIStreamChunk {
 
 #[derive(Debug, Deserialize)]
 struct StreamChoice {
+    // Some compatible upstreams omit `delta` (or send `null`) on the final
+    // chunk that only carries `finish_reason`.
+    #[serde(default, deserialize_with = "null_as_default")]
     delta: Delta,
     #[serde(default)]
     finish_reason: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct Delta {
     #[serde(default)]
     content: Option<String>,
@@ -62,9 +76,9 @@ struct DeltaFunction {
 /// OpenAI 流式响应的 usage 信息（完整版）
 #[derive(Debug, Deserialize)]
 struct Usage {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     prompt_tokens: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     completion_tokens: u32,
     #[serde(default)]
     prompt_tokens_details: Option<PromptTokensDetails>,
@@ -78,9 +92,9 @@ struct Usage {
 /// Nested token details from OpenAI format
 #[derive(Debug, Deserialize)]
 struct PromptTokensDetails {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     cached_tokens: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     cache_write_tokens: u32,
 }
 
@@ -1244,5 +1258,44 @@ mod tests {
         assert!(!events
             .iter()
             .any(|e| e.get("type").and_then(|v| v.as_str()) == Some("message_stop")));
+    }
+
+    #[tokio::test]
+    async fn test_finish_chunk_without_delta_and_null_fields_is_not_dropped() {
+        // Final chunk omits `delta` and uses explicit nulls; it must still
+        // produce message_delta with the stop reason and usage.
+        let input = concat!(
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"id\":null,\"model\":null,\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":null}}}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+        let delta = events
+            .iter()
+            .find(|e| event_type(e) == Some("message_delta"))
+            .expect("message_delta should be emitted");
+        assert_eq!(delta["delta"]["stop_reason"], "end_turn");
+        assert_eq!(delta["usage"]["input_tokens"], 5);
+        assert_eq!(delta["usage"]["output_tokens"], 2);
+        assert!(events
+            .iter()
+            .any(|e| event_type(e) == Some("content_block_stop")));
+    }
+
+    #[tokio::test]
+    async fn test_choice_with_null_delta_is_tolerated() {
+        let input = concat!(
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":null,\"finish_reason\":\"length\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+        let delta = events
+            .iter()
+            .find(|e| event_type(e) == Some("message_delta"))
+            .expect("message_delta should be emitted");
+        assert_eq!(delta["delta"]["stop_reason"], "max_tokens");
     }
 }
