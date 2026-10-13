@@ -106,12 +106,8 @@ fn delete_single_env(conflict: &EnvConflict) -> Result<(), String> {
     match conflict.source_type.as_str() {
         "file" => {
             // Parse file path and line number from source_path (format: "path:line")
-            let parts: Vec<&str> = conflict.source_path.split(':').collect();
-            if parts.len() < 2 {
-                return Err("无效的文件路径格式".to_string());
-            }
-
-            let file_path = parts[0];
+            let file_path = shell_config_path(&conflict.source_path)
+                .ok_or_else(|| "无效的文件路径格式".to_string())?;
 
             // Read file content
             let content = fs::read_to_string(file_path)
@@ -135,8 +131,14 @@ fn delete_single_env(conflict: &EnvConflict) -> Result<(), String> {
                 .map(|s| s.to_string())
                 .collect();
 
-            // Write back to file
-            fs::write(file_path, new_content.join("\n"))
+            // Write back to file, keeping the trailing newline the file had.
+            // Dropping it would make the next `>> ~/.zshrc` append glue onto
+            // the (previously) last line.
+            let mut new_content = new_content.join("\n");
+            if content.ends_with('\n') && !new_content.is_empty() {
+                new_content.push('\n');
+            }
+            fs::write(file_path, new_content)
                 .map_err(|e| format!("写入文件失败 {file_path}: {e}"))?;
 
             Ok(())
@@ -201,20 +203,21 @@ fn restore_single_env(conflict: &EnvConflict) -> Result<(), String> {
     match conflict.source_type.as_str() {
         "file" => {
             // Parse file path from source_path
-            let parts: Vec<&str> = conflict.source_path.split(':').collect();
-            if parts.is_empty() {
-                return Err("无效的文件路径格式".to_string());
-            }
-
-            let file_path = parts[0];
+            let file_path = shell_config_path(&conflict.source_path)
+                .ok_or_else(|| "无效的文件路径格式".to_string())?;
 
             // Read file content
             let mut content = fs::read_to_string(file_path)
                 .map_err(|e| format!("读取文件失败 {file_path}: {e}"))?;
 
-            // Append the environment variable line
-            let export_line = format!("\nexport {}={}", conflict.var_name, conflict.var_value);
-            content.push_str(&export_line);
+            // Append the environment variable line on its own line
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&format!(
+                "export {}={}\n",
+                conflict.var_name, conflict.var_value
+            ));
 
             // Write back to file
             fs::write(file_path, content).map_err(|e| format!("写入文件失败 {file_path}: {e}"))?;
@@ -228,6 +231,18 @@ fn restore_single_env(conflict: &EnvConflict) -> Result<(), String> {
     }
 }
 
+/// Extract the file path from a `"<path>:<line>"` source reference.
+///
+/// Splits on the *last* colon so paths that themselves contain `:` are kept intact.
+#[cfg(not(target_os = "windows"))]
+fn shell_config_path(source_path: &str) -> Option<&str> {
+    let path = match source_path.rsplit_once(':') {
+        Some((path, line)) if !line.is_empty() && line.bytes().all(|b| b.is_ascii_digit()) => path,
+        _ => source_path,
+    };
+    (!path.is_empty()).then_some(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +251,52 @@ mod tests {
     fn test_backup_dir_creation() {
         let backup_dir = get_backup_dir();
         assert!(backup_dir.is_ok());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn file_conflict(path: &std::path::Path, line: usize, name: &str, value: &str) -> EnvConflict {
+        EnvConflict {
+            var_name: name.to_string(),
+            var_value: value.to_string(),
+            source_type: "file".to_string(),
+            source_path: format!("{}:{}", path.display(), line),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn delete_and_restore_keep_shell_file_line_structure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let rc = dir.path().join("my:rc");
+        fs::write(
+            &rc,
+            "export PATH=/bin\nexport ANTHROPIC_API_KEY=sk\nalias ll='ls -l'\n",
+        )
+        .expect("seed rc");
+
+        let conflict = file_conflict(&rc, 2, "ANTHROPIC_API_KEY", "sk");
+        delete_single_env(&conflict).expect("delete");
+        assert_eq!(
+            fs::read_to_string(&rc).expect("read"),
+            "export PATH=/bin\nalias ll='ls -l'\n"
+        );
+
+        restore_single_env(&conflict).expect("restore");
+        assert_eq!(
+            fs::read_to_string(&rc).expect("read"),
+            "export PATH=/bin\nalias ll='ls -l'\nexport ANTHROPIC_API_KEY=sk\n"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn shell_config_path_splits_on_last_colon() {
+        assert_eq!(
+            shell_config_path("/home/u/.zshrc:12"),
+            Some("/home/u/.zshrc")
+        );
+        assert_eq!(shell_config_path("/a:b/.zshrc:3"), Some("/a:b/.zshrc"));
+        assert_eq!(shell_config_path("/home/u/.zshrc"), Some("/home/u/.zshrc"));
+        assert_eq!(shell_config_path(":5"), None);
     }
 }
