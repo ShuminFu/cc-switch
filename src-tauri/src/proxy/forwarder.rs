@@ -2144,6 +2144,9 @@ impl RequestForwarder {
             self.streaming_first_byte_timeout,
         );
 
+        // 非流式请求的整体截止时间起点：响应头 + 响应体共享同一个 non_streaming_timeout。
+        let request_started = std::time::Instant::now();
+
         // 发送请求
         let response = if is_socks_proxy || !preserve_exact_header_case {
             // OpenAI / Copilot / Codex 类后端不依赖原始 header 大小写；走 reqwest
@@ -2201,7 +2204,11 @@ impl RequestForwarder {
 
         if status.is_success() {
             let mut response = self
-                .prepare_success_response_for_failover(response, request_is_streaming)
+                .prepare_success_response_for_failover(
+                    response,
+                    request_is_streaming,
+                    request_started,
+                )
                 .await?;
             // Streaming requests normally return SSE. If a compatible gateway
             // explicitly returns JSON instead, buffer and validate it inside the retry
@@ -2255,11 +2262,14 @@ impl RequestForwarder {
     /// 故障转移开启时，成功不能只看上游响应头。
     ///
     /// - 非流式：先把完整 body 读到内存，读超时/连接中断会回到 retry loop 尝试下一家。
+    ///   body 读取只能使用 `request_started` 起算的剩余时间：hyper raw-write 路径的
+    ///   超时只覆盖到响应头，若这里再给满 `non_streaming_timeout`，总耗时可达 2 倍。
     /// - 流式：至少等首个 chunk 到达，避免上游返回 200 后一直不吐 SSE 时被误记成功。
     async fn prepare_success_response_for_failover(
         &self,
         response: ProxyResponse,
         request_is_streaming: bool,
+        request_started: std::time::Instant,
     ) -> Result<ProxyResponse, ProxyError> {
         if request_is_streaming {
             return self.prime_streaming_response(response).await;
@@ -2271,13 +2281,14 @@ impl RequestForwarder {
 
         let status = response.status();
         let headers = response.headers().clone();
-        let body_timeout = self.non_streaming_timeout;
+        let total_timeout = self.non_streaming_timeout;
+        let body_timeout = total_timeout.saturating_sub(request_started.elapsed());
         let body = tokio::time::timeout(body_timeout, response.bytes())
             .await
             .map_err(|_| {
                 ProxyError::Timeout(format!(
-                    "响应体读取超时: {}s（上游发完响应头后 body 未到达）",
-                    body_timeout.as_secs()
+                    "响应体读取超时: {}s（响应头 + 响应体总时长超过非流式超时）",
+                    total_timeout.as_secs()
                 ))
             })??;
 
@@ -3986,6 +3997,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn non_streaming_body_read_uses_remaining_request_deadline() {
+        let forwarder = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
+        let response = ProxyResponse::streamed(
+            StatusCode::OK,
+            HeaderMap::new(),
+            futures::stream::once(async {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                Ok::<Bytes, std::io::Error>(Bytes::from_static(b"{\"ok\":true}"))
+            }),
+        );
+        // 响应头已经耗掉 800ms：body 只剩 200ms，400ms 后才到达的 body 必须超时，
+        // 而不是再获得完整的 1s。
+        let request_started = std::time::Instant::now()
+            .checked_sub(Duration::from_millis(800))
+            .expect("instant in the past");
+
+        let result = forwarder
+            .prepare_success_response_for_failover(response, false, request_started)
+            .await;
+
+        assert!(matches!(result, Err(ProxyError::Timeout(_))));
+    }
+
+    #[tokio::test]
     async fn non_streaming_success_is_buffered_before_marking_provider_successful() {
         let forwarder = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
         let response = ProxyResponse::streamed(
@@ -3998,7 +4033,7 @@ mod tests {
         );
 
         let prepared = forwarder
-            .prepare_success_response_for_failover(response, false)
+            .prepare_success_response_for_failover(response, false, std::time::Instant::now())
             .await
             .expect("response should be buffered");
 
@@ -4020,7 +4055,7 @@ mod tests {
         );
 
         let err = match forwarder
-            .prepare_success_response_for_failover(response, false)
+            .prepare_success_response_for_failover(response, false, std::time::Instant::now())
             .await
         {
             Ok(_) => panic!("body read errors should fail the attempt"),
@@ -4043,7 +4078,7 @@ mod tests {
         );
 
         let prepared = forwarder
-            .prepare_success_response_for_failover(response, true)
+            .prepare_success_response_for_failover(response, true, std::time::Instant::now())
             .await
             .expect("stream should be primed");
 
@@ -4065,7 +4100,7 @@ mod tests {
         );
 
         let err = match forwarder
-            .prepare_success_response_for_failover(response, true)
+            .prepare_success_response_for_failover(response, true, std::time::Instant::now())
             .await
         {
             Ok(_) => panic!("first chunk errors should fail the attempt"),
