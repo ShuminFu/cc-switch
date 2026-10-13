@@ -324,6 +324,42 @@ describe("SessionManagerPage", () => {
     deleteManySpy.mockRestore();
   });
 
+  it("does not leak an unhandled rejection when single delete fails", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const deleteSpy = vi
+      .spyOn(sessionsApi, "delete")
+      .mockRejectedValueOnce(new Error("permission denied"));
+
+    try {
+      renderPage();
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("heading", { name: "Alpha Session" }),
+        ).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /删除会话/i }));
+      const dialog = screen.getByTestId("confirm-dialog");
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: /删除会话/i }),
+      );
+
+      await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(unhandled).not.toHaveBeenCalled();
+      // The session is still listed since deletion failed.
+      expect(
+        screen.getByRole("heading", { name: "Alpha Session" }),
+      ).toBeInTheDocument();
+    } finally {
+      deleteSpy.mockRestore();
+      process.off("unhandledRejection", unhandled);
+    }
+  });
+
   it("keeps the exit batch mode button visible when search hides all sessions", async () => {
     renderPage();
 

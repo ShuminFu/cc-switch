@@ -453,11 +453,16 @@ export function SessionManagerPage({ appId }: { appId: string }) {
 
     if (targets.length === 1) {
       const [target] = targets;
-      await deleteSessionMutation.mutateAsync({
-        providerId: target.providerId,
-        sessionId: target.sessionId,
-        sourcePath: target.sourcePath!,
-      });
+      try {
+        await deleteSessionMutation.mutateAsync({
+          providerId: target.providerId,
+          sessionId: target.sessionId,
+          sourcePath: target.sourcePath!,
+        });
+      } catch {
+        // useDeleteSessionMutation's onError already shows a toast.
+        return;
+      }
       setSelectedSessionKeys((current) => {
         const next = new Set(current);
         next.delete(getSessionKey(target));
