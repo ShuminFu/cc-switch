@@ -433,6 +433,10 @@ fn parse_agents_lock() -> HashMap<String, LockRepoInfo> {
 
 // ========== SkillService ==========
 
+/// CC Switch 在复制同步到应用目录的 Skill 副本中写入的标记文件名。
+/// 以 `.` 开头，因此不参与 `compute_dir_hash`。
+const SKILL_MANAGED_MARKER: &str = ".cc-switch-managed";
+
 pub struct SkillService;
 
 impl Default for SkillService {
@@ -796,11 +800,6 @@ impl SkillService {
 
         let ssot_dir = Self::get_ssot_dir()?;
         let skill_path = ssot_dir.join(&skill.directory);
-        let ssot_hash = if skill_path.is_dir() {
-            Self::compute_dir_hash(&skill_path).ok()
-        } else {
-            None
-        };
 
         // 从应用目录删除：启用的应用无条件删除；未启用的应用只删除
         // CC Switch 自己同步过去的产物（指向 SSOT 的 symlink 或内容与 SSOT
@@ -809,12 +808,7 @@ impl SkillService {
             if skill.apps.is_enabled_for(&app) {
                 let _ = Self::remove_from_app(&skill.directory, &app);
             } else {
-                let _ = Self::remove_synced_copy_from_app(
-                    &skill.directory,
-                    &app,
-                    &ssot_dir,
-                    ssot_hash.as_deref(),
-                );
+                let _ = Self::remove_synced_copy_from_app(&skill.directory, &app, &ssot_dir);
             }
         }
 
@@ -1613,12 +1607,28 @@ impl SkillService {
 
         let dest = app_dir.join(directory);
 
+        // 目标位置已有不属于 CC Switch 的同名条目（用户自建的 Skill 或指向别处的
+        // symlink）：先移到冲突备份目录再同步，绝不直接覆盖。选择"备份后同步"
+        // 而不是"跳过"：用户显式启用了该 Skill，跳过会让启用静默失效；备份则
+        // 既让启用生效又不丢数据。同步后的副本带管理标记，之后不会重复备份。
+        if (dest.exists() || Self::is_symlink(&dest))
+            && !Self::is_cc_switch_owned(&dest, &ssot_dir, &source)
+        {
+            let backup = Self::backup_conflicting_app_entry(&dest, directory, app)?;
+            log::warn!(
+                "{app:?} 下已存在非 CC Switch 管理的同名 Skill {}，已备份到 {} 后再同步",
+                dest.display(),
+                backup.display()
+            );
+        }
+
         let sync_method = Self::get_sync_method();
 
         match sync_method {
             SyncMethod::Auto => {
                 if dest.exists() && !Self::is_symlink(&dest) {
                     Self::replace_dest_with_copy(&source, &dest, directory)?;
+                    Self::write_managed_marker(&dest);
                     log::debug!("Skill {directory} 已通过复制同步到 {app:?}");
                     return Ok(());
                 }
@@ -1643,6 +1653,7 @@ impl SkillService {
                 }
                 // Fallback 到 copy
                 Self::replace_dest_with_copy(&source, &dest, directory)?;
+                Self::write_managed_marker(&dest);
                 log::debug!("Skill {directory} 已通过复制同步到 {app:?}");
             }
             SyncMethod::Symlink => {
@@ -1654,6 +1665,7 @@ impl SkillService {
             }
             SyncMethod::Copy => {
                 Self::replace_dest_with_copy(&source, &dest, directory)?;
+                Self::write_managed_marker(&dest);
                 log::debug!("Skill {directory} 已通过复制同步到 {app:?}");
             }
         }
@@ -1786,40 +1798,91 @@ impl SkillService {
         Ok(())
     }
 
-    /// 仅当应用目录中的同名条目是 CC Switch 同步产物时才删除：
-    /// 指向 SSOT 的 symlink，或内容哈希与 SSOT 一致的副本。
-    fn remove_synced_copy_from_app(
+    /// 判断应用 skills 目录下的条目是否为 CC Switch 的同步产物：
+    /// - 指向 SSOT 的 symlink；
+    /// - 带有 `SKILL_MANAGED_MARKER` 标记文件的副本（CC Switch 复制同步时写入）；
+    /// - 内容哈希与 SSOT 源目录一致的副本（兼容标记引入前的旧副本）。
+    ///
+    /// 其余情况（用户自建的同名目录、指向别处的 symlink）一律视为用户所有，
+    /// 不得覆盖或删除。
+    fn is_cc_switch_owned(path: &Path, ssot_dir: &Path, ssot_source: &Path) -> bool {
+        if Self::is_symlink(path) {
+            return Self::is_symlink_to_ssot(path, ssot_dir);
+        }
+        if !path.is_dir() {
+            return false;
+        }
+        if path.join(SKILL_MANAGED_MARKER).is_file() {
+            return true;
+        }
+        if !ssot_source.is_dir() {
+            return false;
+        }
+        match (
+            Self::compute_dir_hash(path),
+            Self::compute_dir_hash(ssot_source),
+        ) {
+            (Ok(existing), Ok(expected)) => existing == expected,
+            _ => false,
+        }
+    }
+
+    /// 在复制同步的目标目录中写入 CC Switch 管理标记（隐藏文件，不参与内容哈希）。
+    fn write_managed_marker(dest: &Path) {
+        if let Err(err) = fs::write(
+            dest.join(SKILL_MANAGED_MARKER),
+            "Synced by CC Switch. Removing this file makes CC Switch treat the directory as user-owned.\n",
+        ) {
+            log::warn!("写入 Skill 管理标记失败 {}: {err}", dest.display());
+        }
+    }
+
+    /// 把应用目录中与 Skill 同名、但不属于 CC Switch 的条目移到
+    /// `~/.cc-switch/skill-conflict-backups/`，返回备份位置。
+    fn backup_conflicting_app_entry(
+        path: &Path,
         directory: &str,
         app: &AppType,
-        ssot_dir: &Path,
-        ssot_hash: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<PathBuf> {
+        let backup_root = get_app_config_dir().join("skill-conflict-backups");
+        fs::create_dir_all(&backup_root)?;
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let backup_path = backup_root.join(format!(
+            "{}-{}-{nonce}",
+            app.as_str(),
+            Self::sanitize_backup_segment(directory)
+        ));
+
+        if fs::rename(path, &backup_path).is_err() {
+            // 跨文件系统时 rename 失败：复制后再删除原条目（symlink 只删链接本身）。
+            if let Err(err) = Self::copy_dir_recursive(path, &backup_path) {
+                let _ = fs::remove_dir_all(&backup_path);
+                return Err(err.context(format!("备份同名 Skill 目录失败: {}", path.display())));
+            }
+            Self::remove_path(path)?;
+        }
+        Ok(backup_path)
+    }
+
+    /// 仅当应用目录中的同名条目是 CC Switch 同步产物时才删除。
+    fn remove_synced_copy_from_app(directory: &str, app: &AppType, ssot_dir: &Path) -> Result<()> {
         if matches!(app, AppType::ClaudeDesktop) {
             return Ok(());
         }
 
         let skill_path = Self::get_app_skills_dir(app)?.join(directory);
-        if Self::is_symlink(&skill_path) {
-            if Self::is_symlink_to_ssot(&skill_path, ssot_dir) {
-                Self::remove_path(&skill_path)?;
-            }
+        if !skill_path.exists() && !Self::is_symlink(&skill_path) {
             return Ok(());
         }
 
-        if !skill_path.is_dir() {
-            return Ok(());
-        }
-
-        let is_synced_copy = ssot_hash.is_some_and(|expected| {
-            Self::compute_dir_hash(&skill_path)
-                .map(|hash| hash == expected)
-                .unwrap_or(false)
-        });
-        if is_synced_copy {
+        if Self::is_cc_switch_owned(&skill_path, ssot_dir, &ssot_dir.join(directory)) {
             Self::remove_path(&skill_path)?;
         } else {
             log::info!(
-                "保留 {app:?} 下与已卸载 Skill 同名但非 CC Switch 管理的目录: {}",
+                "保留 {app:?} 下与 Skill 同名但非 CC Switch 管理的条目: {}",
                 skill_path.display()
             );
         }
@@ -1853,7 +1916,18 @@ impl SkillService {
 
                 if let Some(skill) = indexed_skills.get(&dir_name.to_lowercase()) {
                     if !skill.apps.is_enabled_for(app) {
-                        Self::remove_path(&path)?;
+                        if Self::is_cc_switch_owned(
+                            &path,
+                            &ssot_dir,
+                            &ssot_dir.join(&skill.directory),
+                        ) {
+                            Self::remove_path(&path)?;
+                        } else {
+                            log::info!(
+                                "保留 {app:?} 下与已禁用 Skill 同名但非 CC Switch 管理的条目: {}",
+                                path.display()
+                            );
+                        }
                     }
                     continue;
                 }

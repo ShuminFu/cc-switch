@@ -235,6 +235,96 @@ fn uninstall_skill_creates_backup_before_removing_ssot() {
     );
 }
 
+fn managed_skill(directory: &str, apps: SkillApps) -> InstalledSkill {
+    InstalledSkill {
+        id: format!("local:{directory}"),
+        name: directory.to_string(),
+        description: None,
+        directory: directory.to_string(),
+        repo_owner: None,
+        repo_name: None,
+        repo_branch: None,
+        readme_url: None,
+        apps,
+        installed_at: 0,
+        content_hash: None,
+        updated_at: 0,
+    }
+}
+
+#[test]
+fn sync_to_app_dir_backs_up_user_owned_same_name_dir_instead_of_overwriting() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+
+    let ssot_skill = home.join(".cc-switch").join("skills").join("clash");
+    write_skill(&ssot_skill, "Managed");
+
+    let user_skill = home.join(".codex").join("skills").join("clash");
+    write_skill(&user_skill, "User Owned");
+    fs::write(user_skill.join("notes.md"), "mine").expect("write user file");
+
+    SkillService::sync_to_app_dir("clash", &AppType::Codex).expect("sync skill");
+
+    // The app now carries the managed skill...
+    let synced_md = fs::read_to_string(user_skill.join("SKILL.md")).expect("read synced skill");
+    assert!(synced_md.contains("Managed"), "got: {synced_md}");
+    assert!(!user_skill.join("notes.md").exists());
+
+    // ...and the user's directory was preserved in a conflict backup.
+    let backup_root = home.join(".cc-switch").join("skill-conflict-backups");
+    let backups: Vec<_> = fs::read_dir(&backup_root)
+        .expect("conflict backup dir exists")
+        .map(|entry| entry.expect("entry").path())
+        .collect();
+    assert_eq!(backups.len(), 1, "expected one backup, got {backups:?}");
+    assert_eq!(
+        fs::read_to_string(backups[0].join("notes.md")).expect("backup keeps user file"),
+        "mine"
+    );
+
+    // Re-syncing a cc-switch-owned entry must not create further backups.
+    SkillService::sync_to_app_dir("clash", &AppType::Codex).expect("re-sync skill");
+    assert_eq!(fs::read_dir(&backup_root).expect("read backups").count(), 1);
+}
+
+#[test]
+fn sync_to_app_keeps_user_owned_dir_matching_disabled_skill() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+
+    let ssot_dir = home.join(".cc-switch").join("skills");
+    write_skill(&ssot_dir.join("user-clash"), "Managed");
+    write_skill(&ssot_dir.join("stale-copy"), "Managed Copy");
+
+    let codex_skills = home.join(".codex").join("skills");
+    // A user's own skill that happens to share a managed skill's name.
+    write_skill(&codex_skills.join("user-clash"), "User Owned");
+    // A stale cc-switch copy (identical content to SSOT).
+    write_skill(&codex_skills.join("stale-copy"), "Managed Copy");
+
+    let state = create_test_state().expect("create test state");
+    for directory in ["user-clash", "stale-copy"] {
+        state
+            .db
+            .save_skill(&managed_skill(directory, SkillApps::default()))
+            .expect("save skill");
+    }
+
+    SkillService::sync_to_app(&state.db, &AppType::Codex).expect("reconcile skills");
+
+    assert!(
+        codex_skills.join("user-clash").join("SKILL.md").is_file(),
+        "user-owned same-name dir must not be removed by reconcile"
+    );
+    assert!(
+        !codex_skills.join("stale-copy").exists(),
+        "cc-switch copy of a disabled skill should be removed"
+    );
+}
+
 #[test]
 fn uninstall_skill_keeps_user_owned_same_name_dir_in_non_enabled_app() {
     let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
