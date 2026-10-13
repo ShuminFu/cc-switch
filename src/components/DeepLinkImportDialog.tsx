@@ -16,6 +16,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { PromptConfirmation } from "./deeplink/PromptConfirmation";
 import { McpConfirmation } from "./deeplink/McpConfirmation";
 import { SkillConfirmation } from "./deeplink/SkillConfirmation";
+import { UsageScriptHostNotice } from "./deeplink/UsageScriptHostNotice";
 import { ProviderIcon } from "./ProviderIcon";
 
 interface DeeplinkError {
@@ -649,6 +650,9 @@ export function DeepLinkImportDialog() {
                           </span>
                         </div>
                       </div>
+
+                      {/* Hosts the script will contact + key exposure warning */}
+                      <UsageScriptHostNotice request={request} />
 
                       {/* Usage API Key (if different from provider) */}
                       {request.usageApiKey &&
