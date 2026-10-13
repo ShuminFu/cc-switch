@@ -418,6 +418,8 @@ fn convert_message_to_openai(
                     let content_val = block.get("content");
                     let content_str = match content_val {
                         Some(Value::String(s)) => s.clone(),
+                        Some(Value::Array(parts)) => tool_result_text_parts(parts)
+                            .unwrap_or_else(|| canonical_json_string(&Value::Array(parts.clone()))),
                         Some(v) => canonical_json_string(v),
                         None => String::new(),
                     };
@@ -488,6 +490,22 @@ fn convert_message_to_openai(
     // 其他情况直接透传
     result.push(json!({"role": role, "content": content}));
     Ok(result)
+}
+
+/// Flatten an Anthropic `tool_result.content` block array into plain text when
+/// every block is a text block. Claude Code commonly sends tool results as
+/// `[{"type":"text","text":"..."}]`; serializing that array verbatim would hand
+/// the upstream model JSON-escaped block structure instead of the tool output.
+/// Returns `None` for mixed/non-text content so callers keep the lossless JSON.
+fn tool_result_text_parts(parts: &[Value]) -> Option<String> {
+    let mut texts = Vec::with_capacity(parts.len());
+    for part in parts {
+        if part.get("type").and_then(|t| t.as_str()) != Some("text") {
+            return None;
+        }
+        texts.push(part.get("text").and_then(|t| t.as_str())?);
+    }
+    Some(texts.join("\n"))
 }
 
 /// 清理工具参数的 JSON schema，并为根 schema 补齐 OpenAI 要求的 object 类型。
@@ -1126,6 +1144,52 @@ mod tests {
         assert_eq!(msg["role"], "tool");
         assert_eq!(msg["tool_call_id"], "call_123");
         assert_eq!(msg["content"], "Sunny, 25°C");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_tool_result_text_block_array_is_flattened() {
+        let input = json!({
+            "model": "gpt-4o",
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "call_1",
+                    "content": [
+                        {"type": "text", "text": "line one"},
+                        {"type": "text", "text": "line \"two\""}
+                    ]
+                }]
+            }]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        let msg = &result["messages"][0];
+        assert_eq!(msg["role"], "tool");
+        assert_eq!(msg["content"], "line one\nline \"two\"");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_tool_result_mixed_array_keeps_json() {
+        let input = json!({
+            "model": "gpt-4o",
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "call_1",
+                    "content": [
+                        {"type": "text", "text": "see image"},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}}
+                    ]
+                }]
+            }]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        let content = result["messages"][0]["content"].as_str().unwrap();
+        let parsed: Value = serde_json::from_str(content).unwrap();
+        assert_eq!(parsed[1]["type"], "image");
     }
 
     #[test]
