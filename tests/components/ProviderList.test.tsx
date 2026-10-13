@@ -8,6 +8,16 @@ import { ProviderList } from "@/components/providers/ProviderList";
 const useDragSortMock = vi.fn();
 const useSortableMock = vi.fn();
 const providerCardRenderSpy = vi.fn();
+const addToQueueMutateMock = vi.fn();
+const toastErrorMock = vi.fn();
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: vi.fn(),
+    info: vi.fn(),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+  },
+}));
 
 vi.mock("@/hooks/useDragSort", () => ({
   useDragSort: (...args: unknown[]) => useDragSortMock(...args),
@@ -92,7 +102,9 @@ vi.mock("@/hooks/useStreamCheck", () => ({
 vi.mock("@/lib/query/failover", () => ({
   useAutoFailoverEnabled: () => ({ data: false }),
   useFailoverQueue: () => ({ data: [] }),
-  useAddToFailoverQueue: () => ({ mutate: vi.fn() }),
+  useAddToFailoverQueue: () => ({
+    mutate: (...args: unknown[]) => addToQueueMutateMock(...args),
+  }),
   useRemoveFromFailoverQueue: () => ({ mutate: vi.fn() }),
   useReorderFailoverQueue: () => ({ mutate: vi.fn() }),
 }));
@@ -235,12 +247,12 @@ describe("ProviderList Component", () => {
     // Drag attributes from useSortable
     expect(
       providerCardRenderSpy.mock.calls[0][0].dragHandleProps?.attributes[
-      "data-dnd-id"
+        "data-dnd-id"
       ],
     ).toBe("b");
     expect(
       providerCardRenderSpy.mock.calls[1][0].dragHandleProps?.attributes[
-      "data-dnd-id"
+        "data-dnd-id"
       ],
     ).toBe("a");
 
@@ -305,5 +317,42 @@ describe("ProviderList Component", () => {
     expect(
       screen.getByText("No providers match your search."),
     ).toBeInTheDocument();
+  });
+
+  it("toasts when adding a provider to the failover queue fails", () => {
+    const provider = createProvider({ id: "a", name: "A" });
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [provider],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+    addToQueueMutateMock.mockImplementation(
+      (_vars: unknown, opts?: { onError?: (e: unknown) => void }) =>
+        opts?.onError?.("provider not found"),
+    );
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ a: provider }}
+        currentProviderId=""
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+      />,
+    );
+
+    const props = providerCardRenderSpy.mock.calls.at(-1)?.[0];
+    props.onToggleFailover(true);
+
+    expect(addToQueueMutateMock).toHaveBeenCalledWith(
+      { appType: "claude", providerId: "a" },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      expect.stringContaining("provider not found"),
+    );
   });
 });

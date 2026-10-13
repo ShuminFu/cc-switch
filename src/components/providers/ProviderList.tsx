@@ -46,6 +46,7 @@ import { useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
+import { extractErrorMessage } from "@/utils/errorUtils";
 
 interface ProviderListProps {
   providers: Record<string, Provider>;
@@ -179,13 +180,20 @@ export function ProviderList({
 
   const handleToggleFailover = useCallback(
     (providerId: string, enabled: boolean) => {
+      const onError = (error: unknown) => {
+        const label = enabled
+          ? t("proxy.failoverQueue.addFailed", "添加失败")
+          : t("proxy.failoverQueue.removeFailed", "移除失败");
+        const detail = extractErrorMessage(error);
+        toast.error(detail ? `${label}: ${detail}` : label);
+      };
       if (enabled) {
-        addToQueue.mutate({ appType: appId, providerId });
+        addToQueue.mutate({ appType: appId, providerId }, { onError });
       } else {
-        removeFromQueue.mutate({ appType: appId, providerId });
+        removeFromQueue.mutate({ appType: appId, providerId }, { onError });
       }
     },
-    [appId, addToQueue, removeFromQueue],
+    [appId, addToQueue, removeFromQueue, t],
   );
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -239,8 +247,8 @@ export function ProviderList({
         toast.info(t("provider.noProviders"));
       }
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
+    onError: (error: unknown) => {
+      toast.error(extractErrorMessage(error) || t("common.unknown"));
     },
   });
 
