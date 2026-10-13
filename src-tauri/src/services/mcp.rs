@@ -157,11 +157,24 @@ impl McpService {
         id: &str,
         server: &McpServer,
     ) -> Result<(), AppError> {
-        // 从所有曾启用的应用中移除
+        // 从所有曾启用的应用中移除。Best-effort：DB 行此时已删除，之后的
+        // 投影只遍历 DB 中的服务器，不会再清理这里漏掉的条目；若在第一个失败
+        // （如 ~/.claude.json 坏 JSON）处就返回，其余健康应用里会永久残留孤儿。
+        let mut failures: Vec<String> = Vec::new();
         for app in server.apps.enabled_apps() {
-            Self::remove_server_from_app(state, id, &app)?;
+            if let Err(err) = Self::remove_server_from_app(state, id, &app) {
+                log::warn!("从 {app:?} 移除 MCP 服务器 {id} 失败: {err}");
+                failures.push(format!("{}: {err}", app.as_str()));
+            }
         }
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(AppError::Message(format!(
+                "部分应用移除 MCP 服务器 {id} 失败: {}",
+                failures.join("; ")
+            )))
+        }
     }
 
     fn remove_server_from_app(_state: &AppState, id: &str, app: &AppType) -> Result<(), AppError> {

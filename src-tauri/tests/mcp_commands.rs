@@ -1098,3 +1098,55 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
         "live entries unknown to DB should be preserved"
     );
 }
+
+#[test]
+fn delete_server_removes_from_healthy_apps_even_if_one_app_live_is_broken() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let _home = ensure_test_home();
+
+    cc_switch_lib::write_codex_live_atomic(&json!({ "OPENAI_API_KEY": "sk" }), Some(""))
+        .expect("seed codex live");
+    fs::write(get_claude_mcp_path(), "{}").expect("seed claude json");
+
+    let state = create_test_state().expect("create test state");
+    McpService::upsert_server(
+        &state,
+        McpServer {
+            id: "echo-server".into(),
+            name: "Echo Server".into(),
+            server: json!({ "type": "stdio", "command": "echo" }),
+            apps: McpApps {
+                claude: true,
+                codex: true,
+                gemini: false,
+                grokbuild: false,
+                opencode: false,
+                hermes: false,
+            },
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        },
+    )
+    .expect("upsert server");
+
+    let codex_path = cc_switch_lib::get_codex_config_path();
+    assert!(fs::read_to_string(&codex_path)
+        .expect("read codex config")
+        .contains("mcp_servers.echo-server"));
+
+    // Claude's live file becomes unparsable; Claude is processed before Codex.
+    fs::write(get_claude_mcp_path(), "{ not valid json").expect("break claude json");
+
+    let err = McpService::delete_server(&state, "echo-server")
+        .expect_err("broken claude live must surface as an error");
+    assert!(err.to_string().contains("claude"), "got: {err}");
+
+    let codex_live = fs::read_to_string(&codex_path).expect("read codex config");
+    assert!(
+        !codex_live.contains("echo-server"),
+        "deleted server must not be orphaned in codex live config: {codex_live}"
+    );
+}
