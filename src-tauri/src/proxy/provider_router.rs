@@ -132,10 +132,8 @@ impl ProviderRouter {
         error_msg: Option<String>,
     ) -> Result<(), AppError> {
         // 1. 按应用独立获取熔断器配置
-        let failure_threshold = match self.db.get_proxy_config_for_app(app_type).await {
-            Ok(app_config) => app_config.circuit_failure_threshold,
-            Err(_) => 5, // 默认值
-        };
+        let failure_threshold =
+            health_failure_threshold(self.db.get_proxy_config_for_app(app_type).await);
 
         // 2. 更新熔断器状态
         let circuit_key = format!("{app_type}:{provider_id}");
@@ -266,6 +264,18 @@ impl ProviderRouter {
         breakers.insert(key.to_string(), breaker.clone());
 
         breaker
+    }
+}
+
+/// 数据库健康状态使用的失败阈值。
+///
+/// 读取配置失败时必须与熔断器自身的兜底（`CircuitBreakerConfig::default()`，
+/// 也是 schema / DAO 的默认值 4）一致；此前硬编码为 5，导致同一次配置读取失败时
+/// 熔断器在第 4 次失败熔断，而健康徽章要到第 5 次才变为不健康。
+fn health_failure_threshold(config: Result<crate::proxy::types::AppProxyConfig, AppError>) -> u32 {
+    match config {
+        Ok(app_config) => app_config.circuit_failure_threshold,
+        Err(_) => CircuitBreakerConfig::default().failure_threshold,
     }
 }
 
@@ -669,5 +679,14 @@ mod tests {
         }
         // 名额仍由（模拟的）进行中的请求持有，第二个请求必须被拒绝
         assert!(!router.allow_provider_request("a", "claude").await.allowed);
+    }
+
+    #[test]
+    fn health_threshold_fallback_matches_circuit_breaker_default() {
+        assert_eq!(
+            health_failure_threshold(Err(AppError::Database("unavailable".to_string()))),
+            CircuitBreakerConfig::default().failure_threshold
+        );
+        assert_eq!(CircuitBreakerConfig::default().failure_threshold, 4);
     }
 }
