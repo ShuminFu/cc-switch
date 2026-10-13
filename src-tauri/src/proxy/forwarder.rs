@@ -2102,7 +2102,7 @@ impl RequestForwarder {
                 log::debug!(
                     "[{tag}] >>> 请求体内容 ({}字节): {}",
                     body_str.len(),
-                    body_str
+                    truncate_for_log(&body_str, MAX_LOGGED_BODY_BYTES)
                 );
             }
         }
@@ -3297,6 +3297,24 @@ fn merge_json_override_inner(target: &mut Value, patch: &Value, is_top_level: bo
     }
 }
 
+/// Upper bound on request-body bytes written to the debug log. Full bodies
+/// (whole conversations, pasted code, base64 images) can be megabytes each and
+/// bloat the 1GB log file with private prompt content.
+const MAX_LOGGED_BODY_BYTES: usize = 2048;
+
+/// Truncate `s` to at most `max` bytes on a char boundary, noting how much
+/// was omitted.
+fn truncate_for_log(s: &str, max: usize) -> std::borrow::Cow<'_, str> {
+    if s.len() <= max {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    std::borrow::Cow::Owned(format!("{}…[truncated {} bytes]", &s[..end], s.len() - end))
+}
+
 /// Mask credential-bearing query parameters (e.g. Gemini `?key=AIza…`, relay
 /// `?token=…`) before an upstream URL is written to the log file.
 fn redact_url_secrets_for_log(url: &str) -> std::borrow::Cow<'_, str> {
@@ -3551,6 +3569,19 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
     use std::time::Duration;
+
+    #[test]
+    fn truncate_for_log_limits_length_on_char_boundary() {
+        assert_eq!(truncate_for_log("short", 10), "short");
+        assert_eq!(
+            truncate_for_log("abcdefghij", 4),
+            "abcd…[truncated 6 bytes]"
+        );
+        // "你" is 3 bytes; cutting at 4 must back off to a boundary.
+        assert_eq!(truncate_for_log("你好", 4), "你…[truncated 3 bytes]");
+        let big = "x".repeat(MAX_LOGGED_BODY_BYTES * 10);
+        assert!(truncate_for_log(&big, MAX_LOGGED_BODY_BYTES).len() < MAX_LOGGED_BODY_BYTES + 64);
+    }
 
     #[test]
     fn redact_url_secrets_for_log_masks_credential_params() {
