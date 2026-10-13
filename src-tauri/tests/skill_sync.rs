@@ -236,6 +236,68 @@ fn uninstall_skill_creates_backup_before_removing_ssot() {
 }
 
 #[test]
+fn uninstall_skill_keeps_user_owned_same_name_dir_in_non_enabled_app() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+
+    let ssot_skill_dir = home.join(".cc-switch").join("skills").join("shared-name");
+    write_skill(&ssot_skill_dir, "Managed");
+
+    // Enabled for Claude: cc-switch synced a symlink there.
+    let claude_skills = home.join(".claude").join("skills");
+    fs::create_dir_all(&claude_skills).expect("create claude skills dir");
+    symlink_dir(&ssot_skill_dir, &claude_skills.join("shared-name"));
+
+    // Not enabled for Codex: the user has their own skill with the same name.
+    let codex_user_skill = home.join(".codex").join("skills").join("shared-name");
+    write_skill(&codex_user_skill, "User Owned");
+    fs::write(codex_user_skill.join("notes.md"), "mine").expect("write user file");
+
+    // Not enabled for Gemini: a stale cc-switch copy identical to SSOT.
+    let gemini_copy = home.join(".gemini").join("skills").join("shared-name");
+    write_skill(&gemini_copy, "Managed");
+
+    let state = create_test_state().expect("create test state");
+    state
+        .db
+        .save_skill(&InstalledSkill {
+            id: "local:shared-name".to_string(),
+            name: "Managed".to_string(),
+            description: None,
+            directory: "shared-name".to_string(),
+            repo_owner: None,
+            repo_name: None,
+            repo_branch: None,
+            readme_url: None,
+            apps: SkillApps {
+                claude: true,
+                ..Default::default()
+            },
+            installed_at: 0,
+            content_hash: None,
+            updated_at: 0,
+        })
+        .expect("save skill");
+
+    SkillService::uninstall(&state.db, "local:shared-name").expect("uninstall skill");
+
+    assert!(
+        fs::symlink_metadata(claude_skills.join("shared-name")).is_err(),
+        "enabled app entry should be removed"
+    );
+    assert_eq!(
+        fs::read_to_string(codex_user_skill.join("notes.md")).expect("user skill kept"),
+        "mine",
+        "user-owned skill in a non-enabled app must not be deleted"
+    );
+    assert!(
+        !gemini_copy.exists(),
+        "stale cc-switch copy identical to SSOT should be cleaned up"
+    );
+}
+
+#[test]
 fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
     let _guard = test_mutex().lock().expect("acquire test mutex");
     reset_test_fs();

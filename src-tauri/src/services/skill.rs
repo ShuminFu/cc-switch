@@ -788,14 +788,31 @@ impl SkillService {
         let backup_path =
             Self::create_uninstall_backup(&skill)?.map(|path| path.to_string_lossy().to_string());
 
-        // 从所有应用目录删除
+        let ssot_dir = Self::get_ssot_dir()?;
+        let skill_path = ssot_dir.join(&skill.directory);
+        let ssot_hash = if skill_path.is_dir() {
+            Self::compute_dir_hash(&skill_path).ok()
+        } else {
+            None
+        };
+
+        // 从应用目录删除：启用的应用无条件删除；未启用的应用只删除
+        // CC Switch 自己同步过去的产物（指向 SSOT 的 symlink 或内容与 SSOT
+        // 一致的副本），不能误删用户在该应用下自建的同名 Skill。
         for app in AppType::all() {
-            let _ = Self::remove_from_app(&skill.directory, &app);
+            if skill.apps.is_enabled_for(&app) {
+                let _ = Self::remove_from_app(&skill.directory, &app);
+            } else {
+                let _ = Self::remove_synced_copy_from_app(
+                    &skill.directory,
+                    &app,
+                    &ssot_dir,
+                    ssot_hash.as_deref(),
+                );
+            }
         }
 
         // 从 SSOT 删除
-        let ssot_dir = Self::get_ssot_dir()?;
-        let skill_path = ssot_dir.join(&skill.directory);
         if skill_path.exists() {
             fs::remove_dir_all(&skill_path)?;
         }
@@ -1761,6 +1778,46 @@ impl SkillService {
             log::debug!("Skill {directory} 已从 {app:?} 删除");
         }
 
+        Ok(())
+    }
+
+    /// 仅当应用目录中的同名条目是 CC Switch 同步产物时才删除：
+    /// 指向 SSOT 的 symlink，或内容哈希与 SSOT 一致的副本。
+    fn remove_synced_copy_from_app(
+        directory: &str,
+        app: &AppType,
+        ssot_dir: &Path,
+        ssot_hash: Option<&str>,
+    ) -> Result<()> {
+        if matches!(app, AppType::ClaudeDesktop) {
+            return Ok(());
+        }
+
+        let skill_path = Self::get_app_skills_dir(app)?.join(directory);
+        if Self::is_symlink(&skill_path) {
+            if Self::is_symlink_to_ssot(&skill_path, ssot_dir) {
+                Self::remove_path(&skill_path)?;
+            }
+            return Ok(());
+        }
+
+        if !skill_path.is_dir() {
+            return Ok(());
+        }
+
+        let is_synced_copy = ssot_hash.is_some_and(|expected| {
+            Self::compute_dir_hash(&skill_path)
+                .map(|hash| hash == expected)
+                .unwrap_or(false)
+        });
+        if is_synced_copy {
+            Self::remove_path(&skill_path)?;
+        } else {
+            log::info!(
+                "保留 {app:?} 下与已卸载 Skill 同名但非 CC Switch 管理的目录: {}",
+                skill_path.display()
+            );
+        }
         Ok(())
     }
 
