@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { ProxyConfig } from "@/types/proxy";
+import { extractErrorMessage } from "@/utils/errorUtils";
 
 /**
  * 代理配置管理
@@ -30,10 +31,10 @@ export function useProxyConfig() {
       queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
         t("proxy.settings.toast.saveFailed", {
-          error: error.message,
+          error: extractErrorMessage(error) || t("common.unknown"),
         }),
       );
     },

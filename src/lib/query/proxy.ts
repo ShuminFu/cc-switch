@@ -3,6 +3,7 @@ import { proxyApi } from "@/lib/api/proxy";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { GlobalProxyConfig, AppProxyConfig } from "@/types/proxy";
+import { extractErrorMessage } from "@/utils/errorUtils";
 
 // ========== 代理服务器状态 Hooks ==========
 
@@ -123,8 +124,12 @@ export function useSwitchProxyProvider() {
         queryKey: ["providers", variables.appType],
       });
     },
-    onError: (error: Error) => {
-      toast.error(t("proxy.switchFailed", { error: error.message }));
+    onError: (error: unknown) => {
+      toast.error(
+        t("proxy.switchFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
+      );
     },
   });
 }
@@ -150,9 +155,11 @@ export function useProxyConfig() {
       queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
-        t("proxy.settings.toast.saveFailed", { error: error.message }),
+        t("proxy.settings.toast.saveFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
       );
     },
   });
@@ -193,9 +200,11 @@ export function useUpdateGlobalProxyConfig() {
       queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
-        t("proxy.settings.toast.saveFailed", { error: error.message }),
+        t("proxy.settings.toast.saveFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
       );
     },
   });
@@ -234,9 +243,11 @@ export function useUpdateAppProxyConfig() {
       queryClient.invalidateQueries({ queryKey: ["circuitBreakerConfig"] });
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
-        t("proxy.settings.toast.saveFailed", { error: error.message }),
+        t("proxy.settings.toast.saveFailed", {
+          error: extractErrorMessage(error) || t("common.unknown"),
+        }),
       );
     },
   });
