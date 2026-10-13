@@ -853,6 +853,37 @@ fn test_parse_skill_deeplink() {
     assert_eq!(request.branch.unwrap(), "dev");
 }
 
+#[test]
+fn test_parse_skill_deeplink_rejects_malformed_repo() {
+    for repo in [
+        "owner",
+        "/repo",
+        "owner/",
+        "../repo",
+        "owner/..",
+        "a/b/c",
+        "owner/re%20po",
+        "owner/re%3Fpo",
+    ] {
+        let url = format!("ccswitch://v1/import?resource=skill&repo={repo}");
+        assert!(
+            parse_deeplink_url(&url).is_err(),
+            "repo '{repo}' should be rejected"
+        );
+    }
+
+    let ok = parse_deeplink_url("ccswitch://v1/import?resource=skill&repo=my-org/my_repo.js")
+        .expect("valid repo");
+    assert_eq!(ok.repo.as_deref(), Some("my-org/my_repo.js"));
+}
+
+#[test]
+fn test_parse_skill_deeplink_empty_branch_is_none() {
+    let request =
+        parse_deeplink_url("ccswitch://v1/import?resource=skill&repo=owner/repo&branch=").unwrap();
+    assert!(request.branch.is_none());
+}
+
 // =============================================================================
 // Multiple Endpoints Tests
 // =============================================================================

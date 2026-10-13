@@ -330,14 +330,19 @@ fn parse_skill_deeplink(
         .clone();
 
     // Validate repo format (should be "owner/name")
-    if !repo.contains('/') || repo.split('/').count() != 2 {
+    if !is_valid_github_repo(&repo) {
         return Err(AppError::InvalidInput(format!(
             "Invalid repo format: expected 'owner/name', got '{repo}'"
         )));
     }
 
     let directory = params.get("directory").cloned();
-    let branch = params.get("branch").cloned();
+    // An empty `branch=` would otherwise be stored verbatim and produce
+    // `.../archive/refs/heads/.zip`; treat it as "use the default branch".
+    let branch = params
+        .get("branch")
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty());
 
     Ok(DeepLinkImportRequest {
         version,
@@ -371,4 +376,25 @@ fn parse_skill_deeplink(
         usage_user_id: None,
         usage_auto_interval: None,
     })
+}
+
+/// Check that `repo` is exactly `owner/name` with GitHub-safe segments.
+///
+/// Rejects empty segments (`/repo`, `owner/`), dot segments (`../x`) and
+/// characters GitHub never allows in owner/repo names, since these values are
+/// later interpolated into GitHub URL paths.
+fn is_valid_github_repo(repo: &str) -> bool {
+    let mut parts = repo.split('/');
+    let (Some(owner), Some(name), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    let valid_segment = |seg: &str| {
+        !seg.is_empty()
+            && seg != "."
+            && seg != ".."
+            && seg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    valid_segment(owner) && valid_segment(name)
 }
