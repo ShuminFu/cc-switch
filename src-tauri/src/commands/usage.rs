@@ -7,20 +7,7 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 use tauri::State;
 
-/// Run a blocking DB / filesystem job on Tauri's blocking pool.
-///
-/// Synchronous `#[tauri::command]` functions execute on the main (UI) thread
-/// in Tauri 2, so aggregate usage queries and session-log scans there freeze
-/// the window while they run. The commands below are `async` and delegate here.
-async fn run_blocking<T, F>(job: F) -> Result<T, AppError>
-where
-    T: Send + 'static,
-    F: FnOnce() -> Result<T, AppError> + Send + 'static,
-{
-    tauri::async_runtime::spawn_blocking(job)
-        .await
-        .map_err(|e| AppError::Message(format!("后台任务执行失败: {e}")))?
-}
+use super::blocking::run_blocking;
 
 /// 获取使用量汇总
 #[tauri::command]

@@ -2,6 +2,7 @@
 
 mod auth;
 mod balance;
+mod blocking;
 mod codex_oauth;
 mod coding_plan;
 mod config;
