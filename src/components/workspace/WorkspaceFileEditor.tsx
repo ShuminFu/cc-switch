@@ -38,17 +38,27 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
   useEffect(() => {
     if (!isOpen || !filename) return;
 
+    // Ignore results from a previous filename/open cycle: otherwise a slow
+    // read of file A can land after file B was opened and the user would
+    // then save A's content into B.
+    let cancelled = false;
     setLoading(true);
     workspaceApi
       .readFile(filename)
       .then((data) => {
-        setContent(data ?? "");
+        if (!cancelled) setContent(data ?? "");
       })
       .catch((err) => {
+        if (cancelled) return;
         console.error("Failed to read workspace file:", err);
         toast.error(t("workspace.loadFailed"));
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, filename, t]);
 
   const handleSave = useCallback(async () => {
