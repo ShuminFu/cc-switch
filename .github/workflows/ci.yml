@@ -81,15 +81,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends libsoup-3.0-dev \
             || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
 
+      # Keys on OS, job, rustc version (resolved through rust-toolchain.toml)
+      # and Cargo.lock, and prunes workspace artifacts so the cache does not
+      # grow without bound the way a raw target/ snapshot does.
       - name: Cache Cargo registry and build
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2.8.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          workspaces: src-tauri -> target
 
       - name: Create frontend dist placeholder
         shell: bash
