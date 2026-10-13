@@ -794,16 +794,20 @@ impl UniversalProvider {
             base_trimmed.to_string()
         };
 
-        // 生成 Codex 的 config.toml 内容
+        // 生成 Codex 的 config.toml 内容（用户输入的值需按 TOML 规则转义引号/反斜杠）
+        let quote = |value: &str| toml::Value::String(value.to_string()).to_string();
+        let model = quote(&model);
+        let reasoning_effort = quote(&reasoning_effort);
+        let codex_base_url = quote(&codex_base_url);
         let config_toml = format!(
             r#"model_provider = "custom"
-model = "{model}"
-model_reasoning_effort = "{reasoning_effort}"
+model = {model}
+model_reasoning_effort = {reasoning_effort}
 disable_response_storage = true
 
 [model_providers.custom]
 name = "NewAPI"
-base_url = "{codex_base_url}"
+base_url = {codex_base_url}
 wire_api = "responses"
 requires_openai_auth = true"#
         );
@@ -1232,6 +1236,43 @@ mod tests {
                 .pointer("/auth/OPENAI_API_KEY")
                 .and_then(|item| item.as_str()),
             Some("api-key")
+        );
+    }
+
+    #[test]
+    fn universal_provider_to_codex_provider_escapes_toml_values() {
+        let mut universal = UniversalProvider::new(
+            "u1".to_string(),
+            "Universal".to_string(),
+            "newapi".to_string(),
+            "https://api.example.com/a\\b".to_string(),
+            "api-key".to_string(),
+        );
+        universal.apps.codex = true;
+        universal.models.codex = Some(CodexModelConfig {
+            model: Some("my \"quoted\" model".to_string()),
+            reasoning_effort: None,
+        });
+
+        let provider = universal.to_codex_provider().expect("codex provider");
+        let config = provider
+            .settings_config
+            .get("config")
+            .and_then(|item| item.as_str())
+            .expect("config toml");
+
+        let parsed: toml::Table = toml::from_str(config).expect("valid toml");
+        assert_eq!(
+            parsed.get("model").and_then(|v| v.as_str()),
+            Some("my \"quoted\" model")
+        );
+        assert_eq!(
+            parsed
+                .get("model_providers")
+                .and_then(|v| v.get("custom"))
+                .and_then(|v| v.get("base_url"))
+                .and_then(|v| v.as_str()),
+            Some("https://api.example.com/a\\b")
         );
     }
 
