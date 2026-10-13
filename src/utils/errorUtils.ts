@@ -1,3 +1,18 @@
+const MESSAGE_FIELDS = ["message", "error", "detail"] as const;
+
+/** First of message/error/detail that is a non-blank string. */
+const firstNonBlankString = (
+  obj: Record<string, unknown>,
+): string | undefined => {
+  for (const field of MESSAGE_FIELDS) {
+    const value = obj[field];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
 /**
  * 从各种错误对象中提取错误信息
  * @param error 错误对象
@@ -15,8 +30,8 @@ export const extractErrorMessage = (error: unknown): string => {
   if (typeof error === "object") {
     const errObject = error as Record<string, unknown>;
 
-    const candidate = errObject.message ?? errObject.error ?? errObject.detail;
-    if (typeof candidate === "string" && candidate.trim()) {
+    const candidate = firstNonBlankString(errObject);
+    if (candidate) {
       return candidate;
     }
 
@@ -25,10 +40,10 @@ export const extractErrorMessage = (error: unknown): string => {
       return payload;
     }
     if (payload && typeof payload === "object") {
-      const payloadObj = payload as Record<string, unknown>;
-      const payloadCandidate =
-        payloadObj.message ?? payloadObj.error ?? payloadObj.detail;
-      if (typeof payloadCandidate === "string" && payloadCandidate.trim()) {
+      const payloadCandidate = firstNonBlankString(
+        payload as Record<string, unknown>,
+      );
+      if (payloadCandidate) {
         return payloadCandidate;
       }
     }

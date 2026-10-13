@@ -27,6 +27,20 @@ describe("extractErrorMessage", () => {
       "real",
     );
   });
+
+  it("falls back to object fields when an Error has an empty message", () => {
+    const err = Object.assign(new Error(""), { detail: "attached detail" });
+    expect(extractErrorMessage(err)).toBe("attached detail");
+  });
+
+  it("skips a blank message field in favour of error/detail", () => {
+    expect(extractErrorMessage({ message: "", error: "real error" })).toBe(
+      "real error",
+    );
+    expect(
+      extractErrorMessage({ payload: { message: " ", detail: "inner" } }),
+    ).toBe("inner");
+  });
 });
 
 describe("translateMcpBackendError", () => {
