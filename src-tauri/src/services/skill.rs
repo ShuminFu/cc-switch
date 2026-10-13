@@ -697,7 +697,13 @@ impl SkillService {
                 )));
             }
 
-            Self::copy_dir_recursive(&canonical_source, &dest)?;
+            // 复制失败时必须清掉半成品：下次安装看到 dest 已存在会跳过下载，
+            // 直接把残缺目录登记为已安装。
+            if let Err(err) = Self::copy_dir_recursive(&canonical_source, &dest) {
+                let _ = fs::remove_dir_all(&dest);
+                let _ = fs::remove_dir_all(&temp_dir);
+                return Err(err);
+            }
             let _ = fs::remove_dir_all(&temp_dir);
 
             // 使用实际下载成功的分支，避免 readme_url / repo_branch 与真实分支不一致。
@@ -1072,13 +1078,12 @@ impl SkillService {
         // 备份旧文件
         let _ = Self::create_uninstall_backup(&skill);
 
-        // 删除旧 SSOT 目录并复制新文件
+        // 先复制到临时目录再替换旧 SSOT 目录：复制失败时保留旧版本，
+        // 而不是先删后拷、把 Skill 连同各应用里指向它的 symlink 一起弄丢。
         let dest = ssot_dir.join(&skill.directory);
-        if dest.exists() {
-            fs::remove_dir_all(&dest)?;
-        }
-        Self::copy_dir_recursive(&source, &dest)?;
+        let replace_result = Self::replace_dest_with_copy(&source, &dest, &skill.directory);
         let _ = fs::remove_dir_all(&temp_dir);
+        replace_result?;
 
         // 计算新哈希 + 解析新元数据
         let new_hash = Self::compute_dir_hash(&dest).ok();
