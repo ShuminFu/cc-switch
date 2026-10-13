@@ -41,6 +41,17 @@ describe("decodeBase64Utf8", () => {
     );
   });
 
+  it("decodes URL-safe base64 (same variants the Rust deeplink parser accepts)", () => {
+    // ">>>???~~~" yields both "+" and "/" in standard base64
+    const text = '{"k":">>>???~~~"}';
+    const urlSafe = encodeStandard(text)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    expect(urlSafe).toMatch(/[-_]/);
+    expect(decodeBase64Utf8(urlSafe)).toBe(text);
+  });
+
   it("returns empty string for empty input", () => {
     expect(decodeBase64Utf8("")).toBe("");
   });

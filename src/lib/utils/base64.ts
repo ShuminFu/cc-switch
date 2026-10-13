@@ -12,8 +12,14 @@
  */
 export function decodeBase64Utf8(str: string): string {
   try {
-    // Clean up the input: replace spaces with + (URL parsing may convert + to space)
-    let cleaned = str.trim().replace(/ /g, "+");
+    // Clean up the input: replace spaces with + (URL parsing may convert + to space),
+    // and map URL-safe alphabet (-, _) to standard so both variants decode,
+    // matching the Rust deeplink decoder.
+    let cleaned = str
+      .trim()
+      .replace(/ /g, "+")
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
 
     // Try to decode with standard Base64 first
     try {
