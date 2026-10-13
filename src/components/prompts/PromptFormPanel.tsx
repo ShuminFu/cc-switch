@@ -35,9 +35,15 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
     hermes: "AGENTS.md",
   };
   const filename = filenameMap[appId];
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [content, setContent] = useState("");
+  // Hydrate from initialData once on mount. The panel is mounted per edit
+  // session, and the parent's prompts map is replaced on every reload
+  // (toggle, profile-applied, deep-link import); re-syncing on each new
+  // initialData reference would clobber in-progress edits.
+  const [name, setName] = useState(() => initialData?.name ?? "");
+  const [description, setDescription] = useState(
+    () => initialData?.description ?? "",
+  );
+  const [content, setContent] = useState(() => initialData?.content ?? "");
   const [saving, setSaving] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
@@ -55,14 +61,6 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
 
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    if (initialData) {
-      setName(initialData.name);
-      setDescription(initialData.description || "");
-      setContent(initialData.content);
-    }
-  }, [initialData]);
 
   const handleSave = async () => {
     if (!name.trim()) {
