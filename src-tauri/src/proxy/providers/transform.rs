@@ -225,8 +225,24 @@ pub fn anthropic_to_openai_with_reasoning_content(
     if let Some(v) = body.get("tool_choice") {
         result["tool_choice"] = map_tool_choice_to_chat(v);
     }
+    if result.get("tools").is_some() && anthropic_disables_parallel_tool_use(&body) {
+        result["parallel_tool_calls"] = json!(false);
+    }
 
     Ok(result)
+}
+
+/// Whether an Anthropic request sets `tool_choice.disable_parallel_tool_use: true`.
+///
+/// OpenAI Chat / Responses express the same constraint as
+/// `parallel_tool_calls: false`; without the mapping the upstream may return
+/// several tool calls in one turn although the client asked for at most one.
+/// Callers only emit `parallel_tool_calls` when tools are present, since some
+/// OpenAI-compatible backends reject it otherwise.
+pub(crate) fn anthropic_disables_parallel_tool_use(body: &Value) -> bool {
+    body.pointer("/tool_choice/disable_parallel_tool_use")
+        .and_then(Value::as_bool)
+        == Some(true)
 }
 
 /// 为 OpenAI Chat Completions 流式请求注入 `stream_options.include_usage`。
@@ -1843,6 +1859,40 @@ mod tests {
             "tool_choice": value,
         });
         anthropic_to_openai(input).unwrap()["tool_choice"].clone()
+    }
+
+    #[test]
+    fn disable_parallel_tool_use_maps_to_parallel_tool_calls_false() {
+        let input = json!({
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"name": "t", "input_schema": {"type": "object"}}],
+            "tool_choice": {"type": "auto", "disable_parallel_tool_use": true}
+        });
+        let result = anthropic_to_openai(input).unwrap();
+        assert_eq!(result["parallel_tool_calls"], json!(false));
+        assert_eq!(result["tool_choice"], json!("auto"));
+
+        // Not set by default, and never without tools.
+        let input = json!({
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"name": "t", "input_schema": {"type": "object"}}],
+            "tool_choice": {"type": "auto"}
+        });
+        assert!(anthropic_to_openai(input)
+            .unwrap()
+            .get("parallel_tool_calls")
+            .is_none());
+        let input = json!({
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tool_choice": {"type": "auto", "disable_parallel_tool_use": true}
+        });
+        assert!(anthropic_to_openai(input)
+            .unwrap()
+            .get("parallel_tool_calls")
+            .is_none());
     }
 
     #[test]

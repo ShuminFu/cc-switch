@@ -266,6 +266,11 @@ pub fn anthropic_to_responses(
     if let Some(v) = body.get("tool_choice") {
         result["tool_choice"] = map_tool_choice_to_responses(v);
     }
+    if result.get("tools").is_some()
+        && super::transform::anthropic_disables_parallel_tool_use(&body)
+    {
+        result["parallel_tool_calls"] = json!(false);
+    }
 
     // Inject prompt_cache_key for improved cache routing on OpenAI-compatible endpoints
     if let Some(key) = cache_key {
@@ -1058,6 +1063,20 @@ mod tests {
         });
 
         let result = anthropic_to_responses(input, None, false, false).unwrap();
+        assert_eq!(result["tool_choice"], "required");
+    }
+
+    #[test]
+    fn test_anthropic_to_responses_disable_parallel_tool_use() {
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "Hello"}],
+            "tools": [{"name": "t", "input_schema": {"type": "object"}}],
+            "tool_choice": {"type": "any", "disable_parallel_tool_use": true}
+        });
+        let result = anthropic_to_responses(input, None, false, false).unwrap();
+        assert_eq!(result["parallel_tool_calls"], json!(false));
         assert_eq!(result["tool_choice"], "required");
     }
 
