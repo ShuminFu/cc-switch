@@ -303,11 +303,25 @@ pub async fn update_toml_common_config_snippet(
     .map_err(|e| e.to_string())
 }
 
+/// 更新通用配置片段，并把结果同步到当前供应商的 live 配置。
+///
+/// 会改写客户端 live 配置文件，与其他供应商写入命令一起在阻塞线程池中串行执行。
 #[tauri::command]
 pub async fn set_common_config_snippet(
     app_type: String,
     snippet: String,
-    state: tauri::State<'_, crate::store::AppState>,
+    handle: AppHandle,
+) -> Result<(), String> {
+    crate::commands::blocking::with_state_serialized(handle, move |state| {
+        set_common_config_snippet_blocking(state, app_type, snippet)
+    })
+    .await
+}
+
+fn set_common_config_snippet_blocking(
+    state: &AppState,
+    app_type: String,
+    snippet: String,
 ) -> Result<(), String> {
     let is_cleared = snippet.trim().is_empty();
     let old_snippet = state
@@ -326,7 +340,7 @@ pub async fn set_common_config_snippet(
         {
             let app = AppType::from_str(&app_type).map_err(|e| e.to_string())?;
             crate::services::provider::ProviderService::migrate_legacy_common_config_usage(
-                state.inner(),
+                state,
                 app,
                 legacy_snippet,
             )
@@ -345,11 +359,8 @@ pub async fn set_common_config_snippet(
 
     if matches!(app_type.as_str(), "claude" | "codex" | "gemini") {
         let app = AppType::from_str(&app_type).map_err(|e| e.to_string())?;
-        crate::services::provider::ProviderService::sync_current_provider_for_app(
-            state.inner(),
-            app,
-        )
-        .map_err(|e| e.to_string())?;
+        crate::services::provider::ProviderService::sync_current_provider_for_app(state, app)
+            .map_err(|e| e.to_string())?;
     }
 
     if app_type == "omo"
@@ -359,11 +370,8 @@ pub async fn set_common_config_snippet(
             .map_err(|e| e.to_string())?
             .is_some()
     {
-        crate::services::OmoService::write_config_to_file(
-            state.inner(),
-            &crate::services::omo::STANDARD,
-        )
-        .map_err(|e| e.to_string())?;
+        crate::services::OmoService::write_config_to_file(state, &crate::services::omo::STANDARD)
+            .map_err(|e| e.to_string())?;
     }
     if app_type == "omo-slim"
         && state
@@ -372,11 +380,8 @@ pub async fn set_common_config_snippet(
             .map_err(|e| e.to_string())?
             .is_some()
     {
-        crate::services::OmoService::write_config_to_file(
-            state.inner(),
-            &crate::services::omo::SLIM,
-        )
-        .map_err(|e| e.to_string())?;
+        crate::services::OmoService::write_config_to_file(state, &crate::services::omo::SLIM)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
