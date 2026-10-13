@@ -22,6 +22,7 @@ import type { OpenClawAgentsDefaults } from "@/types";
 import { useOpenClawModelOptions } from "./hooks/useOpenClawModelOptions";
 import { getOpenClawTimeoutInputValue } from "./utils";
 import { useDirtyTracker } from "./hooks/useDirtyTracker";
+import { parseStrictNonNegativeInt } from "@/utils/numberInput";
 
 const UNSET_SENTINEL = "__unset__";
 
@@ -135,6 +136,26 @@ const AgentsDefaultsPanel: React.FC = () => {
   };
 
   const handleSave = async () => {
+    // Numeric fields must be non-negative whole numbers. Reject instead of
+    // silently saving a decimal/negative value or dropping the field.
+    const numericFields = [
+      { raw: timeout, labelKey: "openclaw.agents.timeout" },
+      { raw: contextTokens, labelKey: "openclaw.agents.contextTokens" },
+      { raw: maxConcurrent, labelKey: "openclaw.agents.maxConcurrent" },
+    ] as const;
+    const [timeoutNum, ctxNum, concNum] = numericFields.map(({ raw }) =>
+      parseStrictNonNegativeInt(raw),
+    );
+    const invalidIndex = [timeoutNum, ctxNum, concNum].indexOf(null);
+    if (invalidIndex !== -1) {
+      toast.error(
+        t("openclaw.agents.invalidInteger", {
+          field: t(numericFields[invalidIndex].labelKey),
+        }),
+      );
+      return;
+    }
+
     try {
       // Preserve all unknown fields from original data
       const updated: OpenClawAgentsDefaults = { ...defaults };
@@ -155,25 +176,15 @@ const AgentsDefaultsPanel: React.FC = () => {
       if (workspace.trim()) updated.workspace = workspace.trim();
       else delete updated.workspace;
 
-      // Numeric fields: validate before saving to avoid NaN
-      const parseNum = (v: string) => {
-        const n = Number(v);
-        return !isNaN(n) && isFinite(n) ? n : undefined;
-      };
-
-      const timeoutNum = timeout.trim() ? parseNum(timeout) : undefined;
-      if (timeoutNum !== undefined) updated.timeoutSeconds = timeoutNum;
+      // Numeric fields (validated above; null already rejected)
+      if (timeoutNum != null) updated.timeoutSeconds = timeoutNum;
       else delete updated.timeoutSeconds;
       delete updated.timeout;
 
-      const ctxNum = contextTokens.trim() ? parseNum(contextTokens) : undefined;
-      if (ctxNum !== undefined) updated.contextTokens = ctxNum;
+      if (ctxNum != null) updated.contextTokens = ctxNum;
       else delete updated.contextTokens;
 
-      const concNum = maxConcurrent.trim()
-        ? parseNum(maxConcurrent)
-        : undefined;
-      if (concNum !== undefined) updated.maxConcurrent = concNum;
+      if (concNum != null) updated.maxConcurrent = concNum;
       else delete updated.maxConcurrent;
 
       const saveToken = beginSave();
@@ -373,6 +384,9 @@ const AgentsDefaultsPanel: React.FC = () => {
             </Label>
             <Input
               type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
               value={timeout}
               onChange={(e) => {
                 markDirty();
@@ -389,6 +403,9 @@ const AgentsDefaultsPanel: React.FC = () => {
             </Label>
             <Input
               type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
               value={contextTokens}
               onChange={(e) => {
                 markDirty();
@@ -405,6 +422,9 @@ const AgentsDefaultsPanel: React.FC = () => {
             </Label>
             <Input
               type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
               value={maxConcurrent}
               onChange={(e) => {
                 markDirty();

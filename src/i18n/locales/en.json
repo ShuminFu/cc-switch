@@ -2085,7 +2085,8 @@
       "legacyTimeoutDescription": "This config still uses agents.defaults.timeout. Saving here will migrate it to timeoutSeconds.",
       "saveSuccess": "Agents config saved",
       "saveFailed": "Failed to save agents config",
-      "loadFailed": "Failed to load agents config"
+      "loadFailed": "Failed to load agents config",
+      "invalidInteger": "{{field}} must be a whole number of 0 or more"
     },
     "health": {
       "title": "OpenClaw config warnings detected",

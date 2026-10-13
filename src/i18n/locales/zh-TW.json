@@ -2085,7 +2085,8 @@
       "legacyTimeoutDescription": "目前設定仍在使用 agents.defaults.timeout。儲存本頁面時會遷移為 timeoutSeconds。",
       "saveSuccess": "Agents 設定已儲存",
       "saveFailed": "儲存 Agents 設定失敗",
-      "loadFailed": "讀取 Agents 設定失敗"
+      "loadFailed": "讀取 Agents 設定失敗",
+      "invalidInteger": "{{field}} 必須是大於或等於 0 的整數"
     },
     "health": {
       "title": "檢測到 OpenClaw 設定警告",

@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { parseNonNegativeIntInput } from "@/utils/numberInput";
+import {
+  parseNonNegativeIntInput,
+  parseStrictNonNegativeInt,
+} from "@/utils/numberInput";
+
+describe("parseStrictNonNegativeInt", () => {
+  it("returns undefined for empty input", () => {
+    expect(parseStrictNonNegativeInt("")).toBeUndefined();
+    expect(parseStrictNonNegativeInt("  ")).toBeUndefined();
+  });
+
+  it("accepts non-negative integers", () => {
+    expect(parseStrictNonNegativeInt("0")).toBe(0);
+    expect(parseStrictNonNegativeInt(" 300 ")).toBe(300);
+    expect(parseStrictNonNegativeInt("1e3")).toBe(1000);
+  });
+
+  it("rejects negatives, decimals, garbage and unsafe values", () => {
+    expect(parseStrictNonNegativeInt("-1")).toBeNull();
+    expect(parseStrictNonNegativeInt("1.5")).toBeNull();
+    expect(parseStrictNonNegativeInt("12abc")).toBeNull();
+    expect(parseStrictNonNegativeInt("1e400")).toBeNull();
+  });
+});
 
 describe("parseNonNegativeIntInput", () => {
   it("returns undefined for empty input", () => {

@@ -3,6 +3,58 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import EnvPanel from "@/components/openclaw/EnvPanel";
 import ToolsPanel from "@/components/openclaw/ToolsPanel";
 import AgentsDefaultsPanel from "@/components/openclaw/AgentsDefaultsPanel";
+import { toast } from "sonner";
+
+describe("OpenClaw AgentsDefaultsPanel numeric validation", () => {
+  beforeEach(() => {
+    vi.mocked(toast.error).mockReset();
+  });
+
+  it.each([
+    ["4", "-1"],
+    ["4", "1.5"],
+    ["200000", "0.25"],
+    ["300", "-30"],
+  ])(
+    "rejects invalid value in the field with placeholder %s (%s)",
+    async (placeholder, value) => {
+      state.agents = {};
+      render(<AgentsDefaultsPanel />);
+
+      fireEvent.change(screen.getByPlaceholderText(placeholder), {
+        target: { value },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "openclaw.agents.invalidInteger",
+        ),
+      );
+      expect(state.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it("saves valid whole numbers", async () => {
+    state.agents = {};
+    render(<AgentsDefaultsPanel />);
+
+    fireEvent.change(screen.getByPlaceholderText("4"), {
+      target: { value: "8" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("300"), {
+      target: { value: "600" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+
+    await waitFor(() =>
+      expect(state.save).toHaveBeenCalledWith(
+        expect.objectContaining({ maxConcurrent: 8, timeoutSeconds: 600 }),
+      ),
+    );
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+});
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),

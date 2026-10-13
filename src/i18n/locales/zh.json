@@ -2085,7 +2085,8 @@
       "legacyTimeoutDescription": "当前配置仍在使用 agents.defaults.timeout。保存本页面时会迁移为 timeoutSeconds。",
       "saveSuccess": "Agents 配置已保存",
       "saveFailed": "保存 Agents 配置失败",
-      "loadFailed": "读取 Agents 配置失败"
+      "loadFailed": "读取 Agents 配置失败",
+      "invalidInteger": "{{field}} 必须是大于或等于 0 的整数"
     },
     "health": {
       "title": "检测到 OpenClaw 配置警告",

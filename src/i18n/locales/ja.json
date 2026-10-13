@@ -2085,7 +2085,8 @@
       "legacyTimeoutDescription": "この設定ではまだ agents.defaults.timeout を使用しています。ここで保存すると timeoutSeconds に移行されます。",
       "saveSuccess": "Agents 設定を保存しました",
       "saveFailed": "Agents 設定の保存に失敗しました",
-      "loadFailed": "Agents 設定の読み込みに失敗しました"
+      "loadFailed": "Agents 設定の読み込みに失敗しました",
+      "invalidInteger": "{{field}} には 0 以上の整数を入力してください"
     },
     "health": {
       "title": "OpenClaw 設定の警告を検出しました",
