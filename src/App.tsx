@@ -460,9 +460,16 @@ function App() {
         };
 
         await syncWindowMaximizedState();
-        unlistenResize = await currentWindow.onResized(() => {
+        const off = await currentWindow.onResized(() => {
           void syncWindowMaximizedState();
         });
+        // Effect may have been cleaned up while awaiting (e.g. StrictMode
+        // double-mount); release the listener instead of leaking it.
+        if (active) {
+          unlistenResize = off;
+        } else {
+          off();
+        }
       } catch (error) {
         console.error("[App] Failed to sync window maximized state", error);
       }
