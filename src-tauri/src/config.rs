@@ -293,8 +293,43 @@ pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
     atomic_write(path, data.as_bytes())
 }
 
+/// 若 `path` 是符号链接，沿链解析到最终目标路径（目标可以尚不存在）。
+///
+/// 用户常用 dotfiles 管理工具（stow/chezmoi 等）把 `~/.claude/settings.json`、
+/// `~/.codex/config.toml` 等做成符号链接；直接对链接路径 rename 会把链接本身
+/// 替换为普通文件，导致与 dotfiles 仓库脱钩。
+fn resolve_symlink_target(path: &Path) -> Option<PathBuf> {
+    const MAX_HOPS: usize = 40;
+    let mut current = path.to_path_buf();
+    let mut followed = false;
+    for _ in 0..MAX_HOPS {
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let target = fs::read_link(&current).ok()?;
+                current = if target.is_absolute() {
+                    target
+                } else {
+                    match current.parent() {
+                        Some(parent) => parent.join(target),
+                        None => target,
+                    }
+                };
+                followed = true;
+            }
+            _ => return followed.then_some(current),
+        }
+    }
+    // 链路过长（可能成环）：放弃解析，保持原行为
+    None
+}
+
 /// 原子写入：写入临时文件后 rename 替换，避免半写状态
+///
+/// 若目标是符号链接，则写入链接指向的真实文件，保留链接本身。
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
+    let resolved = resolve_symlink_target(path);
+    let path = resolved.as_deref().unwrap_or(path);
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
@@ -314,10 +349,16 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
         .as_nanos();
     tmp.push(format!("{file_name}.tmp.{ts}"));
 
-    {
+    let write_result = (|| -> Result<(), AppError> {
         let mut f = fs::File::create(&tmp).map_err(|e| AppError::io(&tmp, e))?;
         f.write_all(data).map_err(|e| AppError::io(&tmp, e))?;
         f.flush().map_err(|e| AppError::io(&tmp, e))?;
+        Ok(())
+    })();
+    if let Err(e) = write_result {
+        // 写入失败（如磁盘已满）时清理残留的临时文件
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
     }
 
     #[cfg(unix)]
@@ -335,25 +376,73 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
         if path.exists() {
             let _ = fs::remove_file(path);
         }
-        fs::rename(&tmp, path).map_err(|e| AppError::IoContext {
-            context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
-            source: e,
-        })?;
     }
 
-    #[cfg(not(windows))]
-    {
-        fs::rename(&tmp, path).map_err(|e| AppError::IoContext {
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        AppError::IoContext {
             context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
             source: e,
-        })?;
-    }
+        }
+    })?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_through_symlink_preserves_link() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let real_dir = dir.path().join("dotfiles");
+        fs::create_dir_all(&real_dir).expect("create real dir");
+        let real = real_dir.join("settings.json");
+        fs::write(&real, "old").expect("write real");
+        let link = dir.path().join("settings.json");
+        // 相对链接，验证按链接所在目录解析
+        std::os::unix::fs::symlink("dotfiles/settings.json", &link).expect("symlink");
+
+        atomic_write(&link, b"new").expect("atomic write");
+
+        assert!(fs::symlink_metadata(&link)
+            .expect("link meta")
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&real).expect("read real"), "new");
+        assert_eq!(fs::read_to_string(&link).expect("read link"), "new");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_through_dangling_symlink_creates_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let real = dir.path().join("target.toml");
+        let link = dir.path().join("config.toml");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+
+        atomic_write(&link, b"x = 1").expect("atomic write");
+
+        assert!(fs::symlink_metadata(&link)
+            .expect("link meta")
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&real).expect("read real"), "x = 1");
+    }
+
+    #[test]
+    fn atomic_write_leaves_no_temp_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("a.json");
+        atomic_write(&path, b"{}").expect("atomic write");
+        atomic_write(&path, b"{\"k\":1}").expect("atomic overwrite");
+        let names: Vec<_> = fs::read_dir(dir.path())
+            .expect("read dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("a.json")]);
+    }
 
     #[test]
     fn derive_mcp_path_from_override_uses_config_dir_for_custom_path() {
