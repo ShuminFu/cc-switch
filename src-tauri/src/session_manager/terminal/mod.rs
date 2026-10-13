@@ -287,6 +287,14 @@ fn launch_custom(
 
     let cmd_str = command;
     let dir_str = cwd.unwrap_or(".");
+    // The template is user-authored and `{cwd}` is substituted verbatim
+    // (users may already wrap it in quotes), so refuse directories containing
+    // characters that could break out of a quoted or unquoted shell word.
+    if !is_safe_custom_template_value(dir_str) {
+        return Err(format!(
+            "Refusing to launch custom terminal: working directory contains shell metacharacters: {dir_str}"
+        ));
+    }
 
     let final_cmd_line = template
         .replace("{command}", cmd_str)
@@ -315,9 +323,19 @@ fn build_shell_command(command: &str, cwd: Option<&str>) -> String {
     }
 }
 
+fn is_safe_custom_template_value(value: &str) -> bool {
+    !value.chars().any(|c| {
+        matches!(
+            c,
+            '$' | '`' | '"' | '\'' | '\\' | ';' | '|' | '&' | '<' | '>' | '\n' | '\r'
+        )
+    })
+}
+
+/// POSIX single-quote escaping. Double quotes are not enough: `$(...)` and
+/// backticks still expand inside them, and `cwd` comes from session files.
 fn shell_escape(value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{escaped}\"")
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn escape_osascript(value: &str) -> String {
@@ -377,6 +395,24 @@ mod tests {
         );
 
         // Verify shell_escape works correctly for paths with spaces
-        assert_eq!(shell_escape(cwd), "\"/tmp/project dir\"");
+        assert_eq!(shell_escape(cwd), "'/tmp/project dir'");
+    }
+
+    #[test]
+    fn custom_template_rejects_dangerous_cwd() {
+        assert!(is_safe_custom_template_value("/Users/me/My Project (copy)"));
+        for bad in ["/tmp/$(id)", "/tmp/`id`", "/tmp/a\";id;\"", "/tmp/a;id"] {
+            assert!(!is_safe_custom_template_value(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn shell_escape_prevents_command_substitution() {
+        assert_eq!(shell_escape("/tmp/$(id)`id`"), "'/tmp/$(id)`id`'");
+        assert_eq!(shell_escape("/tmp/it's"), r"'/tmp/it'\''s'");
+        assert_eq!(
+            build_shell_command("claude --resume abc", Some("/tmp/x\"; id; \"")),
+            "cd '/tmp/x\"; id; \"' && claude --resume abc"
+        );
     }
 }
