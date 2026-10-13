@@ -334,6 +334,10 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     estimateSize: () => 120,
     overscan: 5,
     gap: 12,
+    // Scope row keys to the selected session: index-only keys make React
+    // reuse SessionMessageItem instances across sessions, carrying the
+    // per-message "expanded" state over to an unrelated message.
+    getItemKey: (index) => `${selectedKey ?? ""}#${index}`,
   });
 
   useEffect(() => {

@@ -716,4 +716,85 @@ describe("SessionManagerPage", () => {
     expect(toastErrorMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalled();
   });
+
+  it("does not carry a message's expanded state over to another session", async () => {
+    const longA = "A".repeat(4000);
+    const longB = "B".repeat(4000);
+    setSessionFixtures(
+      [
+        {
+          providerId: "codex",
+          sessionId: "codex-session-1",
+          title: "Alpha Session",
+          projectDir: "/mock/codex",
+          createdAt: 2,
+          lastActiveAt: 20,
+          sourcePath: "/mock/codex/session-1.jsonl",
+        },
+        {
+          providerId: "codex",
+          sessionId: "codex-session-2",
+          title: "Beta Session",
+          projectDir: "/mock/codex",
+          createdAt: 1,
+          lastActiveAt: 10,
+          sourcePath: "/mock/codex/session-2.jsonl",
+        },
+      ],
+      {
+        "codex:/mock/codex/session-1.jsonl": [
+          { role: "user", content: longA, ts: 20 },
+        ],
+        "codex:/mock/codex/session-2.jsonl": [
+          { role: "user", content: longB, ts: 10 },
+        ],
+      },
+    );
+
+    // Give the virtualizer a non-zero viewport so rows render in jsdom.
+    const heightSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(800);
+    const widthSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(800);
+
+    try {
+      renderPage();
+
+      // Visit Beta first so its messages are cached and render instantly
+      // (without an intermediate empty/loading state) when we come back.
+      await screen.findByRole("button", { name: /展开完整内容/ });
+      fireEvent.click(screen.getByRole("button", { name: /Beta Session/ }));
+      await screen.findByText(/^B+…$/);
+      fireEvent.click(screen.getByRole("button", { name: /Alpha Session/ }));
+      await screen.findByText(/^A+…$/);
+
+      const expandButton = screen.getByRole("button", {
+        name: /展开完整内容/,
+      });
+      fireEvent.click(expandButton);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /收起/ })).toHaveAttribute(
+          "aria-expanded",
+          "true",
+        ),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /Beta Session/ }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("heading", { name: "Beta Session" }),
+        ).toBeInTheDocument(),
+      );
+      const betaToggle = await screen.findByRole("button", {
+        name: /展开完整内容/,
+      });
+      expect(betaToggle).toHaveAttribute("aria-expanded", "false");
+    } finally {
+      heightSpy.mockRestore();
+      widthSpy.mockRestore();
+    }
+  });
 });
