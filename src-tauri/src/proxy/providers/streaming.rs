@@ -185,12 +185,22 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
         let mut tool_blocks_by_index: HashMap<usize, ToolBlockState> = HashMap::new();
         let mut open_tool_block_indices: HashSet<u32> = HashSet::new();
 
+        // Append an EOF sentinel so a final SSE event that omitted its trailing
+        // blank line (e.g. the finish_reason/usage chunk) is still processed.
+        let stream = stream
+            .map(|result| (result, false))
+            .chain(futures::stream::once(async {
+                (Ok::<Bytes, E>(Bytes::new()), true)
+            }));
         tokio::pin!(stream);
 
-        while let Some(chunk) = stream.next().await {
+        while let Some((chunk, is_eof)) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     crate::proxy::sse::append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
+                    if is_eof && !buffer.trim().is_empty() {
+                        buffer.push_str("\n\n");
+                    }
 
                     while let Some(line) = take_sse_block(&mut buffer) {
                         if line.trim().is_empty() {
@@ -1297,5 +1307,22 @@ mod tests {
             .find(|e| event_type(e) == Some("message_delta"))
             .expect("message_delta should be emitted");
         assert_eq!(delta["delta"]["stop_reason"], "max_tokens");
+    }
+
+    #[tokio::test]
+    async fn test_final_event_without_trailing_blank_line_is_processed() {
+        let input = concat!(
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}"
+        );
+
+        let events = collect_anthropic_events(input).await;
+        let delta = events
+            .iter()
+            .find(|e| event_type(e) == Some("message_delta"))
+            .expect("message_delta should be emitted for unterminated final event");
+        assert_eq!(delta["delta"]["stop_reason"], "end_turn");
+        assert_eq!(delta["usage"]["output_tokens"], 1);
+        assert!(events.iter().any(|e| event_type(e) == Some("message_stop")));
     }
 }
