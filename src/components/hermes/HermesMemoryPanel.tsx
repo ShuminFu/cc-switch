@@ -161,14 +161,26 @@ const HermesMemoryPanel: React.FC = () => {
           </Button>
         </div>
 
-        <TabsContent value="memory" className="flex-1 px-6 pb-4 mt-4">
+        {/*
+          forceMount keeps both panes mounted so switching tabs does not
+          discard unsaved edits held in each pane's local buffer.
+        */}
+        <TabsContent
+          value="memory"
+          forceMount
+          className="flex-1 px-6 pb-4 mt-4 data-[state=inactive]:hidden"
+        >
           <MemoryTabPane
             kind="memory"
             limit={memoryLimit}
             enabled={memoryEnabled}
           />
         </TabsContent>
-        <TabsContent value="user" className="flex-1 px-6 pb-4 mt-4">
+        <TabsContent
+          value="user"
+          forceMount
+          className="flex-1 px-6 pb-4 mt-4 data-[state=inactive]:hidden"
+        >
           <MemoryTabPane kind="user" limit={userLimit} enabled={userEnabled} />
         </TabsContent>
       </Tabs>
