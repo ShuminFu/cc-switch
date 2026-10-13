@@ -85,6 +85,10 @@ pub fn decode_base64_param(field: &str, raw: &str) -> Result<Vec<u8>, AppError> 
 /// - https://api.anthropic.com/v1 → https://anthropic.com
 /// - https://api.openai.com/v1 → https://openai.com
 /// - https://api-test.company.com/v1 → https://company.com
+/// - http://localhost:3000/v1 → http://localhost:3000
+///
+/// The scheme (http/https; anything else becomes https) and any non-default
+/// port are preserved so local or self-hosted endpoints yield a reachable URL.
 pub fn infer_homepage_from_endpoint(endpoint: &str) -> Option<String> {
     let url = Url::parse(endpoint).ok()?;
     let host = url.host_str()?;
@@ -95,5 +99,12 @@ pub fn infer_homepage_from_endpoint(endpoint: &str) -> Option<String> {
         .or_else(|| host.strip_prefix("api-"))
         .unwrap_or(host);
 
-    Some(format!("https://{clean_host}"))
+    let scheme = if url.scheme() == "http" {
+        "http"
+    } else {
+        "https"
+    };
+    let port = url.port().map(|p| format!(":{p}")).unwrap_or_default();
+
+    Some(format!("{scheme}://{clean_host}{port}"))
 }

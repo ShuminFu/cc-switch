@@ -995,3 +995,37 @@ fn test_infer_homepage_edge_cases() {
         Some("https://gateway.api.example.com".to_string())
     );
 }
+
+#[test]
+fn test_infer_homepage_keeps_scheme_and_port() {
+    assert_eq!(
+        infer_homepage_from_endpoint("http://localhost:3000/v1"),
+        Some("http://localhost:3000".to_string())
+    );
+    assert_eq!(
+        infer_homepage_from_endpoint("http://127.0.0.1:8080"),
+        Some("http://127.0.0.1:8080".to_string())
+    );
+    assert_eq!(
+        infer_homepage_from_endpoint("https://api.example.com:8443/v1"),
+        Some("https://example.com:8443".to_string())
+    );
+    // Default ports are dropped by the URL parser and stay dropped
+    assert_eq!(
+        infer_homepage_from_endpoint("https://api.example.com:443/v1"),
+        Some("https://example.com".to_string())
+    );
+    assert_eq!(
+        infer_homepage_from_endpoint("http://api.internal.lan/v1"),
+        Some("http://internal.lan".to_string())
+    );
+    assert_eq!(
+        infer_homepage_from_endpoint("http://[::1]:9000/v1"),
+        Some("http://[::1]:9000".to_string())
+    );
+    // Inferred homepages must still pass the deeplink homepage validator
+    for endpoint in ["http://localhost:3000/v1", "ftp://api.example.com"] {
+        let homepage = infer_homepage_from_endpoint(endpoint).unwrap();
+        assert!(validate_url(&homepage, "homepage").is_ok(), "{homepage}");
+    }
+}
