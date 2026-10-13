@@ -2529,6 +2529,7 @@
         "listenAddress": {
           "label": "Listen Address",
           "placeholder": "127.0.0.1",
+          "exposureWarning": "This address accepts connections from other devices. The proxy has no client authentication, so anyone on your network could use it to spend your API keys. Use 127.0.0.1 unless you need LAN access on a trusted network.",
           "description": "IP address the routing server listens on (recommended: 127.0.0.1)"
         },
         "listenPort": {

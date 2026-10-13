@@ -2529,6 +2529,7 @@
         "listenAddress": {
           "label": "監聽位址",
           "placeholder": "127.0.0.1",
+          "exposureWarning": "此位址允許其他裝置連線。代理沒有用戶端驗證，同一網路中的任何人都可以藉此消耗你的 API Key。除非需要在可信網路中區域網路存取，請使用 127.0.0.1。",
           "description": "路由伺服器監聽的 IP 位址（推薦 127.0.0.1）"
         },
         "listenPort": {

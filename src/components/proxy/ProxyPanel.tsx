@@ -30,6 +30,7 @@ import type { ProxyStatus } from "@/types/proxy";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { isLoopbackListenAddress } from "@/lib/utils/listenAddress";
 
 interface ProxyPanelProps {
   enableLocalProxy: boolean;
@@ -553,6 +554,15 @@ export function ProxyPanel({
                         "代理服务器监听的 IP 地址（推荐 127.0.0.1）",
                     })}
                   </p>
+                  {!isLoopbackListenAddress(listenAddress) && (
+                    <p
+                      role="alert"
+                      data-testid="listen-address-exposure-warning"
+                      className="rounded-md bg-red-50 dark:bg-red-900/20 p-2 text-xs font-medium text-red-800 dark:text-red-200"
+                    >
+                      {t("proxy.settings.fields.listenAddress.exposureWarning")}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
