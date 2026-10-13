@@ -67,6 +67,9 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   const [searching, setSearching] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic id of the latest search; responses from older searches are
+  // dropped so a slow earlier query can't overwrite newer results.
+  const searchSeqRef = useRef(0);
 
   // Dark mode
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -92,6 +95,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   // Debounced search execution
   const executeSearch = useCallback(
     async (query: string) => {
+      const seq = ++searchSeqRef.current;
       if (!query.trim()) {
         setSearchResults([]);
         setSearching(false);
@@ -100,12 +104,14 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
       setSearching(true);
       try {
         const results = await workspaceApi.searchDailyMemoryFiles(query.trim());
+        if (seq !== searchSeqRef.current) return;
         setSearchResults(results);
       } catch (err) {
+        if (seq !== searchSeqRef.current) return;
         console.error("Failed to search daily memory files:", err);
         toast.error(t("workspace.dailyMemory.searchFailed"));
       } finally {
-        setSearching(false);
+        if (seq === searchSeqRef.current) setSearching(false);
       }
     },
     [t],
@@ -136,6 +142,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
 
   // Close search bar and clear state
   const closeSearch = useCallback(() => {
+    searchSeqRef.current += 1;
     setIsSearchOpen(false);
     setSearchTerm("");
     setSearchResults([]);
