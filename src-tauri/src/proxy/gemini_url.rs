@@ -66,6 +66,36 @@ pub fn build_gemini_native_url(base_url: &str, endpoint: &str) -> String {
     url
 }
 
+/// Remove client-supplied `key=` query parameters from an incoming Gemini
+/// endpoint (path + query).
+///
+/// Gemini clients may authenticate with `?key=<API_KEY>` instead of the
+/// `x-goog-api-key` header. The proxy replaces client credentials with the
+/// selected provider's credentials, so the client's key must never be forwarded:
+/// under takeover it is the `PROXY_MANAGED` placeholder (sent next to the real
+/// header key), and otherwise it is a real secret that would leak to whichever
+/// provider failover picks and into the `请求 URL` info log line.
+/// Credentials configured in the provider base URL are untouched because they
+/// are merged separately.
+pub fn strip_client_api_key_query(endpoint: &str) -> String {
+    let Some((path, query)) = endpoint.split_once('?') else {
+        return endpoint.to_string();
+    };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|part| !part.is_empty())
+        .filter(|part| {
+            let name = part.split_once('=').map_or(*part, |(name, _)| name);
+            !name.eq_ignore_ascii_case("key")
+        })
+        .collect();
+    if kept.is_empty() {
+        path.to_string()
+    } else {
+        format!("{path}?{}", kept.join("&"))
+    }
+}
+
 fn should_normalize_gemini_full_url(base_url: &str) -> bool {
     let base_url = base_url
         .split_once('#')
@@ -280,7 +310,32 @@ fn merge_queries(base_query: Option<&str>, endpoint_query: Option<&str>) -> Opti
 
 #[cfg(test)]
 mod tests {
-    use super::{build_gemini_native_url, normalize_gemini_model_id, resolve_gemini_native_url};
+    use super::{
+        build_gemini_native_url, normalize_gemini_model_id, resolve_gemini_native_url,
+        strip_client_api_key_query,
+    };
+
+    #[test]
+    fn strip_client_api_key_query_removes_only_key_param() {
+        assert_eq!(
+            strip_client_api_key_query(
+                "/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse&key=AIza-secret"
+            ),
+            "/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse"
+        );
+        assert_eq!(
+            strip_client_api_key_query("/v1beta/models?key=PROXY_MANAGED"),
+            "/v1beta/models"
+        );
+        assert_eq!(
+            strip_client_api_key_query("/v1beta/models?pageSize=10&KEY=x&keyword=y"),
+            "/v1beta/models?pageSize=10&keyword=y"
+        );
+        assert_eq!(
+            strip_client_api_key_query("/v1beta/models/gemini-pro:generateContent"),
+            "/v1beta/models/gemini-pro:generateContent"
+        );
+    }
 
     #[test]
     fn strips_version_root_for_official_base() {

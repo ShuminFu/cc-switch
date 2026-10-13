@@ -1748,11 +1748,15 @@ pub async fn handle_gemini(
         .await?
         .with_model_from_uri(&uri);
 
-    // 提取完整的路径和查询参数
-    let endpoint = uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or(uri.path());
+    // 提取完整的路径和查询参数。
+    // 客户端 `?key=` 凭证必须剥离：上游认证由所选 provider 的 x-goog-api-key 提供，
+    // 客户端 key（接管时为 PROXY_MANAGED 占位符）不能透传给上游，也不能进入 URL 日志。
+    let endpoint = super::gemini_url::strip_client_api_key_query(
+        uri.path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or(uri.path()),
+    );
+    let endpoint = endpoint.as_str();
 
     let is_stream = body
         .get("stream")
