@@ -2,7 +2,7 @@
 
 mod auth;
 mod balance;
-mod blocking;
+pub(crate) mod blocking;
 mod codex_oauth;
 mod coding_plan;
 mod config;

@@ -426,6 +426,8 @@ pub fn handle_profile_tray_event(app: &tauri::AppHandle, event_id: &str) -> bool
         let Some(app_state) = app_handle.try_state::<AppState>() else {
             return;
         };
+        // 与线程池中的供应商/配置写入命令串行，避免交错改写 live 配置
+        let _guard = crate::commands::blocking::lock_mutations();
         match crate::services::profile::ProfileService::apply(app_state.inner(), &profile_id, scope)
         {
             Ok((warnings, should_stop_proxy)) => {
@@ -477,6 +479,8 @@ pub fn handle_provider_tray_event(app: &tauri::AppHandle, event_id: &str) -> boo
                 let app_handle = app.clone();
                 let app_type = section.app_type.clone();
                 tauri::async_runtime::spawn_blocking(move || {
+                    // 与线程池中的供应商/配置写入命令串行，避免交错改写 live 配置
+                    let _guard = crate::commands::blocking::lock_mutations();
                     if let Err(e) = handle_auto_click(&app_handle, &app_type) {
                         log::error!("切换{}Auto模式失败: {e}", section.log_name);
                     }
@@ -490,6 +494,8 @@ pub fn handle_provider_tray_event(app: &tauri::AppHandle, event_id: &str) -> boo
             let provider_id = suffix.to_string();
             let app_type = section.app_type.clone();
             tauri::async_runtime::spawn_blocking(move || {
+                // 与线程池中的供应商/配置写入命令串行，避免交错改写 live 配置
+                let _guard = crate::commands::blocking::lock_mutations();
                 if let Err(e) = handle_provider_click(&app_handle, &app_type, &provider_id) {
                     log::error!("切换{}供应商失败: {e}", section.log_name);
                 }
