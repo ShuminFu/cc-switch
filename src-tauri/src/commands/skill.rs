@@ -5,6 +5,8 @@
 //! - SSOT 存储在 ~/.cc-switch/skills/
 
 use crate::app_config::{AppType, InstalledSkill, UnmanagedSkill};
+use crate::commands::blocking::{run_blocking, run_blocking_serialized};
+use crate::database::Database;
 use crate::error::format_skill_error;
 use crate::services::skill::{
     DiscoverableSkill, ImportSkillSelection, MigrationResult, Skill, SkillBackupEntry, SkillRepo,
@@ -33,14 +35,17 @@ pub fn get_installed_skills(app_state: State<'_, AppState>) -> Result<Vec<Instal
 }
 
 #[tauri::command]
-pub fn get_skill_backups() -> Result<Vec<SkillBackupEntry>, String> {
-    SkillService::list_backups().map_err(|e| e.to_string())
+pub async fn get_skill_backups() -> Result<Vec<SkillBackupEntry>, String> {
+    run_blocking(|| SkillService::list_backups().map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
-pub fn delete_skill_backup(backup_id: String) -> Result<bool, String> {
-    SkillService::delete_backup(&backup_id).map_err(|e| e.to_string())?;
-    Ok(true)
+pub async fn delete_skill_backup(backup_id: String) -> Result<bool, String> {
+    run_blocking_serialized(move || {
+        SkillService::delete_backup(&backup_id).map_err(|e| e.to_string())?;
+        Ok(true)
+    })
+    .await
 }
 
 /// 安装 Skill（新版统一安装）
@@ -66,52 +71,66 @@ pub async fn install_skill_unified(
 
 /// 卸载 Skill（新版统一卸载）
 #[tauri::command]
-pub fn uninstall_skill_unified(
+pub async fn uninstall_skill_unified(
     id: String,
     app_state: State<'_, AppState>,
 ) -> Result<SkillUninstallResult, String> {
-    SkillService::uninstall(&app_state.db, &id).map_err(|e| e.to_string())
+    let db = app_state.db.clone();
+    run_blocking_serialized(move || SkillService::uninstall(&db, &id).map_err(|e| e.to_string()))
+        .await
 }
 
 #[tauri::command]
-pub fn restore_skill_backup(
+pub async fn restore_skill_backup(
     backup_id: String,
     current_app: String,
     app_state: State<'_, AppState>,
 ) -> Result<InstalledSkill, String> {
     let app_type = parse_app_type(&current_app)?;
-    SkillService::restore_from_backup(&app_state.db, &backup_id, &app_type)
-        .map_err(|e| e.to_string())
+    let db = app_state.db.clone();
+    run_blocking_serialized(move || {
+        SkillService::restore_from_backup(&db, &backup_id, &app_type).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// 切换 Skill 的应用启用状态
 #[tauri::command]
-pub fn toggle_skill_app(
+pub async fn toggle_skill_app(
     id: String,
     app: String,
     enabled: bool,
     app_state: State<'_, AppState>,
 ) -> Result<bool, String> {
     let app_type = parse_app_type(&app)?;
-    SkillService::toggle_app(&app_state.db, &id, &app_type, enabled).map_err(|e| e.to_string())?;
-    Ok(true)
+    let db = app_state.db.clone();
+    run_blocking_serialized(move || {
+        SkillService::toggle_app(&db, &id, &app_type, enabled).map_err(|e| e.to_string())?;
+        Ok(true)
+    })
+    .await
 }
 
 /// 扫描未管理的 Skills
 #[tauri::command]
-pub fn scan_unmanaged_skills(
+pub async fn scan_unmanaged_skills(
     app_state: State<'_, AppState>,
 ) -> Result<Vec<UnmanagedSkill>, String> {
-    SkillService::scan_unmanaged(&app_state.db).map_err(|e| e.to_string())
+    let db = app_state.db.clone();
+    run_blocking(move || SkillService::scan_unmanaged(&db).map_err(|e| e.to_string())).await
 }
 
 /// 从应用目录导入 Skills
 #[tauri::command]
-pub fn import_skills_from_apps(
+pub async fn import_skills_from_apps(
     imports: Vec<ImportSkillSelection>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::import_from_apps(&app_state.db, imports).map_err(|e| e.to_string())
+    let db = app_state.db.clone();
+    run_blocking_serialized(move || {
+        SkillService::import_from_apps(&db, imports).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ========== 发现功能命令 ==========
@@ -263,31 +282,40 @@ pub async fn install_skill_for_app(
 
 /// 卸载技能（兼容旧 API）
 #[tauri::command]
-pub fn uninstall_skill(
+pub async fn uninstall_skill(
     directory: String,
     app_state: State<'_, AppState>,
 ) -> Result<SkillUninstallResult, String> {
-    uninstall_skill_for_app("claude".to_string(), directory, app_state)
+    uninstall_skill_by_directory(app_state.db.clone(), directory).await
 }
 
 /// 卸载指定应用的技能（兼容旧 API）
 #[tauri::command]
-pub fn uninstall_skill_for_app(
+pub async fn uninstall_skill_for_app(
     app: String,
     directory: String,
     app_state: State<'_, AppState>,
 ) -> Result<SkillUninstallResult, String> {
     let _ = parse_app_type(&app)?; // 验证参数
+    uninstall_skill_by_directory(app_state.db.clone(), directory).await
+}
 
-    // 通过 directory 找到对应的 skill id
-    let skills = SkillService::get_all_installed(&app_state.db).map_err(|e| e.to_string())?;
+async fn uninstall_skill_by_directory(
+    db: Arc<Database>,
+    directory: String,
+) -> Result<SkillUninstallResult, String> {
+    run_blocking_serialized(move || {
+        // 通过 directory 找到对应的 skill id
+        let skills = SkillService::get_all_installed(&db).map_err(|e| e.to_string())?;
 
-    let skill = skills
-        .into_iter()
-        .find(|s| s.directory.eq_ignore_ascii_case(&directory))
-        .ok_or_else(|| format!("未找到已安装的 Skill: {directory}"))?;
+        let skill = skills
+            .into_iter()
+            .find(|s| s.directory.eq_ignore_ascii_case(&directory))
+            .ok_or_else(|| format!("未找到已安装的 Skill: {directory}"))?;
 
-    SkillService::uninstall(&app_state.db, &skill.id).map_err(|e| e.to_string())
+        SkillService::uninstall(&db, &skill.id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ========== 仓库管理命令 ==========
@@ -324,13 +352,16 @@ pub fn remove_skill_repo(
 
 /// 从 ZIP 文件安装 Skills
 #[tauri::command]
-pub fn install_skills_from_zip(
+pub async fn install_skills_from_zip(
     file_path: String,
     current_app: String,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
     let app_type = parse_app_type(&current_app)?;
-    let path = std::path::Path::new(&file_path);
-
-    SkillService::install_from_zip(&app_state.db, path, &app_type).map_err(|e| e.to_string())
+    let db = app_state.db.clone();
+    run_blocking_serialized(move || {
+        let path = std::path::Path::new(&file_path);
+        SkillService::install_from_zip(&db, path, &app_type).map_err(|e| e.to_string())
+    })
+    .await
 }
