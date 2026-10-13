@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
 use crate::app_config::AppType;
@@ -674,29 +674,54 @@ fn save_settings_file(settings: &AppSettings) -> Result<(), AppError> {
 
     let json = serde_json::to_string_pretty(&normalized)
         .map_err(|e| AppError::JsonSerialize { source: e })?;
+    write_settings_json(&path, json.as_bytes())
+}
+
+/// 原子写入 settings.json：先写同目录临时文件（unix 下权限 0600），再 rename 替换。
+///
+/// 直接 truncate + write 时，若写入中途失败（磁盘已满、进程被杀、断电），
+/// 文件会被截断；下次启动解析失败会静默回退为默认设置，
+/// 之后的任何保存都会用默认值覆盖用户原有设置（含同步凭据、目录覆盖等）。
+fn write_settings_json(path: &Path, data: &[u8]) -> Result<(), AppError> {
     #[cfg(unix)]
     {
         use std::fs::OpenOptions;
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|e| AppError::io(&path, e))?;
-        file.write_all(json.as_bytes())
-            .map_err(|e| AppError::io(&path, e))?;
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| AppError::Config("无效的文件名".to_string()))?
+            .to_string_lossy()
+            .to_string();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let tmp = path.with_file_name(format!("{file_name}.tmp.{ts}"));
+
+        let result = (|| -> Result<(), AppError> {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&tmp)
+                .map_err(|e| AppError::io(&tmp, e))?;
+            file.write_all(data).map_err(|e| AppError::io(&tmp, e))?;
+            file.sync_all().map_err(|e| AppError::io(&tmp, e))?;
+            fs::rename(&tmp, path).map_err(|e| AppError::io(path, e))
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+        result
     }
 
     #[cfg(not(unix))]
     {
-        fs::write(&path, json).map_err(|e| AppError::io(&path, e))?;
+        crate::config::atomic_write(path, data)
     }
-
-    Ok(())
 }
 
 static SETTINGS_STORE: OnceLock<RwLock<AppSettings>> = OnceLock::new();
@@ -1147,6 +1172,23 @@ pub fn update_s3_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
 mod tests {
     use super::*;
     use crate::app_config::AppType;
+
+    #[cfg(unix)]
+    #[test]
+    fn write_settings_json_replaces_atomically_with_private_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        write_settings_json(&path, b"{\"a\":1}").expect("first write");
+        write_settings_json(&path, b"{\"b\":2}").expect("second write");
+
+        assert_eq!(fs::read_to_string(&path).expect("read"), "{\"b\":2}");
+        let mode = fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let entries = fs::read_dir(dir.path()).expect("read dir").count();
+        assert_eq!(entries, 1, "temporary file must not be left behind");
+    }
 
     #[test]
     fn visible_apps_old_settings_default_claude_desktop_visible() {
