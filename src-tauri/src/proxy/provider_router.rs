@@ -269,6 +269,68 @@ impl ProviderRouter {
     }
 }
 
+/// HalfOpen 探测名额的 RAII 守卫
+///
+/// 请求在 HalfOpen 状态下占用的探测名额，正常路径会由 `record_result()` /
+/// `release_permit_neutral()` 释放。但如果客户端在请求进行中断开（例如用户在
+/// CLI 中按 Esc/Ctrl-C），hyper 会直接 drop 处理器 future，这些释放调用永远不会
+/// 执行，名额就会永久泄漏：熔断器停留在 HalfOpen 且名额被占满，该 Provider 从此
+/// 被所有请求跳过，直到手动重置。
+///
+/// 守卫在每个消费点通过 `consume()` 取出名额标记；若在被消费前就被 drop
+/// （即 future 被取消），则在 tokio runtime 上异步中性释放名额。
+pub struct HalfOpenPermitGuard {
+    router: Arc<ProviderRouter>,
+    provider_id: String,
+    app_type: String,
+    used_half_open_permit: bool,
+}
+
+impl HalfOpenPermitGuard {
+    pub fn new(
+        router: Arc<ProviderRouter>,
+        provider_id: &str,
+        app_type: &str,
+        used_half_open_permit: bool,
+    ) -> Self {
+        Self {
+            router,
+            provider_id: provider_id.to_string(),
+            app_type: app_type.to_string(),
+            used_half_open_permit,
+        }
+    }
+
+    /// 取出名额标记并解除守卫。
+    ///
+    /// 第一次调用返回实际的 `used_half_open_permit`，之后返回 `false`，
+    /// 因此即使多个路径先后调用也不会重复释放名额。
+    pub fn consume(&mut self) -> bool {
+        std::mem::take(&mut self.used_half_open_permit)
+    }
+}
+
+impl Drop for HalfOpenPermitGuard {
+    fn drop(&mut self) {
+        if !self.used_half_open_permit {
+            return;
+        }
+        let router = self.router.clone();
+        let provider_id = std::mem::take(&mut self.provider_id);
+        let app_type = std::mem::take(&mut self.app_type);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            log::debug!(
+                "[{app_type}] 请求在结果记录前被取消，释放 HalfOpen 探测名额: provider_id={provider_id}"
+            );
+            handle.spawn(async move {
+                router
+                    .release_permit_neutral(&provider_id, &app_type, true)
+                    .await;
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,5 +581,93 @@ mod tests {
         let third = router.allow_provider_request("a", "claude").await;
         assert!(third.allowed);
         assert!(third.used_half_open_permit);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_cancelled_request_guard_releases_half_open_permit() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        db.update_circuit_breaker_config(&CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 0,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let provider_a =
+            Provider::with_id("a".to_string(), "Provider A".to_string(), json!({}), None);
+        db.save_provider("claude", &provider_a).unwrap();
+
+        let router = Arc::new(ProviderRouter::new(db.clone()));
+        router
+            .record_result("a", "claude", false, false, Some("fail".to_string()))
+            .await
+            .unwrap();
+
+        let first = router.allow_provider_request("a", "claude").await;
+        assert!(first.allowed && first.used_half_open_permit);
+
+        // 模拟客户端断开：请求 future 在记录结果前被 drop
+        let guard =
+            HalfOpenPermitGuard::new(router.clone(), "a", "claude", first.used_half_open_permit);
+        drop(guard);
+
+        let mut released = false;
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+            let next = router.allow_provider_request("a", "claude").await;
+            if next.allowed {
+                assert!(next.used_half_open_permit);
+                released = true;
+                break;
+            }
+        }
+        assert!(
+            released,
+            "cancelled request must not leak the HalfOpen permit"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_consumed_guard_does_not_release_permit_again() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        db.update_circuit_breaker_config(&CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 0,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+        let provider_a =
+            Provider::with_id("a".to_string(), "Provider A".to_string(), json!({}), None);
+        db.save_provider("claude", &provider_a).unwrap();
+
+        let router = Arc::new(ProviderRouter::new(db.clone()));
+        router
+            .record_result("a", "claude", false, false, Some("fail".to_string()))
+            .await
+            .unwrap();
+
+        let first = router.allow_provider_request("a", "claude").await;
+        assert!(first.allowed && first.used_half_open_permit);
+
+        let mut guard =
+            HalfOpenPermitGuard::new(router.clone(), "a", "claude", first.used_half_open_permit);
+        assert!(guard.consume());
+        assert!(!guard.consume());
+        drop(guard);
+
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        // 名额仍由（模拟的）进行中的请求持有，第二个请求必须被拒绝
+        assert!(!router.allow_provider_request("a", "claude").await.allowed);
     }
 }
