@@ -1945,6 +1945,95 @@ fn switch_google_official_gemini_preserves_env_vars() {
     );
 }
 
+/// Make the Claude live settings path unwritable by turning it into a directory.
+fn block_claude_live_writes() {
+    let settings_path = get_claude_settings_path();
+    if settings_path.exists() {
+        std::fs::remove_file(&settings_path).expect("remove claude settings");
+    }
+    std::fs::create_dir_all(settings_path.join("blocker")).expect("block claude settings path");
+}
+
+fn unblock_claude_live_writes() {
+    let _ = std::fs::remove_dir_all(get_claude_settings_path());
+}
+
+#[test]
+fn update_current_provider_with_failed_live_write_keeps_db_unchanged() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let _home = ensure_test_home();
+
+    let mut config = MultiAppConfig::default();
+    {
+        let manager = config
+            .get_manager_mut(&AppType::Claude)
+            .expect("claude manager");
+        manager.current = "a".to_string();
+        manager.providers.insert(
+            "a".to_string(),
+            Provider::with_id(
+                "a".to_string(),
+                "A".to_string(),
+                json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "old-key" } }),
+                None,
+            ),
+        );
+    }
+    let state = create_test_state_with_config(&config).expect("create test state");
+    ProviderService::switch(&state, AppType::Claude, "a").expect("switch to a");
+
+    block_claude_live_writes();
+    let edited = Provider::with_id(
+        "a".to_string(),
+        "A".to_string(),
+        json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "new-key" } }),
+        None,
+    );
+    let result = ProviderService::update(&state, AppType::Claude, None, edited);
+    unblock_claude_live_writes();
+    result.expect_err("update should fail when live config cannot be written");
+
+    let stored = state
+        .db
+        .get_provider_by_id("a", AppType::Claude.as_str())
+        .expect("query provider")
+        .expect("provider a exists");
+    assert_eq!(
+        stored.settings_config["env"]["ANTHROPIC_AUTH_TOKEN"], "old-key",
+        "DB must not hold an edit that never reached live (it would be reverted by the next backfill)"
+    );
+}
+
+#[test]
+fn add_first_provider_with_failed_live_write_is_not_marked_current() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let _home = ensure_test_home();
+
+    let state = create_test_state().expect("create test state");
+
+    block_claude_live_writes();
+    let provider = Provider::with_id(
+        "first".to_string(),
+        "First".to_string(),
+        json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "first-key" } }),
+        None,
+    );
+    let result = ProviderService::add(&state, AppType::Claude, provider, true);
+    unblock_claude_live_writes();
+    result.expect_err("add should fail when live config cannot be written");
+
+    assert_eq!(
+        state
+            .db
+            .get_current_provider(AppType::Claude.as_str())
+            .expect("db current"),
+        None,
+        "a provider whose live write failed must not become current"
+    );
+}
+
 #[test]
 fn provider_service_switch_claude_updates_live_and_state() {
     let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());

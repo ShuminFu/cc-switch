@@ -2101,11 +2101,11 @@ impl ProviderService {
             Self::set_provider_live_config_managed(&mut provider, add_to_live);
         }
 
-        // Save to database
-        state.db.save_provider(app_type.as_str(), &provider)?;
-
         // Additive mode apps (OpenCode, OpenClaw): optionally write to live config.
         if app_type.is_additive_mode() {
+            // Save to database
+            state.db.save_provider(app_type.as_str(), &provider)?;
+
             // OMO / OMO Slim providers use exclusive mode and write to dedicated config file.
             if matches!(app_type, AppType::OpenCode)
                 && matches!(provider.category.as_deref(), Some("omo") | Some("omo-slim"))
@@ -2122,13 +2122,24 @@ impl ProviderService {
         }
 
         // For other apps: Check if sync is needed (if this is current provider, or no current provider)
+        //
+        // Write live BEFORE persisting the provider as current: if the live write fails
+        // after it is marked current, live still holds the user's previous config and
+        // the next switch-away would backfill that foreign config into this provider.
         let current = state.db.get_current_provider(app_type.as_str())?;
-        if current.is_none() {
-            // No current provider, set as current and sync
+        let becomes_current = current.is_none();
+        if becomes_current {
+            write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
+        }
+
+        // Save to database
+        state.db.save_provider(app_type.as_str(), &provider)?;
+
+        if becomes_current {
+            // No current provider, set as current
             state
                 .db
                 .set_current_provider(app_type.as_str(), &provider.id)?;
-            write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
         }
 
         Ok(true)
@@ -2283,15 +2294,15 @@ impl ProviderService {
             return Ok(true);
         }
 
-        // Save to database
-        state.db.save_provider(app_type.as_str(), &provider)?;
-
         // For other apps: Check if this is current provider (use effective current, not just DB)
         let effective_current =
             crate::settings::get_effective_current_provider(&state.db, &app_type)?;
         let is_current = effective_current.as_deref() == Some(provider.id.as_str());
 
-        if is_current {
+        if !is_current {
+            // Save to database
+            state.db.save_provider(app_type.as_str(), &provider)?;
+        } else {
             // 如果 Claude 代理接管处于激活状态，并且代理服务正在运行：
             // - 不直接走普通 Live 写入逻辑
             // - 改为更新 Live 备份，并在 Claude 下同步代理安全的 Live 配置
@@ -2309,6 +2320,9 @@ impl ProviderService {
             let should_sync_via_proxy = has_live_backup || live_taken_over;
 
             if should_sync_via_proxy {
+                // Save to database
+                state.db.save_provider(app_type.as_str(), &provider)?;
+
                 if matches!(app_type, AppType::ClaudeDesktop) {
                     write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
                 } else {
@@ -2344,7 +2358,15 @@ impl ProviderService {
                     }
                 }
             } else {
+                // Write live BEFORE saving to the DB. If the live write fails after the
+                // DB save, DB holds the edit while live keeps the old config, and the
+                // next switch-away backfills the stale live config over the edit.
+                // Writing live first means a failure leaves both sides unchanged; a
+                // DB failure after a successful live write is repaired by that same
+                // backfill (live already holds the edit).
                 write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
+                // Save to database
+                state.db.save_provider(app_type.as_str(), &provider)?;
                 // 重写 live 后只重投影本应用的 MCP：全量 sync_all_enabled 会把
                 // 无关应用的 live 损坏（如 ~/.claude.json 坏 JSON）牵连进保存
                 // 流程。走到这里 DB 与 live 都已按新配置落盘，保存事实上已
