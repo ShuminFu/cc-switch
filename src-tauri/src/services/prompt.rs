@@ -31,8 +31,13 @@ impl PromptService {
         _id: &str,
         prompt: Prompt,
     ) -> Result<(), AppError> {
+        let mut prompt = prompt;
         // 检查是否为已启用的提示词
         let is_enabled = prompt.enabled;
+
+        if !is_enabled {
+            Self::backfill_live_into_prompt_being_disabled(state, &app, &mut prompt)?;
+        }
 
         state.db.save_prompt(app.as_str(), &prompt)?;
 
@@ -54,6 +59,39 @@ impl PromptService {
             }
         }
 
+        Ok(())
+    }
+
+    /// 禁用当前已启用的提示词时，先把 live 文件里的改动回填进它。
+    ///
+    /// 已启用提示词的内容同时活在 live 文件（如 CLAUDE.md）里，用户或应用本身
+    /// （如 Claude Code 的 `#` 记忆）可能直接改了这个文件。禁用时 live 文件会被
+    /// 清空，若不回填，这些改动就永久丢失了（与 `enable_prompt` 切换时的回填对称）。
+    /// 仅在请求没有修改内容（即纯粹的开关操作）时回填，避免覆盖编辑器里的新内容。
+    fn backfill_live_into_prompt_being_disabled(
+        state: &AppState,
+        app: &AppType,
+        prompt: &mut Prompt,
+    ) -> Result<(), AppError> {
+        let prompts = state.db.get_prompts(app.as_str())?;
+        let Some(existing) = prompts.get(&prompt.id) else {
+            return Ok(());
+        };
+        if !existing.enabled || existing.content != prompt.content {
+            return Ok(());
+        }
+
+        let target_path = prompt_file_path(app)?;
+        let Ok(live_content) = std::fs::read_to_string(&target_path) else {
+            return Ok(());
+        };
+        if live_content.trim().is_empty() || live_content == prompt.content {
+            return Ok(());
+        }
+
+        log::info!("禁用前回填 live 提示词内容到: {}", prompt.id);
+        prompt.content = live_content;
+        prompt.updated_at = Some(get_unix_timestamp()?);
         Ok(())
     }
 
