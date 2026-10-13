@@ -92,7 +92,7 @@ fn set_windows_app_user_model_id(app: &tauri::AppHandle) {
     }
 }
 
-fn redact_url_for_log(url_str: &str) -> String {
+pub(crate) fn redact_url_for_log(url_str: &str) -> String {
     match url::Url::parse(url_str) {
         Ok(url) => {
             let mut output = format!("{}://", url.scheme());
@@ -139,8 +139,8 @@ fn handle_deeplink_url(
     }
 
     let redacted_url = redact_url_for_log(url_str);
+    // 不记录原始 URL：provider 导入链接的 query 中包含 apiKey
     log::info!("✓ Deep link URL detected from {source}: {redacted_url}");
-    log::debug!("Deep link URL (raw) from {source}: {url_str}");
 
     match crate::deeplink::parse_deeplink_url(url_str) {
         Ok(request) => {
@@ -1630,7 +1630,10 @@ pub fn run() {
                 RunEvent::Opened { urls } => {
                     if let Some(url) = urls.first() {
                         let url_str = url.to_string();
-                        log::info!("RunEvent::Opened with URL: {url_str}");
+                        log::info!(
+                            "RunEvent::Opened with URL: {}",
+                            redact_url_for_log(&url_str)
+                        );
 
                         if url_str.starts_with("ccswitch://") {
                             if crate::lightweight::is_lightweight_mode() {

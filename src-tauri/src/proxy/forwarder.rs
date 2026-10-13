@@ -2093,7 +2093,10 @@ impl RequestForwarder {
             .get("model")
             .and_then(|v| v.as_str())
             .unwrap_or("<none>");
-        log::info!("[{tag}] >>> 请求 URL: {url} (model={request_model})");
+        log::info!(
+            "[{tag}] >>> 请求 URL: {} (model={request_model})",
+            redact_url_secrets_for_log(&url)
+        );
         if log::log_enabled!(log::Level::Debug) {
             if let Ok(body_str) = serde_json::to_string(&filtered_body) {
                 log::debug!(
@@ -3294,6 +3297,53 @@ fn merge_json_override_inner(target: &mut Value, patch: &Value, is_top_level: bo
     }
 }
 
+/// Mask credential-bearing query parameters (e.g. Gemini `?key=AIza…`, relay
+/// `?token=…`) before an upstream URL is written to the log file.
+fn redact_url_secrets_for_log(url: &str) -> std::borrow::Cow<'_, str> {
+    const SENSITIVE: &[&str] = &[
+        "key",
+        "api_key",
+        "apikey",
+        "api-key",
+        "access_token",
+        "token",
+        "auth",
+        "secret",
+        "password",
+        "sig",
+        "signature",
+    ];
+    let Some((base, rest)) = url.split_once('?') else {
+        return std::borrow::Cow::Borrowed(url);
+    };
+    let (query, fragment) = match rest.split_once('#') {
+        Some((q, f)) => (q, Some(f)),
+        None => (rest, None),
+    };
+    let mut changed = false;
+    let pairs: Vec<String> = query
+        .split('&')
+        .map(|pair| {
+            let name = pair.split('=').next().unwrap_or(pair);
+            if pair.contains('=') && SENSITIVE.contains(&name.to_ascii_lowercase().as_str()) {
+                changed = true;
+                format!("{name}=***")
+            } else {
+                pair.to_string()
+            }
+        })
+        .collect();
+    if !changed {
+        return std::borrow::Cow::Borrowed(url);
+    }
+    let mut out = format!("{base}?{}", pairs.join("&"));
+    if let Some(f) = fragment {
+        out.push('#');
+        out.push_str(f);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 fn apply_local_proxy_header_overrides(
     headers: &mut http::HeaderMap,
     overrides: Option<&LocalProxyRequestOverrides>,
@@ -3501,6 +3551,22 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
     use std::time::Duration;
+
+    #[test]
+    fn redact_url_secrets_for_log_masks_credential_params() {
+        assert_eq!(
+            redact_url_secrets_for_log(
+                "https://g.example/v1beta/models/x:generateContent?alt=sse&key=AIzaSECRET"
+            ),
+            "https://g.example/v1beta/models/x:generateContent?alt=sse&key=***"
+        );
+        assert_eq!(
+            redact_url_secrets_for_log("https://r.example/api?Token=abc#frag"),
+            "https://r.example/api?Token=***#frag"
+        );
+        let plain = "https://api.example/v1/messages?beta=true";
+        assert_eq!(redact_url_secrets_for_log(plain), plain);
+    }
 
     fn test_provider_with_type(provider_type: Option<&str>) -> Provider {
         Provider {

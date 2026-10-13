@@ -665,10 +665,12 @@ pub(super) fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table
                 t[&key[..]] = toml_item;
 
                 // 记录扩展字段的处理
+                // 只记录字段名：自定义字段可能是 headers / bearer_token / env 等，
+                // 值中常含 API Key，不能写入日志文件
                 if extended_fields.contains(&key.as_str()) {
-                    log::debug!("已转换扩展字段 '{key}' = {value:?}");
+                    log::debug!("已转换扩展字段 '{key}'");
                 } else {
-                    log::info!("已转换自定义字段 '{key}' = {value:?}");
+                    log::info!("已转换自定义字段 '{key}'");
                 }
             }
         }
