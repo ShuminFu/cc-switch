@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use chrono::{DateTime, FixedOffset};
@@ -36,8 +36,23 @@ pub fn read_head_tail_lines(
     let seek_pos = file_len.saturating_sub(16_384);
     let mut file2 = File::open(path)?;
     file2.seek(SeekFrom::Start(seek_pos))?;
-    let tail_reader = BufReader::new(file2);
-    let all_tail: Vec<String> = tail_reader.lines().map_while(Result::ok).collect();
+    // Read raw bytes and split on '\n' ourselves: the seek offset may land in
+    // the middle of a multi-byte UTF-8 character, and `BufRead::lines()` would
+    // then yield an `InvalidData` error for the first (partial) line, which
+    // `map_while(Result::ok)` turns into an empty tail.
+    let mut buf = Vec::new();
+    file2.read_to_end(&mut buf)?;
+    let mut all_tail: Vec<String> = buf
+        .split(|b| *b == b'\n')
+        .map(|line| {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            String::from_utf8_lossy(line).into_owned()
+        })
+        .collect();
+    // A trailing '\n' produces an empty final segment; `lines()` never yields it.
+    if buf.ends_with(b"\n") {
+        all_tail.pop();
+    }
 
     // Skip first partial line if we seeked into the middle of a line
     let skip_first = if seek_pos > 0 { 1 } else { 0 };
@@ -158,6 +173,34 @@ pub fn path_basename(value: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::Write;
+
+    #[test]
+    fn read_head_tail_lines_survives_seek_into_multibyte_char() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("session.jsonl");
+        let mut file = File::create(&path).expect("create");
+        // One long line of 3-byte CJK chars, sized so the 16 KiB tail window
+        // starts in the middle of a character.
+        let filler = "中".repeat(10_000);
+        writeln!(file, "{{\"head\":\"{filler}x\"}}").expect("write filler");
+        writeln!(file, "{{\"n\":1}}").expect("write line 1");
+        writeln!(file, "{{\"n\":2}}").expect("write line 2");
+        drop(file);
+
+        let len = std::fs::metadata(&path).expect("meta").len();
+        assert!(len > 16_384);
+        let seek_pos = len - 16_384;
+        let bytes = std::fs::read(&path).expect("read");
+        assert!(
+            std::str::from_utf8(&bytes[seek_pos as usize..]).is_err(),
+            "test must seek into the middle of a multi-byte char"
+        );
+
+        let (head, tail) = read_head_tail_lines(&path, 1, 2).expect("read head/tail");
+        assert_eq!(head.len(), 1);
+        assert_eq!(tail, vec!["{\"n\":1}".to_string(), "{\"n\":2}".to_string()]);
+    }
 
     #[test]
     fn parse_timestamp_to_ms_supports_integers_and_rfc3339() {
