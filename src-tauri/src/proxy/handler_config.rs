@@ -226,3 +226,115 @@ pub const GEMINI_HANDLER_CONFIG: HandlerConfig = HandlerConfig {
     app_type_str: "gemini",
     parser_config: &GEMINI_PARSER_CONFIG,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Every event the stream parser needs must survive the cheap pre-filter,
+    /// otherwise usage is silently dropped on the hot path.
+    fn filtered(events: &[Value], filter: StreamUsageEventFilter) -> Vec<Value> {
+        events
+            .iter()
+            .filter(|e| filter(&e.to_string()))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn claude_filter_keeps_usage_events_and_drops_deltas() {
+        assert!(claude_stream_usage_event_filter(
+            r#"{"type": "message_start","message":{}}"#
+        ));
+        assert!(claude_stream_usage_event_filter(
+            r#"{"type":"message_delta","usage":{"output_tokens":3}}"#
+        ));
+        assert!(!claude_stream_usage_event_filter(
+            r#"{"type":"content_block_delta","delta":{"text":"hi"}}"#
+        ));
+        assert!(!claude_stream_usage_event_filter(""));
+    }
+
+    #[test]
+    fn codex_and_gemini_filters_match_their_usage_markers() {
+        assert!(codex_stream_usage_event_filter(
+            r#"{"type":"response.completed","response":{}}"#
+        ));
+        assert!(codex_stream_usage_event_filter(r#"{"usage":null}"#));
+        assert!(!codex_stream_usage_event_filter(
+            r#"{"type":"response.output_text.delta","delta":"x"}"#
+        ));
+        assert!(gemini_stream_usage_event_filter(
+            r#"{"usageMetadata":{"promptTokenCount":1}}"#
+        ));
+        assert!(!gemini_stream_usage_event_filter(r#"{"candidates":[]}"#));
+        assert!(openai_stream_usage_event_filter(r#"{"usage":{}}"#));
+        assert!(!openai_stream_usage_event_filter(r#"{"choices":[]}"#));
+    }
+
+    #[test]
+    fn claude_extractor_survives_filter_and_prefers_upstream_model() {
+        let events = vec![
+            json!({"type":"message_start","message":{"id":"m1","model":"claude-real","usage":{"input_tokens":10}}}),
+            json!({"type":"content_block_delta","delta":{"text":"hi"}}),
+            json!({"type":"message_delta","usage":{"output_tokens":5}}),
+        ];
+        let kept = filtered(&events, claude_stream_usage_event_filter);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(
+            (CLAUDE_PARSER_CONFIG.stream_parser)(&kept).map(|u| u.output_tokens),
+            Some(5)
+        );
+        assert_eq!(claude_model_extractor(&kept, "fallback"), "claude-real");
+    }
+
+    #[test]
+    fn claude_extractor_treats_empty_model_as_missing() {
+        let events =
+            vec![json!({"type":"message_start","message":{"model":"","usage":{"input_tokens":1}}})];
+        assert_eq!(claude_model_extractor(&events, "mapped"), "mapped");
+        assert_eq!(claude_model_extractor(&[], "mapped"), "mapped");
+    }
+
+    #[test]
+    fn openai_extractor_falls_back_to_event_model_then_request_model() {
+        let with_usage = vec![
+            json!({"model":"gpt-x","choices":[]}),
+            json!({"model":"gpt-x","usage":{"prompt_tokens":3,"completion_tokens":4}}),
+        ];
+        assert_eq!(openai_model_extractor(&with_usage, "req"), "gpt-x");
+
+        let no_usage = vec![json!({"model":""}), json!({"model":"gpt-y"})];
+        assert_eq!(openai_model_extractor(&no_usage, "req"), "gpt-y");
+
+        assert_eq!(openai_model_extractor(&[json!({})], "req"), "req");
+    }
+
+    #[test]
+    fn codex_extractor_reads_response_completed_model() {
+        let events = vec![
+            json!({"type":"response.output_text.delta","delta":"x"}),
+            json!({"type":"response.completed","response":{"model":"gpt-5-codex"}}),
+        ];
+        assert_eq!(codex_auto_model_extractor(&events, "req"), "gpt-5-codex");
+
+        let empty_model = vec![json!({"type":"response.completed","response":{"model":""}})];
+        assert_eq!(codex_auto_model_extractor(&empty_model, "req"), "req");
+
+        let chat_style = vec![json!({"model":"chat-model","choices":[]})];
+        assert_eq!(codex_auto_model_extractor(&chat_style, "req"), "chat-model");
+    }
+
+    #[test]
+    fn gemini_extractor_uses_model_version_from_usage_chunk() {
+        let events = vec![
+            json!({"candidates":[{"content":{}}],"modelVersion":"gemini-2.5-pro"}),
+            json!({"usageMetadata":{"promptTokenCount":2,"totalTokenCount":5},"modelVersion":"gemini-2.5-pro"}),
+        ];
+        let kept = filtered(&events, gemini_stream_usage_event_filter);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(gemini_model_extractor(&kept, "req"), "gemini-2.5-pro");
+        assert_eq!(gemini_model_extractor(&[], "req"), "req");
+    }
+}

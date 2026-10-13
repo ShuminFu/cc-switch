@@ -237,3 +237,168 @@ pub(crate) fn strip_leading_think_open_tag(text: &str) -> Option<String> {
 fn strip_think_answer_separator(text: &str) -> &str {
     text.trim_start_matches(['\r', '\n', '\t', ' '])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_think_block_extracts_reasoning_and_answer() {
+        assert_eq!(
+            split_leading_think_block("<think>\n plan \n</think>\n\nanswer"),
+            Some(("plan".to_string(), "answer".to_string()))
+        );
+    }
+
+    #[test]
+    fn split_think_block_allows_leading_whitespace_and_unicode() {
+        assert_eq!(
+            split_leading_think_block(" \r\n<think>思考🤔</think>答案：好"),
+            Some(("思考🤔".to_string(), "答案：好".to_string()))
+        );
+    }
+
+    #[test]
+    fn split_think_block_requires_leading_open_and_a_close_tag() {
+        assert_eq!(split_leading_think_block("answer <think>x</think>"), None);
+        assert_eq!(split_leading_think_block("<think>still thinking"), None);
+        assert_eq!(split_leading_think_block(""), None);
+        assert_eq!(split_leading_think_block("<THINK>x</THINK>"), None);
+    }
+
+    #[test]
+    fn split_think_block_handles_empty_body_and_answer() {
+        assert_eq!(
+            split_leading_think_block("<think></think>"),
+            Some((String::new(), String::new()))
+        );
+        // Only the first close tag terminates the reasoning
+        assert_eq!(
+            split_leading_think_block("<think>a</think>b</think>c"),
+            Some(("a".to_string(), "b</think>c".to_string()))
+        );
+    }
+
+    #[test]
+    fn strip_leading_open_tag_only_at_start() {
+        assert_eq!(
+            strip_leading_think_open_tag("\n<think> partial "),
+            Some("partial".to_string())
+        );
+        assert_eq!(strip_leading_think_open_tag("x<think>"), None);
+    }
+
+    #[test]
+    fn reasoning_field_priority_and_shapes() {
+        assert_eq!(
+            extract_reasoning_field_text(&json!({"reasoning_content": "rc", "reasoning": "r"})),
+            Some("rc".to_string())
+        );
+        // Empty reasoning_content falls through to reasoning
+        assert_eq!(
+            extract_reasoning_field_text(&json!({"reasoning_content": "", "reasoning": "r"})),
+            Some("r".to_string())
+        );
+        assert_eq!(
+            extract_reasoning_field_text(&json!({"reasoning": {"summary": "s"}})),
+            Some("s".to_string())
+        );
+        assert_eq!(
+            extract_reasoning_field_text(&json!({
+                "reasoning_details": [
+                    {"type": "reasoning.text", "text": "one"},
+                    {"type": "reasoning.encrypted", "data": "xx"},
+                    {"parts": [{"text": "two"}, {"content": "three"}]}
+                ]
+            })),
+            Some("one\n\ntwo\n\nthree".to_string())
+        );
+        assert_eq!(extract_reasoning_field_text(&json!({"content": "x"})), None);
+        assert_eq!(
+            extract_reasoning_field_text(&json!({"reasoning_details": []})),
+            None
+        );
+    }
+
+    #[test]
+    fn reasoning_summary_text_joins_parts() {
+        assert_eq!(
+            extract_reasoning_summary_text(&json!({
+                "summary": [{"type": "summary_text", "text": "a"}, "b", {"text": ""}]
+            })),
+            Some("a\n\nb".to_string())
+        );
+        assert_eq!(
+            extract_reasoning_summary_text(&json!({"summary": ""})),
+            None
+        );
+        assert_eq!(extract_reasoning_summary_text(&json!({})), None);
+    }
+
+    #[test]
+    fn append_reasoning_content_concatenates_and_ignores_blank() {
+        let mut msg = Map::new();
+        assert!(!append_reasoning_content(&mut msg, "  \n"));
+        assert!(msg.is_empty());
+        assert!(append_reasoning_content(&mut msg, " first "));
+        assert!(append_reasoning_content(&mut msg, "second"));
+        assert_eq!(msg["reasoning_content"], json!("first\n\nsecond"));
+
+        // A non-string existing value is replaced rather than corrupted
+        let mut msg = Map::new();
+        msg.insert("reasoning_content".into(), json!(null));
+        assert!(append_reasoning_content(&mut msg, "x"));
+        assert_eq!(msg["reasoning_content"], json!("x"));
+    }
+
+    #[test]
+    fn function_call_item_attaches_namespace_and_reasoning_when_present() {
+        let item = response_function_call_item_with_namespace(
+            "fc_1",
+            "completed",
+            "call_1",
+            "run",
+            Some("mcp__fs"),
+            "{}",
+            Some(" why "),
+        );
+        assert_eq!(item["namespace"], json!("mcp__fs"));
+        assert_eq!(item["reasoning_content"], json!("why"));
+
+        let bare = response_function_call_item_with_namespace(
+            "fc_1",
+            "completed",
+            "call_1",
+            "run",
+            Some(""),
+            "{}",
+            Some("  "),
+        );
+        assert!(bare.get("namespace").is_none());
+        assert!(bare.get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn call_id_prefers_call_id_then_id_and_trims() {
+        assert_eq!(
+            response_item_call_id(&json!({"call_id": " c1 ", "id": "i1"})),
+            Some("c1".to_string())
+        );
+        assert_eq!(
+            response_item_call_id(&json!({"id": "i1"})),
+            Some("i1".to_string())
+        );
+        assert_eq!(response_item_call_id(&json!({"call_id": "  "})), None);
+    }
+
+    #[test]
+    fn is_empty_value_semantics() {
+        assert!(is_empty_value(&json!(null)));
+        assert!(is_empty_value(&json!(" ")));
+        assert!(is_empty_value(&json!([])));
+        assert!(is_empty_value(&json!({})));
+        assert!(!is_empty_value(&json!(0)));
+        assert!(!is_empty_value(&json!(false)));
+        assert!(!is_empty_value(&json!("x")));
+    }
+}
