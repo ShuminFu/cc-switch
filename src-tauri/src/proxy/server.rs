@@ -387,6 +387,11 @@ impl ProxyServer {
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
             // 提高默认请求体大小限制（避免 413 Payload Too Large）
             .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
+            // 拒绝浏览器跨站请求与 DNS rebinding（保护用户 API Key 不被网页盗用）
+            .layer(axum::middleware::from_fn_with_state(
+                self.state.clone(),
+                super::request_guard::guard,
+            ))
             .with_state(self.state.clone())
     }
 

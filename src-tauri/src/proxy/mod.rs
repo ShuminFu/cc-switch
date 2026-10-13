@@ -24,6 +24,7 @@ pub mod media_sanitizer;
 pub mod model_mapper;
 pub mod provider_router;
 pub mod providers;
+mod request_guard;
 pub mod response_handler;
 pub mod response_processor;
 pub(crate) mod server;
