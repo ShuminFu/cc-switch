@@ -11,7 +11,17 @@ pub fn validate_server_spec(spec: &Value) -> Result<(), AppError> {
             "MCP 服务器连接定义必须为 JSON 对象".into(),
         ));
     }
-    let t_opt = spec.get("type").and_then(|x| x.as_str());
+    // A present-but-non-string type (number, bool, object, null) is malformed;
+    // only an absent field means "default to stdio".
+    let t_opt = match spec.get("type") {
+        None => None,
+        Some(Value::String(t)) => Some(t.as_str()),
+        Some(_) => {
+            return Err(AppError::McpValidation(
+                "MCP 服务器 type 必须是 'stdio'、'http' 或 'sse'（或省略表示 stdio）".into(),
+            ))
+        }
+    };
     // 支持三种：stdio/http/sse；若缺省 type 则按 stdio 处理（与社区常见 .mcp.json 一致）
     let is_stdio = t_opt.map(|t| t == "stdio").unwrap_or(true);
     let is_http = t_opt.map(|t| t == "http").unwrap_or(false);
@@ -109,6 +119,21 @@ mod tests {
         assert!(validate_server_spec(&json!({"type": "websocket", "url": "ws://x"})).is_err());
         // Type matching is exact; upper-case variants are not silently accepted
         assert!(validate_server_spec(&json!({"type": "HTTP", "url": "https://x"})).is_err());
+    }
+
+    #[test]
+    fn non_string_type_is_rejected_instead_of_defaulting_to_stdio() {
+        for t in [
+            json!(42),
+            json!(true),
+            json!(null),
+            json!({"kind": "http"}),
+            json!(["stdio"]),
+        ] {
+            let spec = json!({"type": t, "command": "npx", "url": "https://x"});
+            let err = validate_server_spec(&spec).unwrap_err().to_string();
+            assert!(err.contains("type"), "{spec}: {err}");
+        }
     }
 
     #[test]
