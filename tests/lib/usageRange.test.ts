@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getUsageRangePresetLabel, resolveUsageRange } from "@/lib/usageRange";
 
 const sec = (d: Date) => Math.floor(d.getTime() / 1000);
@@ -66,6 +66,26 @@ describe("resolveUsageRange", () => {
       resolveUsageRange({ preset: "custom", customStartDate: 0 }, nowMs)
         .startDate,
     ).toBe(0);
+  });
+
+  describe("across a DST transition", () => {
+    const originalTz = process.env.TZ;
+    beforeEach(() => {
+      process.env.TZ = "America/New_York";
+    });
+    afterEach(() => {
+      if (originalTz === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTz;
+    });
+
+    it("7d starts exactly 6 calendar days back shortly after midnight", () => {
+      // 2026-03-08 is the spring-forward day in New York, so the preceding
+      // week is one hour shorter than 7 * 24h.
+      const justAfterMidnight = new Date(2026, 2, 10, 0, 30).getTime();
+      const range = resolveUsageRange({ preset: "7d" }, justAfterMidnight);
+      expect(new Date(range.startDate * 1000).getHours()).toBe(0);
+      expect(range.startDate).toBe(sec(new Date(2026, 2, 4)));
+    });
   });
 });
 
