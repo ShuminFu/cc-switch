@@ -46,6 +46,8 @@ pub async fn import_config_from_file(
     let db = state.db.clone();
     let db_for_sync = db.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        // 导入会替换数据库并重写 live 配置，与其他供应商/配置写入命令串行
+        let _guard = crate::commands::blocking::lock_mutations();
         let path_buf = PathBuf::from(&filePath);
         let backup_id = db.import_sql(&path_buf)?;
         let warning = post_sync_warning_from_result(Ok(run_post_import_sync(db_for_sync)));
@@ -63,6 +65,7 @@ pub async fn import_config_from_file(
 pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<Value, String> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = crate::commands::blocking::lock_mutations();
         let app_state = AppState::new(db);
         ProviderService::sync_current_to_live(&app_state)?;
         Ok::<_, AppError>(json!({

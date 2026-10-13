@@ -126,9 +126,12 @@ pub async fn webdav_sync_download(state: State<'_, AppState>) -> Result<Value, S
 
     // Post-download sync is best-effort: snapshot restore has already succeeded.
     let warning = post_sync_warning_from_result(
-        tauri::async_runtime::spawn_blocking(move || run_post_import_sync(db_for_sync))
-            .await
-            .map_err(|e| e.to_string()),
+        tauri::async_runtime::spawn_blocking(move || {
+            let _guard = crate::commands::blocking::lock_mutations();
+            run_post_import_sync(db_for_sync)
+        })
+        .await
+        .map_err(|e| e.to_string()),
     );
     if let Some(msg) = warning.as_ref() {
         log::warn!("[WebDAV] post-download sync warning: {msg}");
