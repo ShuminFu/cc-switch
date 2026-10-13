@@ -42,7 +42,6 @@ pnpm dev
 | `pnpm build` | Production build |
 | `pnpm typecheck` | TypeScript type checking |
 | `pnpm test:unit` | Run unit tests |
-| `pnpm lint` | ESLint check |
 | `pnpm format` | Format code (Prettier) |
 | `pnpm format:check` | Check code formatting |
 
@@ -57,7 +56,7 @@ cargo test       # Run tests
 
 ## Code Style
 
-- **Frontend**: Prettier for formatting, ESLint for linting, strict TypeScript (`pnpm typecheck`)
+- **Frontend**: Prettier for formatting, strict TypeScript (`pnpm typecheck`)
 - **Backend**: `cargo fmt` for formatting, `cargo clippy` for linting
 - **Tauri 2.0**: Command names must use camelCase
 
@@ -170,7 +169,6 @@ pnpm dev
 | `pnpm build` | 构建生产版本 |
 | `pnpm typecheck` | TypeScript 类型检查 |
 | `pnpm test:unit` | 运行单元测试 |
-| `pnpm lint` | ESLint 检查 |
 | `pnpm format` | 格式化代码（Prettier） |
 | `pnpm format:check` | 检查代码格式 |
 
@@ -185,7 +183,7 @@ cargo test       # 运行测试
 
 ## 代码规范
 
-- **前端**：使用 Prettier 格式化、ESLint 检查、严格 TypeScript（`pnpm typecheck`）
+- **前端**：使用 Prettier 格式化、严格 TypeScript（`pnpm typecheck`）
 - **后端**：使用 `cargo fmt` 格式化、`cargo clippy` 检查
 - **Tauri 2.0**：命令名必须使用 camelCase
 
