@@ -439,9 +439,9 @@ paru -S cc-switch-bin
 
 ### 開発環境
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
+- Node.js 20.19+ または 22.12+（`.node-version` で 22.12.0 を指定）
+- pnpm 9+
+- Rust 1.95（`rust-toolchain.toml` で固定、rustup が自動インストール）
 - Tauri CLI 2.8+
 
 ### 開発コマンド
@@ -513,7 +513,7 @@ pnpm test:unit
 # ウォッチモード（自動再実行）
 pnpm test:unit:watch
 
-# カバレッジレポート付き
+# カバレッジレポート付き（事前に `pnpm add -D @vitest/coverage-v8` が必要）
 pnpm test:unit --coverage
 ```
 

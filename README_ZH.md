@@ -442,9 +442,9 @@ paru -S cc-switch-bin
 
 ### 环境要求
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
+- Node.js 20.19+ 或 22.12+（`.node-version` 固定为 22.12.0）
+- pnpm 9+
+- Rust 1.95（由 `rust-toolchain.toml` 固定，rustup 会自动安装）
 - Tauri CLI 2.8+
 
 ### 开发命令
@@ -516,7 +516,7 @@ pnpm test:unit
 # 监听模式（自动重跑）
 pnpm test:unit:watch
 
-# 带覆盖率报告
+# 带覆盖率报告（需先执行 `pnpm add -D @vitest/coverage-v8`）
 pnpm test:unit --coverage
 ```
 

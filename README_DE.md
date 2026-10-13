@@ -439,9 +439,9 @@ Laden Sie den neuesten Linux-Build von der Seite [Releases](../../releases) heru
 
 ### Umgebungsanforderungen
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
+- Node.js 20.19+ oder 22.12+ (`.node-version` legt 22.12.0 fest)
+- pnpm 9+
+- Rust 1.95 (in `rust-toolchain.toml` festgelegt, wird von rustup automatisch installiert)
 - Tauri CLI 2.8+
 
 ### Entwicklungsbefehle
@@ -513,7 +513,7 @@ pnpm test:unit
 # Watch-Modus (automatische erneute Ausführung)
 pnpm test:unit:watch
 
-# Mit Coverage-Bericht
+# Mit Coverage-Bericht (erfordert vorher `pnpm add -D @vitest/coverage-v8`)
 pnpm test:unit --coverage
 ```
 
