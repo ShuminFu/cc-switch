@@ -2273,6 +2273,11 @@ impl SkillService {
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
+            // 拒绝包含 `..` 或绝对路径的条目，防止解压到目标目录之外（zip slip）
+            if file.enclosed_name().is_none() {
+                log::warn!("跳过不安全的压缩包条目: {}", file.name());
+                continue;
+            }
             let file_path = file.name().to_string();
 
             let relative_path =
