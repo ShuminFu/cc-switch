@@ -121,30 +121,13 @@ pub fn get_providers() -> Result<Map<String, Value>, AppError> {
 }
 
 pub fn set_provider(id: &str, config: Value) -> Result<(), AppError> {
-    let mut full_config = read_opencode_config()?;
-
-    if full_config.get("provider").is_none() {
-        full_config["provider"] = json!({});
-    }
-
-    if let Some(providers) = full_config
-        .get_mut("provider")
-        .and_then(|v| v.as_object_mut())
-    {
-        providers.insert(id.to_string(), config);
-    }
-
-    write_opencode_config(&full_config)
+    let full_config = read_opencode_config()?;
+    write_opencode_config(&with_section_entry(full_config, "provider", id, config))
 }
 
 pub fn remove_provider(id: &str) -> Result<(), AppError> {
-    let mut config = read_opencode_config()?;
-
-    if let Some(providers) = config.get_mut("provider").and_then(|v| v.as_object_mut()) {
-        providers.remove(id);
-    }
-
-    write_opencode_config(&config)
+    let config = read_opencode_config()?;
+    write_opencode_config(&without_section_entry(config, "provider", id))
 }
 
 pub fn get_typed_providers() -> Result<IndexMap<String, OpenCodeProviderConfig>, AppError> {
@@ -180,49 +163,72 @@ pub fn get_mcp_servers() -> Result<Map<String, Value>, AppError> {
 }
 
 pub fn set_mcp_server(id: &str, config: Value) -> Result<(), AppError> {
-    let mut full_config = read_opencode_config()?;
-
-    if full_config.get("mcp").is_none() {
-        full_config["mcp"] = json!({});
-    }
-
-    if let Some(mcp) = full_config.get_mut("mcp").and_then(|v| v.as_object_mut()) {
-        mcp.insert(id.to_string(), config);
-    }
-
-    write_opencode_config(&full_config)
+    let full_config = read_opencode_config()?;
+    write_opencode_config(&with_section_entry(full_config, "mcp", id, config))
 }
 
 pub fn remove_mcp_server(id: &str) -> Result<(), AppError> {
-    let mut config = read_opencode_config()?;
-
-    if let Some(mcp) = config.get_mut("mcp").and_then(|v| v.as_object_mut()) {
-        mcp.remove(id);
-    }
-
-    write_opencode_config(&config)
+    let config = read_opencode_config()?;
+    write_opencode_config(&without_section_entry(config, "mcp", id))
 }
 
 pub fn add_plugin(plugin_name: &str) -> Result<(), AppError> {
-    let mut config = read_opencode_config()?;
+    let config = read_opencode_config()?;
+    write_opencode_config(&apply_plugin(config, plugin_name))
+}
+
+pub fn remove_plugins_by_prefixes(prefixes: &[&str]) -> Result<(), AppError> {
+    let config = read_opencode_config()?;
+    write_opencode_config(&strip_plugins_by_prefixes(config, prefixes))
+}
+
+// ── Pure config transforms ──────────────────────────────────
+//
+// The file-backed functions above are thin read → transform → write wrappers
+// around these, so the merge rules can be unit-tested without touching disk.
+
+/// Insert (or replace) `config[section][id] = value`, creating `section` as an
+/// empty object when absent. An existing non-object `section` is left as-is.
+fn with_section_entry(mut config: Value, section: &str, id: &str, value: Value) -> Value {
+    if config.get(section).is_none() {
+        config[section] = json!({});
+    }
+
+    if let Some(entries) = config.get_mut(section).and_then(|v| v.as_object_mut()) {
+        entries.insert(id.to_string(), value);
+    }
+
+    config
+}
+
+/// Remove `config[section][id]` if present. The (possibly now empty) section
+/// object is kept.
+fn without_section_entry(mut config: Value, section: &str, id: &str) -> Value {
+    if let Some(entries) = config.get_mut(section).and_then(|v| v.as_object_mut()) {
+        entries.remove(id);
+    }
+
+    config
+}
+
+/// Add `plugin_name` (canonicalized) to the `plugin` array.
+///
+/// Standard OMO and OMO Slim are mutually exclusive: adding either one first
+/// removes every existing entry from both families (any version). Duplicates
+/// are not added twice. A missing or non-array `plugin` value is replaced by a
+/// single-element array.
+fn apply_plugin(mut config: Value, plugin_name: &str) -> Value {
     let normalized_plugin_name = canonicalize_plugin_name(plugin_name);
 
-    let plugins = config.get_mut("plugin").and_then(|v| v.as_array_mut());
-
-    match plugins {
+    match config.get_mut("plugin").and_then(|v| v.as_array_mut()) {
         Some(arr) => {
-            // Mutual exclusion: standard OMO and OMO Slim cannot coexist as plugins
-            if matches_any_plugin_prefix(&normalized_plugin_name, &STANDARD_OMO_PLUGIN_PREFIXES) {
-                arr.retain(|v| {
-                    v.as_str()
-                        .map(|s| {
-                            !matches_any_plugin_prefix(s, &STANDARD_OMO_PLUGIN_PREFIXES)
-                                && !matches_any_plugin_prefix(s, &SLIM_OMO_PLUGIN_PREFIXES)
-                        })
-                        .unwrap_or(true)
-                });
-            } else if matches_any_plugin_prefix(&normalized_plugin_name, &SLIM_OMO_PLUGIN_PREFIXES)
-            {
+            let is_omo_family =
+                matches_any_plugin_prefix(&normalized_plugin_name, &STANDARD_OMO_PLUGIN_PREFIXES)
+                    || matches_any_plugin_prefix(
+                        &normalized_plugin_name,
+                        &SLIM_OMO_PLUGIN_PREFIXES,
+                    );
+            if is_omo_family {
                 arr.retain(|v| {
                     v.as_str()
                         .map(|s| {
@@ -245,12 +251,13 @@ pub fn add_plugin(plugin_name: &str) -> Result<(), AppError> {
         }
     }
 
-    write_opencode_config(&config)
+    config
 }
 
-pub fn remove_plugins_by_prefixes(prefixes: &[&str]) -> Result<(), AppError> {
-    let mut config = read_opencode_config()?;
-
+/// Drop every string `plugin` entry matching one of `prefixes` (exact name or
+/// `name@version`); non-string entries are kept. Removes the `plugin` key
+/// entirely when the array ends up empty.
+fn strip_plugins_by_prefixes(mut config: Value, prefixes: &[&str]) -> Value {
     if let Some(arr) = config.get_mut("plugin").and_then(|v| v.as_array_mut()) {
         arr.retain(|v| {
             v.as_str()
@@ -263,7 +270,7 @@ pub fn remove_plugins_by_prefixes(prefixes: &[&str]) -> Result<(), AppError> {
         }
     }
 
-    write_opencode_config(&config)
+    config
 }
 
 #[cfg(test)]
@@ -330,5 +337,133 @@ mod tests {
             "oh-my-openagent"
         );
         assert_eq!(canonicalize_plugin_name("other-plugin"), "other-plugin");
+    }
+
+    fn plugins(config: &Value) -> Vec<&str> {
+        config["plugin"]
+            .as_array()
+            .expect("plugin array")
+            .iter()
+            .map(|v| v.as_str().unwrap_or("<non-string>"))
+            .collect()
+    }
+
+    #[test]
+    fn apply_plugin_creates_array_when_missing_or_not_an_array() {
+        let out = apply_plugin(json!({"$schema": "x"}), "foo@1");
+        assert_eq!(out, json!({"$schema": "x", "plugin": ["foo@1"]}));
+
+        let out = apply_plugin(json!({"plugin": "oops"}), "foo");
+        assert_eq!(out["plugin"], json!(["foo"]));
+    }
+
+    #[test]
+    fn apply_plugin_appends_once_and_preserves_other_entries() {
+        let cfg = json!({"plugin": ["a", 42, "b"]});
+        let out = apply_plugin(cfg, "c");
+        assert_eq!(out["plugin"], json!(["a", 42, "b", "c"]));
+
+        let out = apply_plugin(out, "c");
+        assert_eq!(out["plugin"], json!(["a", 42, "b", "c"]));
+    }
+
+    #[test]
+    fn apply_plugin_canonicalizes_legacy_name() {
+        let out = apply_plugin(json!({}), "oh-my-opencode@1.2.3");
+        assert_eq!(plugins(&out), vec!["oh-my-openagent@1.2.3"]);
+    }
+
+    #[test]
+    fn apply_plugin_standard_replaces_any_omo_variant() {
+        let cfg = json!({"plugin": [
+            "keep-me",
+            "oh-my-opencode@0.9",
+            "oh-my-openagent@1.0",
+            "oh-my-opencode-slim@0.3",
+            42
+        ]});
+        let out = apply_plugin(cfg, "oh-my-openagent@2.0");
+        assert_eq!(out["plugin"], json!(["keep-me", 42, "oh-my-openagent@2.0"]));
+    }
+
+    #[test]
+    fn apply_plugin_slim_replaces_standard_omo() {
+        let cfg = json!({"plugin": ["oh-my-openagent@2.0", "other"]});
+        let out = apply_plugin(cfg, "oh-my-opencode-slim@0.4");
+        assert_eq!(plugins(&out), vec!["other", "oh-my-opencode-slim@0.4"]);
+    }
+
+    #[test]
+    fn apply_plugin_non_omo_does_not_evict_omo() {
+        let cfg = json!({"plugin": ["oh-my-openagent", "oh-my-opencode-slim"]});
+        let out = apply_plugin(cfg, "oh-my-opencode-extra");
+        assert_eq!(
+            plugins(&out),
+            vec![
+                "oh-my-openagent",
+                "oh-my-opencode-slim",
+                "oh-my-opencode-extra"
+            ]
+        );
+    }
+
+    #[test]
+    fn strip_plugins_removes_matching_entries_only() {
+        let cfg = json!({"plugin": [
+            "oh-my-opencode-slim@0.3",
+            "oh-my-openagent@1",
+            "oh-my-opencode-slimmer",
+            7
+        ]});
+        let out = strip_plugins_by_prefixes(cfg, &SLIM_OMO_PLUGIN_PREFIXES);
+        assert_eq!(
+            out["plugin"],
+            json!(["oh-my-openagent@1", "oh-my-opencode-slimmer", 7])
+        );
+    }
+
+    #[test]
+    fn strip_plugins_drops_key_when_array_becomes_empty() {
+        let cfg = json!({"$schema": "x", "plugin": ["oh-my-opencode", "oh-my-openagent@3"]});
+        let out = strip_plugins_by_prefixes(cfg, &STANDARD_OMO_PLUGIN_PREFIXES);
+        assert_eq!(out, json!({"$schema": "x"}));
+    }
+
+    #[test]
+    fn strip_plugins_leaves_config_without_plugin_array_untouched() {
+        for cfg in [json!({"a": 1}), json!({"plugin": "str"})] {
+            let out = strip_plugins_by_prefixes(cfg.clone(), &STANDARD_OMO_PLUGIN_PREFIXES);
+            assert_eq!(out, cfg);
+        }
+    }
+
+    #[test]
+    fn section_entry_insert_creates_section_and_replaces_existing() {
+        let out = with_section_entry(json!({}), "provider", "p1", json!({"a": 1}));
+        assert_eq!(out, json!({"provider": {"p1": {"a": 1}}}));
+
+        let out = with_section_entry(out, "provider", "p1", json!({"b": 2}));
+        let out = with_section_entry(out, "provider", "p2", json!({}));
+        assert_eq!(out, json!({"provider": {"p1": {"b": 2}, "p2": {}}}));
+    }
+
+    #[test]
+    fn section_entry_insert_ignores_non_object_section() {
+        let cfg = json!({"mcp": ["not", "an", "object"]});
+        let out = with_section_entry(cfg.clone(), "mcp", "srv", json!({}));
+        assert_eq!(out, cfg);
+    }
+
+    #[test]
+    fn section_entry_remove_keeps_empty_section_and_other_keys() {
+        let cfg = json!({"mcp": {"srv": {}}, "provider": {"srv": {}}});
+        let out = without_section_entry(cfg, "mcp", "srv");
+        assert_eq!(out, json!({"mcp": {}, "provider": {"srv": {}}}));
+
+        let untouched = json!({"x": 1});
+        assert_eq!(
+            without_section_entry(untouched.clone(), "mcp", "srv"),
+            untouched
+        );
     }
 }
