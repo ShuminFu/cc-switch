@@ -41,11 +41,12 @@ pub(crate) fn rollup_cutoff_ts<Tz: TimeZone>(
     now: &DateTime<Tz>,
     retain_days: i64,
 ) -> Result<i64, AppError> {
+    // Step back by calendar days, not 24h blocks: across a DST change
+    // `now - N*24h` can land on the neighbouring local date.
     let target_day = now
-        .clone()
+        .date_naive()
         .checked_sub_signed(Duration::days(retain_days))
-        .ok_or_else(|| AppError::Database("rollup cutoff overflow".to_string()))?
-        .date_naive();
+        .ok_or_else(|| AppError::Database("rollup cutoff overflow".to_string()))?;
     let next_day = target_day
         .succ_opt()
         .ok_or_else(|| AppError::Database("rollup cutoff next-day overflow".to_string()))?;
@@ -319,6 +320,29 @@ mod tests {
         assert_eq!(
             rollup_cutoff_ts(&now, 30).unwrap(),
             utc("2026-03-17T16:00:00Z")
+        );
+    }
+
+    #[test]
+    fn rollup_cutoff_counts_calendar_days_across_fall_back() {
+        // now = 2026-11-02 23:30 EST; retain 2 days → keep 11-01 and 11-02,
+        // so the cutoff is 11-01 00:00 EDT. The 25h fall-back day must not
+        // make "2 days ago" land on 11-01 and prune that day early.
+        let now = eastern("2026-11-03T04:30:00Z");
+        assert_eq!(
+            rollup_cutoff_ts(&now, 2).unwrap(),
+            utc("2026-11-01T04:00:00Z")
+        );
+    }
+
+    #[test]
+    fn rollup_cutoff_counts_calendar_days_across_spring_forward() {
+        // now = 2026-03-09 00:30 EDT; retain 2 days → keep 03-08 and 03-09,
+        // cutoff 03-08 00:00 EST.
+        let now = eastern("2026-03-09T04:30:00Z");
+        assert_eq!(
+            rollup_cutoff_ts(&now, 2).unwrap(),
+            utc("2026-03-08T05:00:00Z")
         );
     }
 }
