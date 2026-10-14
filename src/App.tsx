@@ -355,9 +355,9 @@ function App() {
     const setupListener = async () => {
       try {
         const off = await providersApi.onSwitched(
-          async (event: ProviderSwitchEvent) => {
+          (event: ProviderSwitchEvent) => {
             if (event.appType === activeApp) {
-              await refetch();
+              void refetch();
             }
           },
         );
@@ -518,7 +518,7 @@ function App() {
       }
     };
 
-    checkEnvOnStartup();
+    void checkEnvOnStartup();
   }, []);
 
   useEffect(() => {
@@ -536,7 +536,7 @@ function App() {
       }
     };
 
-    checkMigration();
+    void checkMigration();
   }, [t]);
 
   useEffect(() => {
@@ -564,7 +564,7 @@ function App() {
       }
     };
 
-    checkSkillsMigration();
+    void checkSkillsMigration();
   }, [t, queryClient]);
 
   useEffect(() => {
@@ -595,7 +595,7 @@ function App() {
       }
     };
 
-    checkEnvOnSwitch();
+    void checkEnvOnSwitch();
   }, [activeApp]);
 
   const currentViewRef = useRef(currentView);
@@ -822,7 +822,11 @@ function App() {
       }
     }
 
-    await addProvider(duplicatedProvider);
+    try {
+      await addProvider(duplicatedProvider);
+    } catch {
+      // The add mutation's onError already shows the failure toast.
+    }
   };
 
   const handleOpenTerminal = async (provider: Provider) => {
@@ -847,6 +851,22 @@ function App() {
         t("provider.terminalOpenFailed", {
           defaultValue: "打开终端失败",
         }) + (errorMessage ? `: ${errorMessage}` : ""),
+      );
+    }
+  };
+
+  const handleEnvConflictsDeleted = async () => {
+    try {
+      const allConflicts = await checkAllEnvConflicts();
+      const flatConflicts = Object.values(allConflicts).flat();
+      setEnvConflicts(flatConflicts);
+      if (flatConflicts.length === 0) {
+        setShowEnvBanner(false);
+      }
+    } catch (error) {
+      console.error(
+        "[App] Failed to re-check conflicts after deletion:",
+        error,
       );
     }
   };
@@ -1014,7 +1034,7 @@ function App() {
                         isProxyRunning && isCurrentAppTakeoverActive
                       }
                       activeProviderId={activeProviderId}
-                      onSwitch={switchProvider}
+                      onSwitch={(provider) => void switchProvider(provider)}
                       onEdit={(provider) => {
                         setEditingProvider(provider);
                       }}
@@ -1037,18 +1057,22 @@ function App() {
                           ? handleDisableOmoSlim
                           : undefined
                       }
-                      onDuplicate={handleDuplicateProvider}
+                      onDuplicate={(provider) =>
+                        void handleDuplicateProvider(provider)
+                      }
                       onConfigureUsage={setUsageProvider}
-                      onOpenWebsite={handleOpenWebsite}
+                      onOpenWebsite={(url) => void handleOpenWebsite(url)}
                       onOpenTerminal={
-                        activeApp === "claude" ? handleOpenTerminal : undefined
+                        activeApp === "claude"
+                          ? (provider) => void handleOpenTerminal(provider)
+                          : undefined
                       }
                       onCreate={() => setIsAddOpen(true)}
                       onSetAsDefault={
                         activeApp === "openclaw"
-                          ? setAsDefaultModel
+                          ? (provider) => void setAsDefaultModel(provider)
                           : activeApp === "hermes"
-                            ? switchProvider
+                            ? (provider) => void switchProvider(provider)
                             : undefined
                       }
                     />
@@ -1138,21 +1162,7 @@ function App() {
             setShowEnvBanner(false);
             sessionStorage.setItem("env_banner_dismissed", "true");
           }}
-          onDeleted={async () => {
-            try {
-              const allConflicts = await checkAllEnvConflicts();
-              const flatConflicts = Object.values(allConflicts).flat();
-              setEnvConflicts(flatConflicts);
-              if (flatConflicts.length === 0) {
-                setShowEnvBanner(false);
-              }
-            } catch (error) {
-              console.error(
-                "[App] Failed to re-check conflicts after deletion:",
-                error,
-              );
-            }
-          }}
+          onDeleted={() => void handleEnvConflictsDeleted()}
         />
       )}
 

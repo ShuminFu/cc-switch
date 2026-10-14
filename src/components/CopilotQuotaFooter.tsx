@@ -68,7 +68,7 @@ const CopilotQuotaFooter: React.FC<CopilotQuotaFooterProps> = ({
             <span>{quota.error || t("subscription.queryFailed")}</span>
           </div>
           <button
-            onClick={() => refetch()}
+            onClick={() => void refetch()}
             disabled={loading}
             className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50 flex-shrink-0"
             title={t("subscription.refresh")}
@@ -102,7 +102,7 @@ const CopilotQuotaFooter: React.FC<CopilotQuotaFooterProps> = ({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              refetch();
+              void refetch();
             }}
             disabled={loading}
             className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50 flex-shrink-0 text-muted-foreground"
@@ -136,7 +136,7 @@ const CopilotQuotaFooter: React.FC<CopilotQuotaFooterProps> = ({
             </span>
           )}
           <button
-            onClick={() => refetch()}
+            onClick={() => void refetch()}
             disabled={loading}
             className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50"
             title={t("subscription.refresh")}

@@ -693,6 +693,17 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
     }
   };
 
+  const openLink = (url: string) => {
+    settingsApi.openExternal(url).catch((error) => {
+      toast.error(
+        extractErrorMessage(error) ||
+          t("notifications.openLinkFailed", {
+            defaultValue: "链接打开失败",
+          }),
+      );
+    });
+  };
+
   const handleFormat = async () => {
     try {
       const formatted = await prettier.format(script.code, {
@@ -818,7 +829,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
         <Button
           variant="secondary"
           size="sm"
-          onClick={handleTest}
+          onClick={() => void handleTest()}
           disabled={!script.enabled || testing}
         >
           <Play size={14} className="mr-1" />
@@ -827,7 +838,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
         <Button
           variant="outline"
           size="sm"
-          onClick={handleFormat}
+          onClick={() => void handleFormat()}
           disabled={
             !script.enabled ||
             NATIVE_USAGE_TEMPLATES.has(selectedTemplate || "")
@@ -1305,9 +1316,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
                       {t("usageScript.volcengineKeyConsoleLink")}{" "}
                       <button
                         type="button"
-                        onClick={() =>
-                          settingsApi.openExternal(VOLCENGINE_KEY_CONSOLE_URL)
-                        }
+                        onClick={() => openLink(VOLCENGINE_KEY_CONSOLE_URL)}
                         className="inline-flex items-center gap-1 text-blue-400 dark:text-blue-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors break-all align-baseline underline-offset-2 hover:underline"
                       >
                         {VOLCENGINE_KEY_CONSOLE_URL}
@@ -1395,9 +1404,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
                       {t("usageScript.zhipuTeamConsoleLink")}{" "}
                       <button
                         type="button"
-                        onClick={() =>
-                          settingsApi.openExternal(ZHIPU_TEAM_USAGE_URL)
-                        }
+                        onClick={() => openLink(ZHIPU_TEAM_USAGE_URL)}
                         className="inline-flex items-center gap-1 text-blue-400 dark:text-blue-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors break-all align-baseline underline-offset-2 hover:underline"
                       >
                         {ZHIPU_TEAM_USAGE_URL}

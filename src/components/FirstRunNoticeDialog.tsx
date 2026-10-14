@@ -57,7 +57,7 @@ export function FirstRunNoticeDialog() {
           </DialogDescription>
         </div>
         <DialogFooter>
-          <Button onClick={handleAcknowledge}>
+          <Button onClick={() => void handleAcknowledge()}>
             {t("firstRunNotice.confirm")}
           </Button>
         </DialogFooter>

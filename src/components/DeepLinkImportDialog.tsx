@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { DeepLinkImportRequest, deeplinkApi } from "@/lib/api/deeplink";
 import {
   Dialog,
@@ -51,31 +51,33 @@ export function DeepLinkImportDialog() {
 
   useEffect(() => {
     // Listen for deep link import events
-    const unlistenImport = listen<DeepLinkImportRequest>(
-      "deeplink-import",
-      async (event) => {
-        // If config is present, merge it to get the complete configuration
-        if (event.payload.config || event.payload.configUrl) {
-          try {
-            const mergedRequest = await deeplinkApi.mergeDeeplinkConfig(
-              event.payload,
-            );
-            setRequest(mergedRequest);
-          } catch (error) {
-            console.error("Failed to merge config:", error);
-            toast.error(t("deeplink.configMergeError"), {
-              description:
-                error instanceof Error ? error.message : String(error),
-            });
-            // Fall back to original request
-            setRequest(event.payload);
-          }
-        } else {
+    const handleImportEvent = async (event: {
+      payload: DeepLinkImportRequest;
+    }) => {
+      // If config is present, merge it to get the complete configuration
+      if (event.payload.config || event.payload.configUrl) {
+        try {
+          const mergedRequest = await deeplinkApi.mergeDeeplinkConfig(
+            event.payload,
+          );
+          setRequest(mergedRequest);
+        } catch (error) {
+          console.error("Failed to merge config:", error);
+          toast.error(t("deeplink.configMergeError"), {
+            description: error instanceof Error ? error.message : String(error),
+          });
+          // Fall back to original request
           setRequest(event.payload);
         }
+      } else {
+        setRequest(event.payload);
+      }
 
-        setIsOpen(true);
-      },
+      setIsOpen(true);
+    };
+    const unlistenImport = listen<DeepLinkImportRequest>(
+      "deeplink-import",
+      (event) => void handleImportEvent(event),
     );
 
     // Listen for deep link error events
@@ -86,9 +88,17 @@ export function DeepLinkImportDialog() {
       });
     });
 
+    const unlisten = (pending: Promise<UnlistenFn>) => {
+      pending
+        .then((fn) => fn())
+        .catch((error) =>
+          console.error("Failed to subscribe to deep link events:", error),
+        );
+    };
+
     return () => {
-      unlistenImport.then((fn) => fn());
-      unlistenError.then((fn) => fn());
+      unlisten(unlistenImport);
+      unlisten(unlistenError);
     };
   }, [t]);
 
@@ -160,7 +170,7 @@ export function DeepLinkImportDialog() {
           await refreshMcp(result);
         } else if (result.type === "skill") {
           // Refresh Skills with aggressive strategy
-          queryClient.invalidateQueries({
+          void queryClient.invalidateQueries({
             queryKey: ["skills"],
             refetchType: "all",
           });
@@ -732,7 +742,10 @@ export function DeepLinkImportDialog() {
               >
                 {t("common.cancel")}
               </Button>
-              <Button onClick={handleImport} disabled={isImporting}>
+              <Button
+                onClick={() => void handleImport()}
+                disabled={isImporting}
+              >
                 {isImporting ? t("deeplink.importing") : t("deeplink.import")}
               </Button>
             </DialogFooter>

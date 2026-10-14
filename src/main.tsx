@@ -64,13 +64,18 @@ async function handleConfigLoadError(
 }
 
 // 监听后端的配置加载错误事件：仅提醒用户并强制退出，不修改任何配置文件
-try {
-  void listen("configLoadError", async (evt) => {
-    await handleConfigLoadError(evt.payload as ConfigLoadErrorPayload | null);
-  });
-} catch (e) {
+const logConfigLoadErrorSubscriptionFailure = (e: unknown) => {
   // 忽略事件订阅异常（例如在非 Tauri 环境下）
   console.error("订阅 configLoadError 事件失败", e);
+};
+try {
+  listen("configLoadError", (evt) => {
+    handleConfigLoadError(evt.payload as ConfigLoadErrorPayload | null).catch(
+      (e) => console.error("处理 configLoadError 事件失败", e),
+    );
+  }).catch(logConfigLoadErrorSubscriptionFailure);
+} catch (e) {
+  logConfigLoadErrorSubscriptionFailure(e);
 }
 
 async function bootstrap() {

@@ -102,7 +102,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
             <span>{t("usage.queryFailed")}</span>
           </div>
           <button
-            onClick={() => refetch()}
+            onClick={() => void refetch()}
             disabled={loading}
             className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50 flex-shrink-0"
             title={t("usage.refreshUsage")}
@@ -123,7 +123,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
 
           {/* 刷新按钮 */}
           <button
-            onClick={() => refetch()}
+            onClick={() => void refetch()}
             disabled={loading}
             className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 flex-shrink-0"
             title={t("usage.refreshUsage")}
@@ -155,7 +155,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              refetch();
+              void refetch();
             }}
             disabled={loading}
             className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50 flex-shrink-0 text-muted-foreground"
@@ -208,7 +208,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              refetch();
+              void refetch();
             }}
             disabled={loading}
             className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50 flex-shrink-0 text-muted-foreground"
@@ -290,7 +290,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
             </span>
           )}
           <button
-            onClick={() => refetch()}
+            onClick={() => void refetch()}
             disabled={loading}
             className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50"
             title={t("usage.refreshUsage")}

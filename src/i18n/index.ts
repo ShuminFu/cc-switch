@@ -76,7 +76,9 @@ const resources = {
   },
 };
 
-i18n.use(initReactI18next).init({
+// With inline resources init completes synchronously; the returned promise
+// only resolves the t function, so it is safe not to await it.
+void i18n.use(initReactI18next).init({
   resources,
   lng: getInitialLanguage(), // 根据本地存储或系统语言选择默认语言
   fallbackLng: "en", // 如果缺少中文翻译则退回英文

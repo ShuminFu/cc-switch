@@ -60,7 +60,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
   // 启动时检查可用更新，决定 upgradable / incompatible
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
         const version = await invoke<string | null>(
           "check_app_update_available",
@@ -249,7 +249,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
         <div className="flex flex-wrap items-center gap-2">
           {(phase === "upgradable" || phase === "error") && (
             <Button
-              onClick={startUpgrade}
+              onClick={() => void startUpgrade()}
               className="gap-2 bg-amber-500 text-white hover:bg-amber-600"
             >
               {phase === "error" ? (

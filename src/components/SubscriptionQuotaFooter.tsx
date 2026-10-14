@@ -421,7 +421,7 @@ const SubscriptionQuotaFooter: React.FC<SubscriptionQuotaFooterProps> = ({
     <SubscriptionQuotaView
       quota={quota}
       loading={loading}
-      refetch={refetch}
+      refetch={() => void refetch()}
       appIdForExpiredHint={appId}
       inline={inline}
     />
