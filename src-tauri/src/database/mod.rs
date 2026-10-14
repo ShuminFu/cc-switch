@@ -44,11 +44,13 @@ pub use dao::Profile;
 
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
+use crate::proxy::usage::logger::UsageLogEntry;
+use crate::proxy::usage::writer::{self, Enqueued, UsageLogWriter};
 use rusqlite::{hooks::Action, Connection, OpenFlags};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
 // DAO 方法通过 impl Database 提供，无需额外导出
@@ -113,7 +115,13 @@ pub(crate) fn enable_wal(conn: &Connection) -> Result<bool, AppError> {
 /// 使用 Mutex 包装 Connection 以支持在多线程环境（如 Tauri State）中共享。
 /// rusqlite::Connection 本身不是 Sync 的，因此需要这层包装。
 pub struct Database {
-    pub(crate) conn: Mutex<Connection>,
+    /// Background writer for proxy usage logs, started on first use. Declared
+    /// first so it is dropped (draining its queue into `conn`) before the
+    /// other fields. `Some(None)` means the thread could not be spawned and
+    /// logs are written synchronously instead.
+    usage_writer: OnceLock<Option<UsageLogWriter>>,
+    /// The writer connection. Shared (`Arc`) with the usage-log writer thread.
+    pub(crate) conn: Arc<Mutex<Connection>>,
     /// Read-only connections for heavy, read-only queries (usage dashboard,
     /// request logs). `None` for in-memory databases, which can't be shared
     /// between connections; [`Database::read_conn`] then falls back to `conn`.
@@ -256,7 +264,8 @@ impl Database {
         register_db_change_hook(&conn);
 
         let mut db = Self {
-            conn: Mutex::new(conn),
+            usage_writer: OnceLock::new(),
+            conn: Arc::new(Mutex::new(conn)),
             read_pool: None,
         };
         db.create_tables()?;
@@ -400,7 +409,8 @@ impl Database {
         register_db_change_hook(&conn);
 
         let db = Self {
-            conn: Mutex::new(conn),
+            usage_writer: OnceLock::new(),
+            conn: Arc::new(Mutex::new(conn)),
             read_pool: None,
         };
         db.create_tables()?;
@@ -480,6 +490,37 @@ impl Database {
         }
 
         Ok(rebuilt)
+    }
+
+    /// Queue a proxy usage log for the background writer. Never blocks: if
+    /// the queue is full the entry is dropped (with a warning).
+    pub(crate) fn enqueue_usage_log(&self, entry: UsageLogEntry) {
+        let writer =
+            self.usage_writer
+                .get_or_init(|| match UsageLogWriter::spawn(Arc::clone(&self.conn)) {
+                    Ok(w) => Some(w),
+                    Err(e) => {
+                        log::error!("[USG-004] 无法启动使用量日志写线程，改为同步写入: {e}");
+                        None
+                    }
+                });
+        let entry = match writer {
+            Some(writer) => match writer.enqueue(entry) {
+                Enqueued::Queued | Enqueued::Dropped => return,
+                Enqueued::WriterGone(entry) => *entry,
+            },
+            None => entry,
+        };
+        writer::write_batch(&self.conn, vec![entry]);
+    }
+
+    /// Wait (up to `timeout`) until every usage log queued so far has been
+    /// committed. Returns `false` on timeout. Cheap when nothing was queued.
+    pub fn flush_usage_logs(&self, timeout: Duration) -> bool {
+        match self.usage_writer.get() {
+            Some(Some(writer)) => writer.flush(timeout),
+            _ => true,
+        }
     }
 
     /// 检查 MCP 服务器表是否为空

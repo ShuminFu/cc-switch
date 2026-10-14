@@ -43,7 +43,6 @@ use super::{
     ProxyError,
 };
 use crate::app_config::AppType;
-use crate::database::PRICING_SOURCE_REQUEST;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use bytes::Bytes;
 use http_body_util::BodyExt;
@@ -2358,27 +2357,27 @@ fn log_forward_error(
     is_streaming: bool,
     error: &ProxyError,
 ) {
-    use super::usage::logger::UsageLogger;
+    use super::usage::logger::{RequestLog, UsageLogEntry};
 
-    let logger = UsageLogger::new(&state.db);
     let status_code = map_proxy_error_to_status(error);
     let error_message = get_error_message(error);
     let request_id = uuid::Uuid::new_v4().to_string();
 
-    if let Err(e) = logger.log_error_with_context(
-        request_id,
-        ctx.provider.id.clone(),
-        ctx.app_type_str.to_string(),
-        ctx.request_model.clone(),
-        status_code,
-        error_message,
-        ctx.latency_ms(),
-        is_streaming,
-        Some(ctx.session_id.clone()),
-        None,
-    ) {
-        log::warn!("记录失败请求日志失败: {e}");
-    }
+    // 交给后台写线程，不在请求路径上拿数据库锁
+    state
+        .db
+        .enqueue_usage_log(UsageLogEntry::Ready(RequestLog::error(
+            request_id,
+            ctx.provider.id.clone(),
+            ctx.app_type_str.to_string(),
+            ctx.request_model.clone(),
+            status_code,
+            error_message,
+            ctx.latency_ms(),
+            is_streaming,
+            Some(ctx.session_id.clone()),
+            None,
+        )));
 }
 
 /// 记录请求使用量
@@ -2400,51 +2399,30 @@ async fn log_usage(
     status_code: u16,
     session_id: Option<String>,
 ) {
-    use super::usage::logger::{with_logger_blocking, UsageLogger};
+    use super::usage::logger::{ProxyUsage, UsageLogEntry};
 
     if !usage_logging_enabled(state) {
         return;
     }
 
-    let logger = UsageLogger::new(&state.db);
-
-    let (multiplier, pricing_model_source) =
-        logger.resolve_pricing_config(provider_id, app_type).await;
-    let pricing_model = if pricing_model_source == PRICING_SOURCE_REQUEST {
-        outbound_model
-    } else {
-        model
-    };
-
+    // 计价配置、模型价格查询与写入都在后台写线程中完成（批量事务），
+    // 这里只做一次不阻塞的入队。
     let request_id = usage.dedup_request_id();
-
-    let provider_id = provider_id.to_string();
-    let app_type = app_type.to_string();
-    let model = model.to_string();
-    let request_model = request_model.to_string();
-    let pricing_model = pricing_model.to_string();
-    let result = with_logger_blocking(state.db.clone(), move |logger| {
-        logger.log_with_calculation(
-            request_id,
-            provider_id,
-            app_type,
-            model,
-            request_model,
-            pricing_model,
-            usage,
-            multiplier,
-            latency_ms,
-            first_token_ms,
-            status_code,
-            session_id,
-            None, // provider_type
-            is_streaming,
-        )
-    })
-    .await;
-    if let Err(e) = result {
-        log::warn!("[USG-001] 记录使用量失败: {e}");
-    }
+    state.db.enqueue_usage_log(UsageLogEntry::Proxy(ProxyUsage {
+        request_id,
+        provider_id: provider_id.to_string(),
+        app_type: app_type.to_string(),
+        model: model.to_string(),
+        request_model: request_model.to_string(),
+        outbound_model: outbound_model.to_string(),
+        usage,
+        latency_ms,
+        first_token_ms,
+        status_code,
+        session_id,
+        provider_type: None,
+        is_streaming,
+    }));
 }
 
 #[cfg(test)]

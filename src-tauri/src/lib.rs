@@ -1578,6 +1578,13 @@ pub fn run() {
                 //     与所有 Tauri 应用默认重启路径的行为一致，无需额外等待
                 ExitRequestAction::DeferToTauriRestart => {
                     log::info!("收到重启请求 (code={code:?})，交由 Tauri 默认重启流程 re-exec");
+                    // 使用量日志由后台线程批量写入（最多延迟 ~250ms）；进程即将
+                    // re-exec，先把排队中的日志落盘，避免丢失最后一批。
+                    if let Some(state) = app_handle.try_state::<store::AppState>() {
+                        if !state.db.flush_usage_logs(USAGE_LOG_FLUSH_TIMEOUT) {
+                            log::warn!("重启前等待使用量日志写入超时");
+                        }
+                    }
                     return;
                 }
                 // 其它 Some(_)：用户主动调用 app.exit() 退出（如托盘菜单"退出"），
@@ -1718,15 +1725,25 @@ pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
     finalize_database_before_exit(app_handle).await;
 }
 
-/// 退出前收尾数据库：把 WAL 合并回主库文件并截断，使磁盘上的
-/// `cc-switch.db` 自包含（即使用户只拷走这一个文件也不会丢最近的写入）。
+/// 退出前等待后台使用量日志写线程落盘的最长时间
+const USAGE_LOG_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// 退出前收尾数据库：先把后台写线程中排队的使用量日志写入，再把 WAL
+/// 合并回主库文件并截断，使磁盘上的 `cc-switch.db` 自包含（即使用户只
+/// 拷走这一个文件也不会丢最近的写入）。
 /// 尽力而为：失败只记日志，SQLite 下次打开时会自动从 WAL 恢复。
 async fn finalize_database_before_exit(app_handle: &tauri::AppHandle) {
     let Some(state) = app_handle.try_state::<store::AppState>() else {
         return;
     };
     let db = state.db.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || db.checkpoint_wal()).await;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        if !db.flush_usage_logs(USAGE_LOG_FLUSH_TIMEOUT) {
+            log::warn!("退出时等待使用量日志写入超时，部分日志可能丢失");
+        }
+        db.checkpoint_wal()
+    })
+    .await;
     match result {
         Ok(Ok(())) => {}
         Ok(Err(e)) => log::warn!("退出时 WAL checkpoint 失败: {e}"),

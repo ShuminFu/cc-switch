@@ -5,11 +5,15 @@
 pub mod calculator;
 pub mod logger;
 pub mod parser;
+pub(crate) mod writer;
 
 // 仅导出内部使用的类型,避免未使用警告
 #[allow(unused_imports)]
 pub use calculator::{CostBreakdown, CostCalculator, ModelPricing};
 #[allow(unused_imports)]
-pub use logger::{RequestLog, UsageLogger};
+pub use logger::RequestLog;
+#[cfg(test)]
+#[allow(unused_imports)]
+pub use logger::UsageLogger;
 #[allow(unused_imports)]
 pub use parser::{ApiType, TokenUsage};

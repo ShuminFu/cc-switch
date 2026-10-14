@@ -13,7 +13,6 @@ use super::{
     usage::parser::TokenUsage,
     ProxyError,
 };
-use crate::database::PRICING_SOURCE_REQUEST;
 use axum::http::{header::HeaderMap, HeaderName};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
@@ -648,16 +647,7 @@ async fn log_usage_internal(
     status_code: u16,
     session_id: Option<String>,
 ) {
-    use super::usage::logger::{with_logger_blocking, UsageLogger};
-
-    let logger = UsageLogger::new(&state.db);
-    let (multiplier, pricing_model_source) =
-        logger.resolve_pricing_config(provider_id, app_type).await;
-    let pricing_model = if pricing_model_source == PRICING_SOURCE_REQUEST {
-        outbound_model
-    } else {
-        model
-    };
+    use super::usage::logger::{ProxyUsage, UsageLogEntry};
 
     let request_id = usage.dedup_request_id();
 
@@ -670,33 +660,23 @@ async fn log_usage_internal(
         usage.cache_creation_tokens
     );
 
-    let provider_id = provider_id.to_string();
-    let app_type = app_type.to_string();
-    let model = model.to_string();
-    let request_model = request_model.to_string();
-    let pricing_model = pricing_model.to_string();
-    let result = with_logger_blocking(state.db.clone(), move |logger| {
-        logger.log_with_calculation(
-            request_id,
-            provider_id,
-            app_type,
-            model,
-            request_model,
-            pricing_model,
-            usage,
-            multiplier,
-            latency_ms,
-            first_token_ms,
-            status_code,
-            session_id,
-            None, // provider_type
-            is_streaming,
-        )
-    })
-    .await;
-    if let Err(e) = result {
-        log::warn!("[USG-001] 记录使用量失败: {e}");
-    }
+    // 计价配置（倍率 / 按请求或响应计价）、模型价格查询与写入都在后台写线程
+    // 中完成（批量事务），这里只做一次不阻塞的入队。
+    state.db.enqueue_usage_log(UsageLogEntry::Proxy(ProxyUsage {
+        request_id,
+        provider_id: provider_id.to_string(),
+        app_type: app_type.to_string(),
+        model: model.to_string(),
+        request_model: request_model.to_string(),
+        outbound_model: outbound_model.to_string(),
+        usage,
+        latency_ms,
+        first_token_ms,
+        status_code,
+        session_id,
+        provider_type: None,
+        is_streaming,
+    }));
 }
 
 /// 创建带日志记录和超时控制的透传流
@@ -1137,6 +1117,7 @@ mod tests {
             None,
         )
         .await;
+        assert!(db.flush_usage_logs(std::time::Duration::from_secs(10)));
 
         let conn = crate::database::lock_conn!(db.conn);
         let (model, request_model, total_cost, cost_multiplier): (String, String, String, String) =
@@ -1207,6 +1188,7 @@ mod tests {
             None,
         )
         .await;
+        assert!(db.flush_usage_logs(std::time::Duration::from_secs(10)));
 
         let conn = crate::database::lock_conn!(db.conn);
         let (model, request_model, total_cost): (String, String, String) = conn
@@ -1241,9 +1223,8 @@ mod tests {
         db.set_pricing_model_source("claude", "request").await?;
 
         let logger = UsageLogger::new(&db);
-        let (multiplier, source) = logger
-            .resolve_pricing_config("nonexistent-provider", "claude-desktop")
-            .await;
+        let (multiplier, source) =
+            logger.resolve_pricing_config("nonexistent-provider", "claude-desktop");
 
         assert_eq!(multiplier, Decimal::from_str("1.5").unwrap());
         assert_eq!(source, "request");
@@ -1287,6 +1268,7 @@ mod tests {
             None,
         )
         .await;
+        assert!(db.flush_usage_logs(std::time::Duration::from_secs(10)));
 
         let conn = crate::database::lock_conn!(db.conn);
         let (total_cost, cost_multiplier): (String, String) = conn
