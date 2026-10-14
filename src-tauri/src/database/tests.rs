@@ -1123,3 +1123,166 @@ fn checkpoint_is_a_noop_for_memory_db() {
     let conn = db.conn.lock().expect("lock conn");
     assert_eq!(journal_mode(&conn), "memory");
 }
+
+// ==================== Read-only connection pool ====================
+
+#[test]
+fn long_read_on_read_conn_does_not_block_writer() {
+    use std::sync::{mpsc, Arc};
+    use std::time::{Duration, Instant};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cc-switch.db");
+    let db = Arc::new(Database::open_at(&path).expect("open file db"));
+    assert!(db.read_pool.is_some(), "file db should have a read pool");
+
+    let (started_tx, started_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let reader_db = Arc::clone(&db);
+    let reader = std::thread::spawn(move || {
+        let conn = reader_db.read_conn().expect("read conn");
+        // An unbounded statement that we keep open mid-iteration: its read
+        // transaction (snapshot) stays active for as long as we hold `rows`,
+        // like a slow dashboard aggregate.
+        let mut stmt = conn
+            .prepare(
+                "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c)
+                 SELECT x, (SELECT COUNT(*) FROM settings WHERE key = 'written-during-read')
+                 FROM c",
+            )
+            .expect("prepare long read");
+        let mut rows = stmt.query([]).expect("start long read");
+        let seen_before: i64 = rows
+            .next()
+            .expect("step")
+            .expect("first row")
+            .get(1)
+            .expect("col");
+        started_tx.send(()).expect("signal started");
+        release_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("writer should finish while the read is still running");
+        let seen_during: i64 = rows
+            .next()
+            .expect("step")
+            .expect("second row")
+            .get(1)
+            .expect("col");
+        (seen_before, seen_during)
+    });
+
+    started_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("reader started");
+
+    // While the read is in progress, a write on the main connection must go
+    // straight through: it neither waits for the reader's mutex nor, thanks to
+    // WAL, for the reader's SHARED lock (a rollback journal would make this
+    // commit wait for busy_timeout and then fail with SQLITE_BUSY).
+    let started = Instant::now();
+    {
+        let conn = db.conn.lock().expect("lock writer");
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('written-during-read', '1')",
+            [],
+        )
+        .expect("write during long read");
+    }
+    let write_elapsed = started.elapsed();
+    release_tx.send(()).expect("release reader");
+
+    let (seen_before, seen_during) = reader.join().expect("reader thread");
+    assert_eq!(seen_before, 0);
+    assert_eq!(
+        seen_during, 0,
+        "the in-flight read keeps its snapshot (no torn aggregates)"
+    );
+    assert!(
+        write_elapsed < Duration::from_secs(2),
+        "write was blocked by the reader for {write_elapsed:?}"
+    );
+
+    // A new read sees the committed write.
+    let conn = db.read_conn().expect("read conn");
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'written-during-read'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count after");
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn usage_queries_do_not_wait_for_the_writer_lock() {
+    use crate::services::usage_stats::LogFilters;
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cc-switch.db");
+    let db = Arc::new(Database::open_at(&path).expect("open file db"));
+    {
+        let conn = db.conn.lock().expect("lock writer");
+        conn.execute(
+            "INSERT INTO proxy_request_logs (
+                request_id, provider_id, app_type, model, input_tokens, output_tokens,
+                total_cost_usd, latency_ms, status_code, created_at
+            ) VALUES ('r1', 'p1', 'claude', 'm', 10, 5, '0.01', 1, 200, strftime('%s','now'))",
+            [],
+        )
+        .expect("seed log");
+    }
+
+    // Simulate a long write transaction / provider switch holding the writer.
+    let writer_guard = db.conn.lock().expect("hold writer");
+
+    let (tx, rx) = mpsc::channel();
+    let reader_db = Arc::clone(&db);
+    let handle = std::thread::spawn(move || {
+        let logs = reader_db
+            .get_request_logs(&LogFilters::default(), 0, 10)
+            .map(|p| p.total);
+        let summary = reader_db
+            .get_usage_summary(None, None, None, None, None)
+            .map(|s| s.total_requests);
+        let _ = tx.send((logs, summary));
+    });
+
+    let (logs, summary) = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("usage queries must not wait for the writer connection");
+    drop(writer_guard);
+    handle.join().expect("reader thread");
+    assert_eq!(logs.expect("request logs"), 1);
+    assert_eq!(summary.expect("summary"), 1);
+}
+
+#[test]
+fn read_conn_is_read_only_on_file_db() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cc-switch.db");
+    let db = Database::open_at(&path).expect("open file db");
+    let conn = db.read_conn().expect("read conn");
+    let err = conn.execute("INSERT INTO settings (key, value) VALUES ('nope', 'x')", []);
+    assert!(err.is_err(), "read connection must reject writes");
+}
+
+#[test]
+fn read_conn_falls_back_to_main_connection_for_memory_db() {
+    let db = Database::memory().expect("memory db");
+    assert!(db.read_pool.is_none());
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        conn.execute("INSERT INTO settings (key, value) VALUES ('mem', 'v')", [])
+            .expect("insert");
+    }
+    let conn = db.read_conn().expect("read conn");
+    let value: String = conn
+        .query_row("SELECT value FROM settings WHERE key = 'mem'", [], |r| {
+            r.get(0)
+        })
+        .expect("memory read conn sees main-connection writes");
+    assert_eq!(value, "v");
+}

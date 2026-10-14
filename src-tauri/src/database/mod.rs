@@ -44,10 +44,11 @@ pub use dao::Profile;
 
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
-use rusqlite::{hooks::Action, Connection};
+use rusqlite::{hooks::Action, Connection, OpenFlags};
 use serde::Serialize;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 // DAO 方法通过 impl Database 提供，无需额外导出
@@ -113,6 +114,61 @@ pub(crate) fn enable_wal(conn: &Connection) -> Result<bool, AppError> {
 /// rusqlite::Connection 本身不是 Sync 的，因此需要这层包装。
 pub struct Database {
     pub(crate) conn: Mutex<Connection>,
+    /// Read-only connections for heavy, read-only queries (usage dashboard,
+    /// request logs). `None` for in-memory databases, which can't be shared
+    /// between connections; [`Database::read_conn`] then falls back to `conn`.
+    read_pool: Option<ReadPool>,
+}
+
+/// Number of read-only connections opened next to the writer connection. The
+/// dashboard fires a handful of stats queries at once; two lets them overlap
+/// without holding many file handles.
+const READ_POOL_SIZE: usize = 2;
+
+/// A tiny fixed-size pool of read-only connections to the WAL database.
+///
+/// Under WAL, readers see the last committed state as of the start of their
+/// statement and never block (nor are blocked by) the writer connection.
+struct ReadPool {
+    conns: Vec<Mutex<Connection>>,
+    next: AtomicUsize,
+}
+
+impl ReadPool {
+    fn open(db_path: &Path, size: usize) -> Result<Self, AppError> {
+        let mut conns = Vec::with_capacity(size);
+        for _ in 0..size {
+            let conn = Connection::open_with_flags(
+                db_path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | OpenFlags::SQLITE_OPEN_URI
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .map_err(|e| AppError::Database(format!("打开只读连接失败: {e}")))?;
+            configure_file_connection(&conn)?;
+            conn.execute_batch("PRAGMA query_only = ON;")
+                .map_err(|e| AppError::Database(format!("设置只读连接失败: {e}")))?;
+            conns.push(Mutex::new(conn));
+        }
+        Ok(Self {
+            conns,
+            next: AtomicUsize::new(0),
+        })
+    }
+
+    fn get(&self) -> Result<MutexGuard<'_, Connection>, AppError> {
+        // Prefer an idle connection; if all are busy, queue on one in
+        // round-robin order. Waiting here never involves the writer's lock.
+        for conn in &self.conns {
+            if let Ok(guard) = conn.try_lock() {
+                return Ok(guard);
+            }
+        }
+        let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.conns.len();
+        self.conns[idx]
+            .lock()
+            .map_err(|e| AppError::Database(format!("Mutex lock failed: {e}")))
+    }
 }
 
 fn register_db_change_hook(conn: &Connection) {
@@ -199,8 +255,9 @@ impl Database {
         }
         register_db_change_hook(&conn);
 
-        let db = Self {
+        let mut db = Self {
             conn: Mutex::new(conn),
+            read_pool: None,
         };
         db.create_tables()?;
 
@@ -243,14 +300,49 @@ impl Database {
             log::warn!("Startup rollup_and_prune failed: {e}");
         }
         // Reclaim disk space after cleanup
-        {
+        let wal = {
             let conn = lock_conn!(db.conn);
             if let Err(e) = conn.execute_batch("PRAGMA incremental_vacuum;") {
                 log::warn!("Startup incremental vacuum failed: {e}");
             }
+            Self::is_wal(&conn)?
+        };
+
+        // Readers on separate connections only help (and are only safe to
+        // open read-only) once the file is in WAL mode and fully migrated.
+        if wal {
+            match ReadPool::open(db_path, READ_POOL_SIZE) {
+                Ok(pool) => db.read_pool = Some(pool),
+                Err(e) => log::warn!("只读连接池不可用，统计查询将使用主连接: {e}"),
+            }
         }
 
         Ok(db)
+    }
+
+    fn is_wal(conn: &Connection) -> Result<bool, AppError> {
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode;", [], |row| row.get(0))
+            .map_err(|e| AppError::Database(format!("读取 journal_mode 失败: {e}")))?;
+        Ok(mode.eq_ignore_ascii_case("wal"))
+    }
+
+    /// Lock a connection for read-only queries that don't need to observe
+    /// uncommitted writes (usage stats, trends, request logs).
+    ///
+    /// On the file database this is one of the read-only WAL connections, so
+    /// a long aggregate query neither waits for nor blocks the writer
+    /// connection (`self.conn`). It sees everything committed before the
+    /// statement starts. For in-memory databases it is the main connection.
+    ///
+    /// Never write through the returned connection (it is opened read-only
+    /// and `query_only`), and never use it for reads that must see the
+    /// effects of a transaction still open on `self.conn`.
+    pub(crate) fn read_conn(&self) -> Result<MutexGuard<'_, Connection>, AppError> {
+        match &self.read_pool {
+            Some(pool) => pool.get(),
+            None => Ok(lock_conn!(self.conn)),
+        }
     }
 
     /// Fold the WAL back into the main database file and truncate it, so the
@@ -266,10 +358,7 @@ impl Database {
     }
 
     pub(crate) fn checkpoint_wal_on_conn(conn: &Connection) -> Result<(), AppError> {
-        let mode: String = conn
-            .query_row("PRAGMA journal_mode;", [], |row| row.get(0))
-            .map_err(|e| AppError::Database(format!("读取 journal_mode 失败: {e}")))?;
-        if !mode.eq_ignore_ascii_case("wal") {
+        if !Self::is_wal(conn)? {
             return Ok(());
         }
         let (busy, _log, _ckpt): (i64, i64, i64) = conn
@@ -312,6 +401,7 @@ impl Database {
 
         let db = Self {
             conn: Mutex::new(conn),
+            read_pool: None,
         };
         db.create_tables()?;
         db.ensure_model_pricing_seeded()?;
