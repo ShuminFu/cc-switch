@@ -5,10 +5,78 @@
 use super::log_codes::cb as log_cb;
 use super::types::AppProxyConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
+
+/// 错误率统计的滑动窗口长度（秒）。
+///
+/// 错误率只看最近这段时间内的请求：过去的失败不会在很久之后才触发熔断，
+/// 很早以前积累的大量成功也不会掩盖最近的失败高峰。
+const ERROR_RATE_WINDOW_SECS: u64 = 300;
+/// 滑动窗口的桶粒度（秒）。
+const ERROR_RATE_BUCKET_SECS: u64 = 10;
+
+#[derive(Debug, Clone, Copy)]
+struct WindowBucket {
+    index: u64,
+    total: u32,
+    failed: u32,
+}
+
+/// 按时间分桶的请求计数，用于 Closed 状态下的错误率判断。
+#[derive(Debug, Default)]
+struct RequestWindow {
+    buckets: VecDeque<WindowBucket>,
+}
+
+impl RequestWindow {
+    const BUCKETS: u64 = ERROR_RATE_WINDOW_SECS / ERROR_RATE_BUCKET_SECS;
+
+    fn prune(&mut self, now_index: u64) {
+        while let Some(front) = self.buckets.front() {
+            if front.index + Self::BUCKETS <= now_index {
+                self.buckets.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn record(&mut self, now_index: u64, failed: bool) {
+        self.prune(now_index);
+        match self.buckets.back_mut() {
+            Some(bucket) if bucket.index == now_index => {
+                bucket.total = bucket.total.saturating_add(1);
+                bucket.failed = bucket.failed.saturating_add(u32::from(failed));
+            }
+            _ => self.buckets.push_back(WindowBucket {
+                index: now_index,
+                total: 1,
+                failed: u32::from(failed),
+            }),
+        }
+    }
+
+    /// 返回窗口内的 (总请求数, 失败请求数)。
+    fn totals(&mut self, now_index: u64) -> (u32, u32) {
+        self.prune(now_index);
+        self.buckets
+            .iter()
+            .fold((0u32, 0u32), |(total, failed), b| {
+                (
+                    total.saturating_add(b.total),
+                    failed.saturating_add(b.failed),
+                )
+            })
+    }
+
+    fn clear(&mut self) {
+        self.buckets.clear();
+    }
+}
 
 /// 熔断器状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,10 +148,10 @@ pub struct CircuitBreaker {
     consecutive_failures: Arc<AtomicU32>,
     /// 连续成功计数（半开状态）
     consecutive_successes: Arc<AtomicU32>,
-    /// 总请求计数
-    total_requests: Arc<AtomicU32>,
-    /// 失败请求计数
-    failed_requests: Arc<AtomicU32>,
+    /// 最近 `ERROR_RATE_WINDOW_SECS` 内的请求/失败计数（滑动窗口）
+    window: Arc<std::sync::Mutex<RequestWindow>>,
+    /// 窗口时间基准
+    created_at: Instant,
     /// 上次打开时间
     last_opened_at: Arc<RwLock<Option<Instant>>>,
     /// 配置（支持热更新）
@@ -109,8 +177,8 @@ impl CircuitBreaker {
             state: Arc::new(RwLock::new(CircuitState::Closed)),
             consecutive_failures: Arc::new(AtomicU32::new(0)),
             consecutive_successes: Arc::new(AtomicU32::new(0)),
-            total_requests: Arc::new(AtomicU32::new(0)),
-            failed_requests: Arc::new(AtomicU32::new(0)),
+            window: Arc::new(std::sync::Mutex::new(RequestWindow::default())),
+            created_at: Instant::now(),
             last_opened_at: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(config)),
             half_open_requests: Arc::new(AtomicU32::new(0)),
@@ -210,7 +278,7 @@ impl CircuitBreaker {
 
         // 重置失败计数
         self.consecutive_failures.store(0, Ordering::SeqCst);
-        self.total_requests.fetch_add(1, Ordering::SeqCst);
+        self.record_in_window(false);
 
         if state == CircuitState::HalfOpen {
             let successes = self.consecutive_successes.fetch_add(1, Ordering::SeqCst) + 1;
@@ -237,8 +305,7 @@ impl CircuitBreaker {
 
         // 更新计数器
         let failures = self.consecutive_failures.fetch_add(1, Ordering::SeqCst) + 1;
-        self.total_requests.fetch_add(1, Ordering::SeqCst);
-        self.failed_requests.fetch_add(1, Ordering::SeqCst);
+        let (total, failed) = self.record_in_window(true);
 
         // 重置成功计数
         self.consecutive_successes.store(0, Ordering::SeqCst);
@@ -264,10 +331,7 @@ impl CircuitBreaker {
                     drop(config); // 释放读锁再转换状态
                     self.transition_to_open().await;
                 } else {
-                    // 检查错误率
-                    let total = self.total_requests.load(Ordering::SeqCst);
-                    let failed = self.failed_requests.load(Ordering::SeqCst);
-
+                    // 检查错误率（仅统计滑动窗口内的请求）
                     if total >= config.min_requests {
                         let error_rate = failed as f64 / total as f64;
 
@@ -296,13 +360,37 @@ impl CircuitBreaker {
     /// 获取统计信息
     #[allow(dead_code)]
     pub async fn get_stats(&self) -> CircuitBreakerStats {
+        let (total_requests, failed_requests) = self.window_totals();
         CircuitBreakerStats {
             state: *self.state.read().await,
             consecutive_failures: self.consecutive_failures.load(Ordering::SeqCst),
             consecutive_successes: self.consecutive_successes.load(Ordering::SeqCst),
-            total_requests: self.total_requests.load(Ordering::SeqCst),
-            failed_requests: self.failed_requests.load(Ordering::SeqCst),
+            total_requests,
+            failed_requests,
         }
+    }
+
+    fn current_bucket(&self) -> u64 {
+        self.created_at.elapsed().as_secs() / ERROR_RATE_BUCKET_SECS
+    }
+
+    /// 记录一次请求结果并返回窗口内的 (总请求数, 失败请求数)。
+    fn record_in_window(&self, failed: bool) -> (u32, u32) {
+        let now = self.current_bucket();
+        let Ok(mut window) = self.window.lock() else {
+            return (0, 0);
+        };
+        window.record(now, failed);
+        window.totals(now)
+    }
+
+    #[allow(dead_code)] // 仅供 get_stats 使用（同样尚未接入命令）
+    fn window_totals(&self) -> (u32, u32) {
+        let now = self.current_bucket();
+        self.window
+            .lock()
+            .map(|mut window| window.totals(now))
+            .unwrap_or((0, 0))
     }
 
     /// 重置熔断器（手动恢复）
@@ -382,8 +470,9 @@ impl CircuitBreaker {
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
         // 重置计数器
-        self.total_requests.store(0, Ordering::SeqCst);
-        self.failed_requests.store(0, Ordering::SeqCst);
+        if let Ok(mut window) = self.window.lock() {
+            window.clear();
+        }
     }
 }
 
@@ -472,6 +561,62 @@ mod tests {
         let second = breaker.allow_request().await;
         assert!(!second.allowed);
         assert!(!second.used_half_open_permit);
+    }
+
+    #[test]
+    fn request_window_expires_old_failures() {
+        let mut window = RequestWindow::default();
+        for _ in 0..8 {
+            window.record(0, true);
+        }
+        assert_eq!(window.totals(0), (8, 8));
+        // 窗口之后，旧失败不再计入错误率
+        let later = RequestWindow::BUCKETS;
+        window.record(later, false);
+        assert_eq!(window.totals(later), (1, 0));
+    }
+
+    #[test]
+    fn request_window_recent_spike_not_masked_by_old_successes() {
+        let mut window = RequestWindow::default();
+        for _ in 0..1000 {
+            window.record(0, false);
+        }
+        let now = RequestWindow::BUCKETS + 5;
+        for _ in 0..7 {
+            window.record(now, true);
+        }
+        for _ in 0..3 {
+            window.record(now, false);
+        }
+        // 只看最近窗口：10 次请求中 7 次失败
+        assert_eq!(window.totals(now), (10, 7));
+    }
+
+    #[test]
+    fn request_window_keeps_buckets_inside_window() {
+        let mut window = RequestWindow::default();
+        window.record(0, true);
+        window.record(RequestWindow::BUCKETS - 1, false);
+        assert_eq!(window.totals(RequestWindow::BUCKETS - 1), (2, 1));
+        assert_eq!(window.totals(RequestWindow::BUCKETS), (1, 0));
+    }
+
+    #[tokio::test]
+    async fn error_rate_trips_on_recent_failures_within_window() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 100,
+            error_rate_threshold: 0.5,
+            min_requests: 4,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+        breaker.record_success(false).await;
+        breaker.record_failure(false).await;
+        breaker.record_success(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
     }
 
     #[tokio::test]
