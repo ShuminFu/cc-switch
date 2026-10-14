@@ -26,6 +26,7 @@ pub mod subscription;
 pub mod sync_protocol;
 pub mod usage_cache;
 pub mod usage_stats;
+pub(crate) mod usage_time;
 pub mod webdav;
 pub mod webdav_auto_sync;
 pub mod webdav_sync;

@@ -6,7 +6,8 @@ use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::services::sql_helpers::{fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH};
 use crate::services::usage_stats::effective_usage_log_filter;
-use chrono::{Duration, Local, TimeZone};
+use crate::services::usage_time::rollup_cutoff_ts;
+use chrono::{Local, TimeZone};
 
 /// Compute the rollup/prune cutoff aligned to a local-day boundary.
 ///
@@ -17,42 +18,14 @@ use chrono::{Duration, Local, TimeZone};
 /// the cutoff falls mid-day, leaving the day half-rolled-up and half-pruned —
 /// which would silently under-count any range query that touches that day
 /// after `compute_rollup_date_bounds` trims partial-coverage rollup days.
-fn compute_local_midnight_cutoff(
-    now: chrono::DateTime<Local>,
+///
+/// `now` is injected (production passes `Local::now()`); the pure date math
+/// lives in [`rollup_cutoff_ts`] and is tested there across DST transitions.
+fn compute_local_midnight_cutoff<Tz: TimeZone>(
+    now: chrono::DateTime<Tz>,
     retain_days: i64,
 ) -> Result<i64, AppError> {
-    let target_day = now
-        .checked_sub_signed(Duration::days(retain_days))
-        .ok_or_else(|| AppError::Database("rollup cutoff overflow".to_string()))?
-        .date_naive();
-
-    // Use the *next* day's midnight so anything before it has fully been bucketed.
-    let next_day = target_day
-        .succ_opt()
-        .ok_or_else(|| AppError::Database("rollup cutoff next-day overflow".to_string()))?;
-    let naive_midnight = next_day
-        .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| AppError::Database("rollup cutoff midnight overflow".to_string()))?;
-
-    let local_dt = match Local.from_local_datetime(&naive_midnight) {
-        chrono::LocalResult::Single(dt) => dt,
-        chrono::LocalResult::Ambiguous(earliest, _) => earliest,
-        chrono::LocalResult::None => {
-            // DST gap: fall back to one hour later, which always exists.
-            let bumped = naive_midnight + Duration::hours(1);
-            match Local.from_local_datetime(&bumped) {
-                chrono::LocalResult::Single(dt) => dt,
-                chrono::LocalResult::Ambiguous(earliest, _) => earliest,
-                chrono::LocalResult::None => {
-                    return Err(AppError::Database(
-                        "rollup cutoff fell into DST gap".to_string(),
-                    ))
-                }
-            }
-        }
-    };
-
-    Ok(local_dt.timestamp())
+    rollup_cutoff_ts(&now, retain_days)
 }
 
 impl Database {

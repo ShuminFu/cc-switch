@@ -8,6 +8,7 @@ use crate::proxy::usage::calculator::ModelPricing;
 use crate::services::sql_helpers::{
     fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL,
 };
+use crate::services::usage_time::provider_limit_windows;
 use chrono::{Local, NaiveDate, TimeZone, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -1601,6 +1602,19 @@ impl Database {
         provider_id: &str,
         app_type: &str,
     ) -> Result<ProviderLimitStatus, AppError> {
+        self.check_provider_limits_at(provider_id, app_type, &Local::now())
+    }
+
+    /// [`check_provider_limits`](Self::check_provider_limits) with an injected
+    /// clock: "today" and "this month" are the calendar day/month of `now` in
+    /// `now`'s time zone, computed in Rust rather than via SQLite's `'now'`.
+    pub(crate) fn check_provider_limits_at<Tz: TimeZone>(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        now: &chrono::DateTime<Tz>,
+    ) -> Result<ProviderLimitStatus, AppError> {
+        let windows = provider_limit_windows(now)?;
         let conn = lock_conn!(self.conn);
 
         // 获取 provider 的限额设置
@@ -1635,14 +1649,22 @@ impl Database {
                     SELECT CAST(total_cost_usd AS REAL) as cost
                     FROM proxy_request_logs
                     WHERE provider_id = ? AND app_type = ?
-                      AND date(datetime(created_at, 'unixepoch', 'localtime')) = date('now', 'localtime')
+                      AND created_at >= ? AND created_at < ?
                     UNION ALL
                     SELECT CAST(total_cost_usd AS REAL)
                     FROM usage_daily_rollups
                     WHERE provider_id = ? AND app_type = ?
-                      AND date = date('now', 'localtime')
+                      AND date = ?
                 )",
-                params![provider_id, app_type, provider_id, app_type],
+                params![
+                    provider_id,
+                    app_type,
+                    windows.day_start,
+                    windows.day_end,
+                    provider_id,
+                    app_type,
+                    windows.day
+                ],
                 |row| row.get(0),
             )
             .unwrap_or(0.0);
@@ -1654,14 +1676,23 @@ impl Database {
                     SELECT CAST(total_cost_usd AS REAL) as cost
                     FROM proxy_request_logs
                     WHERE provider_id = ? AND app_type = ?
-                      AND strftime('%Y-%m', datetime(created_at, 'unixepoch', 'localtime')) = strftime('%Y-%m', 'now', 'localtime')
+                      AND created_at >= ? AND created_at < ?
                     UNION ALL
                     SELECT CAST(total_cost_usd AS REAL)
                     FROM usage_daily_rollups
                     WHERE provider_id = ? AND app_type = ?
-                      AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime')
+                      AND date >= ? AND date < ?
                 )",
-                params![provider_id, app_type, provider_id, app_type],
+                params![
+                    provider_id,
+                    app_type,
+                    windows.month_start,
+                    windows.month_end,
+                    provider_id,
+                    app_type,
+                    windows.month_first_day,
+                    windows.next_month_first_day
+                ],
                 |row| row.get(0),
             )
             .unwrap_or(0.0);
@@ -4148,6 +4179,87 @@ mod tests {
         let result = find_model_pricing_row(&conn, "unknown-model-123")?;
         assert!(result.is_none(), "不应该匹配不存在的模型");
 
+        Ok(())
+    }
+
+    fn utc_ts(s: &str) -> i64 {
+        chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp()
+    }
+
+    fn insert_rollup_cost(conn: &Connection, date: &str, cost: &str) -> Result<(), AppError> {
+        conn.execute(
+            "INSERT INTO usage_daily_rollups (date, app_type, provider_id, model, total_cost_usd)
+             VALUES (?, 'claude', 'lim', 'm', ?)",
+            params![date, cost],
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_provider_limits_use_injected_clock_and_zone() -> Result<(), AppError> {
+        use crate::services::usage_time::test_tz::Eastern2026;
+
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta) VALUES
+                 ('lim', 'claude', 'Limited', '{}',
+                  '{\"limitDailyUsd\":\"1.00\",\"limitMonthlyUsd\":\"5.00\"}')",
+                [],
+            )?;
+            let log = |id: &str, ts: &str, cost: &str| {
+                insert_usage_log(
+                    &conn,
+                    id,
+                    "claude",
+                    "lim",
+                    "m",
+                    "proxy",
+                    utc_ts(ts),
+                    1,
+                    1,
+                    0,
+                    0,
+                    200,
+                    cost,
+                )
+            };
+            // Fall-back day 2026-11-01 runs 04:00Z..05:00Z(next day) — 25h.
+            log("before-day", "2026-11-01T03:59:59Z", "0.10")?; // 10-31 23:59:59 EDT
+            log("day-first", "2026-11-01T04:00:00Z", "0.20")?; // 00:00 EDT
+            log("day-extra-hour", "2026-11-02T04:30:00Z", "0.30")?; // 23:30 EST, still 11-01
+            log("next-day", "2026-11-02T05:00:00Z", "0.40")?; // 11-02 00:00 EST
+            log("other-month", "2026-10-15T12:00:00Z", "0.80")?;
+            insert_rollup_cost(&conn, "2026-11-01", "0.05")?; // today (rolled up)
+            insert_rollup_cost(&conn, "2026-10-31", "0.70")?; // previous month
+            insert_rollup_cost(&conn, "2026-11-30", "0.01")?; // later this month
+            insert_rollup_cost(&conn, "2026-12-01", "9.00")?; // next month
+        }
+
+        // 2026-11-01 20:00 EST
+        let now = Eastern2026
+            .timestamp_opt(utc_ts("2026-11-02T01:00:00Z"), 0)
+            .single()
+            .unwrap();
+        let status = db.check_provider_limits_at("lim", "claude", &now)?;
+
+        // today: 0.20 + 0.30 (25th hour) + 0.05 rollup
+        assert_eq!(status.daily_usage, "0.550000");
+        assert_eq!(status.daily_limit.as_deref(), Some("1.00"));
+        assert!(!status.daily_exceeded);
+        // November: 0.20 + 0.30 + 0.40 + rollups 0.05 + 0.01
+        assert_eq!(status.monthly_usage, "0.960000");
+        assert!(!status.monthly_exceeded);
+
+        // Same data, clock moved to 2026-10-31 23:00 EDT: October totals
+        let october = Eastern2026
+            .timestamp_opt(utc_ts("2026-11-01T03:00:00Z"), 0)
+            .single()
+            .unwrap();
+        let status = db.check_provider_limits_at("lim", "claude", &october)?;
+        assert_eq!(status.daily_usage, "0.800000"); // 0.10 log + 0.70 rollup
+        assert_eq!(status.monthly_usage, "1.600000"); // 0.10 + 0.80 + 0.70
         Ok(())
     }
 }
