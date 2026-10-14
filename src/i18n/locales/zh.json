@@ -40,7 +40,13 @@
     "deleting": "删除中...",
     "auto": "自动",
     "enabled": "已开启",
-    "notSet": "未设置"
+    "notSet": "未设置",
+    "externalChangeMessage": "文件已在外部被修改，而你有未保存的编辑。",
+    "externalChangeReload": "重新加载",
+    "externalChangeKeepMine": "保留我的修改",
+    "discardChangesTitle": "放弃未保存的修改？",
+    "discardChangesMessage": "你的编辑尚未保存，关闭后将会丢失。",
+    "discardChanges": "放弃修改"
   },
   "firstRunNotice": {
     "title": "欢迎使用 CC Switch",

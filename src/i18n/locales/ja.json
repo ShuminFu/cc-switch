@@ -40,7 +40,13 @@
     "deleting": "削除中...",
     "auto": "自動",
     "enabled": "有効",
-    "notSet": "未設定"
+    "notSet": "未設定",
+    "externalChangeMessage": "未保存の編集がある間に、ディスク上のファイルが変更されました。",
+    "externalChangeReload": "再読み込み",
+    "externalChangeKeepMine": "自分の編集を保持",
+    "discardChangesTitle": "未保存の変更を破棄しますか？",
+    "discardChangesMessage": "編集内容は保存されておらず、失われます。",
+    "discardChanges": "破棄"
   },
   "firstRunNotice": {
     "title": "CC Switch へようこそ",

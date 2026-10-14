@@ -64,7 +64,14 @@ export function ConfirmDialog({
         }
       }}
     >
-      <DialogContent className="max-w-sm" zIndex={zIndex}>
+      <DialogContent
+        className="max-w-sm"
+        zIndex={zIndex}
+        // Radix handles ESC in a document capture listener. Stop it there so
+        // the same key press doesn't also reach window-level ESC handlers
+        // (FullScreenPanel, App) and close whatever is underneath.
+        onEscapeKeyDown={(event) => event.stopPropagation()}
+      >
         <DialogHeader className="space-y-3 border-b-0 bg-transparent pb-0">
           <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
             <IconComponent className={iconClass} />
