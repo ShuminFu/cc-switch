@@ -356,6 +356,8 @@ struct SseUsageCollectorInner {
     start_time: std::time::Instant,
     on_complete: UsageCallbackWithTiming,
     should_collect: Option<StreamUsageEventFilter>,
+    /// 首个 data 事件是否已经放行（见 `should_collect`）。
+    first_data_seen: AtomicBool,
     finished: AtomicBool,
 }
 
@@ -375,16 +377,26 @@ impl SseUsageCollector {
                 start_time,
                 on_complete,
                 should_collect,
+                first_data_seen: AtomicBool::new(false),
                 finished: AtomicBool::new(false),
             }),
         }
     }
 
+    /// 预过滤：只解析 usage 相关事件，但首个 data 事件总是放行。
+    ///
+    /// 部分上游只在早期 chunk 里回显实际模型（Gemini 的 `modelVersion`、
+    /// OpenAI 兼容网关首个 chunk 的 `model`），而该 chunk 不含 usage 字段。
+    /// 若按 usage 标记过滤掉它，模型提取器就只能回退到请求模型，导致计费归因错误。
     pub fn should_collect(&self, data: &str) -> bool {
-        self.inner
-            .should_collect
-            .map(|filter| filter(data))
-            .unwrap_or(true)
+        let Some(filter) = self.inner.should_collect else {
+            return true;
+        };
+        if filter(data) {
+            self.inner.first_data_seen.store(true, Ordering::Release);
+            return true;
+        }
+        !self.inner.first_data_seen.swap(true, Ordering::AcqRel)
     }
 
     /// 标记首个被收集的 SSE 事件时间，沿用 `first_token_ms` 的既有近似语义。
@@ -842,6 +854,40 @@ fn format_headers(headers: &HeaderMap) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn usage_filter_keeps_first_event_for_model_attribution() {
+        let collected: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+        let sink = collected.clone();
+        let collector = SseUsageCollector::new(
+            std::time::Instant::now(),
+            crate::proxy::handler_config::GEMINI_PARSER_CONFIG.stream_event_filter,
+            move |events, _| *sink.lock().unwrap() = events,
+        );
+        let chunks = [
+            r#"{"candidates":[{"content":{"parts":[{"text":"Hi"}]}}],"modelVersion":"gemini-2.5-pro-preview"}"#,
+            r#"{"candidates":[{"content":{"parts":[{"text":" there"}]}}]}"#,
+            r#"{"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"totalTokenCount":8}}"#,
+        ];
+        for chunk in chunks {
+            inspect_passthrough_sse_block(&format!("data: {chunk}\n\n"), Some(&collector), "test")
+                .await;
+        }
+        collector.finish().await;
+
+        let events = collected.lock().unwrap().clone();
+        // 首个 chunk（带 modelVersion）与 usage chunk 保留，中间纯文本 chunk 被过滤
+        assert_eq!(events.len(), 2);
+        let config = crate::proxy::handler_config::GEMINI_PARSER_CONFIG;
+        assert_eq!(
+            (config.model_extractor)(&events, "requested-model"),
+            "gemini-2.5-pro-preview"
+        );
+        assert_eq!(
+            (config.stream_parser)(&events).map(|u| u.output_tokens),
+            Some(5)
+        );
+    }
     use crate::database::Database;
     use crate::error::AppError;
     use crate::provider::ProviderMeta;
