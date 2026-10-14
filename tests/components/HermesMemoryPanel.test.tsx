@@ -24,9 +24,16 @@ vi.mock("@/components/MarkdownEditor", () => ({
   ),
 }));
 
+const memory = vi.hoisted(() => ({
+  data: { memory: "agent memory", user: "user profile" } as Record<
+    string,
+    string
+  >,
+}));
+
 vi.mock("@/hooks/useHermes", () => ({
   useHermesMemory: (kind: string) => ({
-    data: kind === "memory" ? "agent memory" : "user profile",
+    data: memory.data[kind],
     isLoading: false,
   }),
   useHermesMemoryLimits: () => ({ data: undefined }),
@@ -58,5 +65,31 @@ describe("HermesMemoryPanel", () => {
       screen.getByRole("tab", { name: "hermes.memory.agentTab" }),
     );
     expect(visibleEditor().value).toBe("agent memory (edited)");
+  });
+
+  it("re-seeds a clean pane when the memory file changes on disk", () => {
+    memory.data = { memory: "agent memory", user: "user profile" };
+    const { rerender } = render(<HermesMemoryPanel />);
+
+    memory.data = { memory: "agent memory v2", user: "user profile" };
+    rerender(<HermesMemoryPanel />);
+    expect(visibleEditor().value).toBe("agent memory v2");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("offers Reload / Keep mine when the file changes under unsaved edits", () => {
+    memory.data = { memory: "agent memory", user: "user profile" };
+    const { rerender } = render(<HermesMemoryPanel />);
+    fireEvent.change(visibleEditor(), { target: { value: "mine" } });
+
+    memory.data = { memory: "from disk", user: "user profile" };
+    rerender(<HermesMemoryPanel />);
+
+    expect(visibleEditor().value).toBe("mine");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("common.externalChangeReload"));
+    expect(visibleEditor().value).toBe("from disk");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

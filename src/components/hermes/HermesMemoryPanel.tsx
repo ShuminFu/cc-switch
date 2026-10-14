@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ExternalLink } from "lucide-react";
@@ -16,6 +16,10 @@ import {
 import { useDarkMode } from "@/hooks/useDarkMode";
 import type { HermesMemoryKind } from "@/types";
 import { cn } from "@/lib/utils";
+import { useEditableResource } from "@/hooks/useEditableResource";
+import { ExternalChangeBanner } from "@/components/common/ExternalChangeBanner";
+
+const identity = (value: string) => value;
 
 interface MemoryTabPaneProps {
   kind: HermesMemoryKind;
@@ -33,22 +37,27 @@ const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
   const { data, isLoading } = useHermesMemory(kind, true);
   const saveMutation = useSaveHermesMemory();
   const toggleMutation = useToggleHermesMemoryEnabled();
-  const [content, setContent] = useState("");
-  const [loaded, setLoaded] = useState(false);
-
-  // Hydrate local dirty buffer from query data only on first load. Later
-  // refetches (e.g. after a successful save) must not clobber in-flight user
-  // edits — the caller owns `content` until they click Save again.
-  useEffect(() => {
-    if (!loaded && data !== undefined) {
-      setContent(data);
-      setLoaded(true);
-    }
-  }, [data, loaded]);
+  // Refetches never clobber in-flight edits; if the memory file changes on
+  // disk while there are unsaved edits, offer Reload / Keep mine.
+  const {
+    draft: content,
+    setDraft: setContent,
+    isSeeded: loaded,
+    externalChange,
+    reload,
+    keepMine,
+    markSaved,
+  } = useEditableResource<string, string>({
+    data,
+    toDraft: identity,
+    initialDraft: "",
+  });
 
   const handleSave = async () => {
+    const snapshot = content;
     try {
-      await saveMutation.mutateAsync({ kind, content });
+      await saveMutation.mutateAsync({ kind, content: snapshot });
+      markSaved(snapshot);
       toast.success(t("hermes.memory.saveSuccess"));
     } catch {
       // useSaveHermesMemory already surfaces a localized error toast.
@@ -86,6 +95,10 @@ const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
           </span>
         )}
       </div>
+
+      {externalChange && (
+        <ExternalChangeBanner onReload={reload} onKeepMine={keepMine} />
+      )}
 
       {isLoading && !loaded ? (
         <div className="flex items-center justify-center h-64 text-muted-foreground">
