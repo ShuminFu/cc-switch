@@ -711,7 +711,7 @@ export function ClaudeDesktopProviderForm({
           type="button"
           variant="outline"
           size="sm"
-          onClick={handleFetchModels}
+          onClick={() => void handleFetchModels()}
           disabled={isFetchingModels}
           className="h-7 gap-1"
         >
@@ -740,7 +740,18 @@ export function ClaudeDesktopProviderForm({
     <Form {...form}>
       <form
         id="provider-form"
-        onSubmit={form.handleSubmit(handleSubmit)}
+        onSubmit={(event) => {
+          // Provider mutation failures are already toasted by their onError;
+          // log here so the rejection isn't left unhandled.
+          form
+            .handleSubmit(handleSubmit)(event)
+            .catch((error) =>
+              console.error(
+                "[ClaudeDesktopProviderForm] submit failed:",
+                error,
+              ),
+            );
+        }}
         className="space-y-6"
       >
         {!initialData && (
@@ -896,7 +907,7 @@ export function ClaudeDesktopProviderForm({
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={handleFetchModels}
+                          onClick={() => void handleFetchModels()}
                           disabled={isFetchingModels}
                           className="h-7 gap-1"
                         >

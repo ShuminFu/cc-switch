@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { useCodexOauth } from "./hooks/useCodexOauth";
 import { copyText } from "@/lib/clipboard";
+import { toast } from "sonner";
+import { extractErrorMessage } from "@/utils/errorUtils";
 
 interface CodexOAuthSectionProps {
   className?: string;
@@ -73,7 +75,14 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
 
   const copyUserCode = async () => {
     if (deviceCode?.user_code) {
-      await copyText(deviceCode.user_code);
+      try {
+        await copyText(deviceCode.user_code);
+      } catch (error) {
+        toast.error(t("common.error"), {
+          description: extractErrorMessage(error) || undefined,
+        });
+        return;
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -272,7 +281,7 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
                 type="button"
                 size="icon"
                 variant="ghost"
-                onClick={copyUserCode}
+                onClick={() => void copyUserCode()}
                 title={t("codexOauth.copyCode", "复制代码")}
               >
                 {copied ? (

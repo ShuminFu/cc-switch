@@ -405,7 +405,7 @@ export function AddProviderDialog({
         <UniversalProviderFormModal
           isOpen={universalFormOpen}
           onClose={handleUniversalFormClose}
-          onSave={handleUniversalProviderSave}
+          onSave={(provider) => void handleUniversalProviderSave(provider)}
           initialPreset={selectedUniversalPreset}
         />
       )}

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Save, Download, Loader2, Package } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { Button } from "@/components/ui/button";
 import JsonEditor from "@/components/JsonEditor";
@@ -59,8 +61,14 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
   };
 
   const handleSave = async () => {
-    if (await onSave(draftValue)) {
-      onClose();
+    try {
+      if (await onSave(draftValue)) {
+        onClose();
+      }
+    } catch (error) {
+      toast.error(t("common.error"), {
+        description: extractErrorMessage(error) || undefined,
+      });
     }
   };
 
@@ -92,7 +100,11 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
           <Button type="button" variant="outline" onClick={handleClose}>
             {t("common.cancel")}
           </Button>
-          <Button type="button" onClick={handleSave} className="gap-2">
+          <Button
+            type="button"
+            onClick={() => void handleSave()}
+            className="gap-2"
+          >
             <Save className="w-4 h-4" />
             {t("common.save")}
           </Button>

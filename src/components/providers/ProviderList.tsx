@@ -209,7 +209,7 @@ export function ProviderList({
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
   const handleTest = useCallback(
     (provider: Provider) => {
-      checkProvider(provider.id, provider.name);
+      void checkProvider(provider.id, provider.name);
     },
     [checkProvider],
   );
@@ -238,9 +238,11 @@ export function ProviderList({
     },
     onSuccess: (imported) => {
       if (imported) {
-        queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+        void queryClient.invalidateQueries({ queryKey: ["providers", appId] });
         if (appId === "claude-desktop") {
-          queryClient.invalidateQueries({ queryKey: ["claudeDesktopStatus"] });
+          void queryClient.invalidateQueries({
+            queryKey: ["claudeDesktopStatus"],
+          });
         }
         toast.success(t("provider.importCurrentDescription"));
       } else {
@@ -380,7 +382,7 @@ export function ProviderList({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
-      onDragEnd={handleDragEnd}
+      onDragEnd={(event) => void handleDragEnd(event)}
     >
       <SortableContext
         items={filteredProviders.map((provider) => provider.id)}

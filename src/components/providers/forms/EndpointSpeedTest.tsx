@@ -188,7 +188,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
 
     // 只在编辑模式下加载
     if (providerId) {
-      loadCustomEndpoints();
+      void loadCustomEndpoints();
     }
 
     return () => {
@@ -459,7 +459,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
       </Button>
       <Button
         type="button"
-        onClick={handleSave}
+        onClick={() => void handleSave()}
         disabled={isSaving}
         className="gap-2"
       >
@@ -505,7 +505,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
             </label>
             <Button
               type="button"
-              onClick={runSpeedTest}
+              onClick={() => void runSpeedTest()}
               disabled={isTesting || !hasEndpoints}
               size="sm"
               className="h-7 w-24 gap-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
@@ -536,14 +536,14 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
-                  handleAddEndpoint();
+                  void handleAddEndpoint();
                 }
               }}
               className="flex-1"
             />
             <Button
               type="button"
-              onClick={handleAddEndpoint}
+              onClick={() => void handleAddEndpoint()}
               variant="outline"
               size="icon"
             >

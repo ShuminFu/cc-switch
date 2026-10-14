@@ -162,7 +162,7 @@ export function useCodexCommonConfig({
       }
     };
 
-    loadSnippet();
+    void loadSnippet();
 
     return () => {
       mounted = false;
@@ -208,7 +208,7 @@ export function useCodexCommonConfig({
     if (hasCommon && !inferredHasCommon && parsedSnippet.hasContent) {
       let cancelled = false;
       const seq = ++tomlOpSeqRef.current;
-      (async () => {
+      void (async () => {
         const { updatedConfig, error } = await applyTomlSnippet(
           codexConfig,
           commonConfigSnippet,
@@ -271,7 +271,7 @@ export function useCodexCommonConfig({
 
     let cancelled = false;
     const seq = ++tomlOpSeqRef.current;
-    (async () => {
+    void (async () => {
       const { updatedConfig, error } = await applyTomlSnippet(
         codexConfig,
         commonConfigSnippet,

@@ -108,7 +108,7 @@ export function useCommonConfigSnippet({
       }
     };
 
-    loadSnippet();
+    void loadSnippet();
 
     return () => {
       mounted = false;

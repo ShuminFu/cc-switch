@@ -48,7 +48,7 @@ export function UniversalProviderPanel() {
   }, [t]);
 
   useEffect(() => {
-    loadProviders();
+    void loadProviders();
   }, [loadProviders]);
 
   // 添加/编辑供应商
@@ -71,7 +71,7 @@ export function UniversalProviderPanel() {
                 defaultValue: "统一供应商已添加并同步",
               }),
         );
-        loadProviders();
+        void loadProviders();
         setEditingProvider(null);
       } catch (error) {
         console.error("Failed to save universal provider:", error);
@@ -96,7 +96,7 @@ export function UniversalProviderPanel() {
             defaultValue: "已保存并同步到所有应用",
           }),
         );
-        loadProviders();
+        void loadProviders();
         setEditingProvider(null);
       } catch (error) {
         console.error("Failed to save and sync universal provider:", error);
@@ -119,7 +119,7 @@ export function UniversalProviderPanel() {
       toast.success(
         t("universalProvider.deleted", { defaultValue: "统一供应商已删除" }),
       );
-      loadProviders();
+      void loadProviders();
     } catch (error) {
       console.error("Failed to delete universal provider:", error);
       toast.error(
@@ -183,7 +183,7 @@ export function UniversalProviderPanel() {
             defaultValue: "统一供应商已复制并同步",
           }),
         );
-        loadProviders();
+        void loadProviders();
       } catch (error) {
         console.error("Failed to duplicate universal provider:", error);
         toast.error(
@@ -266,7 +266,7 @@ export function UniversalProviderPanel() {
               onEdit={handleEdit}
               onDelete={handleDeleteClick}
               onSync={handleSyncClick}
-              onDuplicate={handleDuplicate}
+              onDuplicate={(provider) => void handleDuplicate(provider)}
             />
           ))}
         </div>
@@ -279,8 +279,8 @@ export function UniversalProviderPanel() {
           setIsFormOpen(false);
           setEditingProvider(null);
         }}
-        onSave={handleSave}
-        onSaveAndSync={handleSaveAndSync}
+        onSave={(provider) => void handleSave(provider)}
+        onSaveAndSync={(provider) => void handleSaveAndSync(provider)}
         editingProvider={editingProvider}
       />
 
@@ -295,7 +295,7 @@ export function UniversalProviderPanel() {
           name: deleteConfirm.name,
         })}
         confirmText={t("common.delete", { defaultValue: "删除" })}
-        onConfirm={handleDelete}
+        onConfirm={() => void handleDelete()}
         onCancel={() => setDeleteConfirm({ open: false, id: "", name: "" })}
       />
 
@@ -312,7 +312,7 @@ export function UniversalProviderPanel() {
         confirmText={t("universalProvider.syncConfirm", {
           defaultValue: "同步",
         })}
-        onConfirm={handleSync}
+        onConfirm={() => void handleSync()}
         onCancel={() => setSyncConfirm({ open: false, id: "", name: "" })}
       />
     </div>

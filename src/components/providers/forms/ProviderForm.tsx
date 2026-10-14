@@ -1853,12 +1853,44 @@ function ProviderFormFull({
     />
   );
 
+  const handleSoftConfirm = async () => {
+    if (isConfirmSubmitting) return;
+    const values = pendingFormValues;
+    const overridesResult = pendingLocalProxyRequestOverridesResult;
+    if (!values || !overridesResult) {
+      setSoftIssues(null);
+      setPendingFormValues(null);
+      setPendingLocalProxyRequestOverridesResult(null);
+      return;
+    }
+    setIsConfirmSubmitting(true);
+    try {
+      await performSubmit(values, overridesResult);
+      setSoftIssues(null);
+      setPendingFormValues(null);
+      setPendingLocalProxyRequestOverridesResult(null);
+    } catch (error) {
+      console.error("[ProviderForm] soft-confirm submit failed:", error);
+      // 保留确认框和 pending values，让用户可以重试或取消
+    } finally {
+      setIsConfirmSubmitting(false);
+    }
+  };
+
   return (
     <>
       <Form {...form}>
         <form
           id="provider-form"
-          onSubmit={form.handleSubmit(handleSubmit)}
+          onSubmit={(event) => {
+            // Provider mutation failures are already toasted by their onError;
+            // log here so the rejection isn't left unhandled.
+            form
+              .handleSubmit(handleSubmit)(event)
+              .catch((error) =>
+                console.error("[ProviderForm] submit failed:", error),
+              );
+          }}
           className="space-y-6 glass rounded-xl p-6 border border-white/10"
         >
           {!initialData && (
@@ -2354,7 +2386,7 @@ function ProviderFormFull({
                 commonConfigError={codexCommonConfigError}
                 authError={codexAuthError}
                 configError={codexConfigError}
-                onExtract={handleCodexExtract}
+                onExtract={() => void handleCodexExtract()}
                 isExtracting={isCodexExtracting}
               />
               {settingsConfigErrorField}
@@ -2376,7 +2408,7 @@ function ProviderFormFull({
                 commonConfigError={geminiCommonConfigError}
                 envError={envError}
                 configError={geminiConfigError}
-                onExtract={handleGeminiExtract}
+                onExtract={() => void handleGeminiExtract()}
                 isExtracting={isGeminiExtracting}
               />
               {settingsConfigErrorField}
@@ -2473,7 +2505,7 @@ function ProviderFormFull({
                 onEditClick={() => setIsCommonConfigModalOpen(true)}
                 isModalOpen={isCommonConfigModalOpen}
                 onModalClose={() => setIsCommonConfigModalOpen(false)}
-                onExtract={handleClaudeExtract}
+                onExtract={() => void handleClaudeExtract()}
                 isExtracting={isClaudeExtracting}
               />
               {settingsConfigErrorField}
@@ -2534,29 +2566,7 @@ function ProviderFormFull({
           defaultValue: "仍要保存",
         })}
         cancelText={t("common.cancel")}
-        onConfirm={async () => {
-          if (isConfirmSubmitting) return;
-          const values = pendingFormValues;
-          const overridesResult = pendingLocalProxyRequestOverridesResult;
-          if (!values || !overridesResult) {
-            setSoftIssues(null);
-            setPendingFormValues(null);
-            setPendingLocalProxyRequestOverridesResult(null);
-            return;
-          }
-          setIsConfirmSubmitting(true);
-          try {
-            await performSubmit(values, overridesResult);
-            setSoftIssues(null);
-            setPendingFormValues(null);
-            setPendingLocalProxyRequestOverridesResult(null);
-          } catch (error) {
-            console.error("[ProviderForm] soft-confirm submit failed:", error);
-            // 保留确认框和 pending values，让用户可以重试或取消
-          } finally {
-            setIsConfirmSubmitting(false);
-          }
-        }}
+        onConfirm={() => void handleSoftConfirm()}
         onCancel={() => {
           if (isConfirmSubmitting) return;
           setSoftIssues(null);

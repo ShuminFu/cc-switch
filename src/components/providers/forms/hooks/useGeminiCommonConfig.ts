@@ -207,7 +207,7 @@ export function useGeminiCommonConfig({
       }
     };
 
-    loadSnippet();
+    void loadSnippet();
 
     return () => {
       mounted = false;

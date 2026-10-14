@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { useCopilotAuth } from "./hooks/useCopilotAuth";
 import { copyText } from "@/lib/clipboard";
+import { toast } from "sonner";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import type { GitHubAccount } from "@/lib/api";
 
 interface CopilotAuthSectionProps {
@@ -82,7 +84,14 @@ export const CopilotAuthSection: React.FC<CopilotAuthSectionProps> = ({
   // 复制用户码
   const copyUserCode = async () => {
     if (deviceCode?.user_code) {
-      await copyText(deviceCode.user_code);
+      try {
+        await copyText(deviceCode.user_code);
+      } catch (error) {
+        toast.error(t("common.error"), {
+          description: extractErrorMessage(error) || undefined,
+        });
+        return;
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -323,7 +332,7 @@ export const CopilotAuthSection: React.FC<CopilotAuthSectionProps> = ({
                 type="button"
                 size="icon"
                 variant="ghost"
-                onClick={copyUserCode}
+                onClick={() => void copyUserCode()}
                 title={t("copilot.copyCode", "复制代码")}
               >
                 {copied ? (

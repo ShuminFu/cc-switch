@@ -1177,7 +1177,7 @@ export function OmoFormFields({
             size="sm"
             className="h-7 text-xs"
             disabled={readLocalFile.isPending}
-            onClick={handleImportFromLocal}
+            onClick={() => void handleImportFromLocal()}
           >
             {readLocalFile.isPending ? (
               <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />

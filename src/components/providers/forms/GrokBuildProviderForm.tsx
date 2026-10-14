@@ -397,7 +397,15 @@ export function GrokBuildProviderForm({
     <Form {...form}>
       <form
         id="provider-form"
-        onSubmit={form.handleSubmit(handleSubmit)}
+        onSubmit={(event) => {
+          // Provider mutation failures are already toasted by their onError;
+          // log here so the rejection isn't left unhandled.
+          form
+            .handleSubmit(handleSubmit)(event)
+            .catch((error) =>
+              console.error("[GrokBuildProviderForm] submit failed:", error),
+            );
+        }}
         className="space-y-6"
       >
         {!initialData && (

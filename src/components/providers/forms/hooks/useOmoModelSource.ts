@@ -72,7 +72,7 @@ export function useOmoModelSource({
     setEnabledOpencodeProviderIds(null);
     setOmoLiveIdsLoadFailed(false);
 
-    (async () => {
+    void (async () => {
       try {
         const ids = await providersApi.getOpenCodeLiveProviderIds();
         if (active) {

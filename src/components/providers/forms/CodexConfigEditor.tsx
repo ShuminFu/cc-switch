@@ -95,7 +95,7 @@ const CodexConfigEditor: React.FC<CodexConfigEditorProps> = ({
         providerName={providerName}
         showRemoteCompaction={showRemoteCompaction}
         useCommonConfig={useCommonConfig}
-        onCommonConfigToggle={onCommonConfigToggle}
+        onCommonConfigToggle={(checked) => void onCommonConfigToggle(checked)}
         onEditCommonConfig={() => setIsCommonConfigModalOpen(true)}
         commonConfigError={commonConfigError}
         configError={configError}
