@@ -104,7 +104,7 @@ export function ProxyClientTokenField() {
             size="sm"
             variant="outline"
             disabled={!token}
-            onClick={handleCopy}
+            onClick={() => void handleCopy()}
           >
             {t("common.copy")}
           </Button>
@@ -113,7 +113,7 @@ export function ProxyClientTokenField() {
             size="sm"
             variant="outline"
             disabled={busy || !token}
-            onClick={handleRegenerate}
+            onClick={() => void handleRegenerate()}
           >
             {t("proxy.settings.fields.clientToken.regenerate")}
           </Button>
