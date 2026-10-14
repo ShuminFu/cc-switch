@@ -35,6 +35,27 @@ describe("OpenClaw AgentsDefaultsPanel numeric validation", () => {
     },
   );
 
+  it("shows the integer error inline next to the field", () => {
+    state.agents = {};
+    render(<AgentsDefaultsPanel />);
+    const field = screen.getByPlaceholderText("4");
+    fireEvent.change(field, { target: { value: "1.5" } });
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("common.integerInvalid")).toBeInTheDocument();
+  });
+
+  it("refuses to re-save a non-integer value loaded from disk", async () => {
+    state.agents = { timeoutSeconds: 1.5 };
+    render(<AgentsDefaultsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "openclaw.agents.invalidInteger",
+      ),
+    );
+    expect(state.save).not.toHaveBeenCalled();
+  });
+
   it("saves valid whole numbers", async () => {
     state.agents = {};
     render(<AgentsDefaultsPanel />);

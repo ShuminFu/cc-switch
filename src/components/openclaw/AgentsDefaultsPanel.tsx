@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Save, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -23,9 +23,23 @@ import { useOpenClawModelOptions } from "./hooks/useOpenClawModelOptions";
 import { getOpenClawTimeoutInputValue } from "./utils";
 import { useEditableResource } from "@/hooks/useEditableResource";
 import { ExternalChangeBanner } from "@/components/common/ExternalChangeBanner";
+import { IntegerField } from "@/components/common/IntegerField";
 import { parseStrictNonNegativeInt } from "@/utils/numberInput";
 
 const UNSET_SENTINEL = "__unset__";
+
+type NumericField = "timeout" | "contextTokens" | "maxConcurrent";
+
+const NUMERIC_FIELDS: ReadonlyArray<{ key: NumericField; labelKey: string }> = [
+  { key: "timeout", labelKey: "openclaw.agents.timeout" },
+  { key: "contextTokens", labelKey: "openclaw.agents.contextTokens" },
+  { key: "maxConcurrent", labelKey: "openclaw.agents.maxConcurrent" },
+];
+
+/** Draft strings hold digits only; empty means "unset". */
+const toFieldValue = (raw: string) => (raw ? Number(raw) : undefined);
+const fromFieldValue = (value: number | undefined) =>
+  value === undefined ? "" : String(value);
 
 interface AgentsDraft {
   primaryModel: string;
@@ -108,6 +122,14 @@ const AgentsDefaultsPanel: React.FC = () => {
   const setContextTokens = setDraftField("contextTokens");
   const setMaxConcurrent = setDraftField("maxConcurrent");
 
+  // IntegerField keeps the last valid value while showing an inline error;
+  // remember which fields currently hold invalid text so Save can refuse.
+  const [invalidNumeric, setInvalidNumeric] = useState<
+    Partial<Record<NumericField, boolean>>
+  >({});
+  const trackValidity = (key: NumericField) => (valid: boolean) =>
+    setInvalidNumeric((prev) => ({ ...prev, [key]: !valid }));
+
   // Build primary options, including a "not in list" entry if current value is missing
   const primaryOptions = useMemo(() => {
     const result = [...modelOptions];
@@ -174,19 +196,22 @@ const AgentsDefaultsPanel: React.FC = () => {
     const snapshot = draft;
     // Numeric fields must be non-negative whole numbers. Reject instead of
     // silently saving a decimal/negative value or dropping the field.
-    const numericFields = [
-      { raw: timeout, labelKey: "openclaw.agents.timeout" },
-      { raw: contextTokens, labelKey: "openclaw.agents.contextTokens" },
-      { raw: maxConcurrent, labelKey: "openclaw.agents.maxConcurrent" },
-    ] as const;
-    const [timeoutNum, ctxNum, concNum] = numericFields.map(({ raw }) =>
-      parseStrictNonNegativeInt(raw),
+    const rawValues: Record<NumericField, string> = {
+      timeout,
+      contextTokens,
+      maxConcurrent,
+    };
+    const [timeoutNum, ctxNum, concNum] = NUMERIC_FIELDS.map(({ key }) =>
+      parseStrictNonNegativeInt(rawValues[key]),
     );
-    const invalidIndex = [timeoutNum, ctxNum, concNum].indexOf(null);
-    if (invalidIndex !== -1) {
+    const invalidField = NUMERIC_FIELDS.find(
+      ({ key }, i) =>
+        invalidNumeric[key] || [timeoutNum, ctxNum, concNum][i] === null,
+    );
+    if (invalidField) {
       toast.error(
         t("openclaw.agents.invalidInteger", {
-          field: t(numericFields[invalidIndex].labelKey),
+          field: t(invalidField.labelKey),
         }),
       );
       return;
@@ -423,15 +448,11 @@ const AgentsDefaultsPanel: React.FC = () => {
             <Label className="mb-1.5 block">
               {t("openclaw.agents.timeout")}
             </Label>
-            <Input
-              type="number"
+            <IntegerField
               min={0}
-              step={1}
-              inputMode="numeric"
-              value={timeout}
-              onChange={(e) => {
-                setTimeout_(e.target.value);
-              }}
+              value={toFieldValue(timeout)}
+              onValueChange={(value) => setTimeout_(fromFieldValue(value))}
+              onValidityChange={trackValidity("timeout")}
               placeholder="300"
               className="font-mono text-xs"
             />
@@ -441,15 +462,11 @@ const AgentsDefaultsPanel: React.FC = () => {
             <Label className="mb-1.5 block">
               {t("openclaw.agents.contextTokens")}
             </Label>
-            <Input
-              type="number"
+            <IntegerField
               min={0}
-              step={1}
-              inputMode="numeric"
-              value={contextTokens}
-              onChange={(e) => {
-                setContextTokens(e.target.value);
-              }}
+              value={toFieldValue(contextTokens)}
+              onValueChange={(value) => setContextTokens(fromFieldValue(value))}
+              onValidityChange={trackValidity("contextTokens")}
               placeholder="200000"
               className="font-mono text-xs"
             />
@@ -459,15 +476,11 @@ const AgentsDefaultsPanel: React.FC = () => {
             <Label className="mb-1.5 block">
               {t("openclaw.agents.maxConcurrent")}
             </Label>
-            <Input
-              type="number"
+            <IntegerField
               min={0}
-              step={1}
-              inputMode="numeric"
-              value={maxConcurrent}
-              onChange={(e) => {
-                setMaxConcurrent(e.target.value);
-              }}
+              value={toFieldValue(maxConcurrent)}
+              onValueChange={(value) => setMaxConcurrent(fromFieldValue(value))}
+              onValidityChange={trackValidity("maxConcurrent")}
               placeholder="4"
               className="font-mono text-xs"
             />
