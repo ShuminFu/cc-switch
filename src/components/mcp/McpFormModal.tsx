@@ -427,7 +427,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
         footer={
           <Button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
             disabled={saving || (!isEditing && !!idError)}
             className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
           >

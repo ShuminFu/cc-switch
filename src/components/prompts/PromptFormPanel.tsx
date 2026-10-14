@@ -126,7 +126,7 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
       footer={
         <Button
           type="button"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           disabled={!name.trim() || saving}
           className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
         >

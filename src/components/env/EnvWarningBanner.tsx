@@ -264,7 +264,7 @@ export function EnvWarningBanner({
             >
               {t("common.cancel")}
             </Button>
-            <Button variant="destructive" onClick={handleDelete}>
+            <Button variant="destructive" onClick={() => void handleDelete()}>
               {t("env.confirm.confirm")}
             </Button>
           </DialogFooter>

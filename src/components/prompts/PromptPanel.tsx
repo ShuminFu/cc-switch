@@ -41,7 +41,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
     } = usePromptActions(appId);
 
     useEffect(() => {
-      if (open) reload();
+      if (open) void reload();
     }, [open, reload]);
 
     // Listen for prompt import events from deep link
@@ -50,7 +50,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
         const customEvent = event as CustomEvent;
         // Reload if the import is for this app
         if (customEvent.detail?.app === appId) {
-          reload();
+          void reload();
         }
       };
 
@@ -83,6 +83,15 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       toggleEnabled(id, enabled).catch(() => {});
     };
 
+    const confirmDelete = async (id: string) => {
+      try {
+        await deletePrompt(id);
+        setConfirmDialog(null);
+      } catch (e) {
+        // Error handled by hook
+      }
+    };
+
     const handleDelete = (id: string) => {
       const prompt = prompts[id];
       setConfirmDialog({
@@ -90,14 +99,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
         titleKey: "prompts.confirm.deleteTitle",
         messageKey: "prompts.confirm.deleteMessage",
         messageParams: { name: prompt?.name },
-        onConfirm: async () => {
-          try {
-            await deletePrompt(id);
-            setConfirmDialog(null);
-          } catch (e) {
-            // Error handled by hook
-          }
-        },
+        onConfirm: () => void confirmDelete(id),
       });
     };
 

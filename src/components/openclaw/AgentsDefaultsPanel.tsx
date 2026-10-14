@@ -492,7 +492,7 @@ const AgentsDefaultsPanel: React.FC = () => {
       <div className="flex justify-end">
         <Button
           size="sm"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           disabled={saveAgentsMutation.isPending}
         >
           <Save className="w-4 h-4 mr-1" />

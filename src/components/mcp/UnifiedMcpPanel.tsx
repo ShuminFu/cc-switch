@@ -118,20 +118,22 @@ const UnifiedMcpPanel = React.forwardRef<
     openImport: handleImport,
   }));
 
+  const deleteServer = async (id: string) => {
+    try {
+      await deleteServerMutation.mutateAsync(id);
+      setConfirmDialog(null);
+      toast.success(t("common.success"), { closeButton: true });
+    } catch (error) {
+      toast.error(t("common.error"), { description: String(error) });
+    }
+  };
+
   const handleDelete = (id: string) => {
     setConfirmDialog({
       isOpen: true,
       title: t("mcp.unifiedPanel.deleteServer"),
       message: t("mcp.unifiedPanel.deleteConfirm", { id }),
-      onConfirm: async () => {
-        try {
-          await deleteServerMutation.mutateAsync(id);
-          setConfirmDialog(null);
-          toast.success(t("common.success"), { closeButton: true });
-        } catch (error) {
-          toast.error(t("common.error"), { description: String(error) });
-        }
-      },
+      onConfirm: () => void deleteServer(id),
     });
   };
 
@@ -173,7 +175,9 @@ const UnifiedMcpPanel = React.forwardRef<
                   key={id}
                   id={id}
                   server={server}
-                  onToggleApp={handleToggleApp}
+                  onToggleApp={(serverId, app, enabled) =>
+                    void handleToggleApp(serverId, app, enabled)
+                  }
                   onEdit={handleEdit}
                   onDelete={handleDelete}
                   isLast={index === serverEntries.length - 1}
@@ -261,7 +265,7 @@ const UnifiedMcpListItem: React.FC<UnifiedMcpListItemProps> = ({
           {docsUrl && (
             <button
               type="button"
-              onClick={openDocs}
+              onClick={() => void openDocs()}
               className="text-muted-foreground/60 hover:text-foreground flex-shrink-0"
               title={t("mcp.presets.docs")}
             >

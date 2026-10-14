@@ -128,7 +128,7 @@ const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
             {t("hermes.memory.runtimeNote")}
           </span>
           <Button
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             disabled={saveMutation.isPending || !loaded}
           >
             {saveMutation.isPending ? t("common.saving") : t("common.save")}

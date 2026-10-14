@@ -121,7 +121,7 @@ const EnvPanel: React.FC = () => {
       <div className="flex justify-end mt-4">
         <Button
           size="sm"
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           disabled={saveEnvMutation.isPending}
         >
           <Save className="w-4 h-4 mr-1" />
