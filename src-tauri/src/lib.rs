@@ -1396,6 +1396,8 @@ pub fn run() {
             commands::set_proxy_takeover_for_app,
             commands::get_proxy_status,
             commands::get_proxy_config,
+            commands::get_proxy_client_token,
+            commands::regenerate_proxy_client_token,
             commands::update_proxy_config,
             // Global & Per-App Config
             commands::get_global_proxy_config,

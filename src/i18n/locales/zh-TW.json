@@ -2538,8 +2538,19 @@
         "listenAddress": {
           "label": "監聽位址",
           "placeholder": "127.0.0.1",
-          "exposureWarning": "此位址允許其他裝置連線。代理沒有用戶端驗證，同一網路中的任何人都可以藉此消耗你的 API Key。除非需要在可信網路中區域網路存取，請使用 127.0.0.1。",
+          "exposureWarning": "此位址允許其他裝置連線。其他裝置的請求必須以下方用戶端 Token 作為 API Key；本機上的 CLI 無需 Token 即可繼續使用。除非需要區域網路存取，請使用 127.0.0.1。",
           "description": "路由伺服器監聽的 IP 位址（推薦 127.0.0.1）"
+        },
+        "clientToken": {
+          "label": "用戶端 Token",
+          "description": "在其他裝置上將此 Token 作為 API Key 使用（Authorization: Bearer、x-api-key、x-goog-api-key 或 ?key=）。它不會被轉送到上游。重新產生後，使用舊 Token 的裝置將無法連線。",
+          "show": "顯示",
+          "hide": "隱藏",
+          "regenerate": "重新產生",
+          "copied": "用戶端 Token 已複製",
+          "regenerated": "用戶端 Token 已重新產生，舊 Token 已失效",
+          "loadFailed": "載入用戶端 Token 失敗：{{error}}",
+          "regenerateFailed": "重新產生用戶端 Token 失敗：{{error}}"
         },
         "listenPort": {
           "label": "監聽連接埠",

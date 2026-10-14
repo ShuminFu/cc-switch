@@ -31,6 +31,7 @@ import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { isLoopbackListenAddress } from "@/lib/utils/listenAddress";
+import { ProxyClientTokenField } from "./ProxyClientTokenField";
 
 interface ProxyPanelProps {
   enableLocalProxy: boolean;
@@ -562,6 +563,9 @@ export function ProxyPanel({
                     >
                       {t("proxy.settings.fields.listenAddress.exposureWarning")}
                     </p>
+                  )}
+                  {!isLoopbackListenAddress(listenAddress) && (
+                    <ProxyClientTokenField />
                   )}
                 </div>
 

@@ -2538,8 +2538,19 @@
         "listenAddress": {
           "label": "Listen Address",
           "placeholder": "127.0.0.1",
-          "exposureWarning": "This address accepts connections from other devices. The proxy has no client authentication, so anyone on your network could use it to spend your API keys. Use 127.0.0.1 unless you need LAN access on a trusted network.",
+          "exposureWarning": "This address accepts connections from other devices. Requests from other devices must send the client token below as their API key; local CLIs on this computer keep working without it. Use 127.0.0.1 unless you need LAN access.",
           "description": "IP address the routing server listens on (recommended: 127.0.0.1)"
+        },
+        "clientToken": {
+          "label": "Client Token",
+          "description": "On other devices, use this token as the API key (Authorization: Bearer, x-api-key, x-goog-api-key or ?key=). It is never forwarded upstream. Regenerating it disconnects devices using the old token.",
+          "show": "Show",
+          "hide": "Hide",
+          "regenerate": "Regenerate",
+          "copied": "Client token copied",
+          "regenerated": "Client token regenerated; the old token no longer works",
+          "loadFailed": "Failed to load client token: {{error}}",
+          "regenerateFailed": "Failed to regenerate client token: {{error}}"
         },
         "listenPort": {
           "label": "Listen Port",

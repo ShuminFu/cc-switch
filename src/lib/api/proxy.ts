@@ -59,6 +59,16 @@ export const proxyApi = {
     return invoke("set_proxy_takeover_for_app", { appType, enabled });
   },
 
+  // 代理客户端 Token：代理监听非回环地址时，远程客户端需以此作为 API Key
+  async getProxyClientToken(): Promise<string> {
+    return invoke("get_proxy_client_token");
+  },
+
+  // 重新生成代理客户端 Token（旧 Token 立即失效）
+  async regenerateProxyClientToken(): Promise<string> {
+    return invoke("regenerate_proxy_client_token");
+  },
+
   // ========== Legacy 代理配置 API (兼容) ==========
 
   // 获取代理配置（旧版 v2 兼容接口）

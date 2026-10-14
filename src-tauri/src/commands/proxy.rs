@@ -68,6 +68,28 @@ pub async fn get_proxy_status(state: tauri::State<'_, AppState>) -> Result<Proxy
     state.proxy_service.get_status().await
 }
 
+/// 获取代理客户端 Token（代理监听非回环地址时，远程客户端需以此作为 API Key）
+#[tauri::command]
+pub async fn get_proxy_client_token(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let db = state.db.clone();
+    crate::commands::blocking::run_blocking(move || {
+        crate::proxy::client_auth::get_or_create_proxy_client_token(&db).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 重新生成代理客户端 Token（旧 Token 立即失效）
+#[tauri::command]
+pub async fn regenerate_proxy_client_token(
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let db = state.db.clone();
+    crate::commands::blocking::run_blocking_serialized(move || {
+        crate::proxy::client_auth::regenerate_proxy_client_token(&db).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// 获取代理配置
 #[tauri::command]
 pub async fn get_proxy_config(state: tauri::State<'_, AppState>) -> Result<ProxyConfig, String> {
