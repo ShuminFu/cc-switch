@@ -41,6 +41,7 @@ pnpm dev
 | `pnpm dev` | Start dev server (hot reload) |
 | `pnpm build` | Production build |
 | `pnpm typecheck` | TypeScript type checking |
+| `pnpm lint` | Lint for unhandled promises (ESLint) |
 | `pnpm test:unit` | Run unit tests |
 | `pnpm format` | Format code (Prettier) |
 | `pnpm format:check` | Check code formatting |
@@ -56,14 +57,14 @@ cargo test       # Run tests
 
 ## Code Style
 
-- **Frontend**: Prettier for formatting, strict TypeScript (`pnpm typecheck`)
+- **Frontend**: Prettier for formatting, strict TypeScript (`pnpm typecheck`), no unhandled promises (`pnpm lint`)
 - **Backend**: `cargo fmt` for formatting, `cargo clippy` for linting
 - **Tauri 2.0**: Command names must use camelCase
 
 Run all checks before submitting:
 
 ```bash
-pnpm typecheck && pnpm format:check && pnpm test:unit
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit
 cd src-tauri && cargo fmt --check && cargo clippy && cargo test
 ```
 
@@ -77,6 +78,7 @@ cd src-tauri && cargo fmt --check && cargo clippy && cargo test
 ### PR Checklist
 
 - [ ] `pnpm typecheck` passes
+- [ ] `pnpm lint` passes
 - [ ] `pnpm format:check` passes
 - [ ] `cargo clippy` passes (if Rust code changed)
 - [ ] Updated i18n files if user-facing text changed
@@ -168,6 +170,7 @@ pnpm dev
 | `pnpm dev` | 启动开发服务器（热重载） |
 | `pnpm build` | 构建生产版本 |
 | `pnpm typecheck` | TypeScript 类型检查 |
+| `pnpm lint` | 检查未处理的 Promise（ESLint） |
 | `pnpm test:unit` | 运行单元测试 |
 | `pnpm format` | 格式化代码（Prettier） |
 | `pnpm format:check` | 检查代码格式 |
@@ -183,14 +186,14 @@ cargo test       # 运行测试
 
 ## 代码规范
 
-- **前端**：使用 Prettier 格式化、严格 TypeScript（`pnpm typecheck`）
+- **前端**：使用 Prettier 格式化、严格 TypeScript（`pnpm typecheck`）、不允许未处理的 Promise（`pnpm lint`）
 - **后端**：使用 `cargo fmt` 格式化、`cargo clippy` 检查
 - **Tauri 2.0**：命令名必须使用 camelCase
 
 提交前运行所有检查：
 
 ```bash
-pnpm typecheck && pnpm format:check && pnpm test:unit
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit
 cd src-tauri && cargo fmt --check && cargo clippy && cargo test
 ```
 
@@ -204,6 +207,7 @@ cd src-tauri && cargo fmt --check && cargo clippy && cargo test
 ### PR 检查清单
 
 - [ ] `pnpm typecheck` 通过
+- [ ] `pnpm lint` 通过
 - [ ] `pnpm format:check` 通过
 - [ ] `cargo clippy` 通过（如修改了 Rust 代码）
 - [ ] 如修改了用户可见文本，已更新国际化文件
