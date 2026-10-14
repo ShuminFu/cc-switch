@@ -1,9 +1,9 @@
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
+use crate::commands::blocking::{run_blocking_serialized, with_state_serialized};
 use crate::hermes_config;
-use crate::store::AppState;
 
 /// Error string returned when `open_hermes_web_ui` cannot reach the Hermes
 /// FastAPI server. Kept in sync with the `HERMES_WEB_OFFLINE_ERROR` constant
@@ -18,10 +18,16 @@ const HERMES_WEB_OFFLINE_ERROR: &str = "hermes_web_offline";
 ///
 /// Hermes uses additive mode — users may already have providers
 /// configured in config.yaml.
+///
+/// Serialized with other provider / live-config writers (see
+/// `commands::blocking`).
 #[tauri::command]
-pub fn import_hermes_providers_from_live(state: State<'_, AppState>) -> Result<usize, String> {
-    crate::services::provider::import_hermes_providers_from_live(state.inner())
-        .map_err(|e| e.to_string())
+pub async fn import_hermes_providers_from_live(handle: AppHandle) -> Result<usize, String> {
+    with_state_serialized(handle, |state| {
+        crate::services::provider::import_hermes_providers_from_live(state)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Get provider names in the Hermes live config.
@@ -70,12 +76,17 @@ pub fn get_hermes_memory_limits() -> Result<hermes_config::HermesMemoryLimits, S
     hermes_config::read_memory_limits().map_err(|e| e.to_string())
 }
 
+/// Toggles a flag in Hermes `config.yaml`, which provider switches also
+/// rewrite, so it is serialized with other live-config writers.
 #[tauri::command]
-pub fn set_hermes_memory_enabled(
+pub async fn set_hermes_memory_enabled(
     kind: hermes_config::MemoryKind,
     enabled: bool,
 ) -> Result<hermes_config::HermesWriteOutcome, String> {
-    hermes_config::set_memory_enabled(kind, enabled).map_err(|e| e.to_string())
+    run_blocking_serialized(move || {
+        hermes_config::set_memory_enabled(kind, enabled).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================

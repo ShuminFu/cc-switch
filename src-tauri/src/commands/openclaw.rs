@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use tauri::State;
+use tauri::AppHandle;
 
+use crate::commands::blocking::{run_blocking_serialized, with_state_serialized};
 use crate::openclaw_config;
-use crate::store::AppState;
 
 // ============================================================================
 // OpenClaw Provider Commands (migrated from provider.rs)
@@ -12,10 +12,16 @@ use crate::store::AppState;
 ///
 /// OpenClaw uses additive mode — users may already have providers
 /// configured in openclaw.json.
+///
+/// Writes the DB and may touch openclaw.json, so it is serialized with other
+/// provider / live-config writers (see `commands::blocking`).
 #[tauri::command]
-pub fn import_openclaw_providers_from_live(state: State<'_, AppState>) -> Result<usize, String> {
-    crate::services::provider::import_openclaw_providers_from_live(state.inner())
-        .map_err(|e| e.to_string())
+pub async fn import_openclaw_providers_from_live(handle: AppHandle) -> Result<usize, String> {
+    with_state_serialized(handle, |state| {
+        crate::services::provider::import_openclaw_providers_from_live(state)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Get provider IDs in the OpenClaw live config.
@@ -54,10 +60,14 @@ pub fn get_openclaw_default_model() -> Result<Option<openclaw_config::OpenClawDe
 
 /// Set OpenClaw default model config (agents.defaults.model)
 #[tauri::command]
-pub fn set_openclaw_default_model(
+pub async fn set_openclaw_default_model(
     model: openclaw_config::OpenClawDefaultModel,
 ) -> Result<openclaw_config::OpenClawWriteOutcome, String> {
-    openclaw_config::set_default_model(&model).map_err(|e| e.to_string())
+    // openclaw.json 的读改写，与 OpenClaw 供应商写入等串行
+    run_blocking_serialized(move || {
+        openclaw_config::set_default_model(&model).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Get OpenClaw model catalog/allowlist (agents.defaults.models)
@@ -69,10 +79,14 @@ pub fn get_openclaw_model_catalog(
 
 /// Set OpenClaw model catalog/allowlist (agents.defaults.models)
 #[tauri::command]
-pub fn set_openclaw_model_catalog(
+pub async fn set_openclaw_model_catalog(
     catalog: HashMap<String, openclaw_config::OpenClawModelCatalogEntry>,
 ) -> Result<openclaw_config::OpenClawWriteOutcome, String> {
-    openclaw_config::set_model_catalog(&catalog).map_err(|e| e.to_string())
+    // openclaw.json 的读改写，与 OpenClaw 供应商写入等串行
+    run_blocking_serialized(move || {
+        openclaw_config::set_model_catalog(&catalog).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Get full agents.defaults config (all fields)
@@ -84,10 +98,14 @@ pub fn get_openclaw_agents_defaults(
 
 /// Set full agents.defaults config (all fields)
 #[tauri::command]
-pub fn set_openclaw_agents_defaults(
+pub async fn set_openclaw_agents_defaults(
     defaults: openclaw_config::OpenClawAgentsDefaults,
 ) -> Result<openclaw_config::OpenClawWriteOutcome, String> {
-    openclaw_config::set_agents_defaults(&defaults).map_err(|e| e.to_string())
+    // openclaw.json 的读改写，与 OpenClaw 供应商写入等串行
+    run_blocking_serialized(move || {
+        openclaw_config::set_agents_defaults(&defaults).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================
@@ -102,10 +120,14 @@ pub fn get_openclaw_env() -> Result<openclaw_config::OpenClawEnvConfig, String> 
 
 /// Set OpenClaw env config (env section of openclaw.json)
 #[tauri::command]
-pub fn set_openclaw_env(
+pub async fn set_openclaw_env(
     env: openclaw_config::OpenClawEnvConfig,
 ) -> Result<openclaw_config::OpenClawWriteOutcome, String> {
-    openclaw_config::set_env_config(&env).map_err(|e| e.to_string())
+    // openclaw.json 的读改写，与 OpenClaw 供应商写入等串行
+    run_blocking_serialized(move || {
+        openclaw_config::set_env_config(&env).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ============================================================================
@@ -120,8 +142,12 @@ pub fn get_openclaw_tools() -> Result<openclaw_config::OpenClawToolsConfig, Stri
 
 /// Set OpenClaw tools config (tools section of openclaw.json)
 #[tauri::command]
-pub fn set_openclaw_tools(
+pub async fn set_openclaw_tools(
     tools: openclaw_config::OpenClawToolsConfig,
 ) -> Result<openclaw_config::OpenClawWriteOutcome, String> {
-    openclaw_config::set_tools_config(&tools).map_err(|e| e.to_string())
+    // openclaw.json 的读改写，与 OpenClaw 供应商写入等串行
+    run_blocking_serialized(move || {
+        openclaw_config::set_tools_config(&tools).map_err(|e| e.to_string())
+    })
+    .await
 }
