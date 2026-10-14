@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { IntegerField } from "@/components/common/IntegerField";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslation } from "react-i18next";
@@ -450,18 +451,13 @@ export function GrokBuildProviderForm({
             <FormLabel htmlFor="grokbuild-context-window">
               {t("grokBuild.contextWindow", { defaultValue: "上下文窗口" })}
             </FormLabel>
-            <Input
+            <IntegerField
               id="grokbuild-context-window"
-              type="number"
               min={1}
-              step={1}
-              value={contextWindow}
-              onChange={(event) => {
-                const value = event.target.value;
-                setContextWindow(value);
-                syncStructuredConfig({
-                  contextWindow: Number.parseInt(value, 10),
-                });
+              value={contextWindow ? Number(contextWindow) : undefined}
+              onValueChange={(value) => {
+                setContextWindow(value === undefined ? "" : String(value));
+                syncStructuredConfig({ contextWindow: value ?? Number.NaN });
               }}
             />
           </FormItem>

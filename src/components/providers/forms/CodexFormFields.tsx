@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IntegerField } from "@/components/common/IntegerField";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { FormLabel } from "@/components/ui/form";
@@ -692,15 +693,15 @@ export function CodexFormFields({
                         defaultValue: "最大输出 tokens",
                       })}
                     </FormLabel>
-                    <Input
+                    <IntegerField
                       id="codex-anthropic-max-output-tokens"
-                      type="number"
                       min={1}
-                      inputMode="numeric"
-                      value={maxOutputTokens}
-                      onChange={(event) =>
+                      value={
+                        maxOutputTokens ? Number(maxOutputTokens) : undefined
+                      }
+                      onValueChange={(value) =>
                         onMaxOutputTokensChange(
-                          event.target.value.replace(/[^\d]/g, ""),
+                          value === undefined ? "" : String(value),
                         )
                       }
                       placeholder={t("codexConfig.maxOutputTokensPlaceholder", {

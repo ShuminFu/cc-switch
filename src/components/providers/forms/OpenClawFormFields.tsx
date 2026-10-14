@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { parseNonNegativeIntInput } from "@/utils/numberInput";
+import { IntegerField } from "@/components/common/IntegerField";
 import { useState, useRef, useCallback } from "react";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -532,15 +532,11 @@ export function OpenClawFormFields({
                             defaultValue: "上下文窗口",
                           })}
                         </label>
-                        <Input
-                          type="number"
-                          value={model.contextWindow ?? ""}
-                          onChange={(e) =>
-                            handleModelChange(
-                              index,
-                              "contextWindow",
-                              parseNonNegativeIntInput(e.target.value),
-                            )
+                        <IntegerField
+                          min={1}
+                          value={model.contextWindow}
+                          onValueChange={(value) =>
+                            handleModelChange(index, "contextWindow", value)
                           }
                           placeholder="200000"
                         />
@@ -551,15 +547,11 @@ export function OpenClawFormFields({
                             defaultValue: "最大输出 Tokens",
                           })}
                         </label>
-                        <Input
-                          type="number"
-                          value={model.maxTokens ?? ""}
-                          onChange={(e) =>
-                            handleModelChange(
-                              index,
-                              "maxTokens",
-                              parseNonNegativeIntInput(e.target.value),
-                            )
+                        <IntegerField
+                          min={1}
+                          value={model.maxTokens}
+                          onValueChange={(value) =>
+                            handleModelChange(index, "maxTokens", value)
                           }
                           placeholder="32000"
                         />

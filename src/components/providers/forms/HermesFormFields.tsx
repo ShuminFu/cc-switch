@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { parseNonNegativeIntInput } from "@/utils/numberInput";
+import { IntegerField } from "@/components/common/IntegerField";
 import {
   useState,
   useRef,
@@ -500,15 +500,11 @@ export function HermesFormFields({
                         defaultValue: "上下文长度",
                       })}
                     </label>
-                    <Input
-                      type="number"
-                      value={model.context_length ?? ""}
-                      onChange={(e) =>
-                        handleModelChange(
-                          index,
-                          "context_length",
-                          parseNonNegativeIntInput(e.target.value),
-                        )
+                    <IntegerField
+                      min={1}
+                      value={model.context_length}
+                      onValueChange={(value) =>
+                        handleModelChange(index, "context_length", value)
                       }
                       placeholder="200000"
                     />

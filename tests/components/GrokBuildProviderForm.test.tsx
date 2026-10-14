@@ -128,6 +128,37 @@ describe("GrokBuildProviderForm", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("validates the context window as an integer before syncing config.toml", () => {
+    const { container } = render(
+      <GrokBuildProviderForm
+        submitLabel="Save"
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    const contextInput = container.querySelector<HTMLInputElement>(
+      "#grokbuild-context-window",
+    )!;
+    const rawConfig = () =>
+      parseToml(
+        (screen.getByLabelText("raw-config") as HTMLTextAreaElement).value,
+      ) as any;
+    const contextWindowInToml = () =>
+      Object.values(rawConfig().model as Record<string, any>)[0].context_window;
+
+    expect(contextWindowInToml()).toBe(500000);
+
+    // Previously parseInt("1.5") silently wrote 1.
+    fireEvent.change(contextInput, { target: { value: "1.5" } });
+    expect(contextInput).toHaveAttribute("aria-invalid", "true");
+    expect(contextWindowInToml()).toBe(500000);
+
+    // Previously parseInt("1e5") wrote 1.
+    fireEvent.change(contextInput, { target: { value: "1e5" } });
+    expect(contextInput).not.toHaveAttribute("aria-invalid");
+    expect(contextWindowInToml()).toBe(100000);
+  });
+
   it("loads edit-mode values and does not resubmit stale custom endpoints", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
