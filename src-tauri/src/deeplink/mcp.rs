@@ -2,7 +2,7 @@
 //!
 //! Handles batch import of MCP server configurations via ccswitch:// URLs.
 
-use super::utils::decode_base64_param;
+use super::utils::decode_base64_utf8_param;
 use super::DeepLinkImportRequest;
 use crate::app_config::{McpApps, McpServer};
 use crate::error::AppError;
@@ -65,10 +65,7 @@ pub fn import_mcp_from_deeplink(
         .ok_or_else(|| AppError::InvalidInput("Missing 'config' parameter for MCP".to_string()))?;
 
     // Decode Base64 config
-    let decoded = decode_base64_param("config", config_b64)?;
-
-    let config_str = String::from_utf8(decoded)
-        .map_err(|e| AppError::InvalidInput(format!("Invalid UTF-8 in config: {e}")))?;
+    let config_str = decode_base64_utf8_param("config", config_b64)?;
 
     // Parse JSON
     let config_json: Value = serde_json::from_str(&config_str)

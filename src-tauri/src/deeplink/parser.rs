@@ -3,7 +3,7 @@
 //! Parses ccswitch:// URLs into DeepLinkImportRequest structures.
 
 use super::utils::validate_url;
-use super::DeepLinkImportRequest;
+use super::{DeepLinkDecoded, DeepLinkImportRequest};
 use crate::error::AppError;
 use std::collections::HashMap;
 use url::Url;
@@ -56,7 +56,7 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
         .clone();
 
     // Dispatch to appropriate parser based on resource type
-    match resource.as_str() {
+    let mut request = match resource.as_str() {
         "provider" => parse_provider_deeplink(&params, version, resource),
         "prompt" => parse_prompt_deeplink(&params, version, resource),
         "mcp" => parse_mcp_deeplink(&params, version, resource),
@@ -64,7 +64,12 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
         _ => Err(AppError::InvalidInput(format!(
             "Unsupported resource type: {resource}"
         ))),
-    }
+    }?;
+
+    // Decode Base64 fields once, here, so the confirmation UI shows exactly
+    // what the import path will decode.
+    request.decoded = DeepLinkDecoded::from_request(&request);
+    Ok(request)
 }
 
 /// Parse provider deep link parameters
@@ -173,6 +178,7 @@ fn parse_provider_deeplink(
         usage_access_token,
         usage_user_id,
         usage_auto_interval,
+        decoded: None,
     })
 }
 
@@ -243,6 +249,7 @@ fn parse_prompt_deeplink(
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     })
 }
 
@@ -315,6 +322,7 @@ fn parse_mcp_deeplink(
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     })
 }
 
@@ -375,6 +383,7 @@ fn parse_skill_deeplink(
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     })
 }
 

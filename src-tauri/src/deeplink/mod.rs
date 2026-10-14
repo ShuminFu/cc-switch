@@ -135,4 +135,46 @@ pub struct DeepLinkImportRequest {
     /// Auto query interval in minutes (0 to disable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_auto_interval: Option<u64>,
+
+    // ============ Decoded previews (backend → frontend only) ============
+    /// UTF-8 text of the Base64 fields above, decoded by the same decoder the
+    /// import path uses, so confirmation dialogs never need their own Base64
+    /// handling. Filled by `parse_deeplink_url`; ignored on import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoded: Option<DeepLinkDecoded>,
+}
+
+/// Decoded text of a deep link's Base64 parameters, for display only.
+///
+/// A field is `None` when the source parameter is absent or does not decode
+/// to valid UTF-8 (the import itself would then fail with a clear error).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeepLinkDecoded {
+    /// Decoded `config` (provider or MCP config file)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<String>,
+    /// Decoded `content` (prompt Markdown)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// Decoded `usage_script` (provider usage query script)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_script: Option<String>,
+}
+
+impl DeepLinkDecoded {
+    /// Decode every Base64 field present on `request`. Returns `None` when the
+    /// request carries no Base64 fields at all.
+    pub fn from_request(request: &DeepLinkImportRequest) -> Option<Self> {
+        let decode = |field: &str, raw: &Option<String>| {
+            raw.as_deref()
+                .and_then(|value| utils::decode_base64_utf8_param(field, value).ok())
+        };
+        let decoded = Self {
+            config: decode("config", &request.config),
+            content: decode("content", &request.content),
+            usage_script: decode("usage_script", &request.usage_script),
+        };
+        (decoded != Self::default()).then_some(decoded)
+    }
 }

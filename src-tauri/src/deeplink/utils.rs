@@ -21,13 +21,10 @@ pub fn validate_url(url_str: &str, field_name: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Decode a Base64 parameter from deep link URL
-///
-/// This function handles common issues with Base64 in URLs:
-/// - `+` being decoded as space
-/// - Missing padding `=`
-/// - Both standard and URL-safe Base64 variants
-pub fn decode_base64_param(field: &str, raw: &str) -> Result<Vec<u8>, AppError> {
+/// Candidate spellings of a Base64 URL parameter, most likely first:
+/// spaces restored to `+` (form-style URL decoding), the value as-is, padded
+/// variants, and finally a fully whitespace-trimmed variant.
+fn base64_candidates(raw: &str) -> Vec<String> {
     let mut candidates: Vec<String> = Vec::new();
     // Keep spaces (to restore `+`), but remove newlines
     let trimmed = raw.trim_matches(|c| c == '\r' || c == '\n');
@@ -58,8 +55,25 @@ pub fn decode_base64_param(field: &str, raw: &str) -> Result<Vec<u8>, AppError> 
         }
     }
 
+    // Last resort, tried only after every variant above: treat surrounding
+    // spaces as stray whitespace rather than URL-decoded '+'.
+    let fully_trimmed = raw.trim().replace(' ', "+");
+    if !fully_trimmed.is_empty() && !candidates.contains(&fully_trimmed) {
+        candidates.push(fully_trimmed);
+    }
+
+    candidates
+}
+
+/// Try every candidate with every Base64 engine and return the first decoded
+/// bytes that `accept` takes. `last_error` describes the last failure.
+fn decode_base64_with<T>(
+    field: &str,
+    raw: &str,
+    mut accept: impl FnMut(Vec<u8>) -> Result<T, String>,
+) -> Result<T, AppError> {
     let mut last_error: Option<String> = None;
-    for candidate in candidates {
+    for candidate in base64_candidates(raw) {
         for engine in [
             &BASE64_STANDARD,
             &BASE64_STANDARD_NO_PAD,
@@ -67,7 +81,10 @@ pub fn decode_base64_param(field: &str, raw: &str) -> Result<Vec<u8>, AppError> 
             &BASE64_URL_SAFE_NO_PAD,
         ] {
             match engine.decode(&candidate) {
-                Ok(bytes) => return Ok(bytes),
+                Ok(bytes) => match accept(bytes) {
+                    Ok(value) => return Ok(value),
+                    Err(err) => last_error = Some(err),
+                },
                 Err(err) => last_error = Some(err.to_string()),
             }
         }
@@ -77,6 +94,25 @@ pub fn decode_base64_param(field: &str, raw: &str) -> Result<Vec<u8>, AppError> 
         "{field} 参数 Base64 解码失败：{}。请确认链接参数已用 Base64 编码并经过 URL 转义（尤其是将 '+' 编码为 %2B，或使用 URL-safe Base64）。",
         last_error.unwrap_or_else(|| "未知错误".to_string())
     )))
+}
+
+/// Decode a Base64 deep link parameter that must be UTF-8 text (configs,
+/// prompt content, usage scripts). This is the single decoder for both the
+/// import path and the confirmation previews sent to the frontend.
+///
+/// Handles the usual damage Base64 suffers in URLs:
+/// - `+` being decoded as space
+/// - Missing padding `=`
+/// - Both standard and URL-safe Base64 variants
+/// - Stray surrounding whitespace
+///
+/// A candidate that decodes to non-UTF-8 bytes is skipped rather than
+/// returned, so an ambiguous spelling (e.g. surrounding spaces read as `+`)
+/// cannot shadow the correct one.
+pub fn decode_base64_utf8_param(field: &str, raw: &str) -> Result<String, AppError> {
+    decode_base64_with(field, raw, |bytes| {
+        String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8 in {field}: {e}"))
+    })
 }
 
 /// Infer homepage URL from API endpoint

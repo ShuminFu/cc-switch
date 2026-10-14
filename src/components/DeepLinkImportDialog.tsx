@@ -240,22 +240,11 @@ export function DeepLinkImportDialog() {
     raw: Record<string, unknown>;
   }
 
-  // Helper to decode base64 with UTF-8 support
-  const b64ToUtf8 = (str: string): string => {
-    try {
-      const binString = atob(str);
-      const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0) || 0);
-      return new TextDecoder().decode(bytes);
-    } catch (e) {
-      console.error("Failed to decode base64:", e);
-      return atob(str);
-    }
-  };
-
   const parsedConfig = useMemo((): ParsedConfig | null => {
-    if (!request?.config) return null;
+    // Decoded by the backend with the same decoder the import uses.
+    const decoded = request?.decoded?.config;
+    if (!decoded) return null;
     try {
-      const decoded = b64ToUtf8(request.config);
       const parsed = JSON.parse(decoded) as Record<string, unknown>;
 
       if (request.app === "claude") {
@@ -286,7 +275,7 @@ export function DeepLinkImportDialog() {
       console.error("Failed to parse config:", e);
       return null;
     }
-  }, [request?.config, request?.app]);
+  }, [request?.decoded?.config, request?.app]);
 
   // Helper to mask sensitive values
   const maskValue = (key: string, value: string): string => {

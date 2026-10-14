@@ -2,7 +2,7 @@
 //!
 //! Handles importing provider configurations via ccswitch:// URLs.
 
-use super::utils::{decode_base64_param, infer_homepage_from_endpoint};
+use super::utils::{decode_base64_utf8_param, infer_homepage_from_endpoint};
 use super::DeepLinkImportRequest;
 use crate::error::AppError;
 use crate::provider::{ClaudeDesktopMode, Provider, ProviderMeta, UsageScript};
@@ -244,9 +244,7 @@ fn build_provider_meta(request: &DeepLinkImportRequest) -> Result<Option<Provide
 
     // Decode usage script code if provided
     let code = if let Some(script_b64) = &request.usage_script {
-        let decoded = decode_base64_param("usage_script", script_b64)?;
-        String::from_utf8(decoded)
-            .map_err(|e| AppError::InvalidInput(format!("Invalid UTF-8 in usage_script: {e}")))?
+        decode_base64_utf8_param("usage_script", script_b64)?
     } else {
         String::new()
     };
@@ -363,9 +361,8 @@ fn extract_claude_config_env(
     // graph (parse_and_merge_config is pub and called separately for preview)
     // makes signature changes invasive. Decode cost is negligible on this
     // one-shot import path.
-    let decoded = decode_base64_param("config", config_b64).ok()?;
-    let json_str = std::str::from_utf8(&decoded).ok()?;
-    let value: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let json_str = decode_base64_utf8_param("config", config_b64).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&json_str).ok()?;
 
     // Pull out the env object — same shape as Claude's own settings.json.
     value.get("env").and_then(|v| v.as_object()).cloned()
@@ -588,9 +585,7 @@ pub fn parse_and_merge_config(
     // Step 1: Get config content
     let config_content = if let Some(config_b64) = &request.config {
         // Decode Base64 inline config
-        let decoded = decode_base64_param("config", config_b64)?;
-        String::from_utf8(decoded)
-            .map_err(|e| AppError::InvalidInput(format!("Invalid UTF-8 in config: {e}")))?
+        decode_base64_utf8_param("config", config_b64)?
     } else if let Some(_config_url) = &request.config_url {
         // Fetch remote config (TODO: implement remote fetching in next phase)
         return Err(AppError::InvalidInput(

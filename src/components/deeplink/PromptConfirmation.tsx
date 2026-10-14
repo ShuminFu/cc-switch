@@ -1,7 +1,5 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { DeepLinkImportRequest } from "../../lib/api/deeplink";
-import { decodeBase64Utf8 } from "../../lib/utils/base64";
 
 export function PromptConfirmation({
   request,
@@ -10,10 +8,8 @@ export function PromptConfirmation({
 }) {
   const { t } = useTranslation();
 
-  const decodedContent = useMemo(() => {
-    if (!request.content) return "";
-    return decodeBase64Utf8(request.content);
-  }, [request.content]);
+  // Fall back to the raw parameter if the backend could not decode it.
+  const decodedContent = request.decoded?.content ?? request.content ?? "";
 
   return (
     <div className="space-y-4">

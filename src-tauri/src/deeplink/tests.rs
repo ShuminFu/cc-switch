@@ -4,8 +4,8 @@ use super::mcp::parse_mcp_apps;
 use super::parser::parse_deeplink_url;
 use super::prompt::import_prompt_from_deeplink;
 use super::provider::parse_and_merge_config;
-use super::utils::{decode_base64_param, infer_homepage_from_endpoint, validate_url};
-use super::DeepLinkImportRequest;
+use super::utils::{decode_base64_utf8_param, infer_homepage_from_endpoint, validate_url};
+use super::{DeepLinkDecoded, DeepLinkImportRequest};
 use crate::AppType;
 use crate::{store::AppState, Database};
 use base64::prelude::*;
@@ -229,6 +229,7 @@ fn test_build_gemini_provider_with_model() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let provider = build_provider_from_request(&AppType::Gemini, &request).unwrap();
@@ -282,6 +283,7 @@ fn test_build_gemini_provider_without_model() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let provider = build_provider_from_request(&AppType::Gemini, &request).unwrap();
@@ -328,6 +330,7 @@ fn test_deeplink_usage_script_does_not_copy_provider_credentials() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -377,6 +380,7 @@ fn test_deeplink_usage_script_omits_explicit_credentials_that_match_provider() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -425,6 +429,7 @@ fn test_deeplink_usage_script_preserves_distinct_usage_credentials() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -478,6 +483,7 @@ fn test_parse_and_merge_config_claude() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let merged = parse_and_merge_config(&request).unwrap();
@@ -601,6 +607,7 @@ fn test_parse_and_merge_config_url_override() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let merged = parse_and_merge_config(&request).unwrap();
@@ -664,6 +671,7 @@ fn test_build_claude_provider_preserves_custom_env_fields() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -719,6 +727,7 @@ fn test_build_claude_provider_without_config_unchanged() {
         usage_access_token: None,
         usage_user_id: None,
         usage_auto_interval: None,
+        decoded: None,
     };
 
     let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
@@ -939,7 +948,7 @@ fn test_infer_homepage_from_endpoint_without_homepage() {
 }
 
 // =============================================================================
-// decode_base64_param
+// decode_base64_utf8_param
 // =============================================================================
 
 /// Payload whose standard encoding contains both '+' and '/', so the URL-safe
@@ -947,7 +956,7 @@ fn test_infer_homepage_from_endpoint_without_homepage() {
 const B64_PAYLOAD: &str = r#"{"k":">>>???~~~","名":"值"}"#;
 
 #[test]
-fn test_decode_base64_param_standard_and_url_safe() {
+fn test_decode_base64_utf8_param_standard_and_url_safe() {
     let standard = BASE64_STANDARD.encode(B64_PAYLOAD);
     assert!(standard.contains('+') && standard.contains('/'));
     for encoded in [
@@ -956,29 +965,27 @@ fn test_decode_base64_param_standard_and_url_safe() {
         BASE64_URL_SAFE.encode(B64_PAYLOAD),
         BASE64_URL_SAFE_NO_PAD.encode(B64_PAYLOAD),
     ] {
-        let decoded = decode_base64_param("config", &encoded).unwrap();
-        assert_eq!(
-            String::from_utf8(decoded).unwrap(),
-            B64_PAYLOAD,
-            "{encoded}"
-        );
+        let decoded = decode_base64_utf8_param("config", &encoded).unwrap();
+        assert_eq!(decoded, B64_PAYLOAD, "{encoded}");
     }
 }
 
 #[test]
-fn test_decode_base64_param_restores_plus_from_space_and_strips_newlines() {
+fn test_decode_base64_utf8_param_restores_plus_from_space_and_strips_newlines() {
     let standard = BASE64_STANDARD.encode(B64_PAYLOAD);
     let mangled = format!("{}\r\n", standard.replace('+', " "));
-    let decoded = decode_base64_param("config", &mangled).unwrap();
-    assert_eq!(String::from_utf8(decoded).unwrap(), B64_PAYLOAD);
+    let decoded = decode_base64_utf8_param("config", &mangled).unwrap();
+    assert_eq!(decoded, B64_PAYLOAD);
 }
 
 #[test]
-fn test_decode_base64_param_rejects_empty_and_garbage() {
-    let err = decode_base64_param("content", "").unwrap_err().to_string();
+fn test_decode_base64_utf8_param_rejects_empty_and_garbage() {
+    let err = decode_base64_utf8_param("content", "")
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("content"), "{err}");
-    assert!(decode_base64_param("content", "\r\n").is_err());
-    assert!(decode_base64_param("content", "!!!not-base64!!!").is_err());
+    assert!(decode_base64_utf8_param("content", "\r\n").is_err());
+    assert!(decode_base64_utf8_param("content", "!!!not-base64!!!").is_err());
 }
 
 #[test]
@@ -1028,4 +1035,131 @@ fn test_infer_homepage_keeps_scheme_and_port() {
         let homepage = infer_homepage_from_endpoint(endpoint).unwrap();
         assert!(validate_url(&homepage, "homepage").is_ok(), "{homepage}");
     }
+}
+
+// =============================================================================
+// Decoded previews (single decoder shared with the frontend dialogs)
+// =============================================================================
+
+fn decode_preview(raw: &str) -> Option<String> {
+    let request = DeepLinkImportRequest {
+        content: Some(raw.to_string()),
+        ..Default::default()
+    };
+    DeepLinkDecoded::from_request(&request).and_then(|d| d.content)
+}
+
+#[test]
+fn test_decoded_preview_accepts_every_base64_variant() {
+    let text = "你好，世界 🚀 >>>???~~~";
+    let standard = BASE64_STANDARD.encode(text);
+    assert!(standard.contains('+') && standard.contains('/'));
+    let variants = [
+        standard.clone(),
+        BASE64_STANDARD_NO_PAD.encode(text),
+        BASE64_URL_SAFE.encode(text),
+        BASE64_URL_SAFE_NO_PAD.encode(text),
+        // '+' turned into ' ' by form-style URL decoding
+        standard.replace('+', " "),
+        // surrounding newlines and stray whitespace
+        format!("\n  {standard}  \n"),
+    ];
+    for raw in variants {
+        assert_eq!(decode_preview(&raw).as_deref(), Some(text), "{raw:?}");
+    }
+}
+
+#[test]
+fn test_decoded_preview_trailing_plus_survives_url_decoding() {
+    // ">>>" encodes to "Pj4+"; after URL decoding the '+' arrives as a space
+    // and must not be trimmed away as whitespace.
+    assert_eq!(BASE64_STANDARD.encode(">>>"), "Pj4+");
+    assert_eq!(decode_preview("Pj4 ").as_deref(), Some(">>>"));
+}
+
+#[test]
+fn test_decoded_preview_is_none_for_garbage_or_invalid_utf8() {
+    assert_eq!(decode_preview("not base64!!"), None);
+    assert_eq!(
+        decode_preview(&BASE64_STANDARD.encode([0xff, 0xfe, 0xfd])),
+        None
+    );
+    assert!(DeepLinkDecoded::from_request(&DeepLinkImportRequest::default()).is_none());
+}
+
+#[test]
+fn test_parse_deeplink_fills_decoded_for_each_base64_resource() {
+    // Prompt: raw '+' in the query is form-decoded to a space by the URL parser
+    let content = "# Title\n>>>? 中文";
+    let content_b64 = BASE64_STANDARD.encode(content);
+    assert!(content_b64.contains('+'));
+    let request = parse_deeplink_url(&format!(
+        "ccswitch://v1/import?resource=prompt&app=claude&name=p&content={content_b64}"
+    ))
+    .unwrap();
+    assert_eq!(request.decoded.unwrap().content.as_deref(), Some(content));
+
+    // MCP: URL-safe, unpadded config
+    let mcp = r#"{"mcpServers":{"t":{"command":"echo","args":[">>>???"]}}}"#;
+    let request = parse_deeplink_url(&format!(
+        "ccswitch://v1/import?resource=mcp&apps=claude&config={}",
+        BASE64_URL_SAFE_NO_PAD.encode(mcp)
+    ))
+    .unwrap();
+    assert_eq!(request.decoded.unwrap().config.as_deref(), Some(mcp));
+
+    // Provider: config and usage script together
+    let config = r#"{"env":{"ANTHROPIC_BASE_URL":"https://api.example.com"}}"#;
+    let script = "({ request: { url: '{{baseUrl}}/usage' } })";
+    let request = parse_deeplink_url(&format!(
+        "ccswitch://v1/import?resource=provider&app=claude&name=P&endpoint=https%3A%2F%2Fapi.example.com&apiKey=k&config={}&usageScript={}",
+        BASE64_URL_SAFE.encode(config).replace('=', "%3D"),
+        BASE64_URL_SAFE_NO_PAD.encode(script)
+    ))
+    .unwrap();
+    let decoded = request.decoded.unwrap();
+    assert_eq!(decoded.config.as_deref(), Some(config));
+    assert_eq!(decoded.usage_script.as_deref(), Some(script));
+    assert_eq!(decoded.content, None);
+
+    // Skill: no Base64 fields, no decoded block
+    let request =
+        parse_deeplink_url("ccswitch://v1/import?resource=skill&repo=owner/repo").unwrap();
+    assert!(request.decoded.is_none());
+}
+
+#[test]
+fn test_decoded_serializes_camel_case_and_is_optional_on_input() {
+    let request = DeepLinkImportRequest {
+        version: "v1".into(),
+        resource: "provider".into(),
+        decoded: Some(DeepLinkDecoded {
+            usage_script: Some("x".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["decoded"], serde_json::json!({"usageScript": "x"}));
+
+    // Requests sent back by older/other callers without `decoded` still parse
+    let parsed: DeepLinkImportRequest =
+        serde_json::from_value(serde_json::json!({"version": "v1", "resource": "prompt"})).unwrap();
+    assert!(parsed.decoded.is_none());
+}
+
+#[test]
+fn test_merge_config_keeps_decoded_preview() {
+    let config =
+        r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"t","ANTHROPIC_BASE_URL":"https://api.example.com"}}"#;
+    let request = parse_deeplink_url(&format!(
+        "ccswitch://v1/import?resource=provider&app=claude&name=P&config={}",
+        BASE64_URL_SAFE_NO_PAD.encode(config)
+    ))
+    .unwrap();
+    let merged = parse_and_merge_config(&request).unwrap();
+    assert_eq!(
+        merged.decoded.and_then(|d| d.config).as_deref(),
+        Some(config)
+    );
 }

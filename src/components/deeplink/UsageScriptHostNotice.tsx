@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { DeepLinkImportRequest } from "@/lib/api/deeplink";
-import { decodeBase64Utf8 } from "@/lib/utils/base64";
 import { summarizeUsageScriptHosts } from "@/lib/utils/usageScriptHosts";
 
 /**
@@ -18,12 +17,18 @@ export function UsageScriptHostNotice({
 
   const summary = useMemo(() => {
     if (!request.usageScript) return null;
-    const code = decodeBase64Utf8(request.usageScript);
+    // Fall back to the raw parameter if the backend could not decode it.
+    const code = request.decoded?.usageScript ?? request.usageScript;
     return summarizeUsageScriptHosts(
       code,
       request.usageBaseUrl || request.endpoint?.split(",")[0],
     );
-  }, [request.usageScript, request.usageBaseUrl, request.endpoint]);
+  }, [
+    request.usageScript,
+    request.decoded?.usageScript,
+    request.usageBaseUrl,
+    request.endpoint,
+  ]);
 
   if (!summary) return null;
 

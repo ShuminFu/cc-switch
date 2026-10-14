@@ -2,7 +2,7 @@
 //!
 //! Handles importing prompt configurations via ccswitch:// URLs.
 
-use super::utils::decode_base64_param;
+use super::utils::decode_base64_utf8_param;
 use super::DeepLinkImportRequest;
 use crate::error::AppError;
 use crate::prompt::Prompt;
@@ -44,9 +44,7 @@ pub fn import_prompt_from_deeplink(
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("Missing 'content' field for prompt".to_string()))?;
 
-    let content = decode_base64_param("content", content_b64)?;
-    let content = String::from_utf8(content)
-        .map_err(|e| AppError::InvalidInput(format!("Invalid UTF-8 in content: {e}")))?;
+    let content = decode_base64_utf8_param("content", content_b64)?;
 
     // Generate ID
     let timestamp = chrono::Utc::now().timestamp_millis();

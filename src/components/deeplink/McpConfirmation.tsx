@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { DeepLinkImportRequest } from "../../lib/api/deeplink";
-import { decodeBase64Utf8 } from "../../lib/utils/base64";
 
 export function McpConfirmation({
   request,
@@ -11,16 +10,16 @@ export function McpConfirmation({
   const { t } = useTranslation();
 
   const mcpServers = useMemo(() => {
-    if (!request.config) return null;
+    const decoded = request.decoded?.config;
+    if (!decoded) return null;
     try {
-      const decoded = decodeBase64Utf8(request.config);
       const parsed = JSON.parse(decoded);
       return parsed.mcpServers || {};
     } catch (e) {
       console.error("Failed to parse MCP config:", e);
       return null;
     }
-  }, [request.config]);
+  }, [request.decoded?.config]);
 
   const targetApps = request.apps?.split(",") || [];
   const serverCount = Object.keys(mcpServers || {}).length;

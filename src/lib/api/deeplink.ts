@@ -47,6 +47,19 @@ export interface DeepLinkImportRequest {
   usageAccessToken?: string;
   usageUserId?: string;
   usageAutoInterval?: number;
+
+  /**
+   * UTF-8 text of the Base64 fields above (config / content / usageScript),
+   * decoded by the backend with the same decoder the import uses. A field is
+   * absent when its source is absent or does not decode.
+   */
+  decoded?: DeepLinkDecoded;
+}
+
+export interface DeepLinkDecoded {
+  config?: string;
+  content?: string;
+  usageScript?: string;
 }
 
 export interface McpImportResult {
