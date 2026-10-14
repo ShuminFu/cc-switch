@@ -213,8 +213,8 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
 
     useImperativeHandle(ref, () => ({
       refresh: () => {
-        refetchDiscoverable();
-        refetchRepos();
+        void refetchDiscoverable();
+        void refetchRepos();
       },
       openRepoManager: () => setRepoManagerOpen(true),
     }));

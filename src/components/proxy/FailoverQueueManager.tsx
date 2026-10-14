@@ -200,7 +200,7 @@ export function FailoverQueueManager({
           </SelectContent>
         </Select>
         <Button
-          onClick={handleAddProvider}
+          onClick={() => void handleAddProvider()}
           disabled={disabled || !selectedProviderId || addToQueue.isPending}
           size="icon"
           variant="outline"
@@ -231,7 +231,7 @@ export function FailoverQueueManager({
               item={item}
               index={index}
               disabled={disabled}
-              onRemove={handleRemoveProvider}
+              onRemove={(providerId) => void handleRemoveProvider(providerId)}
               isRemoving={removeFromQueue.isPending}
             />
           ))}

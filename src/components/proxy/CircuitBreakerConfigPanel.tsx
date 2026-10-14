@@ -285,7 +285,10 @@ export function CircuitBreakerConfigPanel() {
       </div>
 
       <div className="flex gap-3">
-        <Button onClick={handleSave} disabled={updateConfig.isPending}>
+        <Button
+          onClick={() => void handleSave()}
+          disabled={updateConfig.isPending}
+        >
           {updateConfig.isPending
             ? t("common.saving", "保存中...")
             : t("circuitBreaker.saveConfig", "保存配置")}

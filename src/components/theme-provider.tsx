@@ -117,9 +117,9 @@ export function ThemeProvider({
     // This keeps the WebView's prefers-color-scheme in sync with the real OS theme,
     // allowing effect #3's media query listener to fire on system theme changes.
     if (theme === "system") {
-      updateNativeTheme("system");
+      void updateNativeTheme("system");
     } else {
-      updateNativeTheme(theme);
+      void updateNativeTheme(theme);
     }
 
     return () => {

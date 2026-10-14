@@ -254,7 +254,7 @@ export function ProxyPanel({
           </div>
           <Switch
             checked={isRunning}
-            onCheckedChange={onToggleProxy}
+            onCheckedChange={(checked) => void onToggleProxy(checked)}
             disabled={isProxyPending}
           />
         </div>
@@ -293,7 +293,7 @@ export function ProxyPanel({
                           <Switch
                             checked={isEnabled}
                             onCheckedChange={(checked) =>
-                              handleTakeoverChange(appType, checked)
+                              void handleTakeoverChange(appType, checked)
                             }
                             disabled={setTakeoverForApp.isPending}
                           />
@@ -332,15 +332,24 @@ export function ProxyPanel({
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      navigator.clipboard.writeText(
-                        formatAddressForUrl(status.address, status.port),
-                      );
-                      toast.success(
-                        t("proxy.panel.addressCopied", {
-                          defaultValue: "地址已复制",
-                        }),
-                        { closeButton: true },
-                      );
+                      navigator.clipboard
+                        .writeText(
+                          formatAddressForUrl(status.address, status.port),
+                        )
+                        .then(() => {
+                          toast.success(
+                            t("proxy.panel.addressCopied", {
+                              defaultValue: "地址已复制",
+                            }),
+                            { closeButton: true },
+                          );
+                        })
+                        .catch((error) => {
+                          toast.error(t("common.error"), {
+                            description:
+                              extractErrorMessage(error) || undefined,
+                          });
+                        });
                     }}
                   >
                     {t("common.copy")}
@@ -411,7 +420,9 @@ export function ProxyPanel({
                   </div>
                   <Switch
                     checked={globalConfig?.enableLogging ?? true}
-                    onCheckedChange={handleLoggingChange}
+                    onCheckedChange={(enabled) =>
+                      void handleLoggingChange(enabled)
+                    }
                     disabled={updateGlobalConfig.isPending}
                   />
                 </div>
@@ -598,7 +609,7 @@ export function ProxyPanel({
               <div className="flex justify-end">
                 <Button
                   size="sm"
-                  onClick={handleSaveBasicConfig}
+                  onClick={() => void handleSaveBasicConfig()}
                   disabled={updateGlobalConfig.isPending}
                 >
                   {updateGlobalConfig.isPending ? (

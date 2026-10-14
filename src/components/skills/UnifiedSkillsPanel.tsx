@@ -141,34 +141,36 @@ const UnifiedSkillsPanel = React.forwardRef<
     }
   };
 
+  const uninstallSkill = async (skill: InstalledSkill) => {
+    try {
+      // 构建 skillKey 用于更新 discoverable 缓存
+      const installName =
+        skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
+        skill.directory.toLowerCase();
+      const skillKey = `${installName}:${skill.repoOwner?.toLowerCase() || ""}:${skill.repoName?.toLowerCase() || ""}`;
+
+      const result = await uninstallMutation.mutateAsync({
+        id: skill.id,
+        skillKey,
+      });
+      setConfirmDialog(null);
+      toast.success(t("skills.uninstallSuccess", { name: skill.name }), {
+        description: result.backupPath
+          ? t("skills.backup.location", { path: result.backupPath })
+          : undefined,
+        closeButton: true,
+      });
+    } catch (error) {
+      toast.error(t("common.error"), { description: String(error) });
+    }
+  };
+
   const handleUninstall = (skill: InstalledSkill) => {
     setConfirmDialog({
       isOpen: true,
       title: t("skills.uninstall"),
       message: t("skills.uninstallConfirm", { name: skill.name }),
-      onConfirm: async () => {
-        try {
-          // 构建 skillKey 用于更新 discoverable 缓存
-          const installName =
-            skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
-            skill.directory.toLowerCase();
-          const skillKey = `${installName}:${skill.repoOwner?.toLowerCase() || ""}:${skill.repoName?.toLowerCase() || ""}`;
-
-          const result = await uninstallMutation.mutateAsync({
-            id: skill.id,
-            skillKey,
-          });
-          setConfirmDialog(null);
-          toast.success(t("skills.uninstallSuccess", { name: skill.name }), {
-            description: result.backupPath
-              ? t("skills.backup.location", { path: result.backupPath })
-              : undefined,
-            closeButton: true,
-          });
-        } catch (error) {
-          toast.error(t("common.error"), { description: String(error) });
-        }
-      },
+      onConfirm: () => void uninstallSkill(skill),
     });
   };
 
@@ -307,6 +309,26 @@ const UnifiedSkillsPanel = React.forwardRef<
     }
   };
 
+  const deleteBackup = async (backup: SkillBackupEntry) => {
+    try {
+      await deleteBackupMutation.mutateAsync(backup.backupId);
+      await refetchSkillBackups();
+      setConfirmDialog(null);
+      toast.success(
+        t("skills.restoreFromBackup.deleteSuccess", {
+          name: backup.skill.name,
+        }),
+        {
+          closeButton: true,
+        },
+      );
+    } catch (error) {
+      toast.error(t("skills.restoreFromBackup.deleteFailed"), {
+        description: String(error),
+      });
+    }
+  };
+
   const handleDeleteBackup = (backup: SkillBackupEntry) => {
     setConfirmDialog({
       isOpen: true,
@@ -316,25 +338,7 @@ const UnifiedSkillsPanel = React.forwardRef<
       }),
       confirmText: t("skills.restoreFromBackup.delete"),
       variant: "destructive",
-      onConfirm: async () => {
-        try {
-          await deleteBackupMutation.mutateAsync(backup.backupId);
-          await refetchSkillBackups();
-          setConfirmDialog(null);
-          toast.success(
-            t("skills.restoreFromBackup.deleteSuccess", {
-              name: backup.skill.name,
-            }),
-            {
-              closeButton: true,
-            },
-          );
-        } catch (error) {
-          toast.error(t("skills.restoreFromBackup.deleteFailed"), {
-            description: String(error),
-          });
-        }
-      },
+      onConfirm: () => void deleteBackup(backup),
     });
   };
 
@@ -368,7 +372,7 @@ const UnifiedSkillsPanel = React.forwardRef<
               variant="outline"
               size="sm"
               className="h-7 text-xs gap-1 whitespace-nowrap"
-              onClick={handleUpdateAll}
+              onClick={() => void handleUpdateAll()}
               disabled={isUpdatingAll || updateSkillMutation.isPending}
             >
               {isUpdatingAll ? (
@@ -386,7 +390,7 @@ const UnifiedSkillsPanel = React.forwardRef<
             variant="ghost"
             size="sm"
             className="h-7 text-xs gap-1"
-            onClick={handleCheckUpdates}
+            onClick={() => void handleCheckUpdates()}
             disabled={isCheckingUpdates || !skills || skills.length === 0}
           >
             {isCheckingUpdates ? (
@@ -430,9 +434,11 @@ const UnifiedSkillsPanel = React.forwardRef<
                     updateSkillMutation.isPending &&
                     updateSkillMutation.variables === skill.id
                   }
-                  onToggleApp={handleToggleApp}
+                  onToggleApp={(id, app, enabled) =>
+                    void handleToggleApp(id, app, enabled)
+                  }
                   onUninstall={() => handleUninstall(skill)}
-                  onUpdate={() => handleUpdateSkill(skill)}
+                  onUpdate={() => void handleUpdateSkill(skill)}
                   isLast={index === skills.length - 1}
                 />
               ))}
@@ -458,7 +464,7 @@ const UnifiedSkillsPanel = React.forwardRef<
         <ImportSkillsDialog
           skills={unmanagedSkills}
           isImporting={importMutation.isPending}
-          onImport={handleImport}
+          onImport={(imports) => void handleImport(imports)}
           onClose={() => setImportDialogOpen(false)}
         />
       )}
@@ -469,7 +475,7 @@ const UnifiedSkillsPanel = React.forwardRef<
         isLoading={isFetchingSkillBackups}
         onDelete={handleDeleteBackup}
         isRestoring={restoreBackupMutation.isPending}
-        onRestore={handleRestoreFromBackup}
+        onRestore={(backupId) => void handleRestoreFromBackup(backupId)}
         onClose={() => setRestoreDialogOpen(false)}
         open={restoreDialogOpen}
       />
@@ -526,7 +532,7 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
           {skill.readmeUrl && (
             <button
               type="button"
-              onClick={openDocs}
+              onClick={() => void openDocs()}
               className="text-muted-foreground/60 hover:text-foreground flex-shrink-0"
             >
               <ExternalLink size={12} />

@@ -122,7 +122,7 @@ export function SkillCard({
           <Button
             variant="ghost"
             size="sm"
-            onClick={handleOpenGithub}
+            onClick={() => void handleOpenGithub()}
             disabled={loading}
             className="flex-1"
           >
@@ -134,7 +134,7 @@ export function SkillCard({
           <Button
             variant="outline"
             size="sm"
-            onClick={handleUninstall}
+            onClick={() => void handleUninstall()}
             disabled={loading}
             className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-950/50 dark:hover:text-red-300"
           >
@@ -149,7 +149,7 @@ export function SkillCard({
           <Button
             variant="mcp"
             size="sm"
-            onClick={handleInstall}
+            onClick={() => void handleInstall()}
             disabled={loading || !skill.repoOwner}
             className="flex-1"
           >

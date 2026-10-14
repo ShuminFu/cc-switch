@@ -316,7 +316,10 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
           title={t("workspace.editing", { filename: editingFile })}
           onClose={handleBackToList}
           footer={
-            <Button onClick={handleSave} disabled={saving || loadingContent}>
+            <Button
+              onClick={() => void handleSave()}
+              disabled={saving || loadingContent}
+            >
               {saving ? t("common.saving") : t("common.save")}
             </Button>
           }
@@ -342,7 +345,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
           message={t("workspace.dailyMemory.confirmDeleteMessage", {
             date: deletingFile?.replace(".md", "") ?? "",
           })}
-          onConfirm={handleDelete}
+          onConfirm={() => void handleDelete()}
           onCancel={() => setDeletingFile(null)}
         />
       </>
@@ -363,7 +366,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
             <p
               className="text-sm text-muted-foreground shrink-0 cursor-pointer hover:text-foreground transition-colors inline-flex items-center gap-1"
               onClick={() =>
-                workspaceApi
+                void workspaceApi
                   .openDirectory("memory")
                   .catch((error) =>
                     toast.error(
@@ -389,7 +392,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleCreateToday}
+                onClick={() => void handleCreateToday()}
                 className="gap-1.5"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -459,7 +462,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
                 {searchResults.map((result) => (
                   <button
                     key={result.filename}
-                    onClick={() => openFile(result.filename)}
+                    onClick={() => void openFile(result.filename)}
                     className="w-full flex items-start gap-3 p-4 rounded-xl border border-border bg-card hover:bg-accent/50 transition-colors text-left group"
                   >
                     <div className="mt-0.5 text-muted-foreground group-hover:text-foreground transition-colors">
@@ -515,7 +518,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
               {files.map((file) => (
                 <button
                   key={file.filename}
-                  onClick={() => openFile(file.filename)}
+                  onClick={() => void openFile(file.filename)}
                   className="w-full flex items-start gap-3 p-4 rounded-xl border border-border bg-card hover:bg-accent/50 transition-colors text-left group"
                 >
                   <div className="mt-0.5 text-muted-foreground group-hover:text-foreground transition-colors">
@@ -558,7 +561,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
         message={t("workspace.dailyMemory.confirmDeleteMessage", {
           date: deletingFile?.replace(".md", "") ?? "",
         })}
-        onConfirm={handleDelete}
+        onConfirm={() => void handleDelete()}
         onCancel={() => setDeletingFile(null)}
       />
     </>

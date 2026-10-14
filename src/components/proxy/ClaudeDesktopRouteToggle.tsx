@@ -91,7 +91,7 @@ export function ClaudeDesktopRouteToggle({
       )}
       <Switch
         checked={isRunning}
-        onCheckedChange={handleToggle}
+        onCheckedChange={(checked) => void handleToggle(checked)}
         disabled={isBusy}
       />
     </div>

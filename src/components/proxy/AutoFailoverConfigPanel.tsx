@@ -499,7 +499,7 @@ export function AutoFailoverConfigPanel({
           <Button variant="outline" onClick={handleReset} disabled={isDisabled}>
             {t("common.reset", "重置")}
           </Button>
-          <Button onClick={handleSave} disabled={isDisabled}>
+          <Button onClick={() => void handleSave()} disabled={isDisabled}>
             {updateConfig.isPending ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

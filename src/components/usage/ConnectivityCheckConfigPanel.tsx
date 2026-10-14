@@ -25,7 +25,7 @@ export function ConnectivityCheckConfigPanel() {
   });
 
   useEffect(() => {
-    loadConfig();
+    void loadConfig();
   }, []);
 
   async function loadConfig() {
@@ -150,7 +150,7 @@ export function ConnectivityCheckConfigPanel() {
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={isSaving}>
+        <Button onClick={() => void handleSave()} disabled={isSaving}>
           {isSaving ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

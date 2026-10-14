@@ -44,7 +44,7 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
           }),
         );
         // Refresh all usage data
-        queryClient.invalidateQueries({ queryKey: usageKeys.all });
+        void queryClient.invalidateQueries({ queryKey: usageKeys.all });
       } else {
         toast.info(
           t("usage.sessionSync.upToDate", {
@@ -100,7 +100,7 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
           variant="ghost"
           size="sm"
           className="h-7 px-2 text-xs"
-          onClick={handleSync}
+          onClick={() => void handleSync()}
           disabled={syncing}
           title={t("usage.sessionSync.trigger", {
             defaultValue: "Sync session logs",

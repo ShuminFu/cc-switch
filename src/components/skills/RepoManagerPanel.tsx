@@ -123,7 +123,7 @@ export function RepoManagerPanel({
             <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
           )}
           <Button
-            onClick={handleAdd}
+            onClick={() => void handleAdd()}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
             type="button"
           >
@@ -169,7 +169,7 @@ export function RepoManagerPanel({
                     variant="ghost"
                     size="icon"
                     type="button"
-                    onClick={() => handleOpenRepo(repo.owner, repo.name)}
+                    onClick={() => void handleOpenRepo(repo.owner, repo.name)}
                     title={t("common.view", { defaultValue: "查看" })}
                     className="hover:bg-black/5 dark:hover:bg-white/5"
                   >
@@ -179,7 +179,7 @@ export function RepoManagerPanel({
                     variant="ghost"
                     size="icon"
                     type="button"
-                    onClick={() => onRemove(repo.owner, repo.name)}
+                    onClick={() => void onRemove(repo.owner, repo.name)}
                     title={t("common.delete")}
                     className="hover:text-red-500 hover:bg-red-100 dark:hover:text-red-400 dark:hover:bg-red-500/10"
                   >

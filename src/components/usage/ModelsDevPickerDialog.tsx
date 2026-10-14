@@ -297,7 +297,7 @@ export function ModelsDevPickerDialog({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => refetch()}
+                  onClick={() => void refetch()}
                   className="shrink-0"
                 >
                   {t("usage.modelsDevRetry", "重试")}
@@ -433,7 +433,7 @@ export function ModelsDevPickerDialog({
             {t("common.cancel", "取消")}
           </Button>
           <Button
-            onClick={handleImport}
+            onClick={() => void handleImport()}
             disabled={!selected || updatePricing.isPending}
           >
             {updatePricing.isPending ? (

@@ -89,7 +89,7 @@ const WorkspaceFilesPanel: React.FC = () => {
       <p
         className="text-sm text-muted-foreground mb-6 cursor-pointer hover:text-foreground transition-colors inline-flex items-center gap-1"
         onClick={() =>
-          workspaceApi
+          void workspaceApi
             .openDirectory("workspace")
             .catch((error) =>
               toast.error(extractErrorMessage(error) || t("common.error")),

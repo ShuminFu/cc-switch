@@ -123,7 +123,7 @@ export function UsageDashboard({
     const normalized = normalizeRefreshInterval(next);
     const previous = refreshIntervalMs;
     setRefreshIntervalMs(normalized);
-    queryClient.invalidateQueries({ queryKey: usageKeys.all });
+    void queryClient.invalidateQueries({ queryKey: usageKeys.all });
     try {
       const saved = await onRefreshIntervalChange?.(normalized);
       if (saved === false) {
@@ -301,7 +301,7 @@ export function UsageDashboard({
           <div className="flex items-center gap-2 ml-auto lg:ml-0">
             <Select
               value={String(refreshIntervalMs)}
-              onValueChange={(v) => changeRefreshInterval(Number(v))}
+              onValueChange={(v) => void changeRefreshInterval(Number(v))}
             >
               <SelectTrigger
                 className="h-9 w-[100px] bg-background text-xs focus:border-border-default"

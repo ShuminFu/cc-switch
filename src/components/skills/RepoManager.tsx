@@ -128,7 +128,7 @@ export function RepoManager({
                     className="flex-1"
                   />
                   <Button
-                    onClick={handleAdd}
+                    onClick={() => void handleAdd()}
                     className="w-full sm:w-auto sm:px-4"
                     variant="mcp"
                     type="button"
@@ -173,7 +173,9 @@ export function RepoManager({
                           variant="ghost"
                           size="icon"
                           type="button"
-                          onClick={() => handleOpenRepo(repo.owner, repo.name)}
+                          onClick={() =>
+                            void handleOpenRepo(repo.owner, repo.name)
+                          }
                           title={t("common.view", { defaultValue: "查看" })}
                         >
                           <ExternalLink className="h-4 w-4" />
@@ -182,7 +184,7 @@ export function RepoManager({
                           variant="ghost"
                           size="icon"
                           type="button"
-                          onClick={() => onRemove(repo.owner, repo.name)}
+                          onClick={() => void onRemove(repo.owner, repo.name)}
                           title={t("common.delete")}
                           className="hover:text-red-500 hover:bg-red-100 dark:hover:text-red-400 dark:hover:bg-red-500/10"
                         >

@@ -82,7 +82,7 @@ export function ProxyToggle({ className, activeApp }: ProxyToggleProps) {
       )}
       <Switch
         checked={takeoverEnabled}
-        onCheckedChange={handleToggle}
+        onCheckedChange={(checked) => void handleToggle(checked)}
         disabled={isPending}
       />
     </div>

@@ -129,7 +129,7 @@ export function PricingConfigPanel() {
       }
     };
 
-    loadAllConfigs();
+    void loadAllConfigs();
     return () => {
       isMounted = false;
     };
@@ -237,7 +237,7 @@ export function PricingConfigPanel() {
             </p>
           </div>
           <Button
-            onClick={handleSaveAll}
+            onClick={() => void handleSaveAll()}
             disabled={isConfigLoading || isSaving || !isDirty}
             size="sm"
           >
