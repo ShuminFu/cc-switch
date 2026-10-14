@@ -170,39 +170,22 @@ impl ProxyServer {
                         let app = app.clone();
                         let mut conn_shutdown_rx = conn_shutdown_tx.subscribe();
                         tokio::spawn(async move {
-                            // Peek raw TCP bytes to capture original header casing
-                            // before hyper parses (and lowercases) the header names.
-                            let original_cases = {
-                                let mut peek_buf = vec![0u8; 8192];
-                                let peeked = tokio::select! {
-                                    peeked = stream.peek(&mut peek_buf) => peeked,
-                                    _ = conn_shutdown_rx.changed() => return,
-                                };
-                                match peeked {
-                                    Ok(n) => {
-                                        let cases = super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..n]);
-                                        log::debug!(
-                                            "[ProxyServer] Peeked {} bytes, captured {} header casings",
-                                            n, cases.cases.len()
-                                        );
-                                        cases
-                                    }
-                                    Err(e) => {
-                                        log::debug!("[ProxyServer] peek failed (non-fatal): {e}");
-                                        super::hyper_client::OriginalHeaderCases::default()
-                                    }
-                                }
-                            };
+                            // Record the bytes hyper reads so each request's original
+                            // header casing/order is captured per request (not once per
+                            // keep-alive connection).
+                            let (stream, header_capture) =
+                                super::header_capture::HeaderCaptureIo::new(stream);
 
                             // service_fn 将 axum Router（tower::Service）桥接到 hyper
                             let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                                 let mut router = app.clone();
-                                let cases = original_cases.clone();
+                                let header_capture = header_capture.clone();
                                 async move {
                                     // 将 hyper::body::Incoming 转为 axum::body::Body，保留 extensions
                                     let (mut parts, body) = req.into_parts();
 
                                     // Insert our own header case map alongside hyper's internal one
+                                    let cases = header_capture.take_for_request(&parts);
                                     parts.extensions.insert(cases);
                                     parts.extensions.insert(conn_addrs);
 

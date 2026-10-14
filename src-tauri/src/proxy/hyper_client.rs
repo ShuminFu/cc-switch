@@ -17,7 +17,8 @@ use std::sync::OnceLock;
 /// This is a backup mechanism independent of hyper's internal `HeaderCaseMap` (which is
 /// `pub(crate)` and cannot be directly inspected or constructed from outside hyper).
 ///
-/// Populated in `server.rs` by peeking at raw TCP bytes before hyper parses them.
+/// Populated per request by `header_capture::HeaderCapture`, which records the raw
+/// bytes hyper reads from the client connection.
 /// Used in `send_request` to manually write headers with original casing when hyper's
 /// own mechanism fails.
 #[derive(Clone, Debug, Default)]
@@ -25,29 +26,6 @@ pub(crate) struct OriginalHeaderCases {
     /// Ordered list of (lowercase_name, original_wire_bytes) pairs.
     /// Multiple entries with the same name are allowed (for repeated headers).
     pub cases: Vec<(String, Vec<u8>)>,
-}
-
-impl OriginalHeaderCases {
-    /// Parse raw HTTP request bytes (from TcpStream::peek) to extract original header casings.
-    pub fn from_raw_bytes(buf: &[u8]) -> Self {
-        let mut headers_buf = [httparse::EMPTY_HEADER; 128];
-        let mut req = httparse::Request::new(&mut headers_buf);
-        // We don't care if parsing is partial — we just want the header names we can get
-        let _ = req.parse(buf);
-
-        let mut cases = Vec::new();
-        for header in req.headers.iter() {
-            if header.name.is_empty() {
-                break;
-            }
-            cases.push((
-                header.name.to_ascii_lowercase(),
-                header.name.as_bytes().to_vec(),
-            ));
-        }
-
-        Self { cases }
-    }
 }
 
 type HyperClient = Client<

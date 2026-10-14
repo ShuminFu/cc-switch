@@ -16,6 +16,7 @@ pub mod gemini_url;
 pub mod handler_config;
 pub mod handler_context;
 mod handlers;
+mod header_capture;
 mod health;
 pub mod http_client;
 pub mod hyper_client;
