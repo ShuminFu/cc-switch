@@ -58,9 +58,24 @@ pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
 }
 
 /// 保存设置
+///
+/// The save is a read-merge-write of settings.json (which also stores the
+/// current-provider pointers that switches update) and may rewrite the Codex
+/// live config, so it runs serialized with other provider / live-config
+/// writers on the blocking pool.
 #[tauri::command]
 pub async fn save_settings(
-    state: tauri::State<'_, crate::store::AppState>,
+    handle: AppHandle,
+    settings: crate::settings::AppSettings,
+) -> Result<bool, String> {
+    crate::commands::blocking::with_state_serialized(handle, move |state| {
+        save_settings_blocking(state, settings)
+    })
+    .await
+}
+
+fn save_settings_blocking(
+    state: &crate::store::AppState,
     settings: crate::settings::AppSettings,
 ) -> Result<bool, String> {
     let existing = crate::settings::get_settings();
@@ -78,9 +93,7 @@ pub async fn save_settings(
         // 迁走而新会话仍写 openai 桶；关闭=会话还原而 live 仍写 custom）。
         // 报错让前端 saved=false 短路还原；回滚是整次保存的事务语义
         // （本开关的保存只携带开关相关字段）。
-        if let Err(err) =
-            crate::services::provider::reapply_current_codex_official_live(state.inner())
-        {
+        if let Err(err) = crate::services::provider::reapply_current_codex_official_live(state) {
             log::warn!("统一 Codex 会话历史开关变更后重写 live 配置失败，回滚设置: {err}");
             if let Err(rollback_err) = crate::settings::update_settings(existing) {
                 log::error!("回滚统一会话开关设置失败: {rollback_err}");
