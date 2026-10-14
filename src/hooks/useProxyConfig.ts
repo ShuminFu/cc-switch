@@ -28,8 +28,8 @@ export function useProxyConfig() {
       invoke("update_proxy_config", { config: newConfig }),
     onSuccess: () => {
       toast.success(t("proxy.settings.toast.saved"), { closeButton: true });
-      queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: unknown) => {
       toast.error(

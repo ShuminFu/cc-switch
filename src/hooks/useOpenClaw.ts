@@ -104,8 +104,8 @@ export function useSaveOpenClawEnv() {
   return useMutation({
     mutationFn: (env: OpenClawEnvConfig) => openclawApi.setEnv(env),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: openclawKeys.env });
-      queryClient.invalidateQueries({ queryKey: openclawKeys.health });
+      void queryClient.invalidateQueries({ queryKey: openclawKeys.env });
+      void queryClient.invalidateQueries({ queryKey: openclawKeys.health });
     },
   });
 }
@@ -119,8 +119,8 @@ export function useSaveOpenClawTools() {
   return useMutation({
     mutationFn: (tools: OpenClawToolsConfig) => openclawApi.setTools(tools),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: openclawKeys.tools });
-      queryClient.invalidateQueries({ queryKey: openclawKeys.health });
+      void queryClient.invalidateQueries({ queryKey: openclawKeys.tools });
+      void queryClient.invalidateQueries({ queryKey: openclawKeys.health });
     },
   });
 }
@@ -136,9 +136,13 @@ export function useSaveOpenClawAgentsDefaults() {
     mutationFn: (defaults: OpenClawAgentsDefaults) =>
       openclawApi.setAgentsDefaults(defaults),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: openclawKeys.agentsDefaults });
-      queryClient.invalidateQueries({ queryKey: openclawKeys.defaultModel });
-      queryClient.invalidateQueries({ queryKey: openclawKeys.health });
+      void queryClient.invalidateQueries({
+        queryKey: openclawKeys.agentsDefaults,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: openclawKeys.defaultModel,
+      });
+      void queryClient.invalidateQueries({ queryKey: openclawKeys.health });
     },
   });
 }

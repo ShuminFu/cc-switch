@@ -21,7 +21,7 @@ export function useUpsertMcpServer() {
   return useMutation({
     mutationFn: (server: McpServer) => mcpApi.upsertUnifiedServer(server),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
+      void queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
     },
   });
 }
@@ -42,7 +42,7 @@ export function useToggleMcpApp() {
       enabled: boolean;
     }) => mcpApi.toggleApp(serverId, app, enabled),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
+      void queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
     },
   });
 }
@@ -55,7 +55,7 @@ export function useDeleteMcpServer() {
   return useMutation({
     mutationFn: (id: string) => mcpApi.deleteUnifiedServer(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
+      void queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
     },
   });
 }
@@ -70,7 +70,7 @@ export function useImportMcpFromApps() {
     // 后端是 best-effort 导入：部分应用失败会返回错误，但其余应用的
     // 服务器已经入库，失败时也要刷新列表。
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
+      void queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
     },
   });
 }

@@ -17,8 +17,8 @@ function createOmoQueryHooks(
   const keys = createOmoQueryKeys(variant);
 
   function invalidateAll(queryClient: ReturnType<typeof useQueryClient>) {
-    queryClient.invalidateQueries({ queryKey: ["providers"] });
-    queryClient.invalidateQueries({ queryKey: keys.currentProviderId() });
+    void queryClient.invalidateQueries({ queryKey: ["providers"] });
+    void queryClient.invalidateQueries({ queryKey: keys.currentProviderId() });
   }
 
   function useCurrentProviderId(enabled = true) {

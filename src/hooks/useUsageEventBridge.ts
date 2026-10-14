@@ -23,7 +23,7 @@ export function useUsageEventBridge() {
       const off = await listen("usage-log-recorded", () => {
         // invalidate 整个 usage 命名空间：summary / trends / providerStats /
         // modelStats / logs 全部跟着重拉
-        queryClient.invalidateQueries({ queryKey: usageKeys.all });
+        void queryClient.invalidateQueries({ queryKey: usageKeys.all });
       });
 
       if (disposed) {
@@ -31,7 +31,12 @@ export function useUsageEventBridge() {
       } else {
         unlisten = off;
       }
-    })();
+    })().catch((error) => {
+      console.error(
+        "[useUsageEventBridge] Failed to listen for usage events",
+        error,
+      );
+    });
 
     return () => {
       disposed = true;

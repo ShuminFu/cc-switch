@@ -38,15 +38,15 @@ export function useResetCircuitBreaker() {
     }) => failoverApi.resetCircuitBreaker(providerId, appType),
     onSuccess: (_, variables) => {
       // 刷新健康状态
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["providerHealth", variables.providerId, variables.appType],
       });
       // 刷新供应商列表（因为可能发生了自动恢复切换）
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["providers", variables.appType],
       });
       // 刷新代理状态（更新 active_targets）
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["proxyStatus"],
       });
     },
@@ -72,7 +72,9 @@ export function useUpdateCircuitBreakerConfig() {
   return useMutation({
     mutationFn: failoverApi.updateCircuitBreakerConfig,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["circuitBreakerConfig"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["circuitBreakerConfig"],
+      });
     },
   });
 }
@@ -128,13 +130,13 @@ export function useAddToFailoverQueue() {
       providerId: string;
     }) => failoverApi.addToFailoverQueue(appType, providerId),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["failoverQueue", variables.appType],
       });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["availableProvidersForFailover", variables.appType],
       });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["providers", variables.appType],
       });
     },
@@ -156,21 +158,21 @@ export function useRemoveFromFailoverQueue() {
       providerId: string;
     }) => failoverApi.removeFromFailoverQueue(appType, providerId),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["failoverQueue", variables.appType],
       });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["availableProvidersForFailover", variables.appType],
       });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["providers", variables.appType],
       });
       // 清除该供应商的健康状态缓存（退出队列后不再需要健康监控）
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["providerHealth", variables.providerId, variables.appType],
       });
       // 清除该供应商的熔断器统计缓存
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: [
           "circuitBreakerStats",
           variables.providerId,
@@ -267,22 +269,22 @@ export function useSetAutoFailoverEnabled() {
 
     // 无论成功失败，都重新获取
     onSettled: (_, __, variables) => {
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["autoFailoverEnabled", variables.appType],
       });
       // 启用/关闭故障转移可能触发：
       // - 立即切到队列 P1（当前供应商变化）
       // - 队列为空时自动把当前供应商加入队列（队列内容变化）
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["failoverQueue", variables.appType],
       });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["availableProvidersForFailover", variables.appType],
       });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["providers", variables.appType],
       });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["proxyStatus"],
       });
     },

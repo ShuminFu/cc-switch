@@ -62,10 +62,10 @@ export function useStartProxyServer() {
   return useMutation({
     mutationFn: () => proxyApi.startProxyServer(),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyRunning"] });
-      queryClient.invalidateQueries({ queryKey: ["liveTakeoverActive"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyRunning"] });
+      void queryClient.invalidateQueries({ queryKey: ["liveTakeoverActive"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
     },
   });
 }
@@ -79,10 +79,10 @@ export function useStopProxyServer() {
   return useMutation({
     mutationFn: () => proxyApi.stopProxyWithRestore(),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyRunning"] });
-      queryClient.invalidateQueries({ queryKey: ["liveTakeoverActive"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyRunning"] });
+      void queryClient.invalidateQueries({ queryKey: ["liveTakeoverActive"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
     },
   });
 }
@@ -97,8 +97,8 @@ export function useSetProxyTakeoverForApp() {
     mutationFn: ({ appType, enabled }: { appType: string; enabled: boolean }) =>
       proxyApi.setProxyTakeoverForApp(appType, enabled),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
-      queryClient.invalidateQueries({ queryKey: ["liveTakeoverActive"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["liveTakeoverActive"] });
     },
   });
 }
@@ -119,8 +119,8 @@ export function useSwitchProxyProvider() {
       providerId: string;
     }) => proxyApi.switchProxyProvider(appType, providerId),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({
         queryKey: ["providers", variables.appType],
       });
     },
@@ -152,8 +152,8 @@ export function useProxyConfig() {
     mutationFn: proxyApi.updateProxyConfig,
     onSuccess: () => {
       toast.success(t("proxy.settings.toast.saved"), { closeButton: true });
-      queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: unknown) => {
       toast.error(
@@ -196,9 +196,9 @@ export function useUpdateGlobalProxyConfig() {
       proxyApi.updateGlobalProxyConfig(config),
     onSuccess: () => {
       toast.success(t("proxy.settings.toast.saved"), { closeButton: true });
-      queryClient.invalidateQueries({ queryKey: ["globalProxyConfig"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["globalProxyConfig"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: unknown) => {
       toast.error(
@@ -233,15 +233,17 @@ export function useUpdateAppProxyConfig() {
       proxyApi.updateProxyConfigForApp(config),
     onSuccess: (_, variables) => {
       toast.success(t("proxy.settings.toast.saved"), { closeButton: true });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["appProxyConfig", variables.appType],
       });
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["autoFailoverEnabled", variables.appType],
       });
-      queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
-      queryClient.invalidateQueries({ queryKey: ["circuitBreakerConfig"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["circuitBreakerConfig"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: unknown) => {
       toast.error(

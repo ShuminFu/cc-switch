@@ -49,7 +49,7 @@ export function useProxyStatus() {
         }),
         { closeButton: true },
       );
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: Error) => {
       const detail =
@@ -74,7 +74,7 @@ export function useProxyStatus() {
         }),
         { closeButton: true },
       );
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: Error) => {
       const detail =
@@ -99,8 +99,8 @@ export function useProxyStatus() {
         }),
         { closeButton: true },
       );
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
       // 彻底删除所有供应商健康状态缓存（后端已清空数据库记录）
       queryClient.removeQueries({ queryKey: ["providerHealth"] });
       // 彻底删除所有熔断器统计缓存（代理停止后熔断器状态已重置）
@@ -149,8 +149,8 @@ export function useProxyStatus() {
         { closeButton: true },
       );
 
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
     },
     onError: (error: Error) => {
       const detail =
@@ -175,7 +175,7 @@ export function useProxyStatus() {
       providerId: string;
     }) => invoke("switch_proxy_provider", { appType, providerId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: Error) => {
       const detail =

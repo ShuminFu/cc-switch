@@ -43,7 +43,7 @@ export function useDeleteSkillBackup() {
   return useMutation({
     mutationFn: (backupId: string) => skillsApi.deleteBackup(backupId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] });
+      void queryClient.invalidateQueries({ queryKey: ["skills", "backups"] });
     },
   });
 }
@@ -158,8 +158,8 @@ export function useRestoreSkillBackup() {
       currentApp: AppId;
     }) => skillsApi.restoreBackup(backupId, currentApp),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] });
-      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] });
+      void queryClient.invalidateQueries({ queryKey: ["skills", "installed"] });
+      void queryClient.invalidateQueries({ queryKey: ["skills", "backups"] });
     },
   });
 }
@@ -180,7 +180,7 @@ export function useToggleSkillApp() {
       enabled: boolean;
     }) => skillsApi.toggleApp(id, app, enabled),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] });
+      void queryClient.invalidateQueries({ queryKey: ["skills", "installed"] });
     },
   });
 }
@@ -219,7 +219,7 @@ export function useImportSkillsFromApps() {
         (oldData) => mergeImportedSkills(oldData, importedSkills),
       );
       // 刷新 unmanaged 列表（已被导入的应该移除）
-      queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] });
+      void queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] });
     },
   });
 }
@@ -242,8 +242,10 @@ export function useAddSkillRepo() {
   return useMutation({
     mutationFn: skillsApi.addRepo,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "repos"] });
-      queryClient.invalidateQueries({ queryKey: ["skills", "discoverable"] });
+      void queryClient.invalidateQueries({ queryKey: ["skills", "repos"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["skills", "discoverable"],
+      });
     },
   });
 }
@@ -257,8 +259,10 @@ export function useRemoveSkillRepo() {
     mutationFn: ({ owner, name }: { owner: string; name: string }) =>
       skillsApi.removeRepo(owner, name),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "repos"] });
-      queryClient.invalidateQueries({ queryKey: ["skills", "discoverable"] });
+      void queryClient.invalidateQueries({ queryKey: ["skills", "repos"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["skills", "discoverable"],
+      });
     },
   });
 }
