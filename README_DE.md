@@ -439,7 +439,7 @@ Laden Sie den neuesten Linux-Build von der Seite [Releases](../../releases) heru
 
 ### Umgebungsanforderungen
 
-- Node.js 20.19+ oder 22.12+ (`.node-version` legt 22.12.0 fest)
+- Node.js 20.19+ oder 22.13+ (`.node-version` legt 22.13.0 fest)
 - pnpm 9+
 - Rust 1.95 (in `rust-toolchain.toml` festgelegt, wird von rustup automatisch installiert)
 - Tauri CLI 2.8+

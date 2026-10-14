@@ -442,7 +442,7 @@ paru -S cc-switch-bin
 
 ### 环境要求
 
-- Node.js 20.19+ 或 22.12+（`.node-version` 固定为 22.12.0）
+- Node.js 20.19+ 或 22.13+（`.node-version` 固定为 22.13.0）
 - pnpm 9+
 - Rust 1.95（由 `rust-toolchain.toml` 固定，rustup 会自动安装）
 - Tauri CLI 2.8+

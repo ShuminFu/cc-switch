@@ -20,7 +20,7 @@ There are many ways to contribute:
 
 ### Prerequisites
 
-- Node.js 20.19+ or 22.12+ (`.node-version` pins 22.12.0) and pnpm 9+
+- Node.js 20.19+ or 22.13+ (`.node-version` pins 22.13.0) and pnpm 9+
 - Rust and Cargo via rustup (`rust-toolchain.toml` pins Rust 1.95; rustup installs it automatically)
 - [Tauri 2.0 prerequisites](https://v2.tauri.app/start/prerequisites/)
 
@@ -149,7 +149,7 @@ CC Switch supports three languages. When modifying user-facing text:
 
 ### 前提条件
 
-- Node.js 20.19+ 或 22.12+（`.node-version` 固定为 22.12.0）和 pnpm 9+
+- Node.js 20.19+ 或 22.13+（`.node-version` 固定为 22.13.0）和 pnpm 9+
 - 通过 rustup 安装 Rust 和 Cargo（`rust-toolchain.toml` 固定 Rust 1.95，rustup 会自动安装）
 - [Tauri 2.0 开发环境](https://v2.tauri.app/start/prerequisites/)
 

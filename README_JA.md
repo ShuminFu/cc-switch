@@ -439,7 +439,7 @@ paru -S cc-switch-bin
 
 ### 開発環境
 
-- Node.js 20.19+ または 22.12+（`.node-version` で 22.12.0 を指定）
+- Node.js 20.19+ または 22.13+（`.node-version` で 22.13.0 を指定）
 - pnpm 9+
 - Rust 1.95（`rust-toolchain.toml` で固定、rustup が自動インストール）
 - Tauri CLI 2.8+

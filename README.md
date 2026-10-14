@@ -439,7 +439,7 @@ Download the latest Linux build from the [Releases](../../releases) page:
 
 ### Environment Requirements
 
-- Node.js 20.19+ or 22.12+ (`.node-version` pins 22.12.0)
+- Node.js 20.19+ or 22.13+ (`.node-version` pins 22.13.0)
 - pnpm 9+
 - Rust 1.95 (pinned in `rust-toolchain.toml`, installed automatically by rustup)
 - Tauri CLI 2.8+
