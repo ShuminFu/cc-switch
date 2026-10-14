@@ -46,7 +46,10 @@
     "externalChangeKeepMine": "Keep mine",
     "discardChangesTitle": "Discard unsaved changes?",
     "discardChangesMessage": "Your edits have not been saved and will be lost.",
-    "discardChanges": "Discard"
+    "discardChanges": "Discard",
+    "integerInvalid": "Enter a whole number",
+    "integerMin": "Must be at least {{min}}",
+    "integerMax": "Must be at most {{max}}"
   },
   "firstRunNotice": {
     "title": "Welcome to CC Switch",

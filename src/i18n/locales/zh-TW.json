@@ -46,7 +46,10 @@
     "externalChangeKeepMine": "保留我的修改",
     "discardChangesTitle": "放棄未儲存的修改？",
     "discardChangesMessage": "你的編輯尚未儲存，關閉後將會遺失。",
-    "discardChanges": "放棄修改"
+    "discardChanges": "放棄修改",
+    "integerInvalid": "請輸入整數",
+    "integerMin": "不能小於 {{min}}",
+    "integerMax": "不能大於 {{max}}"
   },
   "firstRunNotice": {
     "title": "歡迎使用 CC Switch",

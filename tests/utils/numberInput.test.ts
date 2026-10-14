@@ -1,8 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
   parseNonNegativeIntInput,
+  parseStrictInteger,
   parseStrictNonNegativeInt,
 } from "@/utils/numberInput";
+
+describe("parseStrictInteger", () => {
+  it("accepts integers including negatives and exponent form", () => {
+    expect(parseStrictInteger("-12")).toBe(-12);
+    expect(parseStrictInteger("+7")).toBe(7);
+    expect(parseStrictInteger("2e3")).toBe(2000);
+    expect(parseStrictInteger("")).toBeUndefined();
+  });
+
+  it("rejects non-decimal literals that Number() would accept", () => {
+    expect(parseStrictInteger("0x10")).toBeNull();
+    expect(parseStrictInteger("0b11")).toBeNull();
+    expect(parseStrictInteger("Infinity")).toBeNull();
+    expect(parseStrictInteger("1.5")).toBeNull();
+  });
+
+  it("makes parseStrictNonNegativeInt reject hex too", () => {
+    expect(parseStrictNonNegativeInt("0x10")).toBeNull();
+  });
+});
 
 describe("parseStrictNonNegativeInt", () => {
   it("returns undefined for empty input", () => {

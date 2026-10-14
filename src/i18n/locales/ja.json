@@ -46,7 +46,10 @@
     "externalChangeKeepMine": "自分の編集を保持",
     "discardChangesTitle": "未保存の変更を破棄しますか？",
     "discardChangesMessage": "編集内容は保存されておらず、失われます。",
-    "discardChanges": "破棄"
+    "discardChanges": "破棄",
+    "integerInvalid": "整数を入力してください",
+    "integerMin": "{{min}} 以上の値を入力してください",
+    "integerMax": "{{max}} 以下の値を入力してください"
   },
   "firstRunNotice": {
     "title": "CC Switch へようこそ",
