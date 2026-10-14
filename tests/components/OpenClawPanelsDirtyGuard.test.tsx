@@ -201,3 +201,54 @@ describe("OpenClaw AgentsDefaultsPanel", () => {
     expect(screen.getByPlaceholderText("~/projects")).toHaveValue("~/external");
   });
 });
+
+describe("OpenClaw panels external-change banner", () => {
+  it("EnvPanel: Reload replaces edits with the on-disk version", () => {
+    state.env = { vars: { A: "1" } };
+    const { rerender } = render(<EnvPanel />);
+    const editor = screen.getByTestId("json-editor");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.change(editor, { target: { value: "{}" } });
+    state.env = { vars: { A: "disk" } };
+    rerender(<EnvPanel />);
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("common.externalChangeReload"));
+    expect(editor).toHaveValue(pretty({ vars: { A: "disk" } }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("ToolsPanel: Keep mine dismisses the banner and keeps edits", () => {
+    state.tools = { allow: ["read"] };
+    const { rerender } = render(<ToolsPanel />);
+    fireEvent.change(screen.getByDisplayValue("read"), {
+      target: { value: "mine" },
+    });
+    state.tools = { allow: ["disk"] };
+    rerender(<ToolsPanel />);
+
+    fireEvent.click(screen.getByText("common.externalChangeKeepMine"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("mine")).toBeInTheDocument();
+  });
+
+  it("AgentsDefaultsPanel: Keep mine saves on top of the latest unknown fields", async () => {
+    state.agents = { workspace: "~/a", custom: 1 };
+    const { rerender } = render(<AgentsDefaultsPanel />);
+    fireEvent.change(screen.getByPlaceholderText("~/projects"), {
+      target: { value: "~/mine" },
+    });
+    state.agents = { workspace: "~/disk", custom: 2 };
+    rerender(<AgentsDefaultsPanel />);
+
+    fireEvent.click(screen.getByText("common.externalChangeKeepMine"));
+    fireEvent.click(screen.getByRole("button", { name: /common.save/ }));
+
+    await waitFor(() =>
+      expect(state.save).toHaveBeenCalledWith(
+        expect.objectContaining({ workspace: "~/mine", custom: 2 }),
+      ),
+    );
+  });
+});

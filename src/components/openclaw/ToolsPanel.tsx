@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Save, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -23,41 +23,75 @@ import {
   OPENCLAW_UNSET_PROFILE,
   OPENCLAW_UNSUPPORTED_PROFILE,
 } from "./utils";
-import { useDirtyTracker } from "./hooks/useDirtyTracker";
+import {
+  defaultDraftEquals,
+  useEditableResource,
+} from "@/hooks/useEditableResource";
+import { ExternalChangeBanner } from "@/components/common/ExternalChangeBanner";
 
 interface ListItem {
   id: string;
   value: string;
 }
 
+interface ToolsDraft {
+  config: OpenClawToolsConfig;
+  allow: ListItem[];
+  deny: ListItem[];
+}
+
+const toListItems = (values: string[] | undefined): ListItem[] =>
+  (values ?? []).map((value) => ({ id: crypto.randomUUID(), value }));
+
+const toToolsDraft = (data: OpenClawToolsConfig): ToolsDraft => ({
+  config: data,
+  allow: toListItems(data.allow),
+  deny: toListItems(data.deny),
+});
+
+// Row ids are regenerated on every seed, so compare by values only.
+const toolsDraftEquals = (a: ToolsDraft, b: ToolsDraft) =>
+  defaultDraftEquals(
+    {
+      config: a.config,
+      allow: a.allow.map((i) => i.value),
+      deny: a.deny.map((i) => i.value),
+    },
+    {
+      config: b.config,
+      allow: b.allow.map((i) => i.value),
+      deny: b.deny.map((i) => i.value),
+    },
+  );
+
 const ToolsPanel: React.FC = () => {
   const { t } = useTranslation();
   const { data: toolsData, isLoading } = useOpenClawTools();
   const saveToolsMutation = useSaveOpenClawTools();
-  const [config, setConfig] = useState<OpenClawToolsConfig>({});
-  const [allowList, setAllowList] = useState<ListItem[]>([]);
-  const [denyList, setDenyList] = useState<ListItem[]>([]);
-  const { isDirty, markDirty, beginSave, markSaved } = useDirtyTracker();
+  // Refetches never clobber unsaved edits; an on-disk change while dirty
+  // shows a Reload / Keep mine banner.
+  const { draft, setDraft, externalChange, reload, keepMine, markSaved } =
+    useEditableResource<OpenClawToolsConfig, ToolsDraft>({
+      data: toolsData ?? undefined,
+      toDraft: toToolsDraft,
+      initialDraft: { config: {}, allow: [], deny: [] },
+      isEqual: toolsDraftEquals,
+    });
+  const { config, allow: allowList, deny: denyList } = draft;
 
-  useEffect(() => {
-    // Only (re)seed while the form has no unsaved edits, so a refetch does
-    // not wipe out what the user is typing.
-    if (toolsData && !isDirty()) {
-      setConfig(toolsData);
-      setAllowList(
-        (toolsData.allow ?? []).map((value) => ({
-          id: crypto.randomUUID(),
-          value,
-        })),
-      );
-      setDenyList(
-        (toolsData.deny ?? []).map((value) => ({
-          id: crypto.randomUUID(),
-          value,
-        })),
-      );
-    }
-  }, [toolsData, isDirty]);
+  const setDraftField =
+    <K extends keyof ToolsDraft>(key: K) =>
+    (action: React.SetStateAction<ToolsDraft[K]>) =>
+      setDraft((prev) => ({
+        ...prev,
+        [key]:
+          typeof action === "function"
+            ? (action as (p: ToolsDraft[K]) => ToolsDraft[K])(prev[key])
+            : action,
+      }));
+  const setConfig = setDraftField("config");
+  const setAllowList = setDraftField("allow");
+  const setDenyList = setDraftField("deny");
 
   const unsupportedProfile = getOpenClawUnsupportedProfile(config.profile);
 
@@ -80,6 +114,7 @@ const ToolsPanel: React.FC = () => {
   );
 
   const handleSave = async () => {
+    const snapshot = draft;
     try {
       const { profile, allow, deny, ...other } = config;
       const newConfig: OpenClawToolsConfig = {
@@ -89,9 +124,8 @@ const ToolsPanel: React.FC = () => {
         deny: denyList.map((item) => item.value).filter((s) => s.trim()),
       };
 
-      const saveToken = beginSave();
       await saveToolsMutation.mutateAsync(newConfig);
-      markSaved(saveToken);
+      markSaved(snapshot);
       toast.success(t("openclaw.tools.saveSuccess"));
     } catch (error) {
       const detail = extractErrorMessage(error);
@@ -106,7 +140,6 @@ const ToolsPanel: React.FC = () => {
     index: number,
     value: string,
   ) => {
-    markDirty();
     setList((prev) =>
       prev.map((item, i) => (i === index ? { ...item, value } : item)),
     );
@@ -116,7 +149,6 @@ const ToolsPanel: React.FC = () => {
     setList: React.Dispatch<React.SetStateAction<ListItem[]>>,
     index: number,
   ) => {
-    markDirty();
     setList((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -135,6 +167,14 @@ const ToolsPanel: React.FC = () => {
       <p className="text-sm text-muted-foreground mb-6">
         {t("openclaw.tools.description")}
       </p>
+
+      {externalChange && (
+        <ExternalChangeBanner
+          className="mb-6"
+          onReload={reload}
+          onKeepMine={keepMine}
+        />
+      )}
 
       {unsupportedProfile && (
         <Alert className="mb-6 border-amber-500/30 bg-amber-500/5">
@@ -160,7 +200,6 @@ const ToolsPanel: React.FC = () => {
           value={getOpenClawToolsProfileSelectValue(config.profile)}
           onValueChange={(value) => {
             if (value === OPENCLAW_UNSUPPORTED_PROFILE) return;
-            markDirty();
             if (value === OPENCLAW_UNSET_PROFILE) {
               setConfig((prev) => ({ ...prev, profile: undefined }));
               return;
@@ -224,7 +263,6 @@ const ToolsPanel: React.FC = () => {
             variant="outline"
             size="sm"
             onClick={() => {
-              markDirty();
               setAllowList((prev) => [
                 ...prev,
                 { id: crypto.randomUUID(), value: "" },
@@ -264,7 +302,6 @@ const ToolsPanel: React.FC = () => {
             variant="outline"
             size="sm"
             onClick={() => {
-              markDirty();
               setDenyList((prev) => [
                 ...prev,
                 { id: crypto.randomUUID(), value: "" },

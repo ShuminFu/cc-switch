@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Save, Plus, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -21,10 +21,42 @@ import {
 import type { OpenClawAgentsDefaults } from "@/types";
 import { useOpenClawModelOptions } from "./hooks/useOpenClawModelOptions";
 import { getOpenClawTimeoutInputValue } from "./utils";
-import { useDirtyTracker } from "./hooks/useDirtyTracker";
+import { useEditableResource } from "@/hooks/useEditableResource";
+import { ExternalChangeBanner } from "@/components/common/ExternalChangeBanner";
 import { parseStrictNonNegativeInt } from "@/utils/numberInput";
 
 const UNSET_SENTINEL = "__unset__";
+
+interface AgentsDraft {
+  primaryModel: string;
+  fallbacks: string[];
+  workspace: string;
+  timeout: string;
+  contextTokens: string;
+  maxConcurrent: string;
+}
+
+const EMPTY_AGENTS_DRAFT: AgentsDraft = {
+  primaryModel: "",
+  fallbacks: [],
+  workspace: "",
+  timeout: "",
+  contextTokens: "",
+  maxConcurrent: "",
+};
+
+// agents.defaults is null when the config section is absent.
+const toAgentsDraft = (data: OpenClawAgentsDefaults | null): AgentsDraft =>
+  data
+    ? {
+        primaryModel: data.model?.primary ?? "",
+        fallbacks: data.model?.fallbacks ?? [],
+        workspace: String(data.workspace ?? ""),
+        timeout: getOpenClawTimeoutInputValue(data),
+        contextTokens: String(data.contextTokens ?? ""),
+        maxConcurrent: String(data.maxConcurrent ?? ""),
+      }
+    : EMPTY_AGENTS_DRAFT;
 
 const AgentsDefaultsPanel: React.FC = () => {
   const { t } = useTranslation();
@@ -33,42 +65,48 @@ const AgentsDefaultsPanel: React.FC = () => {
   const { options: modelOptions, isLoading: modelsLoading } =
     useOpenClawModelOptions();
 
-  const [defaults, setDefaults] = useState<OpenClawAgentsDefaults | null>(null);
-  const [primaryModel, setPrimaryModel] = useState("");
-  const [fallbacks, setFallbacks] = useState<string[]>([]);
+  // Refetches never clobber unsaved edits; an on-disk change while dirty
+  // shows a Reload / Keep mine banner. `baselineData` keeps unknown fields
+  // from the version the form is based on.
+  const {
+    draft,
+    setDraft,
+    baselineData,
+    externalChange,
+    reload,
+    keepMine,
+    markSaved,
+  } = useEditableResource<OpenClawAgentsDefaults | null, AgentsDraft>({
+    data: agentsData,
+    toDraft: toAgentsDraft,
+    initialDraft: EMPTY_AGENTS_DRAFT,
+  });
+  const defaults = baselineData ?? null;
+  const {
+    primaryModel,
+    fallbacks,
+    workspace,
+    timeout,
+    contextTokens,
+    maxConcurrent,
+  } = draft;
 
-  // Extra known fields from agents.defaults
-  const [workspace, setWorkspace] = useState("");
-  const [timeout, setTimeout_] = useState("");
-  const [contextTokens, setContextTokens] = useState("");
-  const [maxConcurrent, setMaxConcurrent] = useState("");
-  const { isDirty, markDirty, beginSave, markSaved } = useDirtyTracker();
-
-  useEffect(() => {
-    // agentsData is undefined while loading, null when config section is absent
-    if (agentsData === undefined) return;
-    // Keep unsaved edits when the query refetches; re-seed once saved/clean.
-    if (isDirty()) return;
-    setDefaults(agentsData);
-
-    if (agentsData) {
-      setPrimaryModel(agentsData.model?.primary ?? "");
-      setFallbacks(agentsData.model?.fallbacks ?? []);
-
-      // Extract known extra fields
-      setWorkspace(String(agentsData.workspace ?? ""));
-      setTimeout_(getOpenClawTimeoutInputValue(agentsData));
-      setContextTokens(String(agentsData.contextTokens ?? ""));
-      setMaxConcurrent(String(agentsData.maxConcurrent ?? ""));
-    } else {
-      setPrimaryModel("");
-      setFallbacks([]);
-      setWorkspace("");
-      setTimeout_("");
-      setContextTokens("");
-      setMaxConcurrent("");
-    }
-  }, [agentsData, isDirty]);
+  const setDraftField =
+    <K extends keyof AgentsDraft>(key: K) =>
+    (action: React.SetStateAction<AgentsDraft[K]>) =>
+      setDraft((prev) => ({
+        ...prev,
+        [key]:
+          typeof action === "function"
+            ? (action as (p: AgentsDraft[K]) => AgentsDraft[K])(prev[key])
+            : action,
+      }));
+  const setPrimaryModel = setDraftField("primaryModel");
+  const setFallbacks = setDraftField("fallbacks");
+  const setWorkspace = setDraftField("workspace");
+  const setTimeout_ = setDraftField("timeout");
+  const setContextTokens = setDraftField("contextTokens");
+  const setMaxConcurrent = setDraftField("maxConcurrent");
 
   // Build primary options, including a "not in list" entry if current value is missing
   const primaryOptions = useMemo(() => {
@@ -117,17 +155,14 @@ const AgentsDefaultsPanel: React.FC = () => {
   };
 
   const handleAddFallback = () => {
-    markDirty();
     setFallbacks((prev) => [...prev, ""]);
   };
 
   const handleRemoveFallback = (index: number) => {
-    markDirty();
     setFallbacks((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleFallbackChange = (index: number, value: string) => {
-    markDirty();
     setFallbacks((prev) => {
       const next = [...prev];
       next[index] = value;
@@ -136,6 +171,7 @@ const AgentsDefaultsPanel: React.FC = () => {
   };
 
   const handleSave = async () => {
+    const snapshot = draft;
     // Numeric fields must be non-negative whole numbers. Reject instead of
     // silently saving a decimal/negative value or dropping the field.
     const numericFields = [
@@ -187,9 +223,8 @@ const AgentsDefaultsPanel: React.FC = () => {
       if (concNum != null) updated.maxConcurrent = concNum;
       else delete updated.maxConcurrent;
 
-      const saveToken = beginSave();
       await saveAgentsMutation.mutateAsync(updated);
-      markSaved(saveToken);
+      markSaved(snapshot);
       toast.success(t("openclaw.agents.saveSuccess"));
     } catch (error) {
       const detail = extractErrorMessage(error);
@@ -221,6 +256,14 @@ const AgentsDefaultsPanel: React.FC = () => {
       <p className="text-sm text-muted-foreground mb-6">
         {t("openclaw.agents.description")}
       </p>
+
+      {externalChange && (
+        <ExternalChangeBanner
+          className="mb-4"
+          onReload={reload}
+          onKeepMine={keepMine}
+        />
+      )}
 
       {hasLegacyTimeout && (
         <Alert className="mb-4 border-amber-500/30 bg-amber-500/5">
@@ -262,7 +305,6 @@ const AgentsDefaultsPanel: React.FC = () => {
               <Select
                 value={primaryModel || UNSET_SENTINEL}
                 onValueChange={(v) => {
-                  markDirty();
                   setPrimaryModel(v === UNSET_SENTINEL ? "" : v);
                 }}
               >
@@ -370,7 +412,6 @@ const AgentsDefaultsPanel: React.FC = () => {
             <Input
               value={workspace}
               onChange={(e) => {
-                markDirty();
                 setWorkspace(e.target.value);
               }}
               placeholder="~/projects"
@@ -389,7 +430,6 @@ const AgentsDefaultsPanel: React.FC = () => {
               inputMode="numeric"
               value={timeout}
               onChange={(e) => {
-                markDirty();
                 setTimeout_(e.target.value);
               }}
               placeholder="300"
@@ -408,7 +448,6 @@ const AgentsDefaultsPanel: React.FC = () => {
               inputMode="numeric"
               value={contextTokens}
               onChange={(e) => {
-                markDirty();
                 setContextTokens(e.target.value);
               }}
               placeholder="200000"
@@ -427,7 +466,6 @@ const AgentsDefaultsPanel: React.FC = () => {
               inputMode="numeric"
               value={maxConcurrent}
               onChange={(e) => {
-                markDirty();
                 setMaxConcurrent(e.target.value);
               }}
               placeholder="4"
