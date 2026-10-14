@@ -17,6 +17,7 @@
 //! web `Origin`, and — when the proxy listens on loopback only — requests whose
 //! `Host` is a DNS name other than a local alias.
 
+use super::client_auth::{self, requires_client_auth, ConnAddrs};
 use super::server::ProxyState;
 use axum::{
     extract::{Request, State},
@@ -137,6 +138,42 @@ pub(crate) async fn guard(State(state): State<ProxyState>, req: Request, next: N
         );
         return (StatusCode::FORBIDDEN, reason).into_response();
     }
+
+    // Exposed (non-loopback) proxy: remote peers must present the proxy client
+    // token, which is scrubbed before the request reaches the handlers.
+    let conn = req.extensions().get::<ConnAddrs>().copied();
+    if requires_client_auth(&listen_address, conn.as_ref(), req.uri().path()) {
+        let token = match client_auth::get_or_create_proxy_client_token(&state.db) {
+            Ok(token) => token,
+            Err(e) => {
+                log::error!("[ProxyGuard] failed to load proxy client token: {e}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "proxy client token unavailable",
+                )
+                    .into_response();
+            }
+        };
+        let (mut parts, body) = req.into_parts();
+        if !client_auth::verify_and_scrub(&mut parts, &token) {
+            log::warn!(
+                "[ProxyGuard] rejected unauthenticated {} {} from {}",
+                parts.method,
+                parts.uri.path(),
+                conn.map(|c| c.peer.ip().to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            );
+            return (
+                StatusCode::UNAUTHORIZED,
+                [(header::WWW_AUTHENTICATE, "Bearer")],
+                "proxy client token required: this CC Switch proxy is exposed on the network; \
+                 send the token shown in CC Switch proxy settings as your API key",
+            )
+                .into_response();
+        }
+        return next.run(Request::from_parts(parts, body)).await;
+    }
+
     next.run(req).await
 }
 

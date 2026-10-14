@@ -147,13 +147,24 @@ impl ProxyServer {
             loop {
                 tokio::select! {
                     result = listener.accept() => {
-                        let (stream, _remote_addr) = match result {
+                        let (stream, remote_addr) = match result {
                             Ok(v) => v,
                             Err(e) => {
                                 log::error!("[{SRV}] accept 失败: {e}", SRV = log_srv::ACCEPT_ERR);
                                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                                 continue;
                             }
+                        };
+
+                        // Peer/local addresses feed the client-auth decision
+                        // (request_guard). If the local address is unknown, fall
+                        // back to the unspecified address so the peer is treated
+                        // as remote unless it is loopback.
+                        let conn_addrs = super::client_auth::ConnAddrs {
+                            peer: remote_addr,
+                            local: stream.local_addr().unwrap_or_else(|_| {
+                                SocketAddr::from(([0, 0, 0, 0], 0))
+                            }),
                         };
 
                         let app = app.clone();
@@ -193,6 +204,7 @@ impl ProxyServer {
 
                                     // Insert our own header case map alongside hyper's internal one
                                     parts.extensions.insert(cases);
+                                    parts.extensions.insert(conn_addrs);
 
                                     let body = axum::body::Body::new(body);
                                     let axum_req = http::Request::from_parts(parts, body);
