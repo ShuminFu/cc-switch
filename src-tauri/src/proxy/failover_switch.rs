@@ -9,8 +9,12 @@ use crate::database::Database;
 use crate::error::AppError;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tokio::sync::RwLock;
+
+/// 故障转移切换等待全局配置写入锁的上限。
+const FAILOVER_SWITCH_LOCK_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 故障转移切换管理器
 ///
@@ -57,10 +61,27 @@ impl FailoverSwitchManager {
             pending.insert(switch_key.clone());
         }
 
-        // 执行切换（确保最后清理 pending 标记）
-        let result = self
-            .do_switch(app_handle, app_type, provider_id, provider_name)
-            .await;
+        // 执行切换（确保最后清理 pending 标记）。
+        //
+        // 切换会更新当前供应商指针与 Live 备份，需与 UI 侧的供应商/配置写入
+        // 串行（见 commands::blocking 的 MUTATION_LOCK）。这里运行在代理请求
+        // 派生的后台任务中，不应无限期排在耗时的 UI 操作之后：超时则跳过本次
+        // 切换并记录日志——请求本身已由故障转移成功处理，后续失败会再次触发。
+        let result = match crate::commands::blocking::try_with_mutations_locked(
+            FAILOVER_SWITCH_LOCK_TIMEOUT,
+            self.do_switch(app_handle, app_type, provider_id, provider_name),
+        )
+        .await
+        {
+            Some(result) => result,
+            None => {
+                log::warn!(
+                    "[FO-003] 等待配置写入锁超时（{}s），跳过本次故障转移切换: {app_type} -> {provider_id}",
+                    FAILOVER_SWITCH_LOCK_TIMEOUT.as_secs()
+                );
+                Ok(false)
+            }
+        };
 
         // 清理 pending 标记
         {

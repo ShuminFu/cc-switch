@@ -82,6 +82,23 @@ pub async fn set_auto_failover_enabled(
     app_type: String,
     enabled: bool,
 ) -> Result<(), String> {
+    // 开启时会切换到队列 P1（更新当前供应商指针/备份），并改写队列与 proxy_config：
+    // 与其他供应商/配置写入串行。
+    crate::commands::blocking::with_mutations_locked(set_auto_failover_enabled_locked(
+        app,
+        state.inner(),
+        app_type,
+        enabled,
+    ))
+    .await
+}
+
+async fn set_auto_failover_enabled_locked(
+    app: tauri::AppHandle,
+    state: &AppState,
+    app_type: String,
+    enabled: bool,
+) -> Result<(), String> {
     log::info!(
         "[Failover] Setting auto_failover_enabled: app_type='{app_type}', enabled={enabled}"
     );
@@ -172,7 +189,7 @@ pub async fn set_auto_failover_enabled(
     }
 
     // 刷新托盘菜单，确保状态同步
-    if let Ok(new_menu) = crate::tray::create_tray_menu(&app, &state) {
+    if let Ok(new_menu) = crate::tray::create_tray_menu(&app, state) {
         if let Some(tray) = app.tray_by_id(crate::tray::TRAY_ID) {
             let _ = tray.set_menu(Some(new_menu));
         }

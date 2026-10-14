@@ -2,6 +2,7 @@
 //!
 //! 提供前端调用的 API 接口
 
+use crate::commands::blocking::with_mutations_locked;
 use crate::error::AppError;
 use crate::proxy::types::*;
 use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
@@ -38,7 +39,8 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
 /// 停止代理服务器（恢复 Live 配置）
 #[tauri::command]
 pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.proxy_service.stop_with_restore().await
+    // 恢复 Live 配置：与其他供应商/配置写入串行
+    with_mutations_locked(state.proxy_service.stop_with_restore()).await
 }
 
 /// 获取各应用接管状态
@@ -56,10 +58,8 @@ pub async fn set_proxy_takeover_for_app(
     app_type: String,
     enabled: bool,
 ) -> Result<(), String> {
-    state
-        .proxy_service
-        .set_takeover_for_app(&app_type, enabled)
-        .await
+    // 接管/解除接管会改写 Live 配置：与其他供应商/配置写入串行
+    with_mutations_locked(state.proxy_service.set_takeover_for_app(&app_type, enabled)).await
 }
 
 /// 获取代理服务器状态
@@ -303,6 +303,22 @@ pub async fn switch_proxy_provider(
     app_type: String,
     provider_id: String,
 ) -> Result<(), String> {
+    // 读取供应商 + 热切换（更新当前供应商指针与备份）作为一个整体，
+    // 与其他供应商/配置写入串行
+    with_mutations_locked(switch_proxy_provider_locked(
+        &state,
+        &app_type,
+        &provider_id,
+    ))
+    .await
+}
+
+async fn switch_proxy_provider_locked(
+    state: &AppState,
+    app_type: &str,
+    provider_id: &str,
+) -> Result<(), String> {
+    let (app_type, provider_id) = (app_type.to_string(), provider_id.to_string());
     // Codex's built-in official provider can use the client's native OpenAI
     // login through takeover. Other official providers remain blocked.
     let provider = state

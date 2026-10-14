@@ -1710,6 +1710,9 @@ pub fn run() {
 /// 在应用退出前检查代理服务器状态，如果正在运行则停止代理并恢复 Live 配置。
 /// 确保 Claude Code/Codex/Gemini 的配置不会处于损坏状态。
 /// 使用 stop_with_restore_keep_state 保留 settings 表中的代理状态，下次启动时自动恢复。
+/// 退出时恢复 Live 配置前等待全局配置写入锁的上限。
+const EXIT_RESTORE_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
     if let Some(state) = app_handle.try_state::<store::AppState>() {
         let proxy_service = &state.proxy_service;
@@ -1727,8 +1730,26 @@ pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
 
         if needs_restore {
             log::info!("检测到接管残留，开始恢复 Live 配置（保留代理状态）...");
+            // 恢复会改写 Live 配置：尽量等进行中的供应商/配置写入完成，避免交错；
+            // 但退出流程不能被无限期卡住，超时后仍执行恢复。
+            let restore = proxy_service.stop_with_restore_keep_state();
+            let restore_result = match commands::blocking::try_with_mutations_locked(
+                EXIT_RESTORE_LOCK_TIMEOUT,
+                restore,
+            )
+            .await
+            {
+                Some(result) => result,
+                None => {
+                    log::warn!(
+                        "退出时等待配置写入锁超时（{}s），直接恢复 Live 配置",
+                        EXIT_RESTORE_LOCK_TIMEOUT.as_secs()
+                    );
+                    proxy_service.stop_with_restore_keep_state().await
+                }
+            };
             // 使用 keep_state 版本，保留 settings 表中的代理状态
-            if let Err(e) = proxy_service.stop_with_restore_keep_state().await {
+            if let Err(e) = restore_result {
                 log::error!("退出时恢复 Live 配置失败: {e}");
             } else {
                 log::info!("已恢复 Live 配置（代理状态已保留，下次启动将自动恢复）");
@@ -1802,6 +1823,11 @@ async fn restore_proxy_state_on_startup(state: &store::AppState) {
 
     log::info!("检测到上次代理状态需要恢复，应用列表: {apps_to_restore:?}");
 
+    // 接管会改写 Live 配置：与 UI 侧的供应商/配置写入串行
+    commands::blocking::with_mutations_locked(restore_takeovers(state, apps_to_restore)).await;
+}
+
+async fn restore_takeovers(state: &store::AppState, apps_to_restore: Vec<&'static str>) {
     // 逐个恢复接管状态
     for app_type in apps_to_restore {
         match state
