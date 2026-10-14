@@ -46,7 +46,9 @@ use crate::config::get_app_config_dir;
 use crate::error::AppError;
 use rusqlite::{hooks::Action, Connection};
 use serde::Serialize;
+use std::path::Path;
 use std::sync::Mutex;
+use std::time::Duration;
 
 // DAO 方法通过 impl Database 提供，无需额外导出
 
@@ -71,6 +73,39 @@ macro_rules! lock_conn {
 
 // 导出宏供子模块使用
 pub(crate) use lock_conn;
+
+/// How long a connection waits on a locked database before giving up with
+/// `SQLITE_BUSY`. With WAL readers never block the writer, but two writers
+/// (e.g. another process, or a checkpoint) can still briefly contend.
+pub(crate) const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Per-connection settings for connections to the on-disk database.
+fn configure_file_connection(conn: &Connection) -> Result<(), AppError> {
+    conn.busy_timeout(BUSY_TIMEOUT)
+        .map_err(|e| AppError::Database(format!("设置 busy_timeout 失败: {e}")))
+}
+
+/// Switch the on-disk database to WAL journaling so readers no longer block
+/// the writer (and vice versa). `journal_mode = WAL` is persistent in the file;
+/// `synchronous = NORMAL` is per-connection and is the recommended pairing for
+/// WAL (durable across application crashes, may lose the last transactions on
+/// power loss, never corrupts).
+///
+/// Returns whether WAL is active. Some file systems (e.g. certain network
+/// mounts) can't do WAL; we then stay on the rollback journal and keep the
+/// default `synchronous = FULL`.
+pub(crate) fn enable_wal(conn: &Connection) -> Result<bool, AppError> {
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode = WAL;", [], |row| row.get(0))
+        .map_err(|e| AppError::Database(format!("启用 WAL 失败: {e}")))?;
+    if !mode.eq_ignore_ascii_case("wal") {
+        log::warn!("SQLite WAL 不可用，继续使用 journal_mode={mode}");
+        return Ok(false);
+    }
+    conn.execute_batch("PRAGMA synchronous = NORMAL;")
+        .map_err(|e| AppError::Database(format!("设置 synchronous 失败: {e}")))?;
+    Ok(true)
+}
 
 /// 数据库连接封装
 ///
@@ -126,14 +161,11 @@ impl Database {
     /// 数据库文件位于 `~/.cc-switch/cc-switch.db`
     pub fn init() -> Result<Self, AppError> {
         let db_path = get_app_config_dir().join("cc-switch.db");
-        let db_exists = db_path.exists();
 
         // 确保父目录存在
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
         }
-
-        let conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
 
         // 数据库、备份与日志中包含 API Key，限制为仅当前用户可访问
         // 目录只在默认位置（~/.cc-switch）时收紧，避免改动用户自定义目录的权限
@@ -142,7 +174,19 @@ impl Database {
                 restrict_to_owner(parent);
             }
         }
-        restrict_to_owner(&db_path);
+
+        Self::open_at(&db_path)
+    }
+
+    /// Open (creating if needed), migrate and configure the database file at
+    /// `db_path`. [`Database::init`] calls this with the app's default path.
+    pub(crate) fn open_at(db_path: &Path) -> Result<Self, AppError> {
+        let db_exists = db_path.exists();
+
+        let conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
+        configure_file_connection(&conn)?;
+
+        restrict_to_owner(db_path);
 
         // 启用外键约束
         conn.execute("PRAGMA foreign_keys = ON;", [])
@@ -179,6 +223,16 @@ impl Database {
         if let Err(e) = db.ensure_incremental_auto_vacuum() {
             log::warn!("Failed to ensure incremental auto-vacuum: {e}");
         }
+
+        // Switch to WAL only after the (one-time, legacy) auto-vacuum rebuild
+        // above, so that rebuild keeps running exactly as it always has. On
+        // every later start the file is already in WAL mode and this only
+        // re-applies the per-connection `synchronous` setting.
+        {
+            let conn = lock_conn!(db.conn);
+            enable_wal(&conn)?;
+        }
+
         db.ensure_model_pricing_seeded()?;
 
         // Startup cleanup: prune old logs and reclaim space
@@ -197,6 +251,36 @@ impl Database {
         }
 
         Ok(db)
+    }
+
+    /// Fold the WAL back into the main database file and truncate it, so the
+    /// `.db` file on disk is self-contained (e.g. before the app exits or the
+    /// user copies the config directory by hand). Best effort: a checkpoint
+    /// that can't complete because a reader is active is not an error; the WAL
+    /// is still valid and SQLite recovers from it on the next open.
+    ///
+    /// No-op for in-memory / non-WAL databases.
+    pub fn checkpoint_wal(&self) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        Self::checkpoint_wal_on_conn(&conn)
+    }
+
+    pub(crate) fn checkpoint_wal_on_conn(conn: &Connection) -> Result<(), AppError> {
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode;", [], |row| row.get(0))
+            .map_err(|e| AppError::Database(format!("读取 journal_mode 失败: {e}")))?;
+        if !mode.eq_ignore_ascii_case("wal") {
+            return Ok(());
+        }
+        let (busy, _log, _ckpt): (i64, i64, i64) = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE);", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .map_err(|e| AppError::Database(format!("WAL checkpoint 失败: {e}")))?;
+        if busy != 0 {
+            log::debug!("WAL checkpoint 未能完全截断（存在活动读者），稍后会自动完成");
+        }
+        Ok(())
     }
 
     /// 读取磁盘上数据库的 `user_version`；仅当它比应用支持的 [`SCHEMA_VERSION`]

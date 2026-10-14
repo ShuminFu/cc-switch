@@ -1714,6 +1714,27 @@ pub fn run() {
 const EXIT_RESTORE_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
+    cleanup_proxy_before_exit(app_handle).await;
+    finalize_database_before_exit(app_handle).await;
+}
+
+/// 退出前收尾数据库：把 WAL 合并回主库文件并截断，使磁盘上的
+/// `cc-switch.db` 自包含（即使用户只拷走这一个文件也不会丢最近的写入）。
+/// 尽力而为：失败只记日志，SQLite 下次打开时会自动从 WAL 恢复。
+async fn finalize_database_before_exit(app_handle: &tauri::AppHandle) {
+    let Some(state) = app_handle.try_state::<store::AppState>() else {
+        return;
+    };
+    let db = state.db.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || db.checkpoint_wal()).await;
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => log::warn!("退出时 WAL checkpoint 失败: {e}"),
+        Err(e) => log::warn!("退出时 WAL checkpoint 任务失败: {e}"),
+    }
+}
+
+async fn cleanup_proxy_before_exit(app_handle: &tauri::AppHandle) {
     if let Some(state) = app_handle.try_state::<store::AppState>() {
         let proxy_service = &state.proxy_service;
 

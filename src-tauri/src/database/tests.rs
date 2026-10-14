@@ -937,3 +937,189 @@ fn restrict_to_owner_strips_group_and_other_bits() {
     assert_eq!(mode(&file), 0o600);
     assert_eq!(mode(dir.path()), 0o700);
 }
+
+// ==================== WAL / file database ====================
+
+fn journal_mode(conn: &Connection) -> String {
+    conn.query_row("PRAGMA journal_mode;", [], |row| row.get(0))
+        .expect("read journal_mode")
+}
+
+fn wal_path(db_path: &std::path::Path) -> std::path::PathBuf {
+    let mut name = db_path.as_os_str().to_owned();
+    name.push("-wal");
+    std::path::PathBuf::from(name)
+}
+
+#[test]
+fn file_db_opens_in_wal_mode_with_busy_timeout() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cc-switch.db");
+    let db = Database::open_at(&path).expect("open file db");
+
+    let conn = db.conn.lock().expect("lock conn");
+    assert_eq!(journal_mode(&conn), "wal");
+    let synchronous: i64 = conn
+        .query_row("PRAGMA synchronous;", [], |row| row.get(0))
+        .expect("read synchronous");
+    assert_eq!(synchronous, 1, "synchronous should be NORMAL under WAL");
+    let busy_timeout: i64 = conn
+        .query_row("PRAGMA busy_timeout;", [], |row| row.get(0))
+        .expect("read busy_timeout");
+    assert_eq!(busy_timeout, BUSY_TIMEOUT.as_millis() as i64);
+    assert_eq!(
+        Database::get_auto_vacuum_mode(&conn).expect("auto_vacuum"),
+        2,
+        "new file db keeps INCREMENTAL auto_vacuum with WAL"
+    );
+    drop(conn);
+    drop(db);
+
+    // WAL is persistent: a reopen (the next app start) stays in WAL.
+    let db = Database::open_at(&path).expect("reopen file db");
+    let conn = db.conn.lock().expect("lock conn");
+    assert_eq!(journal_mode(&conn), "wal");
+}
+
+#[test]
+fn legacy_rollback_journal_db_is_upgraded_to_wal_on_open() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cc-switch.db");
+    {
+        let conn = Connection::open(&path).expect("open legacy db");
+        // INCREMENTAL so open_at doesn't take the (app-config-dir) backup that
+        // precedes the legacy auto_vacuum rebuild; only the journal is legacy.
+        conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
+            .expect("set incremental auto_vacuum");
+        Database::create_tables_on_conn(&conn).expect("create tables");
+        Database::apply_schema_migrations_on_conn(&conn).expect("migrate");
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('legacy', 'kept')",
+            [],
+        )
+        .expect("insert legacy row");
+        assert_eq!(journal_mode(&conn), "delete");
+    }
+
+    let db = Database::open_at(&path).expect("open legacy db");
+    let conn = db.conn.lock().expect("lock conn");
+    assert_eq!(journal_mode(&conn), "wal");
+    assert_eq!(
+        Database::get_auto_vacuum_mode(&conn).expect("auto_vacuum"),
+        2,
+        "auto_vacuum preserved across the switch to WAL"
+    );
+    let value: String = conn
+        .query_row("SELECT value FROM settings WHERE key = 'legacy'", [], |r| {
+            r.get(0)
+        })
+        .expect("legacy row survives");
+    assert_eq!(value, "kept");
+}
+
+#[test]
+fn snapshot_file_is_self_contained_while_wal_holds_uncheckpointed_writes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cc-switch.db");
+    let db = Database::open_at(&path).expect("open file db");
+
+    let conn = db.conn.lock().expect("lock conn");
+    // Make sure the write below stays in the WAL only.
+    conn.execute_batch("PRAGMA wal_autocheckpoint = 0;")
+        .expect("disable autocheckpoint");
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('only-in-wal', 'yes')",
+        [],
+    )
+    .expect("insert");
+    let wal_len = std::fs::metadata(wal_path(&path))
+        .expect("wal exists")
+        .len();
+    assert!(wal_len > 0, "write should still be in the WAL");
+
+    let backup_path = dir.path().join("backup.db");
+    Database::write_snapshot_file(&conn, &backup_path).expect("snapshot");
+    drop(conn);
+
+    assert!(
+        !wal_path(&backup_path).exists(),
+        "snapshot must not leave a -wal sibling"
+    );
+
+    // Copy only the single .db file somewhere else: it must be complete.
+    let elsewhere = tempfile::tempdir().expect("tempdir");
+    let copied = elsewhere.path().join("copied.db");
+    std::fs::copy(&backup_path, &copied).expect("copy snapshot");
+    let reopened = Connection::open(&copied).expect("open copied snapshot");
+    assert_eq!(journal_mode(&reopened), "delete");
+    let value: String = reopened
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'only-in-wal'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("row from WAL is in the snapshot");
+    assert_eq!(value, "yes");
+}
+
+#[test]
+fn restoring_into_wal_db_is_visible_to_other_connections_and_checkpointed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("cc-switch.db");
+    let db = Database::open_at(&path).expect("open file db");
+
+    let reader = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .expect("open reader");
+    let before: i64 = reader
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'restored'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count before");
+    assert_eq!(before, 0);
+
+    // Build a source the same way import does (separate db, full schema).
+    let source = Database::memory().expect("source db");
+    {
+        let src = source.conn.lock().expect("lock source");
+        src.execute(
+            "INSERT INTO settings (key, value) VALUES ('restored', 'from-backup')",
+            [],
+        )
+        .expect("insert into source");
+        let mut main = db.conn.lock().expect("lock main");
+        {
+            let backup = rusqlite::backup::Backup::new(&src, &mut main).expect("backup");
+            backup.step(-1).expect("restore step");
+        }
+        Database::checkpoint_wal_on_conn(&main).expect("checkpoint");
+        assert_eq!(journal_mode(&main), "wal", "restore keeps WAL");
+    }
+
+    let value: String = reader
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'restored'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("reader sees restored row");
+    assert_eq!(value, "from-backup");
+    drop(reader);
+
+    assert_eq!(
+        std::fs::metadata(wal_path(&path))
+            .map(|m| m.len())
+            .unwrap_or(0),
+        0,
+        "checkpoint(TRUNCATE) should leave an empty WAL"
+    );
+}
+
+#[test]
+fn checkpoint_is_a_noop_for_memory_db() {
+    let db = Database::memory().expect("memory db");
+    db.checkpoint_wal().expect("checkpoint on memory db");
+    let conn = db.conn.lock().expect("lock conn");
+    assert_eq!(journal_mode(&conn), "memory");
+}

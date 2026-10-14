@@ -132,11 +132,19 @@ impl Database {
         // 使用 Backup 将临时库原子写回主库
         {
             let mut main_conn = lock_conn!(self.conn);
-            let backup = Backup::new(&temp_conn, &mut main_conn)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            backup
-                .step(-1)
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            {
+                let backup = Backup::new(&temp_conn, &mut main_conn)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+                backup
+                    .step(-1)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
+            // The restore rewrote every page into the WAL; fold it back into
+            // the main file right away instead of carrying a WAL as large as
+            // the whole database until the next automatic checkpoint.
+            if let Err(e) = Self::checkpoint_wal_on_conn(&main_conn) {
+                log::warn!("导入后 WAL checkpoint 失败: {e}");
+            }
         }
 
         let backup_id = backup_path
@@ -290,6 +298,11 @@ impl Database {
                 log::warn!("Periodic incremental vacuum failed: {e}");
             }
         }
+        // Keep the WAL from growing unbounded between restarts (automatic
+        // checkpoints never shrink the file, only reuse it).
+        if let Err(e) = self.checkpoint_wal() {
+            log::warn!("Periodic WAL checkpoint failed: {e}");
+        }
 
         Ok(())
     }
@@ -320,17 +333,44 @@ impl Database {
 
         {
             let conn = lock_conn!(self.conn);
-            let mut dest_conn =
-                Connection::open(&backup_path).map_err(|e| AppError::Database(e.to_string()))?;
-            let backup = Backup::new(&conn, &mut dest_conn)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            backup
-                .step(-1)
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            Self::write_snapshot_file(&conn, &backup_path)?;
         }
 
         Self::cleanup_db_backups(&backup_dir)?;
         Ok(Some(backup_path))
+    }
+
+    /// Write a consistent, self-contained copy of `src` to `dest_path`.
+    ///
+    /// Uses the online backup API, which reads through `src`'s connection and
+    /// therefore includes everything committed so far, whether it is still in
+    /// the WAL or already checkpointed into the main file. The destination is
+    /// then switched to the rollback journal (`DELETE`), so the result is a
+    /// single `.db` file with no `-wal`/`-shm` siblings, regardless of the
+    /// source's journal mode, and can be copied or opened anywhere.
+    pub(crate) fn write_snapshot_file(src: &Connection, dest_path: &Path) -> Result<(), AppError> {
+        let mut dest_conn =
+            Connection::open(dest_path).map_err(|e| AppError::Database(e.to_string()))?;
+        {
+            let backup =
+                Backup::new(src, &mut dest_conn).map_err(|e| AppError::Database(e.to_string()))?;
+            backup
+                .step(-1)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        let mode: String = dest_conn
+            .query_row("PRAGMA journal_mode = DELETE;", [], |row| row.get(0))
+            .map_err(|e| AppError::Database(format!("设置备份 journal_mode 失败: {e}")))?;
+        if !mode.eq_ignore_ascii_case("delete") {
+            return Err(AppError::Database(format!(
+                "备份文件 journal_mode 异常: {mode}"
+            )));
+        }
+        dest_conn
+            .close()
+            .map_err(|(_, e)| AppError::Database(format!("关闭备份文件失败: {e}")))?;
+        super::restrict_to_owner(dest_path);
+        Ok(())
     }
 
     /// 清理旧的数据库备份，保留最新的 N 个
@@ -582,11 +622,16 @@ impl Database {
 
         {
             let mut main_conn = lock_conn!(self.conn);
-            let backup = Backup::new(&source_conn, &mut main_conn)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            backup
-                .step(-1)
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            {
+                let backup = Backup::new(&source_conn, &mut main_conn)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+                backup
+                    .step(-1)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            }
+            if let Err(e) = Self::checkpoint_wal_on_conn(&main_conn) {
+                log::warn!("恢复后 WAL checkpoint 失败: {e}");
+            }
         }
 
         // Step 3: Run schema migrations (backup may be from an older version)
