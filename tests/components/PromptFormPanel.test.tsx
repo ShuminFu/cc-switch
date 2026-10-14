@@ -82,5 +82,76 @@ describe("PromptFormPanel", () => {
 
     expect(screen.getByLabelText("prompts.name")).toHaveValue("Edited name");
     expect(screen.getByTestId("md-editor")).toHaveValue("edited body");
+    // Only metadata changed, so no external-change banner.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("offers Reload when the prompt content changes underneath edits", () => {
+    const props = {
+      appId: "claude" as const,
+      editingId: "p1",
+      onSave: vi.fn(),
+      onClose: vi.fn(),
+    };
+    const { rerender } = render(
+      <PromptFormPanel {...props} initialData={makePrompt()} />,
+    );
+    fireEvent.change(screen.getByTestId("md-editor"), {
+      target: { value: "mine" },
+    });
+
+    rerender(
+      <PromptFormPanel
+        {...props}
+        initialData={makePrompt({ content: "imported body" })}
+      />,
+    );
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("common.externalChangeReload"));
+    expect(screen.getByTestId("md-editor")).toHaveValue("imported body");
+  });
+
+  it("closes immediately on ESC when there are no edits", () => {
+    const onClose = vi.fn();
+    render(
+      <PromptFormPanel
+        appId="claude"
+        editingId="p1"
+        initialData={makePrompt()}
+        onSave={vi.fn()}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks before discarding unsaved edits on close", () => {
+    const onClose = vi.fn();
+    render(
+      <PromptFormPanel
+        appId="claude"
+        editingId="p1"
+        initialData={makePrompt()}
+        onSave={vi.fn()}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("prompts.name"), {
+      target: { value: "Edited" },
+    });
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("common.discardChangesTitle")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "common.discardChanges" }),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -6,6 +6,22 @@ import { Label } from "@/components/ui/label";
 import MarkdownEditor from "@/components/MarkdownEditor";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { Prompt, AppId } from "@/lib/api";
+import { useEditableResource } from "@/hooks/useEditableResource";
+import { useCloseGuard } from "@/hooks/useCloseGuard";
+import { ExternalChangeBanner } from "@/components/common/ExternalChangeBanner";
+import { DiscardChangesDialog } from "@/components/common/DiscardChangesDialog";
+
+interface PromptDraft {
+  name: string;
+  description: string;
+  content: string;
+}
+
+const toPromptDraft = (prompt: Prompt | null): PromptDraft => ({
+  name: prompt?.name ?? "",
+  description: prompt?.description ?? "",
+  content: prompt?.content ?? "",
+});
 
 interface PromptFormPanelProps {
   appId: AppId;
@@ -35,15 +51,24 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
     hermes: "AGENTS.md",
   };
   const filename = filenameMap[appId];
-  // Hydrate from initialData once on mount. The panel is mounted per edit
-  // session, and the parent's prompts map is replaced on every reload
-  // (toggle, profile-applied, deep-link import); re-syncing on each new
-  // initialData reference would clobber in-progress edits.
-  const [name, setName] = useState(() => initialData?.name ?? "");
-  const [description, setDescription] = useState(
-    () => initialData?.description ?? "",
-  );
-  const [content, setContent] = useState(() => initialData?.content ?? "");
+  // The parent's prompts map is replaced on every reload (toggle,
+  // profile-applied, deep-link import). Those must never clobber in-progress
+  // edits; a real content change while dirty shows Reload / Keep mine.
+  const { draft, setDraft, isDirty, externalChange, reload, keepMine } =
+    useEditableResource<Prompt | null, PromptDraft>({
+      data: initialData ?? null,
+      toDraft: toPromptDraft,
+      initialDraft: toPromptDraft(null),
+    });
+  const { name, description, content } = draft;
+  const setName = (value: string) =>
+    setDraft((prev) => ({ ...prev, name: value }));
+  const setDescription = (value: string) =>
+    setDraft((prev) => ({ ...prev, description: value }));
+  const setContent = (value: string) =>
+    setDraft((prev) => ({ ...prev, content: value }));
+
+  const closeGuard = useCloseGuard(isDirty, onClose);
   const [saving, setSaving] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
@@ -97,7 +122,7 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
     <FullScreenPanel
       isOpen={true}
       title={title}
-      onClose={onClose}
+      onClose={closeGuard.requestClose}
       footer={
         <Button
           type="button"
@@ -109,6 +134,10 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
         </Button>
       }
     >
+      {externalChange && (
+        <ExternalChangeBanner onReload={reload} onKeepMine={keepMine} />
+      )}
+
       <div className="glass rounded-xl p-6 border border-white/10 space-y-6">
         <div>
           <Label htmlFor="name" className="text-foreground">
@@ -149,6 +178,12 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
           />
         </div>
       </div>
+
+      <DiscardChangesDialog
+        isOpen={closeGuard.confirmOpen}
+        onConfirm={closeGuard.confirmDiscard}
+        onCancel={closeGuard.cancelDiscard}
+      />
     </FullScreenPanel>
   );
 };
