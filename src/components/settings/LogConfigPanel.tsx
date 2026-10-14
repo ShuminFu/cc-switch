@@ -55,7 +55,7 @@ export function LogConfigPanel() {
         </div>
         <Switch
           checked={config.enabled}
-          onCheckedChange={(checked) => handleChange({ enabled: checked })}
+          onCheckedChange={(checked) => void handleChange({ enabled: checked })}
         />
       </div>
 
@@ -70,7 +70,7 @@ export function LogConfigPanel() {
           value={config.level}
           disabled={!config.enabled}
           onValueChange={(value) =>
-            handleChange({ level: value as LogConfig["level"] })
+            void handleChange({ level: value as LogConfig["level"] })
           }
         >
           <SelectTrigger className="w-[120px]">

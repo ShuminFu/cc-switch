@@ -1148,7 +1148,7 @@ export function WebdavSyncSection({
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleTest}
+              onClick={() => void handleTest()}
               actionState={actionState}
               targetState="testing"
               icon={Link2}
@@ -1159,7 +1159,7 @@ export function WebdavSyncSection({
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleSave}
+              onClick={() => void handleSave()}
               actionState={actionState}
               targetState="saving"
               icon={Save}
@@ -1187,7 +1187,7 @@ export function WebdavSyncSection({
             <ActionButton
               type="button"
               size="sm"
-              onClick={handleUploadClick}
+              onClick={() => void handleUploadClick()}
               disabled={!hasSavedConfig}
               actionState={actionState}
               targetState="uploading"
@@ -1204,7 +1204,7 @@ export function WebdavSyncSection({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={handleDownloadClick}
+              onClick={() => void handleDownloadClick()}
               disabled={!hasSavedConfig}
               actionState={actionState}
               targetState="downloading"
@@ -1461,7 +1461,7 @@ export function WebdavSyncSection({
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleS3Test}
+              onClick={() => void handleS3Test()}
               actionState={s3ActionState}
               targetState="testing"
               icon={Link2}
@@ -1472,7 +1472,7 @@ export function WebdavSyncSection({
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleS3Save}
+              onClick={() => void handleS3Save()}
               actionState={s3ActionState}
               targetState="saving"
               icon={Save}
@@ -1500,7 +1500,7 @@ export function WebdavSyncSection({
             <ActionButton
               type="button"
               size="sm"
-              onClick={handleS3UploadClick}
+              onClick={() => void handleS3UploadClick()}
               disabled={!hasS3SavedConfig}
               actionState={s3ActionState}
               targetState="uploading"
@@ -1517,7 +1517,7 @@ export function WebdavSyncSection({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={handleS3DownloadClick}
+              onClick={() => void handleS3DownloadClick()}
               disabled={!hasS3SavedConfig}
               actionState={s3ActionState}
               targetState="downloading"
@@ -1620,7 +1620,10 @@ export function WebdavSyncSection({
             <Button variant="outline" onClick={closeDialog}>
               {t("common.cancel")}
             </Button>
-            <Button variant="destructive" onClick={handleUploadConfirm}>
+            <Button
+              variant="destructive"
+              onClick={() => void handleUploadConfirm()}
+            >
               {t("settings.webdavSync.confirmUpload.confirm")}
             </Button>
           </DialogFooter>
@@ -1693,7 +1696,10 @@ export function WebdavSyncSection({
             <Button variant="outline" onClick={closeDialog}>
               {t("common.cancel")}
             </Button>
-            <Button variant="destructive" onClick={handleDownloadConfirm}>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDownloadConfirm()}
+            >
               {t("settings.webdavSync.confirmDownload.confirm")}
             </Button>
           </DialogFooter>
@@ -1760,7 +1766,10 @@ export function WebdavSyncSection({
             <Button variant="outline" onClick={closeS3Dialog}>
               {t("common.cancel")}
             </Button>
-            <Button variant="destructive" onClick={handleS3UploadConfirm}>
+            <Button
+              variant="destructive"
+              onClick={() => void handleS3UploadConfirm()}
+            >
               {t("settings.s3Sync.confirmUpload.confirm")}
             </Button>
           </DialogFooter>
@@ -1812,7 +1821,10 @@ export function WebdavSyncSection({
             <Button variant="outline" onClick={closeS3Dialog}>
               {t("common.cancel")}
             </Button>
-            <Button variant="destructive" onClick={handleS3DownloadConfirm}>
+            <Button
+              variant="destructive"
+              onClick={() => void handleS3DownloadConfirm()}
+            >
               {t("settings.s3Sync.confirmDownload.confirm")}
             </Button>
           </DialogFooter>
@@ -1844,7 +1856,7 @@ export function WebdavSyncSection({
             </Button>
             <Button
               variant="destructive"
-              onClick={handleMutualExclusionConfirm}
+              onClick={() => void handleMutualExclusionConfirm()}
             >
               {t("common.confirm")}
             </Button>

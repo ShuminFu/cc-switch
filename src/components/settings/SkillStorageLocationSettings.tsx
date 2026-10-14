@@ -36,7 +36,7 @@ export function SkillStorageLocationSettings({
     if (installedCount > 0) {
       setPendingTarget(target);
     } else {
-      doMigrate(target);
+      void doMigrate(target);
     }
   };
 
@@ -122,7 +122,11 @@ export function SkillStorageLocationSettings({
             <Button variant="outline" onClick={() => setPendingTarget(null)}>
               {t("common.cancel")}
             </Button>
-            <Button onClick={() => pendingTarget && doMigrate(pendingTarget)}>
+            <Button
+              onClick={() => {
+                if (pendingTarget) void doMigrate(pendingTarget);
+              }}
+            >
               {t("common.confirm")}
             </Button>
           </DialogFooter>

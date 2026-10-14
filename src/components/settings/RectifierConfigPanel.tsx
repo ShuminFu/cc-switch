@@ -74,7 +74,7 @@ export function RectifierConfigPanel() {
         </div>
         <Switch
           checked={config.enabled}
-          onCheckedChange={(checked) => handleChange({ enabled: checked })}
+          onCheckedChange={(checked) => void handleChange({ enabled: checked })}
         />
       </div>
 
@@ -93,7 +93,7 @@ export function RectifierConfigPanel() {
             checked={config.requestThinkingSignature}
             disabled={!config.enabled}
             onCheckedChange={(checked) =>
-              handleChange({ requestThinkingSignature: checked })
+              void handleChange({ requestThinkingSignature: checked })
             }
           />
         </div>
@@ -108,7 +108,7 @@ export function RectifierConfigPanel() {
             checked={config.requestThinkingBudget}
             disabled={!config.enabled}
             onCheckedChange={(checked) =>
-              handleChange({ requestThinkingBudget: checked })
+              void handleChange({ requestThinkingBudget: checked })
             }
           />
         </div>
@@ -123,7 +123,7 @@ export function RectifierConfigPanel() {
             checked={config.requestMediaFallback}
             disabled={!config.enabled}
             onCheckedChange={(checked) =>
-              handleChange({ requestMediaFallback: checked })
+              void handleChange({ requestMediaFallback: checked })
             }
           />
         </div>
@@ -138,7 +138,7 @@ export function RectifierConfigPanel() {
             checked={config.requestMediaHeuristic}
             disabled={!config.enabled || !config.requestMediaFallback}
             onCheckedChange={(checked) =>
-              handleChange({ requestMediaHeuristic: checked })
+              void handleChange({ requestMediaHeuristic: checked })
             }
           />
         </div>
@@ -162,7 +162,7 @@ export function RectifierConfigPanel() {
             <Switch
               checked={optimizerConfig.enabled}
               onCheckedChange={(checked) =>
-                handleOptimizerChange({ enabled: checked })
+                void handleOptimizerChange({ enabled: checked })
               }
             />
           </div>
@@ -183,7 +183,7 @@ export function RectifierConfigPanel() {
                 checked={optimizerConfig.thinkingOptimizer}
                 disabled={!optimizerConfig.enabled}
                 onCheckedChange={(checked) =>
-                  handleOptimizerChange({ thinkingOptimizer: checked })
+                  void handleOptimizerChange({ thinkingOptimizer: checked })
                 }
               />
             </div>
@@ -199,7 +199,7 @@ export function RectifierConfigPanel() {
                 checked={optimizerConfig.cacheInjection}
                 disabled={!optimizerConfig.enabled}
                 onCheckedChange={(checked) =>
-                  handleOptimizerChange({ cacheInjection: checked })
+                  void handleOptimizerChange({ cacheInjection: checked })
                 }
               />
             </div>

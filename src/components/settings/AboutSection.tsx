@@ -421,10 +421,23 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
     // Mount-only: loadAllToolVersions is intentionally excluded to avoid
     // re-fetching all tools whenever wslShellByTool changes. Single-tool
     // refreshes are handled by refreshToolVersions in the shell/flag handlers.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ... (handlers like handleOpenReleaseNotes, handleCheckUpdate) ...
+
+  const openLink = useCallback(
+    (url: string) => {
+      settingsApi.openExternal(url).catch((error) => {
+        toast.error(
+          extractErrorMessage(error) ||
+            t("notifications.openLinkFailed", {
+              defaultValue: "链接打开失败",
+            }),
+        );
+      });
+    },
+    [t],
+  );
 
   const handleOpenReleaseNotes = useCallback(async () => {
     try {
@@ -867,7 +880,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => settingsApi.openExternal("https://ccswitch.io")}
+              onClick={() => openLink("https://ccswitch.io")}
               className="h-8 gap-1.5 text-xs"
             >
               <Globe className="h-3.5 w-3.5" />
@@ -878,9 +891,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               variant="outline"
               size="sm"
               onClick={() =>
-                settingsApi.openExternal(
-                  "https://github.com/farion1231/cc-switch",
-                )
+                openLink("https://github.com/farion1231/cc-switch")
               }
               className="h-8 gap-1.5 text-xs"
             >
@@ -891,7 +902,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleOpenReleaseNotes}
+              onClick={() => void handleOpenReleaseNotes()}
               className="h-8 gap-1.5 text-xs"
             >
               <ExternalLink className="h-3.5 w-3.5" />
@@ -900,7 +911,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             <Button
               type="button"
               size="sm"
-              onClick={handleCheckUpdate}
+              onClick={() => void handleCheckUpdate()}
               disabled={isChecking || isDownloading}
               className="h-8 gap-1.5 text-xs"
             >
@@ -959,7 +970,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               size="sm"
               variant="outline"
               className="h-7 gap-1.5 text-xs"
-              onClick={() => handleDiagnoseAll()}
+              onClick={() => void handleDiagnoseAll()}
               disabled={isLoadingTools || isAnyBusy || isDiagnosingAll}
             >
               {isDiagnosingAll ? (
@@ -975,7 +986,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               size="sm"
               variant="outline"
               className="h-7 gap-1.5 text-xs"
-              onClick={() => loadAllToolVersions({ force: true })}
+              onClick={() => void loadAllToolVersions({ force: true })}
               disabled={isLoadingTools || isAnyBusy}
             >
               <RefreshCw
@@ -988,7 +999,9 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             <Button
               size="sm"
               className="h-7 gap-1.5 text-xs"
-              onClick={() => handleRunToolAction(updatableToolNames, "update")}
+              onClick={() =>
+                void handleRunToolAction(updatableToolNames, "update")
+              }
               disabled={
                 isLoadingTools || isAnyBusy || updatableToolNames.length === 0
               }
@@ -1119,7 +1132,9 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
                   <div className="flex flex-wrap gap-2">
                     <Select
                       value={wslShellByTool[toolName]?.wslShell || "auto"}
-                      onValueChange={(v) => handleToolShellChange(toolName, v)}
+                      onValueChange={(v) =>
+                        void handleToolShellChange(toolName, v)
+                      }
                       disabled={isToolVersionLoading || isAnyBusy}
                     >
                       <SelectTrigger className="h-7 w-[82px] text-xs">
@@ -1137,7 +1152,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
                     <Select
                       value={wslShellByTool[toolName]?.wslShellFlag || "auto"}
                       onValueChange={(v) =>
-                        handleToolShellFlagChange(toolName, v)
+                        void handleToolShellFlagChange(toolName, v)
                       }
                       disabled={isToolVersionLoading || isAnyBusy}
                     >
@@ -1190,7 +1205,9 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
                       size="sm"
                       variant={action === "install" ? "outline" : "default"}
                       className="h-7 gap-1.5 text-xs"
-                      onClick={() => handleRunToolAction([toolName], action)}
+                      onClick={() =>
+                        void handleRunToolAction([toolName], action)
+                      }
                       disabled={isToolVersionLoading || isAnyBusy}
                     >
                       {runningAction ? (
@@ -1246,7 +1263,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleCopyInstallCommands}
+                onClick={() => void handleCopyInstallCommands()}
                 className="h-7 gap-1.5 text-xs"
               >
                 <Copy className="h-3.5 w-3.5" />

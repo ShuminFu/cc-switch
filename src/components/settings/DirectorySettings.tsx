@@ -67,7 +67,7 @@ export function DirectorySettings({
             type="button"
             variant="outline"
             size="icon"
-            onClick={onBrowseAppConfig}
+            onClick={() => void onBrowseAppConfig()}
             title={t("settings.browseDirectory")}
           >
             <FolderSearch className="h-4 w-4" />
@@ -76,7 +76,7 @@ export function DirectorySettings({
             type="button"
             variant="outline"
             size="icon"
-            onClick={onResetAppConfig}
+            onClick={() => void onResetAppConfig()}
             title={t("settings.resetDefault")}
           >
             <Undo2 className="h-4 w-4" />
@@ -222,7 +222,7 @@ function DirectoryInput({
           type="button"
           variant="outline"
           size="icon"
-          onClick={onBrowse}
+          onClick={() => void onBrowse()}
           title={t("settings.browseDirectory")}
         >
           <FolderSearch className="h-4 w-4" />
@@ -231,7 +231,7 @@ function DirectoryInput({
           type="button"
           variant="outline"
           size="icon"
-          onClick={onReset}
+          onClick={() => void onReset()}
           title={t("settings.resetDefault")}
         >
           <Undo2 className="h-4 w-4" />

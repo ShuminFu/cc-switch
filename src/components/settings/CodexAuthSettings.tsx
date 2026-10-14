@@ -101,7 +101,7 @@ export function CodexAuthSettings({
         description={t("settings.preserveCodexOfficialAuthOnSwitchDescription")}
         checked={settings.preserveCodexOfficialAuthOnSwitch ?? false}
         onCheckedChange={(value) =>
-          onChange({ preserveCodexOfficialAuthOnSwitch: value })
+          void onChange({ preserveCodexOfficialAuthOnSwitch: value })
         }
       />
 

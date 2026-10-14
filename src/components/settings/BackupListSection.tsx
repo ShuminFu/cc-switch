@@ -84,6 +84,24 @@ export function BackupListSection({
   const [editingFilename, setEditingFilename] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
+  const handleCreate = async () => {
+    try {
+      await create();
+      toast.success(
+        t("settings.backupManager.createSuccess", {
+          defaultValue: "Backup created successfully",
+        }),
+      );
+    } catch (error) {
+      const detail =
+        extractErrorMessage(error) ||
+        t("settings.backupManager.createFailed", {
+          defaultValue: "Backup failed",
+        });
+      toast.error(detail);
+    }
+  };
+
   const handleRestore = async () => {
     if (!confirmFilename) return;
     try {
@@ -263,23 +281,7 @@ export function BackupListSection({
             size="sm"
             className="h-7 px-2 text-xs"
             disabled={isCreating || isRestoring}
-            onClick={async () => {
-              try {
-                await create();
-                toast.success(
-                  t("settings.backupManager.createSuccess", {
-                    defaultValue: "Backup created successfully",
-                  }),
-                );
-              } catch (error) {
-                const detail =
-                  extractErrorMessage(error) ||
-                  t("settings.backupManager.createFailed", {
-                    defaultValue: "Backup failed",
-                  });
-                toast.error(detail);
-              }
-            }}
+            onClick={() => void handleCreate()}
           >
             <Download className="h-3 w-3 mr-1" />
             {isCreating
@@ -314,7 +316,7 @@ export function BackupListSection({
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") handleConfirmRename();
+                          if (e.key === "Enter") void handleConfirmRename();
                           if (e.key === "Escape") handleCancelRename();
                         }}
                         className="h-7 text-xs"
@@ -329,7 +331,7 @@ export function BackupListSection({
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 shrink-0"
-                        onClick={handleConfirmRename}
+                        onClick={() => void handleConfirmRename()}
                         disabled={isRenaming || !editValue.trim()}
                       >
                         <Check className="h-3.5 w-3.5" />
@@ -433,7 +435,7 @@ export function BackupListSection({
             >
               {t("common.cancel", { defaultValue: "Cancel" })}
             </Button>
-            <Button onClick={handleRestore} disabled={isRestoring}>
+            <Button onClick={() => void handleRestore()} disabled={isRestoring}>
               {isRestoring
                 ? t("settings.backupManager.restoring", {
                     defaultValue: "Restoring...",
@@ -475,7 +477,7 @@ export function BackupListSection({
             </Button>
             <Button
               variant="destructive"
-              onClick={handleDelete}
+              onClick={() => void handleDelete()}
               disabled={isDeleting}
             >
               {isDeleting

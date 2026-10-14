@@ -254,12 +254,14 @@ export function SettingsPage({
                   >
                     <LanguageSettings
                       value={settings.language}
-                      onChange={(lang) => handleAutoSave({ language: lang })}
+                      onChange={(lang) =>
+                        void handleAutoSave({ language: lang })
+                      }
                     />
                     <ThemeSettings />
                     <AppVisibilitySettings
                       settings={settings}
-                      onChange={handleAutoSave}
+                      onChange={(updates) => void handleAutoSave(updates)}
                     />
                     <SkillStorageLocationSettings
                       value={settings.skillStorageLocation ?? "cc_switch"}
@@ -271,7 +273,7 @@ export function SettingsPage({
                     <SkillSyncMethodSettings
                       value={settings.skillSyncMethod ?? "auto"}
                       onChange={(method) =>
-                        handleAutoSave({ skillSyncMethod: method })
+                        void handleAutoSave({ skillSyncMethod: method })
                       }
                     />
                     <CodexAuthSettings
@@ -280,12 +282,12 @@ export function SettingsPage({
                     />
                     <WindowSettings
                       settings={settings}
-                      onChange={handleAutoSave}
+                      onChange={(updates) => void handleAutoSave(updates)}
                     />
                     <TerminalSettings
                       value={settings.preferredTerminal}
                       onChange={(terminal) =>
-                        handleAutoSave({ preferredTerminal: terminal })
+                        void handleAutoSave({ preferredTerminal: terminal })
                       }
                     />
                   </motion.div>
@@ -422,7 +424,7 @@ export function SettingsPage({
                             backupIntervalHours={settings.backupIntervalHours}
                             backupRetainCount={settings.backupRetainCount}
                             onSettingsChange={(updates) =>
-                              handleAutoSave(updates)
+                              void handleAutoSave(updates)
                             }
                           />
                         </AccordionContent>
@@ -525,7 +527,7 @@ export function SettingsPage({
                 style={{ backgroundColor: "hsl(var(--background))" }}
               >
                 <div className="px-6 flex items-center justify-end gap-3">
-                  <Button onClick={handleSave} disabled={isSaving}>
+                  <Button onClick={() => void handleSave()} disabled={isSaving}>
                     {isSaving ? (
                       <span className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -567,7 +569,7 @@ export function SettingsPage({
               {t("settings.restartLater")}
             </Button>
             <Button
-              onClick={handleRestartNow}
+              onClick={() => void handleRestartNow()}
               className="bg-primary hover:bg-primary/90"
             >
               {t("settings.restartNow")}

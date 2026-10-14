@@ -123,7 +123,7 @@ export function ProxyTabContent({
             <ProxyPanel
               enableLocalProxy={settings?.enableLocalProxy ?? false}
               onEnableLocalProxyChange={(checked) =>
-                onAutoSave({ enableLocalProxy: checked })
+                void onAutoSave({ enableLocalProxy: checked })
               }
               onToggleProxy={handleToggleProxy}
               isProxyPending={isProxyPending}

@@ -183,7 +183,7 @@ export function GlobalProxySettings() {
           variant="outline"
           size="icon"
           disabled={scanMutation.isPending}
-          onClick={handleScan}
+          onClick={() => void handleScan()}
           title={t("settings.globalProxy.scan")}
         >
           {scanMutation.isPending ? (
@@ -196,7 +196,7 @@ export function GlobalProxySettings() {
           variant="outline"
           size="icon"
           disabled={!fullUrl || testMutation.isPending}
-          onClick={handleTest}
+          onClick={() => void handleTest()}
           title={t("settings.globalProxy.test")}
         >
           {testMutation.isPending ? (
@@ -215,7 +215,7 @@ export function GlobalProxySettings() {
           <X className="h-4 w-4" />
         </Button>
         <Button
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           disabled={!dirty || setMutation.isPending}
           size="sm"
         >
