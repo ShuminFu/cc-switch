@@ -28,6 +28,13 @@ they are pushed to every user.
    node scripts/check-versions.mjs vX.Y.Z
    ```
 
+   Regenerate the Flatpak metainfo `<releases>` block from the dated
+   `CHANGELOG.md` entry; CI runs it with `--check` and fails when it is stale:
+
+   ```bash
+   node scripts/sync-metainfo-releases.mjs
+   ```
+
    Add the fix-commit KPI to the release notes: the `unreleased` row of
    `scripts/kpi-fix-commits.sh` (needs tags and full history) counts the
    fix and proxy fix commits since the previous release. Compare it with the
