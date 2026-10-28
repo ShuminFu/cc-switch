@@ -25,10 +25,36 @@ function topLevelPermissions(text: string): string[] | null {
   return body;
 }
 
+/** 返回 jobs 下每个 job 的名称及其是否在 job 级别声明了 permissions */
+function jobPermissions(text: string): Record<string, boolean> {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^jobs\s*:/.test(l));
+  const jobs: Record<string, boolean> = {};
+  if (start === -1) return jobs;
+  let current: string | null = null;
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line) && !line.startsWith("#")) break;
+    const job = line.match(/^ {2}([\w-]+)\s*:/);
+    if (job) {
+      current = job[1];
+      jobs[current] = false;
+    } else if (current && /^ {4}permissions\s*:/.test(line)) {
+      jobs[current] = true;
+    }
+  }
+  return jobs;
+}
+
 describe("workflow token permissions", () => {
-  // claude.yml 只有一个 job，在 job 级别声明权限，同样不会退回仓库默认权限
+  // 没有顶层 permissions 时（如 claude.yml），每个 job 都必须在 job 级别声明，
+  // 否则未声明的 job 仍会退回仓库默认权限
   it.each(workflowFiles)("%s declares token permissions explicitly", (file) => {
-    expect(read(file)).toMatch(/^\s*permissions\s*:/m);
+    const text = read(file);
+    if (topLevelPermissions(text) !== null) return;
+    const jobs = jobPermissions(text);
+    expect(Object.keys(jobs).length).toBeGreaterThan(0);
+    const missing = Object.keys(jobs).filter((name) => !jobs[name]);
+    expect(missing).toEqual([]);
   });
 
   it("ci.yml grants only contents: read", () => {

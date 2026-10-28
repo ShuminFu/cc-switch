@@ -15,7 +15,7 @@ Verified finding ci-no-permissions-block. ci.yml uses the repo-default GITHUB_TO
 Add a top-level `permissions: contents: read`.
 
 ## Acceptance criteria / verification
-- [ ] `actionlint .github/workflows/ci.yml`
+- [x] `actionlint .github/workflows/ci.yml`
 - [ ] The job log's GITHUB_TOKEN Permissions lists only Contents: read and Metadata: read
 
 ## Dependencies
@@ -45,7 +45,17 @@ grants.
 - `pnpm typecheck` passes; `pnpm test:unit` gives 81 files / 545 tests passed; `pnpm format:check` is clean
 
 **Remaining (why Partial):**
-- [ ] `actionlint .github/workflows/ci.yml`: actionlint is not installed here, and
-  installing it from the network was not allowed in this session. Run it locally or in a CI lint step.
+- [x] `actionlint .github/workflows/ci.yml`: done in review (see below).
 - [ ] Check that the GITHUB_TOKEN Permissions section of the "Set up job" log shows only
   Contents: read and Metadata: read. This needs a real GitHub Actions run on a PR or on main.
+
+**Review:** `~/go/bin/actionlint` (v1.7.7) was available after all:
+`actionlint .github/workflows/ci.yml` exits 0. (A full `actionlint` run only
+reports the pre-existing `windows-11-arm` runner label in release.yml, which
+this actionlint version does not know about.) No job in ci.yml needs more than
+contents: read. Tightened the guard test: before, any `permissions:` line
+anywhere in a file passed, so a workflow with no top-level block and one
+unscoped job would still pass. Now a workflow without top-level permissions
+must declare them on every job. Checked that it fails when an extra
+job without permissions is added to claude.yml, and fails on the old ci.yml.
+Status stays Partial: the job-log token check needs a real GitHub Actions run.
