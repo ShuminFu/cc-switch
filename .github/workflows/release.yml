@@ -28,8 +28,31 @@ jobs:
     permissions:
       contents: read
 
+  # Fails fast, before five runners spin up, when the tag does not match
+  # package.json / Cargo.toml / tauri.conf.json or CHANGELOG.md has no entry
+  # for the version (CCS-033).
+  check-versions:
+    name: Check version consistency
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: release-check-versions-${{ github.ref_name }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Check tag against manifest versions and CHANGELOG
+        run: node scripts/check-versions.mjs "$GITHUB_REF_NAME"
+
   release:
-    needs: ci
+    needs: [ci, check-versions]
     runs-on: ${{ matrix.os }}
     environment: release
     # 每个矩阵项单独成组，避免同一次运行内的矩阵项互相取消
@@ -74,6 +97,17 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      # Restores the registry and dependency builds instead of rebuilding from
+      # scratch on every runner. Caches saved on a tag are only visible to
+      # re-runs of that tag, so cache-on-failure lets a re-run after a flaky
+      # notarization or upload step skip the rebuild (CCS-033).
+      - name: Cache Cargo registry and build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: release-${{ matrix.os }}
+          cache-on-failure: true
 
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -613,8 +647,12 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-22.04
     needs: release
+    # id-token + attestations let attest-build-provenance sign the SLSA
+    # provenance with the workflow's OIDC identity (CCS-033).
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     concurrency:
       group: release-publish-${{ github.ref_name }}
       cancel-in-progress: false
@@ -631,6 +669,29 @@ jobs:
         run: |
           set -euo pipefail
           ls -la release-assets
+
+      # scripts/ is not checked out in this job; fetch only the helper.
+      - name: Checkout release scripts
+        uses: actions/checkout@v6
+        with:
+          path: src
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      # SHA256SUMS covers every uploaded asset (installers, updater bundles and
+      # their .sig files); verify with `sha256sum -c SHA256SUMS` (CCS-033).
+      - name: Generate SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash src/scripts/generate-sha256sums.sh release-assets
+          cat release-assets/SHA256SUMS
+
+      # Verify with: gh attestation verify <asset> --repo <owner>/<repo>
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-checksums: release-assets/SHA256SUMS
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v3
@@ -656,6 +717,11 @@ jobs:
             - **Linux (ARM64)**: `CC-Switch-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
 
             > `.tar.gz` 为 Tauri updater 自动更新专用，无需手动下载。
+
+            ### 校验 / Verify
+
+            - `sha256sum -c SHA256SUMS --ignore-missing`
+            - `gh attestation verify <file> --repo ${{ github.repository }}`
 
             ---
             macOS 版本已通过 Apple 代码签名和公证，可直接安装使用。

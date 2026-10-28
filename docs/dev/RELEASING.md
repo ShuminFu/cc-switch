@@ -21,6 +21,13 @@ they are pushed to every user.
 1. Bump the version in `package.json`, `src-tauri/Cargo.toml` and
    `src-tauri/tauri.conf.json`, update `CHANGELOG.md` and add release notes
    under `docs/release-notes/`.
+   Check the bump locally before tagging; the Release workflow runs the same
+   check and stops before building if the tag does not match:
+
+   ```bash
+   node scripts/check-versions.mjs vX.Y.Z
+   ```
+
 2. Merge to `main`, then tag and push:
 
    ```bash
@@ -37,6 +44,17 @@ they are pushed to every user.
 Download the artifacts from the release page and check at least one platform
 installs and starts. Confirm the release has a `latest.json` asset whose
 `version` is `X.Y.Z`.
+
+Every release carries a `SHA256SUMS` asset and a build provenance attestation
+for each asset listed in it:
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify CC-Switch-vX.Y.Z-Linux-x86_64.AppImage --repo farion1231/cc-switch
+```
+
+Attestations need a public repository (or GitHub Enterprise Cloud for a
+private one); on a fork, pass the fork as `--repo`.
 
 ## 3. Promote to latest
 

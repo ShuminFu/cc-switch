@@ -61,6 +61,12 @@ jobs:
       - name: Check formatting
         run: pnpm format:check
 
+      # package.json / Cargo.toml / tauri.conf.json must agree and have a
+      # CHANGELOG entry; on a tag (release.yml calls this workflow) the tag
+      # must match too (CCS-033).
+      - name: Check version consistency
+        run: node scripts/check-versions.mjs
+
       - name: Unit tests
         run: pnpm test:unit
 
@@ -99,15 +105,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends libsoup-3.0-dev \
             || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
 
+      # rust-cache keys on Cargo.lock, the toolchain and the job, and prunes
+      # workspace crates before saving so the cache stays small (CCS-033).
       - name: Cache Cargo registry and build
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          workspaces: src-tauri -> target
+          key: ${{ matrix.os }}
 
       - name: Create frontend dist placeholder
         shell: bash
@@ -147,14 +151,10 @@ jobs:
             || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
 
       - name: Cache Cargo registry and build
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-msrv-
+          workspaces: src-tauri -> target
+          key: msrv
 
       - name: Create frontend dist placeholder
         run: mkdir -p dist
@@ -213,14 +213,10 @@ jobs:
             || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
 
       - name: Cache Cargo registry and build
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-tauri-smoke-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-tauri-smoke-
+          workspaces: src-tauri -> target
+          key: tauri-smoke
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -324,14 +320,10 @@ jobs:
             || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
 
       - name: Cache Cargo registry and build
-        uses: actions/cache@v5
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-llvm-cov-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-llvm-cov-
+          workspaces: src-tauri -> target
+          key: llvm-cov
 
       - name: Create frontend dist placeholder
         shell: bash
