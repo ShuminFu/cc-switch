@@ -517,10 +517,6 @@ requires_openai_auth = true
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[allow(
-    clippy::await_holding_lock,
-    reason = "this integration-style test must serialize global test HOME and settings mutations across async takeover calls"
-)]
 async fn codex_official_to_deepseek_then_takeover_enters_and_restores_proxy_managed_live_config() {
     let _test_env = TestEnv::new();
     enable_codex_official_auth_preservation();

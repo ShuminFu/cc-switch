@@ -7,8 +7,6 @@ use cc_switch_lib::{
 mod support;
 use support::{create_test_state, TestEnv};
 
-// 测试使用 Mutex 进行串行化，跨 await 持锁是预期行为
-#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn default_cost_multiplier_commands_round_trip() {
     let _test_env = TestEnv::new();
@@ -40,8 +38,6 @@ async fn default_cost_multiplier_commands_round_trip() {
     }
 }
 
-// 测试使用 Mutex 进行串行化，跨 await 持锁是预期行为
-#[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn pricing_model_source_commands_round_trip() {
     let _test_env = TestEnv::new();
