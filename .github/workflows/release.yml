@@ -8,14 +8,22 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: release-${{ github.ref_name }}
-  cancel-in-progress: true
+# No workflow-level concurrency: cancel-in-progress there would also cut
+# publish-release / assemble-latest-json mid-upload and leave a half-published
+# release. Concurrency is set per job instead (CCS-031):
+# - ci / release (build matrix): a re-pushed tag cancels the older run's
+#   builds, which is harmless because nothing has been published yet.
+# - publish-release / assemble-latest-json: share release-publish-<ref> with
+#   cancel-in-progress: false, so a newer run waits for an in-progress publish
+#   instead of cancelling it.
 
 jobs:
   # Run the full CI suite on the tag SHA first; release (and everything that
   # depends on it) is skipped unless CI is green.
   ci:
+    concurrency:
+      group: release-ci-${{ github.ref_name }}
+      cancel-in-progress: true
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
@@ -24,6 +32,10 @@ jobs:
     needs: ci
     runs-on: ${{ matrix.os }}
     environment: release
+    # 每个矩阵项单独成组，避免同一次运行内的矩阵项互相取消
+    concurrency:
+      group: release-build-${{ github.ref_name }}-${{ matrix.os }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
@@ -603,6 +615,9 @@ jobs:
     needs: release
     permissions:
       contents: write
+    concurrency:
+      group: release-publish-${{ github.ref_name }}
+      cancel-in-progress: false
     steps:
       - name: Download built release artifacts
         uses: actions/download-artifact@v8
@@ -652,6 +667,9 @@ jobs:
     needs: publish-release
     permissions:
       contents: write
+    concurrency:
+      group: release-publish-${{ github.ref_name }}
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v6
