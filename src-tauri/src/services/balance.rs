@@ -107,6 +107,11 @@ async fn query_deepseek(api_key: &str) -> Result<UsageResult, String> {
         Err(e) => return Ok(make_error(format!("Failed to parse response: {e}"))),
     };
 
+    Ok(parse_deepseek_balance(&body))
+}
+
+/// 解析 DeepSeek 余额响应体
+fn parse_deepseek_balance(body: &serde_json::Value) -> UsageResult {
     let is_available = body
         .get("is_available")
         .and_then(|v| v.as_bool())
@@ -138,11 +143,11 @@ async fn query_deepseek(api_key: &str) -> Result<UsageResult, String> {
         }
     }
 
-    Ok(UsageResult {
+    UsageResult {
         success: true,
         data: if data.is_empty() { None } else { Some(data) },
         error: None,
-    })
+    }
 }
 
 // ── StepFun ─────────────────────────────────────────────────
@@ -185,9 +190,14 @@ async fn query_stepfun(api_key: &str) -> Result<UsageResult, String> {
         Err(e) => return Ok(make_error(format!("Failed to parse response: {e}"))),
     };
 
-    let balance = parse_f64_field(&body, "balance").unwrap_or(0.0);
+    Ok(parse_stepfun_balance(&body))
+}
 
-    Ok(UsageResult {
+/// 解析 StepFun 余额响应体
+fn parse_stepfun_balance(body: &serde_json::Value) -> UsageResult {
+    let balance = parse_f64_field(body, "balance").unwrap_or(0.0);
+
+    UsageResult {
         success: true,
         data: Some(vec![UsageData {
             plan_name: Some("StepFun".to_string()),
@@ -200,7 +210,7 @@ async fn query_stepfun(api_key: &str) -> Result<UsageResult, String> {
             extra: None,
         }]),
         error: None,
-    })
+    }
 }
 
 // ── SiliconFlow ─────────────────────────────────────────────
@@ -250,9 +260,14 @@ async fn query_siliconflow(api_key: &str, is_cn: bool) -> Result<UsageResult, St
         Err(e) => return Ok(make_error(format!("Failed to parse response: {e}"))),
     };
 
+    Ok(parse_siliconflow_balance(&body, is_cn))
+}
+
+/// 解析 SiliconFlow 余额响应体（is_cn 区分 .cn / .com 站点）
+fn parse_siliconflow_balance(body: &serde_json::Value, is_cn: bool) -> UsageResult {
     let data = match body.get("data") {
         Some(d) => d,
-        None => return Ok(make_error("Missing 'data' field in response".to_string())),
+        None => return make_error("Missing 'data' field in response".to_string()),
     };
 
     let total_balance = parse_f64_field(data, "totalBalance").unwrap_or(0.0);
@@ -264,7 +279,7 @@ async fn query_siliconflow(api_key: &str, is_cn: bool) -> Result<UsageResult, St
         "SiliconFlow (EN)"
     };
 
-    Ok(UsageResult {
+    UsageResult {
         success: true,
         data: Some(vec![UsageData {
             plan_name: Some(plan_name.to_string()),
@@ -277,7 +292,7 @@ async fn query_siliconflow(api_key: &str, is_cn: bool) -> Result<UsageResult, St
             extra: None,
         }]),
         error: None,
-    })
+    }
 }
 
 // ── OpenRouter ──────────────────────────────────────────────
@@ -320,12 +335,17 @@ async fn query_openrouter(api_key: &str) -> Result<UsageResult, String> {
         Err(e) => return Ok(make_error(format!("Failed to parse response: {e}"))),
     };
 
-    let data = body.get("data").unwrap_or(&body);
+    Ok(parse_openrouter_balance(&body))
+}
+
+/// 解析 OpenRouter 额度响应体（剩余 = total_credits - total_usage）
+fn parse_openrouter_balance(body: &serde_json::Value) -> UsageResult {
+    let data = body.get("data").unwrap_or(body);
     let total_credits = parse_f64_field(data, "total_credits").unwrap_or(0.0);
     let total_usage = parse_f64_field(data, "total_usage").unwrap_or(0.0);
     let remaining = total_credits - total_usage;
 
-    Ok(UsageResult {
+    UsageResult {
         success: true,
         data: Some(vec![UsageData {
             plan_name: Some("OpenRouter".to_string()),
@@ -342,7 +362,7 @@ async fn query_openrouter(api_key: &str) -> Result<UsageResult, String> {
             extra: None,
         }]),
         error: None,
-    })
+    }
 }
 
 // ── Novita AI ───────────────────────────────────────────────
@@ -386,10 +406,15 @@ async fn query_novita(api_key: &str) -> Result<UsageResult, String> {
         Err(e) => return Ok(make_error(format!("Failed to parse response: {e}"))),
     };
 
-    // Novita 金额单位为 0.0001 USD，需除以 10000 转为 USD
-    let available = parse_f64_field(&body, "availableBalance").unwrap_or(0.0) / 10000.0;
+    Ok(parse_novita_balance(&body))
+}
 
-    Ok(UsageResult {
+/// 解析 Novita AI 余额响应体
+fn parse_novita_balance(body: &serde_json::Value) -> UsageResult {
+    // Novita 金额单位为 0.0001 USD，需除以 10000 转为 USD
+    let available = parse_f64_field(body, "availableBalance").unwrap_or(0.0) / 10000.0;
+
+    UsageResult {
         success: true,
         data: Some(vec![UsageData {
             plan_name: Some("Novita AI".to_string()),
@@ -406,7 +431,7 @@ async fn query_novita(api_key: &str) -> Result<UsageResult, String> {
             extra: None,
         }]),
         error: None,
-    })
+    }
 }
 
 // ── 工具函数 ────────────────────────────────────────────────
@@ -450,5 +475,204 @@ pub async fn get_balance(base_url: &str, api_key: &str) -> Result<UsageResult, S
         BalanceProvider::SiliconFlowEn => query_siliconflow(api_key, false).await,
         BalanceProvider::OpenRouter => query_openrouter(api_key).await,
         BalanceProvider::NovitaAI => query_novita(api_key).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn single(result: &UsageResult) -> &UsageData {
+        let data = result.data.as_ref().expect("data present");
+        assert_eq!(data.len(), 1);
+        &data[0]
+    }
+
+    #[test]
+    fn detect_provider_matches_known_hosts_case_insensitively() {
+        assert!(matches!(
+            detect_provider("https://API.DeepSeek.com/anthropic"),
+            Some(BalanceProvider::DeepSeek)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.stepfun.ai/v1"),
+            Some(BalanceProvider::StepFun)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.stepfun.com/v1"),
+            Some(BalanceProvider::StepFun)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.siliconflow.cn/v1"),
+            Some(BalanceProvider::SiliconFlow)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.siliconflow.com/v1"),
+            Some(BalanceProvider::SiliconFlowEn)
+        ));
+        assert!(matches!(
+            detect_provider("https://openrouter.ai/api/v1"),
+            Some(BalanceProvider::OpenRouter)
+        ));
+        assert!(matches!(
+            detect_provider("https://api.novita.ai/openai"),
+            Some(BalanceProvider::NovitaAI)
+        ));
+        assert!(detect_provider("https://api.anthropic.com").is_none());
+    }
+
+    #[test]
+    fn parse_f64_field_accepts_numbers_and_numeric_strings() {
+        let obj = json!({ "n": 1.5, "s": "2.25", "bad": "abc", "b": true });
+        assert_eq!(parse_f64_field(&obj, "n"), Some(1.5));
+        assert_eq!(parse_f64_field(&obj, "s"), Some(2.25));
+        assert_eq!(parse_f64_field(&obj, "bad"), None);
+        assert_eq!(parse_f64_field(&obj, "b"), None);
+        assert_eq!(parse_f64_field(&obj, "missing"), None);
+    }
+
+    #[test]
+    fn deepseek_parses_each_currency_entry() {
+        let body = json!({
+            "is_available": true,
+            "balance_infos": [
+                { "currency": "CNY", "total_balance": "110.00" },
+                { "currency": "USD", "total_balance": 3.5 }
+            ]
+        });
+        let result = parse_deepseek_balance(&body);
+        assert!(result.success);
+        let data = result.data.expect("data");
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0].plan_name.as_deref(), Some("CNY"));
+        assert_eq!(data[0].remaining, Some(110.0));
+        assert_eq!(data[0].is_valid, Some(true));
+        assert!(data[0].invalid_message.is_none());
+        assert_eq!(data[1].unit.as_deref(), Some("USD"));
+        assert_eq!(data[1].remaining, Some(3.5));
+    }
+
+    #[test]
+    fn deepseek_marks_unavailable_and_handles_empty_infos() {
+        let body = json!({
+            "is_available": false,
+            "balance_infos": [{ "total_balance": "0" }]
+        });
+        let result = parse_deepseek_balance(&body);
+        let entry = single(&result);
+        assert_eq!(entry.unit.as_deref(), Some("CNY"));
+        assert_eq!(entry.is_valid, Some(false));
+        assert_eq!(
+            entry.invalid_message.as_deref(),
+            Some("Insufficient balance")
+        );
+
+        let empty = parse_deepseek_balance(&json!({ "balance_infos": [] }));
+        assert!(empty.success);
+        assert!(empty.data.is_none());
+    }
+
+    #[test]
+    fn stepfun_reads_balance_with_zero_fallback() {
+        let result = parse_stepfun_balance(&json!({ "balance": "12.5" }));
+        let entry = single(&result);
+        assert_eq!(entry.remaining, Some(12.5));
+        assert_eq!(entry.unit.as_deref(), Some("CNY"));
+
+        let missing = parse_stepfun_balance(&json!({}));
+        assert_eq!(single(&missing).remaining, Some(0.0));
+    }
+
+    #[test]
+    fn siliconflow_uses_total_balance_and_site_currency() {
+        let body = json!({ "code": 20000, "data": { "balance": "1", "totalBalance": "8.88" } });
+
+        let cn = parse_siliconflow_balance(&body, true);
+        let entry = single(&cn);
+        assert_eq!(entry.plan_name.as_deref(), Some("SiliconFlow"));
+        assert_eq!(entry.remaining, Some(8.88));
+        assert_eq!(entry.unit.as_deref(), Some("CNY"));
+
+        let en = parse_siliconflow_balance(&body, false);
+        let entry = single(&en);
+        assert_eq!(entry.plan_name.as_deref(), Some("SiliconFlow (EN)"));
+        assert_eq!(entry.unit.as_deref(), Some("USD"));
+    }
+
+    #[test]
+    fn siliconflow_missing_data_is_error() {
+        let result = parse_siliconflow_balance(&json!({ "code": 20000 }), true);
+        assert!(!result.success);
+        assert!(result.data.is_none());
+        assert_eq!(
+            result.error.as_deref(),
+            Some("Missing 'data' field in response")
+        );
+    }
+
+    #[test]
+    fn openrouter_computes_remaining_from_credits_and_usage() {
+        let body = json!({ "data": { "total_credits": 20.0, "total_usage": 5.5 } });
+        let result = parse_openrouter_balance(&body);
+        let entry = single(&result);
+        assert_eq!(entry.total, Some(20.0));
+        assert_eq!(entry.used, Some(5.5));
+        assert_eq!(entry.remaining, Some(14.5));
+        assert_eq!(entry.is_valid, Some(true));
+
+        // 无 data 包裹时直接读取顶层字段
+        let exhausted = parse_openrouter_balance(&json!({
+            "total_credits": 10,
+            "total_usage": 10
+        }));
+        let entry = single(&exhausted);
+        assert_eq!(entry.remaining, Some(0.0));
+        assert_eq!(entry.is_valid, Some(false));
+        assert_eq!(
+            entry.invalid_message.as_deref(),
+            Some("No credits remaining")
+        );
+    }
+
+    #[test]
+    fn novita_converts_ten_thousandths_to_usd() {
+        let result = parse_novita_balance(&json!({ "availableBalance": 123456 }));
+        let entry = single(&result);
+        assert_eq!(entry.remaining, Some(12.3456));
+        assert_eq!(entry.unit.as_deref(), Some("USD"));
+        assert_eq!(entry.is_valid, Some(true));
+
+        let empty = parse_novita_balance(&json!({ "availableBalance": "0" }));
+        let entry = single(&empty);
+        assert_eq!(entry.is_valid, Some(false));
+        assert_eq!(
+            entry.invalid_message.as_deref(),
+            Some("No balance remaining")
+        );
+    }
+
+    #[test]
+    fn auth_error_marks_entry_invalid() {
+        let result = make_auth_error(reqwest::StatusCode::UNAUTHORIZED);
+        assert!(!result.success);
+        let entry = single(&result);
+        assert_eq!(entry.is_valid, Some(false));
+        assert!(result.error.as_deref().unwrap().contains("401"));
+    }
+
+    #[tokio::test]
+    async fn get_balance_rejects_empty_key_and_unknown_provider() {
+        let empty = get_balance("https://api.deepseek.com", "  ")
+            .await
+            .expect("deterministic failure is Ok");
+        assert!(!empty.success);
+        assert_eq!(empty.error.as_deref(), Some("API key is empty"));
+
+        let unknown = get_balance("https://example.com", "sk-test")
+            .await
+            .expect("deterministic failure is Ok");
+        assert!(!unknown.success);
+        assert_eq!(unknown.error.as_deref(), Some("Unknown balance provider"));
     }
 }

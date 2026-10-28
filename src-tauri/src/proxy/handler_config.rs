@@ -226,3 +226,152 @@ pub const GEMINI_HANDLER_CONFIG: HandlerConfig = HandlerConfig {
     app_type_str: "gemini",
     parser_config: &GEMINI_PARSER_CONFIG,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parser_configs_carry_expected_app_type_and_filters() {
+        assert_eq!(CLAUDE_PARSER_CONFIG.app_type_str, "claude");
+        assert_eq!(OPENAI_PARSER_CONFIG.app_type_str, "codex");
+        assert_eq!(CODEX_PARSER_CONFIG.app_type_str, "codex");
+        assert_eq!(GEMINI_PARSER_CONFIG.app_type_str, "gemini");
+
+        for config in [
+            CLAUDE_PARSER_CONFIG,
+            OPENAI_PARSER_CONFIG,
+            CODEX_PARSER_CONFIG,
+            GEMINI_PARSER_CONFIG,
+        ] {
+            assert!(config.stream_event_filter.is_some());
+        }
+    }
+
+    #[test]
+    fn handler_configs_point_at_matching_parser_configs() {
+        let cases = [
+            (&CLAUDE_HANDLER_CONFIG, AppType::Claude, "claude"),
+            (&CODEX_CHAT_HANDLER_CONFIG, AppType::Codex, "codex"),
+            (&CODEX_RESPONSES_HANDLER_CONFIG, AppType::Codex, "codex"),
+            (&GEMINI_HANDLER_CONFIG, AppType::Gemini, "gemini"),
+        ];
+        for (handler, app_type, app_type_str) in cases {
+            assert_eq!(handler.app_type, app_type);
+            assert_eq!(handler.app_type_str, app_type_str);
+            assert_eq!(handler.parser_config.app_type_str, app_type_str);
+        }
+
+        // Codex 两个入口分别使用 OpenAI Chat 与自动检测解析器
+        let chat_filter = CODEX_CHAT_HANDLER_CONFIG
+            .parser_config
+            .stream_event_filter
+            .unwrap();
+        let responses_filter = CODEX_RESPONSES_HANDLER_CONFIG
+            .parser_config
+            .stream_event_filter
+            .unwrap();
+        let completed = r#"{"type":"response.completed","response":{}}"#;
+        assert!(!chat_filter(completed));
+        assert!(responses_filter(completed));
+    }
+
+    #[test]
+    fn stream_usage_event_filters_match_only_usage_events() {
+        assert!(claude_stream_usage_event_filter(
+            r#"{"type":"message_start","message":{}}"#
+        ));
+        assert!(claude_stream_usage_event_filter(
+            r#"{"type":"message_delta","usage":{}}"#
+        ));
+        assert!(!claude_stream_usage_event_filter(
+            r#"{"type":"content_block_delta","delta":{"text":"hi"}}"#
+        ));
+
+        assert!(openai_stream_usage_event_filter(
+            r#"{"choices":[],"usage":{"prompt_tokens":1}}"#
+        ));
+        assert!(!openai_stream_usage_event_filter(
+            r#"{"choices":[{"delta":{"content":"hi"}}]}"#
+        ));
+
+        assert!(codex_stream_usage_event_filter(
+            r#"{"type":"response.completed"}"#
+        ));
+        assert!(codex_stream_usage_event_filter(r#"{"usage":{}}"#));
+        assert!(!codex_stream_usage_event_filter(
+            r#"{"type":"response.output_text.delta","delta":"hi"}"#
+        ));
+
+        assert!(gemini_stream_usage_event_filter(
+            r#"{"usageMetadata":{"promptTokenCount":1}}"#
+        ));
+        assert!(!gemini_stream_usage_event_filter(r#"{"candidates":[]}"#));
+    }
+
+    #[test]
+    fn claude_model_extractor_prefers_usage_model_and_ignores_empty() {
+        let events = vec![json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_1",
+                "model": "claude-upstream",
+                "usage": { "input_tokens": 10 }
+            }
+        })];
+        assert_eq!(
+            claude_model_extractor(&events, "fallback"),
+            "claude-upstream"
+        );
+
+        let empty_model = vec![json!({
+            "type": "message_start",
+            "message": { "model": "", "usage": { "input_tokens": 10 } }
+        })];
+        assert_eq!(claude_model_extractor(&empty_model, "fallback"), "fallback");
+        assert_eq!(claude_model_extractor(&[], "fallback"), "fallback");
+    }
+
+    #[test]
+    fn openai_model_extractor_falls_back_to_event_model() {
+        let events = vec![
+            json!({ "model": "", "choices": [] }),
+            json!({ "model": "gpt-chunk", "choices": [] }),
+        ];
+        assert_eq!(openai_model_extractor(&events, "fallback"), "gpt-chunk");
+        assert_eq!(
+            openai_model_extractor(&[json!({ "choices": [] })], "fallback"),
+            "fallback"
+        );
+    }
+
+    #[test]
+    fn codex_model_extractor_reads_completed_response_then_chunks() {
+        let completed = vec![json!({
+            "type": "response.completed",
+            "response": { "model": "gpt-responses" }
+        })];
+        assert_eq!(
+            codex_auto_model_extractor(&completed, "fallback"),
+            "gpt-responses"
+        );
+
+        let chunks = vec![json!({ "model": "gpt-chat", "choices": [] })];
+        assert_eq!(codex_auto_model_extractor(&chunks, "fallback"), "gpt-chat");
+
+        let empty = vec![json!({
+            "type": "response.completed",
+            "response": { "model": "" }
+        })];
+        assert_eq!(codex_auto_model_extractor(&empty, "fallback"), "fallback");
+    }
+
+    #[test]
+    fn gemini_model_extractor_uses_fallback_without_usage() {
+        assert_eq!(
+            gemini_model_extractor(&[json!({ "candidates": [] })], "gemini-req"),
+            "gemini-req"
+        );
+    }
+}

@@ -133,3 +133,105 @@ impl FailoverSwitchManager {
         Ok(switched)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manager() -> FailoverSwitchManager {
+        FailoverSwitchManager::new(Arc::new(Database::memory().expect("memory db")))
+    }
+
+    async fn set_app_enabled(manager: &FailoverSwitchManager, app_type: &str, enabled: bool) {
+        let mut config = manager
+            .db
+            .get_proxy_config_for_app(app_type)
+            .await
+            .expect("read proxy config");
+        config.enabled = enabled;
+        manager
+            .db
+            .update_proxy_config_for_app(config)
+            .await
+            .expect("update proxy config");
+    }
+
+    async fn is_pending(manager: &FailoverSwitchManager, key: &str) -> bool {
+        manager.pending_switches.read().await.contains(key)
+    }
+
+    #[tokio::test]
+    async fn try_switch_skips_when_same_switch_is_pending() {
+        let manager = manager();
+        set_app_enabled(&manager, "claude", true).await;
+        manager
+            .pending_switches
+            .write()
+            .await
+            .insert("claude:p1".to_string());
+
+        let result = manager
+            .try_switch(None, "claude", "p1", "Provider 1")
+            .await
+            .expect("dedup skip is not an error");
+
+        assert!(!result);
+        // 被跳过的调用不得清理正在进行中的切换标记
+        assert!(is_pending(&manager, "claude:p1").await);
+    }
+
+    #[tokio::test]
+    async fn try_switch_clears_pending_marker_after_completion() {
+        let manager = manager();
+        set_app_enabled(&manager, "claude", true).await;
+
+        let result = manager
+            .try_switch(None, "claude", "p1", "Provider 1")
+            .await
+            .expect("switch without app handle");
+
+        // 无 AppHandle 时无法热切换，结果为 false，但标记必须被清理
+        assert!(!result);
+        assert!(!is_pending(&manager, "claude:p1").await);
+        assert!(manager.pending_switches.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn try_switch_skips_when_app_not_taken_over() {
+        let manager = manager();
+        set_app_enabled(&manager, "codex", false).await;
+
+        let result = manager
+            .try_switch(None, "codex", "p2", "Provider 2")
+            .await
+            .expect("disabled app is not an error");
+
+        assert!(!result);
+        assert!(!is_pending(&manager, "codex:p2").await);
+    }
+
+    #[tokio::test]
+    async fn pending_marker_is_scoped_to_app_and_provider() {
+        let manager = manager();
+        set_app_enabled(&manager, "claude", true).await;
+        manager
+            .pending_switches
+            .write()
+            .await
+            .insert("claude:p1".to_string());
+
+        // 其他 provider / 其他应用的切换不受影响，且完成后只清理自己的标记
+        manager
+            .try_switch(None, "claude", "p2", "Provider 2")
+            .await
+            .expect("other provider");
+        manager
+            .try_switch(None, "codex", "p1", "Provider 1")
+            .await
+            .expect("other app");
+
+        let pending = manager.pending_switches.read().await;
+        assert_eq!(pending.len(), 1);
+        assert!(pending.contains("claude:p1"));
+    }
+}
