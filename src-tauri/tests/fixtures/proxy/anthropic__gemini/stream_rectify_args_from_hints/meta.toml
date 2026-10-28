@@ -1,0 +1,3 @@
+intent = "Tool args under a wrong key are rectified using the client's tool schema (args -> command)."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::rectifies_streamed_tool_call_args_from_tool_schema_hints"

@@ -1,0 +1,8 @@
+intent = "An upstream transport error ends the client stream with an error item and no message_stop."
+source_commit = "6330783"
+
+[options]
+upstream_error = "upstream disconnected"
+
+[invariants]
+terminal = "error"

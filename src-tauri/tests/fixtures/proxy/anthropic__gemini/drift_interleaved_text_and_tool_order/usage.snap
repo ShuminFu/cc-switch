@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: "Known trade-off: streaming emits all tool_use blocks after the merged text, while non-stream keeps the original part order (see the comment above the tool_use loop in streaming_gemini.rs)."
+---
+# stream
+{
+  "input_tokens": 9,
+  "output_tokens": 6,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "r_order",
+  "billable": true
+}
+
+# non-stream
+{
+  "input_tokens": 9,
+  "output_tokens": 6,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "r_order",
+  "billable": true
+}

@@ -1,0 +1,3 @@
+intent = "A call first seen without id and later upgraded to a real id is emitted once with the real id."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::upgraded_real_id_merges_into_existing_synthesized_snapshot"

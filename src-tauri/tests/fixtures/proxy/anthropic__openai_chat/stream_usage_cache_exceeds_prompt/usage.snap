@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: When cache counts exceed prompt_tokens the fresh input saturates at 0 instead of underflowing.
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 50,
+  "cache_read_tokens": 80,
+  "cache_creation_tokens": 50,
+  "model": "glm-5.1",
+  "message_id": "chatcmpl_uf",
+  "billable": true
+}

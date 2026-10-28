@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: prompt_tokens_details.cached_tokens is split out of input_tokens into cache_read_input_tokens.
+---
+# non-stream
+{
+  "input_tokens": 20,
+  "output_tokens": 50,
+  "cache_read_tokens": 80,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4",
+  "message_id": "chatcmpl-123",
+  "billable": true
+}

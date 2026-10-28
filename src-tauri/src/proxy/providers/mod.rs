@@ -31,6 +31,8 @@ pub mod streaming_codex_anthropic;
 pub mod streaming_codex_chat;
 pub mod streaming_gemini;
 pub mod streaming_responses;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 pub mod transform;
 pub mod transform_codex_anthropic;
 pub mod transform_codex_chat;

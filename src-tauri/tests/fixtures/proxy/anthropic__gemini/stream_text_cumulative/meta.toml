@@ -1,0 +1,3 @@
+intent = "Cumulative text snapshots are converted to incremental text_delta events."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::converts_text_stream_to_anthropic_sse"

@@ -1,0 +1,3 @@
+intent = "A later cumulative chunk without thoughtSignature still yields one tool_use with the final args."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::thought_signature_preserved_when_later_chunk_omits_it"

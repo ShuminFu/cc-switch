@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Text followed by a function call: the text block is closed before the tool_use block."
+---
+# stream
+{
+  "input_tokens": 20,
+  "output_tokens": 11,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "r_tt",
+  "billable": true
+}

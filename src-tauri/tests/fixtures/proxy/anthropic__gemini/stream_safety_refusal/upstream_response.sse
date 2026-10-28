@@ -1,0 +1,4 @@
+data: {"responseId":"r_safe","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"I can"}]}}],"usageMetadata":{"promptTokenCount":6,"totalTokenCount":8}}
+
+data: {"responseId":"r_safe","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"SAFETY","content":{"parts":[]}}],"usageMetadata":{"promptTokenCount":6,"totalTokenCount":8}}
+

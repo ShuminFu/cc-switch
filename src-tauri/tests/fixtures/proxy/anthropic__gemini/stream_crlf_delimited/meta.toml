@@ -1,0 +1,3 @@
+intent = "CRLF-delimited Gemini SSE events are parsed like LF-delimited ones."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::converts_crlf_delimited_stream_to_anthropic_sse"

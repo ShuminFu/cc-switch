@@ -1,0 +1,2 @@
+intent = "Text followed by a function call: the text block is closed before the tool_use block."
+source_commit = "6330783"

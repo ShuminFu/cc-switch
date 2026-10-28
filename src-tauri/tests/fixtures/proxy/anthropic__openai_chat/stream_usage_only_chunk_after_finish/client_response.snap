@@ -1,0 +1,11 @@
+---
+source: tests/proxy_golden.rs
+description: A usage-only chunk (empty choices) after finish_reason updates the pending message_delta; cached tokens are split out of input.
+---
+# stream
+message_start {"type":"message_start","message":{"id":"chatcmpl_split","type":"message","role":"assistant","model":"glm-5.1","usage":{"input_tokens":0,"output_tokens":0}}}
+content_block_start {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-0924","name":"Bash"}}
+content_block_delta {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\"pwd\"}"}}
+content_block_stop {"type":"content_block_stop","index":0}
+message_delta {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":13212,"output_tokens":79,"cache_read_input_tokens":100}}
+message_stop {"type":"message_stop"}

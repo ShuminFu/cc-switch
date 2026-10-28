@@ -1,0 +1,2 @@
+intent = "Four-byte UTF-8 sequences (emoji) split at any byte are reassembled before JSON parsing."
+source_commit = "6330783"

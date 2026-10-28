@@ -1,0 +1,40 @@
+{
+  "model": "deepseek-v4-flash",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Weather for today?"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "Need the current date before calling weather.",
+          "signature": ""
+        },
+        {
+          "type": "text",
+          "text": "Let me check the date first."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_date",
+          "name": "get_date",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_date",
+          "content": "2026-10-28"
+        }
+      ]
+    }
+  ]
+}

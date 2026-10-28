@@ -1,0 +1,33 @@
+---
+source: tests/proxy_golden.rs
+description: "DeepSeek reasoning_content becomes a leading thinking block, and replaying the turn with reasoning preservation sends it back as reasoning_content."
+---
+# non-stream
+{
+  "id": "chatcmpl-deepseek",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "Need the current date before calling weather."
+    },
+    {
+      "type": "text",
+      "text": "Let me check the date first."
+    },
+    {
+      "type": "tool_use",
+      "id": "call_date",
+      "name": "get_date",
+      "input": {}
+    }
+  ],
+  "model": "deepseek-v4-flash",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  }
+}

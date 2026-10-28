@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl_split","model":"glm-5.1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"tool-0924","type":"function","function":{"name":"Bash","arguments":"{\"command\":\"pwd\"}"}}]}}]}
+
+data: {"id":"chatcmpl_split","model":"glm-5.1","choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"choices":[],"usage":{"prompt_tokens":13312,"completion_tokens":79,"prompt_tokens_details":{"cached_tokens":100}}}
+
+data: [DONE]
+

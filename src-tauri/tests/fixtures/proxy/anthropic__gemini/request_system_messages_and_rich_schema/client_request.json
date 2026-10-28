@@ -1,0 +1,47 @@
+{
+  "model": "gemini-3-pro",
+  "system": [
+    {
+      "type": "text",
+      "text": "Top level system."
+    }
+  ],
+  "messages": [
+    {
+      "role": "system",
+      "content": "Message system."
+    },
+    {
+      "role": "system",
+      "content": [
+        {
+          "type": "text",
+          "text": "Block system."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Hello"
+    }
+  ],
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search data",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

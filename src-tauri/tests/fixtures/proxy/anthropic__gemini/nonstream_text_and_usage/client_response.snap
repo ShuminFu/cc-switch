@@ -1,0 +1,24 @@
+---
+source: tests/proxy_golden.rs
+description: Text reply with cached tokens; the system prompt maps to systemInstruction and max_tokens to maxOutputTokens.
+---
+# non-stream
+{
+  "id": "resp_1",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Hello from Gemini"
+    }
+  ],
+  "model": "gemini-2.5-pro",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 9,
+    "output_tokens": 8,
+    "cache_read_input_tokens": 3
+  }
+}

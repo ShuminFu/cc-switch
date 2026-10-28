@@ -1,0 +1,3 @@
+intent = "Non-cumulative text chunks are appended as-is."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::stores_full_text_for_shadow_replay_across_delta_chunks"

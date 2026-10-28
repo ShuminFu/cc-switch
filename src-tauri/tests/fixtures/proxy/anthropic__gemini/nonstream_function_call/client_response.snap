@@ -1,0 +1,27 @@
+---
+source: tests/proxy_golden.rs
+description: A functionCall with id maps to a tool_use block with the same id and stop_reason tool_use.
+---
+# non-stream
+{
+  "id": "resp_2",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "call_1",
+      "name": "get_weather",
+      "input": {
+        "city": "Tokyo"
+      }
+    }
+  ],
+  "model": "gemini-2.5-pro",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  }
+}

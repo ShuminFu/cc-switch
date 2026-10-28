@@ -1,0 +1,26 @@
+---
+source: tests/proxy_golden.rs
+description: Text reply with cached tokens; the system prompt maps to systemInstruction and max_tokens to maxOutputTokens.
+---
+{
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You are helpful."
+      }
+    ]
+  },
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Hello"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 128
+  }
+}

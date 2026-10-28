@@ -1,0 +1,32 @@
+{
+  "id": "chatcmpl-deepseek",
+  "object": "chat.completion",
+  "created": 1234567890,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "reasoning_content": "Need the current date before calling weather.",
+        "content": "Let me check the date first.",
+        "tool_calls": [
+          {
+            "id": "call_date",
+            "type": "function",
+            "function": {
+              "name": "get_date",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 5,
+    "total_tokens": 15
+  }
+}

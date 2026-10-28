@@ -1,0 +1,21 @@
+{
+  "responseId": "resp_1",
+  "modelVersion": "gemini-2.5-pro",
+  "candidates": [
+    {
+      "finishReason": "STOP",
+      "content": {
+        "parts": [
+          {
+            "text": "Hello from Gemini"
+          }
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 12,
+    "totalTokenCount": 20,
+    "cachedContentTokenCount": 3
+  }
+}

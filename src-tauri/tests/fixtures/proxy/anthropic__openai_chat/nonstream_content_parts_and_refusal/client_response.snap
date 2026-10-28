@@ -1,0 +1,27 @@
+---
+source: tests/proxy_golden.rs
+description: Array content with text and refusal parts becomes two text blocks.
+---
+# non-stream
+{
+  "id": "chatcmpl-123",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Hello"
+    },
+    {
+      "type": "text",
+      "text": "I can't do that"
+    }
+  ],
+  "model": "gpt-4",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  }
+}

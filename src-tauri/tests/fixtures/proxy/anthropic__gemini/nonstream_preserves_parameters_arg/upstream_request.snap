@@ -1,0 +1,48 @@
+---
+source: tests/proxy_golden.rs
+description: "A legitimate `parameters` argument declared in the schema is not unwrapped."
+---
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Configure"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 256
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "ConfigTool",
+          "description": "",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string"
+                  },
+                  "retries": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            "required": [
+              "parameters"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

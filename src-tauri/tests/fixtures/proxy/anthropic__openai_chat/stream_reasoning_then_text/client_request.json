@@ -1,0 +1,11 @@
+{
+  "model": "deepseek-v4-flash",
+  "max_tokens": 512,
+  "stream": true,
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is 2+2?"
+    }
+  ]
+}

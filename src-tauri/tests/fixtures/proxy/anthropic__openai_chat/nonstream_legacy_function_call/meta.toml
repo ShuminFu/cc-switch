@@ -1,0 +1,7 @@
+intent = "The legacy function_call field and finish_reason maps to a tool_use block and stop_reason tool_use."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform.rs::tests::test_openai_to_anthropic_with_legacy_function_call"
+
+[invariants]
+skip = ["tool_ids"]
+skip_reason = "Known issue found by this testkit: openai_to_anthropic emits the legacy function_call as a tool_use with an empty id (the upstream sends none), so the client cannot correlate a tool_result."

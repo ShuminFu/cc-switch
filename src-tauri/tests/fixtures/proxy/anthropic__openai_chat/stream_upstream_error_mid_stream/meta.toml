@@ -1,0 +1,9 @@
+intent = "An upstream transport error after partial content yields a single error event and no message_delta/message_stop."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming.rs::tests::test_stream_error_does_not_emit_success_terminal_events"
+
+[options]
+upstream_error = "upstream disconnected"
+
+[invariants]
+terminal = "error"

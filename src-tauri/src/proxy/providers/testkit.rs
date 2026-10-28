@@ -1,0 +1,1703 @@
+//! Golden bridge testkit.
+//!
+//! Drives the Anthropic-facing protocol bridges (`anthropic__openai_chat`,
+//! `anthropic__gemini`) from on-disk fixtures so their behaviour can be pinned
+//! by snapshots and compared before and after a refactor.
+//!
+//! Fixture layout (one directory per case):
+//!
+//! ```text
+//! tests/fixtures/proxy/<bridge>/<case>/
+//!   meta.toml                 intent, source, source commit, options, invariants
+//!   client_request.json       optional: Anthropic request sent by the client
+//!   upstream_response.sse     optional: raw upstream SSE body (stream case)
+//!   upstream_response.json    optional: upstream JSON body (non-stream case)
+//!   upstream_request.snap     snapshot: converted upstream request
+//!   client_response.snap      snapshot: converted client response
+//!   usage.snap                snapshot: usage the proxy would record
+//! ```
+//!
+//! Besides producing the snapshot texts, the kit re-splits every stream input
+//! into chunks (every byte offset for inputs up to [`EXHAUSTIVE_SPLIT_LIMIT`]
+//! bytes, [`RANDOM_SPLIT_PLANS`] seeded random multi-splits, every UTF-8
+//! continuation byte and every CRLF pair) and checks that each split yields the
+//! same event sequence as the unsplit input and satisfies the structural
+//! invariants. Every failure names the split offsets that produced it.
+
+use super::transform::{
+    anthropic_to_openai_with_reasoning_content, inject_openai_stream_include_usage,
+    openai_to_anthropic,
+};
+use super::transform_gemini::{
+    anthropic_to_gemini, extract_anthropic_tool_schema_hints,
+    gemini_to_anthropic_with_shadow_and_hints, AnthropicToolSchemaHints,
+};
+use super::{streaming::create_anthropic_sse_stream, streaming_gemini};
+use crate::proxy::sse::{strip_sse_field, take_sse_block};
+use crate::proxy::usage::parser::TokenUsage;
+use bytes::Bytes;
+use futures::StreamExt;
+use serde::Deserialize;
+use serde_json::{json, Map, Value};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fmt::Write as _;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+/// Stream inputs up to this size are split at every byte offset.
+pub const EXHAUSTIVE_SPLIT_LIMIT: usize = 4 * 1024;
+/// Number of seeded random multi-split plans per stream input.
+pub const RANDOM_SPLIT_PLANS: usize = 200;
+/// Upper bound on the number of cut points in one random plan.
+const RANDOM_SPLIT_MAX_CUTS: usize = 24;
+/// At most this many split failures are listed per fixture.
+const MAX_REPORTED_FAILURES: usize = 8;
+
+/// Event name used for an `Err` item yielded by a bridge stream.
+pub const STREAM_ERROR_EVENT: &str = "<stream-error>";
+
+// ---------------------------------------------------------------------------
+// Bridges
+// ---------------------------------------------------------------------------
+
+/// Protocol bridge under test, named `<client protocol>__<upstream protocol>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Bridge {
+    /// Anthropic Messages client -> OpenAI Chat Completions upstream.
+    AnthropicOpenAiChat,
+    /// Anthropic Messages client -> Gemini native upstream.
+    AnthropicGemini,
+}
+
+impl Bridge {
+    pub const ALL: [Bridge; 2] = [Bridge::AnthropicOpenAiChat, Bridge::AnthropicGemini];
+
+    pub fn dir_name(self) -> &'static str {
+        match self {
+            Bridge::AnthropicOpenAiChat => "anthropic__openai_chat",
+            Bridge::AnthropicGemini => "anthropic__gemini",
+        }
+    }
+
+    pub fn from_dir_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|bridge| bridge.dir_name() == name)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fixture metadata
+// ---------------------------------------------------------------------------
+
+/// Contents of `meta.toml`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaseMeta {
+    /// What behaviour the case pins, in one or two sentences.
+    pub intent: String,
+    /// Commit whose behaviour the snapshots record (or that introduced it).
+    pub source_commit: String,
+    /// Inline test the case was ported from, if any.
+    #[serde(default)]
+    pub ported_from: Option<String>,
+    #[serde(default)]
+    pub options: CaseOptions,
+    #[serde(default)]
+    pub invariants: InvariantConfig,
+    #[serde(default)]
+    pub parity: ParityConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaseOptions {
+    /// Chat bridge: keep `reasoning_content` on replayed assistant turns
+    /// (the proxy enables this for reasoning vendors such as DeepSeek/Kimi).
+    #[serde(default)]
+    pub preserve_reasoning_content: bool,
+    /// Append an upstream transport error with this message after the SSE body.
+    #[serde(default)]
+    pub upstream_error: Option<String>,
+}
+
+/// How the client stream is expected to end.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Terminal {
+    /// Exactly one `message_stop`, as the last event.
+    #[default]
+    MessageStop,
+    /// Exactly one `error` event (or stream `Err` item), as the last event.
+    Error,
+    /// No terminal event at all (truncated upstream).
+    None,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InvariantConfig {
+    #[serde(default)]
+    pub terminal: Terminal,
+    /// Invariant names to skip for this case (see [`Invariant`]).
+    #[serde(default)]
+    pub skip: Vec<String>,
+    /// Required when `skip` is non-empty: why the invariant does not hold.
+    #[serde(default)]
+    pub skip_reason: Option<String>,
+}
+
+/// Stream vs non-stream comparison, for cases that ship both upstream bodies.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParityConfig {
+    /// Known differences between the stream and non-stream conversions, one
+    /// line per field as produced by [`parity_diff`]. Empty means "identical".
+    #[serde(default)]
+    pub expected_diff: Vec<String>,
+}
+
+/// Structural invariants checked on every client output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Invariant {
+    /// SSE `event:` name equals the payload `type`.
+    EventNames,
+    /// At most one `message_start`, and it is the first event.
+    MessageStart,
+    /// Every content block is started once, receives deltas only while open
+    /// and is stopped once before the message ends.
+    BlockPairing,
+    /// Content block indices are assigned 0, 1, 2, ... in emission order.
+    IndexOrder,
+    /// `tool_use` blocks carry a non-empty, unique id and a name.
+    ToolIds,
+    /// Concatenated `input_json_delta` fragments parse as JSON.
+    ToolInputJson,
+    /// Thinking blocks come before any text or tool_use block.
+    ReasoningFirst,
+    /// Exactly one terminal event, matching `meta.toml`, and nothing after it.
+    Terminal,
+    /// Client usage accounts for exactly the upstream tokens.
+    UsageConservation,
+}
+
+impl Invariant {
+    pub const ALL: [Invariant; 9] = [
+        Invariant::EventNames,
+        Invariant::MessageStart,
+        Invariant::BlockPairing,
+        Invariant::IndexOrder,
+        Invariant::ToolIds,
+        Invariant::ToolInputJson,
+        Invariant::ReasoningFirst,
+        Invariant::Terminal,
+        Invariant::UsageConservation,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Invariant::EventNames => "event_names",
+            Invariant::MessageStart => "message_start",
+            Invariant::BlockPairing => "block_pairing",
+            Invariant::IndexOrder => "index_order",
+            Invariant::ToolIds => "tool_ids",
+            Invariant::ToolInputJson => "tool_input_json",
+            Invariant::ReasoningFirst => "reasoning_first",
+            Invariant::Terminal => "terminal",
+            Invariant::UsageConservation => "usage_conservation",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|inv| inv.name() == name)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fixture loading
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct Fixture {
+    pub bridge: Bridge,
+    pub name: String,
+    pub dir: PathBuf,
+    pub meta: CaseMeta,
+    pub client_request: Option<Value>,
+    pub upstream_sse: Option<Vec<u8>>,
+    pub upstream_json: Option<Value>,
+}
+
+impl Fixture {
+    /// `<bridge>/<case>`, used in every report.
+    pub fn id(&self) -> String {
+        format!("{}/{}", self.bridge.dir_name(), self.name)
+    }
+
+    pub fn has_stream(&self) -> bool {
+        self.upstream_sse.is_some()
+    }
+
+    pub fn has_non_stream(&self) -> bool {
+        self.upstream_json.is_some()
+    }
+
+    fn skipped(&self) -> HashSet<Invariant> {
+        self.meta
+            .invariants
+            .skip
+            .iter()
+            .filter_map(|name| Invariant::from_name(name))
+            .collect()
+    }
+
+    /// Tool schema hints the proxy derives from the client request.
+    fn tool_schema_hints(&self) -> Option<AnthropicToolSchemaHints> {
+        let hints = extract_anthropic_tool_schema_hints(self.client_request.as_ref()?);
+        (!hints.is_empty()).then_some(hints)
+    }
+}
+
+/// Load every fixture of `bridge` under `root` (the `tests/fixtures/proxy` dir),
+/// sorted by case name.
+pub fn load_fixtures(root: &Path, bridge: Bridge) -> Result<Vec<Fixture>, String> {
+    let bridge_dir = root.join(bridge.dir_name());
+    let entries =
+        fs::read_dir(&bridge_dir).map_err(|e| format!("read {}: {e}", bridge_dir.display()))?;
+    let mut dirs: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect();
+    dirs.sort();
+    dirs.iter().map(|dir| load_fixture(bridge, dir)).collect()
+}
+
+pub fn load_fixture(bridge: Bridge, dir: &Path) -> Result<Fixture, String> {
+    let name = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("bad fixture dir {}", dir.display()))?
+        .to_string();
+    let id = format!("{}/{name}", bridge.dir_name());
+
+    let meta_text = fs::read_to_string(dir.join("meta.toml"))
+        .map_err(|e| format!("{id}: read meta.toml: {e}"))?;
+    let meta: CaseMeta =
+        toml::from_str(&meta_text).map_err(|e| format!("{id}: parse meta.toml: {e}"))?;
+    for skipped in &meta.invariants.skip {
+        if Invariant::from_name(skipped).is_none() {
+            return Err(format!("{id}: unknown invariant `{skipped}` in skip"));
+        }
+    }
+    if !meta.invariants.skip.is_empty() && meta.invariants.skip_reason.is_none() {
+        return Err(format!("{id}: invariants.skip requires skip_reason"));
+    }
+
+    let read_json = |file: &str| -> Result<Option<Value>, String> {
+        let path = dir.join(file);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let text = fs::read_to_string(&path).map_err(|e| format!("{id}: read {file}: {e}"))?;
+        serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|e| format!("{id}: parse {file}: {e}"))
+    };
+    let client_request = read_json("client_request.json")?;
+    let upstream_json = read_json("upstream_response.json")?;
+    let sse_path = dir.join("upstream_response.sse");
+    let upstream_sse = if sse_path.exists() {
+        Some(fs::read(&sse_path).map_err(|e| format!("{id}: read upstream_response.sse: {e}"))?)
+    } else {
+        None
+    };
+
+    if client_request.is_none() && upstream_json.is_none() && upstream_sse.is_none() {
+        return Err(format!("{id}: fixture has no input files"));
+    }
+    if !meta.parity.expected_diff.is_empty() && (upstream_json.is_none() || upstream_sse.is_none())
+    {
+        return Err(format!(
+            "{id}: parity.expected_diff needs both upstream_response.sse and .json"
+        ));
+    }
+
+    Ok(Fixture {
+        bridge,
+        name,
+        dir: dir.to_path_buf(),
+        meta,
+        client_request,
+        upstream_sse,
+        upstream_json,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Running the bridges
+// ---------------------------------------------------------------------------
+
+/// One parsed client SSE event (or a stream `Err` item, see [`STREAM_ERROR_EVENT`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientEvent {
+    pub event: Option<String>,
+    pub data: Value,
+}
+
+impl ClientEvent {
+    pub fn kind(&self) -> &str {
+        self.data
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    }
+
+    fn is_terminal(&self) -> bool {
+        matches!(self.kind(), "message_stop" | "error")
+            || self.event.as_deref() == Some(STREAM_ERROR_EVENT)
+    }
+}
+
+/// Convert the client request into the upstream request, as the proxy does.
+pub fn convert_request(fixture: &Fixture) -> Option<Result<Value, String>> {
+    let body = fixture.client_request.clone()?;
+    let result = match fixture.bridge {
+        Bridge::AnthropicOpenAiChat => anthropic_to_openai_with_reasoning_content(
+            body,
+            fixture.meta.options.preserve_reasoning_content,
+        )
+        .map(|mut converted| {
+            inject_openai_stream_include_usage(&mut converted);
+            converted
+        }),
+        Bridge::AnthropicGemini => anthropic_to_gemini(body),
+    };
+    Some(result.map_err(|e| e.to_string()))
+}
+
+/// Convert the non-stream upstream body into the client response.
+pub fn convert_non_stream(fixture: &Fixture) -> Option<Result<Value, String>> {
+    let body = fixture.upstream_json.clone()?;
+    let result = match fixture.bridge {
+        Bridge::AnthropicOpenAiChat => openai_to_anthropic(body),
+        Bridge::AnthropicGemini => gemini_to_anthropic_with_shadow_and_hints(
+            body,
+            None,
+            None,
+            None,
+            fixture.tool_schema_hints().as_ref(),
+        ),
+    };
+    Some(result.map_err(|e| e.to_string()))
+}
+
+/// Feed `chunks` through the bridge's stream converter and parse the output.
+pub fn run_stream(fixture: &Fixture, chunks: &[&[u8]]) -> Result<Vec<ClientEvent>, String> {
+    let mut items: Vec<Result<Bytes, std::io::Error>> = chunks
+        .iter()
+        .map(|chunk| Ok(Bytes::copy_from_slice(chunk)))
+        .collect();
+    if let Some(message) = &fixture.meta.options.upstream_error {
+        items.push(Err(std::io::Error::other(message.clone())));
+    }
+    let upstream = futures::stream::iter(items);
+
+    let outputs: Vec<Result<Bytes, std::io::Error>> = match fixture.bridge {
+        Bridge::AnthropicOpenAiChat => {
+            futures::executor::block_on(create_anthropic_sse_stream(upstream).collect())
+        }
+        Bridge::AnthropicGemini => futures::executor::block_on(
+            streaming_gemini::create_anthropic_sse_stream_from_gemini(
+                upstream,
+                None,
+                None,
+                None,
+                fixture.tool_schema_hints(),
+            )
+            .collect(),
+        ),
+    };
+    parse_client_stream(outputs)
+}
+
+/// Parse bridge output items into events. Output must be valid UTF-8 and made
+/// of complete SSE blocks.
+pub fn parse_client_stream(
+    items: Vec<Result<Bytes, std::io::Error>>,
+) -> Result<Vec<ClientEvent>, String> {
+    let mut text = Vec::new();
+    let mut events = Vec::new();
+    let flush = |text: &mut Vec<u8>, events: &mut Vec<ClientEvent>| -> Result<(), String> {
+        let mut buffer = String::from_utf8(std::mem::take(text))
+            .map_err(|e| format!("client stream is not valid UTF-8: {e}"))?;
+        while let Some(block) = take_sse_block(&mut buffer) {
+            if block.trim().is_empty() {
+                continue;
+            }
+            let mut event = None;
+            let mut data = Vec::new();
+            for line in block.lines() {
+                if let Some(name) = strip_sse_field(line, "event") {
+                    event = Some(name.to_string());
+                } else if let Some(payload) = strip_sse_field(line, "data") {
+                    data.push(payload);
+                }
+            }
+            let data = data.join("\n");
+            let data: Value = serde_json::from_str(&data)
+                .map_err(|e| format!("client SSE data is not JSON ({e}): {data}"))?;
+            events.push(ClientEvent { event, data });
+        }
+        if !buffer.trim().is_empty() {
+            return Err(format!(
+                "client stream has an unterminated SSE block: {buffer:?}"
+            ));
+        }
+        Ok(())
+    };
+    for item in items {
+        match item {
+            Ok(bytes) => text.extend_from_slice(&bytes),
+            Err(error) => {
+                flush(&mut text, &mut events)?;
+                events.push(ClientEvent {
+                    event: Some(STREAM_ERROR_EVENT.to_string()),
+                    data: json!({ "type": STREAM_ERROR_EVENT, "message": error.to_string() }),
+                });
+            }
+        }
+    }
+    flush(&mut text, &mut events)?;
+    Ok(events)
+}
+
+/// Data payloads of the upstream SSE body (non-JSON payloads such as `[DONE]`
+/// are skipped).
+fn upstream_sse_payloads(input: &[u8]) -> Vec<Value> {
+    let mut buffer = String::from_utf8_lossy(input).into_owned();
+    buffer.push_str("\n\n");
+    let mut payloads = Vec::new();
+    while let Some(block) = take_sse_block(&mut buffer) {
+        let data: Vec<&str> = block
+            .lines()
+            .filter_map(|line| strip_sse_field(line, "data"))
+            .collect();
+        if let Ok(value) = serde_json::from_str::<Value>(&data.join("\n")) {
+            payloads.push(value);
+        }
+    }
+    payloads
+}
+
+// ---------------------------------------------------------------------------
+// Usage
+// ---------------------------------------------------------------------------
+
+fn usage_to_value(usage: Option<TokenUsage>) -> Value {
+    match usage {
+        Some(usage) => json!({
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "cache_read_tokens": usage.cache_read_tokens,
+            "cache_creation_tokens": usage.cache_creation_tokens,
+            "model": usage.model,
+            "message_id": usage.message_id,
+            "billable": usage.has_billable_tokens(),
+        }),
+        None => Value::Null,
+    }
+}
+
+/// Usage the proxy records for a converted client stream.
+pub fn client_stream_usage(events: &[ClientEvent]) -> Value {
+    let data: Vec<Value> = events.iter().map(|event| event.data.clone()).collect();
+    usage_to_value(TokenUsage::from_claude_stream_events(&data))
+}
+
+/// Usage the proxy records for a converted non-stream client response.
+pub fn client_response_usage(response: &Value) -> Value {
+    usage_to_value(TokenUsage::from_claude_response(response))
+}
+
+/// Usage as reported by the upstream itself, parsed in its native format.
+fn upstream_stream_usage(bridge: Bridge, input: &[u8]) -> Option<TokenUsage> {
+    let payloads = upstream_sse_payloads(input);
+    match bridge {
+        Bridge::AnthropicOpenAiChat => TokenUsage::from_openai_stream_events(&payloads),
+        Bridge::AnthropicGemini => TokenUsage::from_gemini_stream_chunks(&payloads),
+    }
+}
+
+fn upstream_response_usage(bridge: Bridge, body: &Value) -> Option<TokenUsage> {
+    match bridge {
+        Bridge::AnthropicOpenAiChat => TokenUsage::from_openai_response(body),
+        Bridge::AnthropicGemini => TokenUsage::from_gemini_response(body),
+    }
+}
+
+/// Both upstream formats count cache tokens inside the prompt total, while the
+/// Anthropic client splits them out: fresh input + cache read + cache creation
+/// must add back up to the upstream prompt, and output must match.
+fn check_usage_conservation(upstream: Option<&TokenUsage>, client: &Value) -> Result<(), String> {
+    let Some(upstream) = upstream else {
+        let billable = client.get("billable").and_then(Value::as_bool);
+        return match billable {
+            None | Some(false) => Ok(()),
+            Some(true) => Err(format!(
+                "upstream reported no usage but client usage is billable: {client}"
+            )),
+        };
+    };
+    let field = |name: &str| client.get(name).and_then(Value::as_u64).unwrap_or(0);
+    let client_prompt =
+        field("input_tokens") + field("cache_read_tokens") + field("cache_creation_tokens");
+    let mut problems = Vec::new();
+    if client_prompt != u64::from(upstream.input_tokens) {
+        problems.push(format!(
+            "input+cache_read+cache_creation={client_prompt} but upstream prompt={}",
+            upstream.input_tokens
+        ));
+    }
+    if field("output_tokens") != u64::from(upstream.output_tokens) {
+        problems.push(format!(
+            "output={} but upstream output={}",
+            field("output_tokens"),
+            upstream.output_tokens
+        ));
+    }
+    if field("cache_read_tokens") != u64::from(upstream.cache_read_tokens) {
+        problems.push(format!(
+            "cache_read={} but upstream cache_read={}",
+            field("cache_read_tokens"),
+            upstream.cache_read_tokens
+        ));
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("; "))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Redaction and rendering
+// ---------------------------------------------------------------------------
+
+/// Keys whose string values are identifiers.
+const ID_KEYS: [&str; 5] = ["id", "tool_use_id", "tool_call_id", "responseId", "call_id"];
+/// Keys whose values are timestamps.
+const TIMESTAMP_KEYS: [&str; 4] = ["created", "created_at", "createTime", "timestamp"];
+
+/// Replaces identifiers that the bridge generated (i.e. that appear nowhere in
+/// the fixture inputs) with `[generated-id:N]`, numbered by first appearance so
+/// equal ids stay equal. Ids copied from the inputs are kept verbatim so the
+/// snapshots still show pass-through. Timestamps are always redacted.
+#[derive(Debug, Clone, Default)]
+pub struct Redactor {
+    input_text: String,
+    generated: HashMap<String, String>,
+}
+
+impl Redactor {
+    pub fn new(fixture: &Fixture) -> Self {
+        let mut input_text = String::new();
+        if let Some(request) = &fixture.client_request {
+            input_text.push_str(&request.to_string());
+        }
+        if let Some(body) = &fixture.upstream_json {
+            input_text.push_str(&body.to_string());
+        }
+        if let Some(sse) = &fixture.upstream_sse {
+            input_text.push_str(&String::from_utf8_lossy(sse));
+        }
+        Self {
+            input_text,
+            generated: HashMap::new(),
+        }
+    }
+
+    fn redact_id(&mut self, id: &str) -> Option<String> {
+        if id.is_empty() || (self.input_text.contains(&format!("\"{id}\""))) {
+            return None;
+        }
+        let next = self.generated.len() + 1;
+        Some(
+            self.generated
+                .entry(id.to_string())
+                .or_insert_with(|| format!("[generated-id:{next}]"))
+                .clone(),
+        )
+    }
+
+    pub fn redact(&mut self, value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map.iter_mut() {
+                    if TIMESTAMP_KEYS.contains(&key.as_str()) && !child.is_null() {
+                        *child = json!("[timestamp]");
+                        continue;
+                    }
+                    if ID_KEYS.contains(&key.as_str()) {
+                        if let Some(id) = child.as_str() {
+                            if let Some(redacted) = self.redact_id(id) {
+                                *child = Value::String(redacted);
+                            }
+                            continue;
+                        }
+                    }
+                    self.redact(child);
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| self.redact(item)),
+            _ => {}
+        }
+    }
+
+    pub fn redact_events(&mut self, events: &[ClientEvent]) -> Vec<ClientEvent> {
+        events
+            .iter()
+            .map(|event| {
+                let mut data = event.data.clone();
+                self.redact(&mut data);
+                ClientEvent {
+                    event: event.event.clone(),
+                    data,
+                }
+            })
+            .collect()
+    }
+}
+
+/// One line per event: `<event name> <compact JSON>`.
+pub fn render_events(events: &[ClientEvent]) -> String {
+    let mut out = String::new();
+    for event in events {
+        let name = event.event.as_deref().unwrap_or("<no-event-name>");
+        let _ = writeln!(out, "{name} {}", event.data);
+    }
+    out
+}
+
+pub fn render_json(value: &Value) -> String {
+    let mut text = serde_json::to_string_pretty(value).unwrap_or_default();
+    text.push('\n');
+    text
+}
+
+// ---------------------------------------------------------------------------
+// Invariants
+// ---------------------------------------------------------------------------
+
+/// Check the structural invariants of a client event stream. Returns one
+/// message per violation, prefixed with the invariant name.
+pub fn check_stream_invariants(
+    events: &[ClientEvent],
+    terminal: Terminal,
+    skip: &HashSet<Invariant>,
+    upstream_usage: Option<&TokenUsage>,
+) -> Vec<String> {
+    let mut violations: Vec<(Invariant, String)> = Vec::new();
+    let mut fail = |inv: Invariant, message: String| violations.push((inv, message));
+    let describe = |i: usize, event: &ClientEvent| format!("event #{i} ({})", event.data);
+
+    // event_names
+    for (i, event) in events.iter().enumerate() {
+        if event.event.as_deref() != Some(event.kind()) {
+            fail(
+                Invariant::EventNames,
+                format!(
+                    "{} has event name {:?}",
+                    describe(i, event),
+                    event.event.as_deref()
+                ),
+            );
+        }
+    }
+
+    // message_start
+    let starts: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.kind() == "message_start")
+        .map(|(i, _)| i)
+        .collect();
+    if starts.len() > 1 {
+        fail(
+            Invariant::MessageStart,
+            format!("{} message_start events at {starts:?}", starts.len()),
+        );
+    }
+    if let Some(&first) = starts.first() {
+        if first != 0 {
+            fail(
+                Invariant::MessageStart,
+                format!("message_start is event #{first}, not the first event"),
+            );
+        }
+    } else if terminal == Terminal::MessageStop {
+        fail(
+            Invariant::MessageStart,
+            "stream completes without message_start".to_string(),
+        );
+    }
+
+    // block_pairing / index_order / tool_ids / tool_input_json / reasoning_first
+    let mut open: HashMap<u64, (String, String)> = HashMap::new();
+    let mut closed: HashSet<u64> = HashSet::new();
+    let mut next_index = 0u64;
+    let mut tool_ids: HashSet<String> = HashSet::new();
+    let mut seen_non_thinking = false;
+    for (i, event) in events.iter().enumerate() {
+        let index = event.data.get("index").and_then(Value::as_u64);
+        match event.kind() {
+            "content_block_start" => {
+                let Some(index) = index else {
+                    fail(
+                        Invariant::BlockPairing,
+                        format!("{} has no index", describe(i, event)),
+                    );
+                    continue;
+                };
+                let block_type = event
+                    .data
+                    .pointer("/content_block/type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                if open.contains_key(&index) || closed.contains(&index) {
+                    fail(
+                        Invariant::BlockPairing,
+                        format!("{} restarts block {index}", describe(i, event)),
+                    );
+                }
+                if index != next_index {
+                    fail(
+                        Invariant::IndexOrder,
+                        format!(
+                            "{} starts block {index}, expected {next_index}",
+                            describe(i, event)
+                        ),
+                    );
+                }
+                next_index = next_index.max(index + 1);
+                match block_type.as_str() {
+                    "thinking" | "redacted_thinking" => {
+                        if seen_non_thinking {
+                            fail(
+                                Invariant::ReasoningFirst,
+                                format!("{} starts thinking after content", describe(i, event)),
+                            );
+                        }
+                    }
+                    _ => seen_non_thinking = true,
+                }
+                if block_type == "tool_use" {
+                    let id = event
+                        .data
+                        .pointer("/content_block/id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let name = event
+                        .data
+                        .pointer("/content_block/name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if id.is_empty() || name.is_empty() {
+                        fail(
+                            Invariant::ToolIds,
+                            format!("{} has empty tool id or name", describe(i, event)),
+                        );
+                    } else if !tool_ids.insert(id.to_string()) {
+                        fail(
+                            Invariant::ToolIds,
+                            format!("{} reuses tool id {id}", describe(i, event)),
+                        );
+                    }
+                }
+                open.insert(index, (block_type, String::new()));
+            }
+            "content_block_delta" => match index.and_then(|index| open.get_mut(&index)) {
+                Some((_, json_buf)) => {
+                    if let Some(fragment) = event
+                        .data
+                        .pointer("/delta/partial_json")
+                        .and_then(Value::as_str)
+                    {
+                        json_buf.push_str(fragment);
+                    }
+                }
+                None => fail(
+                    Invariant::BlockPairing,
+                    format!("{} targets a block that is not open", describe(i, event)),
+                ),
+            },
+            "content_block_stop" => {
+                match index.and_then(|index| open.remove(&index).map(|b| (index, b))) {
+                    Some((index, (block_type, json_buf))) => {
+                        closed.insert(index);
+                        if block_type == "tool_use"
+                            && !json_buf.is_empty()
+                            && serde_json::from_str::<Value>(&json_buf).is_err()
+                        {
+                            fail(
+                                Invariant::ToolInputJson,
+                                format!("block {index} input is not JSON: {json_buf:?}"),
+                            );
+                        }
+                    }
+                    None => fail(
+                        Invariant::BlockPairing,
+                        format!("{} stops a block that is not open", describe(i, event)),
+                    ),
+                }
+            }
+            "message_delta" | "message_stop" if !open.is_empty() => {
+                let mut indices: Vec<u64> = open.keys().copied().collect();
+                indices.sort_unstable();
+                fail(
+                    Invariant::BlockPairing,
+                    format!(
+                        "{} while blocks {indices:?} are still open",
+                        describe(i, event)
+                    ),
+                );
+                open.clear();
+            }
+            _ => {}
+        }
+    }
+
+    // terminal
+    let terminals: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.is_terminal())
+        .map(|(i, _)| i)
+        .collect();
+    let deltas: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.kind() == "message_delta")
+        .map(|(i, _)| i)
+        .collect();
+    match terminal {
+        Terminal::None => {
+            if !terminals.is_empty() {
+                fail(
+                    Invariant::Terminal,
+                    format!("expected no terminal event, found them at {terminals:?}"),
+                );
+            }
+        }
+        Terminal::MessageStop | Terminal::Error => {
+            if terminals.len() != 1 {
+                fail(
+                    Invariant::Terminal,
+                    format!("expected exactly one terminal event, found {terminals:?}"),
+                );
+            } else {
+                let at = terminals[0];
+                let event = &events[at];
+                let is_stop = event.kind() == "message_stop";
+                if is_stop != (terminal == Terminal::MessageStop) {
+                    fail(
+                        Invariant::Terminal,
+                        format!(
+                            "expected {terminal:?} terminal, got {}",
+                            describe(at, event)
+                        ),
+                    );
+                }
+                if at + 1 != events.len() {
+                    fail(
+                        Invariant::Terminal,
+                        format!(
+                            "{} events follow the terminal event #{at}",
+                            events.len() - at - 1
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    if deltas.len() > 1 {
+        fail(
+            Invariant::Terminal,
+            format!("{} message_delta events at {deltas:?}", deltas.len()),
+        );
+    }
+    if let Some(&delta) = deltas.first() {
+        if events[delta + 1..].iter().any(|event| !event.is_terminal()) {
+            fail(
+                Invariant::Terminal,
+                format!("non-terminal events follow message_delta #{delta}"),
+            );
+        }
+    }
+
+    // usage_conservation (only meaningful for a completed message)
+    if terminal == Terminal::MessageStop {
+        if let Err(problem) = check_usage_conservation(upstream_usage, &client_stream_usage(events))
+        {
+            fail(Invariant::UsageConservation, problem);
+        }
+    }
+
+    violations
+        .into_iter()
+        .filter(|(inv, _)| !skip.contains(inv))
+        .map(|(inv, message)| format!("[{}] {message}", inv.name()))
+        .collect()
+}
+
+/// Invariants for a non-stream client response.
+pub fn check_response_invariants(
+    response: &Value,
+    skip: &HashSet<Invariant>,
+    upstream_usage: Option<&TokenUsage>,
+) -> Vec<String> {
+    let mut violations: Vec<(Invariant, String)> = Vec::new();
+    let empty = Vec::new();
+    let content = response
+        .get("content")
+        .and_then(Value::as_array)
+        .unwrap_or(&empty);
+    let mut tool_ids = HashSet::new();
+    let mut seen_non_thinking = false;
+    for (i, block) in content.iter().enumerate() {
+        match block
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+        {
+            "thinking" | "redacted_thinking" => {
+                if seen_non_thinking {
+                    violations.push((
+                        Invariant::ReasoningFirst,
+                        format!("content[{i}] is thinking after content"),
+                    ));
+                }
+            }
+            "tool_use" => {
+                seen_non_thinking = true;
+                let id = block.get("id").and_then(Value::as_str).unwrap_or_default();
+                let name = block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if id.is_empty() || name.is_empty() {
+                    violations.push((
+                        Invariant::ToolIds,
+                        format!("content[{i}] has empty tool id or name"),
+                    ));
+                } else if !tool_ids.insert(id.to_string()) {
+                    violations.push((Invariant::ToolIds, format!("content[{i}] reuses id {id}")));
+                }
+                if !block.get("input").is_some_and(Value::is_object) {
+                    violations.push((
+                        Invariant::ToolInputJson,
+                        format!("content[{i}] input is not an object"),
+                    ));
+                }
+            }
+            _ => seen_non_thinking = true,
+        }
+    }
+    if response.get("stop_reason").is_none_or(Value::is_null) {
+        violations.push((
+            Invariant::Terminal,
+            "response has no stop_reason".to_string(),
+        ));
+    }
+    if let Err(problem) = check_usage_conservation(upstream_usage, &client_response_usage(response))
+    {
+        violations.push((Invariant::UsageConservation, problem));
+    }
+    violations
+        .into_iter()
+        .filter(|(inv, _)| !skip.contains(inv))
+        .map(|(inv, message)| format!("[{}] {message}", inv.name()))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Chunk-split fuzzing
+// ---------------------------------------------------------------------------
+
+/// A way of cutting one stream input into chunks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SplitPlan {
+    /// Strategy label, e.g. `byte-offset`, `random#17`, `utf8`, `crlf`.
+    pub label: String,
+    /// Sorted, distinct cut offsets in `1..len`.
+    pub offsets: Vec<usize>,
+}
+
+impl SplitPlan {
+    fn new(label: impl Into<String>, offsets: impl IntoIterator<Item = usize>) -> Self {
+        let offsets: BTreeSet<usize> = offsets.into_iter().collect();
+        Self {
+            label: label.into(),
+            offsets: offsets.into_iter().collect(),
+        }
+    }
+
+    pub fn chunks<'a>(&self, input: &'a [u8]) -> Vec<&'a [u8]> {
+        let mut chunks = Vec::with_capacity(self.offsets.len() + 1);
+        let mut start = 0;
+        for &offset in &self.offsets {
+            chunks.push(&input[start..offset]);
+            start = offset;
+        }
+        chunks.push(&input[start..]);
+        chunks
+    }
+
+    /// Human-readable description used in failure reports.
+    pub fn describe(&self) -> String {
+        const SHOWN: usize = 32;
+        if self.offsets.len() <= SHOWN {
+            format!("split {} at offsets {:?}", self.label, self.offsets)
+        } else {
+            format!(
+                "split {} at {} offsets {:?}...",
+                self.label,
+                self.offsets.len(),
+                &self.offsets[..SHOWN]
+            )
+        }
+    }
+}
+
+/// SplitMix64: tiny deterministic PRNG so random plans are reproducible from
+/// the fixture name alone.
+struct SplitMix64(u64);
+
+impl SplitMix64 {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn below(&mut self, bound: usize) -> usize {
+        (self.next() % bound as u64) as usize
+    }
+}
+
+/// FNV-1a, used to derive a per-fixture seed.
+pub fn seed_for(name: &str) -> u64 {
+    name.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+/// All split plans for `input`, in a fixed order.
+pub fn split_plans(input: &[u8], seed: u64) -> Vec<SplitPlan> {
+    let len = input.len();
+    let mut plans = Vec::new();
+    if len < 2 {
+        return plans;
+    }
+
+    let utf8: Vec<usize> = (1..len).filter(|&i| (input[i] & 0xC0) == 0x80).collect();
+    let crlf: Vec<usize> = (1..len)
+        .filter(|&i| input[i - 1] == b'\r' && input[i] == b'\n')
+        .collect();
+
+    if len <= EXHAUSTIVE_SPLIT_LIMIT {
+        plans.extend((1..len).map(|offset| SplitPlan::new("byte-offset", [offset])));
+    } else {
+        plans.extend(utf8.iter().map(|&offset| SplitPlan::new("utf8", [offset])));
+        plans.extend(crlf.iter().map(|&offset| SplitPlan::new("crlf", [offset])));
+    }
+    if !utf8.is_empty() {
+        plans.push(SplitPlan::new("utf8-all", utf8.iter().copied()));
+    }
+    if !crlf.is_empty() {
+        plans.push(SplitPlan::new("crlf-all", crlf.iter().copied()));
+    }
+    plans.push(SplitPlan::new("every-byte", 1..len));
+
+    let mut rng = SplitMix64(seed);
+    for n in 0..RANDOM_SPLIT_PLANS {
+        let cuts = 1 + rng.below(RANDOM_SPLIT_MAX_CUTS.min(len - 1));
+        let offsets: Vec<usize> = (0..cuts).map(|_| 1 + rng.below(len - 1)).collect();
+        plans.push(SplitPlan::new(
+            format!("random#{n} seed={seed:#x}"),
+            offsets,
+        ));
+    }
+    plans
+}
+
+/// Run `run` on every split of `input` and compare against the unsplit run.
+///
+/// `run` converts a list of chunks into client events; `check` returns the
+/// invariant violations of one output. Returns one report line per failing
+/// split (each naming its offsets), capped at [`MAX_REPORTED_FAILURES`] plus a
+/// summary line.
+pub fn fuzz_splits<R, C>(input: &[u8], seed: u64, run: R, check: C) -> Vec<String>
+where
+    R: Fn(&[&[u8]]) -> Result<Vec<ClientEvent>, String>,
+    C: Fn(&[ClientEvent]) -> (Vec<ClientEvent>, Vec<String>),
+{
+    let mut failures = Vec::new();
+    let reference = match run(&[input]) {
+        Ok(events) => check(&events).0,
+        Err(error) => return vec![format!("unsplit: {error}")],
+    };
+
+    let mut failed = 0usize;
+    let mut record = |line: String, failures: &mut Vec<String>| {
+        failed += 1;
+        if failures.len() < MAX_REPORTED_FAILURES {
+            failures.push(line);
+        }
+    };
+    for plan in split_plans(input, seed) {
+        let chunks = plan.chunks(input);
+        let events = match run(&chunks) {
+            Ok(events) => events,
+            Err(error) => {
+                record(format!("{}: {error}", plan.describe()), &mut failures);
+                continue;
+            }
+        };
+        let (normalized, violations) = check(&events);
+        if let Some(violation) = violations.first() {
+            record(
+                format!("{}: invariant violated: {violation}", plan.describe()),
+                &mut failures,
+            );
+        } else if normalized != reference {
+            record(
+                format!(
+                    "{}: output differs from unsplit input: {}",
+                    plan.describe(),
+                    first_difference(&reference, &normalized)
+                ),
+                &mut failures,
+            );
+        }
+    }
+    if failed > failures.len() {
+        failures.push(format!(
+            "... {} more failing splits not shown",
+            failed - failures.len()
+        ));
+    }
+    failures
+}
+
+fn first_difference(expected: &[ClientEvent], actual: &[ClientEvent]) -> String {
+    for (i, (want, got)) in expected.iter().zip(actual).enumerate() {
+        if want != got {
+            return format!("event #{i}: expected {} got {}", want.data, got.data);
+        }
+    }
+    format!("expected {} events, got {}", expected.len(), actual.len())
+}
+
+// ---------------------------------------------------------------------------
+// Stream vs non-stream parity
+// ---------------------------------------------------------------------------
+
+/// Fold a client event stream into an Anthropic message (content blocks in
+/// index order, stop reason, usage).
+pub fn aggregate_stream_message(events: &[ClientEvent]) -> Value {
+    let mut blocks: Vec<(u64, Map<String, Value>, String)> = Vec::new();
+    let mut stop_reason = Value::Null;
+    for event in events {
+        let index = event.data.get("index").and_then(Value::as_u64);
+        match event.kind() {
+            "content_block_start" => {
+                if let (Some(index), Some(Value::Object(block))) =
+                    (index, event.data.get("content_block"))
+                {
+                    blocks.push((index, block.clone(), String::new()));
+                }
+            }
+            "content_block_delta" => {
+                let Some((_, block, json_buf)) =
+                    blocks.iter_mut().find(|(i, _, _)| Some(*i) == index)
+                else {
+                    continue;
+                };
+                let delta = &event.data["delta"];
+                for (delta_key, block_key) in [("text", "text"), ("thinking", "thinking")] {
+                    if let Some(piece) = delta.get(delta_key).and_then(Value::as_str) {
+                        let entry = block.entry(block_key).or_insert_with(|| json!(""));
+                        let mut text = entry.as_str().unwrap_or_default().to_string();
+                        text.push_str(piece);
+                        *entry = json!(text);
+                    }
+                }
+                if let Some(piece) = delta.get("partial_json").and_then(Value::as_str) {
+                    json_buf.push_str(piece);
+                }
+            }
+            "message_delta" => {
+                stop_reason = event.data["delta"]["stop_reason"].clone();
+            }
+            _ => {}
+        }
+    }
+    blocks.sort_by_key(|(index, _, _)| *index);
+    let content: Vec<Value> = blocks
+        .into_iter()
+        .map(|(_, mut block, json_buf)| {
+            if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                let input = if json_buf.is_empty() {
+                    json!({})
+                } else {
+                    serde_json::from_str(&json_buf).unwrap_or(Value::String(json_buf))
+                };
+                block.insert("input".to_string(), input);
+            }
+            Value::Object(block)
+        })
+        .collect();
+    json!({
+        "content": content,
+        "stop_reason": stop_reason,
+        "usage": client_stream_usage(events),
+    })
+}
+
+/// Compare the stream and non-stream conversions of the same upstream reply on
+/// content (ids ignored), stop reason and recorded token counts. Returns one
+/// `field: stream=<..> non_stream=<..>` line per difference.
+pub fn parity_diff(stream_message: &Value, non_stream_response: &Value) -> Vec<String> {
+    fn content_summary(message: &Value) -> Value {
+        let blocks = message
+            .get("content")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Value::Array(
+            blocks
+                .into_iter()
+                .filter(|block| {
+                    // Empty text blocks carry no content in either path.
+                    !(block.get("type").and_then(Value::as_str) == Some("text")
+                        && block.get("text").and_then(Value::as_str) == Some(""))
+                })
+                .map(|mut block| {
+                    if let Some(map) = block.as_object_mut() {
+                        map.remove("id");
+                        map.remove("signature");
+                    }
+                    block
+                })
+                .collect(),
+        )
+    }
+    fn tokens(usage: &Value) -> Value {
+        json!({
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "cache_read_tokens": usage.get("cache_read_tokens"),
+            "cache_creation_tokens": usage.get("cache_creation_tokens"),
+        })
+    }
+
+    let non_stream_usage = client_response_usage(non_stream_response);
+    let pairs = [
+        (
+            "stop_reason",
+            stream_message["stop_reason"].clone(),
+            non_stream_response
+                .get("stop_reason")
+                .cloned()
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "content",
+            content_summary(stream_message),
+            content_summary(non_stream_response),
+        ),
+        (
+            "usage",
+            tokens(&stream_message["usage"]),
+            tokens(&non_stream_usage),
+        ),
+    ];
+    pairs
+        .into_iter()
+        .filter(|(_, stream, non_stream)| stream != non_stream)
+        .map(|(field, stream, non_stream)| {
+            format!("{field}: stream={stream} non_stream={non_stream}")
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Whole-fixture driver
+// ---------------------------------------------------------------------------
+
+/// Everything a fixture run produces: snapshot texts and failures.
+#[derive(Debug, Default)]
+pub struct FixtureOutcome {
+    /// `upstream_request` snapshot text, if the fixture has a client request.
+    pub upstream_request: Option<String>,
+    /// `client_response` snapshot text (stream events and/or JSON response).
+    pub client_response: Option<String>,
+    /// `usage` snapshot text.
+    pub usage: Option<String>,
+    /// Invariant, split-fuzz, parity and conversion failures.
+    pub failures: Vec<String>,
+}
+
+/// Run every check for one fixture.
+pub fn run_fixture(fixture: &Fixture) -> FixtureOutcome {
+    let mut outcome = FixtureOutcome::default();
+    let mut redactor = Redactor::new(fixture);
+    let skip = fixture.skipped();
+
+    if let Some(result) = convert_request(fixture) {
+        match result {
+            Ok(mut request) => {
+                redactor.redact(&mut request);
+                outcome.upstream_request = Some(render_json(&request));
+            }
+            Err(error) => outcome.upstream_request = Some(format!("ERROR: {error}\n")),
+        }
+    }
+
+    let mut client_response = String::new();
+    let mut usage = String::new();
+    let mut stream_message = None;
+
+    if let Some(input) = &fixture.upstream_sse {
+        let upstream_usage = upstream_stream_usage(fixture.bridge, input);
+        let terminal = fixture.meta.invariants.terminal;
+        let fresh_redactor = redactor.clone();
+        let check = |events: &[ClientEvent]| {
+            // A fresh redactor per run: generated ids must line up by first
+            // appearance, not by literal value (synthesized ids are random).
+            let normalized = fresh_redactor.clone().redact_events(events);
+            let violations =
+                check_stream_invariants(events, terminal, &skip, upstream_usage.as_ref());
+            (normalized, violations)
+        };
+        let run = |chunks: &[&[u8]]| run_stream(fixture, chunks);
+
+        match run(&[input.as_slice()]) {
+            Ok(events) => {
+                for violation in check(&events).1 {
+                    outcome.failures.push(format!("unsplit: {violation}"));
+                }
+                let redacted = redactor.redact_events(&events);
+                client_response.push_str("# stream\n");
+                client_response.push_str(&render_events(&redacted));
+                let mut stream_usage = client_stream_usage(&events);
+                redactor.redact(&mut stream_usage);
+                usage.push_str("# stream\n");
+                usage.push_str(&render_json(&stream_usage));
+                stream_message = Some(aggregate_stream_message(&events));
+            }
+            Err(error) => outcome.failures.push(format!("unsplit: {error}")),
+        }
+        outcome
+            .failures
+            .extend(fuzz_splits(input, seed_for(&fixture.id()), run, check));
+    }
+
+    if let Some(result) = convert_non_stream(fixture) {
+        if !client_response.is_empty() {
+            client_response.push('\n');
+            usage.push('\n');
+        }
+        client_response.push_str("# non-stream\n");
+        usage.push_str("# non-stream\n");
+        match result {
+            Ok(response) => {
+                let upstream_usage = fixture
+                    .upstream_json
+                    .as_ref()
+                    .and_then(|body| upstream_response_usage(fixture.bridge, body));
+                for violation in
+                    check_response_invariants(&response, &skip, upstream_usage.as_ref())
+                {
+                    outcome.failures.push(format!("non-stream: {violation}"));
+                }
+                let mut response_usage = client_response_usage(&response);
+                if let Some(stream_message) = &stream_message {
+                    let diff = parity_diff(stream_message, &response);
+                    if diff != fixture.meta.parity.expected_diff {
+                        outcome.failures.push(format!(
+                            "parity: stream vs non-stream diff changed\n  expected: {:#?}\n  actual:   {diff:#?}",
+                            fixture.meta.parity.expected_diff
+                        ));
+                    }
+                }
+                let mut response = response;
+                redactor.redact(&mut response);
+                redactor.redact(&mut response_usage);
+                client_response.push_str(&render_json(&response));
+                usage.push_str(&render_json(&response_usage));
+            }
+            Err(error) => {
+                client_response.push_str(&format!("ERROR: {error}\n"));
+                usage.push_str("null\n");
+            }
+        }
+    }
+
+    if !client_response.is_empty() {
+        outcome.client_response = Some(client_response);
+        outcome.usage = Some(usage);
+    }
+    outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(name: &str, data: Value) -> ClientEvent {
+        ClientEvent {
+            event: Some(name.to_string()),
+            data,
+        }
+    }
+
+    fn text_stream() -> Vec<ClientEvent> {
+        vec![
+            event(
+                "message_start",
+                json!({"type":"message_start","message":{"id":"m","usage":{"input_tokens":3,"output_tokens":0}}}),
+            ),
+            event(
+                "content_block_start",
+                json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            ),
+            event(
+                "content_block_delta",
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}),
+            ),
+            event(
+                "content_block_stop",
+                json!({"type":"content_block_stop","index":0}),
+            ),
+            event(
+                "message_delta",
+                json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":3,"output_tokens":1}}),
+            ),
+            event("message_stop", json!({"type":"message_stop"})),
+        ]
+    }
+
+    #[test]
+    fn well_formed_stream_has_no_violations() {
+        let upstream = TokenUsage {
+            input_tokens: 3,
+            output_tokens: 1,
+            ..Default::default()
+        };
+        let violations = check_stream_invariants(
+            &text_stream(),
+            Terminal::MessageStop,
+            &HashSet::new(),
+            Some(&upstream),
+        );
+        assert!(violations.is_empty(), "{violations:?}");
+    }
+
+    #[test]
+    fn invariants_flag_unpaired_blocks_and_double_terminal() {
+        let mut events = text_stream();
+        events.remove(3); // drop content_block_stop
+        events.push(event("message_stop", json!({"type":"message_stop"})));
+        let violations =
+            check_stream_invariants(&events, Terminal::MessageStop, &HashSet::new(), None);
+        assert!(
+            violations.iter().any(|v| v.starts_with("[block_pairing]")),
+            "{violations:?}"
+        );
+        assert!(
+            violations.iter().any(|v| v.starts_with("[terminal]")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn invariants_flag_usage_drift_and_late_thinking() {
+        let mut events = text_stream();
+        events.insert(
+            4,
+            event(
+                "content_block_start",
+                json!({"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":""}}),
+            ),
+        );
+        events.insert(
+            5,
+            event(
+                "content_block_stop",
+                json!({"type":"content_block_stop","index":1}),
+            ),
+        );
+        let upstream = TokenUsage {
+            input_tokens: 5,
+            output_tokens: 1,
+            ..Default::default()
+        };
+        let violations = check_stream_invariants(
+            &events,
+            Terminal::MessageStop,
+            &HashSet::new(),
+            Some(&upstream),
+        );
+        assert!(violations
+            .iter()
+            .any(|v| v.starts_with("[reasoning_first]")));
+        assert!(violations
+            .iter()
+            .any(|v| v.starts_with("[usage_conservation]")));
+
+        let skip: HashSet<Invariant> =
+            [Invariant::ReasoningFirst, Invariant::UsageConservation].into();
+        assert!(
+            check_stream_invariants(&events, Terminal::MessageStop, &skip, Some(&upstream))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn split_plans_cover_every_offset_utf8_and_crlf() {
+        let input = "data: 你\r\n\r\n".as_bytes();
+        let plans = split_plans(input, 7);
+        for offset in 1..input.len() {
+            assert!(plans
+                .iter()
+                .any(|plan| plan.label == "byte-offset" && plan.offsets == [offset]));
+        }
+        let utf8 = plans.iter().find(|plan| plan.label == "utf8-all").unwrap();
+        assert_eq!(utf8.offsets, vec![7, 8]);
+        let crlf = plans.iter().find(|plan| plan.label == "crlf-all").unwrap();
+        assert_eq!(crlf.offsets, vec![10, 12]);
+        assert_eq!(
+            plans
+                .iter()
+                .filter(|plan| plan.label.starts_with("random#"))
+                .count(),
+            RANDOM_SPLIT_PLANS
+        );
+        // Deterministic for a given seed.
+        assert_eq!(plans, split_plans(input, 7));
+        for plan in &plans {
+            assert_eq!(plan.chunks(input).concat(), input);
+        }
+    }
+
+    /// A deliberately broken converter that decodes each chunk on its own (the
+    /// bug fixed by `append_utf8_safe`). The fuzzer must catch it and name the
+    /// offending offsets.
+    #[test]
+    fn fuzzer_reports_split_offset_of_chunk_boundary_bug() {
+        let input = "data: {\"t\":\"你好\"}\n\n".as_bytes();
+        let ni = input.windows(3).position(|w| w == "你".as_bytes()).unwrap();
+        let run = |chunks: &[&[u8]]| {
+            let text: String = chunks
+                .iter()
+                .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
+                .collect();
+            let data = text.trim().trim_start_matches("data: ").to_string();
+            Ok(vec![event(
+                "content_block_delta",
+                json!({"type":"content_block_delta","text":data}),
+            )])
+        };
+        let check = |events: &[ClientEvent]| (events.to_vec(), Vec::new());
+        let failures = fuzz_splits(input, 1, run, check);
+        assert!(!failures.is_empty());
+        let expected = format!("split byte-offset at offsets [{}]", ni + 1);
+        assert!(
+            failures.iter().any(|line| line.starts_with(&expected)),
+            "expected a failure for {expected}: {failures:#?}"
+        );
+    }
+
+    #[test]
+    fn fuzzer_reports_split_offset_of_invariant_violation() {
+        let input = b"0123456789";
+        // Emits a second message_stop whenever a chunk boundary falls at 4.
+        let run = |chunks: &[&[u8]]| {
+            let mut events = vec![event("message_stop", json!({"type":"message_stop"}))];
+            let mut at = 0;
+            for chunk in &chunks[..chunks.len() - 1] {
+                at += chunk.len();
+                if at == 4 {
+                    events.push(event("message_stop", json!({"type":"message_stop"})));
+                }
+            }
+            Ok(events)
+        };
+        let check = |events: &[ClientEvent]| {
+            let violations =
+                check_stream_invariants(events, Terminal::MessageStop, &HashSet::new(), None)
+                    .into_iter()
+                    .filter(|v| v.starts_with("[terminal]"))
+                    .collect();
+            (events.to_vec(), violations)
+        };
+        let failures = fuzz_splits(input, 3, run, check);
+        assert!(
+            failures.iter().any(|line| line
+                .starts_with("split byte-offset at offsets [4]: invariant violated: [terminal]")),
+            "{failures:#?}"
+        );
+    }
+
+    #[test]
+    fn redactor_keeps_input_ids_and_numbers_generated_ones() {
+        let fixture = Fixture {
+            bridge: Bridge::AnthropicGemini,
+            name: "t".into(),
+            dir: PathBuf::new(),
+            meta: toml::from_str("intent = \"x\"\nsource_commit = \"abc\"").unwrap(),
+            client_request: None,
+            upstream_sse: Some(b"data: {\"id\":\"call_1\"}\n\n".to_vec()),
+            upstream_json: None,
+        };
+        let mut redactor = Redactor::new(&fixture);
+        let mut value = json!([
+            {"id": "call_1"},
+            {"id": "gemini_synth_aaa", "created": 123},
+            {"tool_use_id": "gemini_synth_aaa"},
+            {"id": "gemini_synth_bbb"}
+        ]);
+        redactor.redact(&mut value);
+        assert_eq!(
+            value,
+            json!([
+                {"id": "call_1"},
+                {"id": "[generated-id:1]", "created": "[timestamp]"},
+                {"tool_use_id": "[generated-id:1]"},
+                {"id": "[generated-id:2]"}
+            ])
+        );
+    }
+
+    #[test]
+    fn parity_diff_reports_field_level_differences() {
+        let stream = json!({
+            "content": [{"type": "tool_use", "id": "a", "name": "f", "input": {}}],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 1, "output_tokens": 2, "cache_read_tokens": 0, "cache_creation_tokens": 0}
+        });
+        let non_stream = json!({
+            "content": [{"type": "tool_use", "id": "b", "name": "f", "input": {}}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 2}
+        });
+        assert_eq!(
+            parity_diff(&stream, &non_stream),
+            vec!["stop_reason: stream=\"tool_use\" non_stream=\"end_turn\"".to_string()]
+        );
+    }
+}

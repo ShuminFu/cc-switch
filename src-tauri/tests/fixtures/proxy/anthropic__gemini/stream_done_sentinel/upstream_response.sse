@@ -1,0 +1,4 @@
+data: {"responseId":"r_done","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":2,"totalTokenCount":3}}
+
+data: [DONE]
+

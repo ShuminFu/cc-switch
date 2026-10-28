@@ -1,0 +1,2 @@
+intent = "CRLF-delimited SSE events from the upstream are parsed the same as LF-delimited ones."
+source_commit = "6330783"

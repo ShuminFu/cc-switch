@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: CJK text in a JSON payload survives every byte split.
+---
+# stream
+{
+  "input_tokens": 4,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "resp_utf8",
+  "billable": true
+}

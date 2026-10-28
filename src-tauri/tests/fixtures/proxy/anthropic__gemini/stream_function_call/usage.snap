@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "A functionCall part becomes a tool_use block with its args as one input_json_delta, and stop_reason tool_use."
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 3,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "resp_2",
+  "billable": true
+}

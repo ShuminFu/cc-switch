@@ -1,0 +1,27 @@
+---
+source: tests/proxy_golden.rs
+description: The legacy function_call field and finish_reason maps to a tool_use block and stop_reason tool_use.
+---
+# non-stream
+{
+  "id": "chatcmpl-123",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "",
+      "name": "get_weather",
+      "input": {
+        "location": "Tokyo"
+      }
+    }
+  ],
+  "model": "gpt-4",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  }
+}

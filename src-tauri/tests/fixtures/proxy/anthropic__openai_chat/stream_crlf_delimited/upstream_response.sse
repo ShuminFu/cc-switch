@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl_crlf","model":"gpt-4o","choices":[{"delta":{"content":"Hi"}}]}
+
+data: {"id":"chatcmpl_crlf","model":"gpt-4o","choices":[{"delta":{"content":" there"}}]}
+
+data: {"id":"chatcmpl_crlf","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2}}
+
+data: [DONE]
+

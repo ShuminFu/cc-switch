@@ -1,0 +1,3 @@
+intent = "A blocked prompt maps to a refusal with an explanatory text block."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform_gemini.rs::tests::gemini_to_anthropic_maps_blocked_prompt_to_refusal"

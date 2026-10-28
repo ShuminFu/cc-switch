@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: Cumulative text snapshots are converted to incremental text_delta events.
+---
+# stream
+{
+  "input_tokens": 10,
+  "output_tokens": 5,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "resp_1",
+  "billable": true
+}

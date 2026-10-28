@@ -1,0 +1,31 @@
+{
+  "responseId": "resp_2",
+  "modelVersion": "gemini-2.5-pro",
+  "candidates": [
+    {
+      "finishReason": "STOP",
+      "content": {
+        "parts": [
+          {
+            "functionCall": {
+              "id": "call_1",
+              "name": "Skill",
+              "args": {
+                "name": "git-commit",
+                "parameters": {
+                  "args": [
+                    "详细分析内容 编写提交信息 分多次提交代码"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 8,
+    "totalTokenCount": 14
+  }
+}

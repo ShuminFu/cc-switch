@@ -1,0 +1,44 @@
+{
+  "model": "glm-5.1",
+  "max_tokens": 1024,
+  "system": [
+    {
+      "type": "text",
+      "text": "x-anthropic-billing-header: cc_version=2.1.119.47e; cc_entrypoint=sdk-cli; cch=a7754;\n"
+    },
+    {
+      "type": "text",
+      "text": "System prompt",
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Hello",
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "5m"
+          }
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Get weather",
+      "input_schema": {
+        "type": "object"
+      },
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ]
+}

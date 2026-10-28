@@ -1,0 +1,6 @@
+intent = "DeepSeek reasoning_content becomes a leading thinking block, and replaying the turn with reasoning preservation sends it back as reasoning_content."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform.rs::tests::test_deepseek_reasoning_content_round_trips_for_tool_calls"
+
+[options]
+preserve_reasoning_content = true

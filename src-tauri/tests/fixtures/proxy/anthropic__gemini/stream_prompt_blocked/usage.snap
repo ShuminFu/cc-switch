@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: promptFeedback.blockReason yields a synthesized explanatory text block and stop_reason refusal.
+---
+# stream
+{
+  "input_tokens": 4,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-flash",
+  "message_id": "r_block",
+  "billable": true
+}

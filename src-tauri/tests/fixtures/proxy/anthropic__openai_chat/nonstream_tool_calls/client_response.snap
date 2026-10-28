@@ -1,0 +1,27 @@
+---
+source: tests/proxy_golden.rs
+description: Assistant tool_calls become tool_use blocks with parsed input; tool_choice any maps to required.
+---
+# non-stream
+{
+  "id": "chatcmpl-123",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "call_123",
+      "name": "get_weather",
+      "input": {
+        "location": "Tokyo"
+      }
+    }
+  ],
+  "model": "gpt-4",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  }
+}

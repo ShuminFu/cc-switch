@@ -1,0 +1,27 @@
+{
+  "model": "gpt-4o",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "What's the weather?"
+    }
+  ],
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Get weather info",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "any"
+  }
+}

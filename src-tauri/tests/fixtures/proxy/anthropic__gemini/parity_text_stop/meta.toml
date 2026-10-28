@@ -1,0 +1,6 @@
+intent = "The same text reply converted by the stream and non-stream paths yields identical content, stop_reason and usage."
+source_commit = "6330783"
+
+[parity]
+expected_diff = [
+]

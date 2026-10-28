@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_len","model":"gpt-4o","choices":[{"delta":{"content":"This answer is cut"}}]}
+
+data: {"id":"chatcmpl_len","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":11,"completion_tokens":4}}
+
+data: [DONE]
+

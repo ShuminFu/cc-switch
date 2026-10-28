@@ -1,0 +1,43 @@
+---
+source: tests/proxy_golden.rs
+description: "Tool args under a wrong key are rectified using the client's tool schema (args -> command)."
+---
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Show git status"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 256
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "Bash",
+          "description": "",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "timeout": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "command"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

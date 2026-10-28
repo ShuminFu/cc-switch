@@ -1,0 +1,28 @@
+---
+source: tests/proxy_golden.rs
+description: "Non-stream Skill args are rectified from the client's tool schema."
+---
+# non-stream
+{
+  "id": "resp_2",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "call_1",
+      "name": "Skill",
+      "input": {
+        "args": "详细分析内容 编写提交信息 分多次提交代码",
+        "skill": "git-commit"
+      }
+    }
+  ],
+  "model": "gemini-2.5-pro",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 8,
+    "output_tokens": 6
+  }
+}

@@ -1,0 +1,3 @@
+intent = "A no-id call repeated across cumulative chunks keeps one synthesized id and emits a single tool_use with the final args."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::no_id_tool_call_reuses_synthesized_id_across_cumulative_chunks"

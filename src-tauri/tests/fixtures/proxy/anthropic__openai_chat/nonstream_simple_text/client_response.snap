@@ -1,0 +1,23 @@
+---
+source: tests/proxy_golden.rs
+description: A plain text request and reply; the system prompt becomes a system message and the response id is kept for usage dedup.
+---
+# non-stream
+{
+  "id": "chatcmpl-123",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Hello!"
+    }
+  ],
+  "model": "gpt-4",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 5
+  }
+}

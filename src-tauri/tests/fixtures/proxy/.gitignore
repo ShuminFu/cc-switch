@@ -1,0 +1,2 @@
+# Pending insta snapshots (review with `cargo insta review` or INSTA_UPDATE=always).
+*.snap.new

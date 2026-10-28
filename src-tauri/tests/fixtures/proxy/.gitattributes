@@ -1,0 +1,4 @@
+# Raw upstream bodies: keep bytes exactly as written (CRLF fixtures must stay CRLF).
+*.sse -text
+# insta snapshots are compared as LF text on every platform.
+*.snap text eol=lf

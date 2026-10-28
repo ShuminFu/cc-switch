@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl_late","model":"gpt-4o","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":"}}]}}]}
+
+data: {"id":"chatcmpl_late","model":"gpt-4o","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"search","arguments":"\"rust\"}"}}]}}]}
+
+data: {"id":"chatcmpl_late","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":9,"completion_tokens":3}}
+
+data: [DONE]
+

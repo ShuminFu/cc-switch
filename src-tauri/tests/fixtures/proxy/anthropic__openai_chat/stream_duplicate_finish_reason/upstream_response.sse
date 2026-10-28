@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_dup","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chatcmpl_dup","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}
+
+data: [DONE]
+

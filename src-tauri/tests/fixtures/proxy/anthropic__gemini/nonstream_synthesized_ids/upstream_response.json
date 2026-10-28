@@ -1,0 +1,31 @@
+{
+  "responseId": "r1",
+  "modelVersion": "gemini-2.5-pro",
+  "candidates": [
+    {
+      "finishReason": "STOP",
+      "content": {
+        "parts": [
+          {
+            "functionCall": {
+              "name": "foo",
+              "args": {}
+            }
+          },
+          {
+            "functionCall": {
+              "name": "foo",
+              "args": {
+                "k": 1
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 6,
+    "totalTokenCount": 10
+  }
+}

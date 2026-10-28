@@ -1,0 +1,11 @@
+{
+  "model": "gemini-2.5-pro",
+  "max_tokens": 128,
+  "system": "You are helpful.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello"
+    }
+  ]
+}

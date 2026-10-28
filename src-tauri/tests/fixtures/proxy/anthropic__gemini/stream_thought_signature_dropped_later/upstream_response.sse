@@ -1,0 +1,4 @@
+data: {"responseId":"rsig","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"functionCall":{"id":"call_1","name":"get_weather","args":{"city":"Tokyo"}},"thoughtSignature":"sig-keep"}]}}],"usageMetadata":{"promptTokenCount":4,"totalTokenCount":6}}
+
+data: {"responseId":"rsig","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"functionCall":{"id":"call_1","name":"get_weather","args":{"city":"Tokyo","units":"c"}}}]}}],"usageMetadata":{"promptTokenCount":4,"totalTokenCount":9}}
+

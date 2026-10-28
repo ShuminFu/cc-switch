@@ -1,0 +1,30 @@
+---
+source: tests/proxy_golden.rs
+description: The leading x-anthropic-billing-header system part and every cache_control marker are stripped from the upstream request.
+---
+{
+  "model": "glm-5.1",
+  "messages": [
+    {
+      "role": "system",
+      "content": "System prompt"
+    },
+    {
+      "role": "user",
+      "content": "Hello"
+    }
+  ],
+  "max_tokens": 1024,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get weather",
+        "parameters": {
+          "type": "object"
+        }
+      }
+    }
+  ]
+}

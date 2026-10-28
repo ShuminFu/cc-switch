@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Tool args under a wrong key are rectified using the client's tool schema (args -> command)."
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 3,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "resp_5",
+  "billable": true
+}

@@ -1,0 +1,4 @@
+data: {"responseId":"resp_4","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"Hel"}]}}],"usageMetadata":{"promptTokenCount":4,"totalTokenCount":6}}
+
+data: {"responseId":"resp_4","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"lo"},{"text":"","thoughtSignature":"sig-1"}]}}],"usageMetadata":{"promptTokenCount":4,"totalTokenCount":8}}
+

@@ -66,6 +66,12 @@ pub use services::{
 };
 pub use settings::{scoped_settings_store, update_settings, AppSettings, ScopedSettingsStore};
 pub use store::AppState;
+
+/// Golden bridge testkit, used by `tests/proxy_golden.rs`.
+#[cfg(any(test, feature = "testkit"))]
+#[doc(hidden)]
+pub use proxy::providers::testkit as proxy_testkit;
+
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 

@@ -1,0 +1,2 @@
+intent = "A text block is closed before the tool_use block opens; tools and tool_choice are converted in the stream request."
+source_commit = "6330783"

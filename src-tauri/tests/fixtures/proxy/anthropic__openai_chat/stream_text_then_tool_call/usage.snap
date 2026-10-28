@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A text block is closed before the tool_use block opens; tools and tool_choice are converted in the stream request.
+---
+# stream
+{
+  "input_tokens": 8,
+  "output_tokens": 12,
+  "cache_read_tokens": 32,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_tt",
+  "billable": true
+}

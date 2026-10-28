@@ -1,0 +1,2 @@
+data: {"responseId":"resp_2","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"functionCall":{"id":"call_1","name":"get_weather","args":{"city":"Tokyo"}},"thoughtSignature":"sig-1"}]}}],"usageMetadata":{"promptTokenCount":5,"totalTokenCount":8}}
+

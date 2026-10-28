@@ -1,0 +1,3 @@
+intent = "A legitimate `parameters` argument declared in the schema is not unwrapped."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform_gemini.rs::tests::gemini_to_anthropic_preserves_legitimate_parameters_arg"

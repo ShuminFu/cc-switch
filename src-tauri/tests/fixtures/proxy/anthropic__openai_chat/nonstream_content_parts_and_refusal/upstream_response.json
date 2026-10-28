@@ -1,0 +1,27 @@
+{
+  "id": "chatcmpl-123",
+  "model": "gpt-4",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Hello"
+          },
+          {
+            "type": "refusal",
+            "refusal": "I can't do that"
+          }
+        ]
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 5
+  }
+}

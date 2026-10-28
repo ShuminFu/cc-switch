@@ -1,0 +1,2 @@
+intent = "finishReason MAX_TOKENS maps to stop_reason max_tokens."
+source_commit = "6330783"

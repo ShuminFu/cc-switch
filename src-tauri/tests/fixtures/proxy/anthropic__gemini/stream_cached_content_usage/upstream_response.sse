@@ -1,0 +1,4 @@
+data: {"responseId":"r_cache","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"Cached"}]}}],"usageMetadata":{"promptTokenCount":120,"totalTokenCount":122,"cachedContentTokenCount":100}}
+
+data: {"responseId":"r_cache","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"Cached answer"}]}}],"usageMetadata":{"promptTokenCount":120,"totalTokenCount":125,"cachedContentTokenCount":100}}
+

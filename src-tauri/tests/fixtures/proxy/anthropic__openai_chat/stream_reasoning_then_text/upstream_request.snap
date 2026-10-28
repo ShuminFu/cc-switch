@@ -1,0 +1,18 @@
+---
+source: tests/proxy_golden.rs
+description: reasoning_content deltas open a thinking block that is closed before the text block; the request asks for usage in the stream.
+---
+{
+  "model": "deepseek-v4-flash",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is 2+2?"
+    }
+  ],
+  "max_tokens": 512,
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  }
+}

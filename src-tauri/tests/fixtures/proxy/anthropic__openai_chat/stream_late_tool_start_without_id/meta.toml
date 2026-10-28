@@ -1,0 +1,2 @@
+intent = "A tool call that never receives an id gets the fallback id tool_call_<index> and is started when finish_reason arrives."
+source_commit = "6330783"

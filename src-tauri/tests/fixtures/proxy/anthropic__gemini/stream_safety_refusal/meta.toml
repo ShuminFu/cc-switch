@@ -1,0 +1,2 @@
+intent = "finishReason SAFETY maps to stop_reason refusal."
+source_commit = "6330783"

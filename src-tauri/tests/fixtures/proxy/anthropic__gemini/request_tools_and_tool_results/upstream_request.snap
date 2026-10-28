@@ -1,0 +1,62 @@
+---
+source: tests/proxy_golden.rs
+description: "tool_use/tool_result history maps to functionCall/functionResponse, tools to functionDeclarations and a forced tool_choice to allowedFunctionNames."
+---
+{
+  "contents": [
+    {
+      "role": "model",
+      "parts": [
+        {
+          "functionCall": {
+            "name": "get_weather",
+            "args": {
+              "city": "Tokyo"
+            },
+            "id": "call_1"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "get_weather",
+            "response": {
+              "content": "Sunny"
+            },
+            "id": "call_1"
+          }
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "get_weather",
+          "description": "Weather lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "ANY",
+      "allowedFunctionNames": [
+        "get_weather"
+      ]
+    }
+  }
+}

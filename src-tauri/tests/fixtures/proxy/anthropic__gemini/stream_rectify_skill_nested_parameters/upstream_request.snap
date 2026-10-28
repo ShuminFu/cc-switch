@@ -1,0 +1,43 @@
+---
+source: tests/proxy_golden.rs
+description: Skill args nested under name/parameters are flattened to the declared skill/args schema.
+---
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Commit my work"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 256
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "Skill",
+          "description": "",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "skill": {
+                "type": "string"
+              },
+              "args": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "skill"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

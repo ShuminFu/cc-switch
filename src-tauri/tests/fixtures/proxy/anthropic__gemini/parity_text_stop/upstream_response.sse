@@ -1,0 +1,4 @@
+data: {"responseId":"r_par","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"Same "}]}}],"usageMetadata":{"promptTokenCount":10,"totalTokenCount":12}}
+
+data: {"responseId":"r_par","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"Same answer"}]}}],"usageMetadata":{"promptTokenCount":10,"totalTokenCount":14}}
+

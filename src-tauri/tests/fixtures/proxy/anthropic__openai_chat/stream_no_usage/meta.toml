@@ -1,0 +1,3 @@
+intent = "A stream without any usage still emits a message_delta carrying zero usage, and nothing is billed."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming.rs::tests::test_message_delta_includes_zero_usage_when_stream_has_no_usage"

@@ -1,0 +1,2 @@
+data: {"responseId":"r_err","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":3,"totalTokenCount":4}}
+

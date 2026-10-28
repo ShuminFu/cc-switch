@@ -1,0 +1,3 @@
+intent = "Non-stream Skill args are rectified from the client's tool schema."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform_gemini.rs::tests::gemini_to_anthropic_rectifies_tool_args_from_schema_hints"

@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "A stream that ends before any finish_reason emits no success terminal events (no message_delta, no message_stop)."
+---
+# stream
+null

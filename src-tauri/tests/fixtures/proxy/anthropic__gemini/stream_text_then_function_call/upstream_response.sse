@@ -1,0 +1,4 @@
+data: {"responseId":"r_tt","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"text":"Checking the weather."}]}}],"usageMetadata":{"promptTokenCount":20,"totalTokenCount":25}}
+
+data: {"responseId":"r_tt","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"Checking the weather."},{"functionCall":{"id":"call_p","name":"get_weather","args":{"city":"Paris"}}}]}}],"usageMetadata":{"promptTokenCount":20,"totalTokenCount":31}}
+

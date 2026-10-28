@@ -1,0 +1,3 @@
+intent = "System text from the top level and system-role messages is merged into systemInstruction; a rich JSON schema is sent as parametersJsonSchema without $schema."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform_gemini.rs::tests::anthropic_to_gemini_merges_system_messages_into_system_instruction"

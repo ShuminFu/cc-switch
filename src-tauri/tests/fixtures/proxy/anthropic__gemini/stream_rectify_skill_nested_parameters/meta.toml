@@ -1,0 +1,3 @@
+intent = "Skill args nested under name/parameters are flattened to the declared skill/args schema."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::rectifies_streamed_skill_args_from_nested_parameters"

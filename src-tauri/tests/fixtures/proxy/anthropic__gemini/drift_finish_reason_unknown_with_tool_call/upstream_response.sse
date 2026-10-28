@@ -1,0 +1,2 @@
+data: {"responseId":"r_drift","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"MALFORMED_FUNCTION_CALL","content":{"parts":[{"functionCall":{"id":"call_d","name":"get_weather","args":{"city":"Tokyo"}}}]}}],"usageMetadata":{"promptTokenCount":7,"totalTokenCount":11}}
+

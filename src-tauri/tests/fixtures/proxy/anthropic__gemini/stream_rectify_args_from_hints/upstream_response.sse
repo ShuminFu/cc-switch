@@ -1,0 +1,2 @@
+data: {"responseId":"resp_5","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"functionCall":{"id":"call_1","name":"Bash","args":{"args":"git status"}}}]}}],"usageMetadata":{"promptTokenCount":5,"totalTokenCount":8}}
+

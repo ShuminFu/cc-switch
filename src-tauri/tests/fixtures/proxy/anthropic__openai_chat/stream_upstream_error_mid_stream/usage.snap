@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: An upstream transport error after partial content yields a single error event and no message_delta/message_stop.
+---
+# stream
+null

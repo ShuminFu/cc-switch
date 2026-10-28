@@ -1,0 +1,41 @@
+{
+  "model": "o4-mini",
+  "max_tokens": 4096,
+  "thinking": {
+    "type": "enabled",
+    "budget_tokens": 2000
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": "Weather in Tokyo?"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Let me check"
+        },
+        {
+          "type": "tool_use",
+          "id": "call_123",
+          "name": "get_weather",
+          "input": {
+            "location": "Tokyo"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_123",
+          "content": "Sunny, 25°C"
+        }
+      ]
+    }
+  ]
+}

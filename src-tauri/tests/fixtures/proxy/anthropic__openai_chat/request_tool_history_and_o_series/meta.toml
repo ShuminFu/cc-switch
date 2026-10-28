@@ -1,0 +1,3 @@
+intent = "Assistant tool_use and user tool_result history map to tool_calls and tool messages; o-series models get max_completion_tokens and reasoning_effort from the thinking budget."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform.rs::tests::test_anthropic_to_openai_o_series_max_completion_tokens"

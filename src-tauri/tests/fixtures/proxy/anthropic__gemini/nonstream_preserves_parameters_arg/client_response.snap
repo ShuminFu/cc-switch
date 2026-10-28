@@ -1,0 +1,30 @@
+---
+source: tests/proxy_golden.rs
+description: "A legitimate `parameters` argument declared in the schema is not unwrapped."
+---
+# non-stream
+{
+  "id": "resp_params",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "call_1",
+      "name": "ConfigTool",
+      "input": {
+        "parameters": {
+          "mode": "safe",
+          "retries": 2
+        }
+      }
+    }
+  ],
+  "model": "gemini-2.5-pro",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 9,
+    "output_tokens": 4
+  }
+}

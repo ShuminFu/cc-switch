@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: reasoning_content deltas open a thinking block that is closed before the text block; the request asks for usage in the stream.
+---
+# stream
+{
+  "input_tokens": 12,
+  "output_tokens": 9,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "deepseek-v4-flash",
+  "message_id": "chatcmpl_reason",
+  "billable": true
+}

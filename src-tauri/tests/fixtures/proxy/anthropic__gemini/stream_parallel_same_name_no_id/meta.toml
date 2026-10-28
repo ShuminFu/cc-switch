@@ -1,0 +1,3 @@
+intent = "Two parallel calls to the same function without ids both survive with distinct synthesized ids."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::parallel_same_name_no_id_calls_preserve_both"

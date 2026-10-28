@@ -1,0 +1,4 @@
+data: {"responseId":"r2","modelVersion":"gemini-2.5-pro","candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"city":"Tokyo"}}}]}}],"usageMetadata":{"promptTokenCount":4,"totalTokenCount":6}}
+
+data: {"responseId":"r2","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"functionCall":{"name":"get_weather","args":{"city":"Tokyo","units":"c"}}}]}}],"usageMetadata":{"promptTokenCount":4,"totalTokenCount":9}}
+

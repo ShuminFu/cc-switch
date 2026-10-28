@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A no-id call repeated across cumulative chunks keeps one synthesized id and emits a single tool_use with the final args.
+---
+# stream
+{
+  "input_tokens": 4,
+  "output_tokens": 5,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "r2",
+  "billable": true
+}

@@ -1,0 +1,29 @@
+{
+  "responseId": "resp_params",
+  "modelVersion": "gemini-2.5-pro",
+  "candidates": [
+    {
+      "finishReason": "STOP",
+      "content": {
+        "parts": [
+          {
+            "functionCall": {
+              "id": "call_1",
+              "name": "ConfigTool",
+              "args": {
+                "parameters": {
+                  "mode": "safe",
+                  "retries": 2
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 9,
+    "totalTokenCount": 13
+  }
+}

@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: Four-byte UTF-8 sequences (emoji) split at any byte are reassembled before JSON parsing.
+---
+# stream
+{
+  "input_tokens": 7,
+  "output_tokens": 6,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_emoji",
+  "billable": true
+}

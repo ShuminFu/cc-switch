@@ -1,0 +1,45 @@
+---
+source: tests/proxy_golden.rs
+description: System text from the top level and system-role messages is merged into systemInstruction; a rich JSON schema is sent as parametersJsonSchema without $schema.
+---
+{
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "Top level system.\n\nMessage system.\n\nBlock system."
+      }
+    ]
+  },
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Hello"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "search",
+          "description": "Search data",
+          "parametersJsonSchema": {
+            "additionalProperties": false,
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

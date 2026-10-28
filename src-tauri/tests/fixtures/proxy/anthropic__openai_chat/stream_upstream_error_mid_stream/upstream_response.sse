@@ -1,0 +1,2 @@
+data: {"id":"chatcmpl_err","model":"gpt-4o","choices":[{"delta":{"content":"partial"}}]}
+

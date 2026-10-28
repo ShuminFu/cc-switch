@@ -1,0 +1,2 @@
+intent = "cachedContentTokenCount is split out of promptTokenCount into cache_read_input_tokens."
+source_commit = "6330783"

@@ -18,6 +18,8 @@ doctest = false
 [features]
 default = []
 test-hooks = []
+# Exposes `proxy::providers::testkit` (golden bridge fixtures) to integration tests.
+testkit = []
 
 [build-dependencies]
 tauri-build = { version = "2.4.0", features = [] }
@@ -111,3 +113,6 @@ strip = "symbols"
 [dev-dependencies]
 serial_test = "3"
 tempfile = "3"
+insta = "1"
+# Self dev-dependency: integration tests (tests/proxy_golden.rs) link the lib with `testkit` enabled.
+cc-switch = { path = ".", features = ["testkit"] }

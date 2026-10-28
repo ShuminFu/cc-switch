@@ -1,0 +1,4 @@
+data: {"id":"chatcmpl_no_done","model":"gpt-4o","choices":[{"delta":{"content":"hello"}}]}
+
+data: {"id":"chatcmpl_no_done","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}
+

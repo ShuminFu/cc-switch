@@ -1,0 +1,23 @@
+---
+source: tests/proxy_golden.rs
+description: A blocked prompt maps to a refusal with an explanatory text block.
+---
+# non-stream
+{
+  "id": "resp_3",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Request blocked by Gemini safety filters: SAFETY"
+    }
+  ],
+  "model": "gemini-2.5-flash",
+  "stop_reason": "refusal",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 4,
+    "output_tokens": 0
+  }
+}

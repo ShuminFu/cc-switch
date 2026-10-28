@@ -1,0 +1,3 @@
+intent = "The leading x-anthropic-billing-header system part and every cache_control marker are stripped from the upstream request."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform.rs::tests::test_anthropic_to_openai_strips_all_cache_control"

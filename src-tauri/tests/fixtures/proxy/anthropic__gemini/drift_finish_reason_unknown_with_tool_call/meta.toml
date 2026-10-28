@@ -1,0 +1,7 @@
+intent = "Known drift: for an unrecognised finishReason (here MALFORMED_FUNCTION_CALL) with a tool call, streaming_gemini::map_finish_reason falls back to tool_use while transform_gemini::map_finish_reason falls back to end_turn. Fixing the drift must update expected_diff."
+source_commit = "6330783"
+
+[parity]
+expected_diff = [
+    "stop_reason: stream=\"tool_use\" non_stream=\"end_turn\"",
+]

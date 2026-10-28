@@ -1,0 +1,12 @@
+data: {"id":"chatcmpl_tt","model":"gpt-4o","choices":[{"delta":{"content":"Let me check."}}]}
+
+data: {"id":"chatcmpl_tt","model":"gpt-4o","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_w","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}
+
+data: {"id":"chatcmpl_tt","model":"gpt-4o","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"location\":"}}]}}]}
+
+data: {"id":"chatcmpl_tt","model":"gpt-4o","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Tokyo\"}"}}]}}]}
+
+data: {"id":"chatcmpl_tt","model":"gpt-4o","choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":40,"completion_tokens":12,"prompt_tokens_details":{"cached_tokens":32}}}
+
+data: [DONE]
+

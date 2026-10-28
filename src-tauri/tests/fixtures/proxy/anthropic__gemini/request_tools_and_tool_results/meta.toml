@@ -1,0 +1,3 @@
+intent = "tool_use/tool_result history maps to functionCall/functionResponse, tools to functionDeclarations and a forced tool_choice to allowedFunctionNames."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/transform_gemini.rs::tests::anthropic_to_gemini_maps_tools_and_tool_results"

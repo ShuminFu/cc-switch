@@ -1,0 +1,12 @@
+data: {"id":"chatcmpl_reason","model":"deepseek-v4-flash","choices":[{"delta":{"reasoning_content":"Add the "}}]}
+
+data: {"id":"chatcmpl_reason","model":"deepseek-v4-flash","choices":[{"delta":{"reasoning_content":"numbers."}}]}
+
+data: {"id":"chatcmpl_reason","model":"deepseek-v4-flash","choices":[{"delta":{"content":"2+2 = 4"}}]}
+
+data: {"id":"chatcmpl_reason","model":"deepseek-v4-flash","choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":9}}
+
+data: [DONE]
+

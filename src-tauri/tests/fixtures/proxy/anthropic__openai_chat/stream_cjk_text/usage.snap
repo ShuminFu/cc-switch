@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: Multi-byte CJK text deltas survive every chunk split without U+FFFD replacement characters.
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 2,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_3",
+  "billable": true
+}

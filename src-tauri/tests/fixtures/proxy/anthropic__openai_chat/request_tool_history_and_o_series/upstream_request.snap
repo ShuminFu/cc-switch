@@ -1,0 +1,34 @@
+---
+source: tests/proxy_golden.rs
+description: Assistant tool_use and user tool_result history map to tool_calls and tool messages; o-series models get max_completion_tokens and reasoning_effort from the thinking budget.
+---
+{
+  "model": "o4-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Weather in Tokyo?"
+    },
+    {
+      "role": "assistant",
+      "content": "Let me check",
+      "tool_calls": [
+        {
+          "id": "call_123",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"location\":\"Tokyo\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_123",
+      "content": "Sunny, 25°C"
+    }
+  ],
+  "max_completion_tokens": 4096,
+  "reasoning_effort": "low"
+}

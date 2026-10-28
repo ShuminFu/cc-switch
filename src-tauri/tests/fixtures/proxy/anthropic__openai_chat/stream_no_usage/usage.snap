@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "A stream without any usage still emits a message_delta carrying zero usage, and nothing is billed."
+---
+# stream
+null

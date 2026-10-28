@@ -1,0 +1,3 @@
+intent = "CJK text in a JSON payload survives every byte split."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::preserves_utf8_boundaries_when_json_payload_spans_chunks"

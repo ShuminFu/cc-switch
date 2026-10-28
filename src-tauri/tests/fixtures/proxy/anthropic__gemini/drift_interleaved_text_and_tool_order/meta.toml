@@ -1,0 +1,7 @@
+intent = "Known trade-off: streaming emits all tool_use blocks after the merged text, while non-stream keeps the original part order (see the comment above the tool_use loop in streaming_gemini.rs)."
+source_commit = "6330783"
+
+[parity]
+expected_diff = [
+    "content: stream=[{\"type\":\"text\",\"text\":\"First. Second.\"},{\"type\":\"tool_use\",\"input\":{},\"name\":\"a\"},{\"type\":\"tool_use\",\"input\":{},\"name\":\"b\"}] non_stream=[{\"type\":\"text\",\"text\":\"First. \"},{\"type\":\"tool_use\",\"input\":{},\"name\":\"a\"},{\"type\":\"text\",\"text\":\"Second.\"},{\"type\":\"tool_use\",\"input\":{},\"name\":\"b\"}]",
+]

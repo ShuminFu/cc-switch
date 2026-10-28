@@ -1,0 +1,2 @@
+intent = "A trailing [DONE] sentinel from OpenAI-compatible Gemini relays ends parsing cleanly."
+source_commit = "6330783"

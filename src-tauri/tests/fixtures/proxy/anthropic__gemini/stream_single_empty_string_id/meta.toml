@@ -1,0 +1,3 @@
+intent = "A single functionCall with id \"\" gets a synthesized id."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming_gemini.rs::tests::single_empty_string_id_tool_call_gets_synthesized_id"

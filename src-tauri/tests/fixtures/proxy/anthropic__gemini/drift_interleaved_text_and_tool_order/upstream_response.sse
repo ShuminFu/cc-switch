@@ -1,0 +1,2 @@
+data: {"responseId":"r_order","modelVersion":"gemini-2.5-pro","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"First. "},{"functionCall":{"id":"call_a","name":"a","args":{}}},{"text":"Second."},{"functionCall":{"id":"call_b","name":"b","args":{}}}]}}],"usageMetadata":{"promptTokenCount":9,"totalTokenCount":15}}
+

@@ -1,0 +1,6 @@
+intent = "A stream that ends before any finish_reason emits no success terminal events (no message_delta, no message_stop)."
+source_commit = "6330783"
+ported_from = "src/proxy/providers/streaming.rs::tests::test_stream_end_without_finish_reason_does_not_emit_success_terminal_events"
+
+[invariants]
+terminal = "none"

@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: cachedContentTokenCount is split out of promptTokenCount into cache_read_input_tokens.
+---
+# stream
+{
+  "input_tokens": 20,
+  "output_tokens": 5,
+  "cache_read_tokens": 100,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "r_cache",
+  "billable": true
+}

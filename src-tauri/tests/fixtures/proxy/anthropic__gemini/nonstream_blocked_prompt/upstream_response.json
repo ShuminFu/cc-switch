@@ -1,0 +1,11 @@
+{
+  "responseId": "resp_3",
+  "modelVersion": "gemini-2.5-flash",
+  "usageMetadata": {
+    "promptTokenCount": 4,
+    "totalTokenCount": 4
+  },
+  "promptFeedback": {
+    "blockReason": "SAFETY"
+  }
+}

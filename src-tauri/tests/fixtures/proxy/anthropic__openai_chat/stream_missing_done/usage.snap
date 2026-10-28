@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "A stream that ends after finish_reason without [DONE] is still finalized with message_delta and message_stop."
+---
+# stream
+{
+  "input_tokens": 3,
+  "output_tokens": 1,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_no_done",
+  "billable": true
+}

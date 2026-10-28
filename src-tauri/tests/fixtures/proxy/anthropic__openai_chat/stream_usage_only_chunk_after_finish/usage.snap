@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A usage-only chunk (empty choices) after finish_reason updates the pending message_delta; cached tokens are split out of input.
+---
+# stream
+{
+  "input_tokens": 13212,
+  "output_tokens": 79,
+  "cache_read_tokens": 100,
+  "cache_creation_tokens": 0,
+  "model": "glm-5.1",
+  "message_id": "chatcmpl_split",
+  "billable": true
+}

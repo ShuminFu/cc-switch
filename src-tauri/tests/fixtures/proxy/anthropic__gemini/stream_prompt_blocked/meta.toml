@@ -1,0 +1,2 @@
+intent = "promptFeedback.blockReason yields a synthesized explanatory text block and stop_reason refusal."
+source_commit = "6330783"

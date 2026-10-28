@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: prompt_tokens includes cache read and cache write; the client sees fresh input = prompt - read - write.
+---
+# stream
+{
+  "input_tokens": 100,
+  "output_tokens": 50,
+  "cache_read_tokens": 600,
+  "cache_creation_tokens": 300,
+  "model": "glm-5.1",
+  "message_id": "chatcmpl_cc",
+  "billable": true
+}

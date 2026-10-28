@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A blocked prompt maps to a refusal with an explanatory text block.
+---
+# non-stream
+{
+  "input_tokens": 4,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-flash",
+  "message_id": "resp_3",
+  "billable": true
+}
