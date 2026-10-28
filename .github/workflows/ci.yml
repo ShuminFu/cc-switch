@@ -5,6 +5,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Called by release.yml so a tag is only released after CI passes on its SHA.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}

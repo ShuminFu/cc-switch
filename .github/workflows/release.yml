@@ -13,7 +13,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Run the full CI suite on the tag SHA first; release (and everything that
+  # depends on it) is skipped unless CI is green.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release:
+    needs: ci
     runs-on: ${{ matrix.os }}
     environment: release
     strategy:

@@ -1,6 +1,6 @@
 # CCS-023: [ci] Require green CI on the tag SHA before release builds
 
-**Status:** Open · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p1-high`, `area:ci`
+**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p1-high`, `area:ci`
 
 > **Ticket key:** `p0-ci-release-gated` · **Phase:** P0 · **Priority:** p1-high · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -20,3 +20,18 @@ Add `workflow_call:` to ci.yml. In release.yml, add a `ci` job (`uses: ./.github
 
 ## Dependencies
 None.
+
+## Implementation notes
+**Summary.** `ci.yml` now also triggers on `workflow_call:`. `release.yml` has a new `ci` job (`uses: ./.github/workflows/ci.yml`, `permissions: contents: read`) that runs the full CI suite (frontend checks, the Linux/Windows/macOS backend matrix, and the report-only coverage jobs) on the tag SHA. `release` now has `needs: ci`. `publish-release` needs `release` and `assemble-latest-json` needs `publish-release`, and none of them uses `always()`. So a red CI run skips the whole release chain. The report-only coverage jobs keep `continue-on-error: true`, so they never block a release.
+
+**Files.** `.github/workflows/ci.yml`, `.github/workflows/release.yml`, this ticket.
+
+**Commits.** See `git log --grep CCS-023` (code and ticket in one commit).
+
+**Verification.**
+- `actionlint` v1.7.7 (built locally with `go install`): run as `actionlint -config-file <cfg> -shellcheck= .github/workflows/ci.yml .github/workflows/release.yml` → no findings, exit 0. `<cfg>` only lists `windows-11-arm` as a known runner label, because v1.7.7 predates that GitHub-hosted label. shellcheck is not installed, so the shell-script checks were off.
+- `python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))"` parses both files. A structural check confirms that the ci triggers are `pull_request, push, workflow_call` and that the needs chain is `ci -> release -> publish-release -> assemble-latest-json`.
+
+**Remaining (cannot be done from this environment).**
+- Fork test: push a `v*` tag on a commit with a failing test and confirm that `release` and `publish-release` are skipped. This needs a GitHub fork with Actions enabled.
+- Required reviewers on the `release` environment: a repository setting (Settings → Environments → `release` → Required reviewers). A maintainer has to set it.
