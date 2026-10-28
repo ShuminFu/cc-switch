@@ -41,7 +41,7 @@ None.
 | `src-tauri/src/proxy/` | 78.60% | 79.36% |
 | `src-tauri/src/database/` | 78.84% | 42.58% |
 | Rust total | 70.15% | 62.77% |
-| Frontend `src/` total | 52.68% | 38.26% |
+| Frontend `src/` total | 52.47% | 38.33% |
 
 **Commits:** 933c8ef (implementation), plus the follow-up commit recording these notes.
 
@@ -52,5 +52,7 @@ None.
 - `npx vitest run tests/scripts` -> 3/3 passed.
 - `pnpm typecheck`, `pnpm lint`, `pnpm format:check` -> pass. `pnpm test:unit` -> pass (two `tests/integration` cases timed out once while the instrumented cargo build saturated the CPU; re-run green 9/9).
 - `python3 -c "import yaml..." .github/workflows/ci.yml` -> ok; `actionlint .github/workflows/ci.yml` -> no findings.
+
+**Review** (fix(ci): review follow-up for CCS-019): (1) `coverage.exclude: ["src/**/*.d.ts"]` replaced vitest's default excludes, so colocated `src/**/*.test.ts` files were counted as covered source; it now spreads `coverageConfigDefaults.exclude`. (2) vitest skips writing the report when any test fails (`reportOnFailure` defaults to false), so one flaky test would leave the report-only job with no artifact; set `reportOnFailure: true`. (3) Under v8 instrumentation `tests/integration/App.test.tsx` reproducibly exceeded the 5s default test timeout (5.1s), so `test:coverage` now passes `--testTimeout=20000`. Frontend baseline refreshed (52.68% -> 52.47% lines, `src/lib` 34.23% -> 33.51%); the Rust baseline is unchanged but flagged in perf-baseline.json as measured with the parallel lane's uncommitted proxy test changes in the tree. Re-verified: `pnpm test:coverage` 79 files / 530 tests green with report written, `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test:unit`, `npx vitest run tests/scripts` pass. Status stays Partial (PR-run artifact check still needs GitHub Actions).
 
 **Remaining:** confirm on the first PR run that both artifacts upload and the job summaries render (needs GitHub Actions).

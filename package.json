@@ -16,7 +16,7 @@
     "format:check": "prettier --check \"{src,tests}/**/*.{js,jsx,ts,tsx,css,json}\"",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest watch",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage --testTimeout=20000"
   },
   "keywords": [],
   "author": "Jason Young",

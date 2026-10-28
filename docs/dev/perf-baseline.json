@@ -6,6 +6,7 @@
     "platform": "linux-x86_64",
     "rust": {
       "tool": "cargo-llvm-cov 0.9.1 (rust 1.95)",
+      "_caveat": "Measured on a working tree that also held uncommitted proxy test changes from a parallel lane; refresh from the first CI artifact.",
       "dirs": {
         "src-tauri/src/proxy": {
           "files": 57,
@@ -45,7 +46,7 @@
       }
     },
     "frontend": {
-      "tool": "vitest 2.1.9 + @vitest/coverage-v8 (include: src/**/*.{ts,tsx})",
+      "tool": "vitest 2.1.9 + @vitest/coverage-v8 (include: src/**/*.{ts,tsx}, default excludes so colocated src tests are not counted)",
       "dirs": {
         "src/components": {
           "files": 195,
@@ -62,18 +63,18 @@
           "functions": [41, 104]
         },
         "src/lib": {
-          "files": 53,
-          "lines_pct": 34.23,
-          "lines": [1258, 3675],
+          "files": 52,
+          "lines_pct": 33.51,
+          "lines": [1218, 3635],
           "functions_pct": 22.7,
           "functions": [96, 423]
         },
         "total": {
-          "files": 319,
-          "lines_pct": 52.68,
-          "lines": [33030, 62696],
-          "functions_pct": 38.26,
-          "functions": [595, 1555]
+          "files": 315,
+          "lines_pct": 52.47,
+          "lines": [32750, 62413],
+          "functions_pct": 38.33,
+          "functions": [596, 1555]
         }
       }
     }
