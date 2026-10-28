@@ -5,6 +5,27 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Changes merged to `main` after v3.17.0 that have not shipped in a tagged release yet. In particular, **Grok Build support is available on `main` only** — the README already lists it among the supported tools, but v3.17.0 builds do not include it.
+
+### Added
+
+- **First-Class Grok Build Support**: Grok Build (xAI's coding CLI) becomes the eighth managed tool. CC Switch reads and writes its live `~/.grok/config.toml` (with a directory override in Settings), adds a dedicated Grok Build provider form and app-switcher tab, and wires Grok Build into the unified MCP and Skills panels, the session manager, deep-link import, the tray, the usage dashboard, and CLI lifecycle management (install/update via `npm i -g @xai-official/grok@latest`). Grok Build can also be taken over by the local proxy with its own Responses route and an independent proxy configuration. Two schema migrations ship with it: v13→v14 adds a Grok Build row to `proxy_config`, and v14→v15 adds Grok Build enablement flags for Skills and MCP servers. (#5453)
+
+### Fixed
+
+- **Tray Follows the System Locale on First Run**: When no language has been chosen yet, the tray menu now detects the OS locale (zh-TW/HK/MO/Hant → Traditional Chinese, other zh → Simplified Chinese, ja → Japanese, en → English) instead of always falling back to Simplified Chinese, matching the frontend's initial-language detection. An explicitly saved language still wins. (#4355)
+- **Deleted Default Skill Repositories Stay Deleted**: Removing one of the built-in default Skills repositories is now persisted, along with the default-repository initialization state, so the repository is no longer re-added on the next launch. (#5356)
+- **Reasoning Forwarded on the Codex Responses→Chat Bridge**: The Codex Chat Completions bridge now attaches reasoning content to the following assistant message, including trailing reasoning that follows embedded reasoning, so reasoning-capable upstreams receive the full reasoning context. (#5508)
+- **Streamed Codex Tool Calls Keep Their Identity and Order**: Non-empty call IDs are kept across continuation deltas, parallel tool calls are released in Chat index order even when identity fields arrive late, and valid sparse or later calls are preserved during finalization. (#5310)
+- **Function Parameters Normalized for Strict OpenAI-Compatible Providers**: Responses tools whose `parameters` carry `type: null` (or are null entirely) are normalized to `{"type": "object", ...}` before being converted to Chat tools, fixing HTTP 400 errors from strict providers such as DeepSeek. (#4706, closes #4705)
+- **Missing Routing-Required Toast Translation**: The routing-required message for Anthropic-format Codex providers (`proxyReasonAnthropicMessages`) is now localized in all four locales instead of showing a Chinese default in non-Chinese UIs.
+
+### CI
+
+- **Backend Checks on Windows and macOS**: The backend CI job now runs on an Ubuntu/Windows/macOS matrix, and the platform-gated tests and Windows-only clippy warnings it uncovered were repaired. (#5138)
+
 ## [3.17.0] - 2026-07-13
 
 Development since v3.16.5 is headlined by project profiles — named snapshots of provider/MCP/Skills/prompt state, switchable per scope from a new header switcher or the tray (schema v12) — and a deep Codex push: official ChatGPT-subscription sessions can now route through the local proxy takeover with a corrected client identity, gpt-5.6 lands across context-window injection and Sol/Terra/Luna pricing with 1.25× cache-write rates, and a native Anthropic Messages upstream joins the Codex format options. A proxy-correctness wave makes the Responses↔Anthropic bridges fail closed and round-trip reasoning/tool results losslessly, strengthens prompt-cache breakpoint injection, and fixes cache-write accounting across historical token semantics (schema v13); a config.toml hardening batch stops deleted MCP servers from resurrecting, fails MCP sync closed on unparseable files, extends switch-time common-config autosync to Codex, and moves the common-config merge to backend toml_edit. Usage tooling gains Zhipu team-plan quota queries, Codex sub-agent and free-plan accounting, and transient-failure retry, while Kimi For Coding's 256K window finally takes effect — rounded out by a Codex default-model form field, renamed-session titles, OpenCode form and live-sync fixes, and preset updates (SudoCode sponsorship, LongCat-2.0, GPT-5.6 defaults, Hunyuan Hy3 pricing).
