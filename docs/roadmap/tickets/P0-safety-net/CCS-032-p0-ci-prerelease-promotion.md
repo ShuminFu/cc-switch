@@ -1,6 +1,6 @@
 # CCS-032: [ci] Document or automate promoting a prerelease to latest for the updater
 
-**Status:** Open · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-prerelease-promotion` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -22,3 +22,63 @@ Verified finding ci-prerelease-updater. Every release is created with prerelease
 
 ## Dependencies
 None.
+
+## Implementation notes
+
+**Status rationale:** Partial — everything that can be done in-repo is done; the
+second acceptance item (a real promotion on a fork followed by `curl -sIL`)
+needs a GitHub fork with a published release and cannot run in this sandbox.
+
+### Summary
+- `docs/dev/RELEASING.md`: maintainer release checklist — why promotion is needed
+  (prerelease + `releases/latest` updater endpoint), cut / smoke-test / promote /
+  verify / roll back, including `gh release edit vX.Y.Z --prerelease=false --latest`.
+  Linked from `CONTRIBUTING.md` (new "Releasing" / "发布流程" sections).
+- `.github/workflows/promote-release.yml`: `workflow_dispatch` (input `tag`)
+  `promote-release` job, `contents: write`, shares concurrency group
+  `release-publish-<tag>` (cancel-in-progress: false) with release.yml so it waits
+  for an in-progress publish. Runs the script, then curls
+  `releases/latest/download/latest.json` and requires a `Location:` to
+  `releases/download/<tag>/latest.json` (retries 5x). Input is passed via `env`,
+  never interpolated into `run:`.
+- `scripts/promote-release.sh <repo> <tag>`: refuses non-stable tags (`-beta`/`-rc`
+  etc.), missing or draft releases, and releases whose `latest.json` asset is
+  missing or has a different `version`; then `gh release edit --prerelease=false
+  --latest` and checks `gh api repos/<repo>/releases/latest` returns the tag.
+- `release.yml`: comment at `prerelease: true` pointing to the promotion flow.
+  The optional "set prerelease from `contains(github.ref_name, '-')`" was not
+  adopted: keeping every build a prerelease preserves the manual smoke-test gate
+  before the updater ships it (a human decision may change this later).
+
+### Files
+- `.github/workflows/promote-release.yml` (new)
+- `.github/workflows/release.yml`
+- `scripts/promote-release.sh` (new)
+- `docs/dev/RELEASING.md` (new)
+- `CONTRIBUTING.md`
+- `tests/ci/promoteRelease.test.ts` (new)
+
+### Commits
+- a82ad44 ci(release): add a promote-release workflow and document promotion (CCS-032)
+
+### Verification
+- `pnpm exec vitest run tests/ci` → 6 files, 66 tests passed (new
+  `promoteRelease.test.ts`: 14 tests — script against a stub `gh` for the happy
+  path, non-stable tags, missing/draft release, missing/mismatched latest.json,
+  releases/latest not switching; plus wiring checks for the workflow, concurrency
+  group, updater endpoint, RELEASING.md and the CONTRIBUTING.md link). The suite
+  fails before this change (files absent).
+- `pnpm typecheck` → clean; `pnpm format:check` → clean; `pnpm test:unit` → 85
+  files, 596 tests passed.
+- YAML: `python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))"` passes for
+  promote-release.yml and release.yml. actionlint / shellcheck not installed.
+- Redirect check validated against upstream: `curl -sSIL
+  https://github.com/farion1231/cc-switch/releases/latest/download/latest.json`
+  first `Location:` is `.../releases/download/v4.0.21/latest.json`, matching the
+  pattern the workflow asserts.
+
+### Remaining
+- [ ] On a fork: tag a release, run **Promote Release** with the tag, and confirm
+  `curl -sIL https://github.com/<fork>/releases/latest/download/latest.json`
+  redirects to the new tag (the workflow's "Verify updater endpoint" step does
+  this automatically).
