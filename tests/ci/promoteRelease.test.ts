@@ -172,10 +172,13 @@ describe("prerelease promotion wiring", () => {
     expect(promote).toContain("releases/latest/download/latest.json");
   });
 
-  it("queues behind an in-progress release publish of the same tag", () => {
+  // 同组新排队的任务会取消已在等待的任务：提升不能加入 release-publish-<tag>，
+  // 否则可能取消等待中的 assemble-latest-json
+  it("never joins release.yml's publish concurrency group", () => {
     expect(release).toContain("group: release-publish-${{ github.ref_name }}");
+    expect(promote).not.toMatch(/group: release-publish-/);
     expect(promote).toMatch(
-      /group: release-publish-\$\{\{ inputs\.tag \}\}\s*\n\s+cancel-in-progress: false/,
+      /group: promote-release-\$\{\{ inputs\.tag \}\}\s*\n\s+cancel-in-progress: false/,
     );
   });
 

@@ -53,8 +53,11 @@ workflow_, enter the tag (e.g. `v3.5.0`). The workflow
 - checks `releases/latest` now reports the tag, then checks the updater URL
   redirects to `releases/download/vX.Y.Z/latest.json`.
 
-It shares the `release-publish-<tag>` concurrency group with `release.yml`, so
-if started while the release is still publishing it waits instead of racing.
+If it is started before `assemble-latest-json` has uploaded `latest.json`, the
+script refuses and changes nothing; re-run it once the Release workflow is
+green. It deliberately does not join `release.yml`'s `release-publish-<tag>`
+concurrency group: a newly queued job cancels any job already pending in its
+group, which could cancel a pending `assemble-latest-json`.
 
 **Option B — by hand:**
 

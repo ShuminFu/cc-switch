@@ -19,9 +19,11 @@ jobs:
   promote-release:
     name: Promote ${{ inputs.tag }} to latest
     runs-on: ubuntu-22.04
-    # 与 release.yml 的发布阶段同组：发布或 latest.json 上传仍在进行时排队等待，而不是提前提升
+    # 不加入 release.yml 的 release-publish-<tag> 组：同组新排队的任务会取消已在等待的任务，
+    # 可能把等待中的 assemble-latest-json 取消掉。发布未完成时由脚本的 latest.json 检查拒绝提升；
+    # 这里只防止同一标签的两次提升并发执行
     concurrency:
-      group: release-publish-${{ inputs.tag }}
+      group: promote-release-${{ inputs.tag }}
       cancel-in-progress: false
     steps:
       - name: Checkout

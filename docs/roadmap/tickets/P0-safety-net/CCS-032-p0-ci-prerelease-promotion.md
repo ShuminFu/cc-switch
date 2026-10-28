@@ -35,9 +35,8 @@ needs a GitHub fork with a published release and cannot run in this sandbox.
   verify / roll back, including `gh release edit vX.Y.Z --prerelease=false --latest`.
   Linked from `CONTRIBUTING.md` (new "Releasing" / "发布流程" sections).
 - `.github/workflows/promote-release.yml`: `workflow_dispatch` (input `tag`)
-  `promote-release` job, `contents: write`, shares concurrency group
-  `release-publish-<tag>` (cancel-in-progress: false) with release.yml so it waits
-  for an in-progress publish. Runs the script, then curls
+  `promote-release` job, `contents: write`, concurrency group
+  `promote-release-<tag>` (cancel-in-progress: false; see Review). Runs the script, then curls
   `releases/latest/download/latest.json` and requires a `Location:` to
   `releases/download/<tag>/latest.json` (retries 5x). Input is passed via `env`,
   never interpolated into `run:`.
@@ -76,6 +75,21 @@ needs a GitHub fork with a published release and cannot run in this sandbox.
   https://github.com/farion1231/cc-switch/releases/latest/download/latest.json`
   first `Location:` is `.../releases/download/v4.0.21/latest.json`, matching the
   pattern the workflow asserts.
+
+### Review
+Verified both commits against the spec: RELEASING.md exists, documents
+`gh release edit vX.Y.Z --prerelease=false --latest` and is linked from both
+language sections of CONTRIBUTING.md; the workflow_dispatch job, the script's
+refusal checks and the redirect check are correct (`latest.json` `version` is
+`${TAG#v}` in generate-latest-json.sh, matching the script). One defect fixed:
+the job originally joined release.yml's `release-publish-<tag>` group. In
+GitHub Actions a newly queued job cancels any job already *pending* in the same
+group, so a promotion queued while `assemble-latest-json` was waiting (e.g. a
+second promote dispatched during the first) could cancel the latest.json
+upload, and a pending promotion was itself cancelled rather than "waiting" when
+assemble queued. The job now uses its own `promote-release-<tag>` group; an
+early promotion is refused by the script's latest.json check instead. Docs and
+the wiring test were updated. Status stays Partial (fork check still manual).
 
 ### Remaining
 - [ ] On a fork: tag a release, run **Promote Release** with the tag, and confirm
