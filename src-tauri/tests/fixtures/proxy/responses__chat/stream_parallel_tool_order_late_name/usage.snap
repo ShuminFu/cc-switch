@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 6d316c0: parallel tool calls are released in Chat index order even when the earlier call's name arrives after the later call is complete."
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "deepseek-v4-pro",
+  "message_id": null,
+  "billable": false
+}

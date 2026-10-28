@@ -1,0 +1,3 @@
+intent = "Regression 650905a: an HTTP 2xx body with status failed is a conversion error carrying the upstream message, not an empty success."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_responses_failed_status_is_not_silent_empty_success"

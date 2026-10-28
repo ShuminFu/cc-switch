@@ -1,0 +1,8 @@
+intent = "An upstream transport error after partial text ends the stream with response.failed, never response.completed."
+source_commit = "a738206"
+
+[options]
+upstream_error = "connection reset"
+
+[invariants]
+terminal = "error"

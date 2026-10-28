@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression f991726: nested input_tokens_details.cache_write_tokens becomes Anthropic cache_creation_input_tokens, so input + cache_read + cache_creation equals the upstream input total."
+---
+# stream
+{
+  "input_tokens": 50,
+  "output_tokens": 10,
+  "cache_read_tokens": 30,
+  "cache_creation_tokens": 20,
+  "model": "gpt-5.6",
+  "message_id": "resp_cache",
+  "billable": true
+}

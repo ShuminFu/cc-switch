@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 27ce0a5: malformed arguments on a completed function_call are a conversion error, never a tool_use with guessed input."
+---
+# non-stream
+null

@@ -1,0 +1,21 @@
+---
+source: tests/proxy_golden.rs
+description: "The same text reply converts to the same Anthropic content, stop_reason and usage in stream and non-stream mode."
+---
+{
+  "model": "gpt-5.4",
+  "instructions": "Be brief.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Say hi"
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 256,
+  "stream": true
+}

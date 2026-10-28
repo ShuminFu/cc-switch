@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A non-stream tool_use block becomes a function_call item with JSON arguments.
+---
+# non-stream
+{
+  "input_tokens": 11,
+  "output_tokens": 9,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude",
+  "message_id": null,
+  "billable": true
+}

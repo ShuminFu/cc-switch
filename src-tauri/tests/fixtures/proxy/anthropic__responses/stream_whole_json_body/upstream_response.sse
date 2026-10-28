@@ -1,0 +1,1 @@
+{"id":"resp_json","status":"completed","model":"gpt-5","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":4,"output_tokens":1}}

@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: An upstream transport error before any output becomes response.failed without response.completed.
+---
+# stream
+response.failed {"type":"response.failed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"failed","model":"","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}},"error":{"message":"Stream error: boom","type":"stream_error"}}}

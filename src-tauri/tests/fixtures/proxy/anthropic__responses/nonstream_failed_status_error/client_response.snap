@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: an HTTP 2xx body with status failed is a conversion error carrying the upstream message, not an empty success."
+---
+# non-stream
+ERROR: 格式转换错误: Responses upstream failed: backend exploded

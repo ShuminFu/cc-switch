@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: A stream that ends without output or finish_reason is response.failed.
+---
+# stream
+null

@@ -1,0 +1,3 @@
+intent = "Regression 650905a: unsigned thinking is not replayed as encrypted reasoning; only the message item is returned."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/transform_codex_anthropic.rs::tests::test_unsigned_thinking_is_not_replayed_as_encrypted_reasoning"

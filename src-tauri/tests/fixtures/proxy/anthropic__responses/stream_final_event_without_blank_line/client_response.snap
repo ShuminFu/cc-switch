@@ -1,0 +1,8 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a final response.completed that is not followed by a blank line is still processed exactly once (no stream_truncated error)."
+---
+# stream
+message_start {"type":"message_start","message":{"id":"resp_1","type":"message","role":"assistant","model":"gpt-5","usage":{"input_tokens":0,"output_tokens":0}}}
+message_delta {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":0,"output_tokens":0}}
+message_stop {"type":"message_stop"}

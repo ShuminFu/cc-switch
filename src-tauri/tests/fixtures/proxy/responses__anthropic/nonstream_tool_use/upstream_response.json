@@ -1,0 +1,25 @@
+{
+  "id": "msg_tool",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude",
+  "content": [
+    {
+      "type": "text",
+      "text": "Checking."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_1",
+      "name": "get_weather",
+      "input": {
+        "city": "Tokyo"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "usage": {
+    "input_tokens": 11,
+    "output_tokens": 9
+  }
+}

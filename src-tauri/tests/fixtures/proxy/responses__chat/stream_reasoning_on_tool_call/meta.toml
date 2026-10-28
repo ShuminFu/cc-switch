@@ -1,0 +1,3 @@
+intent = "reasoning_content before a tool call becomes a reasoning item and is also attached to the function_call item for replay."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::preserves_reasoning_content_on_streamed_tool_call_items"

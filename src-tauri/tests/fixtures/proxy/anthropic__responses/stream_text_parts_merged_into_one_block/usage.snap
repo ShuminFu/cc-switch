@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Two output_text content parts of one message item are merged into a single Anthropic text block (one start, one stop)."
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 2,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5.4",
+  "message_id": "resp_merge",
+  "billable": true
+}

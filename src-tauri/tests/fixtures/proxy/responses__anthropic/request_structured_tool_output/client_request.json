@@ -1,0 +1,36 @@
+{
+  "model": "c",
+  "input": [
+    {
+      "type": "function_call",
+      "call_id": "c1",
+      "name": "inspect",
+      "arguments": "{}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "c1",
+      "output": [
+        {
+          "type": "input_text",
+          "text": "[cc-switch:tool-result-error]"
+        },
+        {
+          "type": "input_text",
+          "text": "failed"
+        },
+        {
+          "type": "input_file",
+          "file_url": "https://example.com/log.pdf",
+          "filename": "log.pdf"
+        },
+        {
+          "type": "future_part",
+          "payload": {
+            "x": 1
+          }
+        }
+      ]
+    }
+  ]
+}

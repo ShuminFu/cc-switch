@@ -1,0 +1,15 @@
+---
+source: tests/proxy_golden.rs
+description: "CJK and 4-byte emoji text survive every chunk split, including splits inside a character."
+---
+# stream
+response.created {"type":"response.created","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":6,"output_tokens":0,"total_tokens":6,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.in_progress {"type":"response.in_progress","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":6,"output_tokens":0,"total_tokens":6,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.output_item.added {"type":"response.output_item.added","output_index":0,"item":{"id":"[generated-id:2]","type":"message","status":"in_progress","role":"assistant","content":[]}}
+response.content_part.added {"type":"response.content_part.added","item_id":"[generated-id:2]","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}
+response.output_text.delta {"type":"response.output_text.delta","item_id":"[generated-id:2]","output_index":0,"content_index":0,"delta":"你好，"}
+response.output_text.delta {"type":"response.output_text.delta","item_id":"[generated-id:2]","output_index":0,"content_index":0,"delta":"世界 🌏"}
+response.output_text.done {"type":"response.output_text.done","item_id":"[generated-id:2]","output_index":0,"content_index":0,"text":"你好，世界 🌏"}
+response.content_part.done {"type":"response.content_part.done","item_id":"[generated-id:2]","output_index":0,"content_index":0,"part":{"type":"output_text","text":"你好，世界 🌏","annotations":[]}}
+response.output_item.done {"type":"response.output_item.done","output_index":0,"item":{"id":"[generated-id:2]","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"你好，世界 🌏","annotations":[]}]}}
+response.completed {"type":"response.completed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"completed","model":"claude","output":[{"id":"[generated-id:2]","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"你好，世界 🌏","annotations":[]}]}],"usage":{"input_tokens":6,"output_tokens":5,"total_tokens":11,"output_tokens_details":{"reasoning_tokens":0}}}}

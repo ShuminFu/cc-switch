@@ -1,0 +1,11 @@
+---
+source: tests/proxy_golden.rs
+description: A function_call item with argument deltas becomes a tool_use block with input_json_delta and stop_reason tool_use; usage comes from response.completed.
+---
+# stream
+message_start {"type":"message_start","message":{"id":"resp_1","type":"message","role":"assistant","model":"gpt-4o","usage":{"input_tokens":12,"output_tokens":0}}}
+content_block_start {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_1","name":"get_weather"}}
+content_block_delta {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Tokyo\"}"}}
+content_block_stop {"type":"content_block_stop","index":0}
+message_delta {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":12,"output_tokens":3}}
+message_stop {"type":"message_stop"}

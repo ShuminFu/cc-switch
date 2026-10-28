@@ -1,0 +1,3 @@
+intent = "A Chat call to a Codex custom tool is restored as a custom_tool_call item with custom_tool_call_input events carrying the raw input."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::restores_custom_tool_input_stream_events"

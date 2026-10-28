@@ -1,0 +1,17 @@
+{
+  "id": "resp_bad_args",
+  "status": "completed",
+  "model": "gpt-5.6",
+  "output": [
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "broken_tool",
+      "arguments": "{\"path\":"
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 2
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl_len",
+  "object": "chat.completion",
+  "created": 123,
+  "model": "gpt-5.4",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "partial"
+      },
+      "finish_reason": "length"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 7,
+    "completion_tokens": 16,
+    "total_tokens": 23
+  }
+}

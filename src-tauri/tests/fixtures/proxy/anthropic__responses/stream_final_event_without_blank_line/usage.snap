@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a final response.completed that is not followed by a blank line is still processed exactly once (no stream_truncated error)."
+---
+# stream
+null

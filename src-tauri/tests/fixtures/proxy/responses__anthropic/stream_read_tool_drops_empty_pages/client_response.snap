@@ -1,0 +1,11 @@
+---
+source: tests/proxy_golden.rs
+description: "The Read tool's empty `pages` argument is dropped from the function_call arguments."
+---
+# stream
+response.created {"type":"response.created","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.in_progress {"type":"response.in_progress","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.output_item.added {"type":"response.output_item.added","output_index":0,"item":{"id":"[generated-id:2]","type":"function_call","status":"in_progress","call_id":"toolu_r","name":"Read","arguments":""}}
+response.function_call_arguments.done {"type":"response.function_call_arguments.done","item_id":"[generated-id:2]","output_index":0,"arguments":"{\"file_path\":\"/tmp/x\"}"}
+response.output_item.done {"type":"response.output_item.done","output_index":0,"item":{"id":"[generated-id:2]","type":"function_call","status":"completed","call_id":"toolu_r","name":"Read","arguments":"{\"file_path\":\"/tmp/x\"}"}}
+response.completed {"type":"response.completed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"completed","model":"claude","output":[{"id":"[generated-id:2]","type":"function_call","status":"completed","call_id":"toolu_r","name":"Read","arguments":"{\"file_path\":\"/tmp/x\"}"}],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}

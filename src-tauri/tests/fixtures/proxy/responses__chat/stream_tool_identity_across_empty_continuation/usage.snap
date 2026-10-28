@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 6d316c0: empty id/name fields on continuation deltas (DashScope) do not erase the call_id or name of an already started tool call."
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "deepseek-v4-pro",
+  "message_id": null,
+  "billable": false
+}

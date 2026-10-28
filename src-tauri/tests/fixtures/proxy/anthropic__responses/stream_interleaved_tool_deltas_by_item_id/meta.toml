@@ -1,0 +1,3 @@
+intent = "Argument deltas of two concurrent function_call items are routed to the tool_use block of their own item_id."
+source_commit = "27ce0a5"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_streaming_conversion_interleaved_tool_deltas_by_item_id"

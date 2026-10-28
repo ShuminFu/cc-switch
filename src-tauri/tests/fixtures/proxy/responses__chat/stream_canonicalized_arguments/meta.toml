@@ -1,0 +1,3 @@
+intent = "Streamed tool arguments with whitespace are canonicalized on the done events and in the completed output."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::canonicalizes_streamed_tool_call_arguments_on_done_events"

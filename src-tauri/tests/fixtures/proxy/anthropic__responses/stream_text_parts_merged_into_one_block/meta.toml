@@ -1,0 +1,3 @@
+intent = "Two output_text content parts of one message item are merged into a single Anthropic text block (one start, one stop)."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_streaming_text_parts_are_merged_into_one_text_block"

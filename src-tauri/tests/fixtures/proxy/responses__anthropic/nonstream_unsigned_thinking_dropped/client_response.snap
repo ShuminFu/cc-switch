@@ -1,0 +1,35 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: unsigned thinking is not replayed as encrypted reasoning; only the message item is returned."
+---
+# non-stream
+{
+  "id": "[generated-id:1]",
+  "object": "response",
+  "created_at": "[timestamp]",
+  "status": "completed",
+  "model": "",
+  "output": [
+    {
+      "id": "[generated-id:2]",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "answer",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  }
+}

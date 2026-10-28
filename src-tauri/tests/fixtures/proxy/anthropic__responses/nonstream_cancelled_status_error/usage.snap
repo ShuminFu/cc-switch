@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a cancelled response is an error, not end_turn."
+---
+# non-stream
+null

@@ -1,0 +1,6 @@
+intent = "A stream that ends without output or finish_reason is response.failed."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::stream_end_without_output_or_finish_reason_emits_failed_without_completed"
+
+[invariants]
+terminal = "error"

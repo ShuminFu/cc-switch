@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: An upstream transport error before any output becomes response.failed without response.completed.
+---
+# stream
+null

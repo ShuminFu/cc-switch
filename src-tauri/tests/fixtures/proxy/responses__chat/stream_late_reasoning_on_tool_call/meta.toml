@@ -1,0 +1,7 @@
+intent = "reasoning_content that arrives after the tool call is still attached to the function_call item."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::preserves_late_reasoning_content_on_streamed_tool_call_items"
+
+[invariants]
+skip = ["reasoning_first"]
+skip_reason = "The upstream sends reasoning_content after the tool call; the bridge emits the reasoning item in arrival order (after the function_call) and also attaches the text to the function_call item as reasoning_content for replay."

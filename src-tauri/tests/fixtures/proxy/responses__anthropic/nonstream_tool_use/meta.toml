@@ -1,0 +1,2 @@
+intent = "A non-stream tool_use block becomes a function_call item with JSON arguments."
+source_commit = "a738206"

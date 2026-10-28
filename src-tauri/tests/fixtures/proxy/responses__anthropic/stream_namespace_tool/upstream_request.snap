@@ -1,0 +1,28 @@
+---
+source: tests/proxy_golden.rs
+description: A flattened tool_use name of a namespaced tool is restored to its namespace and inner name.
+---
+{
+  "model": "claude",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "read it"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192,
+  "stream": true,
+  "tools": [
+    {
+      "name": "mcp_files__read",
+      "input_schema": {
+        "type": "object"
+      }
+    }
+  ]
+}

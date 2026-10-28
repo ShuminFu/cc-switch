@@ -1,0 +1,3 @@
+intent = "A flattened tool_use name of a namespaced tool is restored to its namespace and inner name."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_namespace_tool_stream_restores_namespace"

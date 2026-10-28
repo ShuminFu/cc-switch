@@ -1,0 +1,3 @@
+intent = "An Anthropic text stream becomes one Responses message item; input usage from message_start and output usage from message_delta reach response.completed."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_text_stream"

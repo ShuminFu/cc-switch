@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl_tool_reasoning","model":"deepseek-v4-flash","choices":[{"delta":{"reasoning_content":"Need file."}}]}
+
+data: {"id":"chatcmpl_tool_reasoning","model":"deepseek-v4-flash","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file"}}]}}]}
+
+data: {"id":"chatcmpl_tool_reasoning","model":"deepseek-v4-flash","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

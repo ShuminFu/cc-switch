@@ -1,0 +1,2 @@
+data: {"id":"chatcmpl_reset","model":"gpt-5.4","choices":[{"delta":{"content":"partial"}}]}
+

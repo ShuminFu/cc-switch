@@ -1,0 +1,26 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 27ce0a5: an assistant turn holding only a bridge-owned reasoning block is not replayed; only the user turn is sent."
+---
+{
+  "model": "gpt-5.6",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "continue"
+        }
+      ]
+    }
+  ],
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "store": false,
+  "instructions": "",
+  "tools": [],
+  "parallel_tool_calls": false,
+  "stream": true
+}

@@ -1,0 +1,6 @@
+intent = "Regression 650905a: a pre-output response.failed is terminal; a later text delta neither starts a message nor leaks its text."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_late_delta_after_failure_does_not_emit_message_start"
+
+[invariants]
+terminal = "error"

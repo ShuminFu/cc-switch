@@ -1,0 +1,3 @@
+intent = "Regression 650905a: a 2xx error envelope keeps the upstream message in the conversion error."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_responses_error_envelope_preserves_upstream_message"

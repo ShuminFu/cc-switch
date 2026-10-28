@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a 2xx Anthropic error envelope is a conversion error carrying the upstream message."
+---
+# non-stream
+ERROR: 格式转换错误: Anthropic upstream authentication_error: bad key

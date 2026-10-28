@@ -1,0 +1,23 @@
+{
+  "model": "claude",
+  "instructions": "base",
+  "input": [
+    {
+      "role": "system",
+      "content": "system history"
+    },
+    {
+      "role": "developer",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "developer history"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "hi"
+    }
+  ]
+}

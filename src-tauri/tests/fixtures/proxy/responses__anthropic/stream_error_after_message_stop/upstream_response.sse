@@ -1,0 +1,9 @@
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_terminal"}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+event: error
+data: {"type":"error","error":{"message":"late"}}
+

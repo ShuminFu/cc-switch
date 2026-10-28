@@ -1,0 +1,2 @@
+intent = "A non-stream Chat reply with reasoning_content and a tool call becomes a reasoning item followed by a function_call item."
+source_commit = "a738206"

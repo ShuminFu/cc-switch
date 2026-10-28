@@ -1,0 +1,9 @@
+intent = "An upstream transport error before any output becomes response.failed without response.completed."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::stream_error_emits_failed_without_completed"
+
+[options]
+upstream_error = "boom"
+
+[invariants]
+terminal = "error"

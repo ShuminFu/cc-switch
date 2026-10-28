@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: response.failed becomes an Anthropic error event carrying the upstream message, with no message_stop."
+---
+# stream
+null

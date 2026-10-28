@@ -1,0 +1,38 @@
+---
+source: tests/proxy_golden.rs
+description: finish_reason length maps to status incomplete with reason max_output_tokens.
+---
+# non-stream
+{
+  "id": "[generated-id:1]",
+  "object": "response",
+  "created_at": "[timestamp]",
+  "status": "incomplete",
+  "model": "gpt-5.4",
+  "output": [
+    {
+      "id": "[generated-id:2]",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "partial",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 7,
+    "output_tokens": 16,
+    "total_tokens": 23,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "incomplete_details": {
+    "reason": "max_output_tokens"
+  }
+}

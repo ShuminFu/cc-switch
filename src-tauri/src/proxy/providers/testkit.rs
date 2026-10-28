@@ -1,15 +1,19 @@
 //! Golden bridge testkit.
 //!
-//! Drives the Anthropic-facing protocol bridges (`anthropic__openai_chat`,
-//! `anthropic__gemini`) from on-disk fixtures so their behaviour can be pinned
-//! by snapshots and compared before and after a refactor.
+//! Drives the protocol bridges from on-disk fixtures so their behaviour can be
+//! pinned by snapshots and compared before and after a refactor:
+//!
+//! - Anthropic Messages clients: `anthropic__openai_chat`, `anthropic__gemini`,
+//!   `anthropic__responses`;
+//! - OpenAI Responses (Codex) clients: `responses__chat`, `responses__anthropic`.
 //!
 //! Fixture layout (one directory per case):
 //!
 //! ```text
 //! tests/fixtures/proxy/<bridge>/<case>/
 //!   meta.toml                 intent, source, source commit, options, invariants
-//!   client_request.json       optional: Anthropic request sent by the client
+//!   client_request.json       optional: request sent by the client (Anthropic
+//!                             or Responses, per the bridge's client protocol)
 //!   upstream_response.sse     optional: raw upstream SSE body (stream case)
 //!   upstream_response.json    optional: upstream JSON body (non-stream case)
 //!   upstream_request.snap     snapshot: converted upstream request
@@ -28,11 +32,22 @@ use super::transform::{
     anthropic_to_openai_with_reasoning_content, inject_openai_stream_include_usage,
     openai_to_anthropic,
 };
+use super::transform_codex_anthropic::{
+    anthropic_response_to_responses_with_context, responses_request_to_anthropic,
+};
+use super::transform_codex_chat::{
+    build_codex_tool_context_from_request, chat_completion_to_response_with_context,
+    responses_to_chat_completions_with_reasoning, CodexToolContext,
+};
 use super::transform_gemini::{
     anthropic_to_gemini, extract_anthropic_tool_schema_hints,
     gemini_to_anthropic_with_shadow_and_hints, AnthropicToolSchemaHints,
 };
-use super::{streaming::create_anthropic_sse_stream, streaming_gemini};
+use super::transform_responses::{anthropic_to_responses, responses_to_anthropic};
+use super::{
+    streaming::create_anthropic_sse_stream, streaming_codex_anthropic, streaming_codex_chat,
+    streaming_gemini, streaming_responses,
+};
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 use crate::proxy::usage::parser::TokenUsage;
 use bytes::Bytes;
@@ -67,15 +82,67 @@ pub enum Bridge {
     AnthropicOpenAiChat,
     /// Anthropic Messages client -> Gemini native upstream.
     AnthropicGemini,
+    /// Anthropic Messages client -> OpenAI Responses upstream.
+    AnthropicResponses,
+    /// OpenAI Responses (Codex) client -> OpenAI Chat Completions upstream.
+    ResponsesChat,
+    /// OpenAI Responses (Codex) client -> Anthropic Messages upstream.
+    ResponsesAnthropic,
+}
+
+/// Wire protocol spoken on one side of a bridge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    Anthropic,
+    OpenAiChat,
+    Gemini,
+    Responses,
+}
+
+impl Protocol {
+    /// Whether the protocol's input token count already includes cache reads
+    /// and writes (OpenAI, Gemini) or excludes them (Anthropic).
+    fn input_includes_cache(self) -> bool {
+        !matches!(self, Protocol::Anthropic)
+    }
 }
 
 impl Bridge {
-    pub const ALL: [Bridge; 2] = [Bridge::AnthropicOpenAiChat, Bridge::AnthropicGemini];
+    pub const ALL: [Bridge; 5] = [
+        Bridge::AnthropicOpenAiChat,
+        Bridge::AnthropicGemini,
+        Bridge::AnthropicResponses,
+        Bridge::ResponsesChat,
+        Bridge::ResponsesAnthropic,
+    ];
 
     pub fn dir_name(self) -> &'static str {
         match self {
             Bridge::AnthropicOpenAiChat => "anthropic__openai_chat",
             Bridge::AnthropicGemini => "anthropic__gemini",
+            Bridge::AnthropicResponses => "anthropic__responses",
+            Bridge::ResponsesChat => "responses__chat",
+            Bridge::ResponsesAnthropic => "responses__anthropic",
+        }
+    }
+
+    /// Protocol of the client side (requests in, responses out).
+    pub fn client(self) -> Protocol {
+        match self {
+            Bridge::AnthropicOpenAiChat | Bridge::AnthropicGemini | Bridge::AnthropicResponses => {
+                Protocol::Anthropic
+            }
+            Bridge::ResponsesChat | Bridge::ResponsesAnthropic => Protocol::Responses,
+        }
+    }
+
+    /// Protocol of the upstream side.
+    pub fn upstream(self) -> Protocol {
+        match self {
+            Bridge::AnthropicOpenAiChat | Bridge::ResponsesChat => Protocol::OpenAiChat,
+            Bridge::AnthropicGemini => Protocol::Gemini,
+            Bridge::AnthropicResponses => Protocol::Responses,
+            Bridge::ResponsesAnthropic => Protocol::Anthropic,
         }
     }
 
@@ -119,16 +186,24 @@ pub struct CaseOptions {
     /// Append an upstream transport error with this message after the SSE body.
     #[serde(default)]
     pub upstream_error: Option<String>,
+    /// Responses bridge: the upstream is the Codex OAuth backend (forces
+    /// `store: false` and requests encrypted reasoning).
+    #[serde(default)]
+    pub codex_oauth: bool,
 }
 
 /// How the client stream is expected to end.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Terminal {
-    /// Exactly one `message_stop`, as the last event.
+    /// Exactly one completion event as the last event: `message_stop` for
+    /// Anthropic clients, `response.completed` / `response.incomplete` for
+    /// Responses clients (also accepted as `completed`).
     #[default]
+    #[serde(alias = "completed")]
     MessageStop,
-    /// Exactly one `error` event (or stream `Err` item), as the last event.
+    /// Exactly one `error` event (or stream `Err` item), as the last event;
+    /// `response.failed` for Responses clients.
     Error,
     /// No terminal event at all (truncated upstream).
     None,
@@ -256,6 +331,15 @@ impl Fixture {
         let hints = extract_anthropic_tool_schema_hints(self.client_request.as_ref()?);
         (!hints.is_empty()).then_some(hints)
     }
+
+    /// Codex tool context (custom / namespace / tool_search tools) the proxy
+    /// derives from the Responses client request.
+    fn codex_tool_context(&self) -> CodexToolContext {
+        self.client_request
+            .as_ref()
+            .map(build_codex_tool_context_from_request)
+            .unwrap_or_default()
+    }
 }
 
 /// Load every fixture of `bridge` under `root` (the `tests/fixtures/proxy` dir),
@@ -353,8 +437,17 @@ impl ClientEvent {
     }
 
     fn is_terminal(&self) -> bool {
-        matches!(self.kind(), "message_stop" | "error")
+        self.is_completion()
+            || matches!(self.kind(), "error" | "response.failed")
             || self.event.as_deref() == Some(STREAM_ERROR_EVENT)
+    }
+
+    /// Successful end of the message (possibly truncated by a token limit).
+    fn is_completion(&self) -> bool {
+        matches!(
+            self.kind(),
+            "message_stop" | "response.completed" | "response.incomplete"
+        )
     }
 }
 
@@ -371,9 +464,25 @@ pub fn convert_request(fixture: &Fixture) -> Option<Result<Value, String>> {
             converted
         }),
         Bridge::AnthropicGemini => anthropic_to_gemini(body),
+        // No prompt_cache_key and no fast mode: both depend on provider config.
+        Bridge::AnthropicResponses => {
+            anthropic_to_responses(body, None, fixture.meta.options.codex_oauth, false)
+        }
+        // The proxy first restores cached tool calls from the session history
+        // (`codex_chat_history`) and applies provider reasoning config; fixtures
+        // carry their full history and run without provider config.
+        Bridge::ResponsesChat => responses_to_chat_completions_with_reasoning(body, None),
+        // Same default max_tokens as the forwarder. The forwarder's later cache
+        // breakpoint injection and Claude Code system prompt are provider config.
+        Bridge::ResponsesAnthropic => {
+            responses_request_to_anthropic(body, CODEX_ANTHROPIC_DEFAULT_MAX_TOKENS)
+        }
     };
     Some(result.map_err(|e| e.to_string()))
 }
+
+/// `DEFAULT_CODEX_ANTHROPIC_MAX_TOKENS` in the forwarder.
+const CODEX_ANTHROPIC_DEFAULT_MAX_TOKENS: u64 = 8192;
 
 /// Convert the non-stream upstream body into the client response.
 pub fn convert_non_stream(fixture: &Fixture) -> Option<Result<Value, String>> {
@@ -387,6 +496,13 @@ pub fn convert_non_stream(fixture: &Fixture) -> Option<Result<Value, String>> {
             None,
             fixture.tool_schema_hints().as_ref(),
         ),
+        Bridge::AnthropicResponses => responses_to_anthropic(body),
+        Bridge::ResponsesChat => {
+            chat_completion_to_response_with_context(body, &fixture.codex_tool_context())
+        }
+        Bridge::ResponsesAnthropic => {
+            anthropic_response_to_responses_with_context(body, &fixture.codex_tool_context())
+        }
     };
     Some(result.map_err(|e| e.to_string()))
 }
@@ -413,6 +529,23 @@ pub fn run_stream(fixture: &Fixture, chunks: &[&[u8]]) -> Result<Vec<ClientEvent
                 None,
                 None,
                 fixture.tool_schema_hints(),
+            )
+            .collect(),
+        ),
+        Bridge::AnthropicResponses => futures::executor::block_on(
+            streaming_responses::create_anthropic_sse_stream_from_responses(upstream).collect(),
+        ),
+        Bridge::ResponsesChat => futures::executor::block_on(
+            streaming_codex_chat::create_responses_sse_stream_from_chat_with_context(
+                upstream,
+                fixture.codex_tool_context(),
+            )
+            .collect(),
+        ),
+        Bridge::ResponsesAnthropic => futures::executor::block_on(
+            streaming_codex_anthropic::create_responses_sse_stream_from_anthropic_with_context(
+                upstream,
+                fixture.codex_tool_context(),
             )
             .collect(),
         ),
@@ -509,36 +642,63 @@ fn usage_to_value(usage: Option<TokenUsage>) -> Value {
 }
 
 /// Usage the proxy records for a converted client stream.
-pub fn client_stream_usage(events: &[ClientEvent]) -> Value {
+pub fn client_stream_usage(client: Protocol, events: &[ClientEvent]) -> Value {
     let data: Vec<Value> = events.iter().map(|event| event.data.clone()).collect();
-    usage_to_value(TokenUsage::from_claude_stream_events(&data))
+    usage_to_value(match client {
+        Protocol::Responses => TokenUsage::from_codex_stream_events_auto(&data),
+        _ => TokenUsage::from_claude_stream_events(&data),
+    })
 }
 
 /// Usage the proxy records for a converted non-stream client response.
-pub fn client_response_usage(response: &Value) -> Value {
-    usage_to_value(TokenUsage::from_claude_response(response))
+pub fn client_response_usage(client: Protocol, response: &Value) -> Value {
+    usage_to_value(match client {
+        Protocol::Responses => TokenUsage::from_codex_response_auto(response),
+        _ => TokenUsage::from_claude_response(response),
+    })
 }
 
 /// Usage as reported by the upstream itself, parsed in its native format.
 fn upstream_stream_usage(bridge: Bridge, input: &[u8]) -> Option<TokenUsage> {
     let payloads = upstream_sse_payloads(input);
-    match bridge {
-        Bridge::AnthropicOpenAiChat => TokenUsage::from_openai_stream_events(&payloads),
-        Bridge::AnthropicGemini => TokenUsage::from_gemini_stream_chunks(&payloads),
+    if payloads.is_empty() {
+        // Some gateways answer a stream request with one whole JSON body.
+        if let Ok(body) = serde_json::from_slice::<Value>(input) {
+            return upstream_response_usage(bridge, &body);
+        }
+    }
+    match bridge.upstream() {
+        Protocol::OpenAiChat => TokenUsage::from_openai_stream_events(&payloads),
+        Protocol::Gemini => TokenUsage::from_gemini_stream_chunks(&payloads),
+        Protocol::Anthropic => TokenUsage::from_claude_stream_events(&payloads),
+        // The usage of the last response object that carries one (completed,
+        // incomplete or failed), counted as reported (input includes cache).
+        Protocol::Responses => payloads.iter().rev().find_map(|payload| {
+            let response = payload.get("response").unwrap_or(payload);
+            response.get("usage")?;
+            TokenUsage::from_codex_response(response)
+        }),
     }
 }
 
 fn upstream_response_usage(bridge: Bridge, body: &Value) -> Option<TokenUsage> {
-    match bridge {
-        Bridge::AnthropicOpenAiChat => TokenUsage::from_openai_response(body),
-        Bridge::AnthropicGemini => TokenUsage::from_gemini_response(body),
+    match bridge.upstream() {
+        Protocol::OpenAiChat => TokenUsage::from_openai_response(body),
+        Protocol::Gemini => TokenUsage::from_gemini_response(body),
+        Protocol::Anthropic => TokenUsage::from_claude_response(body),
+        Protocol::Responses => TokenUsage::from_codex_response(body),
     }
 }
 
-/// Both upstream formats count cache tokens inside the prompt total, while the
-/// Anthropic client splits them out: fresh input + cache read + cache creation
-/// must add back up to the upstream prompt, and output must match.
-fn check_usage_conservation(upstream: Option<&TokenUsage>, client: &Value) -> Result<(), String> {
+/// OpenAI, Gemini and Responses count cache tokens inside the prompt total,
+/// while Anthropic splits them out. Whatever the two sides' conventions, the
+/// client must account for the same prompt total, output, cache read and
+/// cache creation tokens as the upstream reported.
+fn check_usage_conservation(
+    bridge: Bridge,
+    upstream: Option<&TokenUsage>,
+    client: &Value,
+) -> Result<(), String> {
     let Some(upstream) = upstream else {
         let billable = client.get("billable").and_then(Value::as_bool);
         return match billable {
@@ -549,28 +709,35 @@ fn check_usage_conservation(upstream: Option<&TokenUsage>, client: &Value) -> Re
         };
     };
     let field = |name: &str| client.get(name).and_then(Value::as_u64).unwrap_or(0);
-    let client_prompt =
-        field("input_tokens") + field("cache_read_tokens") + field("cache_creation_tokens");
+    let client_prompt = if bridge.client().input_includes_cache() {
+        field("input_tokens")
+    } else {
+        field("input_tokens") + field("cache_read_tokens") + field("cache_creation_tokens")
+    };
+    let upstream_prompt = if bridge.upstream().input_includes_cache() {
+        u64::from(upstream.input_tokens)
+    } else {
+        u64::from(upstream.input_tokens)
+            + u64::from(upstream.cache_read_tokens)
+            + u64::from(upstream.cache_creation_tokens)
+    };
     let mut problems = Vec::new();
-    if client_prompt != u64::from(upstream.input_tokens) {
+    if client_prompt != upstream_prompt {
         problems.push(format!(
-            "input+cache_read+cache_creation={client_prompt} but upstream prompt={}",
-            upstream.input_tokens
+            "client prompt total={client_prompt} but upstream prompt total={upstream_prompt}"
         ));
     }
-    if field("output_tokens") != u64::from(upstream.output_tokens) {
-        problems.push(format!(
-            "output={} but upstream output={}",
-            field("output_tokens"),
-            upstream.output_tokens
-        ));
-    }
-    if field("cache_read_tokens") != u64::from(upstream.cache_read_tokens) {
-        problems.push(format!(
-            "cache_read={} but upstream cache_read={}",
-            field("cache_read_tokens"),
-            upstream.cache_read_tokens
-        ));
+    for (name, upstream_value) in [
+        ("output_tokens", upstream.output_tokens),
+        ("cache_read_tokens", upstream.cache_read_tokens),
+        ("cache_creation_tokens", upstream.cache_creation_tokens),
+    ] {
+        if field(name) != u64::from(upstream_value) {
+            problems.push(format!(
+                "{name}={} but upstream {name}={upstream_value}",
+                field(name)
+            ));
+        }
     }
     if problems.is_empty() {
         Ok(())
@@ -584,7 +751,15 @@ fn check_usage_conservation(upstream: Option<&TokenUsage>, client: &Value) -> Re
 // ---------------------------------------------------------------------------
 
 /// Keys whose string values are identifiers.
-const ID_KEYS: [&str; 5] = ["id", "tool_use_id", "tool_call_id", "responseId", "call_id"];
+const ID_KEYS: [&str; 7] = [
+    "id",
+    "tool_use_id",
+    "tool_call_id",
+    "responseId",
+    "call_id",
+    "item_id",
+    "previous_response_id",
+];
 /// Keys whose values are timestamps.
 const TIMESTAMP_KEYS: [&str; 4] = ["created", "created_at", "createTime", "timestamp"];
 
@@ -691,11 +866,15 @@ pub fn render_json(value: &Value) -> String {
 /// Check the structural invariants of a client event stream. Returns one
 /// message per violation, prefixed with the invariant name.
 pub fn check_stream_invariants(
+    bridge: Bridge,
     events: &[ClientEvent],
     terminal: Terminal,
     skip: &HashSet<Invariant>,
     upstream_usage: Option<&TokenUsage>,
 ) -> Vec<String> {
+    if bridge.client() == Protocol::Responses {
+        return check_responses_stream_invariants(bridge, events, terminal, skip, upstream_usage);
+    }
     let mut violations: Vec<(Invariant, String)> = Vec::new();
     let mut fail = |inv: Invariant, message: String| violations.push((inv, message));
     let describe = |i: usize, event: &ClientEvent| format!("event #{i} ({})", event.data);
@@ -898,7 +1077,7 @@ pub fn check_stream_invariants(
             } else {
                 let at = terminals[0];
                 let event = &events[at];
-                let is_stop = event.kind() == "message_stop";
+                let is_stop = event.is_completion();
                 if is_stop != (terminal == Terminal::MessageStop) {
                     fail(
                         Invariant::Terminal,
@@ -937,12 +1116,22 @@ pub fn check_stream_invariants(
 
     // usage_conservation (only meaningful for a completed message)
     if terminal == Terminal::MessageStop {
-        if let Err(problem) = check_usage_conservation(upstream_usage, &client_stream_usage(events))
-        {
+        if let Err(problem) = check_usage_conservation(
+            bridge,
+            upstream_usage,
+            &client_stream_usage(bridge.client(), events),
+        ) {
             fail(Invariant::UsageConservation, problem);
         }
     }
 
+    report_violations(violations, skip)
+}
+
+fn report_violations(
+    violations: Vec<(Invariant, String)>,
+    skip: &HashSet<Invariant>,
+) -> Vec<String> {
     violations
         .into_iter()
         .filter(|(inv, _)| !skip.contains(inv))
@@ -952,10 +1141,14 @@ pub fn check_stream_invariants(
 
 /// Invariants for a non-stream client response.
 pub fn check_response_invariants(
+    bridge: Bridge,
     response: &Value,
     skip: &HashSet<Invariant>,
     upstream_usage: Option<&TokenUsage>,
 ) -> Vec<String> {
+    if bridge.client() == Protocol::Responses {
+        return check_responses_response_invariants(bridge, response, skip, upstream_usage);
+    }
     let mut violations: Vec<(Invariant, String)> = Vec::new();
     let empty = Vec::new();
     let content = response
@@ -1009,15 +1202,320 @@ pub fn check_response_invariants(
             "response has no stop_reason".to_string(),
         ));
     }
-    if let Err(problem) = check_usage_conservation(upstream_usage, &client_response_usage(response))
-    {
+    if let Err(problem) = check_usage_conservation(
+        bridge,
+        upstream_usage,
+        &client_response_usage(bridge.client(), response),
+    ) {
         violations.push((Invariant::UsageConservation, problem));
     }
-    violations
-        .into_iter()
-        .filter(|(inv, _)| !skip.contains(inv))
-        .map(|(inv, message)| format!("[{}] {message}", inv.name()))
-        .collect()
+    report_violations(violations, skip)
+}
+
+/// Item types that carry a tool call the client must answer.
+fn is_tool_call_item(item: &Value) -> bool {
+    matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("function_call" | "custom_tool_call")
+    )
+}
+
+/// `tool_ids` / `tool_input_json` / `reasoning_first` checks shared by the
+/// stream and non-stream Responses outputs. `items` are in output order.
+fn check_responses_output_items(items: &[&Value], violations: &mut Vec<(Invariant, String)>) {
+    let mut call_ids = HashSet::new();
+    let mut seen_non_reasoning = false;
+    for (i, item) in items.iter().enumerate() {
+        let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+        if item_type == "reasoning" {
+            if seen_non_reasoning {
+                violations.push((
+                    Invariant::ReasoningFirst,
+                    format!("output[{i}] is reasoning after content"),
+                ));
+            }
+            continue;
+        }
+        seen_non_reasoning = true;
+        if !is_tool_call_item(item) {
+            continue;
+        }
+        let call_id = item
+            .get("call_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
+        if call_id.is_empty() || name.is_empty() {
+            violations.push((
+                Invariant::ToolIds,
+                format!("output[{i}] ({item}) has empty call_id or name"),
+            ));
+        } else if !call_ids.insert(call_id.to_string()) {
+            violations.push((
+                Invariant::ToolIds,
+                format!("output[{i}] reuses call_id {call_id}"),
+            ));
+        }
+        // A call cut off by the token limit (status incomplete) may carry
+        // partial arguments; the client must not run it anyway.
+        let incomplete = item.get("status").and_then(Value::as_str) == Some("incomplete");
+        if item_type == "function_call" && !incomplete {
+            let arguments = item.get("arguments").and_then(Value::as_str);
+            if !arguments
+                .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                .is_some_and(|value| value.is_object())
+            {
+                violations.push((
+                    Invariant::ToolInputJson,
+                    format!("output[{i}] arguments are not a JSON object: {arguments:?}"),
+                ));
+            }
+        }
+    }
+}
+
+/// Stream invariants for a Responses client:
+/// - `event_names`: SSE event name equals the payload `type`;
+/// - `message_start`: one `response.created`, as the first event;
+/// - `block_pairing`: every output item is added once and done once, deltas
+///   only target open items, all items are done before the response completes,
+///   and the completed response's `output` equals the done items;
+/// - `index_order`: output indices are assigned 0, 1, 2, ... as items are added;
+/// - `tool_ids` / `tool_input_json` (except for `incomplete` calls) /
+///   `reasoning_first` on the done items;
+/// - `terminal`: exactly one terminal event (`response.completed` /
+///   `response.incomplete`, or `response.failed` / stream error), last;
+/// - `usage_conservation` against the upstream usage.
+fn check_responses_stream_invariants(
+    bridge: Bridge,
+    events: &[ClientEvent],
+    terminal: Terminal,
+    skip: &HashSet<Invariant>,
+    upstream_usage: Option<&TokenUsage>,
+) -> Vec<String> {
+    let mut violations: Vec<(Invariant, String)> = Vec::new();
+    let describe = |i: usize, event: &ClientEvent| format!("event #{i} ({})", event.data);
+
+    for (i, event) in events.iter().enumerate() {
+        if event.event.as_deref() != Some(event.kind()) {
+            violations.push((
+                Invariant::EventNames,
+                format!(
+                    "{} has event name {:?}",
+                    describe(i, event),
+                    event.event.as_deref()
+                ),
+            ));
+        }
+    }
+
+    let created: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.kind() == "response.created")
+        .map(|(i, _)| i)
+        .collect();
+    if created.len() > 1 {
+        violations.push((
+            Invariant::MessageStart,
+            format!("{} response.created events at {created:?}", created.len()),
+        ));
+    }
+    match created.first() {
+        Some(&0) => {}
+        Some(&first) => violations.push((
+            Invariant::MessageStart,
+            format!("response.created is event #{first}, not the first event"),
+        )),
+        None if terminal == Terminal::MessageStop => violations.push((
+            Invariant::MessageStart,
+            "stream completes without response.created".to_string(),
+        )),
+        None => {}
+    }
+
+    let mut open: HashSet<u64> = HashSet::new();
+    let mut done: Vec<(u64, Value)> = Vec::new();
+    let mut next_index = 0u64;
+    for (i, event) in events.iter().enumerate() {
+        let index = event.data.get("output_index").and_then(Value::as_u64);
+        let kind = event.kind();
+        match kind {
+            "response.output_item.added" => {
+                let Some(index) = index else {
+                    violations.push((
+                        Invariant::BlockPairing,
+                        format!("{} has no output_index", describe(i, event)),
+                    ));
+                    continue;
+                };
+                if open.contains(&index) || done.iter().any(|(at, _)| *at == index) {
+                    violations.push((
+                        Invariant::BlockPairing,
+                        format!("{} re-adds output item {index}", describe(i, event)),
+                    ));
+                }
+                if index != next_index {
+                    violations.push((
+                        Invariant::IndexOrder,
+                        format!(
+                            "{} adds output item {index}, expected {next_index}",
+                            describe(i, event)
+                        ),
+                    ));
+                }
+                next_index = next_index.max(index + 1);
+                open.insert(index);
+            }
+            "response.output_item.done" => match index {
+                Some(index) if open.remove(&index) => {
+                    done.push((
+                        index,
+                        event.data.get("item").cloned().unwrap_or(Value::Null),
+                    ));
+                }
+                _ => violations.push((
+                    Invariant::BlockPairing,
+                    format!("{} finishes an item that is not open", describe(i, event)),
+                )),
+            },
+            "response.completed" | "response.incomplete" | "response.failed" => {
+                // Like an Anthropic `error`, a failed response may abandon open items.
+                if kind != "response.failed" && !open.is_empty() {
+                    let mut indices: Vec<u64> = open.iter().copied().collect();
+                    indices.sort_unstable();
+                    violations.push((
+                        Invariant::BlockPairing,
+                        format!(
+                            "{} while output items {indices:?} are still open",
+                            describe(i, event)
+                        ),
+                    ));
+                    open.clear();
+                }
+                if kind != "response.failed" {
+                    let mut finished = done.clone();
+                    finished.sort_by_key(|(index, _)| *index);
+                    let finished: Vec<Value> = finished.into_iter().map(|(_, item)| item).collect();
+                    let output = event
+                        .data
+                        .pointer("/response/output")
+                        .cloned()
+                        .unwrap_or_else(|| json!([]));
+                    if output != Value::Array(finished.clone()) {
+                        violations.push((
+                            Invariant::BlockPairing,
+                            format!(
+                                "{} output differs from the done items {}",
+                                describe(i, event),
+                                Value::Array(finished)
+                            ),
+                        ));
+                    }
+                }
+            }
+            _ if kind.starts_with("response.") && index.is_some() => {
+                let index = index.unwrap_or_default();
+                if !open.contains(&index) {
+                    violations.push((
+                        Invariant::BlockPairing,
+                        format!("{} targets an item that is not open", describe(i, event)),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut finished = done;
+    finished.sort_by_key(|(index, _)| *index);
+    let items: Vec<&Value> = finished.iter().map(|(_, item)| item).collect();
+    check_responses_output_items(&items, &mut violations);
+
+    let terminals: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.is_terminal())
+        .map(|(i, _)| i)
+        .collect();
+    match terminal {
+        Terminal::None => {
+            if !terminals.is_empty() {
+                violations.push((
+                    Invariant::Terminal,
+                    format!("expected no terminal event, found them at {terminals:?}"),
+                ));
+            }
+        }
+        Terminal::MessageStop | Terminal::Error => {
+            if terminals.len() != 1 {
+                violations.push((
+                    Invariant::Terminal,
+                    format!("expected exactly one terminal event, found {terminals:?}"),
+                ));
+            } else {
+                let at = terminals[0];
+                let event = &events[at];
+                if event.is_completion() != (terminal == Terminal::MessageStop) {
+                    violations.push((
+                        Invariant::Terminal,
+                        format!(
+                            "expected {terminal:?} terminal, got {}",
+                            describe(at, event)
+                        ),
+                    ));
+                }
+                if at + 1 != events.len() {
+                    violations.push((
+                        Invariant::Terminal,
+                        format!(
+                            "{} events follow the terminal event #{at}",
+                            events.len() - at - 1
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    if terminal == Terminal::MessageStop {
+        if let Err(problem) = check_usage_conservation(
+            bridge,
+            upstream_usage,
+            &client_stream_usage(bridge.client(), events),
+        ) {
+            violations.push((Invariant::UsageConservation, problem));
+        }
+    }
+
+    report_violations(violations, skip)
+}
+
+/// Non-stream invariants for a Responses client response.
+fn check_responses_response_invariants(
+    bridge: Bridge,
+    response: &Value,
+    skip: &HashSet<Invariant>,
+    upstream_usage: Option<&TokenUsage>,
+) -> Vec<String> {
+    let mut violations: Vec<(Invariant, String)> = Vec::new();
+    let empty = Vec::new();
+    let output = response
+        .get("output")
+        .and_then(Value::as_array)
+        .unwrap_or(&empty);
+    let items: Vec<&Value> = output.iter().collect();
+    check_responses_output_items(&items, &mut violations);
+    if response.get("status").and_then(Value::as_str).is_none() {
+        violations.push((Invariant::Terminal, "response has no status".to_string()));
+    }
+    if let Err(problem) = check_usage_conservation(
+        bridge,
+        upstream_usage,
+        &client_response_usage(bridge.client(), response),
+    ) {
+        violations.push((Invariant::UsageConservation, problem));
+    }
+    report_violations(violations, skip)
 }
 
 // ---------------------------------------------------------------------------
@@ -1205,9 +1703,13 @@ fn first_difference(expected: &[ClientEvent], actual: &[ClientEvent]) -> String 
 // Stream vs non-stream parity
 // ---------------------------------------------------------------------------
 
-/// Fold a client event stream into an Anthropic message (content blocks in
-/// index order, stop reason, usage).
-pub fn aggregate_stream_message(events: &[ClientEvent]) -> Value {
+/// Fold a client event stream into one message: for Anthropic clients the
+/// content blocks in index order, stop reason and usage; for Responses
+/// clients the done output items in output order, final status and usage.
+pub fn aggregate_stream_message(client: Protocol, events: &[ClientEvent]) -> Value {
+    if client == Protocol::Responses {
+        return aggregate_responses_stream(events);
+    }
     let mut blocks: Vec<(u64, Map<String, Value>, String)> = Vec::new();
     let mut stop_reason = Value::Null;
     for event in events {
@@ -1263,14 +1765,46 @@ pub fn aggregate_stream_message(events: &[ClientEvent]) -> Value {
     json!({
         "content": content,
         "stop_reason": stop_reason,
-        "usage": client_stream_usage(events),
+        "usage": client_stream_usage(client, events),
+    })
+}
+
+fn aggregate_responses_stream(events: &[ClientEvent]) -> Value {
+    let mut items: Vec<(u64, Value)> = Vec::new();
+    let mut status = Value::Null;
+    for event in events {
+        match event.kind() {
+            "response.output_item.done" => {
+                if let (Some(index), Some(item)) = (
+                    event.data.get("output_index").and_then(Value::as_u64),
+                    event.data.get("item"),
+                ) {
+                    items.push((index, item.clone()));
+                }
+            }
+            "response.completed" | "response.incomplete" | "response.failed" => {
+                status = event.data["response"]["status"].clone();
+            }
+            _ => {}
+        }
+    }
+    items.sort_by_key(|(index, _)| *index);
+    json!({
+        "output": items.into_iter().map(|(_, item)| item).collect::<Vec<_>>(),
+        "status": status,
+        "usage": client_stream_usage(Protocol::Responses, events),
     })
 }
 
 /// Compare the stream and non-stream conversions of the same upstream reply on
-/// content (ids ignored), stop reason and recorded token counts. Returns one
-/// `field: stream=<..> non_stream=<..>` line per difference.
-pub fn parity_diff(stream_message: &Value, non_stream_response: &Value) -> Vec<String> {
+/// content (ids ignored), stop reason (status for Responses clients) and
+/// recorded token counts. Returns one `field: stream=<..> non_stream=<..>`
+/// line per difference.
+pub fn parity_diff(
+    client: Protocol,
+    stream_message: &Value,
+    non_stream_response: &Value,
+) -> Vec<String> {
     fn content_summary(message: &Value) -> Value {
         let blocks = message
             .get("content")
@@ -1304,21 +1838,54 @@ pub fn parity_diff(stream_message: &Value, non_stream_response: &Value) -> Vec<S
         })
     }
 
-    let non_stream_usage = client_response_usage(non_stream_response);
+    fn output_summary(message: &Value) -> Value {
+        let items = message
+            .get("output")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Value::Array(
+            items
+                .into_iter()
+                .map(|mut item| {
+                    if let Some(map) = item.as_object_mut() {
+                        map.remove("id");
+                    }
+                    item
+                })
+                .collect(),
+        )
+    }
+
+    let non_stream_usage = client_response_usage(client, non_stream_response);
+    let (stop_field, content_field, content) = match client {
+        Protocol::Responses => (
+            "status",
+            "output",
+            (
+                output_summary(stream_message),
+                output_summary(non_stream_response),
+            ),
+        ),
+        _ => (
+            "stop_reason",
+            "content",
+            (
+                content_summary(stream_message),
+                content_summary(non_stream_response),
+            ),
+        ),
+    };
     let pairs = [
         (
-            "stop_reason",
-            stream_message["stop_reason"].clone(),
+            stop_field,
+            stream_message[stop_field].clone(),
             non_stream_response
-                .get("stop_reason")
+                .get(stop_field)
                 .cloned()
                 .unwrap_or(Value::Null),
         ),
-        (
-            "content",
-            content_summary(stream_message),
-            content_summary(non_stream_response),
-        ),
+        (content_field, content.0, content.1),
         (
             "usage",
             tokens(&stream_message["usage"]),
@@ -1356,6 +1923,7 @@ pub fn run_fixture(fixture: &Fixture) -> FixtureOutcome {
     let mut outcome = FixtureOutcome::default();
     let mut redactor = Redactor::new(fixture);
     let skip = fixture.skipped();
+    let client = fixture.bridge.client();
 
     if let Some(result) = convert_request(fixture) {
         match result {
@@ -1379,8 +1947,13 @@ pub fn run_fixture(fixture: &Fixture) -> FixtureOutcome {
             // A fresh redactor per run: generated ids must line up by first
             // appearance, not by literal value (synthesized ids are random).
             let normalized = fresh_redactor.clone().redact_events(events);
-            let violations =
-                check_stream_invariants(events, terminal, &skip, upstream_usage.as_ref());
+            let violations = check_stream_invariants(
+                fixture.bridge,
+                events,
+                terminal,
+                &skip,
+                upstream_usage.as_ref(),
+            );
             (normalized, violations)
         };
         let run = |chunks: &[&[u8]]| run_stream(fixture, chunks);
@@ -1393,11 +1966,11 @@ pub fn run_fixture(fixture: &Fixture) -> FixtureOutcome {
                 let redacted = redactor.redact_events(&events);
                 client_response.push_str("# stream\n");
                 client_response.push_str(&render_events(&redacted));
-                let mut stream_usage = client_stream_usage(&events);
+                let mut stream_usage = client_stream_usage(client, &events);
                 redactor.redact(&mut stream_usage);
                 usage.push_str("# stream\n");
                 usage.push_str(&render_json(&stream_usage));
-                stream_message = Some(aggregate_stream_message(&events));
+                stream_message = Some(aggregate_stream_message(client, &events));
             }
             Err(error) => outcome.failures.push(format!("unsplit: {error}")),
         }
@@ -1419,14 +1992,17 @@ pub fn run_fixture(fixture: &Fixture) -> FixtureOutcome {
                     .upstream_json
                     .as_ref()
                     .and_then(|body| upstream_response_usage(fixture.bridge, body));
-                for violation in
-                    check_response_invariants(&response, &skip, upstream_usage.as_ref())
-                {
+                for violation in check_response_invariants(
+                    fixture.bridge,
+                    &response,
+                    &skip,
+                    upstream_usage.as_ref(),
+                ) {
                     outcome.failures.push(format!("non-stream: {violation}"));
                 }
-                let mut response_usage = client_response_usage(&response);
+                let mut response_usage = client_response_usage(client, &response);
                 if let Some(stream_message) = &stream_message {
-                    let diff = parity_diff(stream_message, &response);
+                    let diff = parity_diff(client, stream_message, &response);
                     if diff != fixture.meta.parity.expected_diff {
                         outcome.failures.push(format!(
                             "parity: stream vs non-stream diff changed\n  expected: {:#?}\n  actual:   {diff:#?}",
@@ -1499,6 +2075,7 @@ mod tests {
             ..Default::default()
         };
         let violations = check_stream_invariants(
+            Bridge::AnthropicOpenAiChat,
             &text_stream(),
             Terminal::MessageStop,
             &HashSet::new(),
@@ -1512,8 +2089,13 @@ mod tests {
         let mut events = text_stream();
         events.remove(3); // drop content_block_stop
         events.push(event("message_stop", json!({"type":"message_stop"})));
-        let violations =
-            check_stream_invariants(&events, Terminal::MessageStop, &HashSet::new(), None);
+        let violations = check_stream_invariants(
+            Bridge::AnthropicOpenAiChat,
+            &events,
+            Terminal::MessageStop,
+            &HashSet::new(),
+            None,
+        );
         assert!(
             violations.iter().any(|v| v.starts_with("[block_pairing]")),
             "{violations:?}"
@@ -1547,6 +2129,7 @@ mod tests {
             ..Default::default()
         };
         let violations = check_stream_invariants(
+            Bridge::AnthropicOpenAiChat,
             &events,
             Terminal::MessageStop,
             &HashSet::new(),
@@ -1561,10 +2144,122 @@ mod tests {
 
         let skip: HashSet<Invariant> =
             [Invariant::ReasoningFirst, Invariant::UsageConservation].into();
-        assert!(
-            check_stream_invariants(&events, Terminal::MessageStop, &skip, Some(&upstream))
-                .is_empty()
+        assert!(check_stream_invariants(
+            Bridge::AnthropicOpenAiChat,
+            &events,
+            Terminal::MessageStop,
+            &skip,
+            Some(&upstream)
+        )
+        .is_empty());
+    }
+
+    fn responses_text_stream() -> Vec<ClientEvent> {
+        let item = json!({"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]});
+        vec![
+            event(
+                "response.created",
+                json!({"type":"response.created","response":{"id":"r","status":"in_progress","output":[]}}),
+            ),
+            event(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","content":[]}}),
+            ),
+            event(
+                "response.output_text.delta",
+                json!({"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"hi"}),
+            ),
+            event(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","output_index":0,"item":item}),
+            ),
+            event(
+                "response.completed",
+                json!({"type":"response.completed","response":{"id":"r","status":"completed","output":[item],"usage":{"input_tokens":10,"output_tokens":1,"input_tokens_details":{"cached_tokens":4,"cache_write_tokens":2}}}}),
+            ),
+        ]
+    }
+
+    #[test]
+    fn responses_invariants_accept_well_formed_stream_and_conserve_usage() {
+        // Anthropic upstream: fresh 4 + cache read 4 + cache creation 2 = total 10.
+        let upstream = TokenUsage {
+            input_tokens: 4,
+            output_tokens: 1,
+            cache_read_tokens: 4,
+            cache_creation_tokens: 2,
+            ..Default::default()
+        };
+        let violations = check_stream_invariants(
+            Bridge::ResponsesAnthropic,
+            &responses_text_stream(),
+            Terminal::MessageStop,
+            &HashSet::new(),
+            Some(&upstream),
         );
+        assert!(violations.is_empty(), "{violations:?}");
+
+        // Chat upstream reporting the same prompt total without cache writes.
+        let upstream = TokenUsage {
+            input_tokens: 10,
+            output_tokens: 1,
+            cache_read_tokens: 4,
+            ..Default::default()
+        };
+        let violations = check_stream_invariants(
+            Bridge::ResponsesChat,
+            &responses_text_stream(),
+            Terminal::MessageStop,
+            &HashSet::new(),
+            Some(&upstream),
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.starts_with("[usage_conservation]") && v.contains("cache_creation")),
+            "{violations:?}"
+        );
+    }
+
+    #[test]
+    fn responses_invariants_flag_open_items_and_bad_tool_calls() {
+        let mut events = responses_text_stream();
+        events.remove(3); // drop output_item.done
+        let call = json!({"type":"function_call","call_id":"","name":"f","arguments":"{"});
+        events.insert(
+            3,
+            event(
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","output_index":2,"item":call}),
+            ),
+        );
+        events.insert(
+            4,
+            event(
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","output_index":2,"item":call}),
+            ),
+        );
+        let violations = check_stream_invariants(
+            Bridge::ResponsesChat,
+            &events,
+            Terminal::MessageStop,
+            &HashSet::new(),
+            None,
+        );
+        for name in [
+            "block_pairing",
+            "index_order",
+            "tool_ids",
+            "tool_input_json",
+        ] {
+            assert!(
+                violations
+                    .iter()
+                    .any(|v| v.starts_with(&format!("[{name}]"))),
+                "missing {name}: {violations:?}"
+            );
+        }
     }
 
     #[test]
@@ -1638,11 +2333,16 @@ mod tests {
             Ok(events)
         };
         let check = |events: &[ClientEvent]| {
-            let violations =
-                check_stream_invariants(events, Terminal::MessageStop, &HashSet::new(), None)
-                    .into_iter()
-                    .filter(|v| v.starts_with("[terminal]"))
-                    .collect();
+            let violations = check_stream_invariants(
+                Bridge::AnthropicOpenAiChat,
+                events,
+                Terminal::MessageStop,
+                &HashSet::new(),
+                None,
+            )
+            .into_iter()
+            .filter(|v| v.starts_with("[terminal]"))
+            .collect();
             (events.to_vec(), violations)
         };
         let failures = fuzz_splits(input, 3, run, check);
@@ -1696,7 +2396,7 @@ mod tests {
             "usage": {"input_tokens": 1, "output_tokens": 2}
         });
         assert_eq!(
-            parity_diff(&stream, &non_stream),
+            parity_diff(Protocol::Anthropic, &stream, &non_stream),
             vec!["stop_reason: stream=\"tool_use\" non_stream=\"end_turn\"".to_string()]
         );
     }

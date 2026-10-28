@@ -1,0 +1,19 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: an incomplete historical function_call and its orphaned output are dropped instead of being sent as tool_use/tool_result."
+---
+{
+  "model": "c",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "run it"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192
+}

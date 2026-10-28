@@ -1,0 +1,30 @@
+---
+source: tests/proxy_golden.rs
+description: A flattened Chat name of a namespaced MCP tool is restored to its namespace and inner name.
+---
+{
+  "model": "gpt-5.4",
+  "messages": [
+    {
+      "role": "tool",
+      "tool_call_id": "call_tool_search_1",
+      "content": "{\"call_id\":\"call_tool_search_1\",\"tools\":[{\"name\":\"mcp__codex_apps__gmail\",\"tools\":[{\"description\":\"Search Gmail.\",\"name\":\"_search_emails\",\"parameters\":{\"type\":\"object\"},\"type\":\"function\"}],\"type\":\"namespace\"}],\"type\":\"tool_search_output\"}"
+    }
+  ],
+  "stream": true,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "mcp__codex_apps__gmail___search_emails",
+        "description": "Search Gmail.",
+        "parameters": {
+          "type": "object"
+        }
+      }
+    }
+  ],
+  "stream_options": {
+    "include_usage": true
+  }
+}

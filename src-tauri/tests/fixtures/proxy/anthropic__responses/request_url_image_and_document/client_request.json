@@ -1,0 +1,26 @@
+{
+  "model": "gpt-5",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "url",
+            "url": "https://example.com/a.png"
+          }
+        },
+        {
+          "type": "document",
+          "title": "manual.pdf",
+          "source": {
+            "type": "url",
+            "url": "https://example.com/manual.pdf"
+          }
+        }
+      ]
+    }
+  ]
+}

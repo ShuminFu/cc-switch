@@ -1,0 +1,3 @@
+intent = "A stream that ends with output but no finish_reason completes with status incomplete (max_output_tokens), not failed."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::stream_end_with_output_without_finish_reason_emits_incomplete_without_failed"

@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: Tool input carried only in content_block_start (no deltas) becomes the function_call arguments.
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 3,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude",
+  "message_id": null,
+  "billable": true
+}

@@ -1,0 +1,42 @@
+{
+  "model": "gpt-5.4",
+  "instructions": "You are Codex.",
+  "stream": true,
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "list files"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "read_file",
+      "description": "Read a file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "type": "custom",
+      "name": "exec",
+      "description": "Run a shell command."
+    }
+  ],
+  "tool_choice": "auto",
+  "max_output_tokens": 512
+}

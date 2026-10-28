@@ -1,0 +1,20 @@
+{
+  "model": "claude",
+  "stream": true,
+  "input": "read it",
+  "tools": [
+    {
+      "type": "namespace",
+      "name": "mcp_files",
+      "tools": [
+        {
+          "type": "function",
+          "name": "read",
+          "parameters": {
+            "type": "object"
+          }
+        }
+      ]
+    }
+  ]
+}

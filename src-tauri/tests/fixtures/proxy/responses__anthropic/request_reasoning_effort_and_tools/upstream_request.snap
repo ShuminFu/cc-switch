@@ -1,0 +1,42 @@
+---
+source: tests/proxy_golden.rs
+description: reasoning.effort maps to an Anthropic thinking budget below max_tokens; function tools and instructions are converted.
+---
+{
+  "model": "claude-sonnet-4-5",
+  "system": "You are Codex.",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "read the readme"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 16000,
+  "thinking": {
+    "type": "enabled",
+    "budget_tokens": 8000
+  },
+  "stream": true,
+  "tools": [
+    {
+      "name": "read_file",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "description": "Read a file."
+    }
+  ]
+}

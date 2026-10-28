@@ -1,0 +1,3 @@
+intent = "The Read tool's empty `pages` argument is dropped from the function_call arguments."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_read_tool_drops_empty_pages"

@@ -1,4 +1,4 @@
-//! Golden tests for the Anthropic-facing protocol bridges.
+//! Golden tests for the protocol bridges (Anthropic and Responses clients).
 //!
 //! Each directory under `tests/fixtures/proxy/<bridge>/<case>/` is one case
 //! (see `proxy::providers::testkit` for the layout). For every case this test
@@ -15,7 +15,11 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
 /// Minimum number of golden fixtures across all bridges.
-const MIN_FIXTURES: usize = 30;
+const MIN_FIXTURES: usize = 60;
+
+/// Fix commits of the Responses bridges that must each be pinned by at least
+/// one fixture citing them as `source_commit`.
+const REGRESSION_COMMITS: [&str; 5] = ["6d316c0", "27ce0a5", "650905a", "613fef7", "f991726"];
 
 fn fixtures_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/proxy")
@@ -88,11 +92,32 @@ fn golden_anthropic_gemini() {
 }
 
 #[test]
+fn golden_anthropic_responses() {
+    run_bridge(Bridge::AnthropicResponses);
+}
+
+#[test]
+fn golden_responses_chat() {
+    run_bridge(Bridge::ResponsesChat);
+}
+
+#[test]
+fn golden_responses_anthropic() {
+    run_bridge(Bridge::ResponsesAnthropic);
+}
+
+#[test]
 fn golden_fixture_inventory() {
     let mut total = 0;
+    let mut commits = Vec::new();
     for bridge in Bridge::ALL {
         let fixtures = load(bridge);
         total += fixtures.len();
+        commits.extend(
+            fixtures
+                .iter()
+                .map(|fixture| fixture.meta.source_commit.clone()),
+        );
         assert!(
             fixtures.iter().any(Fixture::has_stream),
             "{} needs at least one stream fixture",
@@ -125,6 +150,12 @@ fn golden_fixture_inventory() {
         total >= MIN_FIXTURES,
         "expected at least {MIN_FIXTURES} golden fixtures, found {total}"
     );
+    for commit in REGRESSION_COMMITS {
+        assert!(
+            commits.iter().any(|cited| cited.starts_with(commit)),
+            "no fixture cites regression commit {commit} as source_commit"
+        );
+    }
 
     // Every bridge directory on disk must be one the testkit knows how to run.
     for entry in std::fs::read_dir(fixtures_root()).expect("read fixtures root") {

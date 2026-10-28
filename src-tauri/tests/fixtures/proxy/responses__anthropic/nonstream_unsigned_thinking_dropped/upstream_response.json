@@ -1,0 +1,14 @@
+{
+  "id": "msg_unsigned",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "unsigned"
+    },
+    {
+      "type": "text",
+      "text": "answer"
+    }
+  ],
+  "stop_reason": "end_turn"
+}

@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: "The same text reply converts to the same Anthropic content, stop_reason and usage in stream and non-stream mode."
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 2,
+  "cache_read_tokens": 4,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5.4",
+  "message_id": "resp_par",
+  "billable": true
+}
+
+# non-stream
+{
+  "input_tokens": 5,
+  "output_tokens": 2,
+  "cache_read_tokens": 4,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5.4",
+  "message_id": "resp_par",
+  "billable": true
+}

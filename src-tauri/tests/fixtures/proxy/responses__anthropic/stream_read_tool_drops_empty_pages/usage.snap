@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "The Read tool's empty `pages` argument is dropped from the function_call arguments."
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude",
+  "message_id": null,
+  "billable": false
+}

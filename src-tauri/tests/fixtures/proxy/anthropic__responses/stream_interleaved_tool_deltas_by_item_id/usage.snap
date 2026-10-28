@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: Argument deltas of two concurrent function_call items are routed to the tool_use block of their own item_id.
+---
+# stream
+{
+  "input_tokens": 8,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "resp_2",
+  "billable": true
+}

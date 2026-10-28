@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A Chat call to the tool_search pseudo-tool is restored as a tool_search_call item.
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5.4",
+  "message_id": null,
+  "billable": false
+}

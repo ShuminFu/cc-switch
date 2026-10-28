@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a pre-output response.failed is terminal; a later text delta neither starts a message nor leaks its text."
+---
+# stream
+null

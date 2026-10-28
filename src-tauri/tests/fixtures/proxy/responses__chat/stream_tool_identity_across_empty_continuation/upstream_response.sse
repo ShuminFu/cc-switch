@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_dashscope","model":"deepseek-v4-pro","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_dashscope","type":"function","function":{"name":"exec_command","arguments":"{"}}]}}]}
+
+data: {"id":"chatcmpl_dashscope","model":"deepseek-v4-pro","choices":[{"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":"\"cmd\":\"date\"}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

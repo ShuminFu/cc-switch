@@ -1,0 +1,26 @@
+{
+  "model": "c",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "run it"
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "call_id": "c1",
+      "name": "exec",
+      "arguments": "{\"cmd\":",
+      "status": "incomplete"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "c1",
+      "output": "never ran"
+    }
+  ]
+}

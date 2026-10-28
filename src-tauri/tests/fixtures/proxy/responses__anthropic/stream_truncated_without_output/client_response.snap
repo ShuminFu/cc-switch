@@ -1,0 +1,8 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a stream cut off before any output is response.failed."
+---
+# stream
+response.created {"type":"response.created","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.in_progress {"type":"response.in_progress","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.failed {"type":"response.failed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"failed","model":"claude","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}},"error":{"message":"Upstream Anthropic stream ended before message_stop","type":"stream_truncated"}}}

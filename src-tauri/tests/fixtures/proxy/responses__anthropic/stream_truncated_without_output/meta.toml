@@ -1,0 +1,6 @@
+intent = "Regression 650905a: a stream cut off before any output is response.failed."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_truncated_stream_without_output_reports_failed"
+
+[invariants]
+terminal = "error"

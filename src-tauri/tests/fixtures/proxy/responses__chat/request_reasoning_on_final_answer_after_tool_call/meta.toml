@@ -1,0 +1,3 @@
+intent = "Regression 613fef7: in [reasoning, function_call, output, reasoning, message] the final assistant message keeps its own reasoning_content and the tool-call message keeps the first one."
+source_commit = "613fef7"
+ported_from = "src/proxy/providers/transform_codex_chat.rs::tests::responses_request_to_chat_keeps_reasoning_on_final_answer_after_tool_call"

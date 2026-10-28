@@ -1,0 +1,3 @@
+intent = "A CJK text delta survives every chunk split, including splits inside a multi-byte character."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_streaming_responses_chinese_split_across_chunks_no_replacement_chars"

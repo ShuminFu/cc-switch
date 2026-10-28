@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a clean EOF after partial text closes the text block and finishes explicitly with stop_reason max_tokens."
+---
+# stream
+null

@@ -1,0 +1,7 @@
+intent = "Regression 650905a: response.incomplete without a status field still maps to max_tokens through the event-type fallback."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_response_incomplete_event_without_status_uses_event_fallback"
+
+[invariants]
+skip = ["usage_conservation"]
+skip_reason = "The upstream usage has no input_tokens, so TokenUsage::from_codex_response cannot parse it, while the client still records output_tokens=3."

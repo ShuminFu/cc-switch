@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: reasoning_content and reasoning deltas become one reasoning item that is emitted before the message item.
+---
+# stream
+{
+  "input_tokens": 4,
+  "output_tokens": 6,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "deepseek-reasoner",
+  "message_id": null,
+  "billable": true
+}

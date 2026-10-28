@@ -1,0 +1,6 @@
+intent = "A data-only Chat error payload becomes response.failed carrying the upstream error code."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::chat_sse_data_only_error_emits_failed_without_completed"
+
+[invariants]
+terminal = "error"

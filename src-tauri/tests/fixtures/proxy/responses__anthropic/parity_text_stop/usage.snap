@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: "The same Anthropic text reply converts to the same Responses output, status and usage in stream and non-stream mode."
+---
+# stream
+{
+  "input_tokens": 9,
+  "output_tokens": 2,
+  "cache_read_tokens": 4,
+  "cache_creation_tokens": 0,
+  "model": "claude",
+  "message_id": null,
+  "billable": true
+}
+
+# non-stream
+{
+  "input_tokens": 9,
+  "output_tokens": 2,
+  "cache_read_tokens": 4,
+  "cache_creation_tokens": 0,
+  "model": "claude",
+  "message_id": null,
+  "billable": true
+}

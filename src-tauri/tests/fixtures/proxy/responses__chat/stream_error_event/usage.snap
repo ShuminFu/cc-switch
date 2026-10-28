@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "A Chat SSE `event: error` frame becomes response.failed carrying the upstream error."
+---
+# stream
+null

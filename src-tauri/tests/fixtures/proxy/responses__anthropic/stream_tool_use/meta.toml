@@ -1,0 +1,3 @@
+intent = "A tool_use block becomes a function_call item with argument delta/done events."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_tool_use_stream"

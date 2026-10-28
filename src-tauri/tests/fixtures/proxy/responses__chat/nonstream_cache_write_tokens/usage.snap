@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression f991726: non-stream Chat usage with cached and cache_write tokens keeps both as Responses input_tokens_details."
+---
+# non-stream
+{
+  "input_tokens": 10,
+  "output_tokens": 5,
+  "cache_read_tokens": 3,
+  "cache_creation_tokens": 2,
+  "model": "gpt-5.4",
+  "message_id": null,
+  "billable": true
+}

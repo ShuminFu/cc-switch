@@ -1,0 +1,6 @@
+intent = "Regression 650905a: response.failed becomes an Anthropic error event carrying the upstream message, with no message_stop."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_response_failed_event_becomes_anthropic_error"
+
+[invariants]
+terminal = "error"

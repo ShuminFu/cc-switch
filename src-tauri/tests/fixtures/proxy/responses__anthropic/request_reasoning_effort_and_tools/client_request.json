@@ -1,0 +1,39 @@
+{
+  "model": "claude-sonnet-4-5",
+  "instructions": "You are Codex.",
+  "stream": true,
+  "max_output_tokens": 16000,
+  "reasoning": {
+    "effort": "medium"
+  },
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "read the readme"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "read_file",
+      "description": "Read a file.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  ]
+}

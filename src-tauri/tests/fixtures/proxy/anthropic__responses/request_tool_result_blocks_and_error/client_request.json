@@ -1,0 +1,38 @@
+{
+  "model": "gpt-5",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_1",
+          "is_error": true,
+          "content": [
+            {
+              "type": "text",
+              "text": "command failed"
+            },
+            {
+              "type": "image",
+              "source": {
+                "type": "url",
+                "url": "https://example.com/error.png"
+              }
+            },
+            {
+              "type": "document",
+              "title": "trace.pdf",
+              "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": "JVBERi0="
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

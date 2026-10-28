@@ -1,0 +1,20 @@
+{
+  "id": "resp_partial_args",
+  "status": "incomplete",
+  "incomplete_details": {
+    "reason": "max_output_tokens"
+  },
+  "model": "gpt-5.6",
+  "output": [
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "dangerous_tool",
+      "arguments": "{\"path\":"
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 2
+  }
+}

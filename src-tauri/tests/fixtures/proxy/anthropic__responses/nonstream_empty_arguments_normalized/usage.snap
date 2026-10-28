@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 27ce0a5: a completed function_call with empty arguments becomes a tool_use with input {}."
+---
+# non-stream
+{
+  "input_tokens": 10,
+  "output_tokens": 2,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5.6",
+  "message_id": "resp_empty_args",
+  "billable": true
+}

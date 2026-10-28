@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression f991726: Anthropic cache_read and cache_creation tokens are folded into the Responses input total and exposed as cached_tokens / cache_write_tokens."
+---
+# stream
+{
+  "input_tokens": 100,
+  "output_tokens": 5,
+  "cache_read_tokens": 60,
+  "cache_creation_tokens": 20,
+  "model": "claude",
+  "message_id": null,
+  "billable": true
+}

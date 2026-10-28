@@ -1,0 +1,26 @@
+{
+  "model": "gpt-5.4",
+  "stream": true,
+  "input": [
+    {
+      "type": "tool_search_output",
+      "call_id": "call_tool_search_1",
+      "tools": [
+        {
+          "type": "namespace",
+          "name": "mcp__codex_apps__gmail",
+          "tools": [
+            {
+              "type": "function",
+              "name": "_search_emails",
+              "description": "Search Gmail.",
+              "parameters": {
+                "type": "object"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

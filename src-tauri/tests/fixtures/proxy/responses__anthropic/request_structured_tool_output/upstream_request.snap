@@ -1,0 +1,58 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a structured function_call_output restores is_error from the marker, file parts as documents and unknown parts as text."
+---
+{
+  "model": "c",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "(continuing the conversation)"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "c1",
+          "name": "inspect",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "c1",
+          "content": [
+            {
+              "type": "text",
+              "text": "failed"
+            },
+            {
+              "type": "document",
+              "source": {
+                "type": "url",
+                "url": "https://example.com/log.pdf"
+              },
+              "title": "log.pdf"
+            },
+            {
+              "type": "text",
+              "text": "{\"payload\":{\"x\":1},\"type\":\"future_part\"}"
+            }
+          ],
+          "is_error": true
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192
+}

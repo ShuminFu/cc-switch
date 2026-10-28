@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A Chat call to a Codex custom tool is restored as a custom_tool_call item with custom_tool_call_input events carrying the raw input.
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5.4",
+  "message_id": null,
+  "billable": false
+}

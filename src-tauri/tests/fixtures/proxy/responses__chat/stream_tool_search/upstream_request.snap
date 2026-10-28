@@ -1,0 +1,42 @@
+---
+source: tests/proxy_golden.rs
+description: A Chat call to the tool_search pseudo-tool is restored as a tool_search_call item.
+---
+{
+  "model": "gpt-5.4",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Search for Gmail tools."
+    }
+  ],
+  "stream": true,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "tool_search",
+        "description": "Search and load Codex tools, plugins, connectors, and MCP namespaces for the current task.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query for tools or connectors to load."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of tool groups to return."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    }
+  ],
+  "stream_options": {
+    "include_usage": true
+  }
+}

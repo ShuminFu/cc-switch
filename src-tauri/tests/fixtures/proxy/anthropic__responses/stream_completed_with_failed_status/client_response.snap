@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a response.completed wrapper whose status is failed is reported as an error, not as an empty successful reply."
+---
+# stream
+error {"type":"error","error":{"type":"server_error","message":"failed wrapper"}}

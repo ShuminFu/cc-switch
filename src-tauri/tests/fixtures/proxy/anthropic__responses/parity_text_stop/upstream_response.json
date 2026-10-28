@@ -1,0 +1,25 @@
+{
+  "id": "resp_par",
+  "status": "completed",
+  "model": "gpt-5.4",
+  "output": [
+    {
+      "id": "msg_par",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Hi there"
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 9,
+    "output_tokens": 2,
+    "input_tokens_details": {
+      "cached_tokens": 4
+    }
+  }
+}

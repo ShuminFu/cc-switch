@@ -1,0 +1,2 @@
+intent = "instructions become a system message, function and custom tools become Chat function tools, and stream requests ask for usage."
+source_commit = "a738206"

@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "The Read tool's empty `pages` argument is dropped before the input reaches the Anthropic client."
+---
+# stream
+null

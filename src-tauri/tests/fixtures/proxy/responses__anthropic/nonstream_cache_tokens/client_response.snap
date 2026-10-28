@@ -1,0 +1,40 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression f991726: the non-stream Responses input_tokens is the inclusive total fresh + cache_read + cache_creation, with both cache buckets in input_tokens_details."
+---
+# non-stream
+{
+  "id": "[generated-id:1]",
+  "object": "response",
+  "created_at": "[timestamp]",
+  "status": "completed",
+  "model": "claude",
+  "output": [
+    {
+      "id": "[generated-id:2]",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "cached",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 5,
+    "total_tokens": 105,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "input_tokens_details": {
+      "cached_tokens": 60,
+      "cache_write_tokens": 20
+    },
+    "cache_creation_input_tokens": 20
+  }
+}

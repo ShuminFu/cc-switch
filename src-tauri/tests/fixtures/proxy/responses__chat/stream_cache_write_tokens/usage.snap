@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression f991726: prompt_tokens_details.cache_write_tokens is kept as input_tokens_details.cache_write_tokens (and the legacy cache_creation_input_tokens alias) on response.completed."
+---
+# stream
+{
+  "input_tokens": 1000,
+  "output_tokens": 50,
+  "cache_read_tokens": 600,
+  "cache_creation_tokens": 300,
+  "model": "glm-5.1",
+  "message_id": null,
+  "billable": true
+}

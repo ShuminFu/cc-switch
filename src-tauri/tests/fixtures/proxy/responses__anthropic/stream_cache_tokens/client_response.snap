@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression f991726: Anthropic cache_read and cache_creation tokens are folded into the Responses input total and exposed as cached_tokens / cache_write_tokens."
+---
+# stream
+response.created {"type":"response.created","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":100,"output_tokens":0,"total_tokens":100,"output_tokens_details":{"reasoning_tokens":0},"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":20},"cache_creation_input_tokens":20}}}
+response.in_progress {"type":"response.in_progress","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":100,"output_tokens":0,"total_tokens":100,"output_tokens_details":{"reasoning_tokens":0},"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":20},"cache_creation_input_tokens":20}}}
+response.output_item.added {"type":"response.output_item.added","output_index":0,"item":{"id":"[generated-id:2]","type":"message","status":"in_progress","role":"assistant","content":[]}}
+response.content_part.added {"type":"response.content_part.added","item_id":"[generated-id:2]","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}
+response.output_text.delta {"type":"response.output_text.delta","item_id":"[generated-id:2]","output_index":0,"content_index":0,"delta":"cached"}
+response.output_text.done {"type":"response.output_text.done","item_id":"[generated-id:2]","output_index":0,"content_index":0,"text":"cached"}
+response.content_part.done {"type":"response.content_part.done","item_id":"[generated-id:2]","output_index":0,"content_index":0,"part":{"type":"output_text","text":"cached","annotations":[]}}
+response.output_item.done {"type":"response.output_item.done","output_index":0,"item":{"id":"[generated-id:2]","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"cached","annotations":[]}]}}
+response.completed {"type":"response.completed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"completed","model":"claude","output":[{"id":"[generated-id:2]","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"cached","annotations":[]}]}],"usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105,"output_tokens_details":{"reasoning_tokens":0},"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":20},"cache_creation_input_tokens":20}}}

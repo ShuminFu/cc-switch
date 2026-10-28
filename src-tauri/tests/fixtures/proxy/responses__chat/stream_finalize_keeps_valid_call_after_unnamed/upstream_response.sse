@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_parallel_missing","model":"deepseek-v4-pro","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_missing","type":"function","function":{"arguments":"{}"}}]}}]}
+
+data: {"id":"chatcmpl_parallel_missing","model":"deepseek-v4-pro","choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_valid","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"date\"}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

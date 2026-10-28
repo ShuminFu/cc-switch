@@ -1,0 +1,3 @@
+intent = "reasoning_content and reasoning deltas become one reasoning item that is emitted before the message item."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::converts_reasoning_content_chat_sse_to_responses_reasoning_events"

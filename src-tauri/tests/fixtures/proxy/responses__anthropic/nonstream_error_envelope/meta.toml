@@ -1,0 +1,2 @@
+intent = "Regression 650905a: a 2xx Anthropic error envelope is a conversion error carrying the upstream message."
+source_commit = "650905a"

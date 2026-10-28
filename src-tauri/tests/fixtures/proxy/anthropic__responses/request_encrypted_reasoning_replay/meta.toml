@@ -1,0 +1,6 @@
+intent = "Regression 27ce0a5: a thinking block signed by the bridge is replayed as the original encrypted reasoning item before the function_call (Codex OAuth)."
+source_commit = "27ce0a5"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_encrypted_reasoning_round_trips_through_anthropic_history"
+
+[options]
+codex_oauth = true

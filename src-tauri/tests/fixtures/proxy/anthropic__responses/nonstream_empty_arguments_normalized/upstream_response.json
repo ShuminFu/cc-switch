@@ -1,0 +1,17 @@
+{
+  "id": "resp_empty_args",
+  "status": "completed",
+  "model": "gpt-5.6",
+  "output": [
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "ping",
+      "arguments": ""
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 2
+  }
+}

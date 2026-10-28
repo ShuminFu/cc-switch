@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a stream request answered with a whole Anthropic error JSON becomes response.failed with the upstream error, not a truncation error."
+---
+# stream
+null

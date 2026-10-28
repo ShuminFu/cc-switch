@@ -1,0 +1,3 @@
+intent = "Regression 650905a: URL images and URL documents become input_image / input_file parts."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_anthropic_to_responses_url_image_and_document"

@@ -1,0 +1,6 @@
+intent = "A Chat SSE `event: error` frame becomes response.failed carrying the upstream error."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::chat_sse_error_event_emits_failed_without_completed"
+
+[invariants]
+terminal = "error"

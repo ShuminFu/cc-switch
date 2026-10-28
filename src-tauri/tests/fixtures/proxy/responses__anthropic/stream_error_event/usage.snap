@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: An Anthropic error event becomes response.failed carrying the upstream error type and message.
+---
+# stream
+null

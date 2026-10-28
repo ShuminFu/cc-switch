@@ -1,0 +1,38 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 613fef7: in [reasoning, function_call, output, reasoning, message] the final assistant message keeps its own reasoning_content and the tool-call message keeps the first one."
+---
+{
+  "model": "kimi-k2-thinking",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"path\":\"README.md\"}"
+          }
+        }
+      ],
+      "reasoning_content": "need to read a file"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "Readme content"
+    },
+    {
+      "role": "assistant",
+      "content": "The file says hello.",
+      "reasoning_content": "now I can answer"
+    },
+    {
+      "role": "user",
+      "content": "Continue"
+    }
+  ]
+}

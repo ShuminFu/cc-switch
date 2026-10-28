@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 27ce0a5: truncated (incomplete) function_call arguments become input {} with stop_reason max_tokens."
+---
+# non-stream
+{
+  "id": "resp_partial_args",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "call_1",
+      "name": "dangerous_tool",
+      "input": {}
+    }
+  ],
+  "model": "gpt-5.6",
+  "stop_reason": "max_tokens",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 2
+  }
+}

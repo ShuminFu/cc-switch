@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_1","created":123,"model":"gpt-5.4","choices":[{"delta":{"content":"Hel"}}]}
+
+data: {"id":"chatcmpl_1","created":123,"model":"gpt-5.4","choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}
+
+data: [DONE]
+

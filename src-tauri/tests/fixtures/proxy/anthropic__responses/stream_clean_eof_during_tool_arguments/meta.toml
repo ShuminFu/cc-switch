@@ -1,0 +1,6 @@
+intent = "Regression 650905a: a clean EOF while tool arguments are still streaming is a stream_truncated error, never a completed tool call."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_clean_eof_during_tool_arguments_is_error"
+
+[invariants]
+terminal = "error"

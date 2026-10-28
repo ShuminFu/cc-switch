@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a stream request answered with a whole Anthropic error JSON becomes response.failed with the upstream error, not a truncation error."
+---
+# stream
+response.failed {"type":"response.failed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"failed","model":"","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}},"error":{"message":"bad key","type":"authentication_error"}}}

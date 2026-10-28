@@ -1,0 +1,3 @@
+intent = "Chat content deltas become one Responses message item with output_text deltas; Chat usage becomes Responses usage on response.completed."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::converts_text_chat_sse_to_responses_sse"

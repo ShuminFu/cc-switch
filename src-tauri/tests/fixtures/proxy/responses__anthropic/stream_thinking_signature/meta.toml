@@ -1,0 +1,3 @@
+intent = "A signed thinking block becomes a reasoning item whose encrypted_content round-trips the Anthropic block (signature included)."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_thinking_signature_is_preserved"

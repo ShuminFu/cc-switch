@@ -1,0 +1,62 @@
+---
+source: tests/proxy_golden.rs
+description: "instructions become a system message, function and custom tools become Chat function tools, and stream requests ask for usage."
+---
+{
+  "model": "gpt-5.4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are Codex."
+    },
+    {
+      "role": "user",
+      "content": "list files"
+    }
+  ],
+  "max_tokens": 512,
+  "stream": true,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "exec",
+        "description": "Original tool definition:\n```json\n{\"description\":\"Run a shell command.\",\"name\":\"exec\",\"type\":\"custom\"}\n```",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "string",
+              "description": "Raw string input for the original custom tool. Preserve formatting exactly and follow the original tool definition embedded in the description."
+            }
+          },
+          "required": [
+            "input"
+          ]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "stream_options": {
+    "include_usage": true
+  }
+}

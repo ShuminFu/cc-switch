@@ -1,0 +1,43 @@
+{
+  "model": "kimi-k2-thinking",
+  "input": [
+    {
+      "type": "reasoning",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "need to read a file"
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "read_file",
+      "arguments": "{\"path\":\"README.md\"}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_1",
+      "output": "Readme content"
+    },
+    {
+      "type": "reasoning",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "now I can answer"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "The file says hello."
+    },
+    {
+      "role": "user",
+      "content": "Continue"
+    }
+  ]
+}

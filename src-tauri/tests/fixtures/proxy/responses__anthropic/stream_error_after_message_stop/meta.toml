@@ -1,0 +1,3 @@
+intent = "Regression 650905a: an error event after message_stop does not produce a second terminal event."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_error_after_message_stop_does_not_emit_second_terminal_event"

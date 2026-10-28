@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_cjk","model":"deepseek-v4-flash","choices":[{"delta":{"role":"assistant","content":"你好，"}}]}
+
+data: {"id":"chatcmpl_cjk","model":"deepseek-v4-flash","choices":[{"delta":{"content":"世界 🌏"},"finish_reason":"stop"}],"usage":{"prompt_tokens":6,"completion_tokens":5,"total_tokens":11}}
+
+data: [DONE]
+

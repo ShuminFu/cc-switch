@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a stream cut off after partial text is finalized explicitly as incomplete, not completed."
+---
+# stream
+response.created {"type":"response.created","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":4,"output_tokens":0,"total_tokens":4,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.in_progress {"type":"response.in_progress","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":4,"output_tokens":0,"total_tokens":4,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.output_item.added {"type":"response.output_item.added","output_index":0,"item":{"id":"[generated-id:2]","type":"message","status":"in_progress","role":"assistant","content":[]}}
+response.content_part.added {"type":"response.content_part.added","item_id":"[generated-id:2]","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}
+response.output_text.delta {"type":"response.output_text.delta","item_id":"[generated-id:2]","output_index":0,"content_index":0,"delta":"partial"}
+response.output_text.done {"type":"response.output_text.done","item_id":"[generated-id:2]","output_index":0,"content_index":0,"text":"partial"}
+response.content_part.done {"type":"response.content_part.done","item_id":"[generated-id:2]","output_index":0,"content_index":0,"part":{"type":"output_text","text":"partial","annotations":[]}}
+response.output_item.done {"type":"response.output_item.done","output_index":0,"item":{"id":"[generated-id:2]","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"partial","annotations":[]}]}}
+response.completed {"type":"response.completed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"incomplete","model":"claude","output":[{"id":"[generated-id:2]","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"partial","annotations":[]}]}],"usage":{"input_tokens":4,"output_tokens":0,"total_tokens":4,"output_tokens_details":{"reasoning_tokens":0}},"incomplete_details":{"reason":"max_output_tokens"}}}

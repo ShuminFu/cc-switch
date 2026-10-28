@@ -1,0 +1,3 @@
+intent = "An inline <think> block in the content stream becomes a reasoning item without leaking the tags into the message text; the usage-only chunk after finish is kept."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::converts_inline_think_chat_sse_to_reasoning_without_leaking_tags"

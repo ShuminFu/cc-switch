@@ -1,0 +1,3 @@
+intent = "A function_call item with argument deltas becomes a tool_use block with input_json_delta and stop_reason tool_use; usage comes from response.completed."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_streaming_conversion_with_wrapped_response_events"

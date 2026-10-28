@@ -1,0 +1,3 @@
+intent = "A Chat tool call becomes a function_call item with argument delta/done events and status completed."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::converts_tool_call_chat_sse_to_responses_sse"

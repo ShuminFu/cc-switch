@@ -1,0 +1,2 @@
+intent = "Regression f991726: nested input_tokens_details.cache_write_tokens becomes Anthropic cache_creation_input_tokens, so input + cache_read + cache_creation equals the upstream input total."
+source_commit = "f991726"

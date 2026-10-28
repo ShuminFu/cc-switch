@@ -1,0 +1,3 @@
+intent = "The Read tool's empty `pages` argument is dropped before the input reaches the Anthropic client."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_streaming_read_tool_drops_empty_pages"

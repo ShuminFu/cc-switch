@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: An inline <think> block in the content stream becomes a reasoning item without leaking the tags into the message text; the usage-only chunk after finish is kept.
+---
+# stream
+{
+  "input_tokens": 4,
+  "output_tokens": 6,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "MiniMax-M2.7",
+  "message_id": null,
+  "billable": true
+}

@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_gmail","model":"gpt-5.4","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_gmail","type":"function","function":{"name":"mcp__codex_apps__gmail___search_emails"}}]}}]}
+
+data: {"id":"chatcmpl_gmail","model":"gpt-5.4","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":\"in:inbox\"}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

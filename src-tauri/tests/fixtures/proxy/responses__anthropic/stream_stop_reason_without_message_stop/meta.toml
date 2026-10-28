@@ -1,0 +1,3 @@
+intent = "Regression 650905a: a message_delta with a stop_reason followed by EOF (no message_stop) still completes normally."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_stop_reason_without_message_stop_completes"

@@ -1,0 +1,5 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: malformed completed function_call arguments in the history are a non-retryable invalid request."
+---
+ERROR: 无效的请求: Invalid function_call arguments for 't': key must be a string at line 1 column 2

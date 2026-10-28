@@ -1,0 +1,2 @@
+intent = "reasoning.effort maps to an Anthropic thinking budget below max_tokens; function tools and instructions are converted."
+source_commit = "a738206"

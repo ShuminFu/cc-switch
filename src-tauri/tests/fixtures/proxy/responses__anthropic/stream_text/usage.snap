@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: An Anthropic text stream becomes one Responses message item; input usage from message_start and output usage from message_delta reach response.completed.
+---
+# stream
+{
+  "input_tokens": 12,
+  "output_tokens": 3,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude",
+  "message_id": null,
+  "billable": true
+}

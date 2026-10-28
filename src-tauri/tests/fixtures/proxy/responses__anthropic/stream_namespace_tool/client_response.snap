@@ -1,0 +1,11 @@
+---
+source: tests/proxy_golden.rs
+description: A flattened tool_use name of a namespaced tool is restored to its namespace and inner name.
+---
+# stream
+response.created {"type":"response.created","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.in_progress {"type":"response.in_progress","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"claude","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.output_item.added {"type":"response.output_item.added","output_index":0,"item":{"id":"[generated-id:2]","type":"function_call","status":"in_progress","call_id":"call_1","name":"read","arguments":"","namespace":"mcp_files"}}
+response.function_call_arguments.done {"type":"response.function_call_arguments.done","item_id":"[generated-id:2]","output_index":0,"arguments":"{}"}
+response.output_item.done {"type":"response.output_item.done","output_index":0,"item":{"id":"[generated-id:2]","type":"function_call","status":"completed","call_id":"call_1","name":"read","arguments":"{}","namespace":"mcp_files"}}
+response.completed {"type":"response.completed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"completed","model":"claude","output":[{"id":"[generated-id:2]","type":"function_call","status":"completed","call_id":"call_1","name":"read","arguments":"{}","namespace":"mcp_files"}],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}

@@ -1,0 +1,20 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: system and developer history items are hoisted into the Anthropic system prompt after the instructions."
+---
+{
+  "model": "claude",
+  "system": "base\n\nsystem history\n\ndeveloper history",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "hi"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192
+}

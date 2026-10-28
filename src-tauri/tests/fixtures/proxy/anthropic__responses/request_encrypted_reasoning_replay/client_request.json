@@ -1,0 +1,36 @@
+{
+  "model": "gpt-5.6",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "look it up"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "Need a tool.",
+          "signature": "ccswitch-openai-reasoning-v1:eyJ0eXBlIjoicmVhc29uaW5nIiwiaWQiOiJyc18xMjMiLCJzdW1tYXJ5IjpbeyJ0eXBlIjoic3VtbWFyeV90ZXh0IiwidGV4dCI6Ik5lZWQgYSB0b29sLiJ9XSwiZW5jcnlwdGVkX2NvbnRlbnQiOiJvcGFxdWUtY2lwaGVydGV4dCJ9"
+        },
+        {
+          "type": "tool_use",
+          "id": "call_1",
+          "name": "lookup",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_1",
+          "content": "found"
+        }
+      ]
+    }
+  ]
+}

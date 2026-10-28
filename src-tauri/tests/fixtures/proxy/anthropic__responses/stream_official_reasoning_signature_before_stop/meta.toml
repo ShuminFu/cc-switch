@@ -1,0 +1,3 @@
+intent = "Regression 27ce0a5: official reasoning_summary events become a thinking block whose signature (the encoded reasoning item) is sent before content_block_stop."
+source_commit = "27ce0a5"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_official_reasoning_events_emit_signature_before_stop"

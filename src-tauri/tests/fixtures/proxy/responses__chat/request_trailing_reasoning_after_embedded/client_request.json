@@ -1,0 +1,25 @@
+{
+  "model": "gpt-5.4",
+  "input": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "reasoning_content": "Embedded thought.",
+      "content": "Done."
+    },
+    {
+      "type": "reasoning",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Trailing thought."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "Continue"
+    }
+  ]
+}

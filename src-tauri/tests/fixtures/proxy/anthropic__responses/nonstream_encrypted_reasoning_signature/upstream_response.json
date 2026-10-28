@@ -1,0 +1,29 @@
+{
+  "id": "resp_123",
+  "status": "completed",
+  "model": "gpt-5.6",
+  "output": [
+    {
+      "type": "reasoning",
+      "id": "rs_123",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Need a tool."
+        }
+      ],
+      "encrypted_content": "opaque-ciphertext"
+    },
+    {
+      "type": "function_call",
+      "id": "fc_1",
+      "call_id": "call_1",
+      "name": "lookup",
+      "arguments": "{}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 2
+  }
+}

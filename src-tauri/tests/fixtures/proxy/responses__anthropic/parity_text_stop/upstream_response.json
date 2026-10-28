@@ -1,0 +1,18 @@
+{
+  "id": "msg_par",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude",
+  "content": [
+    {
+      "type": "text",
+      "text": "Hi there"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 5,
+    "cache_read_input_tokens": 4,
+    "output_tokens": 2
+  }
+}

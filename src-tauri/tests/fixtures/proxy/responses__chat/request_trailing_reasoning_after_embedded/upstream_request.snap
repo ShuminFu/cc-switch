@@ -1,0 +1,18 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 613fef7: a trailing reasoning item after an assistant message with embedded reasoning_content is appended to that message's reasoning_content."
+---
+{
+  "model": "gpt-5.4",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "Done.",
+      "reasoning_content": "Embedded thought.\n\nTrailing thought."
+    },
+    {
+      "role": "user",
+      "content": "Continue"
+    }
+  ]
+}

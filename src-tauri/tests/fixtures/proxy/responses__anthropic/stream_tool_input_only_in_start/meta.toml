@@ -1,0 +1,3 @@
+intent = "Tool input carried only in content_block_start (no deltas) becomes the function_call arguments."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_tool_use_input_only_in_start_event"

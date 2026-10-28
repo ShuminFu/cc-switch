@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression f991726: the non-stream conversion splits the Responses input total into fresh input, cache_read and cache_creation."
+---
+# non-stream
+{
+  "input_tokens": 50,
+  "output_tokens": 10,
+  "cache_read_tokens": 30,
+  "cache_creation_tokens": 20,
+  "model": "gpt-5.6",
+  "message_id": "resp_cache",
+  "billable": true
+}

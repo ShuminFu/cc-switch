@@ -1,0 +1,38 @@
+---
+source: tests/proxy_golden.rs
+description: A Chat call to a Codex custom tool is restored as a custom_tool_call item with custom_tool_call_input events carrying the raw input.
+---
+{
+  "model": "gpt-5.4",
+  "messages": [
+    {
+      "role": "user",
+      "content": "list files"
+    }
+  ],
+  "stream": true,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "exec",
+        "description": "Original tool definition:\n```json\n{\"name\":\"exec\",\"type\":\"custom\"}\n```",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "string",
+              "description": "Raw string input for the original custom tool. Preserve formatting exactly and follow the original tool definition embedded in the description."
+            }
+          },
+          "required": [
+            "input"
+          ]
+        }
+      }
+    }
+  ],
+  "stream_options": {
+    "include_usage": true
+  }
+}

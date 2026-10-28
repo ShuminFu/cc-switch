@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "A stream that ends with output but no finish_reason completes with status incomplete (max_output_tokens), not failed."
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5.4",
+  "message_id": null,
+  "billable": false
+}

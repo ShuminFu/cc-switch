@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a stream request answered with one whole Responses JSON body is converted into a complete Anthropic stream."
+---
+# stream
+{
+  "input_tokens": 4,
+  "output_tokens": 1,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5",
+  "message_id": "resp_json",
+  "billable": true
+}

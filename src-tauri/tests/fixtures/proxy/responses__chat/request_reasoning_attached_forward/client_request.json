@@ -1,0 +1,37 @@
+{
+  "model": "kimi-k2-thinking",
+  "input": [
+    {
+      "type": "reasoning",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "first thought"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "First answer."
+    },
+    {
+      "type": "reasoning",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "second thought"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "Second answer."
+    },
+    {
+      "role": "user",
+      "content": "Continue"
+    }
+  ]
+}

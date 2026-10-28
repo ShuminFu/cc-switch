@@ -1,0 +1,3 @@
+intent = "Regression 27ce0a5: a completed function_call with empty arguments becomes a tool_use with input {}."
+source_commit = "27ce0a5"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_completed_function_call_empty_arguments_normalizes_to_object"

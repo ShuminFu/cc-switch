@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression f991726: prompt_tokens_details.cache_write_tokens is kept as input_tokens_details.cache_write_tokens (and the legacy cache_creation_input_tokens alias) on response.completed."
+---
+# stream
+response.created {"type":"response.created","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"glm-5.1","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.in_progress {"type":"response.in_progress","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"in_progress","model":"glm-5.1","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}}}}
+response.output_item.added {"type":"response.output_item.added","output_index":0,"item":{"id":"[generated-id:2]","type":"message","status":"in_progress","role":"assistant","content":[]}}
+response.content_part.added {"type":"response.content_part.added","item_id":"[generated-id:2]","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}
+response.output_text.delta {"type":"response.output_text.delta","item_id":"[generated-id:2]","output_index":0,"content_index":0,"delta":"ok"}
+response.output_text.done {"type":"response.output_text.done","item_id":"[generated-id:2]","output_index":0,"content_index":0,"text":"ok"}
+response.content_part.done {"type":"response.content_part.done","item_id":"[generated-id:2]","output_index":0,"content_index":0,"part":{"type":"output_text","text":"ok","annotations":[]}}
+response.output_item.done {"type":"response.output_item.done","output_index":0,"item":{"id":"[generated-id:2]","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}}
+response.completed {"type":"response.completed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"completed","model":"glm-5.1","output":[{"id":"[generated-id:2]","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":1000,"output_tokens":50,"total_tokens":1050,"input_tokens_details":{"cached_tokens":600,"cache_write_tokens":300},"output_tokens_details":{"reasoning_tokens":0},"cache_creation_input_tokens":300}}}

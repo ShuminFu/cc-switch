@@ -1,0 +1,16 @@
+{
+  "model": "c",
+  "input": [
+    {
+      "type": "function_call",
+      "call_id": "c1",
+      "name": "t",
+      "arguments": "{broken"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "c1",
+      "output": "ok"
+    }
+  ]
+}

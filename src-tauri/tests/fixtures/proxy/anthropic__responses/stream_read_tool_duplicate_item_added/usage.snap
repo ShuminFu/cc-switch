@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: A repeated output_item.added for the same item does not open a second tool_use block and keeps the buffered arguments.
+---
+# stream
+null

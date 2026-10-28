@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: A data-only Chat error payload becomes response.failed carrying the upstream error code.
+---
+# stream
+null

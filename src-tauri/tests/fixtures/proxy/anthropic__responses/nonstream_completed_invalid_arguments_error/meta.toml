@@ -1,0 +1,3 @@
+intent = "Regression 27ce0a5: malformed arguments on a completed function_call are a conversion error, never a tool_use with guessed input."
+source_commit = "27ce0a5"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_completed_function_call_invalid_arguments_is_error"

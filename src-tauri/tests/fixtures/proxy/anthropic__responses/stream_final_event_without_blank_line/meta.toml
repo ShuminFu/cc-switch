@@ -1,0 +1,3 @@
+intent = "Regression 650905a: a final response.completed that is not followed by a blank line is still processed exactly once (no stream_truncated error)."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_final_event_without_blank_line_is_processed"

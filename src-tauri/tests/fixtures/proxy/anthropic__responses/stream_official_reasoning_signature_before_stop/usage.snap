@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 27ce0a5: official reasoning_summary events become a thinking block whose signature (the encoded reasoning item) is sent before content_block_stop."
+---
+# stream
+null

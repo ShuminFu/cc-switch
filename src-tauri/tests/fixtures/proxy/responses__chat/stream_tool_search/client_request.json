@@ -1,0 +1,10 @@
+{
+  "model": "gpt-5.4",
+  "stream": true,
+  "tools": [
+    {
+      "type": "tool_search"
+    }
+  ],
+  "input": "Search for Gmail tools."
+}

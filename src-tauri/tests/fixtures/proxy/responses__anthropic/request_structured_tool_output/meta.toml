@@ -1,0 +1,3 @@
+intent = "Regression 650905a: a structured function_call_output restores is_error from the marker, file parts as documents and unknown parts as text."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/transform_codex_anthropic.rs::tests::test_structured_tool_output_restores_error_file_and_unknown_parts"

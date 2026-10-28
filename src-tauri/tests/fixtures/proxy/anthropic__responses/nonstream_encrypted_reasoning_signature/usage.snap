@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 27ce0a5: an encrypted reasoning item becomes a thinking block whose signature encodes the whole item (ccswitch-openai-reasoning-v1)."
+---
+# non-stream
+{
+  "input_tokens": 10,
+  "output_tokens": 2,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5.6",
+  "message_id": "resp_123",
+  "billable": true
+}

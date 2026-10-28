@@ -1,0 +1,12 @@
+{
+  "model": "gpt-5.4",
+  "max_tokens": 256,
+  "system": "Be brief.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Say hi"
+    }
+  ],
+  "stream": true
+}

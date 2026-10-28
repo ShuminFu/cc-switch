@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: response.incomplete with reason max_output_tokens finishes with stop_reason max_tokens and message_stop."
+---
+# stream
+{
+  "input_tokens": 10,
+  "output_tokens": 3,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-5",
+  "message_id": "resp_1",
+  "billable": true
+}

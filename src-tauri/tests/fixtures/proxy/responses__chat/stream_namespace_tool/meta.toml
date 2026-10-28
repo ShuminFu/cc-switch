@@ -1,0 +1,3 @@
+intent = "A flattened Chat name of a namespaced MCP tool is restored to its namespace and inner name."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::restores_namespace_on_streamed_tool_call_items"

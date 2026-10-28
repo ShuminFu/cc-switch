@@ -1,0 +1,19 @@
+{
+  "model": "gpt-5.6",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "redacted_thinking",
+          "data": "ccswitch-openai-reasoning-v1:eyJ0eXBlIjoicmVhc29uaW5nIiwiaWQiOiJyc19vcnBoYW4iLCJzdW1tYXJ5IjpbXSwiZW5jcnlwdGVkX2NvbnRlbnQiOiJvcGFxdWUifQ"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "continue"
+    }
+  ]
+}

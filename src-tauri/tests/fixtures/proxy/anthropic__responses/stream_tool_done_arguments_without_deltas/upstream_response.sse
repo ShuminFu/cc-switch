@@ -1,0 +1,12 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_done","model":"gpt-5.6"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_done","type":"function_call","call_id":"call_done","name":"lookup","arguments":""}}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","item_id":"fc_done","output_index":0,"item":{"id":"fc_done","type":"function_call","arguments":"{\"q\":\"rust\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"status":"completed"}}
+

@@ -1,0 +1,13 @@
+{
+  "id": "resp_failed",
+  "status": "failed",
+  "error": {
+    "type": "server_error",
+    "message": "backend exploded"
+  },
+  "output": [],
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 0
+  }
+}

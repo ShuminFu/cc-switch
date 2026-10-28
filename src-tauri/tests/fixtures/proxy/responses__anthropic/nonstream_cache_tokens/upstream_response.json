@@ -1,0 +1,19 @@
+{
+  "id": "msg_cache",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude",
+  "content": [
+    {
+      "type": "text",
+      "text": "cached"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 20,
+    "cache_read_input_tokens": 60,
+    "cache_creation_input_tokens": 20,
+    "output_tokens": 5
+  }
+}

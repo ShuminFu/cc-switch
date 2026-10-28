@@ -1,0 +1,3 @@
+intent = "Regression 650905a: a cancelled response is an error, not end_turn."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_responses_cancelled_status_is_not_end_turn"

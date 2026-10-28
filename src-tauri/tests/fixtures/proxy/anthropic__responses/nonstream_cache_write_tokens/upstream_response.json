@@ -1,0 +1,26 @@
+{
+  "id": "resp_cache",
+  "status": "completed",
+  "model": "gpt-5.6",
+  "output": [
+    {
+      "type": "message",
+      "id": "msg_1",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "cached"
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 10,
+    "input_tokens_details": {
+      "cached_tokens": 30,
+      "cache_write_tokens": 20
+    }
+  }
+}

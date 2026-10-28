@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: response.incomplete without a status field still maps to max_tokens through the event-type fallback."
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 3,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "",
+  "message_id": "",
+  "billable": true
+}

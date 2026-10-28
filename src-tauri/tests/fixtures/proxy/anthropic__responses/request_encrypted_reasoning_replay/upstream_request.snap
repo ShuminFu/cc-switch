@@ -1,0 +1,48 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 27ce0a5: a thinking block signed by the bridge is replayed as the original encrypted reasoning item before the function_call (Codex OAuth)."
+---
+{
+  "model": "gpt-5.6",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "look it up"
+        }
+      ]
+    },
+    {
+      "type": "reasoning",
+      "id": "[generated-id:1]",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Need a tool."
+        }
+      ],
+      "encrypted_content": "opaque-ciphertext"
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "lookup",
+      "arguments": "{}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_1",
+      "output": "found"
+    }
+  ],
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "store": false,
+  "instructions": "",
+  "tools": [],
+  "parallel_tool_calls": false,
+  "stream": true
+}

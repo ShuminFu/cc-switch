@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 27ce0a5: keyless legacy response.reasoning.delta events share one fallback thinking block, which is closed before the text block starts."
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 10,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "o3",
+  "message_id": "resp_r",
+  "billable": true
+}

@@ -1,0 +1,18 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_par","model":"gpt-5.4"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_par","type":"message","role":"assistant","content":[]}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_par","output_index":0,"content_index":0,"delta":"Hi "}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","item_id":"msg_par","output_index":0,"content_index":0,"delta":"there"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_par","type":"message","role":"assistant","content":[{"type":"output_text","text":"Hi there"}]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":9,"output_tokens":2,"input_tokens_details":{"cached_tokens":4}}}}
+

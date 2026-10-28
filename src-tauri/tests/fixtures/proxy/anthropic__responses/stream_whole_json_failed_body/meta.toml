@@ -1,0 +1,6 @@
+intent = "Regression 650905a: a stream request answered with a failed Responses JSON body becomes an error event, not an empty success."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_stream_request_with_failed_json_response_is_error"
+
+[invariants]
+terminal = "error"

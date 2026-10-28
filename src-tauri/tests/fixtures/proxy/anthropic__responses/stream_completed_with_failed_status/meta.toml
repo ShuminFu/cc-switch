@@ -1,0 +1,6 @@
+intent = "Regression 650905a: a response.completed wrapper whose status is failed is reported as an error, not as an empty successful reply."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_completed_event_with_failed_status_is_error"
+
+[invariants]
+terminal = "error"

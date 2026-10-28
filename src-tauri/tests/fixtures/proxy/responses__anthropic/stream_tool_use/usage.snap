@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A tool_use block becomes a function_call item with argument delta/done events.
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 7,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude",
+  "message_id": null,
+  "billable": true
+}

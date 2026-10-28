@@ -1,0 +1,3 @@
+intent = "A Chat call to the tool_search pseudo-tool is restored as a tool_search_call item."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_chat.rs::tests::restores_tool_search_on_streamed_tool_call_items"

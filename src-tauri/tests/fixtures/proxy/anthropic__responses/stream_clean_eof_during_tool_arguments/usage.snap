@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a clean EOF while tool arguments are still streaming is a stream_truncated error, never a completed tool call."
+---
+# stream
+null

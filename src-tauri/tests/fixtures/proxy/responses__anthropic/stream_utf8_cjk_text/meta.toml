@@ -1,0 +1,2 @@
+intent = "CJK and 4-byte emoji text survive every chunk split, including splits inside a character."
+source_commit = "a738206"

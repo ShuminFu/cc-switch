@@ -1,0 +1,6 @@
+intent = "An Anthropic error event becomes response.failed carrying the upstream error type and message."
+source_commit = "a738206"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_error_event_becomes_failed"
+
+[invariants]
+terminal = "error"

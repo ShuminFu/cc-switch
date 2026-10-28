@@ -1,0 +1,6 @@
+intent = "Regression 650905a: a stream request answered with a whole Anthropic error JSON becomes response.failed with the upstream error, not a truncation error."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_raw_json_error_body_is_not_reported_as_truncated_sse"
+
+[invariants]
+terminal = "error"

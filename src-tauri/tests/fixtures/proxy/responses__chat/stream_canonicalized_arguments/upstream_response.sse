@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl_args","model":"gpt-5.4","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup"}}]}}]}
+
+data: {"id":"chatcmpl_args","model":"gpt-5.4","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{ \"b\": 2,"}}]}}]}
+
+data: {"id":"chatcmpl_args","model":"gpt-5.4","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" \"a\": 1 }"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

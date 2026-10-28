@@ -1,0 +1,3 @@
+intent = "Regression f991726: the non-stream conversion splits the Responses input total into fresh input, cache_read and cache_creation."
+source_commit = "f991726"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_build_usage_cache_write_tokens_from_nested_details"

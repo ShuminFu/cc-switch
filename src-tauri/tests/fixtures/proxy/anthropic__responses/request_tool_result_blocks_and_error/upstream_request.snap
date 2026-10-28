@@ -1,0 +1,33 @@
+---
+source: tests/proxy_golden.rs
+description: "Regression 650905a: a structured error tool_result keeps its text, URL image and base64 document parts, prefixed by the tool-result error marker."
+---
+{
+  "model": "gpt-5",
+  "input": [
+    {
+      "type": "function_call_output",
+      "call_id": "call_1",
+      "output": [
+        {
+          "type": "input_text",
+          "text": "[cc-switch:tool-result-error]"
+        },
+        {
+          "type": "input_text",
+          "text": "command failed"
+        },
+        {
+          "type": "input_image",
+          "image_url": "https://example.com/error.png"
+        },
+        {
+          "type": "input_file",
+          "file_data": "data:application/pdf;base64,JVBERi0=",
+          "filename": "trace.pdf"
+        }
+      ]
+    }
+  ],
+  "max_output_tokens": 1024
+}

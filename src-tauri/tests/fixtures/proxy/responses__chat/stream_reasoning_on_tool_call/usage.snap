@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: reasoning_content before a tool call becomes a reasoning item and is also attached to the function_call item for replay.
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "deepseek-v4-flash",
+  "message_id": null,
+  "billable": false
+}

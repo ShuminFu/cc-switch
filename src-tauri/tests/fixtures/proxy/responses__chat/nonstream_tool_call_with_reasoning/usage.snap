@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: A non-stream Chat reply with reasoning_content and a tool call becomes a reasoning item followed by a function_call item.
+---
+# non-stream
+{
+  "input_tokens": 20,
+  "output_tokens": 8,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "deepseek-v4-flash",
+  "message_id": null,
+  "billable": true
+}

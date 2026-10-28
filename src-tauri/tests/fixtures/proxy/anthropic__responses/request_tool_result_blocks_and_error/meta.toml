@@ -1,0 +1,3 @@
+intent = "Regression 650905a: a structured error tool_result keeps its text, URL image and base64 document parts, prefixed by the tool-result error marker."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/transform_responses.rs::tests::test_anthropic_to_responses_tool_result_preserves_blocks_and_error"

@@ -1,0 +1,3 @@
+intent = "Regression 650905a: a final event without a trailing blank line is still processed before EOF finalization."
+source_commit = "650905a"
+ported_from = "src/proxy/providers/streaming_codex_anthropic.rs::tests::test_final_event_without_blank_line_is_processed"

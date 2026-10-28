@@ -1,0 +1,11 @@
+{
+  "model": "gpt-5.4",
+  "stream": true,
+  "input": "list files",
+  "tools": [
+    {
+      "type": "custom",
+      "name": "exec"
+    }
+  ]
+}

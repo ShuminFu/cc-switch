@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: A data-only Chat error payload becomes response.failed carrying the upstream error code.
+---
+# stream
+response.failed {"type":"response.failed","response":{"id":"[generated-id:1]","object":"response","created_at":"[timestamp]","status":"failed","model":"","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0,"output_tokens_details":{"reasoning_tokens":0}},"error":{"message":"quota exceeded","type":"rate_limit_exceeded"}}}

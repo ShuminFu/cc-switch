@@ -1,0 +1,3 @@
+intent = "Regression 27ce0a5: keyless legacy response.reasoning.delta events share one fallback thinking block, which is closed before the text block starts."
+source_commit = "27ce0a5"
+ported_from = "src/proxy/providers/streaming_responses.rs::tests::test_streaming_reasoning_delta_emits_thinking_blocks"

@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: stop_reason max_tokens maps to status incomplete with reason max_output_tokens.
+---
+# stream
+{
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude",
+  "message_id": null,
+  "billable": false
+}
