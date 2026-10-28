@@ -1,6 +1,6 @@
 # CCS-038: [usage] Move session-log sync off tokio workers and off the main thread
 
-**Status:** Open · **Kind:** bug · **Labels:** `bug`, `phase:P0`, `p1-high`, `area:usage`
+**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P0`, `p1-high`, `area:usage`
 
 > **Ticket key:** `p0-hotfix-session-sync-blocking` · **Phase:** P0 · **Priority:** p1-high · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -22,3 +22,51 @@ Verified finding backend-session-sync-blocking. The 60 s periodic sync runs bloc
 
 ## Dependencies
 None.
+
+## Implementation notes
+
+**Status rationale:** code and automated checks are done; the manual
+responsiveness check with a large `~/.claude/projects` needs a desktop session
+and has not been run here.
+
+### Summary
+- `services/session_usage.rs`: new `sync_all_session_usage(&Database)` (the
+  Claude + Codex + Gemini + OpenCode aggregation that used to live in the
+  command), `run_sync_blocking(label, f)` (runs `f` via
+  `tauri::async_runtime::spawn_blocking`, emits a `debug!` log with the executing
+  thread name, maps a join error to `AppError::Message`), and
+  `sync_all_session_usage_blocking(Arc<Database>)`.
+- `commands/usage.rs`: `sync_session_usage` is now `async` and delegates to
+  `sync_all_session_usage_blocking(state.db.clone())`, so it no longer runs on the
+  main thread. The frontend `invoke("sync_session_usage")` is unchanged.
+- `lib.rs`: the startup backfill and each startup/periodic sync step in the 60 s
+  loop are run via `run_sync_blocking`, so they no longer block a tokio worker.
+
+### Files
+- `src-tauri/src/services/session_usage.rs`
+- `src-tauri/src/commands/usage.rs`
+- `src-tauri/src/lib.rs`
+
+### Commits
+- `833fb94` fix(usage): run session-log sync on the blocking pool (CCS-038)
+
+### Verification
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --check`: clean.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: clean.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib session_usage`: 41 passed, 0 failed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2020 passed, 0 failed, 2 ignored.
+- New regression tests in `services::session_usage::tests`:
+  - `test_run_sync_blocking_runs_off_caller_thread`: the closure must run on a
+    different thread from the caller.
+  - `test_run_sync_blocking_does_not_stall_async_workers`: on a single-threaded
+    tokio runtime, a blocking step waits for a signal from a concurrent async
+    task. This only finishes if the step does not hold the async thread.
+  - `test_run_sync_blocking_propagates_errors`.
+  To show these catch the bug, `run_sync_blocking` was temporarily changed to
+  call `f()` inline (the old behaviour). The first two tests then failed
+  (thread-id assertion; 5 s recv timeout) and passed again once the fix was
+  restored.
+- Thread debug log: `[SESSION-SYNC] Session usage sync running on thread "..."`
+  is emitted at debug level. The first test checks the same thing.
+- Not run: the manual UI responsiveness check with many large `.jsonl` files
+  (needs a desktop session).
