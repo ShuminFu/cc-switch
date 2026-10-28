@@ -131,15 +131,21 @@ impl ProviderRouter {
         success: bool,
         error_msg: Option<String>,
     ) -> Result<(), AppError> {
-        // 1. 按应用独立获取熔断器配置
+        let circuit_key = format!("{app_type}:{provider_id}");
+        let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
+
+        // 1. 按应用独立获取熔断器配置；读取失败时回退到熔断器自身的阈值，
+        //    保证数据库健康状态与熔断器使用同一个阈值
         let failure_threshold = match self.db.get_proxy_config_for_app(app_type).await {
             Ok(app_config) => app_config.circuit_failure_threshold,
-            Err(_) => 5, // 默认值
+            Err(e) => {
+                let fallback = breaker.failure_threshold().await;
+                log::warn!("[{app_type}] 读取 proxy_config 失败: {e}，使用熔断器阈值 {fallback}");
+                fallback
+            }
         };
 
         // 2. 更新熔断器状态
-        let circuit_key = format!("{app_type}:{provider_id}");
-        let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
         if success {
             breaker.record_success(used_half_open_permit).await;
@@ -519,5 +525,83 @@ mod tests {
         let third = router.allow_provider_request("a", "claude").await;
         assert!(third.allowed);
         assert!(third.used_half_open_permit);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_record_result_config_read_failure_uses_default_threshold() {
+        use crate::proxy::circuit_breaker::{CircuitState, DEFAULT_CIRCUIT_FAILURE_THRESHOLD};
+
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        let provider_a =
+            Provider::with_id("a".to_string(), "Provider A".to_string(), json!({}), None);
+        db.save_provider("claude", &provider_a).unwrap();
+
+        // 让 proxy_config 读取失败（模拟配置读取错误）
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("DROP TABLE proxy_config", []).unwrap();
+        }
+        assert!(db.get_proxy_config_for_app("claude").await.is_err());
+
+        let router = ProviderRouter::new(db.clone());
+
+        for _ in 0..DEFAULT_CIRCUIT_FAILURE_THRESHOLD - 1 {
+            router
+                .record_result("a", "claude", false, false, Some("fail".to_string()))
+                .await
+                .unwrap();
+        }
+        let health = db.get_provider_health("a", "claude").await.unwrap();
+        assert!(health.is_healthy);
+
+        router
+            .record_result("a", "claude", false, false, Some("fail".to_string()))
+            .await
+            .unwrap();
+
+        let health = db.get_provider_health("a", "claude").await.unwrap();
+        assert_eq!(
+            health.consecutive_failures,
+            DEFAULT_CIRCUIT_FAILURE_THRESHOLD
+        );
+        assert!(!health.is_healthy);
+
+        // 数据库健康状态与熔断器在同一次失败时翻转
+        let stats = router
+            .get_circuit_breaker_stats("a", "claude")
+            .await
+            .unwrap();
+        assert_eq!(stats.state, CircuitState::Open);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_failure_threshold_defaults_are_consistent() {
+        use crate::proxy::circuit_breaker::DEFAULT_CIRCUIT_FAILURE_THRESHOLD;
+
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        assert_eq!(
+            CircuitBreakerConfig::default().failure_threshold,
+            DEFAULT_CIRCUIT_FAILURE_THRESHOLD
+        );
+        // schema.rs 的 SQL DEFAULT 需与常量一致（claude 行的 seed 值是有意不同的，
+        // 这里插入仅含 app_type 的行来验证列默认值）
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("DELETE FROM proxy_config WHERE app_type = 'codex'", [])
+                .unwrap();
+            conn.execute("INSERT INTO proxy_config (app_type) VALUES ('codex')", [])
+                .unwrap();
+        }
+        let config = db.get_proxy_config_for_app("codex").await.unwrap();
+        assert_eq!(
+            config.circuit_failure_threshold,
+            DEFAULT_CIRCUIT_FAILURE_THRESHOLD
+        );
     }
 }

@@ -260,7 +260,8 @@ impl Database {
                     streaming_first_byte_timeout: 60,
                     streaming_idle_timeout: 120,
                     non_streaming_timeout: 600,
-                    circuit_failure_threshold: 4,
+                    circuit_failure_threshold:
+                        crate::proxy::circuit_breaker::DEFAULT_CIRCUIT_FAILURE_THRESHOLD,
                     circuit_success_threshold: 2,
                     circuit_timeout_seconds: 60,
                     circuit_error_rate_threshold: 0.6,

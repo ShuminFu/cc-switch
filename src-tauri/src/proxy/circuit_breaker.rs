@@ -32,6 +32,12 @@ impl std::fmt::Display for CircuitState {
     }
 }
 
+/// 熔断器失败阈值的统一默认值
+///
+/// 熔断器默认配置、DAO 回退配置以及 `record_result` 读取配置失败时的回退都使用此值，
+/// 需与 schema.rs 中 `circuit_failure_threshold` 列的 SQL DEFAULT 保持一致。
+pub const DEFAULT_CIRCUIT_FAILURE_THRESHOLD: u32 = 4;
+
 /// 熔断器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,7 +69,7 @@ impl From<&AppProxyConfig> for CircuitBreakerConfig {
 impl Default for CircuitBreakerConfig {
     fn default() -> Self {
         Self {
-            failure_threshold: 4,
+            failure_threshold: DEFAULT_CIRCUIT_FAILURE_THRESHOLD,
             success_threshold: 2,
             timeout_seconds: 60,
             error_rate_threshold: 0.6,
@@ -120,6 +126,11 @@ impl CircuitBreaker {
     /// 更新熔断器配置（热更新，不重置状态）
     pub async fn update_config(&self, new_config: CircuitBreakerConfig) {
         *self.config.write().await = new_config;
+    }
+
+    /// 获取当前配置的失败阈值
+    pub async fn failure_threshold(&self) -> u32 {
+        self.config.read().await.failure_threshold
     }
 
     /// 判断当前 Provider 是否“可被纳入候选链路”
