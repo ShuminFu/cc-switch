@@ -178,6 +178,26 @@ export const normalizeCodexCatalogModelsForSave = (
   return normalized;
 };
 
+/**
+ * 解析待保存的 JSON 对象文本（Codex auth.json / Gemini config）。
+ * 空文本视为 {}；非法 JSON 或非对象返回 null，调用方必须阻止保存，
+ * 不能回退到初始/预设配置（否则用户编辑会被静默丢弃）。
+ */
+export const parseJsonObjectForSave = (
+  raw: string,
+): Record<string, unknown> | null => {
+  if (!raw.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
 const normalizeCodexChatReasoningForSave = (
   value?: CodexChatReasoning,
 ): CodexChatReasoning | undefined => {
@@ -613,8 +633,11 @@ function ProviderFormFull({
         : "",
     );
 
-  const { configError: codexConfigError, debouncedValidate } =
-    useCodexTomlValidation();
+  const {
+    configError: codexConfigError,
+    debouncedValidate,
+    validateToml: validateCodexToml,
+  } = useCodexTomlValidation();
 
   const handleCodexConfigChange = useCallback(
     (value: string) => {
@@ -1163,6 +1186,37 @@ function ProviderFormFull({
       return;
     }
 
+    // Codex auth.json / config.toml、Gemini config JSON：B 类
+    // 解析失败时必须阻止保存，否则只能回退到初始配置，用户的编辑会被静默丢弃
+    if (appId === "codex") {
+      if (parseJsonObjectForSave(codexAuth) === null) {
+        toast.error(
+          t("providerForm.codexAuthInvalid", {
+            defaultValue: "auth.json 格式错误（必须是 JSON 对象），无法保存",
+          }),
+        );
+        return;
+      }
+      // configError 由 debounce 校验产生，提交时同步重新校验，避免读到过期状态
+      if (!validateCodexToml(codexConfig ?? "")) {
+        toast.error(
+          t("providerForm.codexConfigInvalid", {
+            defaultValue: "config.toml 格式错误，无法保存",
+          }),
+        );
+        return;
+      }
+    }
+
+    if (appId === "gemini" && parseJsonObjectForSave(geminiConfig) === null) {
+      toast.error(
+        t("providerForm.geminiConfigInvalid", {
+          defaultValue: "Gemini 配置格式错误（必须是 JSON 对象），无法保存",
+        }),
+      );
+      return;
+    }
+
     // OMO Other Fields JSON：B 类（格式错了保存下去数据就坏了）
     if (
       appId === "opencode" &&
@@ -1282,58 +1336,66 @@ function ProviderFormFull({
     let settingsConfig: string;
 
     if (appId === "codex") {
-      try {
-        const authJson = JSON.parse(codexAuth);
-        let normalizedCodexConfig =
-          category !== "official" && (codexConfig ?? "").trim()
-            ? setCodexWireApi(codexConfig ?? "", "responses")
-            : (codexConfig ?? "");
-        // 模型映射与「路由接管」解耦：对所有非官方供应商，填了就持久化
-        //（Chat 生成兼容路由、原生 Responses 生成 model-catalogs.json），
-        // 留空归一化为 [] 即不写。后端只看 modelCatalog.models 是否非空。
-        const normalizedCatalogModels =
-          category !== "official"
-            ? normalizeCodexCatalogModelsForSave(codexCatalogModels)
-            : [];
-        // The default-model field writes the top-level `model` into the TOML
-        // as the user types; only when it was left empty fall back to the
-        // first catalog row so "fill mapping only" keeps its old behavior.
-        if (
-          normalizedCatalogModels.length > 0 &&
-          !extractCodexModelName(normalizedCodexConfig)
-        ) {
-          normalizedCodexConfig = setCodexModelNameInConfig(
-            normalizedCodexConfig,
-            normalizedCatalogModels[0].model,
-          );
-        }
-        const configObj = {
-          auth: authJson,
-          config: normalizedCodexConfig,
-        } as {
-          auth: unknown;
-          config: string;
-          modelCatalog?: { models: CodexCatalogModel[] };
-        };
-        if (normalizedCatalogModels.length > 0) {
-          configObj.modelCatalog = { models: normalizedCatalogModels };
-        }
-        settingsConfig = JSON.stringify(configObj);
-      } catch (err) {
-        settingsConfig = values.settingsConfig.trim();
+      // 格式已在 handleSubmit 前置校验中验证过；这里仍不回退到初始配置
+      const authJson = parseJsonObjectForSave(codexAuth);
+      if (authJson === null) {
+        toast.error(
+          t("providerForm.codexAuthInvalid", {
+            defaultValue: "auth.json 格式错误（必须是 JSON 对象），无法保存",
+          }),
+        );
+        return;
       }
+      let normalizedCodexConfig =
+        category !== "official" && (codexConfig ?? "").trim()
+          ? setCodexWireApi(codexConfig ?? "", "responses")
+          : (codexConfig ?? "");
+      // 模型映射与「路由接管」解耦：对所有非官方供应商，填了就持久化
+      //（Chat 生成兼容路由、原生 Responses 生成 model-catalogs.json），
+      // 留空归一化为 [] 即不写。后端只看 modelCatalog.models 是否非空。
+      const normalizedCatalogModels =
+        category !== "official"
+          ? normalizeCodexCatalogModelsForSave(codexCatalogModels)
+          : [];
+      // The default-model field writes the top-level `model` into the TOML
+      // as the user types; only when it was left empty fall back to the
+      // first catalog row so "fill mapping only" keeps its old behavior.
+      if (
+        normalizedCatalogModels.length > 0 &&
+        !extractCodexModelName(normalizedCodexConfig)
+      ) {
+        normalizedCodexConfig = setCodexModelNameInConfig(
+          normalizedCodexConfig,
+          normalizedCatalogModels[0].model,
+        );
+      }
+      const configObj = {
+        auth: authJson,
+        config: normalizedCodexConfig,
+      } as {
+        auth: unknown;
+        config: string;
+        modelCatalog?: { models: CodexCatalogModel[] };
+      };
+      if (normalizedCatalogModels.length > 0) {
+        configObj.modelCatalog = { models: normalizedCatalogModels };
+      }
+      settingsConfig = JSON.stringify(configObj);
     } else if (appId === "gemini") {
-      try {
-        const envObj = envStringToObj(geminiEnv);
-        const configObj = geminiConfig.trim() ? JSON.parse(geminiConfig) : {};
-        const combined = {
-          env: envObj,
-          config: configObj,
-        };
-        settingsConfig = JSON.stringify(combined);
-      } catch (err) {
-        settingsConfig = values.settingsConfig.trim();
+      const configObj = parseJsonObjectForSave(geminiConfig);
+      if (configObj === null) {
+        toast.error(
+          t("providerForm.geminiConfigInvalid", {
+            defaultValue: "Gemini 配置格式错误（必须是 JSON 对象），无法保存",
+          }),
+        );
+        return;
       }
+      const combined = {
+        env: envStringToObj(geminiEnv),
+        config: configObj,
+      };
+      settingsConfig = JSON.stringify(combined);
     } else if (
       appId === "opencode" &&
       (category === "omo" || category === "omo-slim")
