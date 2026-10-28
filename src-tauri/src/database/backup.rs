@@ -22,6 +22,7 @@ const SYNC_SKIP_TABLES: &[&str] = &[
     "provider_health",
     "proxy_live_backup",
     "usage_daily_rollups",
+    "session_log_sync",
 ];
 
 /// Tables whose local data is preserved (restored from local snapshot) during WebDAV import.
@@ -31,6 +32,7 @@ const SYNC_PRESERVE_TABLES: &[&str] = &[
     "stream_check_logs",
     "proxy_live_backup",
     "usage_daily_rollups",
+    "session_log_sync",
 ];
 
 /// A database backup entry for the UI
@@ -777,6 +779,91 @@ mod tests {
             stream_logs, 1,
             "local stream check logs should be preserved"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_import_preserves_local_session_log_sync_cursors() -> Result<(), AppError> {
+        let remote_db = Database::memory()?;
+        {
+            let conn = crate::database::lock_conn!(remote_db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta)
+                 VALUES ('remote-provider', 'claude', 'Remote Provider', '{}', '{}')",
+                [],
+            )?;
+            conn.execute(
+                "INSERT INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at)
+                 VALUES ('/remote/only.jsonl', 111, 11, 1111),
+                        ('/shared/session.jsonl', 999, 99, 9999)",
+                [],
+            )?;
+        }
+        let remote_sql = remote_db.export_sql_string_for_sync()?;
+        assert!(
+            !remote_sql.contains("INSERT INTO \"session_log_sync\""),
+            "sync export should not include session_log_sync rows"
+        );
+
+        let local_db = Database::memory()?;
+        {
+            let conn = crate::database::lock_conn!(local_db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta)
+                 VALUES ('local-provider', 'claude', 'Local Provider', '{}', '{}')",
+                [],
+            )?;
+            conn.execute(
+                "INSERT INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at)
+                 VALUES ('/local/only.jsonl', 222, 22, 2222),
+                        ('/shared/session.jsonl', 333, 33, 3333)",
+                [],
+            )?;
+        }
+
+        // Even a snapshot that still carries remote cursor rows (e.g. produced by an
+        // older version) must not replace the local cursors.
+        let full_remote_sql = remote_db.export_sql_string()?;
+        assert!(full_remote_sql.contains("INSERT INTO \"session_log_sync\""));
+
+        for sql in [&remote_sql, &full_remote_sql] {
+            local_db.import_sql_string_for_sync(sql)?;
+
+            let conn = crate::database::lock_conn!(local_db.conn);
+            let remote_provider_exists: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM providers WHERE id = 'remote-provider' AND app_type = 'claude'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(
+                remote_provider_exists, 1,
+                "remote config should be imported"
+            );
+
+            let mut stmt = conn.prepare(
+                "SELECT file_path, last_modified, last_line_offset, last_synced_at
+                 FROM session_log_sync ORDER BY file_path",
+            )?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(
+                rows,
+                vec![
+                    ("/local/only.jsonl".to_string(), 222, 22, 2222),
+                    ("/shared/session.jsonl".to_string(), 333, 33, 3333),
+                ],
+                "local session_log_sync cursors should be preserved"
+            );
+        }
 
         Ok(())
     }
