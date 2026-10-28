@@ -43,7 +43,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version-file: .node-version
 
       # rust-toolchain.toml pins the channel; the target adds below apply to
       # that toolchain, so only one toolchain is used for the build (CCS-025).

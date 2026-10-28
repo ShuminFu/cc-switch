@@ -18,6 +18,9 @@
     "test:unit:watch": "vitest watch",
     "test:coverage": "vitest run --coverage --testTimeout=20000"
   },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "keywords": [],
   "author": "Jason Young",
   "license": "MIT",
