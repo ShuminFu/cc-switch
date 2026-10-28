@@ -93,4 +93,10 @@ console.log(`- Deleted: ${deletedCount}`);
 console.log(`- Renamed (Color -> Standard): ${renamedCount}`);
 
 // Regenerate index and metadata
-require('./generate-icon-index.js');
+// generate-icon-index.cjs is optional: src/icons/extracted/index.ts is maintained by hand
+const GENERATOR = path.join(__dirname, 'generate-icon-index.cjs');
+if (fs.existsSync(GENERATOR)) {
+    require(GENERATOR);
+} else {
+    console.log('\nSkipped index regeneration: update src/icons/extracted/index.ts manually.');
+}
