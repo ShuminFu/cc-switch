@@ -1058,7 +1058,19 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     const SESSION_SYNC_INTERVAL_SECS: u64 = 60;
 
-                    fn run_step<T>(name: &str, result: Result<T, crate::error::AppError>) {
+                    // 每个步骤都包含文件扫描和同步 Mutex 数据库操作，
+                    // 放到阻塞线程池中执行，避免占用 tokio 工作线程
+                    async fn run_step<T: Send + 'static>(
+                        name: &'static str,
+                        db: &Arc<crate::database::Database>,
+                        step: fn(&crate::database::Database) -> Result<T, crate::error::AppError>,
+                    ) {
+                        let db = db.clone();
+                        let result = crate::services::session_usage::run_sync_blocking(
+                            name,
+                            move || step(&db),
+                        )
+                        .await;
                         if let Err(e) = result {
                             log::warn!("{name} failed: {e}");
                         }
@@ -1069,24 +1081,34 @@ pub fn run() {
                     // 首次同步
                     run_step(
                         "Usage cost startup backfill",
-                        db.backfill_missing_usage_costs(),
-                    );
+                        db,
+                        crate::database::Database::backfill_missing_usage_costs,
+                    )
+                    .await;
                     run_step(
                         "Session usage initial sync",
-                        crate::services::session_usage::sync_claude_session_logs(db),
-                    );
+                        db,
+                        crate::services::session_usage::sync_claude_session_logs,
+                    )
+                    .await;
                     run_step(
                         "Codex usage initial sync",
-                        crate::services::session_usage_codex::sync_codex_usage(db),
-                    );
+                        db,
+                        crate::services::session_usage_codex::sync_codex_usage,
+                    )
+                    .await;
                     run_step(
                         "Gemini usage initial sync",
-                        crate::services::session_usage_gemini::sync_gemini_usage(db),
-                    );
+                        db,
+                        crate::services::session_usage_gemini::sync_gemini_usage,
+                    )
+                    .await;
                     run_step(
                         "OpenCode usage initial sync",
-                        crate::services::session_usage_opencode::sync_opencode_usage(db),
-                    );
+                        db,
+                        crate::services::session_usage_opencode::sync_opencode_usage,
+                    )
+                    .await;
 
                     // 定期同步
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(
@@ -1097,20 +1119,28 @@ pub fn run() {
                         interval.tick().await;
                         run_step(
                             "Session usage periodic sync",
-                            crate::services::session_usage::sync_claude_session_logs(db),
-                        );
+                            db,
+                            crate::services::session_usage::sync_claude_session_logs,
+                        )
+                        .await;
                         run_step(
                             "Codex usage periodic sync",
-                            crate::services::session_usage_codex::sync_codex_usage(db),
-                        );
+                            db,
+                            crate::services::session_usage_codex::sync_codex_usage,
+                        )
+                        .await;
                         run_step(
                             "Gemini usage periodic sync",
-                            crate::services::session_usage_gemini::sync_gemini_usage(db),
-                        );
+                            db,
+                            crate::services::session_usage_gemini::sync_gemini_usage,
+                        )
+                        .await;
                         run_step(
                             "OpenCode usage periodic sync",
-                            crate::services::session_usage_opencode::sync_opencode_usage(db),
-                        );
+                            db,
+                            crate::services::session_usage_opencode::sync_opencode_usage,
+                        )
+                        .await;
                     }
                 });
             });

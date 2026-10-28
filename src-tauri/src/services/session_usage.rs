@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// 同步结果
@@ -561,6 +562,74 @@ pub fn get_data_source_breakdown(db: &Database) -> Result<Vec<DataSourceSummary>
     Ok(summaries)
 }
 
+/// 会话数据同步函数签名
+type SessionSyncFn = fn(&Database) -> Result<SessionSyncResult, AppError>;
+
+/// 依次同步 Claude / Codex / Gemini / OpenCode 的会话数据并合并结果。
+///
+/// Claude 同步失败直接返回错误；其他来源失败只记录到 `errors` 中。
+/// 这是阻塞函数（文件扫描 + 同步 Mutex 数据库操作），
+/// 在异步上下文中请使用 [`sync_all_session_usage_blocking`]。
+pub fn sync_all_session_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
+    // 同步 Claude 会话日志
+    let mut result = sync_claude_session_logs(db)?;
+
+    // 同步 Codex / Gemini / OpenCode 使用数据
+    let others: [(&str, SessionSyncFn); 3] = [
+        (
+            "Codex",
+            crate::services::session_usage_codex::sync_codex_usage,
+        ),
+        (
+            "Gemini",
+            crate::services::session_usage_gemini::sync_gemini_usage,
+        ),
+        (
+            "OpenCode",
+            crate::services::session_usage_opencode::sync_opencode_usage,
+        ),
+    ];
+    for (name, sync) in others {
+        match sync(db) {
+            Ok(other) => {
+                result.imported += other.imported;
+                result.skipped += other.skipped;
+                result.files_scanned += other.files_scanned;
+                result.errors.extend(other.errors);
+            }
+            Err(e) => {
+                result.errors.push(format!("{name} 同步失败: {e}"));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// 在阻塞线程池中执行同步任务，避免占用 tokio 工作线程或 Tauri 主线程。
+pub async fn run_sync_blocking<T, F>(label: &'static str, f: F) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, AppError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        log::debug!(
+            "[SESSION-SYNC] {label} running on thread {:?}",
+            std::thread::current().name().unwrap_or("<unnamed>")
+        );
+        f()
+    })
+    .await
+    .map_err(|e| AppError::Message(format!("{label} 任务执行失败: {e}")))?
+}
+
+/// [`sync_all_session_usage`] 的异步版本：在阻塞线程池中运行。
+pub async fn sync_all_session_usage_blocking(
+    db: Arc<Database>,
+) -> Result<SessionSyncResult, AppError> {
+    run_sync_blocking("Session usage sync", move || sync_all_session_usage(&db)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -794,5 +863,51 @@ mod tests {
 
         fs::remove_dir_all(&tmp).ok();
         Ok(())
+    }
+
+    #[test]
+    fn test_run_sync_blocking_runs_off_caller_thread() -> Result<(), AppError> {
+        let caller = std::thread::current().id();
+        let (worker, value) =
+            tauri::async_runtime::block_on(run_sync_blocking("test sync", || {
+                Ok((std::thread::current().id(), 42))
+            }))?;
+        assert_ne!(
+            worker, caller,
+            "sync work must not run on the caller thread"
+        );
+        assert_eq!(value, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn test_run_sync_blocking_does_not_stall_async_workers() -> Result<(), AppError> {
+        // 单线程运行时中，阻塞任务期间其他异步任务仍应能推进
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .map_err(|e| AppError::Message(e.to_string()))?;
+        rt.block_on(async {
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            let blocking = run_sync_blocking("test sync", move || {
+                rx.recv_timeout(std::time::Duration::from_secs(5))
+                    .map_err(|e| AppError::Message(e.to_string()))
+            });
+            let ticker = async move {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                tx.send(()).ok();
+            };
+            let (res, ()) = tokio::join!(blocking, ticker);
+            res
+        })
+    }
+
+    #[test]
+    fn test_run_sync_blocking_propagates_errors() {
+        let err = tauri::async_runtime::block_on(run_sync_blocking::<(), _>("test sync", || {
+            Err(AppError::Message("boom".into()))
+        }))
+        .unwrap_err();
+        assert!(err.to_string().contains("boom"));
     }
 }
