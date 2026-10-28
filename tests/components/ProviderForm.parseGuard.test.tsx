@@ -108,7 +108,11 @@ describe("ProviderForm config parse guard", () => {
     fireEvent.change(auth, { target: { value: "{bad" } });
     clickSave();
 
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/auth\.json/),
+      ),
+    );
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -146,7 +150,11 @@ describe("ProviderForm config parse guard", () => {
     fireEvent.change(config, { target: { value: "[model_providers" } });
     clickSave();
 
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/config\.toml/),
+      ),
+    );
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -173,7 +181,11 @@ describe("ProviderForm config parse guard", () => {
     fireEvent.change(configEditor!, { target: { value: '{"timeout": ' } });
     clickSave();
 
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/Gemini/),
+      ),
+    );
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
