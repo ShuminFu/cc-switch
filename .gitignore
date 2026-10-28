@@ -17,6 +17,7 @@ GEMINI.md
 /.idea
 /.vscode
 vitest-report.json
+coverage/
 nul
 
 # Flatpak build artifacts

@@ -1,0 +1,81 @@
+{
+  "coverage": {
+    "_note": "Report-only baseline (CCS-019). Refresh from the coverage-rust / coverage-frontend CI artifacts (summary-by-dir.json) or locally: `cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lcov --output-path coverage/rust/lcov.info` and `pnpm test:coverage`, then `node scripts/coverage-summary.mjs`. P5 target: proxy/ and database/ lines >= 75%, ratcheted.",
+    "recorded_at": "2026-10-28",
+    "commit": "6330783",
+    "platform": "linux-x86_64",
+    "rust": {
+      "tool": "cargo-llvm-cov 0.9.1 (rust 1.95)",
+      "dirs": {
+        "src-tauri/src/proxy": {
+          "files": 57,
+          "lines_pct": 78.6,
+          "lines": [27849, 35430],
+          "functions_pct": 79.36,
+          "functions": [3165, 3988]
+        },
+        "src-tauri/src/database": {
+          "files": 16,
+          "lines_pct": 78.84,
+          "lines": [5065, 6424],
+          "functions_pct": 42.58,
+          "functions": [284, 667]
+        },
+        "src-tauri/src/services": {
+          "files": 36,
+          "lines_pct": 67.4,
+          "lines": [17200, 25521],
+          "functions_pct": 62.4,
+          "functions": [1512, 2423]
+        },
+        "src-tauri/src/commands": {
+          "files": 33,
+          "lines_pct": 33.3,
+          "lines": [2575, 7732],
+          "functions_pct": 21.49,
+          "functions": [318, 1480]
+        },
+        "total": {
+          "files": 199,
+          "lines_pct": 70.15,
+          "lines": [68587, 97772],
+          "functions_pct": 62.77,
+          "functions": [7046, 11226]
+        }
+      }
+    },
+    "frontend": {
+      "tool": "vitest 2.1.9 + @vitest/coverage-v8 (include: src/**/*.{ts,tsx})",
+      "dirs": {
+        "src/components": {
+          "files": 195,
+          "lines_pct": 40.12,
+          "lines": [16416, 40914],
+          "functions_pct": 40.9,
+          "functions": [337, 824]
+        },
+        "src/hooks": {
+          "files": 26,
+          "lines_pct": 57.14,
+          "lines": [1541, 2697],
+          "functions_pct": 39.42,
+          "functions": [41, 104]
+        },
+        "src/lib": {
+          "files": 53,
+          "lines_pct": 34.23,
+          "lines": [1258, 3675],
+          "functions_pct": 22.7,
+          "functions": [96, 423]
+        },
+        "total": {
+          "files": 319,
+          "lines_pct": 52.68,
+          "lines": [33030, 62696],
+          "functions_pct": 38.26,
+          "functions": [595, 1555]
+        }
+      }
+    }
+  }
+}

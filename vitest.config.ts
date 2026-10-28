@@ -14,7 +14,12 @@ export default defineConfig({
     setupFiles: ["./tests/setupGlobals.ts", "./tests/setupTests.ts"],
     globals: true,
     coverage: {
-      reporter: ["text", "lcov"],
+      // Report-only (CCS-019): no thresholds until the P5 ratchet.
+      provider: "v8",
+      reporter: ["text-summary", "lcov", "json-summary"],
+      reportsDirectory: "./coverage/frontend",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/*.d.ts"],
     },
   },
 });

@@ -22,6 +22,7 @@ export default tseslint.config(
       "flatpak/**",
       "scripts/**",
       "docs/**",
+      "coverage/**",
     ],
   },
   {

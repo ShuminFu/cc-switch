@@ -1,0 +1,26 @@
+export interface LcovRecord {
+  file: string;
+  linesFound: number;
+  linesHit: number;
+  functionsFound: number;
+  functionsHit: number;
+}
+
+export interface CoverageRow {
+  dir: string;
+  files: number;
+  linesFound: number;
+  linesHit: number;
+  functionsFound: number;
+  functionsHit: number;
+  linesPct: number | null;
+  functionsPct: number | null;
+}
+
+export function parseLcov(text: string): LcovRecord[];
+export function summarize(
+  records: LcovRecord[],
+  dirs: string[],
+  root?: string,
+): CoverageRow[];
+export function toMarkdown(title: string, rows: CoverageRow[]): string;
