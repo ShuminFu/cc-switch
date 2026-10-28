@@ -8,6 +8,12 @@ on:
   # Called by release.yml so a tag is only released after CI passes on its SHA.
   workflow_call:
 
+# Least-privilege GITHUB_TOKEN: CI only reads the repo. Without this the token
+# falls back to the repository default, which may be write-all (CCS-027).
+# release.yml calls this workflow with the same contents: read grant.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
