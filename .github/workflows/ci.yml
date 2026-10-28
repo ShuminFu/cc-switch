@@ -74,10 +74,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # rust-toolchain.toml is the single source for the channel and the
+      # rustfmt/clippy components (CCS-025).
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
 
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -113,6 +115,47 @@ jobs:
 
       - name: Run tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  # Proves the declared rust-version in src-tauri/Cargo.toml is real: the
+  # lockfile must still build on the MSRV, not only on the pinned channel
+  # (CCS-025). Keep the version here in sync with `rust-version`.
+  msrv:
+    name: MSRV Check (Rust 1.88)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        run: rustup toolchain install 1.88 --profile minimal
+
+      - name: Install Linux system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev \
+            libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
+            || sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev
+          sudo apt-get install -y --no-install-recommends libsoup-3.0-dev \
+            || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-msrv-
+
+      - name: Create frontend dist placeholder
+        run: mkdir -p dist
+
+      - name: Cargo check on MSRV
+        working-directory: src-tauri
+        run: cargo +1.88 check --locked
 
   # Builds the real app binary against the real dist (beforeBuildCommand runs
   # build:renderer), so tauri config / frontendDist / build-script failures

@@ -45,8 +45,13 @@ jobs:
         with:
           node-version: '20'
 
+      # rust-toolchain.toml pins the channel; the target adds below apply to
+      # that toolchain, so only one toolchain is used for the build (CCS-025).
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
 
       - name: Add Windows ARM64 target
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
