@@ -6,7 +6,7 @@ use cc_switch_lib::{
 
 #[path = "support.rs"]
 mod support;
-use support::{create_test_state, ensure_test_home, reset_test_fs, test_mutex};
+use support::{create_test_state, TestEnv};
 
 fn write_skill(dir: &std::path::Path, name: &str) {
     fs::create_dir_all(dir).expect("create skill dir");
@@ -29,9 +29,8 @@ fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) {
 
 #[test]
 fn import_from_apps_respects_explicit_app_selection() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
-    let home = ensure_test_home();
+    let test_env = TestEnv::new();
+    let home = test_env.home();
 
     write_skill(
         &home.join(".claude").join("skills").join("shared-skill"),
@@ -74,9 +73,8 @@ fn import_from_apps_respects_explicit_app_selection() {
 
 #[test]
 fn import_from_apps_does_not_rewrite_selected_app_directory() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
-    let home = ensure_test_home();
+    let test_env = TestEnv::new();
+    let home = test_env.home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("codex-skill");
     write_skill(&ssot_skill_dir, "Stale SSOT Skill");
@@ -121,9 +119,8 @@ fn import_from_apps_does_not_rewrite_selected_app_directory() {
 
 #[test]
 fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
-    let home = ensure_test_home();
+    let test_env = TestEnv::new();
+    let home = test_env.home();
 
     let ssot_dir = home.join(".cc-switch").join("skills");
     let disabled_skill = ssot_dir.join("disabled-skill");
@@ -169,9 +166,8 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
 
 #[test]
 fn uninstall_skill_creates_backup_before_removing_ssot() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
-    let home = ensure_test_home();
+    let test_env = TestEnv::new();
+    let home = test_env.home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("backup-skill");
     write_skill(&ssot_skill_dir, "Backup Skill");
@@ -237,9 +233,8 @@ fn uninstall_skill_creates_backup_before_removing_ssot() {
 
 #[test]
 fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
-    let home = ensure_test_home();
+    let test_env = TestEnv::new();
+    let home = test_env.home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("restore-skill");
     write_skill(&ssot_skill_dir, "Restore Skill");
@@ -316,9 +311,8 @@ fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
 
 #[test]
 fn delete_skill_backup_removes_backup_directory() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
-    let home = ensure_test_home();
+    let test_env = TestEnv::new();
+    let home = test_env.home();
 
     let ssot_skill_dir = home
         .join(".cc-switch")
@@ -381,9 +375,8 @@ fn delete_skill_backup_removes_backup_directory() {
 
 #[test]
 fn migration_snapshot_overrides_multi_source_directory_inference() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
-    let home = ensure_test_home();
+    let test_env = TestEnv::new();
+    let home = test_env.home();
 
     write_skill(
         &home.join(".claude").join("skills").join("demo-skill"),

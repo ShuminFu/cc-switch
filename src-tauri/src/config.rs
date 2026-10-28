@@ -8,29 +8,16 @@ use crate::error::AppError;
 
 /// 获取用户主目录，带回退和日志
 ///
-/// ## Windows 注意事项
-///
-/// - `dirs::home_dir()` 在 Windows 上使用 `SHGetKnownFolderPath(FOLDERID_Profile)`，
-///   返回的是真实用户目录（类似 `C:\\Users\\Alice`），与 v3.10.2 行为一致。
-/// - 不要直接使用 `HOME` 环境变量：它可能由 Git/Cygwin/MSYS 等第三方工具注入，
-///   且不一定等于用户目录，可能导致 `.cc-switch/cc-switch.db` 路径变化，从而“看起来像数据丢失”。
+/// 实际解析由 [`crate::paths::current`] 完成：生产环境下等价于 `dirs::home_dir()`
+/// （Windows 注意事项见 [`crate::paths::Paths::from_env`]）。
 ///
 /// ## 测试隔离
 ///
 /// 为了让 Windows CI/本地测试能稳定隔离真实用户数据，可通过 `CC_SWITCH_TEST_HOME`
-/// 显式覆盖 home dir（仅用于测试/调试场景）。
+/// 显式覆盖 home dir（仅用于测试/调试场景），或用 [`crate::paths::scoped`]
+/// 在当前线程注入独立的 [`crate::paths::Paths`]。
 pub fn get_home_dir() -> PathBuf {
-    if let Ok(home) = std::env::var("CC_SWITCH_TEST_HOME") {
-        let trimmed = home.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
-
-    dirs::home_dir().unwrap_or_else(|| {
-        log::warn!("无法获取用户主目录，回退到当前目录");
-        PathBuf::from(".")
-    })
+    crate::paths::current().home()
 }
 
 /// 获取 Claude Code 配置目录路径
@@ -39,12 +26,14 @@ pub fn get_claude_config_dir() -> PathBuf {
         return custom;
     }
 
-    get_home_dir().join(".claude")
+    crate::paths::current()
+        .default_app_dir(&crate::app_config::AppType::Claude)
+        .unwrap_or_else(|| get_home_dir().join(".claude"))
 }
 
 /// 默认 Claude MCP 配置文件路径 (~/.claude.json)
 pub fn get_default_claude_mcp_path() -> PathBuf {
-    get_home_dir().join(".claude.json")
+    crate::paths::current().claude_mcp_path()
 }
 
 fn normalize_path_lexically(path: &Path) -> PathBuf {
@@ -185,7 +174,7 @@ pub fn get_app_config_dir() -> PathBuf {
         return custom;
     }
 
-    let default_dir = get_home_dir().join(".cc-switch");
+    let default_dir = crate::paths::current().app_config_dir();
 
     // 兼容 v3.10.3：当用户环境存在 `HOME` 且与真实用户目录不同，
     // v3.10.3 可能在 `HOME/.cc-switch/` 下创建/使用了数据库。

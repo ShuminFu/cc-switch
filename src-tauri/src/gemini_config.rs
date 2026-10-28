@@ -11,7 +11,9 @@ pub fn get_gemini_dir() -> PathBuf {
         return custom;
     }
 
-    get_home_dir().join(".gemini")
+    crate::paths::current()
+        .default_app_dir(&crate::app_config::AppType::Gemini)
+        .unwrap_or_else(|| get_home_dir().join(".gemini"))
 }
 
 /// 获取 Gemini .env 文件路径

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::fs;
+use std::marker::PhantomData;
 use std::path::PathBuf;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::app_config::AppType;
 use crate::error::AppError;
@@ -557,11 +559,7 @@ impl Default for AppSettings {
 impl AppSettings {
     fn settings_path() -> Option<PathBuf> {
         // settings.json 保留用于旧版本迁移和无数据库场景
-        Some(
-            crate::config::get_home_dir()
-                .join(".cc-switch")
-                .join("settings.json"),
-        )
+        Some(crate::paths::current().settings_path())
     }
 
     fn normalize_paths(&mut self) {
@@ -699,23 +697,60 @@ fn save_settings_file(settings: &AppSettings) -> Result<(), AppError> {
     Ok(())
 }
 
-static SETTINGS_STORE: OnceLock<RwLock<AppSettings>> = OnceLock::new();
+static SETTINGS_STORE: OnceLock<Arc<RwLock<AppSettings>>> = OnceLock::new();
 
-fn settings_store() -> &'static RwLock<AppSettings> {
-    SETTINGS_STORE.get_or_init(|| RwLock::new(AppSettings::load_from_file()))
+thread_local! {
+    static SCOPED_SETTINGS_STORE: RefCell<Option<Arc<RwLock<AppSettings>>>> =
+        const { RefCell::new(None) };
+}
+
+fn settings_store() -> Arc<RwLock<AppSettings>> {
+    if let Some(store) = SCOPED_SETTINGS_STORE.with(|scoped| scoped.borrow().clone()) {
+        return store;
+    }
+    SETTINGS_STORE
+        .get_or_init(|| Arc::new(RwLock::new(AppSettings::load_from_file())))
+        .clone()
+}
+
+/// 在当前线程注入独立的设置缓存（从当前 [`crate::paths::current`] 的 settings.json 加载），
+/// guard 释放时恢复之前的缓存。仅用于测试隔离：配合 [`crate::paths::scoped`] 使用，
+/// 避免并行测试共享进程级设置缓存。
+pub fn scoped_settings_store() -> ScopedSettingsStore {
+    let store = Arc::new(RwLock::new(AppSettings::load_from_file()));
+    let previous = SCOPED_SETTINGS_STORE.with(|scoped| scoped.borrow_mut().replace(store));
+    ScopedSettingsStore {
+        previous,
+        _not_send: PhantomData,
+    }
+}
+
+/// [`scoped_settings_store`] 返回的 guard
+#[must_use = "dropping the guard immediately restores the previous settings store"]
+pub struct ScopedSettingsStore {
+    previous: Option<Arc<RwLock<AppSettings>>>,
+    _not_send: PhantomData<*const ()>,
+}
+
+impl Drop for ScopedSettingsStore {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        SCOPED_SETTINGS_STORE.with(|scoped| *scoped.borrow_mut() = previous);
+    }
 }
 
 fn resolve_override_path(raw: &str) -> PathBuf {
+    let paths = crate::paths::current();
     if raw == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
+        if let Some(home) = paths.user_home() {
+            return home.to_path_buf();
         }
     } else if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = paths.user_home() {
             return home.join(stripped);
         }
     } else if let Some(stripped) = raw.strip_prefix("~\\") {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = paths.user_home() {
             return home.join(stripped);
         }
     }
@@ -749,7 +784,9 @@ pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
     new_settings.normalize_paths();
     save_settings_file(&new_settings)?;
 
-    let mut guard = settings_store().write().unwrap_or_else(|e| {
+    let store = settings_store();
+
+    let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
     });
@@ -761,7 +798,8 @@ fn mutate_settings<F>(mutator: F) -> Result<(), AppError>
 where
     F: FnOnce(&mut AppSettings),
 {
-    let mut guard = settings_store().write().unwrap_or_else(|e| {
+    let store = settings_store();
+    let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
     });
@@ -869,7 +907,8 @@ pub fn clear_codex_unify_migrate_existing() -> Result<(), AppError> {
 /// 用于导入配置等场景，确保内存缓存与文件同步
 pub fn reload_settings() -> Result<(), AppError> {
     let fresh_settings = AppSettings::load_from_file();
-    let mut guard = settings_store().write().unwrap_or_else(|e| {
+    let store = settings_store();
+    let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
     });
@@ -878,7 +917,8 @@ pub fn reload_settings() -> Result<(), AppError> {
 }
 
 pub fn get_claude_override_dir() -> Option<PathBuf> {
-    let settings = settings_store().read().ok()?;
+    let store = settings_store();
+    let settings = store.read().ok()?;
     settings
         .claude_config_dir
         .as_ref()
@@ -886,7 +926,8 @@ pub fn get_claude_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_codex_override_dir() -> Option<PathBuf> {
-    let settings = settings_store().read().ok()?;
+    let store = settings_store();
+    let settings = store.read().ok()?;
     settings
         .codex_config_dir
         .as_ref()
@@ -894,7 +935,8 @@ pub fn get_codex_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_gemini_override_dir() -> Option<PathBuf> {
-    let settings = settings_store().read().ok()?;
+    let store = settings_store();
+    let settings = store.read().ok()?;
     settings
         .gemini_config_dir
         .as_ref()
@@ -902,7 +944,8 @@ pub fn get_gemini_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_grok_override_dir() -> Option<PathBuf> {
-    let settings = settings_store().read().ok()?;
+    let store = settings_store();
+    let settings = store.read().ok()?;
     settings
         .grok_config_dir
         .as_ref()
@@ -910,7 +953,8 @@ pub fn get_grok_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_opencode_override_dir() -> Option<PathBuf> {
-    let settings = settings_store().read().ok()?;
+    let store = settings_store();
+    let settings = store.read().ok()?;
     settings
         .opencode_config_dir
         .as_ref()
@@ -918,7 +962,8 @@ pub fn get_opencode_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_openclaw_override_dir() -> Option<PathBuf> {
-    let settings = settings_store().read().ok()?;
+    let store = settings_store();
+    let settings = store.read().ok()?;
     settings
         .openclaw_config_dir
         .as_ref()
@@ -926,7 +971,8 @@ pub fn get_openclaw_override_dir() -> Option<PathBuf> {
 }
 
 pub fn get_hermes_override_dir() -> Option<PathBuf> {
-    let settings = settings_store().read().ok()?;
+    let store = settings_store();
+    let settings = store.read().ok()?;
     settings
         .hermes_config_dir
         .as_ref()
@@ -960,7 +1006,8 @@ pub fn unify_codex_session_history() -> bool {
 /// 这是设备级别的设置，不随数据库同步。
 /// 如果本地没有设置，调用者应该 fallback 到数据库的 `is_current` 字段。
 pub fn get_current_provider(app_type: &AppType) -> Option<String> {
-    let settings = settings_store().read().ok()?;
+    let store = settings_store();
+    let settings = store.read().ok()?;
     match app_type {
         AppType::Claude => settings.current_provider_claude.clone(),
         AppType::ClaudeDesktop => settings.current_provider_claude_desktop.clone(),

@@ -66,27 +66,22 @@ pub fn get_hermes_dir() -> PathBuf {
     default_hermes_dir()
 }
 
-/// 平台默认 Hermes 目录(Windows):对齐 Hermes `_get_platform_default_hermes_home()`——
-/// 读 `LOCALAPPDATA` 环境变量,缺失/空时回退 `~\AppData\Local`,再拼 `hermes`。
-#[cfg(target_os = "windows")]
+/// 平台默认 Hermes 目录(Windows: `%LOCALAPPDATA%\hermes`,Mac/Linux: `~/.hermes`),
+/// 由 [`crate::paths::Paths::default_app_dir`] 统一解析。
 fn default_hermes_dir() -> PathBuf {
-    windows_local_hermes_dir(
-        std::env::var_os("LOCALAPPDATA").as_deref(),
-        &crate::config::get_home_dir(),
-    )
-}
-
-/// 平台默认 Hermes 目录(Mac/Linux):`~/.hermes`。
-#[cfg(not(target_os = "windows"))]
-fn default_hermes_dir() -> PathBuf {
-    crate::config::get_home_dir().join(".hermes")
+    crate::paths::current()
+        .default_app_dir(&crate::app_config::AppType::Hermes)
+        .unwrap_or_else(|| crate::config::get_home_dir().join(".hermes"))
 }
 
 /// Windows `%LOCALAPPDATA%\hermes` 路径计算(纯函数,便于跨平台单测)。
 /// 对齐 Hermes 的 `os.environ.get("LOCALAPPDATA", "").strip()`:trim 后为空
 /// (缺失/空/纯空白)则回退 `<home>\AppData\Local\hermes`。
 #[cfg(any(target_os = "windows", test))]
-fn windows_local_hermes_dir(localappdata: Option<&std::ffi::OsStr>, home: &Path) -> PathBuf {
+pub(crate) fn windows_local_hermes_dir(
+    localappdata: Option<&std::ffi::OsStr>,
+    home: &Path,
+) -> PathBuf {
     localappdata
         .map(|value| value.to_string_lossy().trim().to_string())
         .filter(|value| !value.is_empty())

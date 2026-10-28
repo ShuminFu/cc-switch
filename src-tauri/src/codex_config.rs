@@ -160,7 +160,9 @@ pub fn get_codex_config_dir() -> PathBuf {
         return custom;
     }
 
-    get_home_dir().join(".codex")
+    crate::paths::current()
+        .default_app_dir(&crate::app_config::AppType::Codex)
+        .unwrap_or_else(|| get_home_dir().join(".codex"))
 }
 
 /// 获取 Codex auth.json 路径
