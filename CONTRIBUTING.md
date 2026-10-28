@@ -74,6 +74,7 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 2. **Fork and branch** — Create a feature branch from `main` (e.g., `feat/my-feature` or `fix/issue-123`).
 3. **Keep PRs focused** — One feature or fix per PR. Avoid unrelated changes.
 4. **Follow the PR template** — Fill in the summary, related issue, and checklist.
+5. **Proxy changes need a fixture** — A PR that changes `src-tauri/src/proxy/**` must add or update a golden fixture under `src-tauri/tests/fixtures/proxy/` (a bug fix adds the fixture first), or a maintainer applies the `no-fixture-needed` label; CI enforces this. See [docs/dev/ACCEPTANCE.md](./docs/dev/ACCEPTANCE.md) for the "fix a proxy bug" and "add an app" playbooks.
 
 ### PR Checklist
 
@@ -81,6 +82,7 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 - [ ] `pnpm format:check` passes
 - [ ] `cargo clippy` passes (if Rust code changed)
 - [ ] Updated i18n files if user-facing text changed
+- [ ] Added or updated a proxy fixture (if `src-tauri/src/proxy/**` changed)
 
 ### Commit Convention
 
@@ -206,6 +208,7 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 2. **Fork 并创建分支** — 从 `main` 创建功能分支（如 `feat/my-feature` 或 `fix/issue-123`）。
 3. **保持 PR 专注** — 每个 PR 只做一件事，避免无关改动。
 4. **遵循 PR 模板** — 填写概述、关联 Issue 和检查清单。
+5. **代理改动需要 fixture** — 修改 `src-tauri/src/proxy/**` 的 PR 必须在 `src-tauri/tests/fixtures/proxy/` 下新增或更新 golden fixture（修复 bug 时先加 fixture），或由维护者添加 `no-fixture-needed` 标签，CI 会检查这一点。"修复代理 bug"与"新增应用"的操作手册见 [docs/dev/ACCEPTANCE.md](./docs/dev/ACCEPTANCE.md)。
 
 ### PR 检查清单
 
@@ -213,6 +216,7 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 - [ ] `pnpm format:check` 通过
 - [ ] `cargo clippy` 通过（如修改了 Rust 代码）
 - [ ] 如修改了用户可见文本，已更新国际化文件
+- [ ] 已新增或更新代理 fixture（如修改了 `src-tauri/src/proxy/**`）
 
 ### 提交信息规范
 

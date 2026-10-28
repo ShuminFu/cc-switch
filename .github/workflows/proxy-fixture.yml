@@ -1,0 +1,41 @@
+name: Proxy Fixture Rule
+
+# Every PR that changes src-tauri/src/proxy/** must also change a golden
+# fixture under src-tauri/tests/fixtures/proxy/, or carry the
+# `no-fixture-needed` label (CCS-034, see docs/dev/ACCEPTANCE.md). Kept out of
+# ci.yml so adding or removing the label re-runs only this check.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+# Reads the diff and the labels from the event payload; no write access needed.
+permissions:
+  contents: read
+
+concurrency:
+  group: proxy-fixture-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  proxy-fixture:
+    name: Proxy fixture required
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          # The base...head diff needs the merge base of the two branches.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .node-version
+
+      - name: Check proxy changes come with a fixture
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/check-proxy-fixture.mjs

@@ -28,6 +28,11 @@ they are pushed to every user.
    node scripts/check-versions.mjs vX.Y.Z
    ```
 
+   Add the fix-commit KPI to the release notes: the `unreleased` row of
+   `scripts/kpi-fix-commits.sh` (needs tags and full history) counts the
+   fix and proxy fix commits since the previous release. Compare it with the
+   baseline in [ACCEPTANCE.md](./ACCEPTANCE.md#fix-commit-kpi).
+
 2. Merge to `main`, then tag and push:
 
    ```bash

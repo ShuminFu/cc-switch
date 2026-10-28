@@ -72,3 +72,11 @@ proxy:
           - "src/lib/api/proxy.ts"
           - "src-tauri/src/proxy/**"
           - "src-tauri/src/commands/proxy.rs"
+
+# Golden proxy fixtures; a src-tauri/src/proxy/** change needs one of these or
+# the `no-fixture-needed` label (proxy-fixture.yml, CCS-034). That label is
+# set by hand and must not be listed here, or sync-labels would remove it.
+fixtures:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src-tauri/tests/fixtures/proxy/**"
