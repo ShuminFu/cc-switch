@@ -34,7 +34,7 @@ p0-ci-pin-actions (same file; land in sequence).
 
 **Files.** `.github/workflows/release.yml`, `tests/ci/releaseSecrets.test.ts`, this ticket.
 
-**Commits.** See `git log --grep CCS-029` (code, test and this note land in one commit).
+**Commits.** `9be6d7b` (workflow, test and this note).
 
 **Verification.**
 - `grep -n 'secrets\.' .github/workflows/release.yml` → all matches are `NAME: ${{ secrets.NAME }}` lines under `env:` (none under `run:`).
