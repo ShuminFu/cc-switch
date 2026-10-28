@@ -216,7 +216,7 @@ TeamoRouter 还提供企业级功能，包括集中账单、团队管理、BYOK�
 
 ## 功能特性
 
-[完整更新日志](CHANGELOG.md) | [发布说明](docs/release-notes/v3.16.1-zh.md)
+[完整更新日志](CHANGELOG.md) | [发布说明](docs/release-notes/v3.17.0-zh.md)
 
 ### 供应商管理
 
@@ -388,9 +388,9 @@ paru -S cc-switch-bin
 
 从 [Releases](../../releases) 页面下载最新版本的 Linux 安装包：
 
-- `CC-Switch-v{版本号}-Linux.deb`（Debian/Ubuntu）
-- `CC-Switch-v{版本号}-Linux.rpm`（Fedora/RHEL/openSUSE）
-- `CC-Switch-v{版本号}-Linux.AppImage`（通用）
+- `CC-Switch-v{版本号}-Linux-{x86_64|arm64}.deb`（Debian/Ubuntu）
+- `CC-Switch-v{版本号}-Linux-{x86_64|arm64}.rpm`（Fedora/RHEL/openSUSE）
+- `CC-Switch-v{版本号}-Linux-{x86_64|arm64}.AppImage`（通用）
 
 > **Flatpak**：官方 Release 不包含 Flatpak 包。如需使用，可从 `.deb` 自行构建 — 参见 [`flatpak/README.md`](flatpak/README.md)。
 

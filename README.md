@@ -215,7 +215,7 @@ Modern AI-powered coding relies on tools like Claude Code, Claude Desktop, Codex
 
 ## Features
 
-[Full Changelog](CHANGELOG.md) | [Release Notes](docs/release-notes/v3.16.1-en.md)
+[Full Changelog](CHANGELOG.md) | [Release Notes](docs/release-notes/v3.17.0-en.md)
 
 ### Provider Management
 
@@ -385,9 +385,9 @@ paru -S cc-switch-bin
 
 Download the latest Linux build from the [Releases](../../releases) page:
 
-- `CC-Switch-v{version}-Linux.deb` (Debian/Ubuntu)
-- `CC-Switch-v{version}-Linux.rpm` (Fedora/RHEL/openSUSE)
-- `CC-Switch-v{version}-Linux.AppImage` (Universal)
+- `CC-Switch-v{version}-Linux-{x86_64|arm64}.deb` (Debian/Ubuntu)
+- `CC-Switch-v{version}-Linux-{x86_64|arm64}.rpm` (Fedora/RHEL/openSUSE)
+- `CC-Switch-v{version}-Linux-{x86_64|arm64}.AppImage` (Universal)
 
 > **Flatpak**: Not included in official releases. You can build it yourself from the `.deb` — see [`flatpak/README.md`](flatpak/README.md) for instructions.
 

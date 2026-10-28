@@ -215,7 +215,7 @@ TeamoRouter は、集中請求、チーム管理、BYOK、スマートルーテ�
 
 ## 特長
 
-[完全な更新履歴](CHANGELOG.md) | [リリースノート](docs/release-notes/v3.16.1-ja.md)
+[完全な更新履歴](CHANGELOG.md) | [リリースノート](docs/release-notes/v3.17.0-ja.md)
 
 ### プロバイダ管理
 
@@ -385,9 +385,9 @@ paru -S cc-switch-bin
 
 [Releases](../../releases) から最新版の Linux ビルドをダウンロード：
 
-- `CC-Switch-v{version}-Linux.deb`（Debian/Ubuntu）
-- `CC-Switch-v{version}-Linux.rpm`（Fedora/RHEL/openSUSE）
-- `CC-Switch-v{version}-Linux.AppImage`（汎用）
+- `CC-Switch-v{version}-Linux-{x86_64|arm64}.deb`（Debian/Ubuntu）
+- `CC-Switch-v{version}-Linux-{x86_64|arm64}.rpm`（Fedora/RHEL/openSUSE）
+- `CC-Switch-v{version}-Linux-{x86_64|arm64}.AppImage`（汎用）
 
 > **Flatpak**：公式リリースには含まれていません。`.deb` から自分でビルドできます — 手順は [`flatpak/README.md`](flatpak/README.md) を参照してください。
 
