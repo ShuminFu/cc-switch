@@ -1,0 +1,57 @@
+name: Promote Release
+
+# release.yml publishes every tag as a prerelease, and the updater endpoint
+# (releases/latest/download/latest.json) skips prereleases. Run this workflow
+# by hand once a release has been checked to make it the latest release and
+# ship it to the updater (CCS-032). See docs/dev/RELEASING.md.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Stable release tag to promote, e.g. v3.5.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote-release:
+    name: Promote ${{ inputs.tag }} to latest
+    runs-on: ubuntu-22.04
+    # 与 release.yml 的发布阶段同组：发布或 latest.json 上传仍在进行时排队等待，而不是提前提升
+    concurrency:
+      group: release-publish-${{ inputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Promote release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          bash scripts/promote-release.sh "$GITHUB_REPOSITORY" "$TAG"
+
+      # 与 updater 走同一条路径：releases/latest/download/latest.json 必须重定向到新标签
+      # （第一跳 Location 指向 releases/download/<tag>/，之后才跳到资产 CDN）
+      - name: Verify updater endpoint
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
+          for attempt in 1 2 3 4 5; do
+            LOCATIONS="$(curl -sSIL "$URL" | tr -d '\r' | grep -i '^location:' || true)"
+            if grep -q "/releases/download/$TAG/latest.json" <<<"$LOCATIONS"; then
+              echo "✅ $URL redirects to $TAG"
+              exit 0
+            fi
+            echo "attempt $attempt: redirects were:"
+            echo "${LOCATIONS:-<none>}"
+            sleep 10
+          done
+          echo "❌ $URL does not redirect to $TAG" >&2
+          exit 1

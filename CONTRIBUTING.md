@@ -94,6 +94,10 @@ ci: add format check workflow
 chore(deps): update dependencies
 ```
 
+## Releasing
+
+Releases are cut by maintainers. Tagged builds are published as prereleases and must be promoted before the in-app updater sees them — see [docs/dev/RELEASING.md](./docs/dev/RELEASING.md).
+
 ## AI-Assisted Contributions
 
 We welcome AI-assisted contributions, but **the responsibility stays with you**. AI tools lower the cost of writing code — they do not lower the cost of reviewing it. Maintainers are not obligated to clean up AI-generated output.
@@ -221,6 +225,10 @@ docs(readme): update installation instructions
 ci: add format check workflow
 chore(deps): update dependencies
 ```
+
+## 发布流程
+
+发布由维护者执行。打标签构建出的版本会先以预发布（prerelease）形式发布，需要手动提升为 latest 后应用内更新才能检测到，详见 [docs/dev/RELEASING.md](./docs/dev/RELEASING.md)。
 
 ## AI 辅助贡献
 

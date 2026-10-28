@@ -637,6 +637,8 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: CC Switch ${{ github.ref_name }}
+          # 始终先发布为预发布：updater 读取 releases/latest（跳过预发布），
+          # 验证后需运行 promote-release.yml 提升为 latest，见 docs/dev/RELEASING.md（CCS-032）
           prerelease: true
           body: |
             ## CC Switch ${{ github.ref_name }}
