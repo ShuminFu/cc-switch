@@ -68,6 +68,12 @@ describe("release.yml concurrency", () => {
     // 组名必须区分矩阵项，否则同一次运行的矩阵项会互相取消
     expect(release?.group).toContain("${{ matrix.os }}");
     expect(release?.group).not.toBe(jobs["publish-release"]?.group);
+    // 组名按 matrix.os 区分，因此矩阵中的 os 必须唯一
+    const oses = lines
+      .map((l) => l.match(/^\s+- os:\s*(\S+)\s*$/)?.[1])
+      .filter((os): os is string => !!os);
+    expect(oses.length).toBeGreaterThan(1);
+    expect(new Set(oses).size).toBe(oses.length);
   });
 
   it("every job declares concurrency explicitly", () => {
