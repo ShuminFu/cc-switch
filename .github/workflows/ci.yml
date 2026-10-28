@@ -67,6 +67,11 @@ jobs:
       - name: Check version consistency
         run: node scripts/check-versions.mjs
 
+      # The AppStream metainfo <releases> block is generated from CHANGELOG.md
+      # and must list the package.json version (CCS-044).
+      - name: Check AppStream metainfo releases
+        run: node scripts/sync-metainfo-releases.mjs --check
+
       - name: Unit tests
         run: pnpm test:unit
 

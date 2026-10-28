@@ -1,7 +1,7 @@
 id: com.ccswitch.desktop
 
 runtime: org.gnome.Platform
-runtime-version: '46'
+runtime-version: '50'
 sdk: org.gnome.Sdk
 
 command: cc-switch
@@ -40,6 +40,7 @@ modules:
       - type: git
         url: https://github.com/AyatanaIndicators/ayatana-ido.git
         tag: 0.10.4
+        commit: f968079b09e2310fefc3fc307359025f1c74b3eb
 
   - name: libdbusmenu-gtk3
     buildsystem: autotools
@@ -64,6 +65,7 @@ modules:
       - type: git
         url: https://github.com/AyatanaIndicators/libayatana-indicator.git
         tag: 0.9.4
+        commit: 611bb384b73fa6311777ba4c41381a06f5b99dad
 
   - name: libayatana-appindicator
     buildsystem: cmake-ninja
@@ -74,11 +76,12 @@ modules:
       - type: git
         url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
         tag: 0.5.93
+        commit: 238c8b02718fa5b4af95ede72beeed762094f4cc
 
   - name: cc-switch
     buildsystem: simple
     sources:
-      # Placed in flatpak/ directory by CI or local build script
+      # cc-switch.deb is copied into flatpak/ by hand before building (see flatpak/README.md)
       - type: file
         path: cc-switch.deb
       - type: file

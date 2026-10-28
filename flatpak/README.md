@@ -1,19 +1,19 @@
 # Flatpak Build Guide
 
-This directory contains the Flatpak manifest (`com.ccswitch.desktop`) for CC Switch, used to convert the generated `.deb` artifact into an installable `.flatpak` package via CI or local builds.
+This directory contains the Flatpak manifest (`com.ccswitch.desktop`) for CC Switch, used to convert the generated `.deb` artifact into an installable `.flatpak` package via a local build. Official releases do not ship a Flatpak and CI does not build one.
 
 ## Dependencies
 
 - `flatpak`
 - `flatpak-builder`
-- Flathub remote (for installing `org.gnome.Platform//46` runtime)
+- Flathub remote (for installing `org.gnome.Platform//50` runtime)
 
 For Ubuntu/Debian:
 
 ```bash
 sudo apt install flatpak flatpak-builder
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install -y --user flathub org.gnome.Platform//46 org.gnome.Sdk//46
+flatpak install -y --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
 ```
 
 ## Local Build (Generate .flatpak from .deb)
@@ -43,6 +43,17 @@ flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user ./CC-Switch-Linux.flatpak
 flatpak run com.ccswitch.desktop
 ```
+
+## Metainfo Releases
+
+The `<releases>` block of `com.ccswitch.desktop.metainfo.xml` is generated from the dated entries in `CHANGELOG.md`. After bumping the version and adding its changelog entry, regenerate it:
+
+```bash
+node scripts/sync-metainfo-releases.mjs
+appstreamcli validate --pedantic flatpak/com.ccswitch.desktop.metainfo.xml
+```
+
+CI runs `node scripts/sync-metainfo-releases.mjs --check` and fails when the block is out of date.
 
 ## Permissions Note
 
