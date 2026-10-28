@@ -1,6 +1,6 @@
 # CCS-036: [terminal] Write provider terminal config and launcher scripts as private, uniquely named temp files
 
-**Status:** Open · **Kind:** security · **Labels:** `security`, `phase:P0`, `p1-high`, `area:terminal`
+**Status:** Partial · **Kind:** security · **Labels:** `security`, `phase:P0`, `p1-high`, `area:terminal`
 
 > **Ticket key:** `p0-hotfix-terminal-tempfiles` · **Phase:** P0 · **Priority:** p1-high · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -25,3 +25,51 @@ Covers verified findings backend-terminal-tmp-key and backend-terminal-script-na
 
 ## Dependencies
 None.
+
+## Implementation notes
+**Summary.** All terminal-launch temp files in `src-tauri/src/commands/misc.rs` now go through a new
+`write_private_temp_file` helper (`tempfile::Builder`, 12 random bytes in the name, `O_EXCL`,
+mode 0600, or 0700 for scripts, then `keep()`).
+- `private_launch_temp_dir()`: on Linux, `$XDG_RUNTIME_DIR` if it is set to an absolute directory,
+  otherwise `<app_config_dir>/tmp`, created with mode 0700. On macOS and Windows it uses the system
+  temp dir, which is already per-user (`$TMPDIR` / `%TEMP%`).
+- `sanitize_temp_file_component()`: keeps only `[A-Za-z0-9_-]`, up to 32 characters, and falls back
+  to `provider`. It is applied to the provider id and to the `launch_terminal_running` label.
+- `write_claude_config()` now creates the file itself and returns its path.
+- `build_provider_launcher_script()` (macOS and Linux): this is now the only place the launcher
+  script text is built.
+  - It keeps the config path in a single-quoted shell variable.
+  - It runs `rm -f "$cc_switch_config" "$0"` after `claude` exits and before the final `exec`. An
+    EXIT trap does not run on `exec`, so that line is what removes the file.
+  - The trap is kept as a fallback for early exit.
+- The Windows provider `.bat` and the macOS, Linux and Windows scripts written by
+  `launch_terminal_running` now get unique names.
+- If writing the launcher script fails, the config file is removed.
+- Out of scope, unchanged: the synchronous Windows silent-exec `.bat` (`cc_switch_<label>_<pid>.bat`,
+  around line 233). It is written, run and deleted inside a single call.
+
+**Files:** `src-tauri/src/commands/misc.rs` (code + tests in `tests::private_temp_files`).
+
+**Commits:** d7b5297 (code), plus the follow-up commit that records these notes.
+
+**Verification (Linux):**
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib commands::misc`: 79 passed, including 6 new tests:
+  - distinct paths, with `mode & 0o077 == 0`
+  - scripts get mode 0o700
+  - config files are private and unique, with sanitized names
+  - sanitizer cases
+  - `rm` comes before `exec` in the script
+  - regression test: runs the generated script with `sh` and checks that the config file and the script are gone even though it ends in `exec`
+- The regression was confirmed by hand. A script with the old shape (`trap ... EXIT` + `exec true`) leaves the config file on disk.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2016 passed, 0 failed.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`: clean.
+- `cargo fmt`: clean.
+
+**Remaining (why Partial):**
+- The manual desktop check from the acceptance criteria has not been run. It needs a graphical
+  terminal session, which this headless container does not have:
+  - `ls -l` shows `-rw-------`
+  - the file is gone after exiting claude
+  - launching A and then B quickly shows each one its own config path
+- The cfg-gated macOS and Windows branches were reviewed but not compiled. Only the
+  `x86_64-unknown-linux-gnu` target is installed here, so a macOS/Windows CI build should confirm them.
