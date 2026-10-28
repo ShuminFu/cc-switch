@@ -65,7 +65,7 @@ Run all checks before submitting:
 
 ```bash
 pnpm typecheck && pnpm format:check && pnpm test:unit
-cd src-tauri && cargo fmt --check && cargo clippy && cargo test
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 ## Pull Request Guidelines
@@ -193,7 +193,7 @@ cargo test       # 运行测试
 
 ```bash
 pnpm typecheck && pnpm format:check && pnpm test:unit
-cd src-tauri && cargo fmt --check && cargo clippy && cargo test
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 ## Pull Request 指南
