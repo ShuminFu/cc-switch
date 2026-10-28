@@ -1,6 +1,6 @@
 # CCS-033: [ci] Add rust-cache, a version consistency check, provenance attestation and SHA256SUMS
 
-**Status:** Open · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
+**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:ci`
 
 > **Ticket key:** `p0-ci-release-hygiene` · **Phase:** P0 · **Priority:** p3-low · **Effort:** M · **Depends on:** `p0-ci-pin-actions`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -19,3 +19,65 @@ From the CI review ideas: the release job rebuilds from scratch on 5 runners; no
 
 ## Dependencies
 p0-ci-pin-actions
+
+## Implementation notes
+
+**Summary.**
+- `ci.yml`: the four manual Cargo `actions/cache` steps (backend, msrv,
+  tauri-build-smoke, coverage-rust) are replaced with `Swatinem/rust-cache@v2`
+  (`workspaces: src-tauri -> target`, one `key` per job / matrix OS). The
+  frontend job runs `node scripts/check-versions.mjs`; when release.yml calls
+  ci.yml on a tag, `GITHUB_REF` is `refs/tags/*` and the tag is checked too.
+- `release.yml`: the build matrix gains `Swatinem/rust-cache@v2`
+  (`key: release-${{ matrix.os }}`, `cache-on-failure: true` so a re-run of the
+  same tag after a flaky notarization/upload step reuses the build). A new
+  `check-versions` job runs `node scripts/check-versions.mjs "$GITHUB_REF_NAME"`
+  and `release` now `needs: [ci, check-versions]`, so a mismatch fails before
+  the five runners start. `publish-release` gets `id-token: write` and
+  `attestations: write`, writes `release-assets/SHA256SUMS` with
+  `scripts/generate-sha256sums.sh` (sparse checkout of `scripts/`), then runs
+  `actions/attest-build-provenance@v3` with
+  `subject-checksums: release-assets/SHA256SUMS` before the upload; SHA256SUMS
+  is uploaded with the other assets and the release body shows how to verify.
+- `scripts/check-versions.mjs` (+ `.d.mts`): checks package.json,
+  `[package].version` in Cargo.toml and tauri.conf.json agree, that CHANGELOG.md
+  has `## [<version>]` (a prerelease version may use `## [Unreleased]`), and
+  that the tag (argument or `GITHUB_REF`) equals `v<version>`. `--root` points
+  it at another tree (used by tests).
+- `docs/dev/RELEASING.md`: run the check before tagging; how to verify
+  SHA256SUMS and attestations.
+
+**Files.** `.github/workflows/ci.yml`, `.github/workflows/release.yml`,
+`scripts/check-versions.mjs`, `scripts/check-versions.d.mts`,
+`scripts/generate-sha256sums.sh`, `tests/scripts/checkVersions.test.ts`,
+`tests/ci/releaseHygiene.test.ts`, `docs/dev/RELEASING.md`.
+
+**Commits.** `3736bef` (implementation); this ticket update follows in a
+separate commit.
+
+**Verification.**
+- `node scripts/check-versions.mjs v3.18.0` → exit 1 (tag does not match the
+  3.17.0 in all three manifests); `node scripts/check-versions.mjs v3.17.0` and
+  with no argument → exit 0.
+- `npx vitest run tests/ci tests/scripts` → 9 files, 91 tests passed (new:
+  checkVersions 11, releaseHygiene 11). The workflow assertions fail on the
+  previous workflows (no rust-cache, no check-versions job, no SHA256SUMS /
+  attestation step).
+- `pnpm test:unit` → 87 files, 618 tests passed; `pnpm typecheck` clean;
+  `pnpm format:check` clean; `bash -n scripts/generate-sha256sums.sh` ok.
+- YAML: `python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))"` passes
+  for ci.yml and release.yml. actionlint and shellcheck are not installed here.
+
+**Remaining (Partial).**
+- "Release assets include SHA256SUMS; `gh attestation verify` passes on a
+  fork" needs a real tag run on GitHub (secrets, macOS/Windows runners). After
+  the next release (or a fork release), run
+  `sha256sum -c SHA256SUMS --ignore-missing` and
+  `gh attestation verify <asset> --repo <owner>/<repo>`. Attestations require
+  a public repository (or GitHub Enterprise Cloud for a private fork); on a
+  private fork without it the attest step fails and blocks publishing.
+- The dependency p0-ci-pin-actions (CCS-028) is still Open, so the new actions
+  (`Swatinem/rust-cache@v2`, `actions/attest-build-provenance@v3`) use tags
+  like the rest of the workflows; CCS-028 should pin them to SHAs with the
+  others. The action major versions could not be checked against GitHub from
+  this environment.
