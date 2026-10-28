@@ -1,0 +1,100 @@
+# cargo-deny configuration (https://embarkstudios.github.io/cargo-deny/).
+#
+# Run locally from the repository root:
+#   cargo deny --manifest-path src-tauri/Cargo.toml check
+#
+# CI runs the same check on every PR/push and on a weekly schedule, so a new
+# RustSec advisory against a crate in Cargo.lock fails the build even when no
+# code changed.
+
+[graph]
+all-features = true
+
+[output]
+feature-depth = 1
+
+[advisories]
+# Vulnerabilities, unsound and yanked crates are errors. Unmaintained notices
+# are only reported for crates we depend on directly; transitive ones are
+# outside our control and would only add noise.
+unmaintained = "workspace"
+yanked = "deny"
+# Accepted advisories. This is a baseline of what Cargo.lock contained when the
+# gate was introduced (CCS-018); most entries are fixed by a semver-compatible
+# `cargo update` and should be removed as soon as the lockfile is refreshed.
+# Every new entry needs a reason.
+ignore = [
+    # aws-lc-sys 0.36 (via rustls/aws-lc-rs)
+    { id = "RUSTSEC-2026-0044", reason = "baseline: aws-lc-sys, fix via cargo update" },
+    { id = "RUSTSEC-2026-0045", reason = "baseline: aws-lc-sys, fix via cargo update" },
+    { id = "RUSTSEC-2026-0046", reason = "baseline: aws-lc-sys, fix via cargo update" },
+    { id = "RUSTSEC-2026-0047", reason = "baseline: aws-lc-sys, fix via cargo update" },
+    { id = "RUSTSEC-2026-0048", reason = "baseline: aws-lc-sys, fix via cargo update" },
+    # rustls 0.23 / rustls-webpki 0.103 / bundled root certificates
+    { id = "RUSTSEC-2026-0049", reason = "baseline: rustls-webpki, fix via cargo update" },
+    { id = "RUSTSEC-2026-0098", reason = "baseline: rustls-webpki, fix via cargo update" },
+    { id = "RUSTSEC-2026-0099", reason = "baseline: rustls-webpki, fix via cargo update" },
+    { id = "RUSTSEC-2026-0104", reason = "baseline: rustls-webpki, fix via cargo update" },
+    { id = "RUSTSEC-2026-0382", reason = "baseline: rustls-webpki, fix via cargo update" },
+    { id = "RUSTSEC-2026-0285", reason = "baseline: rustls, fix via cargo update" },
+    { id = "RUSTSEC-2026-0346", reason = "baseline: rustls, fix via cargo update" },
+    { id = "RUSTSEC-2026-0348", reason = "baseline: rustls, fix via cargo update" },
+    { id = "RUSTSEC-2026-0349", reason = "baseline: rustls, fix via cargo update" },
+    { id = "RUSTSEC-2026-0381", reason = "baseline: webpki-roots, fix via cargo update" },
+    { id = "RUSTSEC-2026-0383", reason = "baseline: webpki-root-certs, fix via cargo update" },
+    # HTTP/2, XML, archive and compression crates
+    { id = "RUSTSEC-2026-0258", reason = "baseline: h2, fix via cargo update" },
+    { id = "RUSTSEC-2026-0194", reason = "baseline: quick-xml 0.38, fix via cargo update" },
+    { id = "RUSTSEC-2026-0195", reason = "baseline: quick-xml 0.38, fix via cargo update" },
+    { id = "RUSTSEC-2026-0067", reason = "baseline: tar, fix via cargo update" },
+    { id = "RUSTSEC-2026-0068", reason = "baseline: tar, fix via cargo update" },
+    { id = "RUSTSEC-2026-0367", reason = "baseline: zip 2.x/4.x, needs zip upgrade" },
+    { id = "RUSTSEC-2026-0368", reason = "baseline: zip 2.x/4.x, needs zip upgrade" },
+    { id = "RUSTSEC-2026-0369", reason = "baseline: zip 2.x/4.x, needs zip upgrade" },
+    { id = "RUSTSEC-2026-0391", reason = "baseline: zstd 0.13, no semver-compatible fix yet" },
+    { id = "RUSTSEC-2026-0398", reason = "baseline: zstd-safe 7, no semver-compatible fix yet" },
+    { id = "RUSTSEC-2026-0403", reason = "baseline: zstd-safe 7, no semver-compatible fix yet" },
+    { id = "RUSTSEC-2026-0410", reason = "baseline: zstd-sys, fix via cargo update" },
+    # Unsound APIs
+    { id = "RUSTSEC-2026-0190", reason = "baseline: anyhow Error::downcast_mut, fix via cargo update" },
+    { id = "RUSTSEC-2026-0386", reason = "baseline: tokio AsyncFd constructors, fix via cargo update" },
+    # Yanked (Windows-only, via tauri plugins)
+    { crate = "clipboard-win@5.4.1", reason = "baseline: yanked, fix via cargo update" },
+    { crate = "uds_windows@1.2.0", reason = "baseline: yanked, fix via cargo update" },
+]
+
+[licenses]
+# The app is MIT; every dependency must use one of these permissive or
+# weak-copyleft (file-level) licenses.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MPL-2.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "0BSD",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Duplicate versions are common in a Tauri graph; report them without failing.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

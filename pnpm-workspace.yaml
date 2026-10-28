@@ -6,3 +6,16 @@ onlyBuiltDependencies:
 
 ignoredBuiltDependencies:
   - msw
+
+# `pnpm audit --audit-level=high` runs as a CI gate (see .github/workflows/ci.yml).
+# Advisories listed here are accepted until the fix lands; each entry needs a
+# reason and should be removed as soon as the upgrade is done.
+auditConfig:
+  ignoreGhsas:
+    # vitest 2.x (dev-only test runner, never bundled into the app). Fixes need
+    # vitest >= 3.2.6 with tinypool >= 2.1.2 and vite >= 6.4.4, i.e. a major
+    # vitest upgrade tracked separately. We don't run the Vitest UI server.
+    - GHSA-5xrq-8626-4rwp # vitest: UI server arbitrary file read
+    - GHSA-5gmw-xhrv-c9v3 # tinypool (via vitest): prototype pollution in worker options
+    - GHSA-85c8-ppgw-ccpr # tinypool (via vitest): prototype pollution in run() options
+    - GHSA-587h-7wmj-h5pm # vite 5 (via vitest): launch-editor check bypass on Windows
