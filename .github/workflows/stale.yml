@@ -5,6 +5,11 @@ on:
     # Run daily at 00:00 UTC
     - cron: '0 0 * * *'
   workflow_dispatch: # Allow manual trigger
+    inputs:
+      debug-only:
+        description: 'Dry run: log what would be labelled / marked stale / closed without changing anything'
+        type: boolean
+        default: false
 
 permissions:
   issues: write
@@ -12,7 +17,46 @@ permissions:
 jobs:
   stale:
     runs-on: ubuntu-latest
+    env:
+      # Manual dry runs pass debug-only: true; scheduled runs have no inputs and act for real
+      DEBUG_ONLY: ${{ inputs.debug-only == true }}
+      POPULAR_LABEL: 'popular'
+      POPULAR_MIN_REACTIONS: '3'
     steps:
+      # actions/stale has no reaction-based exemption, so open issues with 3+ reactions
+      # get the `popular` label first and are then skipped via exempt-issue-labels
+      - name: Label popular issues
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const label = process.env.POPULAR_LABEL;
+            const minReactions = Number(process.env.POPULAR_MIN_REACTIONS);
+            const dryRun = process.env.DEBUG_ONLY === 'true';
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            let labelled = 0;
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+              if ((issue.reactions?.total_count ?? 0) < minReactions) continue;
+              const names = issue.labels.map((l) => (typeof l === 'string' ? l : l.name));
+              if (names.includes(label)) continue;
+              core.info(`${dryRun ? '[dry run] would label' : 'Labelling'} #${issue.number} as ${label} (${issue.reactions.total_count} reactions)`);
+              if (!dryRun) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  labels: [label],
+                });
+              }
+              labelled++;
+            }
+            core.info(`${labelled} issue(s) newly labelled ${label}`);
+
       - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
         with:
           # --- Timing ---
@@ -36,9 +80,11 @@ jobs:
 
           # --- Exemptions ---
           # Issues with these labels will NEVER be marked stale
-          exempt-issue-labels: 'security,performance'
-          # Issues with 3+ reactions are likely popular requests, exempt them
-          exempt-issue-created-after: '2020-01-01'
+          # (`popular` is applied by the previous step to issues with 3+ reactions)
+          exempt-issue-labels: 'security,performance,popular'
+
+          # --- Dry run (workflow_dispatch input) ---
+          debug-only: ${{ env.DEBUG_ONLY }}
 
           # --- Processing limits ---
           # Process up to 100 issues per run to avoid API rate limits
