@@ -97,6 +97,22 @@ lane.
 - No Rust source changed, so `cargo fmt`, `clippy` and `test` were not
   re-run for this ticket.
 
+### Review
+An independent review re-checked both acceptance criteria. `cargo deny
+--manifest-path src-tauri/Cargo.toml check` (0.20.2) gives `advisories ok,
+bans ok, licenses ok, sources ok`. The only warnings are duplicate versions,
+and every baseline ignore entry still matches an advisory. A scratch copy
+with `lru = "=0.6.6"` exits 1 with RUSTSEC-2021-0130 and `advisories FAILED`.
+The pinned `cargo-deny-action@v2` image also ships cargo-deny 0.20.2. Its
+entrypoint installs the 1.95 toolchain from `rust-toolchain.toml`, so CI
+matches the local run. With pnpm 10.12.3, `pnpm audit --audit-level=high`
+exits 0 and `pnpm install --frozen-lockfile` is up to date. `vite build`,
+typecheck, lint and format:check pass. `pnpm test:unit` passed 527/527 on
+two consecutive runs, so the earlier App.test.tsx failures are flaky, not a
+regression. Fixed in review: the `pnpm-workspace.yaml` comment pointed to
+ci.yml, but the gate lives in `.github/workflows/audit.yml`. Status stays
+Partial: making the checks required in branch protection still needs a human.
+
 ### Remaining (needs a human or another lane)
 - Mark the `cargo-deny` and `pnpm audit` checks as required in branch
   protection for `main`.

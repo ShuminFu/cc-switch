@@ -7,7 +7,7 @@ onlyBuiltDependencies:
 ignoredBuiltDependencies:
   - msw
 
-# `pnpm audit --audit-level=high` runs as a CI gate (see .github/workflows/ci.yml).
+# `pnpm audit --audit-level=high` runs as a CI gate (see .github/workflows/audit.yml).
 # Advisories listed here are accepted until the fix lands; each entry needs a
 # reason and should be removed as soon as the upgrade is done.
 auditConfig:
