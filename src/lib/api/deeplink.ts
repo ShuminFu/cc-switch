@@ -71,15 +71,6 @@ export type ImportResult =
 
 export const deeplinkApi = {
   /**
-   * Parse a deep link URL
-   * @param url The ccswitch:// URL to parse
-   * @returns Parsed deep link request
-   */
-  parseDeeplink: async (url: string): Promise<DeepLinkImportRequest> => {
-    return invoke("parse_deeplink", { url });
-  },
-
-  /**
    * Merge configuration from Base64/URL into a deep link request
    * This is used to show the complete configuration in the confirmation dialog
    * @param request The deep link import request

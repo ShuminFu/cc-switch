@@ -1,16 +1,9 @@
 use crate::deeplink::{
     import_mcp_from_deeplink, import_prompt_from_deeplink, import_provider_from_deeplink,
-    import_skill_from_deeplink, parse_deeplink_url, DeepLinkImportRequest,
+    import_skill_from_deeplink, DeepLinkImportRequest,
 };
 use crate::store::AppState;
 use tauri::State;
-
-/// Parse a deep link URL and return the parsed request for frontend confirmation
-#[tauri::command]
-pub fn parse_deeplink(url: String) -> Result<DeepLinkImportRequest, String> {
-    log::info!("Parsing deep link URL: {url}");
-    parse_deeplink_url(&url).map_err(|e| e.to_string())
-}
 
 /// Merge configuration from Base64/URL into a deep link request
 /// This is used by the frontend to show the complete configuration in the confirmation dialog
