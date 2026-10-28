@@ -34,5 +34,5 @@ None.
 - i18n: added `providerForm.codexAuthInvalid`, `providerForm.codexConfigInvalid` and `providerForm.geminiConfigInvalid` in en/zh/zh-TW/ja.
 - Tests: `tests/components/ProviderForm.parseGuard.test.tsx` renders the real form (only JsonEditor and sonner are mocked). It covers four cases: Codex auth `{bad` with config base_url B means no submit and an error toast; Codex auth `""` submits auth `{}` and base_url B; invalid Codex TOML is blocked; invalid Gemini config is blocked. All 4 tests fail against the pre-change ProviderForm.tsx and pass after.
 - Files: `src/components/providers/forms/ProviderForm.tsx`, `src/i18n/locales/{en,zh,zh-TW,ja}.json`, `tests/components/ProviderForm.parseGuard.test.tsx`.
-- Commit: see `git log --grep CCS-039`.
+- Commit: 5ce06b0 (implementation + tests); SHA recorded in a follow-up docs commit.
 - Verification: `pnpm typecheck` passed; `pnpm test:unit` passed (74 files, 467 tests); `pnpm format:check` passed.
