@@ -1,4 +1,5 @@
 use super::env_checker::EnvConflict;
+use crate::config::atomic_write;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -66,7 +67,7 @@ fn create_backup(conflicts: &[EnvConflict]) -> Result<BackupInfo, String> {
     let json = serde_json::to_string_pretty(&backup_info)
         .map_err(|e| format!("序列化备份数据失败: {e}"))?;
 
-    fs::write(&backup_file, json).map_err(|e| format!("写入备份文件失败: {e}"))?;
+    atomic_write(&backup_file, json.as_bytes()).map_err(|e| format!("写入备份文件失败: {e}"))?;
 
     Ok(backup_info)
 }
@@ -142,7 +143,7 @@ fn delete_single_env(conflict: &EnvConflict) -> Result<(), String> {
                 .collect();
 
             // Write back to file
-            fs::write(file_path, new_content.join("\n"))
+            atomic_write(Path::new(file_path), new_content.join("\n").as_bytes())
                 .map_err(|e| format!("写入文件失败 {file_path}: {e}"))?;
 
             Ok(())
@@ -315,7 +316,8 @@ fn restore_single_env(conflict: &EnvConflict) -> Result<(), String> {
             content.push_str(&export_line);
 
             // Write back to file
-            fs::write(file_path, content).map_err(|e| format!("写入文件失败 {file_path}: {e}"))?;
+            atomic_write(Path::new(file_path), content.as_bytes())
+                .map_err(|e| format!("写入文件失败 {file_path}: {e}"))?;
 
             Ok(())
         }

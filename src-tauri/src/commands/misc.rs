@@ -231,7 +231,8 @@ fn run_tool_lifecycle_silently(command_line: &str, label: &str) -> Result<(), St
 
     let bat_file =
         std::env::temp_dir().join(format!("cc_switch_{}_{}.bat", label, std::process::id()));
-    std::fs::write(&bat_file, command_line).map_err(|e| format!("写入批处理文件失败: {e}"))?;
+    crate::config::atomic_write(&bat_file, command_line.as_bytes())
+        .map_err(|e| format!("写入批处理文件失败: {e}"))?;
 
     let output = Command::new("cmd")
         .arg("/C")

@@ -31,7 +31,7 @@ impl ConfigService {
 
         let backup_path = backup_dir.join(format!("{backup_id}.json"));
         let contents = fs::read(config_path).map_err(|e| AppError::io(config_path, e))?;
-        fs::write(&backup_path, contents).map_err(|e| AppError::io(&backup_path, e))?;
+        crate::config::atomic_write(&backup_path, &contents)?;
 
         Self::cleanup_old_backups(&backup_dir, MAX_BACKUPS)?;
 

@@ -689,7 +689,9 @@ fn save_settings_file(settings: &AppSettings) -> Result<(), AppError> {
             .map_err(|e| AppError::io(&path, e))?;
     }
 
+    // 非 unix 平台的原子保存由 CCS-084（p1-settings-atomic-save）处理
     #[cfg(not(unix))]
+    #[allow(clippy::disallowed_methods)]
     {
         fs::write(&path, json).map_err(|e| AppError::io(&path, e))?;
     }

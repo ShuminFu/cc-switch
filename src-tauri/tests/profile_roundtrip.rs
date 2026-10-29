@@ -2,6 +2,9 @@
 //!
 //! 全链路 apply 会写 live 配置文件——support.rs 已把 HOME 指向临时目录，安全。
 
+// 测试夹具直接写文件即可，无需走 atomic_write（见 clippy.toml）
+#![allow(clippy::disallowed_methods)]
+
 use std::fs;
 
 use serde_json::json;

@@ -1,3 +1,6 @@
+// 测试夹具直接写文件即可，无需走 atomic_write（见 clippy.toml）
+#![allow(clippy::disallowed_methods)]
+
 mod support;
 
 use cc_switch_lib::{hermes_config, update_settings, AppSettings};

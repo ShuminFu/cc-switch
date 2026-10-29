@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use crate::config::atomic_write;
 use crate::error::AppError;
 
 const CLAUDE_DIR: &str = ".claude";
@@ -80,7 +81,7 @@ pub fn write_claude_config() -> Result<bool, AppError> {
     if changed || !path.exists() {
         let serialized = serde_json::to_string_pretty(&obj)
             .map_err(|e| AppError::JsonSerialize { source: e })?;
-        fs::write(&path, format!("{serialized}\n")).map_err(|e| AppError::io(&path, e))?;
+        atomic_write(&path, format!("{serialized}\n").as_bytes())?;
         Ok(true)
     } else {
         Ok(false)
@@ -114,7 +115,7 @@ pub fn clear_claude_config() -> Result<bool, AppError> {
 
     let serialized =
         serde_json::to_string_pretty(&value).map_err(|e| AppError::JsonSerialize { source: e })?;
-    fs::write(&path, format!("{serialized}\n")).map_err(|e| AppError::io(&path, e))?;
+    atomic_write(&path, format!("{serialized}\n").as_bytes())?;
     Ok(true)
 }
 

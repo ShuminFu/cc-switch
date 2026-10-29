@@ -2444,7 +2444,7 @@ impl SkillService {
             let metadata_path = backup_path.join("meta.json");
             let metadata_json = serde_json::to_string_pretty(&metadata)
                 .context("failed to serialize skill backup metadata")?;
-            fs::write(&metadata_path, metadata_json)
+            crate::config::atomic_write(&metadata_path, metadata_json.as_bytes())
                 .with_context(|| format!("failed to write {}", metadata_path.display()))?;
             Ok(())
         };

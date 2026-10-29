@@ -1,3 +1,6 @@
+// 生产代码由 lib 目标按 clippy.toml 检查；单元测试可直接用 std::fs::write 准备夹具
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
+
 mod app_config;
 mod app_store;
 mod auto_launch;

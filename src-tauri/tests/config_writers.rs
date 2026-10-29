@@ -17,6 +17,9 @@
 //! `INSTA_UPDATE=always cargo test --test config_writers` (or
 //! `cargo insta review`) and review the diff.
 
+// 测试夹具直接写文件即可，无需走 atomic_write（见 clippy.toml）
+#![allow(clippy::disallowed_methods)]
+
 mod support;
 
 use std::collections::HashMap;
@@ -582,6 +585,29 @@ async fn written_file_modes() {
     settings.set_omit_expression(true);
     settings.set_description("file modes after every writer (seeded files are 0644)");
     settings.bind(|| insta::assert_snapshot!("file_modes", text));
+}
+
+/// A missing `~/.claude/config.json` is created through `atomic_write`, so it
+/// starts owner-only instead of inheriting the umask (CCS-082).
+#[cfg(unix)]
+#[test]
+fn claude_plugin_creates_new_config_owner_only() {
+    let env = LiveEnv::new();
+    let path = env.path(".claude/config.json");
+    assert!(!path.exists());
+
+    assert!(kit::write_claude_plugin_config().expect("claude plugin"));
+
+    assert_private_mode(&path);
+    let leftovers: Vec<_> = fs::read_dir(env.path(".claude"))
+        .expect("read .claude")
+        .map(|e| e.expect("entry").file_name())
+        .filter(|name| name != "config.json")
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "temp files left behind: {leftovers:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
