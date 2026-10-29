@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::collections::HashMap;
+#[cfg(any(target_os = "macos", test))]
+use std::time::Duration;
 
 use crate::config;
 
@@ -104,6 +106,64 @@ struct ClaudeOAuthEntry {
     expires_at: Option<serde_json::Value>,
 }
 
+// ── macOS Keychain 读取 ───────────────────────────────────
+
+/// Keychain 读取超时：`security` 弹出授权对话框时会一直等待用户响应，
+/// 超时后放弃 Keychain、回退到凭据文件。
+#[cfg(target_os = "macos")]
+const KEYCHAIN_READ_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// 通过 `security find-generic-password ... -w` 读取 Keychain 中的密文
+#[cfg(target_os = "macos")]
+async fn read_keychain_secret(args: &[&str]) -> Option<String> {
+    let mut full_args = vec!["find-generic-password"];
+    full_args.extend_from_slice(args);
+    full_args.push("-w");
+    run_secret_command("security", &full_args, KEYCHAIN_READ_TIMEOUT).await
+}
+
+/// 异步运行读取密文的外部命令，返回去除首尾空白后的非空 stdout
+///
+/// 使用 `tokio::process` 而非 `std::process`：Keychain 授权对话框可能让命令
+/// 阻塞到用户响应为止，同步等待会占住一个 tokio worker（current_thread 运行时
+/// 下则冻结整个运行时）。超时后 future 被丢弃，`kill_on_drop` 负责终止子进程。
+/// 命令失败、超时或输出为空均返回 `None`，由调用方回退到凭据文件。
+#[cfg(any(target_os = "macos", test))]
+async fn run_secret_command(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+
+    let output = match tokio::time::timeout(timeout, cmd.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => {
+            log::debug!("[Subscription] Failed to run {program}: {e}");
+            return None;
+        }
+        Err(_) => {
+            log::warn!(
+                "[Subscription] {program} did not finish within {}s, falling back to credentials file",
+                timeout.as_secs()
+            );
+            return None;
+        }
+    };
+
+    if !output.status.success() {
+        return None; // Keychain 中无此条目，回退到文件
+    }
+
+    let secret = String::from_utf8(output.stdout).ok()?;
+    let secret = secret.trim();
+    if secret.is_empty() {
+        return None;
+    }
+    Some(secret.to_string())
+}
+
 /// 读取 Claude OAuth 凭据
 ///
 /// 按优先级尝试以下来源：
@@ -113,11 +173,11 @@ struct ClaudeOAuthEntry {
 /// JSON 格式（两种 key 都兼容）：
 /// {"claudeAiOauth": {"accessToken": "...", "expiresAt": ...}}
 /// {"claude.ai_oauth": {"accessToken": "...", "expiresAt": ...}}
-fn read_claude_credentials() -> (Option<String>, CredentialStatus, Option<String>) {
+async fn read_claude_credentials() -> (Option<String>, CredentialStatus, Option<String>) {
     // 来源 1: macOS Keychain
     #[cfg(target_os = "macos")]
     {
-        if let Some(result) = read_claude_credentials_from_keychain() {
+        if let Some(result) = read_claude_credentials_from_keychain().await {
             return result;
         }
     }
@@ -128,29 +188,10 @@ fn read_claude_credentials() -> (Option<String>, CredentialStatus, Option<String
 
 /// 从 macOS Keychain 读取 Claude 凭据
 #[cfg(target_os = "macos")]
-fn read_claude_credentials_from_keychain(
+async fn read_claude_credentials_from_keychain(
 ) -> Option<(Option<String>, CredentialStatus, Option<String>)> {
-    let output = std::process::Command::new("security")
-        .args([
-            "find-generic-password",
-            "-s",
-            "Claude Code-credentials",
-            "-w",
-        ])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None; // Keychain 中无此条目，回退到文件
-    }
-
-    let json_str = String::from_utf8(output.stdout).ok()?;
-    let json_str = json_str.trim();
-    if json_str.is_empty() {
-        return None;
-    }
-
-    Some(parse_claude_credentials_json(json_str))
+    let json_str = read_keychain_secret(&["-s", "Claude Code-credentials"]).await?;
+    Some(parse_claude_credentials_json(&json_str))
 }
 
 /// 从文件读取 Claude 凭据
@@ -481,10 +522,10 @@ type CodexCredentials = (
 /// 2. 凭据文件 ~/.codex/auth.json
 ///
 /// 仅 auth_mode == "chatgpt" (OAuth) 时有效，API key 模式不支持用量查询。
-fn read_codex_credentials() -> CodexCredentials {
+async fn read_codex_credentials() -> CodexCredentials {
     #[cfg(target_os = "macos")]
     {
-        if let Some(result) = read_codex_credentials_from_keychain() {
+        if let Some(result) = read_codex_credentials_from_keychain().await {
             return result;
         }
     }
@@ -494,23 +535,9 @@ fn read_codex_credentials() -> CodexCredentials {
 
 /// 从 macOS Keychain 读取 Codex 凭据
 #[cfg(target_os = "macos")]
-fn read_codex_credentials_from_keychain() -> Option<CodexCredentials> {
-    let output = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", "Codex Auth", "-w"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let json_str = String::from_utf8(output.stdout).ok()?;
-    let json_str = json_str.trim();
-    if json_str.is_empty() {
-        return None;
-    }
-
-    Some(parse_codex_credentials_json(json_str))
+async fn read_codex_credentials_from_keychain() -> Option<CodexCredentials> {
+    let json_str = read_keychain_secret(&["-s", "Codex Auth"]).await?;
+    Some(parse_codex_credentials_json(&json_str))
 }
 
 /// 从文件读取 Codex 凭据
@@ -785,10 +812,10 @@ type GeminiCredentials = (
 /// 2. 凭据文件 ~/.gemini/oauth_creds.json（遗留格式）
 ///
 /// 仅 OAuth 认证模式（`oauth-personal`）有效；API key 模式无法查询官方用量。
-fn read_gemini_credentials() -> GeminiCredentials {
+async fn read_gemini_credentials() -> GeminiCredentials {
     #[cfg(target_os = "macos")]
     {
-        if let Some(result) = read_gemini_credentials_from_keychain() {
+        if let Some(result) = read_gemini_credentials_from_keychain().await {
             return result;
         }
     }
@@ -798,30 +825,9 @@ fn read_gemini_credentials() -> GeminiCredentials {
 
 /// 从 macOS Keychain 读取 Gemini 凭据
 #[cfg(target_os = "macos")]
-fn read_gemini_credentials_from_keychain() -> Option<GeminiCredentials> {
-    let output = std::process::Command::new("security")
-        .args([
-            "find-generic-password",
-            "-s",
-            "gemini-cli-oauth",
-            "-a",
-            "main-account",
-            "-w",
-        ])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let json_str = String::from_utf8(output.stdout).ok()?;
-    let json_str = json_str.trim();
-    if json_str.is_empty() {
-        return None;
-    }
-
-    Some(parse_gemini_keychain_json(json_str))
+async fn read_gemini_credentials_from_keychain() -> Option<GeminiCredentials> {
+    let json_str = read_keychain_secret(&["-s", "gemini-cli-oauth", "-a", "main-account"]).await?;
+    Some(parse_gemini_keychain_json(&json_str))
 }
 
 /// 解析 Keychain 格式的 Gemini 凭据
@@ -1233,7 +1239,7 @@ async fn query_gemini_quota(access_token: &str) -> Result<SubscriptionQuota, Str
 pub async fn get_subscription_quota(tool: &str) -> Result<SubscriptionQuota, String> {
     match tool {
         "claude" => {
-            let (token, status, message) = read_claude_credentials();
+            let (token, status, message) = read_claude_credentials().await;
 
             match status {
                 CredentialStatus::NotFound => Ok(SubscriptionQuota::not_found("claude")),
@@ -1263,7 +1269,7 @@ pub async fn get_subscription_quota(tool: &str) -> Result<SubscriptionQuota, Str
             }
         }
         "codex" => {
-            let (token, account_id, status, message) = read_codex_credentials();
+            let (token, account_id, status, message) = read_codex_credentials().await;
 
             match status {
                 CredentialStatus::NotFound => Ok(SubscriptionQuota::not_found("codex")),
@@ -1305,7 +1311,7 @@ pub async fn get_subscription_quota(tool: &str) -> Result<SubscriptionQuota, Str
             }
         }
         "gemini" => {
-            let (token, refresh_token, status, message) = read_gemini_credentials();
+            let (token, refresh_token, status, message) = read_gemini_credentials().await;
 
             match status {
                 CredentialStatus::NotFound => Ok(SubscriptionQuota::not_found("gemini")),
@@ -1368,5 +1374,81 @@ mod tests {
         // 其他窗口按小时/天回退命名
         assert_eq!(window_seconds_to_tier_name(3600), "1_hour");
         assert_eq!(window_seconds_to_tier_name(86400), "1_day");
+    }
+
+    /// 模拟 Keychain 授权对话框挂起：在 current_thread 运行时上，读取期间
+    /// 并发任务必须能继续推进（同步 `std::process` 会冻结整个运行时）。
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn slow_secret_reader_does_not_block_concurrent_tasks() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticker = {
+            let ticks = Arc::clone(&ticks);
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    ticks.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        };
+
+        let secret = run_secret_command(
+            "sh",
+            &["-c", "sleep 1; printf '  secret-json \\n'"],
+            Duration::from_secs(10),
+        )
+        .await;
+        ticker.abort();
+
+        assert_eq!(secret.as_deref(), Some("secret-json"));
+        let ticks = ticks.load(Ordering::SeqCst);
+        assert!(
+            ticks >= 10,
+            "concurrent task should keep running while the reader waits, got {ticks} ticks"
+        );
+    }
+
+    /// 读取超时后放弃（返回 None 以回退到凭据文件），不会等待命令结束
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn slow_secret_reader_times_out() {
+        let started = std::time::Instant::now();
+        let secret = run_secret_command(
+            "sh",
+            &["-c", "sleep 30; printf secret"],
+            Duration::from_millis(200),
+        )
+        .await;
+
+        assert_eq!(secret, None);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "reader should give up at the timeout, took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn secret_reader_failures_return_none() {
+        let timeout = Duration::from_secs(5);
+        // 非零退出码（如 Keychain 中无此条目）
+        assert_eq!(
+            run_secret_command("sh", &["-c", "printf secret; exit 44"], timeout).await,
+            None
+        );
+        // 空输出
+        assert_eq!(
+            run_secret_command("sh", &["-c", "printf '  '"], timeout).await,
+            None
+        );
+        // 命令不存在
+        assert_eq!(
+            run_secret_command("/nonexistent/security", &[], timeout).await,
+            None
+        );
     }
 }
