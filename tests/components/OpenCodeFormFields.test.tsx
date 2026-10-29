@@ -206,4 +206,52 @@ describe("OpenCodeFormFields", () => {
       },
     });
   });
+
+  it("reports base URL and API key edits", () => {
+    const onBaseUrlChange = vi.fn();
+    const onApiKeyChange = vi.fn();
+    renderOpenCodeForm({ onBaseUrlChange, onApiKeyChange });
+
+    fireEvent.change(screen.getByDisplayValue("https://api.example.com/v1"), {
+      target: { value: "https://relay.example.com/v1" },
+    });
+    fireEvent.change(screen.getByDisplayValue("sk-test"), {
+      target: { value: "sk-new" },
+    });
+
+    expect(onBaseUrlChange).toHaveBeenCalledWith(
+      "https://relay.example.com/v1",
+    );
+    expect(onApiKeyChange).toHaveBeenCalledWith("sk-new");
+  });
+
+  it("shows the empty state and appends a blank model", () => {
+    const onModelsChange = vi.fn();
+    renderOpenCodeForm({ models: {}, onModelsChange });
+
+    expect(screen.getByText("opencode.noModels")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("opencode.addModel"));
+
+    const [[nextModels]] = onModelsChange.mock.calls;
+    expect(Object.values(nextModels)).toEqual([{ name: "" }]);
+    expect(Object.keys(nextModels)[0]).toMatch(/^model-\d+$/);
+  });
+
+  it("renames and removes models", () => {
+    const onModelsChange = vi.fn();
+    renderOpenCodeForm({ onModelsChange });
+
+    fireEvent.change(screen.getByDisplayValue("Kimi K2"), {
+      target: { value: "Kimi K2.5" },
+    });
+    expect(onModelsChange).toHaveBeenLastCalledWith({
+      "kimi-k2": {
+        name: "Kimi K2.5",
+        limit: { context: 1048576, output: 131072 },
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    expect(onModelsChange).toHaveBeenLastCalledWith({});
+  });
 });

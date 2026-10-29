@@ -154,6 +154,34 @@ describe("per-app form modules (CCS-191)", () => {
     }
   });
 
+  it("gives OpenCode, OpenClaw and Hermes their own module (CCS-192)", () => {
+    for (const app of ["opencode", "openclaw", "hermes"]) {
+      for (const file of [
+        "schema.ts",
+        "fromProvider.ts",
+        "toSettingsConfig.ts",
+        "Fields.tsx",
+        "presets.ts",
+      ]) {
+        expect(
+          existsSync(
+            path.join(ROOT, "src/features/providers/forms", app, file),
+          ),
+          `${app}/${file}`,
+        ).toBe(true);
+      }
+    }
+    // 三个应用不再共用一个按 appId 分支的编辑器
+    expect(
+      existsSync(
+        path.join(ROOT, "src/components/providers/forms/ProviderFormFull.tsx"),
+      ),
+    ).toBe(false);
+    expect(new Set(Object.values(PROVIDER_FORM_EDITORS)).size).toBe(
+      ALL_APP_IDS.length,
+    );
+  });
+
   it("uses each module's schema as its union branch", async () => {
     const { claudeProviderFormSchema } = await import(
       "@/features/providers/forms/claude/schema"
@@ -163,5 +191,17 @@ describe("per-app form modules (CCS-191)", () => {
     );
     expect(providerFormSchemas.claude).toBe(claudeProviderFormSchema);
     expect(providerFormSchemas.codex).toBe(codexProviderFormSchema);
+    const { opencodeProviderFormSchema } = await import(
+      "@/features/providers/forms/opencode/schema"
+    );
+    const { openclawProviderFormSchema } = await import(
+      "@/features/providers/forms/openclaw/schema"
+    );
+    const { hermesProviderFormSchema } = await import(
+      "@/features/providers/forms/hermes/schema"
+    );
+    expect(providerFormSchemas.opencode).toBe(opencodeProviderFormSchema);
+    expect(providerFormSchemas.openclaw).toBe(openclawProviderFormSchema);
+    expect(providerFormSchemas.hermes).toBe(hermesProviderFormSchema);
   });
 });

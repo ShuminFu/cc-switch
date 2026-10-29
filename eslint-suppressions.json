@@ -124,11 +124,6 @@
       "count": 2
     }
   },
-  "src/components/providers/forms/ProviderFormFull.tsx": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 6
-    }
-  },
   "src/components/providers/forms/ProviderPresetSelector.tsx": {
     "cc-switch/no-app-literal-comparison": {
       "count": 3

@@ -6,7 +6,9 @@ import { ClaudeDesktopProviderForm } from "@/features/providers/forms/claude-des
 import { CodexProviderForm } from "@/features/providers/forms/codex/CodexProviderForm";
 import { GeminiProviderForm } from "@/features/providers/forms/gemini/GeminiProviderForm";
 import { GrokBuildProviderForm } from "@/features/providers/forms/grokbuild/GrokBuildProviderForm";
-import { ProviderFormFull } from "./ProviderFormFull";
+import { HermesProviderForm } from "@/features/providers/forms/hermes/HermesProviderForm";
+import { OpenClawProviderForm } from "@/features/providers/forms/openclaw/OpenClawProviderForm";
+import { OpenCodeProviderForm } from "@/features/providers/forms/opencode/OpenCodeProviderForm";
 
 export type {
   ProviderFormProps,
@@ -33,9 +35,9 @@ export const PROVIDER_FORM_EDITORS: Record<
   codex: CodexProviderForm,
   gemini: GeminiProviderForm,
   grokbuild: GrokBuildProviderForm,
-  opencode: ProviderFormFull,
-  openclaw: ProviderFormFull,
-  hermes: ProviderFormFull,
+  opencode: OpenCodeProviderForm,
+  openclaw: OpenClawProviderForm,
+  hermes: HermesProviderForm,
 };
 
 export function ProviderForm(props: ProviderFormProps) {

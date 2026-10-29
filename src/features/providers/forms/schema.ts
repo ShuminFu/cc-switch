@@ -9,12 +9,15 @@ import { claudeDesktopProviderFormSchema } from "./claude-desktop/schema";
 import { codexProviderFormSchema } from "./codex/schema";
 import { geminiProviderFormSchema } from "./gemini/schema";
 import { grokBuildProviderFormSchema } from "./grokbuild/schema";
+import { hermesProviderFormSchema } from "./hermes/schema";
+import { openclawProviderFormSchema } from "./openclaw/schema";
+import { opencodeProviderFormSchema } from "./opencode/schema";
 
 export { baseProviderFormSchema } from "./baseSchema";
 
 /**
- * 每个应用一个分支，以 `appId` 区分。已拆成独立模块的应用从
- * `<app>/schema.ts` 取分支；应用专属字段加在对应分支上。
+ * 每个应用一个分支，以 `appId` 区分。各应用从 `<app>/schema.ts` 取分支；
+ * 应用专属字段加在对应分支上。
  */
 export const providerFormSchemas = {
   claude: claudeProviderFormSchema,
@@ -22,9 +25,9 @@ export const providerFormSchemas = {
   codex: codexProviderFormSchema,
   gemini: geminiProviderFormSchema,
   grokbuild: grokBuildProviderFormSchema,
-  opencode: appVariant("opencode"),
-  openclaw: appVariant("openclaw"),
-  hermes: appVariant("hermes"),
+  opencode: opencodeProviderFormSchema,
+  openclaw: openclawProviderFormSchema,
+  hermes: hermesProviderFormSchema,
 } satisfies { [A in AppId]: ReturnType<typeof appVariant<A>> };
 
 export const providerFormSchema = z.discriminatedUnion("appId", [
