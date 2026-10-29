@@ -391,6 +391,9 @@ fn convert_message_to_openai(
                         content_parts.push(part);
                     }
                 }
+                "document" => {
+                    content_parts.push(document_block_to_openai_part(block));
+                }
                 "tool_use" => {
                     let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("");
                     let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -495,22 +498,128 @@ fn convert_message_to_openai(
 }
 
 /// 将 Anthropic image block 转换为 OpenAI image_url content part
+///
+/// - `url` 源直接透传 URL；
+/// - `base64` 或缺省 type 拼接 data URL；
+/// - 空数据 / 未知源类型跳过并记录日志，避免发送空的 data URL。
 fn image_block_to_openai_part(block: &Value) -> Option<Value> {
     let source = block.get("source")?;
-    // URL 图片源直接透传，避免拼出空的 data URL
-    if source.get("type").and_then(|t| t.as_str()) == Some("url") {
-        let url = source.get("url").and_then(|u| u.as_str())?;
-        return Some(json!({"type": "image_url", "image_url": {"url": url}}));
+    match source.get("type").and_then(|t| t.as_str()) {
+        Some("url") => {
+            let url = source
+                .get("url")
+                .and_then(|u| u.as_str())
+                .filter(|u| !u.is_empty());
+            if url.is_none() {
+                log::warn!("[Claude/OpenAI] Skipping image block with empty url source");
+            }
+            url.map(|url| json!({"type": "image_url", "image_url": {"url": url}}))
+        }
+        Some("base64") | None => {
+            let data = source
+                .get("data")
+                .and_then(|d| d.as_str())
+                .filter(|d| !d.is_empty());
+            let Some(data) = data else {
+                log::warn!("[Claude/OpenAI] Skipping image block with empty base64 data");
+                return None;
+            };
+            let media_type = source
+                .get("media_type")
+                .and_then(|m| m.as_str())
+                .unwrap_or("image/png");
+            Some(json!({
+                "type": "image_url",
+                "image_url": {"url": format!("data:{};base64,{}", media_type, data)}
+            }))
+        }
+        Some(other) => {
+            log::warn!(
+                "[Claude/OpenAI] Skipping image block with unsupported source type: {other}"
+            );
+            None
+        }
     }
-    let media_type = source
-        .get("media_type")
-        .and_then(|m| m.as_str())
-        .unwrap_or("image/png");
-    let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
-    Some(json!({
-        "type": "image_url",
-        "image_url": {"url": format!("data:{};base64,{}", media_type, data)}
-    }))
+}
+
+/// 将 Anthropic document block 转换为 OpenAI Chat content part（总是产生非空内容）
+///
+/// - `text` 源转为 text part；
+/// - `content` 源拼接其中的文本 block；
+/// - base64 PDF 转为 Chat Completions 的 `file` part；
+/// - 其他情况（URL、非 PDF、空数据等）插入占位文本，避免文档被静默丢弃。
+fn document_block_to_openai_part(block: &Value) -> Value {
+    let title = block
+        .get("title")
+        .or_else(|| block.get("filename"))
+        .and_then(|t| t.as_str())
+        .filter(|t| !t.is_empty());
+    let source = block.get("source");
+    let source_type = source.and_then(|s| s.get("type")).and_then(|t| t.as_str());
+
+    let text = match source_type {
+        Some("text") => source
+            .and_then(|s| s.get("data"))
+            .and_then(|d| d.as_str())
+            .map(str::to_string),
+        Some("content") => match source.and_then(|s| s.get("content")) {
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(Value::Array(blocks)) => Some(
+                blocks
+                    .iter()
+                    .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            _ => None,
+        },
+        _ => None,
+    }
+    .filter(|t| !t.is_empty());
+    if let Some(text) = text {
+        let text = match title {
+            Some(title) => format!("[document: {title}]\n{text}"),
+            None => text,
+        };
+        return json!({"type": "text", "text": text});
+    }
+
+    if source_type == Some("base64") {
+        let media_type = source
+            .and_then(|s| s.get("media_type"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("application/pdf");
+        let data = source
+            .and_then(|s| s.get("data"))
+            .and_then(|d| d.as_str())
+            .filter(|d| !d.is_empty());
+        if let (Some(data), "application/pdf") = (data, media_type) {
+            return json!({
+                "type": "file",
+                "file": {
+                    "filename": title.unwrap_or("document.pdf"),
+                    "file_data": format!("data:{media_type};base64,{data}")
+                }
+            });
+        }
+    }
+
+    log::warn!(
+        "[Claude/OpenAI] Unsupported document block (source type: {}), inserting placeholder",
+        source_type.unwrap_or("missing")
+    );
+    let url = source
+        .filter(|_| source_type == Some("url"))
+        .and_then(|s| s.get("url"))
+        .and_then(|u| u.as_str())
+        .filter(|u| !u.is_empty());
+    let placeholder = match (title, url) {
+        (Some(title), Some(url)) => format!("[document omitted: {title} ({url})]"),
+        (Some(title), None) => format!("[document omitted: {title}]"),
+        (None, Some(url)) => format!("[document omitted: {url}]"),
+        (None, None) => "[document omitted]".to_string(),
+    };
+    json!({"type": "text", "text": placeholder})
 }
 
 /// 将 tool_result 的 content 转换为 tool 消息文本。
@@ -1287,6 +1396,107 @@ mod tests {
             messages[1]["content"],
             json!([{"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}])
         );
+    }
+
+    fn user_content_to_openai(content: Value) -> Value {
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": content}]
+        });
+        let result = anthropic_to_openai(input).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        messages[0]["content"].clone()
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_url_image_keeps_url() {
+        let content = user_content_to_openai(json!([
+            {"type": "text", "text": "What is this?"},
+            {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
+        ]));
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(content[1]["image_url"]["url"], "https://example.com/a.png");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_base64_image_unchanged() {
+        let content = user_content_to_openai(json!([
+            {"type": "text", "text": "What is this?"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJDRA=="}},
+            {"type": "image", "source": {"media_type": "image/gif", "data": "R0lG"}}
+        ]));
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            "data:image/jpeg;base64,QUJDRA=="
+        );
+        assert_eq!(content[2]["image_url"]["url"], "data:image/gif;base64,R0lG");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_empty_image_sources_are_skipped() {
+        let content = user_content_to_openai(json!([
+            {"type": "text", "text": "hi"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": ""}},
+            {"type": "image", "source": {"type": "url", "url": ""}},
+            {"type": "image", "source": {"type": "file", "file_id": "file_123"}}
+        ]));
+        assert_eq!(content, "hi");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_text_document_becomes_text_part() {
+        let content = user_content_to_openai(json!([
+            {"type": "document", "title": "notes.txt", "source": {"type": "text", "media_type": "text/plain", "data": "hello doc"}},
+            {"type": "text", "text": "Summarize"}
+        ]));
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "[document: notes.txt]\nhello doc");
+        assert_eq!(content[1]["text"], "Summarize");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_content_document_joins_text() {
+        let content = user_content_to_openai(json!([
+            {"type": "document", "source": {"type": "content", "content": [
+                {"type": "text", "text": "part one"},
+                {"type": "text", "text": "part two"}
+            ]}}
+        ]));
+        assert_eq!(content, "part one\npart two");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_pdf_document_becomes_file_part() {
+        let content = user_content_to_openai(json!([
+            {"type": "document", "title": "manual.pdf", "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERi0="}},
+            {"type": "text", "text": "Summarize"}
+        ]));
+        assert_eq!(
+            content[0],
+            json!({
+                "type": "file",
+                "file": {"filename": "manual.pdf", "file_data": "data:application/pdf;base64,JVBERi0="}
+            })
+        );
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_unsupported_document_inserts_placeholder() {
+        let content = user_content_to_openai(json!([
+            {"type": "document", "title": "manual.pdf", "source": {"type": "url", "url": "https://example.com/manual.pdf"}},
+            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": ""}},
+            {"type": "document"}
+        ]));
+        let parts = content.as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(
+            parts[0]["text"],
+            "[document omitted: manual.pdf (https://example.com/manual.pdf)]"
+        );
+        assert_eq!(parts[1]["text"], "[document omitted]");
+        assert_eq!(parts[2]["text"], "[document omitted]");
     }
 
     #[test]
