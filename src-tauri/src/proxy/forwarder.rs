@@ -5,6 +5,7 @@
 use super::hyper_client::ProxyResponse;
 use super::{
     body_filter::filter_private_params_with_whitelist,
+    circuit_breaker::HalfOpenPermit,
     content_encoding::{decompress_body, get_content_encoding},
     error::*,
     failover_switch::FailoverSwitchManager,
@@ -242,12 +243,12 @@ impl RequestForwarder {
         &self,
         provider_id: &str,
         app_type: &str,
-        used_half_open_permit: bool,
+        half_open_permit: Option<&HalfOpenPermit>,
     ) {
-        if used_half_open_permit {
+        if half_open_permit.is_some() {
             if let Err(e) = self
                 .router
-                .record_result(provider_id, app_type, true, true, None)
+                .record_result(provider_id, app_type, half_open_permit, true, None)
                 .await
             {
                 log::warn!(
@@ -262,7 +263,7 @@ impl RequestForwarder {
         let app_type = app_type.to_string();
         tokio::spawn(async move {
             if let Err(e) = router
-                .record_result(&provider_id, &app_type, false, true, None)
+                .record_result(&provider_id, &app_type, None, true, None)
                 .await
             {
                 log::warn!(
@@ -284,7 +285,7 @@ impl RequestForwarder {
         retry_err: ProxyError,
         provider: &Provider,
         app_type_str: &str,
-        used_half_open_permit: bool,
+        half_open_permit: Option<&HalfOpenPermit>,
         rectifier_label: &str,
         last_error: &mut Option<ProxyError>,
         last_provider: &mut Option<Provider>,
@@ -303,7 +304,7 @@ impl RequestForwarder {
                 .record_result(
                     &provider.id,
                     app_type_str,
-                    used_half_open_permit,
+                    half_open_permit,
                     false,
                     Some(retry_err.to_string()),
                 )
@@ -321,7 +322,7 @@ impl RequestForwarder {
         }
 
         self.router
-            .release_permit_neutral(&provider.id, app_type_str, used_half_open_permit)
+            .release_permit_neutral(&provider.id, app_type_str, half_open_permit)
             .await;
         let mut status = self.status.write().await;
         status.failed_requests += 1;
@@ -432,14 +433,16 @@ impl RequestForwarder {
 
             // 发起请求前先获取熔断器放行许可（HalfOpen 会占用探测名额）
             // 单 Provider 场景下跳过此检查，避免熔断器阻塞所有请求
-            let (allowed, used_half_open_permit) = if bypass_circuit_breaker {
-                (true, false)
+            // `half_open_permit` 守卫在本轮迭代内持有：若请求在记录结果前被取消
+            // （客户端断开等导致 future 被 drop），守卫 Drop 时会释放探测名额
+            let (allowed, half_open_permit) = if bypass_circuit_breaker {
+                (true, None)
             } else {
                 let permit = self
                     .router
                     .allow_provider_request(&provider.id, app_type_str)
                     .await;
-                (permit.allowed, permit.used_half_open_permit)
+                (permit.allowed, permit.permit)
             };
 
             if !allowed {
@@ -492,8 +495,12 @@ impl RequestForwarder {
                 Ok((response, claude_api_format, outbound_model)) => {
                     // 成功：普通闭合熔断状态异步记录，避免阻塞流式首包返回；
                     // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
-                    self.record_success_result(&provider.id, app_type_str, used_half_open_permit)
-                        .await;
+                    self.record_success_result(
+                        &provider.id,
+                        app_type_str,
+                        half_open_permit.as_ref(),
+                    )
+                    .await;
 
                     // 更新当前应用类型使用的 provider
                     {
@@ -595,7 +602,7 @@ impl RequestForwarder {
                                     self.record_success_result(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.as_ref(),
                                     )
                                     .await;
 
@@ -653,7 +660,7 @@ impl RequestForwarder {
                                             retry_err,
                                             provider,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            half_open_permit.as_ref(),
                                             "media 降级",
                                             &mut last_error,
                                             &mut last_provider,
@@ -682,7 +689,7 @@ impl RequestForwarder {
                                     .release_permit_neutral(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.as_ref(),
                                     )
                                     .await;
                                 let mut status = self.status.write().await;
@@ -739,7 +746,7 @@ impl RequestForwarder {
                                         self.record_success_result(
                                             &provider.id,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            half_open_permit.as_ref(),
                                         )
                                         .await;
 
@@ -802,7 +809,7 @@ impl RequestForwarder {
                                                 retry_err,
                                                 provider,
                                                 app_type_str,
-                                                used_half_open_permit,
+                                                half_open_permit.as_ref(),
                                                 "整流",
                                                 &mut last_error,
                                                 &mut last_provider,
@@ -834,7 +841,7 @@ impl RequestForwarder {
                                     .release_permit_neutral(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.as_ref(),
                                     )
                                     .await;
                                 let mut status = self.status.write().await;
@@ -860,7 +867,7 @@ impl RequestForwarder {
                                     .release_permit_neutral(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.as_ref(),
                                     )
                                     .await;
                                 let mut status = self.status.write().await;
@@ -905,7 +912,7 @@ impl RequestForwarder {
                                     self.record_success_result(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.as_ref(),
                                     )
                                     .await;
 
@@ -962,7 +969,7 @@ impl RequestForwarder {
                                             retry_err,
                                             provider,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            half_open_permit.as_ref(),
                                             "budget 整流",
                                             &mut last_error,
                                             &mut last_provider,
@@ -982,7 +989,7 @@ impl RequestForwarder {
                             .release_permit_neutral(
                                 &provider.id,
                                 app_type_str,
-                                used_half_open_permit,
+                                half_open_permit.as_ref(),
                             )
                             .await;
                         let mut status = self.status.write().await;
@@ -1012,7 +1019,7 @@ impl RequestForwarder {
                                 .record_result(
                                     &provider.id,
                                     app_type_str,
-                                    used_half_open_permit,
+                                    half_open_permit.as_ref(),
                                     false,
                                     Some(e.to_string()),
                                 )
@@ -1043,7 +1050,7 @@ impl RequestForwarder {
                                 .release_permit_neutral(
                                     &provider.id,
                                     app_type_str,
-                                    used_half_open_permit,
+                                    half_open_permit.as_ref(),
                                 )
                                 .await;
                             {
@@ -4774,5 +4781,100 @@ mod tests {
         });
         let body = body_with_image("any-model");
         assert!(fwd.media_retry_should_trigger("Claude", false, &body, &image_unsupported_error()));
+    }
+
+    #[tokio::test]
+    async fn cancelled_half_open_probe_releases_the_permit() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        // 挂起的上游：接受连接但从不响应
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind hanging upstream");
+        let addr = listener.local_addr().expect("hanging upstream address");
+        let connections = Arc::new(AtomicUsize::new(0));
+        let accepted = connections.clone();
+        let upstream = tokio::spawn(async move {
+            let mut open = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                accepted.fetch_add(1, Ordering::SeqCst);
+                open.push(stream);
+            }
+        });
+
+        let db = Arc::new(Database::memory().expect("memory db"));
+        db.get_proxy_config_for_app("claude")
+            .await
+            .expect("create proxy config");
+        db.update_circuit_breaker_config(&crate::proxy::circuit_breaker::CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 0,
+            ..Default::default()
+        })
+        .await
+        .expect("write circuit config");
+
+        let make_provider = |id: &str| {
+            Provider::with_id(
+                id.to_string(),
+                format!("Provider {id}"),
+                json!({
+                    "env": {
+                        "ANTHROPIC_BASE_URL": format!("http://{addr}"),
+                        "ANTHROPIC_AUTH_TOKEN": "sk-test",
+                    }
+                }),
+                None,
+            )
+        };
+        let providers = vec![make_provider("a"), make_provider("b")];
+        for provider in &providers {
+            db.save_provider("claude", provider).expect("save provider");
+        }
+
+        let router = Arc::new(ProviderRouter::new(db));
+        let mut forwarder = test_forwarder(Duration::from_secs(30), Duration::from_secs(30));
+        forwarder.router = router.clone();
+        forwarder.max_attempts = 2;
+
+        // A 熔断（timeout=0，下一次请求即进入 HalfOpen 探测）
+        router
+            .record_result("a", "claude", None, false, Some("boom".to_string()))
+            .await
+            .expect("record failure");
+
+        let forward = forwarder.forward_with_retry(
+            &AppType::Claude,
+            http::Method::POST,
+            "/v1/messages",
+            json!({
+                "model": "claude-sonnet-4-5",
+                "max_tokens": 16,
+                "messages": [{ "role": "user", "content": "hi" }]
+            }),
+            HeaderMap::new(),
+            Extensions::new(),
+            providers,
+        );
+        let cancelled = tokio::time::timeout(Duration::from_millis(300), forward).await;
+        assert!(
+            cancelled.is_err(),
+            "forward against a hanging upstream must time out"
+        );
+        assert!(
+            connections.load(Ordering::SeqCst) >= 1,
+            "the half-open probe must have reached the upstream"
+        );
+
+        let next = router.allow_provider_request("a", "claude").await;
+        assert!(
+            next.allowed,
+            "cancelling the probe must release the half-open permit"
+        );
+        assert!(next.used_half_open_permit());
+
+        upstream.abort();
     }
 }

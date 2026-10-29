@@ -18,6 +18,7 @@ pub mod cb {
     pub const TRIGGERED_FAILURES: &str = "CB-004";
     pub const TRIGGERED_ERROR_RATE: &str = "CB-005";
     pub const MANUAL_RESET: &str = "CB-006";
+    pub const HALF_OPEN_PERMIT_STALE: &str = "CB-007";
 }
 
 /// 服务器日志码

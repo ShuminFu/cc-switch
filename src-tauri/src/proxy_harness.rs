@@ -64,6 +64,11 @@ pub enum MockReply {
     Json { status: u16, body: Value },
     /// A `text/event-stream` body sent as one chunk per entry.
     Sse { status: u16, chunks: Vec<String> },
+    /// `reply`, sent only after `delay` (simulates a hanging upstream).
+    Delayed {
+        delay: Duration,
+        reply: Box<MockReply>,
+    },
 }
 
 impl MockReply {
@@ -103,6 +108,14 @@ impl MockReply {
         Self::Sse {
             status: 200,
             chunks,
+        }
+    }
+
+    /// This reply, sent only after `delay`.
+    pub fn delayed(self, delay: Duration) -> Self {
+        Self::Delayed {
+            delay,
+            reply: Box::new(self),
         }
     }
 }
@@ -240,7 +253,18 @@ async fn mock_handler(State(state): State<MockState>, request: Request) -> Respo
         requests.len() - 1
     };
 
-    match (state.responder)(index, &recorded) {
+    let mut reply = (state.responder)(index, &recorded);
+    while let MockReply::Delayed {
+        delay,
+        reply: inner,
+    } = reply
+    {
+        tokio::time::sleep(delay).await;
+        reply = *inner;
+    }
+
+    match reply {
+        MockReply::Delayed { .. } => unreachable!("delays are unwrapped above"),
         MockReply::Json { status, body } => Response::builder()
             .status(StatusCode::from_u16(status).expect("valid mock status"))
             .header("content-type", "application/json")

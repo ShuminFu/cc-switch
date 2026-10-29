@@ -282,6 +282,66 @@ async fn half_open_probe_failure_reopens_and_success_closes_the_breaker() {
     harness.shutdown().await;
 }
 
+#[tokio::test]
+async fn client_abort_during_half_open_probe_releases_the_probe_slot() {
+    let _env = TestEnv::new();
+    // a: fails (→ Open), hangs on the half-open probe, then recovers.
+    let a = MockUpstream::sequence(vec![
+        MockReply::error(500, "boom"),
+        MockReply::message("too late", 10, 5).delayed(Duration::from_secs(10)),
+        MockReply::message("from a", 10, 5),
+    ])
+    .await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            failure_threshold: 1,
+            success_threshold: 1,
+            timeout_seconds: 0,
+        })
+        .spawn()
+        .await;
+
+    // 1. a fails once → Open; b serves.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 1);
+
+    // 2. timeout 0 → the next request is a's half-open probe; the upstream
+    //    hangs and the client gives up, which cancels the proxy's request.
+    let aborted = tokio::time::timeout(
+        Duration::from_millis(300),
+        harness.messages(&simple_request()),
+    )
+    .await;
+    assert!(aborted.is_err(), "the probe hangs until the client aborts");
+    assert_eq!(a.hits(), 2, "the probe reached a");
+
+    // 3. The aborted probe must not keep the half-open slot: a is probed
+    //    again (instead of being skipped forever) and closes the breaker.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let body = json_body(harness.messages(&simple_request()).await).await;
+        if first_text(&body) == "from a" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "a stayed half-open with a leaked probe slot"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(a.hits(), 3);
+
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a", "closed breaker serves a again");
+
+    harness.shutdown().await;
+}
+
 // ============================================================================
 // Rectifiers
 // ============================================================================

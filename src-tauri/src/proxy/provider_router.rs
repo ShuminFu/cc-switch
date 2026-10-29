@@ -6,7 +6,9 @@ use crate::app_config::AppType;
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
-use crate::proxy::circuit_breaker::{AllowResult, CircuitBreaker, CircuitBreakerConfig};
+use crate::proxy::circuit_breaker::{
+    AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
+};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -114,8 +116,8 @@ impl ProviderRouter {
     /// - Open：超时到达后切到 HalfOpen 并放行一次探测
     /// - HalfOpen：按限流规则放行探测
     ///
-    /// 注意：调用方必须在请求结束后通过 `record_result()` 释放 HalfOpen 名额，
-    /// 否则会导致该 Provider 长时间无法进入探测状态。
+    /// 注意：调用方需持有返回的 `HalfOpenPermit` 直到请求结束，并通过 `record_result()`
+    /// 或 `release_permit_neutral()` 释放；请求被取消时守卫 Drop 也会释放名额。
     pub async fn allow_provider_request(&self, provider_id: &str, app_type: &str) -> AllowResult {
         let circuit_key = format!("{app_type}:{provider_id}");
         let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
@@ -127,7 +129,7 @@ impl ProviderRouter {
         &self,
         provider_id: &str,
         app_type: &str,
-        used_half_open_permit: bool,
+        half_open_permit: Option<&HalfOpenPermit>,
         success: bool,
         error_msg: Option<String>,
     ) -> Result<(), AppError> {
@@ -148,9 +150,9 @@ impl ProviderRouter {
         // 2. 更新熔断器状态
 
         if success {
-            breaker.record_success(used_half_open_permit).await;
+            breaker.record_success(half_open_permit).await;
         } else {
-            breaker.record_failure(used_half_open_permit).await;
+            breaker.record_failure(half_open_permit).await;
         }
 
         // 3. 更新数据库健康状态（使用配置的阈值）
@@ -189,14 +191,12 @@ impl ProviderRouter {
         &self,
         provider_id: &str,
         app_type: &str,
-        used_half_open_permit: bool,
+        half_open_permit: Option<&HalfOpenPermit>,
     ) {
-        if !used_half_open_permit {
-            return;
+        if let Some(permit) = half_open_permit {
+            log::debug!("[{app_type}] 中性释放 HalfOpen 探测名额: provider_id={provider_id}");
+            permit.release();
         }
-        let circuit_key = format!("{app_type}:{provider_id}");
-        let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
-        breaker.release_half_open_permit();
     }
 
     /// 更新所有熔断器的配置（热更新）
@@ -464,7 +464,7 @@ mod tests {
         let router = ProviderRouter::new(db.clone());
 
         router
-            .record_result("b", "claude", false, false, Some("fail".to_string()))
+            .record_result("b", "claude", None, false, Some("fail".to_string()))
             .await
             .unwrap();
 
@@ -503,14 +503,14 @@ mod tests {
 
         // 触发熔断：1 次失败
         router
-            .record_result("a", "claude", false, false, Some("fail".to_string()))
+            .record_result("a", "claude", None, false, Some("fail".to_string()))
             .await
             .unwrap();
 
         // 第一次请求：获取 HalfOpen 探测名额
         let first = router.allow_provider_request("a", "claude").await;
         assert!(first.allowed);
-        assert!(first.used_half_open_permit);
+        assert!(first.used_half_open_permit());
 
         // 第二次请求应被拒绝（名额已被占用）
         let second = router.allow_provider_request("a", "claude").await;
@@ -518,13 +518,13 @@ mod tests {
 
         // 使用 release_permit_neutral 释放名额（不影响健康统计）
         router
-            .release_permit_neutral("a", "claude", first.used_half_open_permit)
+            .release_permit_neutral("a", "claude", first.permit.as_ref())
             .await;
 
         // 第三次请求应被允许（名额已释放）
         let third = router.allow_provider_request("a", "claude").await;
         assert!(third.allowed);
-        assert!(third.used_half_open_permit);
+        assert!(third.used_half_open_permit());
     }
 
     #[tokio::test]
@@ -550,7 +550,7 @@ mod tests {
 
         for _ in 0..DEFAULT_CIRCUIT_FAILURE_THRESHOLD - 1 {
             router
-                .record_result("a", "claude", false, false, Some("fail".to_string()))
+                .record_result("a", "claude", None, false, Some("fail".to_string()))
                 .await
                 .unwrap();
         }
@@ -558,7 +558,7 @@ mod tests {
         assert!(health.is_healthy);
 
         router
-            .record_result("a", "claude", false, false, Some("fail".to_string()))
+            .record_result("a", "claude", None, false, Some("fail".to_string()))
             .await
             .unwrap();
 
