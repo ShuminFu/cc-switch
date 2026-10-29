@@ -234,6 +234,152 @@ fn encode_sse(event_name: &str, payload: &Value) -> Bytes {
     ))
 }
 
+/// How a Gemini stream reports `text` parts across chunks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GeminiTextMode {
+    /// Each chunk carries only the newly generated text (native Gemini).
+    Incremental,
+    /// Each chunk carries the full text generated so far (some relays).
+    Cumulative,
+}
+
+/// Turns per-chunk Gemini visible text into Anthropic text deltas.
+///
+/// The mode is decided once per stream instead of per chunk: classifying
+/// every chunk independently drops text whenever an incremental chunk
+/// happens to start with all prior text (`"ha"`, `"haha"`) and swallows
+/// identical incremental chunks entirely.
+///
+/// - A chunk that does not start with the text seen so far is only possible
+///   in incremental mode, so it locks `Incremental`.
+/// - A chunk that does start with it (a longer or identical snapshot) is
+///   ambiguous and is held back. If the next chunk starts with that held
+///   snapshot too, the stream is locked as `Cumulative`; otherwise it is
+///   `Incremental` and the held chunk is released verbatim.
+/// - A chunk still held when the stream ends is resolved as a cumulative
+///   snapshot (relays commonly repeat the final snapshot with
+///   `finishReason`).
+///
+/// Once `Incremental` is locked, chunks that repeat prior text are appended
+/// verbatim.
+#[derive(Debug, Default)]
+struct GeminiTextDeltaTracker {
+    mode: Option<GeminiTextMode>,
+    emitted: String,
+    pending: Option<String>,
+}
+
+impl GeminiTextDeltaTracker {
+    /// Feeds the visible text of one chunk and returns the delta to emit now.
+    fn push(&mut self, chunk: String) -> String {
+        if chunk.is_empty() {
+            return String::new();
+        }
+        match self.mode {
+            Some(GeminiTextMode::Incremental) => self.append(chunk),
+            Some(GeminiTextMode::Cumulative) => {
+                if chunk.starts_with(&self.emitted) {
+                    let delta = chunk[self.emitted.len()..].to_string();
+                    self.emitted = chunk;
+                    delta
+                } else {
+                    // Snapshot diverged from what was already sent; the
+                    // emitted text cannot be retracted, so append it as-is.
+                    self.append(chunk)
+                }
+            }
+            None => {
+                if let Some(pending) = self.pending.take() {
+                    if chunk.starts_with(&pending) {
+                        self.mode = Some(GeminiTextMode::Cumulative);
+                        let delta = chunk[self.emitted.len()..].to_string();
+                        self.emitted = chunk;
+                        delta
+                    } else {
+                        self.mode = Some(GeminiTextMode::Incremental);
+                        let mut delta = self.append(pending);
+                        delta.push_str(&self.append(chunk));
+                        delta
+                    }
+                } else if self.emitted.is_empty() {
+                    self.append(chunk)
+                } else if chunk.starts_with(&self.emitted) {
+                    self.pending = Some(chunk);
+                    String::new()
+                } else {
+                    self.mode = Some(GeminiTextMode::Incremental);
+                    self.append(chunk)
+                }
+            }
+        }
+    }
+
+    /// Releases any held chunk at end of stream and returns its delta.
+    fn finish(&mut self) -> String {
+        match self.pending.take() {
+            Some(pending) => {
+                let delta = pending[self.emitted.len()..].to_string();
+                self.emitted = pending;
+                delta
+            }
+            None => String::new(),
+        }
+    }
+
+    /// Full text emitted so far.
+    fn text(&self) -> &str {
+        &self.emitted
+    }
+
+    fn append(&mut self, chunk: String) -> String {
+        self.emitted.push_str(&chunk);
+        chunk
+    }
+}
+
+/// Builds the `content_block_start` (if needed) and `content_block_delta`
+/// events for a text delta. Returns nothing for an empty delta.
+fn text_delta_events(
+    delta: &str,
+    text_block_index: &mut Option<u32>,
+    next_content_index: &mut u32,
+    open_indices: &mut HashSet<u32>,
+) -> Vec<Bytes> {
+    let mut events = Vec::new();
+    if delta.is_empty() {
+        return events;
+    }
+    let index = *text_block_index.get_or_insert_with(|| {
+        let assigned = *next_content_index;
+        *next_content_index += 1;
+        assigned
+    });
+
+    if !open_indices.contains(&index) {
+        let start_event = json!({
+            "type": "content_block_start",
+            "index": index,
+            "content_block": {
+                "type": "text",
+                "text": ""
+            }
+        });
+        events.push(encode_sse("content_block_start", &start_event));
+        open_indices.insert(index);
+    }
+
+    let delta_event = json!({
+        "type": "content_block_delta",
+        "index": index,
+        "delta": {
+            "type": "text_delta",
+            "text": delta
+        }
+    });
+    events.push(encode_sse("content_block_delta", &delta_event));
+    events
+}
+
 pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
     shadow_store: Option<Arc<GeminiShadowStore>>,
@@ -247,7 +393,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
         let mut message_id: Option<String> = None;
         let mut current_model: Option<String> = None;
         let mut has_sent_message_start = false;
-        let mut accumulated_text = String::new();
+        let mut text_tracker = GeminiTextDeltaTracker::default();
         let mut text_block_index: Option<u32> = None;
         let mut next_content_index: u32 = 0;
         let mut open_indices: HashSet<u32> = HashSet::new();
@@ -355,47 +501,14 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                                 );
                                 let visible_text = extract_visible_text(&rectified_parts);
                                 if !visible_text.is_empty() {
-                                    let is_cumulative = visible_text.starts_with(&accumulated_text);
-                                    let delta = if is_cumulative {
-                                        visible_text[accumulated_text.len()..].to_string()
-                                    } else {
-                                        visible_text.clone()
-                                    };
-
-                                    if !delta.is_empty() {
-                                        let index = *text_block_index.get_or_insert_with(|| {
-                                            let assigned = next_content_index;
-                                            next_content_index += 1;
-                                            assigned
-                                        });
-
-                                        if !open_indices.contains(&index) {
-                                            let start_event = json!({
-                                                "type": "content_block_start",
-                                                "index": index,
-                                                "content_block": {
-                                                    "type": "text",
-                                                    "text": ""
-                                                }
-                                            });
-                                            yield Ok(encode_sse("content_block_start", &start_event));
-                                            open_indices.insert(index);
-                                        }
-
-                                        let delta_event = json!({
-                                            "type": "content_block_delta",
-                                            "index": index,
-                                            "delta": {
-                                                "type": "text_delta",
-                                                "text": delta
-                                            }
-                                        });
-                                        yield Ok(encode_sse("content_block_delta", &delta_event));
-                                        if is_cumulative {
-                                            accumulated_text = visible_text;
-                                        } else {
-                                            accumulated_text.push_str(&delta);
-                                        }
+                                    let delta = text_tracker.push(visible_text);
+                                    for event in text_delta_events(
+                                        &delta,
+                                        &mut text_block_index,
+                                        &mut next_content_index,
+                                        &mut open_indices,
+                                    ) {
+                                        yield Ok(event);
                                     }
                                 }
                             }
@@ -422,6 +535,17 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
             });
             yield Ok(encode_sse("message_start", &event));
         }
+
+        let tail = text_tracker.finish();
+        for event in text_delta_events(
+            &tail,
+            &mut text_block_index,
+            &mut next_content_index,
+            &mut open_indices,
+        ) {
+            yield Ok(event);
+        }
+        let accumulated_text = text_tracker.text();
 
         if accumulated_text.is_empty() {
             if let Some(blocked_text) = blocked_text.clone() {
@@ -475,7 +599,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
             let shadow_text = if accumulated_text.is_empty() {
                 blocked_text.as_deref()
             } else {
-                Some(accumulated_text.as_str())
+                Some(accumulated_text)
             };
             let shadow_parts = build_shadow_assistant_parts(
                 shadow_text,
@@ -642,6 +766,77 @@ mod tests {
         assert!(output.contains("\"text\":\"lo\""));
         assert!(output.contains("\"stop_reason\":\"end_turn\""));
         assert!(output.contains("event: message_stop"));
+    }
+
+    fn text_chunk(text: &str) -> String {
+        format!(
+            "data: {}\n\n",
+            json!({
+                "responseId": "resp_delta",
+                "modelVersion": "gemini-2.5-pro",
+                "candidates": [{ "content": { "parts": [{ "text": text }] } }]
+            })
+        )
+    }
+
+    fn streamed_text(output: &str) -> String {
+        output
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+            .filter(|event| event["delta"]["type"] == "text_delta")
+            .map(|event| event["delta"]["text"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn streamed_text_for(texts: &[&str]) -> String {
+        let chunks: Vec<String> = texts.iter().map(|text| text_chunk(text)).collect();
+        let output = collect_stream_output(chunks.iter().map(String::as_str).collect());
+        streamed_text(&output)
+    }
+
+    #[test]
+    fn incremental_chunks_that_repeat_prior_text_are_not_dropped() {
+        assert_eq!(streamed_text_for(&["ha", "haha", "ha"]), "hahahaha");
+    }
+
+    #[test]
+    fn cumulative_snapshots_emit_only_new_text() {
+        assert_eq!(streamed_text_for(&["ha", "haha", "hahaha"]), "hahaha");
+    }
+
+    #[test]
+    fn identical_chunks_are_kept_once_incremental_mode_is_locked() {
+        assert_eq!(streamed_text_for(&["Hel", "lo", "lo", "lo"]), "Hellololo");
+        assert_eq!(streamed_text_for(&["a", "b", "\n", "\n"]), "ab\n\n");
+    }
+
+    #[test]
+    fn repeated_final_cumulative_snapshot_is_not_duplicated() {
+        assert_eq!(streamed_text_for(&["Hello", "Hello"]), "Hello");
+        assert_eq!(streamed_text_for(&["Hel", "Hello", "Hello"]), "Hello");
+    }
+
+    #[test]
+    fn mode_is_locked_after_first_unambiguous_chunk() {
+        // Locked incremental by "lo"; later chunks that start with all prior
+        // text must still be appended verbatim.
+        assert_eq!(streamed_text_for(&["Hel", "lo", "Hello"]), "HelloHello");
+        // Locked cumulative by the second extension; the snapshot delta is used.
+        assert_eq!(
+            streamed_text_for(&["Hel", "Hello", "Hello w", "Hello world"]),
+            "Hello world"
+        );
+    }
+
+    #[test]
+    fn held_snapshot_is_released_at_end_of_stream() {
+        let mut tracker = GeminiTextDeltaTracker::default();
+        assert_eq!(tracker.push("Hel".to_string()), "Hel");
+        assert_eq!(tracker.push("Hello".to_string()), "");
+        assert_eq!(tracker.finish(), "lo");
+        assert_eq!(tracker.text(), "Hello");
+        assert_eq!(tracker.finish(), "");
     }
 
     #[test]
