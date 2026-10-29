@@ -1059,6 +1059,145 @@ command = "legacy-cmd"
         assert_eq!(live["env"]["ANTHROPIC_API_KEY"], "token-b");
     }
 
+    fn omo_provider(id: &str, model: &str) -> Provider {
+        let mut provider = Provider::with_id(
+            id.into(),
+            format!("OMO {id}"),
+            json!({
+                "agents": { "sisyphus": { "model": model } },
+                "otherFields": { "marker": id }
+            }),
+            None,
+        );
+        provider.category = Some("omo".to_string());
+        provider
+    }
+
+    fn read_omo_live_marker() -> Option<String> {
+        let path = crate::opencode_config::get_opencode_dir()
+            .join(crate::services::omo::STANDARD.preferred_filename);
+        let live: serde_json::Value = read_json_file(&path).ok()?;
+        live.get("marker")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+
+    #[test]
+    #[serial]
+    fn switch_concurrent_opencode_waits_for_per_app_lock() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        let state = Arc::new(AppState::new(db.clone()));
+
+        let omo = omo_provider("omo-a", "model-a");
+        db.save_provider("opencode", &omo)
+            .expect("save omo provider");
+        let plain = Provider::with_id(
+            "plain".into(),
+            "Plain".into(),
+            json!({
+                "npm": "@ai-sdk/openai-compatible",
+                "options": { "baseURL": "https://api.plain.example/v1", "apiKey": "sk-plain" },
+                "models": {}
+            }),
+            None,
+        );
+        db.save_provider("opencode", &plain)
+            .expect("save plain provider");
+
+        // Simulate a concurrent switch (UI / deeplink / profile) holding the
+        // OpenCode lock. Both the OMO early-return path and the additive path
+        // must wait for it.
+        for id in ["omo-a", "plain"] {
+            let guard =
+                futures::executor::block_on(state.proxy_service.lock_switch_for_app("opencode"));
+
+            let switch_state = state.clone();
+            let target = id.to_string();
+            let handle = std::thread::spawn(move || {
+                ProviderService::switch(&switch_state, AppType::OpenCode, &target)
+            });
+
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            assert!(
+                !handle.is_finished(),
+                "switch to {id} must wait for the held OpenCode lock"
+            );
+
+            drop(guard);
+            handle
+                .join()
+                .expect("switch thread panicked")
+                .expect("switch succeeds after the lock is released");
+        }
+
+        assert_eq!(
+            db.get_current_omo_provider("opencode", "omo")
+                .expect("read current omo")
+                .map(|p| p.id)
+                .as_deref(),
+            Some("omo-a")
+        );
+        assert_eq!(read_omo_live_marker().as_deref(), Some("omo-a"));
+        let opencode_live: serde_json::Value =
+            read_json_file(&crate::opencode_config::get_opencode_config_path())
+                .expect("read opencode live config");
+        assert!(
+            opencode_live["provider"].get("plain").is_some(),
+            "additive switch must write the provider to opencode.json, got: {opencode_live}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn switch_concurrent_opencode_omo_keeps_db_and_live_in_sync() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        let state = Arc::new(AppState::new(db.clone()));
+
+        for (id, model) in [("omo-a", "model-a"), ("omo-b", "model-b")] {
+            db.save_provider("opencode", &omo_provider(id, model))
+                .expect("save omo provider");
+        }
+
+        // Two threads keep switching OpenCode to a and b. Without the per-app
+        // lock, "set DB current" and "write live from DB current" interleave
+        // and the last live write can come from the losing switch.
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = ["omo-a", "omo-b"]
+            .into_iter()
+            .map(|id| {
+                let state = state.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..25 {
+                        ProviderService::switch(&state, AppType::OpenCode, id)
+                            .expect("switch succeeds");
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("switch thread panicked");
+        }
+
+        let current = db
+            .get_current_omo_provider("opencode", "omo")
+            .expect("read current omo")
+            .map(|p| p.id)
+            .expect("an OMO provider is current");
+        assert_eq!(
+            read_omo_live_marker().as_deref(),
+            Some(current.as_str()),
+            "live OMO config must match the DB current provider"
+        );
+    }
+
     #[tokio::test]
     #[serial]
     async fn update_current_claude_provider_syncs_live_when_proxy_takeover_detected_without_backup()
@@ -2594,6 +2733,16 @@ impl ProviderService {
     ///    d. Write target provider config to live files
     ///    e. Sync MCP configuration
     pub fn switch(state: &AppState, app_type: AppType, id: &str) -> Result<SwitchResult, AppError> {
+        // Provider switches and takeover toggles both mutate live config and the
+        // restore backup. Serialize every switch per app (including the OMO /
+        // OMO Slim and ClaudeDesktop paths below) before reading any state, so a
+        // deeplink, tray or profile switch racing a UI switch cannot interleave
+        // DB and live writes, and a just-started takeover cannot be overwritten
+        // by a normal live write. The tokio Mutex is not reentrant: nothing
+        // below (switch_normal included) may take this lock again.
+        let _switch_guard =
+            futures::executor::block_on(state.proxy_service.lock_switch_for_app(app_type.as_str()));
+
         // Check if provider exists
         let providers = state.db.get_all_providers(app_type.as_str())?;
         let _provider = providers
@@ -2615,21 +2764,6 @@ impl ProviderService {
         if matches!(app_type, AppType::ClaudeDesktop) {
             return Self::switch_normal(state, app_type, id, &providers);
         }
-
-        // Provider switches and takeover toggles both mutate live config and the
-        // restore backup. Serialize them per app, then decide from the locked
-        // current state so a just-started takeover cannot be overwritten by a
-        // normal live write.
-        let _switch_guard = if matches!(
-            app_type,
-            AppType::Claude | AppType::Codex | AppType::Gemini | AppType::GrokBuild
-        ) {
-            Some(futures::executor::block_on(
-                state.proxy_service.lock_switch_for_app(app_type.as_str()),
-            ))
-        } else {
-            None
-        };
 
         // Backup or live placeholders mean the live file is owned by proxy
         // takeover, even if the proxy server is temporarily stopped or is in the
