@@ -542,7 +542,17 @@ fn assert_paths(case: &Case<'_>, home: &Path) {
     if let Some(source) = adapter.session_source() {
         let roots = source.session_roots();
         assert!(!roots.is_empty(), "{slug}: session roots");
+        // 用户显式设置的 XDG_DATA_HOME 是合法的会话根（OpenCode 优先遵循它）
+        let xdg_data_home = std::env::var_os("XDG_DATA_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
         for root in roots {
+            if xdg_data_home
+                .as_deref()
+                .is_some_and(|xdg| root.starts_with(xdg))
+            {
+                continue;
+            }
             under_home("session root", &root);
         }
     }
