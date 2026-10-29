@@ -127,10 +127,20 @@ pub fn import_provider_from_deeplink(
         }
     }
 
-    // If enabled=true, set as current provider
+    // If enabled=true, set as current provider. A Claude config carrying env
+    // keys outside the allow-list is still imported, but never switched to
+    // automatically: those keys reach hooks and child processes, so the user
+    // has to enable the provider explicitly after reviewing them.
     if merged_request.enabled.unwrap_or(false) {
-        ProviderService::switch(state, app_type.clone(), &provider_id)?;
-        log::info!("Provider '{provider_id}' set as current for {app_type:?}");
+        let unreviewed_keys = unlisted_claude_env_keys(&app_type, &merged_request);
+        if unreviewed_keys.is_empty() {
+            ProviderService::switch(state, app_type.clone(), &provider_id)?;
+            log::info!("Provider '{provider_id}' set as current for {app_type:?}");
+        } else {
+            log::warn!(
+                "Provider '{provider_id}' not auto-switched: config env has non-allow-listed keys {unreviewed_keys:?}"
+            );
+        }
     }
 
     Ok(provider_id)
@@ -281,6 +291,79 @@ fn build_provider_meta(request: &DeepLinkImportRequest) -> Result<Option<Provide
     }))
 }
 
+/// How an env key from a deeplink's Claude config is treated on import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClaudeEnvKeyClass {
+    /// Known Claude Code / provider setting; imported as-is.
+    Allowed,
+    /// Can hijack the processes Claude Code spawns (hooks, Bash tool, MCP
+    /// servers); dropped on import.
+    Denied,
+    /// Anything else; imported, but flagged in the dialog and blocks auto-switch.
+    Unlisted,
+}
+
+/// Env keys that change how Node, the dynamic loader, shells or Python start
+/// up. Keep in sync with `DENIED_ENV_KEYS` in `src/lib/deeplink/envKeys.ts`.
+const DENIED_CLAUDE_ENV_KEYS: &[&str] = &[
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "PATH",
+    "BASH_ENV",
+    "ENV",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+];
+const DENIED_CLAUDE_ENV_PREFIXES: &[&str] = &["LD_", "DYLD_"];
+
+/// Exactly-named env keys allowed besides the prefix families below.
+const ALLOWED_CLAUDE_ENV_KEYS: &[&str] = &[
+    "API_TIMEOUT_MS",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+];
+const ALLOWED_CLAUDE_ENV_PREFIXES: &[&str] = &["ANTHROPIC_", "CLAUDE_CODE_", "DISABLE_"];
+
+/// Classify an env key from a deeplink Claude config. Matching ignores case
+/// because env names are case-insensitive on Windows and proxy variables are
+/// commonly written in lower case.
+pub(crate) fn classify_claude_env_key(key: &str) -> ClaudeEnvKeyClass {
+    let upper = key.trim().to_ascii_uppercase();
+    if DENIED_CLAUDE_ENV_KEYS.contains(&upper.as_str())
+        || DENIED_CLAUDE_ENV_PREFIXES
+            .iter()
+            .any(|p| upper.starts_with(p))
+    {
+        return ClaudeEnvKeyClass::Denied;
+    }
+    if ALLOWED_CLAUDE_ENV_KEYS.contains(&upper.as_str())
+        || ALLOWED_CLAUDE_ENV_PREFIXES
+            .iter()
+            .any(|p| upper.starts_with(p))
+    {
+        return ClaudeEnvKeyClass::Allowed;
+    }
+    ClaudeEnvKeyClass::Unlisted
+}
+
+/// Env keys of a Claude deeplink config that are imported but not on the
+/// allow-list. Empty for non-Claude apps and configs without an env block.
+fn unlisted_claude_env_keys(app_type: &AppType, request: &DeepLinkImportRequest) -> Vec<String> {
+    if !matches!(app_type, AppType::Claude | AppType::ClaudeDesktop) {
+        return Vec::new();
+    }
+    extract_claude_config_env(request)
+        .map(|env| {
+            env.keys()
+                .filter(|k| classify_claude_env_key(k) == ClaudeEnvKeyClass::Unlisted)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Build Claude settings configuration
 ///
 /// Merges env from the inline config (if any) with the standard fields from URL params.
@@ -288,6 +371,8 @@ fn build_provider_meta(request: &DeepLinkImportRequest) -> Result<Option<Provide
 /// Non-standard env fields (e.g. `ANTHROPIC_CUSTOM_HEADERS`, `API_TIMEOUT_MS`,
 /// `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, ...) are preserved as-is so that
 /// providers requiring extra environment variables work after deeplink import.
+/// Process-hijacking keys (`NODE_OPTIONS`, `LD_*`, ...) are dropped by
+/// [`extract_claude_config_env`].
 fn build_claude_settings(request: &DeepLinkImportRequest) -> serde_json::Value {
     // Start from the full env block in the inline config (if present), so any
     // custom env vars the user passed via `config=<base64-json>` survive the
@@ -340,6 +425,7 @@ fn build_claude_settings(request: &DeepLinkImportRequest) -> serde_json::Value {
 ///
 /// Returns `None` when no config is attached, when the payload can't be
 /// decoded/parsed, or when it doesn't contain a Claude-style `env` object.
+/// Keys classified as [`ClaudeEnvKeyClass::Denied`] are removed.
 /// This is a best-effort accessor — we deliberately don't surface parse
 /// errors here because `parse_and_merge_config` will have already validated
 /// the payload during the merge phase; any failure at this point just means
@@ -371,7 +457,18 @@ fn extract_claude_config_env(
     let value: serde_json::Value = serde_json::from_str(json_str).ok()?;
 
     // Pull out the env object — same shape as Claude's own settings.json.
-    value.get("env").and_then(|v| v.as_object()).cloned()
+    let mut env = value.get("env").and_then(|v| v.as_object()).cloned()?;
+
+    // Drop keys that would be inherited by hooks, the Bash tool and MCP
+    // children and could run arbitrary code there (NODE_OPTIONS, LD_PRELOAD...).
+    env.retain(|key, _| {
+        let denied = classify_claude_env_key(key) == ClaudeEnvKeyClass::Denied;
+        if denied {
+            log::warn!("Dropping env key '{key}' from deeplink config");
+        }
+        !denied
+    });
+    Some(env)
 }
 
 /// Build Codex settings configuration

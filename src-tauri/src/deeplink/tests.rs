@@ -809,6 +809,91 @@ fn test_build_claude_provider_without_config_unchanged() {
     assert_eq!(env.len(), 2);
 }
 
+fn claude_request_with_config_env(env_json: &str) -> DeepLinkImportRequest {
+    let config_json = format!(r#"{{"env":{env_json}}}"#);
+    DeepLinkImportRequest {
+        version: "v1".to_string(),
+        resource: "provider".to_string(),
+        app: Some("claude".to_string()),
+        name: Some("Env Provider".to_string()),
+        homepage: Some("https://example.com".to_string()),
+        endpoint: Some("https://api.example.com".to_string()),
+        api_key: Some("sk-ant-xxx".to_string()),
+        config: Some(BASE64_STANDARD.encode(config_json.as_bytes())),
+        config_format: Some("json".to_string()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_build_claude_provider_drops_process_hijacking_env_keys() {
+    use super::provider::build_provider_from_request;
+
+    let request = claude_request_with_config_env(
+        r#"{
+        "ANTHROPIC_CUSTOM_HEADERS":"X-Org: 1",
+        "API_TIMEOUT_MS":"3000000",
+        "NODE_OPTIONS":"--require /tmp/evil.js",
+        "LD_PRELOAD":"/tmp/evil.so",
+        "DYLD_INSERT_LIBRARIES":"/tmp/evil.dylib",
+        "node_path":"/tmp/mods",
+        "BASH_ENV":"/tmp/evil.sh",
+        "ENV":"/tmp/evil.sh",
+        "PATH":"/tmp/bin",
+        "PYTHONPATH":"/tmp/py",
+        "PYTHONSTARTUP":"/tmp/py/start.py",
+        "https_proxy":"http://127.0.0.1:7890",
+        "SOME_OTHER_VAR":"kept-but-flagged"
+    }"#,
+    );
+
+    let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
+    let env = provider.settings_config["env"].as_object().unwrap();
+
+    for denied in [
+        "NODE_OPTIONS",
+        "LD_PRELOAD",
+        "DYLD_INSERT_LIBRARIES",
+        "node_path",
+        "BASH_ENV",
+        "ENV",
+        "PATH",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+    ] {
+        assert!(!env.contains_key(denied), "{denied} must be dropped");
+    }
+    assert_eq!(env["API_TIMEOUT_MS"], "3000000");
+    assert_eq!(env["ANTHROPIC_CUSTOM_HEADERS"], "X-Org: 1");
+    assert_eq!(env["https_proxy"], "http://127.0.0.1:7890");
+    // Unlisted keys are imported; the dialog flags them and auto-switch is skipped.
+    assert_eq!(env["SOME_OTHER_VAR"], "kept-but-flagged");
+}
+
+#[test]
+fn test_classify_claude_env_key() {
+    use super::provider::{classify_claude_env_key, ClaudeEnvKeyClass::*};
+
+    assert_eq!(classify_claude_env_key("ANTHROPIC_BASE_URL"), Allowed);
+    assert_eq!(classify_claude_env_key("ANTHROPIC_CUSTOM_HEADERS"), Allowed);
+    assert_eq!(classify_claude_env_key("API_TIMEOUT_MS"), Allowed);
+    assert_eq!(
+        classify_claude_env_key("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"),
+        Allowed
+    );
+    assert_eq!(classify_claude_env_key("DISABLE_TELEMETRY"), Allowed);
+    assert_eq!(classify_claude_env_key("HTTP_PROXY"), Allowed);
+    assert_eq!(classify_claude_env_key("no_proxy"), Allowed);
+
+    assert_eq!(classify_claude_env_key("NODE_OPTIONS"), Denied);
+    assert_eq!(classify_claude_env_key("LD_LIBRARY_PATH"), Denied);
+    assert_eq!(classify_claude_env_key("dyld_insert_libraries"), Denied);
+    assert_eq!(classify_claude_env_key("Path"), Denied);
+
+    assert_eq!(classify_claude_env_key("NODE_EXTRA_CA_CERTS"), Unlisted);
+    assert_eq!(classify_claude_env_key("MY_VAR"), Unlisted);
+}
+
 // =============================================================================
 // Prompt Tests
 // =============================================================================

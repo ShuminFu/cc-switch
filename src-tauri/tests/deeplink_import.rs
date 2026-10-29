@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use cc_switch_lib::{import_provider_from_deeplink, parse_deeplink_url, AppState, Database};
+use base64::prelude::*;
+use cc_switch_lib::{
+    import_provider_from_deeplink, parse_deeplink_url, AppState, AppType, Database, ProviderService,
+};
 
 #[path = "support.rs"]
 mod support;
@@ -78,5 +81,52 @@ fn deeplink_import_codex_provider_builds_auth_and_config() {
     assert!(
         config_text.contains("model = \"gpt-4o\""),
         "config.toml content should contain model setting"
+    );
+}
+
+fn claude_deeplink_with_env(name: &str, env_json: &str) -> String {
+    let config = BASE64_STANDARD.encode(format!(r#"{{"env":{env_json}}}"#));
+    let config: String = url::form_urlencoded::byte_serialize(config.as_bytes()).collect();
+    format!(
+        "ccswitch://v1/import?resource=provider&app=claude&name={name}&homepage=https%3A%2F%2Fexample.com&endpoint=https%3A%2F%2Fapi.example.com&apiKey=sk-test&enabled=true&config={config}"
+    )
+}
+
+#[test]
+fn deeplink_import_with_unlisted_env_keys_does_not_auto_switch() {
+    let _test_env = TestEnv::new();
+
+    let db = Arc::new(Database::memory().expect("create memory db"));
+    let state = AppState::new(db.clone());
+
+    // Allow-listed keys only: enabled=true switches to the new provider.
+    let first = parse_deeplink_url(&claude_deeplink_with_env(
+        "Trusted",
+        r#"{"API_TIMEOUT_MS":"600000","NODE_OPTIONS":"--require /tmp/x.js"}"#,
+    ))
+    .expect("parse deeplink url");
+    let first_id = import_provider_from_deeplink(&state, first).expect("import trusted provider");
+    assert_eq!(
+        ProviderService::current(&state, AppType::Claude).unwrap(),
+        first_id
+    );
+
+    // An unlisted key keeps the provider imported but not current.
+    let second = parse_deeplink_url(&claude_deeplink_with_env(
+        "Flagged",
+        r#"{"SOME_OTHER_VAR":"1"}"#,
+    ))
+    .expect("parse deeplink url");
+    let second_id = import_provider_from_deeplink(&state, second).expect("import flagged provider");
+
+    let providers = db.get_all_providers("claude").expect("get providers");
+    assert!(providers.contains_key(&second_id));
+    assert!(providers[&first_id]
+        .settings_config
+        .pointer("/env/NODE_OPTIONS")
+        .is_none());
+    assert_eq!(
+        ProviderService::current(&state, AppType::Claude).unwrap(),
+        first_id
     );
 }
