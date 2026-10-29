@@ -1113,6 +1113,12 @@
       "hint": "仍要保存吗？保存后切换此供应商时可能失败，可以之后再补全。",
       "saveAnyway": "仍要保存"
     },
+    "unsavedChanges": {
+      "title": "放弃未保存的更改？",
+      "message": "此供应商有尚未保存的修改，现在关闭将丢失这些修改。",
+      "discard": "放弃更改",
+      "keepEditing": "继续编辑"
+    },
     "configJsonError": "配置JSON格式错误，请检查语法",
     "authJsonRequired": "auth.json 必须是 JSON 对象",
     "authJsonError": "auth.json 格式错误，请检查JSON语法",

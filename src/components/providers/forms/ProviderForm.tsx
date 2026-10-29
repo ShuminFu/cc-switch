@@ -1,6 +1,9 @@
 import type { ComponentType } from "react";
 import type { AppId } from "@/lib/api";
-import type { ProviderFormProps } from "@/features/providers/forms";
+import {
+  ProviderFormDirtyContext,
+  type ProviderFormProps,
+} from "@/features/providers/forms";
 import { ClaudeProviderForm } from "@/features/providers/forms/claude/ClaudeProviderForm";
 import { ClaudeDesktopProviderForm } from "@/features/providers/forms/claude-desktop/ClaudeDesktopProviderForm";
 import { CodexProviderForm } from "@/features/providers/forms/codex/CodexProviderForm";
@@ -42,5 +45,9 @@ export const PROVIDER_FORM_EDITORS: Record<
 
 export function ProviderForm(props: ProviderFormProps) {
   const Editor = PROVIDER_FORM_EDITORS[props.appId];
-  return <Editor {...props} />;
+  return (
+    <ProviderFormDirtyContext.Provider value={props.onDirtyChange}>
+      <Editor {...props} />
+    </ProviderFormDirtyContext.Provider>
+  );
 }

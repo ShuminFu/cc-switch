@@ -1,4 +1,14 @@
-import { useMemo, type FormEvent, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+  type SyntheticEvent,
+} from "react";
 import {
   useForm,
   useFormState,
@@ -17,6 +27,14 @@ import { ProviderFormErrorSummary } from "./ProviderFormErrorSummary";
 
 /** 对话框底部的保存按钮通过 form="provider-form" 关联到表单 */
 export const PROVIDER_FORM_ID = "provider-form";
+
+/**
+ * 由 ProviderForm 分发器注入的"未保存修改"回调（来自 ProviderFormProps.onDirtyChange），
+ * 外壳统一上报，各应用编辑器无需逐个透传。
+ */
+export const ProviderFormDirtyContext = createContext<
+  ((isDirty: boolean) => void) | undefined
+>(undefined);
 
 /** 各编辑器共用的 react-hook-form 实例：按应用走判别联合 schema 校验 */
 export function useProviderForm(
@@ -59,7 +77,27 @@ export function ProviderFormShell({
   children,
 }: ProviderFormShellProps) {
   const { t } = useTranslation();
-  const { isSubmitting } = useFormState({ control: form.control });
+  const { isSubmitting, isDirty } = useFormState({ control: form.control });
+
+  // 未保存修改 = RHF 字段已变更，或用户在表单内直接编辑过不受 RHF 管理的编辑器
+  // （Codex/Gemini 配置、API Key 等由各自 hooks 持有状态，setValue 不会标记 dirty）。
+  // 只统计表单 DOM 内部的输入事件：通用配置等弹窗经 portal 冒泡上来但单独保存，不算。
+  const formRef = useRef<HTMLFormElement>(null);
+  const [hasEditorEdits, setHasEditorEdits] = useState(false);
+  const markEditorEdited = (event: SyntheticEvent) => {
+    if (formRef.current?.contains(event.target as Node)) {
+      setHasEditorEdits(true);
+    }
+  };
+  const onDirtyChange = useContext(ProviderFormDirtyContext);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  const hasUnsavedChanges = isDirty || hasEditorEdits;
+  useEffect(() => {
+    onDirtyChangeRef.current?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges]);
+  // 表单卸载（关闭面板、切换标签页）后修改已不存在
+  useEffect(() => () => onDirtyChangeRef.current?.(false), []);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     // 每次提交都重新检查，上一次的阻断错误不保留
@@ -71,8 +109,11 @@ export function ProviderFormShell({
     <>
       <Form {...form}>
         <form
+          ref={formRef}
           id={PROVIDER_FORM_ID}
           onSubmit={handleSubmit}
+          onInput={markEditorEdited}
+          onChange={markEditorEdited}
           className={className}
         >
           {children}

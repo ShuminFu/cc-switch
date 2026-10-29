@@ -1113,6 +1113,12 @@
       "hint": "Save anyway? Switching to this provider may fail; you can fill these in later.",
       "saveAnyway": "Save anyway"
     },
+    "unsavedChanges": {
+      "title": "Discard unsaved changes?",
+      "message": "You have unsaved edits in this provider. Closing now will discard them.",
+      "discard": "Discard changes",
+      "keepEditing": "Keep editing"
+    },
     "configJsonError": "Config JSON format error, please check syntax",
     "authJsonRequired": "auth.json must be a JSON object",
     "authJsonError": "auth.json format error, please check JSON syntax",

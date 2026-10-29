@@ -33,6 +33,8 @@ export interface ProviderFormProps {
   onUniversalPresetSelect?: (preset: UniversalProviderPreset) => void;
   onManageUniversalProviders?: () => void;
   onSubmittingChange?: (isSubmitting: boolean) => void;
+  /** 表单是否有未保存的修改（RHF dirty 或编辑器被编辑过），用于关闭前确认 */
+  onDirtyChange?: (isDirty: boolean) => void;
   initialData?: ProviderFormInitialData;
   showButtons?: boolean;
   isProxyTakeover?: boolean;

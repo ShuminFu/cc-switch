@@ -9,6 +9,7 @@ import {
   type ProviderFormValues,
 } from "@/components/providers/forms/ProviderForm";
 import { openclawApi, providersApi, vscodeApi, type AppId } from "@/lib/api";
+import { useUnsavedChangesGuard } from "@/features/providers/forms/useUnsavedChangesGuard";
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -32,6 +33,9 @@ export function EditProviderDialog({
 }: EditProviderDialogProps) {
   const { t } = useTranslation();
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
+  const closePanel = useCallback(() => onOpenChange(false), [onOpenChange]);
+  // 用户主动关闭（Esc/返回）时若有未保存修改先确认；保存成功后直接关闭
+  const unsavedGuard = useUnsavedChangesGuard(closePanel);
 
   // 默认使用传入的 provider.settingsConfig，若当前编辑对象是"当前生效供应商"，则尝试读取实时配置替换初始值
   const [liveSettings, setLiveSettings] = useState<Record<
@@ -212,7 +216,7 @@ export function EditProviderDialog({
     <FullScreenPanel
       isOpen={open}
       title={t("provider.editProvider")}
-      onClose={() => onOpenChange(false)}
+      onClose={unsavedGuard.requestClose}
       footer={
         <Button
           type="submit"
@@ -231,8 +235,9 @@ export function EditProviderDialog({
           providerId={provider.id}
           submitLabel={t("common.save")}
           onSubmit={handleSubmit}
-          onCancel={() => onOpenChange(false)}
+          onCancel={unsavedGuard.requestClose}
           onSubmittingChange={setIsFormSubmitting}
+          onDirtyChange={unsavedGuard.onDirtyChange}
           initialData={initialData}
           showButtons={false}
           isProxyTakeover={isProxyTakeover}
@@ -247,6 +252,8 @@ export function EditProviderDialog({
           {t("common.loading")}
         </div>
       )}
+
+      {unsavedGuard.confirmDialog}
     </FullScreenPanel>
   );
 }

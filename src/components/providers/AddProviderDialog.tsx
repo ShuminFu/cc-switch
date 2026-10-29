@@ -21,6 +21,7 @@ import { claudeDesktopPresetLoader } from "@/features/providers/forms/claude-des
 import { extractCodexBaseUrl } from "@/utils/providerConfigUtils";
 import { extractGrokBuildBaseUrl } from "@/utils/grokBuildConfig";
 import { appCaps } from "@/entities/app/registry";
+import { useUnsavedChangesGuard } from "@/features/providers/forms/useUnsavedChangesGuard";
 import type { OpenClawSuggestedDefaults } from "@/config/openclawProviderPresets";
 import type { UniversalProviderPreset } from "@/config/universalProviderPresets";
 
@@ -59,6 +60,9 @@ export function AddProviderDialog({
   const [selectedUniversalPreset, setSelectedUniversalPreset] =
     useState<UniversalProviderPreset | null>(null);
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
+  const closePanel = useCallback(() => onOpenChange(false), [onOpenChange]);
+  // 用户主动关闭（Esc/返回/取消）时若有未保存修改先确认；保存成功后直接关闭
+  const unsavedGuard = useUnsavedChangesGuard(closePanel);
 
   const handleUniversalProviderSave = useCallback(
     async (provider: UniversalProvider) => {
@@ -304,7 +308,7 @@ export function AddProviderDialog({
         </span>
         <Button
           variant="outline"
-          onClick={() => onOpenChange(false)}
+          onClick={unsavedGuard.requestClose}
           className="border-border/20 hover:bg-accent hover:text-accent-foreground"
         >
           {t("common.cancel")}
@@ -324,7 +328,7 @@ export function AddProviderDialog({
       <>
         <Button
           variant="outline"
-          onClick={() => onOpenChange(false)}
+          onClick={unsavedGuard.requestClose}
           className="border-border/20 hover:bg-accent hover:text-accent-foreground"
         >
           {t("common.cancel")}
@@ -343,7 +347,7 @@ export function AddProviderDialog({
     <FullScreenPanel
       isOpen={open}
       title={t("provider.addNewProvider")}
-      onClose={() => onOpenChange(false)}
+      onClose={unsavedGuard.requestClose}
       footer={footer}
       contentClassName="pt-3"
     >
@@ -366,8 +370,9 @@ export function AddProviderDialog({
               appId={appId}
               submitLabel={t("common.add")}
               onSubmit={handleSubmit}
-              onCancel={() => onOpenChange(false)}
+              onCancel={unsavedGuard.requestClose}
               onSubmittingChange={setIsFormSubmitting}
+              onDirtyChange={unsavedGuard.onDirtyChange}
               showButtons={false}
             />
           </TabsContent>
@@ -382,8 +387,9 @@ export function AddProviderDialog({
           appId={appId}
           submitLabel={t("common.add")}
           onSubmit={handleSubmit}
-          onCancel={() => onOpenChange(false)}
+          onCancel={unsavedGuard.requestClose}
           onSubmittingChange={setIsFormSubmitting}
+          onDirtyChange={unsavedGuard.onDirtyChange}
           showButtons={false}
         />
       )}
@@ -396,6 +402,8 @@ export function AddProviderDialog({
           initialPreset={selectedUniversalPreset}
         />
       )}
+
+      {unsavedGuard.confirmDialog}
     </FullScreenPanel>
   );
 }

@@ -1113,6 +1113,12 @@
       "hint": "仍要儲存嗎？儲存後切換此供應商時可能失敗，可以之後再補全。",
       "saveAnyway": "仍要儲存"
     },
+    "unsavedChanges": {
+      "title": "放棄未儲存的變更？",
+      "message": "此供應商有尚未儲存的修改，現在關閉將遺失這些修改。",
+      "discard": "放棄變更",
+      "keepEditing": "繼續編輯"
+    },
     "configJsonError": "設定 JSON 格式錯誤，請檢查語法",
     "authJsonRequired": "auth.json 必須是 JSON 物件",
     "authJsonError": "auth.json 格式錯誤，請檢查 JSON 語法",

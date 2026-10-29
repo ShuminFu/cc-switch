@@ -1113,6 +1113,12 @@
       "hint": "それでも保存しますか？保存後、このプロバイダーへの切り替えが失敗する可能性がありますが、後から補完できます。",
       "saveAnyway": "それでも保存"
     },
+    "unsavedChanges": {
+      "title": "未保存の変更を破棄しますか？",
+      "message": "このプロバイダーには保存されていない変更があります。今閉じると変更は失われます。",
+      "discard": "変更を破棄",
+      "keepEditing": "編集を続ける"
+    },
     "configJsonError": "Config JSON の形式が正しくありません。構文を確認してください",
     "authJsonRequired": "auth.json は JSON オブジェクトで入力してください",
     "authJsonError": "auth.json の形式が正しくありません。JSON を確認してください",
