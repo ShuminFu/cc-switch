@@ -122,3 +122,19 @@ notes follows it.
   not exercised in a desktop session. It uses the same `tauri_plugin_dialog`
   call pattern as `save_file_dialog`.
 
+
+**Review.** An independent review checked each acceptance item against the code
+and re-ran the verification. It found one redaction leak and fixed it. Stream
+bytes are redacted as raw SSE text, where a newline is still the JSON escape
+`\n`. The bare-key rules (`sk-`, `AIza`, `gh?_`, `github_pat_`), the `Bearer`
+rule and the header-line rule were anchored with `\b`. No word boundary exists
+between the `n` of `\n` and the first letter of a key, so a key at the start of
+a line in model output reached the export unredacted (for example a code block
+with `\nsk-ant-...`). These rules now start with an explicit boundary group,
+`KEY_START`, that also accepts a JSON escape. The group is captured and kept in
+the replacement. `capture_redact_text_catches_keys_after_json_escapes` covers
+`\n`, `\r\n` and `\t` before each key shape. Re-verified: `cargo test capture`
+(lib 13 passed), the full `cargo test --no-fail-fast` (lib 2340 passed, 0
+failures in any binary), `cargo fmt --check`, `cargo clippy` (with and without
+`--tests`) at `-D warnings`, `pnpm typecheck`, `pnpm test:unit` (1504 passed)
+and `pnpm format:check`.

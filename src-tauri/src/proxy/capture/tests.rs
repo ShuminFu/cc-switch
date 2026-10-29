@@ -202,6 +202,32 @@ fn capture_redact_text_covers_every_key_shape() {
     assert_eq!(redact_text(plain), plain);
 }
 
+/// Raw SSE bytes keep JSON escapes, so a key at the start of a line follows
+/// `\n` / `\t` with no word boundary in between.
+#[test]
+fn capture_redact_text_catches_keys_after_json_escapes() {
+    for (escape, key) in [
+        (r"\n", ANTHROPIC_KEY),
+        (r"\n", PLAIN_SK_KEY),
+        (r"\r\n", GOOGLE_KEY),
+        (r"\t", GITHUB_PAT),
+        (r"\n", GITHUB_USER_TOKEN),
+        (r"\n", &format!("Bearer {BEARER_TOKEN}")),
+        (r"\n", &format!("x-api-key: {OPAQUE_API_KEY}")),
+        (r"\n", &format!("Cookie: {SESSION_COOKIE}")),
+    ] {
+        let raw = format!(r#"data: {{"text":"code:{escape}{key}{escape}done"}}"#);
+        let redacted = redact_text(&raw);
+        assert_no_leaks(&raw, &redacted);
+        let payload = redacted.strip_prefix("data: ").expect("data line kept");
+        let value: Value = serde_json::from_str(payload).expect("still JSON");
+        assert!(
+            value["text"].as_str().unwrap().contains(REDACTED),
+            "{raw} -> {redacted}"
+        );
+    }
+}
+
 #[test]
 fn capture_redaction_keeps_sse_and_json_parseable() {
     let line = format!(

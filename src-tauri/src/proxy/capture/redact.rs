@@ -64,6 +64,14 @@ fn rule(pattern: &str, replacement: &'static str) -> Rule {
     }
 }
 
+/// 密钥起始边界（捕获组 1，替换时原样保留）：文本开头、非单词字符，或 JSON
+/// 转义序列 `\n` / `\t` 等。原始 SSE 字节里换行写作 `\n`，`\b` 在 `n` 与密钥
+/// 首字母之间不成立，行首的密钥会漏掉。regex crate 不支持后行断言，故用捕获组。
+const KEY_START: &str = r"(^|[^A-Za-z0-9_]|\\[nrtbf])";
+
+/// 裸密钥规则的替换：保留边界字符，只替换密钥本身
+const KEEP_START: &str = "${1}[REDACTED]";
+
 /// 按顺序应用的文本规则。先处理"键: 值"形式（整段抹掉），再处理裸密钥形态。
 static TEXT_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     vec![
@@ -79,23 +87,37 @@ static TEXT_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         ),
         // 文本中的头部行：`x-api-key: ...`、`Cookie: a=b; c=d`
         rule(
-            r#"(?i)\b((?:proxy-)?authorization|x-api-key|x-goog-api-key|api-key|set-cookie|cookie)(\s*:\s*)[^\r\n"\\]+"#,
-            "$1$2[REDACTED]",
+            &format!(
+                r#"(?i){KEY_START}((?:proxy-)?authorization|x-api-key|x-goog-api-key|api-key|set-cookie|cookie)(\s*:\s*)[^\r\n"\\]+"#
+            ),
+            "${1}${2}${3}[REDACTED]",
         ),
         // Bearer token
-        rule(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=\-]+", "$1 [REDACTED]"),
+        rule(
+            &format!(r"(?i){KEY_START}(bearer)\s+[A-Za-z0-9._~+/=\-]+"),
+            "${1}${2} [REDACTED]",
+        ),
         // URL 查询参数
         rule(
             r#"(?i)([?&](?:key|api[-_]?key|access[-_]?token|token|auth)=)[^&\s"'#\\]+"#,
             "$1[REDACTED]",
         ),
         // Anthropic / OpenAI 风格（sk-ant-…、sk-proj-…、sk-…）
-        rule(r"\bsk-[A-Za-z0-9_\-]{8,}", REDACTED),
+        rule(&format!(r"{KEY_START}sk-[A-Za-z0-9_\-]{{8,}}"), KEEP_START),
         // Google API key
-        rule(r"\bAIza[0-9A-Za-z_\-]{20,}", REDACTED),
+        rule(
+            &format!(r"{KEY_START}AIza[0-9A-Za-z_\-]{{20,}}"),
+            KEEP_START,
+        ),
         // GitHub token（ghu_ / ghp_ / gho_ / ghs_ / ghr_）与 fine-grained PAT
-        rule(r"\bgh[pousr]_[A-Za-z0-9]{16,}", REDACTED),
-        rule(r"\bgithub_pat_[A-Za-z0-9_]{20,}", REDACTED),
+        rule(
+            &format!(r"{KEY_START}gh[pousr]_[A-Za-z0-9]{{16,}}"),
+            KEEP_START,
+        ),
+        rule(
+            &format!(r"{KEY_START}github_pat_[A-Za-z0-9_]{{20,}}"),
+            KEEP_START,
+        ),
     ]
 });
 
