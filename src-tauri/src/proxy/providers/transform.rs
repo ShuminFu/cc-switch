@@ -373,6 +373,9 @@ fn convert_message_to_openai(
         // reasoning_parts: 仅在兼容 Moonshot/Kimi/DeepSeek thinking tool-call 路径时
         // 生成 reasoning_content，通用 OpenAI-compatible 路径不发送该非标准字段。
         let mut reasoning_parts = Vec::new();
+        // tool role 消息只能承载文本：tool_result 中的图片收集到这里，
+        // 在所有 tool 消息之后以 user 消息的 image_url parts 发送。
+        let mut tool_image_parts = Vec::new();
 
         for block in blocks {
             let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -384,16 +387,8 @@ fn convert_message_to_openai(
                     }
                 }
                 "image" => {
-                    if let Some(source) = block.get("source") {
-                        let media_type = source
-                            .get("media_type")
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("image/png");
-                        let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
-                        content_parts.push(json!({
-                            "type": "image_url",
-                            "image_url": {"url": format!("data:{};base64,{}", media_type, data)}
-                        }));
+                    if let Some(part) = image_block_to_openai_part(block) {
+                        content_parts.push(part);
                     }
                 }
                 "tool_use" => {
@@ -415,12 +410,11 @@ fn convert_message_to_openai(
                         .get("tool_use_id")
                         .and_then(|i| i.as_str())
                         .unwrap_or("");
-                    let content_val = block.get("content");
-                    let content_str = match content_val {
-                        Some(Value::String(s)) => s.clone(),
-                        Some(v) => canonical_json_string(v),
-                        None => String::new(),
-                    };
+                    let mut content_str =
+                        tool_result_content_to_text(block.get("content"), &mut tool_image_parts);
+                    if block.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+                        content_str.insert_str(0, "[ERROR] ");
+                    }
                     result.push(json!({
                         "role": "tool",
                         "tool_call_id": tool_use_id,
@@ -444,6 +438,16 @@ fn convert_message_to_openai(
                     reasoning_parts.push("[redacted thinking]".to_string());
                 }
                 _ => {}
+            }
+        }
+
+        if !tool_image_parts.is_empty() {
+            if role == "user" {
+                // 合并进本条 user 消息，避免产生连续的 user 消息
+                tool_image_parts.append(&mut content_parts);
+                content_parts = tool_image_parts;
+            } else {
+                result.push(json!({"role": "user", "content": tool_image_parts}));
             }
         }
 
@@ -488,6 +492,55 @@ fn convert_message_to_openai(
     // 其他情况直接透传
     result.push(json!({"role": role, "content": content}));
     Ok(result)
+}
+
+/// 将 Anthropic image block 转换为 OpenAI image_url content part
+fn image_block_to_openai_part(block: &Value) -> Option<Value> {
+    let source = block.get("source")?;
+    let media_type = source
+        .get("media_type")
+        .and_then(|m| m.as_str())
+        .unwrap_or("image/png");
+    let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
+    Some(json!({
+        "type": "image_url",
+        "image_url": {"url": format!("data:{};base64,{}", media_type, data)}
+    }))
+}
+
+/// 将 tool_result 的 content 转换为 tool 消息文本。
+///
+/// - 文本 block 以换行拼接；
+/// - 图片替换为 `[image attached]` 占位符，image_url part 追加到 `image_parts`；
+/// - 文档替换为占位符，避免把 base64 原文当作文本发送；
+/// - 仅未知 block 类型回退为 canonical JSON 文本。
+fn tool_result_content_to_text(content: Option<&Value>, image_parts: &mut Vec<Value>) -> String {
+    let blocks = match content {
+        None | Some(Value::Null) => return String::new(),
+        Some(Value::String(s)) => return s.clone(),
+        Some(Value::Array(blocks)) => blocks,
+        Some(other) => return canonical_json_string(other),
+    };
+
+    let mut parts = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        match block.get("type").and_then(|t| t.as_str()) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                    parts.push(text.to_string());
+                }
+            }
+            Some("image") => {
+                if let Some(part) = image_block_to_openai_part(block) {
+                    image_parts.push(part);
+                    parts.push("[image attached]".to_string());
+                }
+            }
+            Some("document") => parts.push("[document omitted]".to_string()),
+            _ => parts.push(canonical_json_string(block)),
+        }
+    }
+    parts.join("\n")
 }
 
 /// 清理工具参数的 JSON schema，并为根 schema 补齐 OpenAI 要求的 object 类型。
@@ -1126,6 +1179,128 @@ mod tests {
         assert_eq!(msg["role"], "tool");
         assert_eq!(msg["tool_call_id"], "call_123");
         assert_eq!(msg["content"], "Sunny, 25°C");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_tool_result_text_blocks_are_joined() {
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "call_1",
+                    "content": [{"type": "text", "text": "hello"}]
+                }]
+            }]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "tool");
+        assert_eq!(messages[0]["content"], "hello");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_tool_result_images_move_to_user_message() {
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_1",
+                        "content": [
+                            {"type": "text", "text": "screenshot taken"},
+                            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJDRA=="}}
+                        ]
+                    },
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "call_2",
+                        "content": [
+                            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "UERGREFUQQ=="}}
+                        ]
+                    },
+                    {"type": "text", "text": "Describe it"}
+                ]
+            }]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+
+        assert_eq!(messages[0]["role"], "tool");
+        assert_eq!(messages[0]["tool_call_id"], "call_1");
+        assert_eq!(messages[0]["content"], "screenshot taken\n[image attached]");
+        assert_eq!(messages[1]["role"], "tool");
+        assert_eq!(messages[1]["tool_call_id"], "call_2");
+        assert_eq!(messages[1]["content"], "[document omitted]");
+        for tool_msg in &messages[..2] {
+            let text = tool_msg["content"].as_str().unwrap();
+            assert!(!text.contains("QUJDRA==") && !text.contains("UERGREFUQQ=="));
+        }
+
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(
+            messages[2]["content"],
+            json!([
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJDRA=="}},
+                {"type": "text", "text": "Describe it"}
+            ])
+        );
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_tool_result_is_error_prefix() {
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "call_1", "is_error": true, "content": "file not found"},
+                    {"type": "tool_result", "tool_use_id": "call_2", "is_error": true, "content": [{"type": "text", "text": "boom"}]},
+                    {"type": "tool_result", "tool_use_id": "call_3", "is_error": false, "content": "ok"}
+                ]
+            }]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages[0]["content"], "[ERROR] file not found");
+        assert_eq!(messages[1]["content"], "[ERROR] boom");
+        assert_eq!(messages[2]["content"], "ok");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_tool_result_unknown_block_falls_back_to_json() {
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "call_1",
+                    "content": [
+                        {"type": "text", "text": "a"},
+                        {"type": "search_result", "title": "t"}
+                    ]
+                }]
+            }]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        assert_eq!(
+            result["messages"][0]["content"],
+            "a\n{\"title\":\"t\",\"type\":\"search_result\"}"
+        );
     }
 
     #[test]

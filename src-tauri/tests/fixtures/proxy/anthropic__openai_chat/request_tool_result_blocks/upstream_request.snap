@@ -1,0 +1,83 @@
+---
+source: tests/proxy_golden.rs
+description: "Array tool_result content: text blocks are joined as plain text, images become an [image attached] placeholder plus a following user image_url part, documents become a placeholder, and is_error prefixes [ERROR]."
+---
+{
+  "model": "gpt-4o",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Take a screenshot, read the report and run the build."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_text",
+          "type": "function",
+          "function": {
+            "name": "echo",
+            "arguments": "{\"text\":\"hello\"}"
+          }
+        },
+        {
+          "id": "call_shot",
+          "type": "function",
+          "function": {
+            "name": "screenshot",
+            "arguments": "{}"
+          }
+        },
+        {
+          "id": "call_doc",
+          "type": "function",
+          "function": {
+            "name": "read_report",
+            "arguments": "{}"
+          }
+        },
+        {
+          "id": "call_build",
+          "type": "function",
+          "function": {
+            "name": "build",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_text",
+      "content": "hello"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_shot",
+      "content": "Screenshot captured\n[image attached]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_doc",
+      "content": "[document omitted]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_build",
+      "content": "[ERROR] exit code 1"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/png;base64,iVBORw0KGgo="
+          }
+        }
+      ]
+    }
+  ],
+  "max_tokens": 1024
+}

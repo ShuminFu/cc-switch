@@ -1,0 +1,50 @@
+{
+  "model": "gpt-4o",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Take a screenshot, read the report and run the build."
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {"type": "tool_use", "id": "call_text", "name": "echo", "input": {"text": "hello"}},
+        {"type": "tool_use", "id": "call_shot", "name": "screenshot", "input": {}},
+        {"type": "tool_use", "id": "call_doc", "name": "read_report", "input": {}},
+        {"type": "tool_use", "id": "call_build", "name": "build", "input": {}}
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_text",
+          "content": [{"type": "text", "text": "hello"}]
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_shot",
+          "content": [
+            {"type": "text", "text": "Screenshot captured"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}}
+          ]
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_doc",
+          "content": [
+            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "JVBERi0xLjQ="}}
+          ]
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "call_build",
+          "is_error": true,
+          "content": [{"type": "text", "text": "exit code 1"}]
+        }
+      ]
+    }
+  ]
+}
