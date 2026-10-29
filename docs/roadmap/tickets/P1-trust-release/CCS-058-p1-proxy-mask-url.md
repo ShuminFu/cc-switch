@@ -38,7 +38,7 @@ through `mask_url`, so they inherit the fix with no caller changes.
   `test_mask_url_multibyte_does_not_panic`, `test_mask_url_unparseable_strips_userinfo`,
   `test_build_client_invalid_url_does_not_leak_secret`.
 
-**Commits.** See `git log --grep CCS-058` (code and this note land in the same commit).
+**Commits.** `6a05b13` (code, tests and this note).
 
 **Verification.**
 - Regression check: with the old fallback restored, the 3 new tests FAIL (multibyte
