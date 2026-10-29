@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { maskSecret, maskValue } from "@/lib/deeplink/mask";
+import {
+  maskConfigText,
+  maskFieldValue,
+  maskSecret,
+  maskValue,
+} from "@/lib/deeplink/mask";
 
 describe("deeplink masking", () => {
   it("shows at most the first 4 characters of a sensitive value", () => {
@@ -33,5 +38,28 @@ describe("deeplink masking", () => {
       maskSecret("abcdefghijklmnopqrstuvwxyz0123"),
     );
     expect(maskSecret(undefined)).toBe("****");
+  });
+
+  it("masks diff values by the leaf key of their dotted field path", () => {
+    expect(
+      maskFieldValue(
+        "settingsConfig.env.ANTHROPIC_AUTH_TOKEN",
+        "sk-abcdefghijk",
+      ),
+    ).toBe(`sk-a${"*".repeat(20)}`);
+    expect(
+      maskFieldValue("settingsConfig.env.ANTHROPIC_BASE_URL", "https://a.b"),
+    ).toBe("https://a.b");
+  });
+
+  it("masks secret lines inside multi-line config text", () => {
+    const toml =
+      'model = "grok-4"\napi_key = "xai-abcdefghijkl"\nbase_url = "https://x.ai"';
+    expect(maskConfigText(toml)).toBe(
+      `model = "grok-4"\napi_key = "xai-${"*".repeat(20)}"\nbase_url = "https://x.ai"`,
+    );
+    expect(maskFieldValue("settingsConfig.config", toml)).toBe(
+      maskConfigText(toml),
+    );
   });
 });

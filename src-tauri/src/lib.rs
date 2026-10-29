@@ -1341,6 +1341,7 @@ pub fn run() {
             commands::sync_current_providers_live,
             // Deep link import
             commands::merge_deeplink_config,
+            commands::preview_deeplink_import,
             commands::import_from_deeplink,
             commands::import_from_deeplink_unified,
             update_tray_menu,

@@ -2438,7 +2438,13 @@
       "title": "批量导入 MCP Servers",
       "targetApps": "目标应用",
       "serverCount": "MCP Servers ({{count}} 个)",
-      "enabledWarning": "导入后将立即写入所有指定应用的配置文件"
+      "enabledWarning": "导入后将立即写入所有指定应用的配置文件",
+      "command": "命令",
+      "url": "URL",
+      "env": "环境变量",
+      "headers": "请求头",
+      "commandWarning": "将以你的用户权限运行本地命令",
+      "existsNote": "已安装：仅添加目标应用，不会写入此配置"
     },
     "prompt": {
       "title": "导入系统提示词",
@@ -2463,7 +2469,24 @@
     "usageApiKey": "用量 API Key",
     "usageBaseUrl": "用量查询地址",
     "usageAutoInterval": "自动查询",
-    "usageAutoIntervalValue": "每 {{minutes}} 分钟"
+    "usageAutoIntervalValue": "每 {{minutes}} 分钟",
+    "preview": {
+      "usageScriptCode": "脚本源码（导入后保持禁用，需手动启用后才会运行）",
+      "usageScriptHosts": "脚本访问的主机",
+      "usageScriptNoHosts": "脚本中未检测到主机",
+      "liveFilesOnImport": "导入时写入的文件",
+      "liveFilesOnSwitch": "切换到该供应商时写入的文件",
+      "existingTitle": "已存在名为 \"{{name}}\" 的供应商",
+      "existingDescription": "导入会新增一个供应商，现有供应商不会被修改。与现有供应商的差异：",
+      "existingIsCurrent": "现有供应商当前正在使用。",
+      "existingNoChanges": "配置与现有供应商完全相同。",
+      "diffField": "字段",
+      "diffBefore": "现有",
+      "diffAfter": "链接中",
+      "newerLinkIgnored": "此对话框打开期间收到了更新的链接，但未被应用：此处仍显示原始链接。如需查看新链接，请取消后重新打开它。",
+      "riskAck": "我已检查所有标红项目并信任此链接",
+      "riskAckHint": "确认标红项目后才能导入。"
+    }
   },
   "iconPicker": {
     "search": "搜索图标",

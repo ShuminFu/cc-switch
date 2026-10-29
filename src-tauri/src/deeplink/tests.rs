@@ -1070,3 +1070,205 @@ fn test_infer_homepage_from_endpoint_without_homepage() {
         Some("https://cubence.com".to_string())
     );
 }
+
+// =============================================================================
+// Import Preview Tests
+// =============================================================================
+
+fn preview_state() -> AppState {
+    AppState::new(Arc::new(Database::memory().expect("create memory db")))
+}
+
+#[test]
+#[serial_test::serial]
+fn test_preview_provider_flags_env_script_and_diffs_same_name_provider() {
+    use super::preview::{preview_deeplink_import, PreviewRisk};
+    use super::provider::import_provider_from_deeplink;
+
+    let _test_home = TestHomeGuard::new();
+    let state = preview_state();
+
+    let existing = DeepLinkImportRequest {
+        version: "v1".to_string(),
+        resource: "provider".to_string(),
+        app: Some("claude".to_string()),
+        name: Some("Relay".to_string()),
+        endpoint: Some("https://old.relay.example".to_string()),
+        api_key: Some("sk-old-key-123456".to_string()),
+        ..Default::default()
+    };
+    let existing_id = import_provider_from_deeplink(&state, existing).expect("seed provider");
+
+    let config = serde_json::json!({
+        "env": {
+            "ANTHROPIC_BASE_URL": "https://new.relay.example",
+            "CUSTOM_FLAG": "1",
+            "NODE_OPTIONS": "--require /tmp/x.js"
+        }
+    });
+    let script =
+        r#"({ request: { url: "{{baseUrl}}/usage" }, x: "https://collector.example.net/c" })"#;
+    let request = DeepLinkImportRequest {
+        version: "v1".to_string(),
+        resource: "provider".to_string(),
+        app: Some("claude".to_string()),
+        name: Some("Relay".to_string()),
+        api_key: Some("sk-new-key-123456".to_string()),
+        config: Some(BASE64_STANDARD.encode(config.to_string())),
+        config_format: Some("json".to_string()),
+        usage_script: Some(BASE64_STANDARD.encode(script)),
+        enabled: Some(true),
+        ..Default::default()
+    };
+
+    let preview = preview_deeplink_import(&state, &request).expect("preview");
+
+    // Merged like merge_deeplink_config
+    assert_eq!(
+        preview.request.endpoint.as_deref(),
+        Some("https://new.relay.example")
+    );
+    assert_eq!(preview.unlisted_env_keys, vec!["CUSTOM_FLAG".to_string()]);
+    assert_eq!(preview.denied_env_keys, vec!["NODE_OPTIONS".to_string()]);
+    assert_eq!(
+        preview.risks,
+        vec![PreviewRisk::UnlistedEnv, PreviewRisk::UsageScript]
+    );
+
+    let usage = preview.usage_script.expect("usage script preview");
+    assert_eq!(usage.code, script);
+    assert_eq!(
+        usage.target_hosts,
+        vec![
+            "new.relay.example".to_string(),
+            "collector.example.net".to_string()
+        ]
+    );
+
+    // Unlisted env keys block activation, so live files are only written on switch
+    assert!(!preview.writes_live_on_import);
+    assert_eq!(preview.live_files.len(), 1);
+    assert!(preview.live_files[0].ends_with("settings.json"));
+
+    let existing = preview.existing.expect("same-name provider found");
+    assert_eq!(existing.id, existing_id);
+    assert!(existing.is_current, "first provider became current");
+    let change = |field: &str| {
+        existing
+            .changes
+            .iter()
+            .find(|c| c.field == field)
+            .unwrap_or_else(|| panic!("missing change for {field}: {:?}", existing.changes))
+    };
+    let base_url = change("settingsConfig.env.ANTHROPIC_BASE_URL");
+    assert_eq!(
+        base_url.before.as_deref(),
+        Some("https://old.relay.example")
+    );
+    assert_eq!(base_url.after.as_deref(), Some("https://new.relay.example"));
+    let token = change("settingsConfig.env.ANTHROPIC_AUTH_TOKEN");
+    assert_eq!(token.after.as_deref(), Some("sk-new-key-123456"));
+    let custom = change("settingsConfig.env.CUSTOM_FLAG");
+    assert_eq!(custom.before, None);
+    assert_eq!(custom.after.as_deref(), Some("1"));
+    assert_eq!(change("usageScript.code").after.as_deref(), Some(script));
+    assert!(
+        !existing
+            .changes
+            .iter()
+            .any(|c| c.field.contains("NODE_OPTIONS")),
+        "denied keys are not imported, so they are not part of the diff"
+    );
+}
+
+#[test]
+#[serial_test::serial]
+fn test_preview_provider_without_risk_writes_live_when_first() {
+    use super::preview::preview_deeplink_import;
+
+    let _test_home = TestHomeGuard::new();
+    let state = preview_state();
+    let request = DeepLinkImportRequest {
+        version: "v1".to_string(),
+        resource: "provider".to_string(),
+        app: Some("codex".to_string()),
+        name: Some("Plain".to_string()),
+        endpoint: Some("https://api.example.com/v1".to_string()),
+        api_key: Some("sk-plain".to_string()),
+        ..Default::default()
+    };
+
+    let preview = preview_deeplink_import(&state, &request).expect("preview");
+    assert!(preview.risks.is_empty());
+    assert!(preview.existing.is_none());
+    assert!(preview.usage_script.is_none());
+    assert!(preview.writes_live_on_import, "no current provider yet");
+    assert_eq!(preview.live_files.len(), 2);
+}
+
+#[test]
+#[serial_test::serial]
+fn test_preview_mcp_lists_commands_and_marks_existing_servers() {
+    use super::preview::{preview_deeplink_import, PreviewRisk};
+    use crate::app_config::{McpApps, McpServer};
+
+    let _test_home = TestHomeGuard::new();
+    let state = preview_state();
+    state
+        .db
+        .save_mcp_server(&McpServer {
+            id: "known".to_string(),
+            name: "known".to_string(),
+            server: serde_json::json!({ "command": "old-cmd" }),
+            apps: McpApps::default(),
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        })
+        .expect("seed mcp server");
+
+    let config = serde_json::json!({
+        "mcpServers": {
+            "runner": { "command": "npx", "args": ["-y", "some-pkg@1.2.3", "--flag"] },
+            "known": { "command": "new-cmd" },
+            "remote": { "type": "http", "url": "https://mcp.example.com/mcp" }
+        }
+    });
+    let request = DeepLinkImportRequest {
+        version: "v1".to_string(),
+        resource: "mcp".to_string(),
+        apps: Some("claude,codex".to_string()),
+        config: Some(BASE64_STANDARD.encode(config.to_string())),
+        ..Default::default()
+    };
+
+    let preview = preview_deeplink_import(&state, &request).expect("preview");
+    assert_eq!(preview.risks, vec![PreviewRisk::McpCommand]);
+    assert!(preview.writes_live_on_import);
+    assert_eq!(preview.live_files.len(), 2);
+
+    let runner = preview
+        .mcp_servers
+        .iter()
+        .find(|s| s.id == "runner")
+        .expect("runner listed");
+    assert_eq!(runner.command.as_deref(), Some("npx"));
+    assert_eq!(runner.args, vec!["-y", "some-pkg@1.2.3", "--flag"]);
+    assert!(!runner.exists);
+
+    let known = preview
+        .mcp_servers
+        .iter()
+        .find(|s| s.id == "known")
+        .expect("known listed");
+    assert!(known.exists, "existing servers keep their spec");
+
+    let remote = preview
+        .mcp_servers
+        .iter()
+        .find(|s| s.id == "remote")
+        .expect("remote listed");
+    assert_eq!(remote.url.as_deref(), Some("https://mcp.example.com/mcp"));
+    assert!(remote.command.is_none());
+}

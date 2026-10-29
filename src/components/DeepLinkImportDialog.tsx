@@ -1,6 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { DeepLinkImportRequest, deeplinkApi } from "@/lib/api/deeplink";
+import {
+  DeepLinkImportPreview,
+  DeepLinkImportRequest,
+  DeepLinkPreviewRisk,
+  deeplinkApi,
+} from "@/lib/api/deeplink";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +19,13 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { PromptConfirmation } from "./deeplink/PromptConfirmation";
-import { McpConfirmation } from "./deeplink/McpConfirmation";
+import { McpConfirmation, parseMcpServers } from "./deeplink/McpConfirmation";
+import {
+  ExistingProviderDiff,
+  LiveFilesPreview,
+  RiskAcknowledgement,
+  UsageScriptPreview,
+} from "./deeplink/ImportPreviewSections";
 import { SkillConfirmation } from "./deeplink/SkillConfirmation";
 import { ProviderIcon } from "./ProviderIcon";
 import { invalidateProviderGraph } from "@/entities/provider/invalidate";
@@ -31,6 +42,11 @@ export function DeepLinkImportDialog() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [request, setRequest] = useState<DeepLinkImportRequest | null>(null);
+  const [preview, setPreview] = useState<DeepLinkImportPreview | null>(null);
+  // Extra confirmation for links carrying risky items (see `risks` below)
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  // A newer link arrived (and was ignored) while this dialog was open
+  const [newerLinkIgnored, setNewerLinkIgnored] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isOpen, setIsOpenState] = useState(false);
   // Refs mirror the dialog state for the event listener, which is registered
@@ -81,14 +97,43 @@ export function DeepLinkImportDialog() {
           toast.warning(t("deeplink.requestIgnoredBusy"), {
             description: t("deeplink.requestIgnoredBusyDescription"),
           });
+          if (isOpenRef.current) setNewerLinkIgnored(true);
           return;
         }
 
         const seq = ++requestSeqRef.current;
         let nextRequest: DeepLinkImportRequest = event.payload;
+        let nextPreview: DeepLinkImportPreview | null = null;
+        const hasConfig = !!(event.payload.config || event.payload.configUrl);
+        const wantsPreview =
+          event.payload.resource === "provider" ||
+          event.payload.resource === "mcp" ||
+          !event.payload.resource;
 
-        // If config is present, merge it to get the complete configuration
-        if (event.payload.config || event.payload.configUrl) {
+        if (wantsPreview) {
+          // The preview merges the config like mergeDeeplinkConfig and adds
+          // the risk details shown in the dialog.
+          isMergingRef.current = true;
+          try {
+            nextPreview = await deeplinkApi.previewDeeplinkImport(
+              event.payload,
+            );
+            nextRequest = nextPreview.request;
+          } catch (error) {
+            console.error("Failed to build import preview:", error);
+            if (hasConfig) {
+              toast.error(t("deeplink.configMergeError"), {
+                description:
+                  error instanceof Error ? error.message : String(error),
+              });
+            }
+            // Fall back to the original request; risks are derived locally
+            nextRequest = event.payload;
+          } finally {
+            isMergingRef.current = false;
+          }
+        } else if (hasConfig) {
+          // If config is present, merge it to get the complete configuration
           isMergingRef.current = true;
           try {
             nextRequest = await deeplinkApi.mergeDeeplinkConfig(event.payload);
@@ -109,6 +154,9 @@ export function DeepLinkImportDialog() {
         if (seq !== requestSeqRef.current) return;
 
         setRequest(nextRequest);
+        setPreview(nextPreview);
+        setRiskAcknowledged(false);
+        setNewerLinkIgnored(false);
         setIsOpen(true);
       },
     );
@@ -132,6 +180,7 @@ export function DeepLinkImportDialog() {
 
   const handleImport = async () => {
     if (!request || isImportingRef.current) return;
+    if (risks.length > 0 && !riskAcknowledged) return;
 
     isImportingRef.current = true;
     setIsImporting(true);
@@ -332,6 +381,35 @@ export function DeepLinkImportDialog() {
     return groups;
   }, [parsedConfig]);
 
+  // Usage script source: from the preview, or decoded locally as a fallback
+  const usageScriptCode = useMemo(() => {
+    if (preview?.usageScript) return preview.usageScript.code;
+    if (!request?.usageScript) return null;
+    try {
+      return b64ToUtf8(request.usageScript);
+    } catch {
+      return request.usageScript;
+    }
+  }, [preview, request?.usageScript]);
+
+  // Items that need the extra confirmation. The backend preview is
+  // authoritative; local checks keep the gate when the preview failed.
+  const risks = useMemo((): DeepLinkPreviewRisk[] => {
+    const found = new Set<DeepLinkPreviewRisk>(preview?.risks ?? []);
+    if (!request) return [];
+    if (claudeEnvGroups.unlisted.length > 0) found.add("unlistedEnv");
+    if (usageScriptCode?.trim()) found.add("usageScript");
+    if (
+      !preview &&
+      request.resource === "mcp" &&
+      parseMcpServers(request)?.some((s) => !!s.command)
+    ) {
+      found.add("mcpCommand");
+    }
+    return Array.from(found);
+  }, [preview, request, claudeEnvGroups, usageScriptCode]);
+  const importBlocked = risks.length > 0 && !riskAcknowledged;
+
   const getTitle = () => {
     if (!request) return t("deeplink.confirmImport");
     switch (request.resource) {
@@ -376,8 +454,24 @@ export function DeepLinkImportDialog() {
               {request.resource === "prompt" && (
                 <PromptConfirmation request={request} />
               )}
+              {newerLinkIgnored && (
+                <div
+                  role="status"
+                  data-testid="deeplink-newer-link-banner"
+                  className="rounded-lg border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 p-3 text-xs text-yellow-800 dark:text-yellow-200"
+                >
+                  {t("deeplink.preview.newerLinkIgnored")}
+                </div>
+              )}
+
               {request.resource === "mcp" && (
-                <McpConfirmation request={request} />
+                <>
+                  <McpConfirmation
+                    request={request}
+                    servers={preview?.mcpServers}
+                  />
+                  {preview && <LiveFilesPreview preview={preview} />}
+                </>
               )}
               {request.resource === "skill" && (
                 <SkillConfirmation request={request} />
@@ -719,19 +813,19 @@ export function DeepLinkImportDialog() {
                           {t("deeplink.usageScript")}
                         </div>
                         <div className="col-span-2 text-sm">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
-                              request.usageEnabled !== false
-                                ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-                                : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
-                            }`}
-                          >
-                            {request.usageEnabled !== false
-                              ? t("deeplink.usageScriptEnabled")
-                              : t("deeplink.usageScriptDisabled")}
+                          {/* Deeplink scripts are always stored disabled */}
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+                            {t("deeplink.usageScriptDisabled")}
                           </span>
                         </div>
                       </div>
+
+                      {usageScriptCode !== null && (
+                        <UsageScriptPreview
+                          code={usageScriptCode}
+                          targetHosts={preview?.usageScript?.targetHosts}
+                        />
+                      )}
 
                       {/* Usage API Key (if different from provider) */}
                       {request.usageApiKey &&
@@ -778,11 +872,24 @@ export function DeepLinkImportDialog() {
                     </div>
                   )}
 
+                  {preview?.existing && (
+                    <ExistingProviderDiff existing={preview.existing} />
+                  )}
+
+                  {preview && <LiveFilesPreview preview={preview} />}
+
                   {/* Warning */}
                   <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 p-3 text-sm text-yellow-800 dark:text-yellow-200">
                     {t("deeplink.warning")}
                   </div>
                 </>
+              )}
+
+              {risks.length > 0 && (
+                <RiskAcknowledgement
+                  checked={riskAcknowledged}
+                  onCheckedChange={setRiskAcknowledged}
+                />
               )}
             </div>
 
@@ -794,7 +901,10 @@ export function DeepLinkImportDialog() {
               >
                 {t("common.cancel")}
               </Button>
-              <Button onClick={handleImport} disabled={isImporting}>
+              <Button
+                onClick={handleImport}
+                disabled={isImporting || importBlocked}
+              >
                 {isImporting ? t("deeplink.importing") : t("deeplink.import")}
               </Button>
             </DialogFooter>

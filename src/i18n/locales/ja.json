@@ -2438,7 +2438,13 @@
       "title": "MCP サーバーを一括インポート",
       "targetApps": "ターゲットアプリ",
       "serverCount": "MCP サーバー（{{count}} 件）",
-      "enabledWarning": "インポート後、指定したすべてのアプリに即座に書き込まれます"
+      "enabledWarning": "インポート後、指定したすべてのアプリに即座に書き込まれます",
+      "command": "コマンド",
+      "url": "URL",
+      "env": "環境変数",
+      "headers": "ヘッダー",
+      "commandWarning": "あなたのユーザー権限でローカルコマンドを実行します",
+      "existsNote": "インストール済み：対象アプリのみ追加され、この設定は書き込まれません"
     },
     "prompt": {
       "title": "システムプロンプトをインポート",
@@ -2463,7 +2469,24 @@
     "usageApiKey": "使用量 API キー",
     "usageBaseUrl": "使用量クエリ URL",
     "usageAutoInterval": "自動クエリ",
-    "usageAutoIntervalValue": "{{minutes}} 分ごと"
+    "usageAutoIntervalValue": "{{minutes}} 分ごと",
+    "preview": {
+      "usageScriptCode": "スクリプトのソース（無効のまま保存され、有効にするまで実行されません）",
+      "usageScriptHosts": "スクリプトが接続するホスト",
+      "usageScriptNoHosts": "スクリプトにホストは検出されませんでした",
+      "liveFilesOnImport": "インポート時に書き込まれるファイル",
+      "liveFilesOnSwitch": "このプロバイダーに切り替えたときに書き込まれるファイル",
+      "existingTitle": "\"{{name}}\" という名前のプロバイダーが既に存在します",
+      "existingDescription": "インポートすると新しいプロバイダーが追加され、既存のものは変更されません。既存のプロバイダーとの差分：",
+      "existingIsCurrent": "既存のプロバイダーは現在使用中です。",
+      "existingNoChanges": "設定は既存のプロバイダーと同一です。",
+      "diffField": "項目",
+      "diffBefore": "既存",
+      "diffAfter": "リンク",
+      "newerLinkIgnored": "このダイアログを開いている間に新しいリンクを受信しましたが、適用されていません。ここには元のリンクが表示されたままです。新しいリンクを確認するには、キャンセルしてから再度開いてください。",
+      "riskAck": "赤で示された項目を確認し、このリンクを信頼します",
+      "riskAckHint": "赤で示された項目を確認するとインポートできます。"
+    }
   },
   "iconPicker": {
     "search": "アイコンを検索",

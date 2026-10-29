@@ -2438,7 +2438,13 @@
       "title": "Batch Import MCP Servers",
       "targetApps": "Target Apps",
       "serverCount": "MCP Servers ({{count}})",
-      "enabledWarning": "After import, configurations will be written to all specified apps immediately"
+      "enabledWarning": "After import, configurations will be written to all specified apps immediately",
+      "command": "Command",
+      "url": "URL",
+      "env": "Environment",
+      "headers": "Headers",
+      "commandWarning": "Runs a local command with your user permissions",
+      "existsNote": "Already installed: only the target apps are added; this configuration is not written"
     },
     "prompt": {
       "title": "Import System Prompt",
@@ -2463,7 +2469,24 @@
     "usageApiKey": "Usage API Key",
     "usageBaseUrl": "Usage Query URL",
     "usageAutoInterval": "Auto Query",
-    "usageAutoIntervalValue": "Every {{minutes}} minutes"
+    "usageAutoIntervalValue": "Every {{minutes}} minutes",
+    "preview": {
+      "usageScriptCode": "Script source (stored disabled; it only runs after you enable it)",
+      "usageScriptHosts": "Hosts the script contacts",
+      "usageScriptNoHosts": "No hosts detected in the script",
+      "liveFilesOnImport": "Files written on import",
+      "liveFilesOnSwitch": "Files written when you switch to this provider",
+      "existingTitle": "A provider named \"{{name}}\" already exists",
+      "existingDescription": "Importing adds a new provider next to it; the existing one is not changed. Differences from the existing provider:",
+      "existingIsCurrent": "The existing provider is currently active.",
+      "existingNoChanges": "The configuration is identical to the existing provider.",
+      "diffField": "Field",
+      "diffBefore": "Existing",
+      "diffAfter": "From link",
+      "newerLinkIgnored": "A newer link arrived while this dialog was open. It was not applied: this dialog still shows the original link. Cancel and open the newer link again to review it.",
+      "riskAck": "I have reviewed the items marked in red and trust this link",
+      "riskAckHint": "Import is enabled after you confirm the items marked in red."
+    }
   },
   "iconPicker": {
     "search": "Search Icons",

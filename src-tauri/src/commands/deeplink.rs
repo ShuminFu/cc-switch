@@ -1,6 +1,7 @@
 use crate::deeplink::{
     import_mcp_from_deeplink, import_prompt_from_deeplink, import_provider_from_deeplink,
-    import_skill_from_deeplink, DeepLinkImportRequest,
+    import_skill_from_deeplink, preview_deeplink_import as build_deeplink_preview,
+    DeepLinkImportPreview, DeepLinkImportRequest,
 };
 use crate::store::AppState;
 use tauri::State;
@@ -13,6 +14,18 @@ pub fn merge_deeplink_config(
 ) -> Result<DeepLinkImportRequest, String> {
     log::info!("Merging config for deep link request: {:?}", request.name);
     crate::deeplink::parse_and_merge_config(&request).map_err(|e| e.to_string())
+}
+
+/// Build the confirm-dialog preview of a deep link request: the merged
+/// request plus env-key flags, MCP commands, usage-script source and hosts,
+/// affected live files and a diff against a same-named provider.
+#[tauri::command]
+pub fn preview_deeplink_import(
+    state: State<AppState>,
+    request: DeepLinkImportRequest,
+) -> Result<DeepLinkImportPreview, String> {
+    log::info!("Building import preview for {} deep link", request.resource);
+    build_deeplink_preview(&state, &request).map_err(|e| e.to_string())
 }
 
 /// Import a provider from a deep link request (legacy, kept for compatibility)

@@ -49,6 +49,48 @@ export interface DeepLinkImportRequest {
   usageAutoInterval?: number;
 }
 
+/** Item the user must explicitly acknowledge before importing */
+export type DeepLinkPreviewRisk = "unlistedEnv" | "mcpCommand" | "usageScript";
+
+export interface DeepLinkPreviewMcpServer {
+  id: string;
+  command?: string;
+  args: string[];
+  url?: string;
+  /** Full server spec carried by the link */
+  spec: Record<string, unknown>;
+  /** Already installed: only app flags are merged, this spec is not written */
+  exists: boolean;
+}
+
+export interface DeepLinkPreviewFieldChange {
+  field: string;
+  before?: string;
+  after?: string;
+}
+
+/**
+ * Structured import preview built by the backend. Values are unmasked; the
+ * dialog masks secrets before display.
+ */
+export interface DeepLinkImportPreview {
+  /** Request with its inline config merged (as merge_deeplink_config) */
+  request: DeepLinkImportRequest;
+  unlistedEnvKeys: string[];
+  deniedEnvKeys: string[];
+  mcpServers: DeepLinkPreviewMcpServer[];
+  usageScript?: { code: string; targetHosts: string[] };
+  liveFiles: string[];
+  writesLiveOnImport: boolean;
+  existing?: {
+    id: string;
+    name: string;
+    isCurrent: boolean;
+    changes: DeepLinkPreviewFieldChange[];
+  };
+  risks: DeepLinkPreviewRisk[];
+}
+
 export interface McpImportResult {
   importedCount: number;
   importedIds: string[];
@@ -80,6 +122,17 @@ export const deeplinkApi = {
     request: DeepLinkImportRequest,
   ): Promise<DeepLinkImportRequest> => {
     return invoke("merge_deeplink_config", { request });
+  },
+
+  /**
+   * Build the confirm-dialog preview: merged request, flagged env keys, MCP
+   * commands, usage-script source and hosts, affected live files and a diff
+   * against an existing provider with the same name.
+   */
+  previewDeeplinkImport: async (
+    request: DeepLinkImportRequest,
+  ): Promise<DeepLinkImportPreview> => {
+    return invoke("preview_deeplink_import", { request });
   },
 
   /**

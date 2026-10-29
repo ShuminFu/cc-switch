@@ -28,3 +28,34 @@ export function isSensitiveKey(key: string): boolean {
 export function maskValue(key: string, value: string): string {
   return isSensitiveKey(key) ? maskSecret(value) : value;
 }
+
+const CONFIG_LINE = /^(\s*["']?([A-Za-z0-9_.-]+)["']?\s*[=:]\s*)(.+)$/;
+
+/**
+ * Masks secret values inside multi-line config text (TOML `key = value`,
+ * YAML / JSON `key: value`). Lines whose key does not name a secret are kept.
+ */
+export function maskConfigText(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const match = line.match(CONFIG_LINE);
+      if (!match || !isSensitiveKey(match[2])) return line;
+      const raw = match[3]
+        .trim()
+        .replace(/,$/, "")
+        .replace(/^["']|["']$/g, "");
+      return `${match[1]}"${maskSecret(raw)}"`;
+    })
+    .join("\n");
+}
+
+/**
+ * Masks a preview diff value addressed by a dotted `field` path
+ * (e.g. `settingsConfig.env.ANTHROPIC_AUTH_TOKEN`).
+ */
+export function maskFieldValue(field: string, value: string): string {
+  const leaf = field.split(".").pop() ?? field;
+  if (isSensitiveKey(leaf)) return maskSecret(value);
+  return value.includes("\n") ? maskConfigText(value) : value;
+}
