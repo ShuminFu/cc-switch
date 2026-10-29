@@ -4687,4 +4687,145 @@ mod tests {
 
         upstream.abort();
     }
+
+    /// 本地上游：前 `failures` 次返回 500，之后返回 200
+    async fn spawn_flaky_upstream(
+        failures: usize,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let remaining = Arc::new(AtomicUsize::new(failures));
+        let app = axum::Router::new().route(
+            "/v1/messages",
+            axum::routing::post(move || {
+                let remaining = remaining.clone();
+                async move {
+                    let failed = remaining
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                        .is_ok();
+                    if failed {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "upstream boom")
+                    } else {
+                        (StatusCode::OK, r#"{"type":"message","content":[]}"#)
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind flaky upstream");
+        let addr = listener.local_addr().expect("flaky upstream address");
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (addr, handle)
+    }
+
+    fn upstream_provider(id: &str, addr: std::net::SocketAddr) -> Provider {
+        Provider::with_id(
+            id.to_string(),
+            format!("Provider {id}"),
+            json!({
+                "env": {
+                    "ANTHROPIC_BASE_URL": format!("http://{addr}"),
+                    "ANTHROPIC_AUTH_TOKEN": "sk-test",
+                }
+            }),
+            None,
+        )
+    }
+
+    /// 与 `deps` 共享状态的 forwarder，模拟请求开始时当前供应商为 `current_at_start`
+    fn failover_forwarder(deps: &Arc<ForwarderDeps>, current_at_start: &str) -> RequestForwarder {
+        let mut forwarder = test_forwarder(Duration::from_secs(30), Duration::from_secs(30));
+        forwarder.shared = deps.clone();
+        forwarder.req.max_attempts = 2;
+        forwarder.req.current_provider_id_at_start = current_at_start.to_string();
+        forwarder
+    }
+
+    async fn send(forwarder: &RequestForwarder, providers: &[Provider]) -> String {
+        let result = forwarder
+            .forward_with_retry(
+                &AppType::Claude,
+                http::Method::POST,
+                "/v1/messages",
+                json!({
+                    "model": "claude-sonnet-4-5",
+                    "max_tokens": 16,
+                    "messages": [{ "role": "user", "content": "hi" }]
+                }),
+                HeaderMap::new(),
+                Extensions::new(),
+                providers.to_vec(),
+            )
+            .await;
+        match result {
+            Ok(result) => result.provider.id,
+            Err(e) => panic!("request must succeed, got {:?}", e.error),
+        }
+    }
+
+    #[tokio::test]
+    async fn transient_failure_counts_one_failover_and_return_counts_recovery() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let (a_addr, a_upstream) = spawn_flaky_upstream(1).await;
+        let (b_addr, b_upstream) = spawn_flaky_upstream(0).await;
+        let providers = vec![
+            upstream_provider("a", a_addr),
+            upstream_provider("b", b_addr),
+        ];
+        let deps = test_forwarder(Duration::ZERO, Duration::ZERO).shared;
+
+        // 请求 1：当前供应商 P1，P1 返回 5xx，P2 接手
+        assert_eq!(send(&failover_forwarder(&deps, "a"), &providers).await, "b");
+        assert_eq!(deps.status.read().await.failover_count, 1);
+        assert_eq!(deps.status.read().await.recovery_count, 0);
+
+        // 请求 2：热切换已把当前供应商改为 P2，P1 首个尝试即成功 —— 恢复而不是故障转移
+        assert_eq!(send(&failover_forwarder(&deps, "b"), &providers).await, "a");
+        let status = deps.status.read().await;
+        assert_eq!(status.failover_count, 1);
+        assert_eq!(status.recovery_count, 1);
+        assert_eq!(status.success_requests, 2);
+        drop(status);
+
+        // 请求 3：仍停留在 P1，不再计数
+        assert_eq!(send(&failover_forwarder(&deps, "a"), &providers).await, "a");
+        let status = deps.status.read().await;
+        assert_eq!(status.failover_count, 1);
+        assert_eq!(status.recovery_count, 1);
+
+        a_upstream.abort();
+        b_upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn parallel_failovers_before_the_switch_lands_count_once() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        const N: usize = 8;
+        let (a_addr, a_upstream) = spawn_flaky_upstream(usize::MAX).await;
+        let (b_addr, b_upstream) = spawn_flaky_upstream(0).await;
+        let providers = vec![
+            upstream_provider("a", a_addr),
+            upstream_provider("b", b_addr),
+        ];
+        let deps = test_forwarder(Duration::ZERO, Duration::ZERO).shared;
+
+        // 所有请求都在异步切换落地前开始：当前供应商仍是 P1
+        let forwarders: Vec<_> = (0..N).map(|_| failover_forwarder(&deps, "a")).collect();
+        let served =
+            futures::future::join_all(forwarders.iter().map(|f| send(f, &providers))).await;
+
+        assert!(served.iter().all(|id| id == "b"), "served by {served:?}");
+        let status = deps.status.read().await;
+        assert_eq!(status.success_requests, N as u64);
+        assert_eq!(status.failover_count, 1);
+        assert_eq!(status.recovery_count, 0);
+
+        a_upstream.abort();
+        b_upstream.abort();
+    }
 }

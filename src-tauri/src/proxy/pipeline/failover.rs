@@ -7,11 +7,18 @@
 //! - 尝试维度：[`AttemptRecorder::begin`] 申请熔断器放行许可，返回的 [`Attempt`] 持有
 //!   `HalfOpenPermit` 守卫，并通过消耗 `self` 的方法只记录一次结果。若请求在记录结果前
 //!   被取消（future 被 drop），守卫随 `Attempt` 一起 Drop，释放 HalfOpen 探测名额。
+//!
+//! 切换计数：只有本次请求里排在前面的 provider 失败（或被熔断器拒绝）后由后面的
+//! provider 接手，才计一次 `failover_count`；首个尝试就成功、但与请求开始时的当前供应商
+//! 不同（回到更高优先级的 provider）计一次 `recovery_count`。两者都以
+//! `current_providers` 中记录的「最近一次实际使用的 provider」去重，
+//! 并发请求在异步切换落地前各自成功时只计一次。
 
 use crate::provider::Provider;
 use crate::proxy::circuit_breaker::HalfOpenPermit;
 use crate::proxy::forwarder::ForwarderDeps;
 use crate::proxy::types::ProxyStatus;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 按当前计数重新计算成功率
 fn refresh_success_rate(status: &mut ProxyStatus) {
@@ -27,6 +34,8 @@ pub(crate) struct AttemptRecorder<'a> {
     app_type: &'a str,
     /// 请求开始时的"当前供应商 ID"；成功的 provider 与之不同即视为发生了故障转移
     current_provider_id_at_start: &'a str,
+    /// 本次请求中是否已有排在前面的 provider 失败或被熔断器拒绝
+    earlier_provider_failed: AtomicBool,
 }
 
 impl<'a> AttemptRecorder<'a> {
@@ -39,7 +48,12 @@ impl<'a> AttemptRecorder<'a> {
             deps,
             app_type,
             current_provider_id_at_start,
+            earlier_provider_failed: AtomicBool::new(false),
         }
+    }
+
+    fn mark_provider_failed(&self) {
+        self.earlier_provider_failed.store(true, Ordering::Relaxed);
     }
 
     /// 为 `provider` 开始一次尝试
@@ -61,6 +75,7 @@ impl<'a> AttemptRecorder<'a> {
                 .allow_provider_request(&provider.id, self.app_type)
                 .await;
             if !allow.allowed {
+                self.mark_provider_failed();
                 return None;
             }
             allow.permit
@@ -98,8 +113,9 @@ pub(crate) struct Attempt<'r, 'p> {
 }
 
 impl Attempt<'_, '_> {
-    /// 尝试成功：记录熔断器/健康度，更新当前 provider 与成功统计，
-    /// 实际使用的 provider 不是请求开始时的当前供应商时计一次故障转移并触发切换
+    /// 尝试成功：记录熔断器/健康度，更新当前 provider 与成功统计；
+    /// 实际使用的 provider 不是请求开始时的当前供应商时触发切换，
+    /// 并按是否有前序 provider 失败分别计一次故障转移或恢复（见模块文档）
     pub(crate) async fn succeed(self) {
         let recorder = self.recorder;
         let deps = recorder.deps;
@@ -135,21 +151,38 @@ impl Attempt<'_, '_> {
             });
         }
 
-        // 更新当前应用类型使用的 provider
-        {
+        // 更新当前应用类型使用的 provider；写锁内取回上一次实际使用的 provider，
+        // 已被并发请求切到同一 provider 时不再重复计数
+        let previous_provider_id = {
             let mut current_providers = deps.current_providers.write().await;
-            current_providers.insert(
-                app_type.to_string(),
-                (provider.id.clone(), provider.name.clone()),
-            );
-        }
+            current_providers
+                .insert(
+                    app_type.to_string(),
+                    (provider.id.clone(), provider.name.clone()),
+                )
+                .map(|(id, _)| id)
+        };
+
+        let switched_from_start = recorder.current_provider_id_at_start != provider.id.as_str();
+        let newly_switched =
+            switched_from_start && previous_provider_id.as_deref() != Some(provider.id.as_str());
 
         let mut status = deps.status.write().await;
         status.success_requests += 1;
         status.last_error = None;
-        if recorder.current_provider_id_at_start != provider.id.as_str() {
-            status.failover_count += 1;
-
+        if newly_switched {
+            if recorder.earlier_provider_failed.load(Ordering::Relaxed) {
+                status.failover_count += 1;
+            } else {
+                status.recovery_count += 1;
+                log::info!(
+                    "[{app_type}] 已恢复到 Provider {} (id={})",
+                    provider.name,
+                    provider.id
+                );
+            }
+        }
+        if switched_from_start {
             // 异步触发供应商切换，更新 UI/托盘，并把"当前供应商"同步为实际使用的 provider
             let fm = deps.failover_manager.clone();
             let ah = deps.app_handle.clone();
@@ -169,6 +202,7 @@ impl Attempt<'_, '_> {
     /// 全部失败时再由 [`AttemptRecorder::fail_request`] 记一次请求失败。
     pub(crate) async fn fail_provider(self, error: String, status_message: String) {
         let recorder = self.recorder;
+        recorder.mark_provider_failed();
         let _ = recorder
             .deps
             .router
@@ -275,12 +309,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn success_on_other_provider_counts_one_failover() {
+    async fn success_after_earlier_failure_counts_one_failover() {
         let deps = deps_with_breaker(60).await;
         deps.status.write().await.total_requests = 1;
         let recorder = AttemptRecorder::new(&deps, "claude", "a");
+        let a = provider("a");
         let b = provider("b");
 
+        recorder
+            .begin(&a, false)
+            .await
+            .expect("closed breaker")
+            .fail_provider("boom".into(), "Provider a 失败: boom".into())
+            .await;
         recorder
             .begin(&b, false)
             .await
@@ -291,8 +332,81 @@ mod tests {
         let status = deps.status.read().await;
         assert_eq!(status.success_requests, 1);
         assert_eq!(status.failover_count, 1);
+        assert_eq!(status.recovery_count, 0);
         assert_eq!(status.success_rate, 100.0);
         assert!(status.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn breaker_rejected_provider_counts_as_earlier_failure() {
+        let deps = deps_with_breaker(60).await;
+        trip(&deps, "a").await;
+        let recorder = AttemptRecorder::new(&deps, "claude", "a");
+        let (a, b) = (provider("a"), provider("b"));
+
+        assert!(recorder.begin(&a, false).await.is_none());
+        recorder
+            .begin(&b, false)
+            .await
+            .expect("closed")
+            .succeed()
+            .await;
+
+        let status = deps.status.read().await;
+        assert_eq!(status.failover_count, 1);
+        assert_eq!(status.recovery_count, 0);
+    }
+
+    #[tokio::test]
+    async fn first_attempt_on_other_provider_counts_recovery_not_failover() {
+        let deps = deps_with_breaker(60).await;
+        // 上一次实际使用的是 b（此前故障转移到 b），请求开始时当前供应商也是 b
+        deps.current_providers
+            .write()
+            .await
+            .insert("claude".into(), ("b".into(), "Provider b".into()));
+        let recorder = AttemptRecorder::new(&deps, "claude", "b");
+        let a = provider("a");
+
+        recorder
+            .begin(&a, false)
+            .await
+            .expect("closed")
+            .succeed()
+            .await;
+
+        let status = deps.status.read().await;
+        assert_eq!(status.failover_count, 0);
+        assert_eq!(status.recovery_count, 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_switches_to_the_same_provider_count_once() {
+        let deps = deps_with_breaker(60).await;
+        let (a, b) = (provider("a"), provider("b"));
+        // 两个请求都在切换落地前开始（当前供应商仍是 a），且 a 都失败
+        let first = AttemptRecorder::new(&deps, "claude", "a");
+        let second = AttemptRecorder::new(&deps, "claude", "a");
+        for recorder in [&first, &second] {
+            recorder
+                .begin(&a, true)
+                .await
+                .expect("bypass")
+                .fail_provider("boom".into(), "boom".into())
+                .await;
+        }
+
+        first.begin(&b, true).await.expect("bypass").succeed().await;
+        second
+            .begin(&b, true)
+            .await
+            .expect("bypass")
+            .succeed()
+            .await;
+
+        let status = deps.status.read().await;
+        assert_eq!(status.success_requests, 2);
+        assert_eq!(status.failover_count, 1);
     }
 
     #[tokio::test]

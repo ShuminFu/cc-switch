@@ -601,6 +601,8 @@ export type ProxyStatus = {
 	last_error: string | null,
 	/**  Provider故障转移次数 */
 	failover_count: number,
+	/**  回到更高优先级 Provider 的恢复次数（首个尝试即成功，但不是请求开始时的当前供应商） */
+	recovery_count?: number,
 	/**  当前活跃的代理目标列表 */
 	active_targets?: ActiveTarget[],
 };
