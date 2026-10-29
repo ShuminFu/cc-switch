@@ -424,7 +424,7 @@ async fn send_raw_request(
             .map_err(RawSendError::PreWrite)?
     } else {
         ProxyStream::Tcp(
-            tokio::net::TcpStream::connect((host, port))
+            tcp_connect(host, port)
                 .await
                 .map_err(|e| pre(format!("TCP connect failed: {e}")))?,
         )
@@ -432,8 +432,8 @@ async fn send_raw_request(
 
     if scheme == "https" {
         let tls_connector = global_tls_connector();
-        let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
-            .map_err(|e| pre(format!("Invalid server name: {e}")))?;
+        let server_name =
+            tls_server_name(host).map_err(|e| pre(format!("Invalid server name: {e}")))?;
         let mut tls_stream = tls_connector
             .connect(server_name, stream)
             .await
@@ -470,6 +470,38 @@ async fn send_raw_request(
     }
 }
 
+/// Strip the `[...]` brackets that URIs put around IPv6 literals.
+///
+/// `http::Uri::host` and `url::Url::host_str` both return `"[::1]"`, which
+/// neither the socket resolver nor `ServerName` accepts.
+fn unbracket_host(host: &str) -> &str {
+    host.strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host)
+}
+
+/// TCP connect to a URI host, connecting IP literals (bracketed IPv6
+/// included) by `SocketAddr` and resolving everything else by name.
+async fn tcp_connect(host: &str, port: u16) -> std::io::Result<tokio::net::TcpStream> {
+    let host = unbracket_host(host);
+    match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => tokio::net::TcpStream::connect(std::net::SocketAddr::new(ip, port)).await,
+        Err(_) => tokio::net::TcpStream::connect((host, port)).await,
+    }
+}
+
+/// TLS server name for a URI host: `IpAddress` for IP literals (bracketed
+/// IPv6 included), `DnsName` otherwise.
+fn tls_server_name(
+    host: &str,
+) -> Result<rustls::pki_types::ServerName<'static>, rustls::pki_types::InvalidDnsNameError> {
+    let host = unbracket_host(host);
+    match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => Ok(rustls::pki_types::ServerName::IpAddress(ip.into())),
+        Err(_) => rustls::pki_types::ServerName::try_from(host.to_string()),
+    }
+}
+
 /// Establish a connection through an HTTP CONNECT proxy tunnel.
 ///
 /// 1. Connect TCP to the proxy server (TLS-wrapped when `https://` proxy)
@@ -498,14 +530,14 @@ async fn connect_via_proxy(
         proxy_auth_header(&parsed).map(|value| format!("Proxy-Authorization: {value}\r\n"));
 
     // Connect to the proxy
-    let tcp = tokio::net::TcpStream::connect((proxy_host, proxy_port))
+    let tcp = tcp_connect(proxy_host, proxy_port)
         .await
         .map_err(|e| ProxyError::ForwardFailed(format!("Proxy TCP connect failed: {e}")))?;
 
     // Wrap with TLS if the proxy URL uses https://
     let mut stream: ProxyStream = if parsed.scheme() == "https" {
         let tls_connector = global_tls_connector();
-        let server_name = rustls::pki_types::ServerName::try_from(proxy_host.to_string())
+        let server_name = tls_server_name(proxy_host)
             .map_err(|e| ProxyError::ForwardFailed(format!("Invalid proxy server name: {e}")))?;
         let tls_stream = tls_connector
             .connect(server_name, tcp)
@@ -1080,6 +1112,109 @@ mod tests {
             Err(ProxyError::AuthError(_)) => {}
             Err(e) => panic!("expected AuthError, got: {e}"),
             Ok(_) => panic!("407 must not establish the tunnel"),
+        }
+    }
+
+    /// Bind a listener on `[::1]:0`, or `None` when the host has no IPv6.
+    async fn bind_ipv6_loopback() -> Option<tokio::net::TcpListener> {
+        match tokio::net::TcpListener::bind("[::1]:0").await {
+            Ok(listener) => Some(listener),
+            Err(e) => {
+                eprintln!("skipping: IPv6 loopback unavailable: {e}");
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn unbracket_host_strips_only_ipv6_brackets() {
+        assert_eq!(unbracket_host("[::1]"), "::1");
+        assert_eq!(unbracket_host("[2001:db8::1]"), "2001:db8::1");
+        assert_eq!(unbracket_host("127.0.0.1"), "127.0.0.1");
+        assert_eq!(unbracket_host("example.com"), "example.com");
+        assert_eq!(unbracket_host("[::1"), "[::1");
+    }
+
+    #[test]
+    fn tls_server_name_uses_ip_address_for_literals() {
+        use rustls::pki_types::ServerName;
+        let v6: std::net::IpAddr = "::1".parse().unwrap();
+        assert_eq!(
+            tls_server_name("[::1]").unwrap(),
+            ServerName::IpAddress(v6.into())
+        );
+        let v4: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        assert_eq!(
+            tls_server_name("127.0.0.1").unwrap(),
+            ServerName::IpAddress(v4.into())
+        );
+        assert!(matches!(
+            tls_server_name("example.com").unwrap(),
+            ServerName::DnsName(_)
+        ));
+        assert!(tls_server_name("not a host").is_err());
+    }
+
+    #[tokio::test]
+    async fn connect_via_proxy_reaches_ipv6_literal_proxy() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let Some(listener) = bind_ipv6_loopback().await else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let n = sock.read(&mut buf).await.unwrap_or(0);
+            let _ = tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+            let _ = sock.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await;
+            let _ = sock.flush().await;
+            let _ = sock.read(&mut buf).await;
+        });
+
+        let result = connect_via_proxy(&format!("http://[::1]:{port}"), "[::1]", 8443).await;
+        assert!(result.is_ok(), "IPv6-literal proxy must connect");
+        let request = rx.await.unwrap();
+        assert!(
+            request.starts_with("CONNECT [::1]:8443 HTTP/1.1\r\nHost: [::1]:8443\r\n"),
+            "CONNECT line and Host header must keep brackets, got: {request:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_raw_request_reaches_ipv6_literal_upstream() {
+        use tokio::io::AsyncWriteExt;
+        let Some(listener) = bind_ipv6_loopback().await else {
+            return;
+        };
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            read_full_request(&mut stream).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .await;
+            let _ = stream.flush().await;
+        });
+
+        let uri: http::Uri = format!("http://[::1]:{port}/v1/messages").parse().unwrap();
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::HOST,
+            http::HeaderValue::from_str(&format!("[::1]:{port}")).unwrap(),
+        );
+        let cases =
+            OriginalHeaderCases::from_raw_bytes(b"POST /v1/messages HTTP/1.1\r\nHost: x\r\n\r\n");
+        // Call the raw path directly: success here cannot come from the fallback.
+        let result =
+            send_raw_request(&uri, &http::Method::POST, &headers, &cases, b"{}", None).await;
+        match result {
+            Ok(resp) => {
+                assert_eq!(resp.status(), http::StatusCode::OK);
+                assert_eq!(&resp.bytes().await.unwrap()[..], b"ok");
+            }
+            Err(e) => panic!("raw path to [::1] must succeed, got: {e:?}"),
         }
     }
 }
