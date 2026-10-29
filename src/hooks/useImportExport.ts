@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { settingsApi } from "@/lib/api";
 import { syncCurrentProvidersLiveSafe } from "@/utils/postChangeSync";
+import { getIpcErrorAction } from "@/lib/errors/errorActions";
 
 export type ImportStatus =
   | "idle"
@@ -111,6 +112,7 @@ export function useImportExport(
         t("settings.importFailedError", {
           message,
         }),
+        { action: getIpcErrorAction(error, t) ?? undefined },
       );
     } finally {
       setIsImporting(false);

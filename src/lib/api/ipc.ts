@@ -32,6 +32,9 @@ export const IPC_ERROR_CODES = [
   "DOWNLOAD_FAILED",
   "EMPTY_ARCHIVE",
   "NO_SKILLS_IN_ZIP",
+  "TOOL_NOT_INSTALLED",
+  "TAKEOVER_ACTIVE",
+  "DB_VERSION_TOO_NEW",
 ] as const;
 
 export type IpcErrorCode = (typeof IPC_ERROR_CODES)[number];

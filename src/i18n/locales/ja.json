@@ -1762,7 +1762,16 @@
   "errors": {
     "usage_query_failed": "利用状況の取得に失敗しました",
     "configLoadFailedTitle": "設定の読み込みに失敗しました",
-    "configLoadFailedMessage": "設定ファイルを読み込めません:\n{{path}}\n\nエラー詳細:\n{{detail}}\n\nJSON が正しいか確認するか、同じディレクトリのバックアップファイル（config.json.bak など）から復元してください。\n\nアプリを終了して修正してください。"
+    "configLoadFailedMessage": "設定ファイルを読み込めません:\n{{path}}\n\nエラー詳細:\n{{detail}}\n\nJSON が正しいか確認するか、同じディレクトリのバックアップファイル（config.json.bak など）から復元してください。\n\nアプリを終了して修正してください。",
+    "actions": {
+      "install": "インストール",
+      "resetCircuit": "リセット",
+      "stopTakeover": "引き継ぎを停止",
+      "restoreBackup": "バックアップを復元",
+      "succeeded": "{{action}}：完了しました",
+      "failed": "{{action}}に失敗しました：{{error}}",
+      "noBackup": "復元できるデータベースバックアップがありません"
+    }
   },
   "presetSelector": {
     "title": "設定タイプを選択",

@@ -222,7 +222,13 @@ export type ErrorCode =
 /**  带 i18n key 的本地化错误，key 见 `IpcError::i18n_key` */
 "LOCALIZED" | "DATABASE" | "OMO_CONFIG_NOT_FOUND" | 
 /**  所有供应商已熔断 */
-"CIRCUIT_OPEN" | "NO_PROVIDERS_CONFIGURED" | "UNSUPPORTED" | "SKILL_NOT_FOUND" | "INVALID_SKILL_DIRECTORY" | "SKILL_DIRECTORY_CONFLICT" | "SKILL_DIR_NOT_FOUND" | "DOWNLOAD_TIMEOUT" | "DOWNLOAD_FAILED" | "EMPTY_ARCHIVE" | "NO_SKILLS_IN_ZIP";
+"CIRCUIT_OPEN" | "NO_PROVIDERS_CONFIGURED" | "UNSUPPORTED" | "SKILL_NOT_FOUND" | "INVALID_SKILL_DIRECTORY" | "SKILL_DIRECTORY_CONFLICT" | "SKILL_DIR_NOT_FOUND" | "DOWNLOAD_TIMEOUT" | "DOWNLOAD_FAILED" | "EMPTY_ARCHIVE" | "NO_SKILLS_IN_ZIP" | 
+/**  所需 CLI 工具未安装，`details = { tool }` */
+"TOOL_NOT_INSTALLED" | 
+/**  代理接管冲突，`details = { appType }` */
+"TAKEOVER_ACTIVE" | 
+/**  数据库版本高于应用支持版本，`details = { backupId? }` */
+"DB_VERSION_TOO_NEW";
 
 /**
  *  Tauri 命令返回给前端的结构化错误

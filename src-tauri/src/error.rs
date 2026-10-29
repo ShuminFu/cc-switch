@@ -169,6 +169,13 @@ pub enum ErrorCode {
     DownloadFailed,
     EmptyArchive,
     NoSkillsInZip,
+    // ---- 可操作错误（前端 toast 提供修复按钮） ----
+    /// 所需 CLI 工具未安装，`details = { tool }`
+    ToolNotInstalled,
+    /// 代理接管冲突，`details = { appType }`
+    TakeoverActive,
+    /// 数据库版本高于应用支持版本，`details = { backupId? }`
+    DbVersionTooNew,
 }
 
 impl ErrorCode {
@@ -196,6 +203,9 @@ impl ErrorCode {
         ErrorCode::DownloadFailed,
         ErrorCode::EmptyArchive,
         ErrorCode::NoSkillsInZip,
+        ErrorCode::ToolNotInstalled,
+        ErrorCode::TakeoverActive,
+        ErrorCode::DbVersionTooNew,
     ];
 
     /// 稳定的线上字符串，与 serde 序列化结果一致
@@ -224,6 +234,9 @@ impl ErrorCode {
             ErrorCode::DownloadFailed => "DOWNLOAD_FAILED",
             ErrorCode::EmptyArchive => "EMPTY_ARCHIVE",
             ErrorCode::NoSkillsInZip => "NO_SKILLS_IN_ZIP",
+            ErrorCode::ToolNotInstalled => "TOOL_NOT_INSTALLED",
+            ErrorCode::TakeoverActive => "TAKEOVER_ACTIVE",
+            ErrorCode::DbVersionTooNew => "DB_VERSION_TOO_NEW",
         }
     }
 }
@@ -405,6 +418,9 @@ mod tests {
             ErrorCode::DownloadFailed => 20,
             ErrorCode::EmptyArchive => 21,
             ErrorCode::NoSkillsInZip => 22,
+            ErrorCode::ToolNotInstalled => 23,
+            ErrorCode::TakeoverActive => 24,
+            ErrorCode::DbVersionTooNew => 25,
         }
     }
 
@@ -413,7 +429,7 @@ mod tests {
         for (i, code) in ErrorCode::ALL.iter().enumerate() {
             assert_eq!(variant_index(*code), i, "{code:?} out of order in ALL");
         }
-        assert_eq!(ErrorCode::ALL.len(), 23);
+        assert_eq!(ErrorCode::ALL.len(), 26);
     }
 
     #[test]
@@ -442,6 +458,9 @@ mod tests {
             "DOWNLOAD_FAILED",
             "EMPTY_ARCHIVE",
             "NO_SKILLS_IN_ZIP",
+            "TOOL_NOT_INSTALLED",
+            "TAKEOVER_ACTIVE",
+            "DB_VERSION_TOO_NEW",
         ];
         assert_eq!(ErrorCode::ALL.len(), expected.len());
         for (code, wire) in ErrorCode::ALL.iter().zip(expected) {

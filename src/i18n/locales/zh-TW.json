@@ -1762,7 +1762,16 @@
   "errors": {
     "usage_query_failed": "用量查詢失敗",
     "configLoadFailedTitle": "設定載入失敗",
-    "configLoadFailedMessage": "無法讀取設定檔：\n{{path}}\n\n錯誤詳情：\n{{detail}}\n\n請手動檢查 JSON 是否有效，或從同目錄的備份檔案（如 config.json.bak）還原。\n\n應用程式將退出以便您進行修復。"
+    "configLoadFailedMessage": "無法讀取設定檔：\n{{path}}\n\n錯誤詳情：\n{{detail}}\n\n請手動檢查 JSON 是否有效，或從同目錄的備份檔案（如 config.json.bak）還原。\n\n應用程式將退出以便您進行修復。",
+    "actions": {
+      "install": "安裝",
+      "resetCircuit": "重設",
+      "stopTakeover": "停止接管",
+      "restoreBackup": "還原備份",
+      "succeeded": "{{action}}：已完成",
+      "failed": "{{action}}失敗：{{error}}",
+      "noBackup": "沒有可還原的資料庫備份"
+    }
   },
   "presetSelector": {
     "title": "選擇設定類型",

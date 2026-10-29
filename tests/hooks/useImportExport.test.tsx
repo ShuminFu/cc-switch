@@ -155,8 +155,10 @@ describe("useImportExport Hook", () => {
 
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe("Import failed");
+    // 非结构化错误没有修复按钮
     expect(toastErrorMock).toHaveBeenCalledWith(
       expect.stringContaining("导入配置失败"),
+      { action: undefined },
     );
   });
 
