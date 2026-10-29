@@ -1146,3 +1146,199 @@ fn init_keeps_delete_journal_in_cloud_sync_dir() {
     assert!(!dir.join("cc-switch.db-wal").exists());
     assert!(!dir.join("cc-switch.db-shm").exists());
 }
+
+/// 把 SQL 导出中的 `PRAGMA user_version=N;` 改写为 `version`，模拟更新版本的导出
+fn with_dump_user_version(sql: &str, version: i32) -> String {
+    assert!(
+        sql.lines()
+            .any(|line| line.starts_with("PRAGMA user_version=")),
+        "dump has no user_version"
+    );
+    sql.lines()
+        .map(|line| {
+            if line.starts_with("PRAGMA user_version=") {
+                format!("PRAGMA user_version={version};")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn import_of_newer_schema_dump_is_rejected_and_leaves_db_unchanged() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let db = Database::memory().expect("create memory db");
+    seed_main_provider(&db);
+
+    let remote = Database::memory().expect("create remote db");
+    {
+        let conn = remote.conn.lock().expect("lock conn");
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, meta)
+             VALUES ('remote-provider', 'claude', 'Remote Provider', '{}', '{}')",
+            [],
+        )
+        .expect("insert remote provider");
+    }
+    let newer = with_dump_user_version(
+        &remote.export_sql_string().expect("export"),
+        SCHEMA_VERSION + 1,
+    );
+
+    for (label, result) in [
+        ("manual import", db.import_sql_string(&newer)),
+        ("sync import", db.import_sql_string_for_sync(&newer)),
+    ] {
+        match result {
+            Err(AppError::Localized { key, en, .. }) => {
+                assert_eq!(key, "backup.sql.newer_schema", "{label}");
+                assert!(en.contains("No local data was changed"), "{label}: {en}");
+            }
+            other => panic!("{label}: unexpected result: {other:?}"),
+        }
+    }
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+
+    // 头部被改写为受支持版本、但实际执行后 user_version 更新的导出同样被拒绝
+    let forged = format!(
+        "{}\nPRAGMA user_version={};\n",
+        remote.export_sql_string().expect("export"),
+        SCHEMA_VERSION + 1
+    );
+    match db.import_sql_string(&forged) {
+        Err(AppError::Localized { key, .. }) => assert_eq!(key, "backup.sql.newer_schema"),
+        other => panic!("forged dump: unexpected result: {other:?}"),
+    }
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+}
+
+/// 模拟「新版应用迁移后回退到旧版」：磁盘上的库比当前应用新，backups 里有
+/// 新版应用迁移前留下的快照（以及一个同样过新、不可恢复的备份）。
+fn setup_newer_db_with_premigration_backup(home: &std::path::Path) -> std::path::PathBuf {
+    let db = Database::init().expect("init database");
+    seed_main_provider(&db);
+    drop(db);
+    let dir = home.join(".cc-switch");
+    let db_path = dir.join("cc-switch.db");
+    let backup_dir = dir.join("backups");
+    std::fs::create_dir_all(&backup_dir).expect("create backup dir");
+    {
+        let conn = Connection::open(&db_path).expect("open main db");
+        let mut dest =
+            Connection::open(backup_dir.join("db_backup_20260101_000000.db")).expect("open dest");
+        rusqlite::backup::Backup::new(&conn, &mut dest)
+            .and_then(|b| b.step(-1))
+            .expect("copy pre-migration backup");
+        Database::set_user_version(&conn, SCHEMA_VERSION + 1).expect("bump main version");
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, meta)
+             VALUES ('newer-provider', 'claude', 'Newer Provider', '{}', '{}')",
+            [],
+        )
+        .expect("insert newer provider");
+    }
+    write_backup_file(
+        home,
+        "db_backup_20260102_000000.db",
+        SCHEMA_VERSION + 1,
+        None,
+    );
+    std::fs::write(
+        backup_dir.join("db_backup_20260103_000000.db"),
+        b"not sqlite",
+    )
+    .expect("write corrupt backup");
+    db_path
+}
+
+#[test]
+fn db_version_too_new_payload_lists_restorable_premigration_backups() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let _settings = crate::settings::scoped_settings_store();
+    let db_path = setup_newer_db_with_premigration_backup(home.path());
+
+    let version = Database::stored_user_version_exceeds_supported(&db_path)
+        .expect("precheck")
+        .expect("database must be flagged as too new");
+    let payload = crate::init_status::db_version_too_new_payload(&db_path, version);
+
+    assert_eq!(
+        payload.kind.as_deref(),
+        Some(crate::init_status::DB_VERSION_TOO_NEW)
+    );
+    assert_eq!(payload.db_version, Some(SCHEMA_VERSION + 1));
+    assert_eq!(payload.supported_version, Some(SCHEMA_VERSION));
+    let backups = payload.restorable_backups.expect("backups listed");
+    let names: Vec<&str> = backups.iter().map(|b| b.filename.as_str()).collect();
+    assert_eq!(names, vec!["db_backup_20260101_000000.db"]);
+    assert_eq!(backups[0].db_version, SCHEMA_VERSION);
+
+    let json = serde_json::to_value(crate::init_status::db_version_too_new_payload(
+        &db_path, version,
+    ))
+    .expect("serialize payload");
+    assert_eq!(
+        json["restorable_backups"][0]["filename"],
+        json!("db_backup_20260101_000000.db")
+    );
+    assert_eq!(
+        json["restorable_backups"][0]["dbVersion"],
+        json!(SCHEMA_VERSION)
+    );
+}
+
+#[test]
+fn restore_backup_over_newer_db_downgrades_and_keeps_newer_copy() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let _settings = crate::settings::scoped_settings_store();
+    let db_path = setup_newer_db_with_premigration_backup(home.path());
+
+    match Database::restore_backup_over_newer_db("db_backup_20260102_000000.db") {
+        Err(AppError::Localized { key, .. }) => assert_eq!(key, "error.backupFromNewerVersion"),
+        other => panic!("unexpected result: {other:?}"),
+    }
+    assert!(Database::restore_backup_over_newer_db("../cc-switch.db").is_err());
+    assert_eq!(
+        Database::stored_user_version_exceeds_supported(&db_path).expect("precheck"),
+        Some(SCHEMA_VERSION + 1),
+        "a refused restore must leave the newer database in place"
+    );
+
+    let preserved = Database::restore_backup_over_newer_db("db_backup_20260101_000000.db")
+        .expect("restore pre-migration backup");
+    assert!(preserved.starts_with(&format!("db_newer_v{}_", SCHEMA_VERSION + 1)));
+    assert!(preserved.ends_with(".sqlite"));
+    let backup_dir = home.path().join(".cc-switch").join("backups");
+    let kept = Connection::open(backup_dir.join(&preserved)).expect("open preserved db");
+    assert_eq!(
+        Database::get_user_version(&kept).expect("preserved version"),
+        SCHEMA_VERSION + 1
+    );
+    let newer_rows: i64 = kept
+        .query_row(
+            "SELECT COUNT(*) FROM providers WHERE id = 'newer-provider'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count newer rows");
+    assert_eq!(newer_rows, 1, "the newer database must be preserved");
+    // 保留的新版库不是 .db 备份：不会被列出，也不会被备份保留数清理
+    assert!(Database::list_backups()
+        .expect("list backups")
+        .iter()
+        .all(|b| b.filename != preserved));
+
+    assert_eq!(
+        Database::stored_user_version_exceeds_supported(&db_path).expect("precheck"),
+        None
+    );
+    let db = Database::init().expect("app starts after downgrade restore");
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+}

@@ -262,7 +262,7 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 数据库版本过新的恢复模式下没有托盘可唤回，关闭即退出，避免应用隐身后台
                 let in_db_recovery = crate::init_status::get_init_error()
-                    .map(|p| p.kind.as_deref() == Some("db_version_too_new"))
+                    .map(|p| p.kind.as_deref() == Some(crate::init_status::DB_VERSION_TOO_NEW))
                     .unwrap_or(false);
                 if in_db_recovery {
                     api.prevent_close();
@@ -416,16 +416,10 @@ pub fn run() {
             match crate::database::Database::stored_user_version_exceeds_supported(&db_path) {
                 Ok(Some(version)) => {
                     log::warn!("数据库版本过新（v{version}），引导用户在应用内升级应用");
-                    crate::init_status::set_init_error(crate::init_status::InitErrorPayload {
-                        path: db_path.display().to_string(),
-                        error: format!(
-                            "数据库版本过新（{version}），当前应用仅支持 {}，请升级应用后再尝试。",
-                            crate::database::SCHEMA_VERSION
-                        ),
-                        kind: Some("db_version_too_new".to_string()),
-                        db_version: Some(version),
-                        supported_version: Some(crate::database::SCHEMA_VERSION),
-                    });
+                    // 附带可恢复的迁移前备份，恢复界面据此提供降级恢复（见 docs/dev/DB_COMPATIBILITY.md）
+                    crate::init_status::set_init_error(
+                        crate::init_status::db_version_too_new_payload(&db_path, version),
+                    );
                     // 主窗口默认 visible:false，恢复界面必须强制显示
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();
@@ -1354,6 +1348,7 @@ pub fn run() {
             commands::create_db_backup,
             commands::list_db_backups,
             commands::restore_db_backup,
+            commands::restore_backup_over_newer_db,
             commands::rename_db_backup,
             commands::delete_db_backup,
             commands::sync_current_providers_live,

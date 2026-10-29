@@ -1757,7 +1757,12 @@
     "retry": "Retry upgrade",
     "openReleases": "Open releases page",
     "openConfigDir": "Open config folder",
-    "quit": "Quit"
+    "quit": "Quit",
+    "restoreTitle": "Restore a pre-upgrade backup",
+    "restoreDescription": "These backups were taken before a newer version upgraded the database and can be opened by this version. Restoring replaces the current database (a copy of it is kept in the backups folder) and restarts the app; changes made after the backup are not included.",
+    "backupInfo": "Database v{{version}} · {{date}}",
+    "restoreBackup": "Restore",
+    "restoreConfirm": "Restore {{filename}}? The current database will be kept as a copy in the backups folder, and the app will restart."
   },
   "errors": {
     "usage_query_failed": "Usage query failed",

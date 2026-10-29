@@ -24,7 +24,11 @@ pub(crate) use super::webdav_sync::archive::{
 /// Retains historic "webdav" naming for backward compatibility with existing remotes.
 pub(crate) const PROTOCOL_FORMAT: &str = "cc-switch-webdav-sync";
 pub(crate) const PROTOCOL_VERSION: u32 = 2;
+/// Generation of the synced `db.sql`. Bump only for a change an older app cannot
+/// import (see docs/dev/DB_COMPATIBILITY.md); additive schema changes keep it.
 pub(crate) const DB_COMPAT_VERSION: u32 = 6;
+/// Generation assumed for legacy-layout remotes whose manifest predates
+/// `dbCompatVersion`. Frozen: never bump.
 pub(crate) const LEGACY_DB_COMPAT_VERSION: u32 = 5;
 pub(crate) const REMOTE_DB_SQL: &str = "db.sql";
 pub(crate) const REMOTE_SKILLS_ZIP: &str = "skills.zip";
@@ -318,6 +322,9 @@ pub(crate) fn apply_snapshot(
             format!("SQL is not valid UTF-8: {e}"),
         )
     })?;
+    // A snapshot from a newer schema is rejected before skills or the DB are
+    // touched, so it is never partially applied (see docs/dev/DB_COMPATIBILITY.md).
+    crate::database::Database::ensure_sql_dump_version_supported(sql_str)?;
     let skills_backup = backup_current_skills()?;
 
     // Replace skills first, then import database; roll back skills on DB failure.
@@ -542,6 +549,96 @@ mod tests {
             Some(DB_COMPAT_VERSION + 1),
         );
         assert!(validate_manifest_compat(&manifest, RemoteLayout::Legacy).is_err());
+    }
+
+    fn assert_localized(result: Result<(), AppError>, expected_key: &str) {
+        match result {
+            Err(AppError::Localized { key, zh, en }) => {
+                assert_eq!(key, expected_key);
+                assert!(!zh.is_empty() && !en.is_empty());
+            }
+            other => panic!("expected localized {expected_key}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_manifest_compat_rejects_next_db_compat_version_with_localized_error() {
+        let manifest = manifest_with(
+            PROTOCOL_FORMAT,
+            PROTOCOL_VERSION,
+            Some(DB_COMPAT_VERSION + 1),
+        );
+        for layout in [RemoteLayout::Current, RemoteLayout::Legacy] {
+            assert_localized(
+                validate_manifest_compat(&manifest, layout),
+                "sync.manifest_db_version_incompatible",
+            );
+        }
+    }
+
+    #[test]
+    fn apply_snapshot_rejects_newer_schema_dump_without_partial_import() {
+        use crate::database::{Database, SCHEMA_VERSION};
+
+        let home = tempfile::tempdir().expect("tempdir");
+        let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+        let _settings = crate::settings::scoped_settings_store();
+
+        let insert_provider = |db: &Database, id: &str| {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta)
+                 VALUES (?1, 'claude', 'Provider', '{}', '{}')",
+                [id],
+            )
+            .expect("insert provider");
+        };
+        let local = Database::memory().expect("local db");
+        insert_provider(&local, "local-provider");
+        let remote = Database::memory().expect("remote db");
+        insert_provider(&remote, "remote-provider");
+
+        // A dump from a device one schema generation ahead.
+        let newer_sql = remote
+            .export_sql_string_for_sync()
+            .expect("export")
+            .lines()
+            .map(|line| {
+                if line.starts_with("PRAGMA user_version=") {
+                    format!("PRAGMA user_version={};", SCHEMA_VERSION + 1)
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let skills_dir = crate::config::get_app_config_dir().join("skills");
+        std::fs::create_dir_all(&skills_dir).expect("create skills dir");
+        std::fs::write(skills_dir.join("marker.txt"), "local").expect("write skill marker");
+
+        assert_localized(
+            apply_snapshot(&local, newer_sql.as_bytes(), b"not a zip"),
+            "backup.sql.newer_schema",
+        );
+
+        let ids: Vec<String> = {
+            let conn = local.conn.lock().expect("lock conn");
+            let mut stmt = conn
+                .prepare("SELECT id FROM providers ORDER BY id")
+                .expect("prepare");
+            let rows = stmt
+                .query_map([], |row| row.get(0))
+                .expect("query")
+                .collect::<Result<_, _>>()
+                .expect("collect");
+            rows
+        };
+        assert_eq!(ids, vec!["local-provider".to_string()]);
+        assert_eq!(
+            std::fs::read_to_string(skills_dir.join("marker.txt")).expect("skill marker"),
+            "local",
+            "skills must not be replaced by a rejected snapshot"
+        );
     }
 
     #[test]

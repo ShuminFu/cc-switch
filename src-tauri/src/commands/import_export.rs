@@ -178,6 +178,25 @@ pub async fn restore_db_backup(
         .map_err(|e: AppError| e.to_string())
 }
 
+/// Downgrade restore from the db_version_too_new recovery screen: replace the
+/// too-new database with a restorable (pre-migration) backup. The app must be
+/// restarted afterwards. Returns the filename the newer database was kept as.
+#[tauri::command]
+pub async fn restore_backup_over_newer_db(filename: String) -> Result<String, String> {
+    let in_recovery = crate::init_status::get_init_error()
+        .map(|p| p.kind.as_deref() == Some(crate::init_status::DB_VERSION_TOO_NEW))
+        .unwrap_or(false);
+    if !in_recovery {
+        return Err(
+            "This restore is only available while the database is too new for this app".to_string(),
+        );
+    }
+    tauri::async_runtime::spawn_blocking(move || Database::restore_backup_over_newer_db(&filename))
+        .await
+        .map_err(|e| format!("Restore failed: {e}"))?
+        .map_err(|e: AppError| e.to_string())
+}
+
 /// Rename a database backup file
 #[tauri::command]
 pub fn rename_db_backup(

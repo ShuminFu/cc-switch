@@ -1757,7 +1757,12 @@
     "retry": "重试升级",
     "openReleases": "打开发布页",
     "openConfigDir": "打开配置目录",
-    "quit": "退出"
+    "quit": "退出",
+    "restoreTitle": "恢复升级前的备份",
+    "restoreDescription": "以下备份是更新版本升级数据库之前留下的，当前版本可以打开。恢复会替换当前数据库（当前数据库会另存一份到备份目录）并重启应用；备份之后的修改不会包含在内。",
+    "backupInfo": "数据库 v{{version}} · {{date}}",
+    "restoreBackup": "恢复",
+    "restoreConfirm": "确定恢复 {{filename}}？当前数据库会另存一份到备份目录，应用随后将重启。"
   },
   "errors": {
     "usage_query_failed": "用量查询失败",

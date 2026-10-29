@@ -53,6 +53,17 @@ pub struct BackupEntry {
     pub created_at: String, // ISO 8601
 }
 
+/// A backup that this app can restore (its `user_version` is not newer than
+/// [`SCHEMA_VERSION`]); listed on the db_version_too_new recovery screen.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorableBackup {
+    pub filename: String,
+    pub size_bytes: u64,
+    pub created_at: String, // ISO 8601
+    pub db_version: i32,
+}
+
 impl Database {
     /// 导出为 SQLite 兼容的 SQL 文本（内存字符串，完整导出）
     pub fn export_sql_string(&self) -> Result<String, AppError> {
@@ -109,6 +120,8 @@ impl Database {
     ) -> Result<String, AppError> {
         let sql_content = sql_raw.trim_start_matches('\u{feff}');
         Self::validate_cc_switch_sql_export(sql_content)?;
+        // 更新版本的导出在任何备份/写入之前拒绝，避免部分导入
+        Self::ensure_sql_dump_version_supported(sql_content)?;
 
         // 导入前备份现有数据库
         let backup_path = self.backup_database_file()?;
@@ -137,6 +150,8 @@ impl Database {
         let import_result = temp_conn.execute_batch(sql_content);
         temp_conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
         import_result.map_err(|e| AppError::Database(format!("执行 SQL 导入失败: {e}")))?;
+        // 头部可伪造：以实际执行后的 user_version 再校验一次
+        Self::ensure_dump_version_supported(Self::get_user_version(&temp_conn)?)?;
 
         // 补齐缺失表/索引并进行基础校验
         Self::create_tables_on_conn(&temp_conn)?;
@@ -221,6 +236,47 @@ impl Database {
             "backup.sql.invalid_format",
             "仅支持导入由 CC Switch 导出的 SQL 备份文件。",
             "Only SQL backups exported by CC Switch are supported.",
+        ))
+    }
+
+    /// 读取 `dump_sql` 写入的 `PRAGMA user_version=N;`（缺失时返回 None）
+    fn sql_dump_user_version(sql: &str) -> Option<i32> {
+        sql.lines().find_map(|line| {
+            let line = line.trim();
+            let (name, value) = line
+                .strip_prefix("PRAGMA ")
+                .or_else(|| line.strip_prefix("pragma "))?
+                .split_once('=')?;
+            if !name.trim().eq_ignore_ascii_case("user_version") {
+                return None;
+            }
+            value.trim().trim_end_matches(';').trim().parse().ok()
+        })
+    }
+
+    /// SQL 导出（含同步快照 db.sql）来自更新的 schema 时返回本地化错误。
+    ///
+    /// 仅检查文本，不触碰数据库或 Skills；同步导入在替换任何本地数据前调用，
+    /// 保证不会出现部分导入。
+    pub(crate) fn ensure_sql_dump_version_supported(sql: &str) -> Result<(), AppError> {
+        match Self::sql_dump_user_version(sql) {
+            Some(version) => Self::ensure_dump_version_supported(version),
+            None => Ok(()),
+        }
+    }
+
+    fn ensure_dump_version_supported(version: i32) -> Result<(), AppError> {
+        if version <= SCHEMA_VERSION {
+            return Ok(());
+        }
+        Err(AppError::localized(
+            "backup.sql.newer_schema",
+            format!(
+                "该数据来自更新版本的 CC Switch（数据库版本 {version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再导入。本地数据未做任何修改。"
+            ),
+            format!(
+                "This data was exported by a newer version of CC Switch (database version {version}); this app supports up to {SCHEMA_VERSION}. Update the app before importing it. No local data was changed."
+            ),
         ))
     }
 
@@ -715,6 +771,121 @@ impl Database {
         // Sort by created_at descending (newest first)
         entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(entries)
+    }
+
+    /// List the backups this app can restore (`user_version <= SCHEMA_VERSION`),
+    /// newest first. Used by the db_version_too_new startup path, where these are
+    /// the pre-migration snapshots taken before a newer app upgraded the database.
+    /// Unreadable backups are skipped.
+    pub fn list_restorable_backups() -> Result<Vec<RestorableBackup>, AppError> {
+        let backup_dir = get_app_config_dir().join("backups");
+        let entries = Self::list_backups()?
+            .into_iter()
+            .filter_map(|entry| {
+                let path = backup_dir.join(&entry.filename);
+                let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .map_err(|e| log::warn!("Skipping unreadable backup {}: {e}", entry.filename))
+                    .ok()?;
+                let db_version = Self::get_user_version(&conn)
+                    .map_err(|e| log::warn!("Skipping unreadable backup {}: {e}", entry.filename))
+                    .ok()?;
+                (db_version <= SCHEMA_VERSION).then_some(RestorableBackup {
+                    filename: entry.filename,
+                    size_bytes: entry.size_bytes,
+                    created_at: entry.created_at,
+                    db_version,
+                })
+            })
+            .collect();
+        Ok(entries)
+    }
+
+    /// Downgrade restore for the db_version_too_new recovery screen: replace the
+    /// on-disk database (too new for this app, so never opened by [`Database::init`])
+    /// with a restorable backup.
+    ///
+    /// The backup is migrated and validated in a temp database first. The newer
+    /// database is kept as `backups/db_newer_v{N}_<timestamp>.sqlite` (not a `.db`
+    /// file, so backup retention never prunes it and it is not listed as a backup).
+    /// Returns that preserved filename.
+    pub fn restore_backup_over_newer_db(filename: &str) -> Result<String, AppError> {
+        validate_backup_filename(filename)?;
+
+        let app_dir = get_app_config_dir();
+        let backup_dir = app_dir.join("backups");
+        let backup_path = backup_dir.join(filename);
+        let db_path = app_dir.join("cc-switch.db");
+
+        if !backup_path.exists() {
+            return Err(AppError::InvalidInput(format!(
+                "Backup file not found: {filename}"
+            )));
+        }
+
+        let source_conn =
+            Connection::open_with_flags(&backup_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        let backup_version = Self::get_user_version(&source_conn)?;
+        if backup_version > SCHEMA_VERSION {
+            return Err(AppError::localized(
+                "error.backupFromNewerVersion",
+                format!(
+                    "该备份来自更新版本的 CC Switch（数据库版本 {backup_version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再恢复。"
+                ),
+                format!(
+                    "This backup was created by a newer version of CC Switch (database version {backup_version}); this app supports up to {SCHEMA_VERSION}. Please update the app before restoring it."
+                ),
+            ));
+        }
+
+        let temp_file = NamedTempFile::new().map_err(|e| AppError::IoContext {
+            context: "创建临时数据库文件失败".to_string(),
+            source: e,
+        })?;
+        let mut temp_conn =
+            Connection::open(temp_file.path()).map_err(|e| AppError::Database(e.to_string()))?;
+        Self::copy_database(&source_conn, &mut temp_conn)?;
+        drop(source_conn);
+
+        Self::create_tables_on_conn(&temp_conn)?;
+        Self::apply_schema_migrations_on_conn(&temp_conn)?;
+        Self::validate_basic_state(&temp_conn)?;
+        Self::ensure_model_pricing_seeded_on_conn(&temp_conn)?;
+
+        fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+        let mut preserved_name = String::new();
+        if db_path.exists() {
+            let newer_conn =
+                Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            let newer_version = Self::get_user_version(&newer_conn)?;
+            let base = format!(
+                "db_newer_v{newer_version}_{}",
+                Local::now().format("%Y%m%d_%H%M%S")
+            );
+            preserved_name = format!("{base}.sqlite");
+            let mut counter = 1;
+            while backup_dir.join(&preserved_name).exists() {
+                preserved_name = format!("{base}_{counter}.sqlite");
+                counter += 1;
+            }
+            let preserved_path = backup_dir.join(&preserved_name);
+            let mut preserved_conn =
+                Connection::open(&preserved_path).map_err(|e| AppError::Database(e.to_string()))?;
+            Self::copy_database(&newer_conn, &mut preserved_conn)?;
+            super::journal::set_journal_mode(&preserved_conn, "delete")?;
+        }
+
+        {
+            let mut main_conn =
+                Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
+            Self::copy_database(&temp_conn, &mut main_conn)?;
+        }
+
+        log::info!(
+            "Database restored from backup {filename} (v{backup_version}); newer database kept as {preserved_name}"
+        );
+        Ok(preserved_name)
     }
 
     /// Restore database from a backup file. Returns the safety backup ID.

@@ -16,7 +16,35 @@ pub struct InitErrorPayload {
     /// 当升级到最新版后 db_version 仍 > supported_version，说明可能由第三方客户端创建。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supported_version: Option<i32>,
+    /// 数据库版本过新时可由当前应用恢复的备份（user_version ≤ SCHEMA_VERSION，
+    /// 即更新版应用迁移前留下的快照），新到旧排序；前端据此提供「恢复迁移前备份」。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restorable_backups: Option<Vec<crate::database::backup::RestorableBackup>>,
 }
+
+/// 构造 `db_version_too_new` 启动错误：磁盘上的数据库版本 `version` 高于
+/// 当前应用支持的 SCHEMA_VERSION，附带可恢复的迁移前备份列表。
+pub fn db_version_too_new_payload(db_path: &std::path::Path, version: i32) -> InitErrorPayload {
+    let supported = crate::database::SCHEMA_VERSION;
+    let restorable_backups =
+        crate::database::Database::list_restorable_backups().unwrap_or_else(|e| {
+            log::warn!("列出可恢复的数据库备份失败: {e}");
+            Vec::new()
+        });
+    InitErrorPayload {
+        path: db_path.display().to_string(),
+        error: format!(
+            "数据库版本过新（{version}），当前应用仅支持 {supported}，请升级应用后再尝试。"
+        ),
+        kind: Some(DB_VERSION_TOO_NEW.to_string()),
+        db_version: Some(version),
+        supported_version: Some(supported),
+        restorable_backups: Some(restorable_backups),
+    }
+}
+
+/// [`InitErrorPayload::kind`]：数据库版本过新（应用过旧）
+pub const DB_VERSION_TOO_NEW: &str = "db_version_too_new";
 
 static INIT_ERROR: OnceLock<RwLock<Option<InitErrorPayload>>> = OnceLock::new();
 
@@ -115,6 +143,7 @@ mod tests {
             kind: None,
             db_version: None,
             supported_version: None,
+            restorable_backups: None,
         };
         set_init_error(payload.clone());
         let got = get_init_error().expect("should get payload back");

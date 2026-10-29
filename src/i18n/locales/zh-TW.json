@@ -1757,7 +1757,12 @@
     "retry": "重試升級",
     "openReleases": "開啟發佈頁",
     "openConfigDir": "開啟設定目錄",
-    "quit": "結束"
+    "quit": "結束",
+    "restoreTitle": "還原升級前的備份",
+    "restoreDescription": "以下備份是較新版本升級資料庫之前留下的，目前版本可以開啟。還原會取代目前的資料庫（目前的資料庫會另存一份到備份資料夾）並重新啟動應用程式；備份之後的變更不會包含在內。",
+    "backupInfo": "資料庫 v{{version}} · {{date}}",
+    "restoreBackup": "還原",
+    "restoreConfirm": "確定還原 {{filename}}？目前的資料庫會另存一份到備份資料夾，應用程式隨後將重新啟動。"
   },
   "errors": {
     "usage_query_failed": "用量查詢失敗",
