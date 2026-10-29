@@ -1,0 +1,358 @@
+# Database / DAO / migrations — findings (DB-xx)
+
+Part of the [next-phase proposals](../README.md). 34 findings. Priorities: P0 = 2, P1 = 4, P2 = 18, P3 = 10.
+
+## Area summary
+
+The database layer is functional and has clearly had care put into it: migrations run under a SAVEPOINT with rollback, a pre-migration file backup is taken, SQL identifiers are validated before being interpolated, user-supplied filter values in `usage_stats.rs` are bound as parameters (no injection found), and the rollup/prune + cost-backfill pipeline has a solid unit-test suite. The main structural risk is the connection model: one `std::sync::Mutex<rusqlite::Connection>` opened with default rollback-journal mode (no WAL, no `busy_timeout`, no `synchronous` tuning) is shared by the proxy hot path (5 lock acquisitions and one fsync'd autocommit INSERT per proxied request), the session-log importers (one autocommit per row), the UI dashboard (which invalidates every usage query on each `usage-log-recorded` event), and daily maintenance (rollup/prune/VACUUM) that runs synchronously on tokio worker threads. Schema evolution is split between an ever-growing idempotent `create_tables_on_conn` (with error-swallowing `let _ = ALTER TABLE`) and a hand-rolled `match version` chain with no migration ledger; `SCHEMA_VERSION` and the sync `DB_COMPAT_VERSION` are independent hand-bumped constants. Security-wise, provider API keys, backups (`~/.cc-switch/backups/*.db`) and the cloud `db.sql` artifact are all plaintext, and the sync importer executes arbitrary SQL from the remote artifact after only a header-string check. Suggested direction for the next phase: (1) a dedicated writer thread + WAL + read connections, (2) a proper migration framework and single schema source of truth, (3) secrets off the plaintext path and a validated/encrypted sync format, (4) explicit device-vs-synced classification of tables/keys, and (5) moving raw SQL out of `commands/` and `services/` into the DAO.
+
+## Index
+
+| ID | Title | Type | Priority | Effort | Confidence |
+|---|---|---|---|---|---|
+| [DB-01](#db-01) | Sync importer executes arbitrary SQL from the remote artifact after a header-only check | security | P0 | L | high |
+| [DB-02](#db-02) | Provider API keys, backups and the cloud sync artifact are all plaintext | security | P0 | XL | high |
+| [DB-03](#db-03) | Single `Mutex<Connection>` without WAL/busy_timeout serialises the proxy write path, importers, UI reads and maintenance | refactor | P1 | XL | high |
+| [DB-04](#db-04) | Usage log inserts are one-row autocommit statements with 8 index B-trees to maintain | performance | P1 | M | high |
+| [DB-09](#db-09) | Maintenance and backfill hold the global lock for unbounded full-table work on every start | performance | P1 | M | high |
+| [DB-10](#db-10) | Backup rotation, restore safety and pre-migration backups | bug | P1 | M | high |
+| [DB-05](#db-05) | Blocking SQLite work runs directly on tokio worker threads (no `spawn_blocking`) | performance | P2 | M | high |
+| [DB-06](#db-06) | Device-level tables/keys are synced wholesale (proxy_config, settings flags, session_log_sync) | bug | P2 | M | medium |
+| [DB-07](#db-07) | `create_tables_on_conn` is a second, untracked migration path with error-swallowing DDL and data fixups | tech-debt | P2 | L | high |
+| [DB-11](#db-11) | Sync import restores preserved tables row-by-row in autocommit mode | performance | P2 | S | high |
+| [DB-12](#db-12) | Full SQL export is built as one in-memory `String` and fails on any non-UTF-8 TEXT value | bug | P2 | M | high |
+| [DB-13](#db-13) | Mixed timestamp units and types across tables | tech-debt | P2 | L | high |
+| [DB-14](#db-14) | Costs are stored as decimal TEXT but aggregated as REAL | bug | P2 | M | medium |
+| [DB-15](#db-15) | Raw SQL and direct `conn` locking spread across commands/services (layering violation) | refactor | P2 | L | high |
+| [DB-16](#db-16) | `universal_providers` is one JSON blob in `settings` with a read-modify-write race | bug | P2 | M | high |
+| [DB-17](#db-17) | Column-per-app boolean flags force a schema migration per new app and already lag `AppType` | refactor | P2 | L | high |
+| [DB-18](#db-18) | `proxy_config.app_type` CHECK constraint hard-codes the app list and defaults are duplicated in four places | tech-debt | P2 | M | high |
+| [DB-19](#db-19) | Model pricing lives as ~900 lines of Rust in `schema.rs` and needs a release per price change | refactor | P2 | L | high |
+| [DB-20](#db-20) | Whole-snapshot last-writer-wins sync with no row versioning or tombstones | refactor | P2 | XL | high |
+| [DB-24](#db-24) | Corrupt JSON columns are silently coerced to `Null`/default and can be written back | bug | P2 | S | high |
+| [DB-25](#db-25) | Retention windows are hard-coded (30 d logs, 7 d stream checks) with no user control or "keep forever" | feature | P2 | M | high |
+| [DB-26](#db-26) | Tests run against an un-migrated in-memory schema and skip backups/concurrency/hostile import | test | P2 | M | high |
+| [DB-27](#db-27) | UI invalidates every usage query on each log event, amplifying read load under the single lock | performance | P2 | S | medium |
+| [DB-33](#db-33) | No developer documentation for the schema, table ownership, retention/backup semantics or migration checklist | docs | P2 | S | high |
+| [DB-08](#db-08) | No migration ledger/checksums; `SCHEMA_VERSION` and sync `DB_COMPAT_VERSION` are independent hand-bumped constants | refactor | P3 | L | medium |
+| [DB-21](#db-21) | `get_all_providers` issues one endpoint query per provider (N+1) and is on the tray/failover path | performance | P3 | S | high |
+| [DB-22](#db-22) | `provider_endpoints` has no uniqueness constraint; duplicates accumulate | bug | P3 | S | high |
+| [DB-23](#db-23) | `INSERT OR REPLACE` on parent rows with `ON DELETE CASCADE` children; REPLACE used as upsert everywhere | bug | P3 | S | medium |
+| [DB-28](#db-28) | `settings` key-value table is an untyped grab-bag with no namespace or ownership | tech-debt | P3 | M | high |
+| [DB-29](#db-29) | `stream_check_logs.status` persists the Rust `Debug` representation of an enum | tech-debt | P3 | S | high |
+| [DB-30](#db-30) | `Database::init` runs DDL before the too-new version check; secondary entry points lack the precheck | bug | P3 | S | medium |
+| [DB-31](#db-31) | `update_provider_health` uses an unindexed read-then-REPLACE and relies on a FK to a possibly-deleted provider | tech-debt | P3 | S | medium |
+| [DB-32](#db-32) | `DB_COMPAT_VERSION` strict equality blocks sync between app versions that are actually compatible | tech-debt | P3 | S | medium |
+| [DB-34](#db-34) | Startup seeding and fixups run as hundreds of individual autocommits | performance | P3 | S | high |
+
+## Findings
+
+### DB-01: Sync importer executes arbitrary SQL from the remote artifact after a header-only check
+
+**Type:** security · **Priority:** P0 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/backup.rs:94-147` — `import_sql_string_inner` calls `validate_cc_switch_sql_export` (lines 166-177, only checks the file starts with the literal `-- CC Switch SQLite 导出`) and then `temp_conn.execute_batch(sql_content)` (120-122) on an unrestricted connection, then copies the temp DB over the main DB via the Backup API (134-140). `dump_sql` (`backup.rs:402-431`) exports `type IN ('table','index','trigger','view')`, so triggers in the artifact are recreated. `src-tauri/src/services/sync_protocol.rs:309-340` feeds WebDAV/S3 downloads straight into this path; integrity is only a SHA-256 in a manifest stored next to the artifact (`sync_protocol.rs:266-305`), which an attacker who can write the share can regenerate.
+- **Problem:** Anyone who can modify the WebDAV/S3 share (or a MITM on a plain-HTTP WebDAV URL) can plant SQL that runs on the user's machine: `ATTACH DATABASE '/path'` to write files, persistent `CREATE TRIGGER` that rewrites provider configs on every insert, or simply a dump that silently blanks/alters API keys. No `PRAGMA foreign_key_check` is run after import either (the dump sets `PRAGMA foreign_keys=OFF`).
+- **Proposal:** Replace free-form SQL execution with a validated row format: either (a) parse the dump into statements and allow only `INSERT INTO "<allowlisted table>"` plus `CREATE TABLE/INDEX` for known names (reject triggers/views/ATTACH/PRAGMA), or (b) switch the artifact to a raw SQLite file validated with `PRAGMA integrity_check`, a schema allowlist (`sqlite_master` must contain only known tables/indexes, zero triggers), then imported via the Backup API. Add `PRAGMA foreign_key_check` before swapping. Pair with DB-02 (encryption/authentication of the artifact).
+- **Acceptance:** A test feeding an artifact containing `CREATE TRIGGER`, `ATTACH DATABASE`, and an `INSERT` into an unknown table is rejected before the main DB is touched; existing round-trip sync test still passes.
+
+### DB-02: Provider API keys, backups and the cloud sync artifact are all plaintext
+
+**Type:** security · **Priority:** P0 · **Effort:** XL · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/schema.rs:27-44` — `providers.settings_config TEXT` holds the raw env/auth JSON (255 references to `ANTHROPIC_AUTH_TOKEN`/`OPENAI_API_KEY`/`GEMINI_API_KEY` across `src-tauri/src`, e.g. `src-tauri/src/provider.rs:199,453`). `src-tauri/Cargo.toml:76` pulls `rusqlite` only; no `keyring`/`stronghold`/`aes`/`age` dependency exists anywhere in `src-tauri`. `backup.rs:298-334` writes up to `backup_retain_count` (default 10, `src-tauri/src/settings.rs:1077-1087`) full plaintext copies into `~/.cc-switch/backups/`. `sync_protocol.rs:105-162` uploads `db.sql` as plaintext `application/sql`; `backup.rs:19-25` skips only log tables, so `providers`, `settings` (including `global_proxy_url`, `dao/settings.rs:141`, which can embed `user:pass@`) are included.
+- **Problem:** Every secret the app manages is readable by any process/user with file access, is multiplied by the backup rotation, and is shipped to a third-party server in the clear. This contradicts the README's "reliable ... protect your configs" positioning (`README.md:200`).
+- **Proposal:** Phase 1 (M): encrypt the sync artifact with a user passphrase (e.g. `age` or AES-GCM with Argon2-derived key) and HMAC the manifest; refuse plain `http://` WebDAV without an explicit opt-in. Phase 2 (XL): move secret fields out of `settings_config` into the OS keychain (`keyring` crate) keyed by `(app_type, provider_id, field)`, leaving a `{"$secret":"ref"}` placeholder in SQLite; backups then contain no secrets; add a one-time migration that extracts existing keys. Document the threat model.
+- **Acceptance:** `strings ~/.cc-switch/cc-switch.db backups/*.db` shows no API keys; `db.sql` on the share is ciphertext; a tampered manifest/artifact fails authentication before import.
+
+### DB-03: Single `Mutex<Connection>` without WAL/busy_timeout serialises the proxy write path, importers, UI reads and maintenance
+
+**Type:** refactor · **Priority:** P1 · **Effort:** XL · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/mod.rs:79-81,108-118` — one `std::sync::Mutex<Connection>`; the only PRAGMAs set are `foreign_keys` and `auto_vacuum` (no `journal_mode=WAL`, `busy_timeout`, `synchronous`; confirmed by `rg journal_mode|busy_timeout|synchronous src-tauri/src` hitting only external Codex/OpenCode DB code). `src-tauri/src/proxy/usage/logger.rs:51-124` — every proxied request takes the lock for an autocommit `INSERT OR REPLACE` (81-118), after `resolve_pricing_config` (220-312) took it three more times (234, 252, 270-274) and `get_model_pricing` (206-217) once. `src-tauri/src/services/usage_stats.rs` takes the same lock 46 times (`rg -c lock_conn!`), each dashboard query holding it for multi-table aggregates with a correlated `EXISTS` dedup subquery (297-343). `src/hooks/useUsageEventBridge.ts:23-26` invalidates the whole usage query namespace on every `usage-log-recorded` event (200 ms debounce), so UI reads and proxy writes contend continuously. `usage_rollup.rs:62-114` holds the lock for backfill + aggregate + bulk DELETE.
+- **Problem:** In rollback-journal mode every autocommit insert costs two fsyncs and blocks all readers; a long dashboard aggregate or a prune blocks the proxy's logging (and, because callers run on tokio workers, see DB-05, the proxy itself). There is no backoff: a contended lock just parks the thread.
+- **Proposal:** Introduce a `DbHandle` that owns (a) a dedicated writer thread fed by an `mpsc` channel of `WriteJob` closures/enums that are coalesced into one transaction per tick (e.g. up to N jobs or 50 ms), and (b) a small pool (2-4) of read-only `Connection`s opened with `SQLITE_OPEN_READ_ONLY`. Open the file with `PRAGMA journal_mode=WAL; synchronous=NORMAL; busy_timeout=5000; temp_store=MEMORY`. Usage logging becomes a non-blocking `send` (buffer bounded, drop-with-metric on overflow). Keep an `async fn with_write<T>(f) -> T` for callers that need the result. Migrate module by module (logger first, then session importers, then DAO). Schema changes/backup/restore go through the writer to keep single-writer invariants.
+- **Acceptance:** A benchmark (1k concurrent proxied requests + dashboard polling) shows p99 proxy latency unaffected by dashboard queries; `PRAGMA journal_mode` returns `wal`; no code outside `database/` holds `Mutex<Connection>` directly.
+
+### DB-04: Usage log inserts are one-row autocommit statements with 8 index B-trees to maintain
+
+**Type:** performance · **Priority:** P1 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/schema.rs:197-211` — `proxy_request_logs` has `request_id TEXT PRIMARY KEY` (UUID strings, `src-tauri/src/proxy/usage/parser.rs:52-57`); indexes at `schema.rs:213-230` (`provider`, `created_at`, `model`, `session`, `status`) plus `idx_request_logs_app_created_at` (2783-2788) and the 7-column expression index `idx_request_logs_dedup_lookup_expr` (2812-2819). Writers: `proxy/usage/logger.rs:81-118` (per request), `services/session_usage.rs:315-350` loop calling `insert_session_log_entry` (415-516) which locks and autocommits per message, same pattern in `session_usage_codex.rs:595-625`, `session_usage_gemini.rs:302,381`, `session_usage_opencode.rs:396`.
+- **Problem:** Each insert updates the PK unique index plus 7 secondary indexes and pays a full fsync; an initial import of a large `~/.claude/projects` history is tens of thousands of serial fsyncs while holding the global lock. Several indexes look redundant: `idx_request_logs_created_at` is subsumed by `(app_type, created_at)` for the app-filtered queries, `idx_request_logs_status` is on a 3-4 value column, and `idx_request_logs_model` is unlikely to be used because queries filter on `effective_model_sql` (COALESCE expression, `usage_stats.rs:266-274`).
+- **Proposal:** Batch importer inserts inside one `unchecked_transaction` per file (or per 500 rows); route proxy inserts through the writer channel from DB-03. Review indexes with `EXPLAIN QUERY PLAN` for each `usage_stats.rs` query and drop the unused ones in a migration. Consider `id INTEGER PRIMARY KEY` + `request_id TEXT UNIQUE` so the clustered order follows insertion time.
+- **Acceptance:** Importing a 50k-message session history takes < 5 s on a laptop SSD; `EXPLAIN QUERY PLAN` for summary/trends/logs queries uses the remaining indexes; schema test asserts the index set.
+
+### DB-09: Maintenance and backfill hold the global lock for unbounded full-table work on every start
+
+**Type:** performance · **Priority:** P1 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/mod.rs:141-160` — startup runs migrations, possible full `VACUUM` (233-236, when `auto_vacuum` was not INCREMENTAL), `seed_model_pricing` (~200 `INSERT OR IGNORE`, `schema.rs:2374-2392`) + `repair_current_model_pricing` (2398-2743) as individual autocommits, `cleanup_old_stream_check_logs`, `rollup_and_prune(30)` and `incremental_vacuum`, all before `init()` returns. `usage_rollup.rs:84-86` calls `backfill_missing_usage_costs_on_conn` first, whose `BASE_SQL` (`usage_stats.rs:1729-1740`) filters on `CAST(total_cost_usd AS REAL) <= 0` (not indexable) and collects every matching row into a `Vec` (1743-1747) before deciding anything; rows for models with no pricing stay zero-cost forever, so they are re-scanned and re-loaded on every start and every daily maintenance run (`lib.rs:1105-1108` runs it again).
+- **Problem:** Startup time and memory scale with the size of `proxy_request_logs`; the first launch after enabling `auto_vacuum` can block for minutes on a large DB with no UI feedback; the `DELETE ... WHERE created_at < ?` (`usage_rollup.rs:175-180`) is one statement holding the lock.
+- **Proposal:** Defer rollup/prune/backfill/vacuum to a background job after the window is shown; wrap seed+repair in one transaction; add a `cost_status INTEGER` column (0 unpriced, 1 priced, 2 unpriceable-at-seed-version N) with a partial index so backfill only visits rows that a *new* pricing version could fix; chunk the prune DELETE by `rowid` ranges with a small sleep/yield between chunks.
+- **Acceptance:** `Database::init()` completes in < 200 ms on a DB with 1M log rows; backfill query plan shows index use; prune of 500k rows does not block a concurrent read for > 100 ms.
+
+### DB-10: Backup rotation, restore safety and pre-migration backups
+
+**Type:** bug · **Priority:** P1 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/backup.rs:337-367` — `cleanup_db_backups` sorts every `*.db` in `backups/` by mtime and deletes the oldest beyond `retain` regardless of origin; pre-migration backups (`mod.rs:126-139`), import safety backups (`backup.rs:103`), restore safety backups (574-577), manual backups and user-renamed backups (`rename_backup`, 602-662) all share the pool. `restore_from_backup` (552-599) copies the file into the live DB with no `PRAGMA integrity_check`/`quick_check` and no `user_version` precheck; then runs `create_tables` (DDL, see DB-07) before `apply_schema_migrations` can reject a too-new backup. Nothing after restore/import invalidates in-memory state (e.g. proxy config caches); `rg` shows no tests referencing `cleanup_db_backups`, `restore_from_backup`, `rename_backup`, `list_backups` or `delete_backup`.
+- **Problem:** A user who renames a backup "before-big-change" can lose it to rotation; restoring a corrupt or newer-version file leaves the app running on a DB it cannot read, with the only recovery being another manual restore.
+- **Proposal:** Encode a kind in the filename or a sidecar JSON (`manual`, `auto`, `pre-migration`, `safety`) and rotate per kind (never auto-delete `manual`/pinned); run `PRAGMA quick_check` and a `user_version <= SCHEMA_VERSION` check on the candidate before touching the live DB; after restore/import emit an app-level "db-replaced" event that reloads proxy config/tray/UI caches. Add tests for rotation ordering, pinned retention, corrupt-file rejection and newer-version rejection.
+- **Acceptance:** Tests above pass; restoring a file with `user_version=99` fails without modifying `cc-switch.db`; pinned backups survive 20 automatic backups.
+
+### DB-05: Blocking SQLite work runs directly on tokio worker threads (no `spawn_blocking`)
+
+**Type:** performance · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/response_processor.rs:619-676` — `async fn log_usage_internal` is spawned via `tokio::spawn` (507, 533, 586) and calls the synchronous `logger.resolve_pricing_config` / `log_with_calculation` (636-637, 656). `src-tauri/src/lib.rs:1076-1090` — daily maintenance (`periodic_backup_if_needed` = file backup + rollup/prune + incremental vacuum) runs inside `tauri::async_runtime::spawn(async move { ... })` without `spawn_blocking`; `lib.rs:1092-1140` — the 60 s session-sync loop and startup `backfill_missing_usage_costs` likewise. `src-tauri/src/services/webdav_sync.rs:73,147` — `build_local_snapshot` (full Backup-API copy + SQL dump) and `apply_snapshot` are called inside `pub async fn upload/download`. `src-tauri/src/database/dao/proxy.rs:61-121` etc. are `async fn` whose bodies are entirely synchronous, which forces `futures::executor::block_on` in `src-tauri/src/claude_desktop_config.rs:915-918`.
+- **Problem:** When the mutex is held (prune, VACUUM, a large export), the awaiting tokio worker is parked, starving other in-flight proxy streams on that worker. The fake-`async` DAO signatures hide this and invite `block_on`.
+- **Proposal:** Until DB-03 lands, wrap every DB call made from async context in `spawn_blocking` (helper `db.run(|conn| ...)`), and strip `async` from DAO methods that never await. Cache `(cost_multiplier, pricing_model_source)` per `(app_type, provider_id)` in `ProxyState`, invalidated on provider/proxy-config save, so the hot path does one DB write, not five lock acquisitions.
+- **Acceptance:** `rg "lock_conn!|\.conn\.lock" src-tauri/src/proxy src-tauri/src/lib.rs src-tauri/src/services/webdav_sync.rs` returns nothing outside `spawn_blocking`/DbHandle calls; no `block_on` of DAO futures remains.
+- **Verification:** **confirmed** — Every cited site holds: `Database.conn` is a `std::sync::Mutex<Connection>` (src-tauri/src/database/mod.rs:80) and `lock_conn!` is a blocking `.lock()` (mod.rs:64-70); `log_usage_internal` (src-tauri/src/proxy/response_processor.rs:619-676) is `tokio::spawn`ed at 507/533/586 and takes five locks per request (get_default_cost_multiplier, get_pricing_model_source, get_provider_by_id in logger.rs:220-313, then get_model_pricing logger.rs:207 and log_request logger.rs:52); `periodic_backup_if_needed` (backup.rs:236-295: Backup-API copy + rollup_and_prune + incremental_vacuum under the lock) and the 60 s session-sync loop with `backfill_missing_usage_costs` run inside plain `tauri::async_runtime::spawn` (lib.rs:1077-1140); `upload`/`download` call `build_local_snapshot`/`apply_snapshot` synchronously (services/webdav_sync.rs:73,147) and the command wrapper only `spawn_blocking`s the post-import step (commands/webdav_sync.rs:129); `futures::executor::block_on(db.get_proxy_config())` is at claude_desktop_config.rs:918 with ~20 more block_on sites in services/proxy.rs:929-951, tray.rs and provider/mod.rs. The proxy server is spawned on the same shared tauri/tokio runtime (proxy/server.rs:141,156; no custom runtime), no pricing cache exists in ProxyState (grep empty), and the acceptance grep still returns 12 lock sites under src/proxy. Priority lowered to P2: the runtime is multi-threaded and single-user, so the realistic symptom is intermittent stream latency/stalls during daily maintenance or WebDAV export/import rather than an outage; the proposal is sound and not implemented.
+
+### DB-06: Device-level tables/keys are synced wholesale (proxy_config, settings flags, session_log_sync)
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/database/backup.rs:19-34` — `SYNC_SKIP_TABLES` omits `proxy_config`, `session_log_sync`, `settings`, `model_pricing`, `profiles`; `SYNC_PRESERVE_TABLES` omits `session_log_sync`. `proxy_config` holds `listen_address/listen_port/enabled/live_takeover_active` (`schema.rs:126-139`), and `lib.rs:1771-1772` restores takeover state from `proxy_config.enabled` on startup. `settings` holds device/one-shot flags: `official_providers_seeded`, `default_skill_repos_initialized`, `skills_ssot_migration_pending/_snapshot`, `global_proxy_url` (`dao/settings.rs:141`, `dao/skills.rs:240-261`, `schema.rs:1012-1018`). `session_log_sync` stores absolute local file paths and byte offsets (`schema.rs:301-309`). `src-tauri/src/services/webdav_auto_sync.rs:43-55` also triggers auto-sync on `settings`/`proxy_config` writes. README `README.md:420` promises "SQLite for syncable data, JSON for device-level settings".
+- **Problem:** After a sync import, device B inherits device A's proxy listen port/enabled flags (and may auto-start takeover on next launch), A's outbound proxy URL, A's migration/seed flags, and loses its own `session_log_sync` offsets (full re-scan of local logs). Toggling the proxy on one device dirties the sync state on all.
+- **Proposal:** Classify every table and settings key as `synced` or `device`. Move device-level keys into a separate `device_settings` table (or add a `scope` column) and add `proxy_config`, `session_log_sync`, `device_settings` to both skip and preserve lists; remove `proxy_config`/device keys from `should_trigger_for_table`. Add a unit test that enumerates `sqlite_master` and asserts each table is explicitly classified.
+- **Acceptance:** Round-trip sync test shows `proxy_config`, `session_log_sync` and device keys unchanged on the importing side; no auto-sync signal from proxy toggles.
+- **Verification:** **partially-confirmed** — Core observation confirmed: `SYNC_SKIP_TABLES`/`SYNC_PRESERVE_TABLES` (src-tauri/src/database/backup.rs:19-34) omit proxy_config, settings and session_log_sync, and `import_sql_string_inner` (backup.rs:94-140) rebuilds the DB from the remote dump restoring only the preserve list, so the importing device inherits listen_port/proxy_enabled/enabled/live_takeover_active (schema.rs:126-139, 341) and `global_proxy_url` (dao/settings.rs:141); `restore_proxy_state_on_startup` (lib.rs:1068, 1760-1780) then calls `set_takeover_for_app(.., true)`, which auto-starts the proxy (services/proxy.rs:735-739). The only round-trip test (backup.rs:698 `sync_import_preserves_local_only_tables`) never asserts on these tables. Details that are off: the seed/init flags are harmless because the data they guard (providers, skill_repos) is synced too and `skills_ssot_migration_pending` is reset to false after consumption (lib.rs:528,538); WebDAV auto-sync is upload-only (`run_auto_sync_upload`, webdav_auto_sync.rs:106-191), so a proxy toggle only enqueues an upload and other devices change only on a manual download; and the session_log_sync consequence is worse than a re-scan when both devices share the same absolute path, since `sync_single_file` trusts the inherited mtime/offset (session_usage.rs:191-213) and can silently skip unimported lines (duplicates are otherwise prevented by `INSERT OR IGNORE` keyed on session:msg_id, session_usage.rs:327-343,480). The proposal to drop the whole proxy_config table from sync is too coarse because that table also holds per-app timeout/circuit-breaker/cost-multiplier/pricing-source preferences; a column-level split (or a separate device table) is needed. P2 because the feature is opt-in and the damage is a surprising but recoverable config change.
+
+### DB-07: `create_tables_on_conn` is a second, untracked migration path with error-swallowing DDL and data fixups
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/schema.rs:24-406` runs on every start (`mod.rs:124`), on restore (`backup.rs:593`) and on import (`backup.rs:125`): it executes `let _ = conn.execute("ALTER TABLE proxy_config ADD COLUMN ...")` ×8 (341-376), `DROP INDEX/TABLE failover_queue` (395-396), rewrites `settings.current_profile_id` → `current_profile_id_claude` (326-338), seeds `proxy_config` rows (148-183), and calls `migrate_proxy_config_to_per_app` (380-385) — all outside any transaction and before the version check in `apply_schema_migrations_on_conn` (415-428). `Database::memory()` (`mod.rs:182-199`) runs only this path and never `apply_schema_migrations`, leaving `user_version=0`.
+- **Problem:** Genuine failures (disk full, I/O error, locked file) are silently ignored; the "fresh" schema and the "migrated" schema are maintained by hand in two places and can drift (one alignment test exists at `tests.rs:260`, but DAO tests run against the un-migrated `memory()` schema); data fixups that belong to a versioned migration run unconditionally forever.
+- **Proposal:** Make `create_tables_on_conn` produce only the *current* schema (pure `CREATE TABLE/INDEX IF NOT EXISTS`, inside one transaction, all errors propagated) and move every ALTER/DROP/fixup into numbered migrations. Have `memory()` and tests apply the full migration chain from an empty DB and assert the result equals the fresh schema (compare `sqlite_master` SQL). See DB-08 for the framework.
+- **Acceptance:** `rg "let _ = conn.execute" src-tauri/src/database` is empty; a test proves `fresh schema == migrated schema` text for every table/index.
+- **Verification:** **partially-confirmed** — The mechanics are as described: `create_tables_on_conn` (src-tauri/src/database/schema.rs:24-406) runs at every start (mod.rs:124), on restore (backup.rs:593) and on sync import (backup.rs:125), contains eight swallowed `let _ = conn.execute("ALTER TABLE proxy_config ADD COLUMN ...")` (schema.rs:341-376), the swallowed DROP INDEX/TABLE failover_queue (395-396), the unconditional settings `current_profile_id` fixup (326-338), the proxy_config seeds (146-183) and `migrate_proxy_config_to_per_app` (380-385), with no BEGIN/SAVEPOINT anywhere in that range (`create_tables` at schema.rs:18-21 only takes the lock); `rg "let _ = conn.execute"` gives 14 hits and `Database::memory()` (mod.rs:182-199) never calls `apply_schema_migrations`, leaving user_version=0 for its 139 test call sites. Impact is overstated, though: at startup `stored_user_version_exceeds_supported` (lib.rs:426-449) rejects a too-new DB before `Database::init()` ever reaches this DDL, the import path runs it on a throw-away temp connection, and the numbered migrations are savepoint-wrapped (schema.rs:415-428, 515-530), so only `restore_from_backup` of a newer backup (backup.rs:552-595, no version precheck) actually executes DDL before the version check. Test coverage is also more than the one test cited: tests.rs:573-615 replays the real `create_tables_on_conn` + `apply_schema_migrations_on_conn` order from a v3.8 schema and tests.rs:518-560 covers the proxy_config singleton repair, although no test compares `sqlite_master` text of fresh vs migrated schema (grep empty). Lowered to P2: real maintenance hazard, no demonstrated user-facing failure; proposal is sound and not implemented.
+
+### DB-11: Sync import restores preserved tables row-by-row in autocommit mode
+
+**Type:** performance · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/backup.rs:179-233` — `restore_tables` does `DELETE FROM "<table>"` then one `target_conn.execute(INSERT ...)` per row with no transaction on `temp_conn`; it is called for `proxy_request_logs`, `stream_check_logs`, `proxy_live_backup`, `usage_daily_rollups` (28-34, 128-130) on every WebDAV/S3 import.
+- **Problem:** With a few hundred thousand local usage rows a sync import spends most of its time fsyncing a temp file, and this happens inside the async sync path (DB-05).
+- **Proposal:** Wrap the whole `restore_tables` in `target_conn.unchecked_transaction()`; prepare the INSERT once per table; alternatively `ATTACH` the snapshot and `INSERT INTO t SELECT * FROM snap.t`.
+- **Acceptance:** Import of a DB with 200k log rows completes in < 3 s; existing `sync_import_preserves_local_only_tables` test passes.
+
+### DB-12: Full SQL export is built as one in-memory `String` and fails on any non-UTF-8 TEXT value
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/backup.rs:387-473` — `dump_sql` appends every row of every table (including `proxy_request_logs` for the manual export path `export_sql_string`, 47-50) to a `String`; `format_sql_value` (492-512) returns `Err` for `ValueRef::Text` that is not valid UTF-8 (497-499), aborting the whole export/sync snapshot (`sync_protocol.rs:109`).
+- **Problem:** Memory use is proportional to the log table (hundreds of MB possible) and a single malformed byte sequence (SQLite happily stores invalid UTF-8 in TEXT, e.g. from an upstream error body in `error_message`) makes export and cloud sync permanently fail with an opaque message.
+- **Proposal:** Stream the dump to a `BufWriter<File>` (or `tempfile`) instead of a `String`; for invalid UTF-8 emit the value as a blob literal `X'..'` or use `from_utf8_lossy` with a warning; for manual "full" exports prefer a binary snapshot (`VACUUM INTO` / Backup API) which is lossless and smaller.
+- **Acceptance:** Export of a DB with an invalid-UTF-8 `error_message` succeeds; peak RSS during export of a 1M-row log table stays flat.
+
+### DB-13: Mixed timestamp units and types across tables
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** milliseconds — `providers.created_at` and `provider_endpoints.added_at` (`dao/providers.rs:340,609,636`, `timestamp_millis()`); seconds — `proxy_request_logs.created_at` (`proxy/usage/logger.rs:73`), `stream_check_logs.tested_at` (`dao/stream_check.rs:251`); nanoseconds — `session_log_sync.last_modified` with an in-code note that old rows are seconds and no migration was done (`services/session_usage.rs:371-379`); RFC3339 TEXT — `provider_health.*_at` (`dao/proxy.rs:605`), `proxy_live_backup.backed_up_at` (785); SQLite `datetime('now')` TEXT — `proxy_config.created_at/updated_at` (`schema.rs:138`); local-date TEXT — `usage_daily_rollups.date` (`schema.rs:277-296`, built with `'localtime'` at `usage_rollup.rs:148`).
+- **Problem:** Every consumer must know the unit per column; cross-table queries (e.g. "provider created before this log") are error-prone; rollup days depend on the machine's timezone, so a TZ change or DST transition produces split/duplicated day buckets (partially mitigated by `compute_local_midnight_cutoff`).
+- **Proposal:** Adopt one convention (INTEGER Unix milliseconds UTC) for new columns, add a migration converting the obvious ones (`provider_health`, `proxy_live_backup`, `proxy_config`), and store `tz` alongside `date` in rollups (or roll up in UTC and convert on read). Document the convention in the schema doc (DB-33).
+- **Acceptance:** A `schema.md` table lists every timestamp column with its unit; new-column lint test rejects TEXT timestamps.
+
+### DB-14: Costs are stored as decimal TEXT but aggregated as REAL
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/usage/logger.rs:54-71` writes `rust_decimal` values via `to_string()`; `src-tauri/src/database/dao/usage_rollup.rs:140,158` aggregates with `CAST(total_cost_usd AS REAL)` and writes the sum back as TEXT; `usage_stats.rs:1729` filters with `CAST(total_cost_usd AS REAL) <= 0`; `services/session_usage.rs:535-549` sums `CAST(... AS REAL)` and formats `{:.6}`.
+- **Problem:** Decimal precision is lost in every aggregate (binary float accumulation across thousands of rows) and the TEXT column cannot be indexed/compared numerically, forcing full scans (DB-09).
+- **Proposal:** Store costs as INTEGER micro-dollars (or nano-dollars) and keep `rust_decimal` only at the API edge; migrate existing TEXT values once; replace `CAST(... AS REAL)` with integer sums.
+- **Acceptance:** Property test: sum of N random decimal costs via SQL equals `Decimal` sum exactly; backfill query uses an index on the new column.
+
+### DB-15: Raw SQL and direct `conn` locking spread across commands/services (layering violation)
+
+**Type:** refactor · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** `Database.conn` is `pub(crate)` (`mod.rs:80`); 15 files outside `src-tauri/src/database/` import `rusqlite` and 9 lock `db.conn` directly (`rg -c "lock_conn!|\.conn\.lock" src-tauri/src` → `usage_stats.rs:46`, `session_usage_codex.rs:8`, `session_usage.rs:7`, `proxy/response_processor.rs:6`, `proxy/usage/logger.rs:6`, `commands/usage.rs:3`, ...). `src-tauri/src/commands/usage.rs:130-138,225-233,264-270` execute `SELECT ... sqlite_master`, `INSERT OR REPLACE INTO model_pricing` and `DELETE FROM model_pricing` directly in Tauri command handlers. `services/usage_stats.rs` is 4153 lines mixing DAO SQL, pricing-name normalisation and ~60 tests.
+- **Problem:** The README's "Commands → Services → DAO → Database" contract (`README.md:419-423`) is not enforced; any future change to the connection model (DB-03) must touch 15 files; SQL is untestable in isolation and index/plan changes have no single owner.
+- **Proposal:** Make `conn` private; expose `Database::read(|conn| ..)` / `write(|tx| ..)` (later backed by the writer thread/read pool); move `model_pricing` CRUD into `dao/pricing.rs`, split `usage_stats.rs` into `dao/usage_queries.rs` (SQL) + `services/pricing_resolution.rs` (model-name normalisation) + tests; move session-import SQL into `dao/session_usage.rs`. Add a `#![deny]`-style check: a CI grep that fails if `rusqlite` is imported outside `database/`.
+- **Acceptance:** `rg "use rusqlite|rusqlite::" src-tauri/src --glob '!src-tauri/src/database/**'` returns only `error.rs`; all DAO functions have unit tests against `Database::memory()`.
+
+### DB-16: `universal_providers` is one JSON blob in `settings` with a read-modify-write race
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/dao/universal_providers.rs:286-344` — `save_universal_provider` calls `get_all_universal_providers` (takes and releases the lock) then `save_all_universal_providers` (takes it again) to `INSERT OR REPLACE` the entire map into `settings.universal_providers`; `delete_universal_provider` same pattern.
+- **Problem:** Two concurrent saves (UI + deeplink/sync worker) lose one update; the blob grows unbounded and is rewritten in full for every change; no per-row `updated_at` for sync merging (DB-20).
+- **Proposal:** Normalise into a `universal_providers(id TEXT PK, name, config TEXT, created_at, updated_at)` table (migration copies the JSON), with row-level UPSERT and a transaction around read-modify-write where still needed.
+- **Acceptance:** Concurrency test with two threads saving different ids ends with both rows present; blob key removed after migration.
+
+### DB-17: Column-per-app boolean flags force a schema migration per new app and already lag `AppType`
+
+**Type:** refactor · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** `mcp_servers` and `skills` carry `enabled_claude/codex/gemini/grokbuild/opencode/hermes` (`schema.rs:64-74,85-104`); migrations `v3→v4` (1056-1076), `v9→v10` (1271-1297) and `v14→v15` (1493-1514) exist solely to add such columns; `AppType` has 8 variants including `ClaudeDesktop` and `OpenClaw` (`src-tauri/src/app_config.rs:370-384`) with no matching columns; every DAO select/insert enumerates the list by hand (`dao/mcp.rs:16,77`, `dao/skills.rs:24-27,113-116,163`).
+- **Problem:** Adding an app is a 4-file schema change plus a release-gated migration; the sync compat version has to bump for a purely additive flag.
+- **Proposal:** Replace with junction tables `mcp_server_apps(server_id, app_type, PRIMARY KEY, FK ON DELETE CASCADE)` and `skill_apps(skill_id, app_type)`; `McpApps`/`SkillApps` become `BTreeSet<AppType>` (serde stays compatible via a custom (de)serialiser). One migration copies the flags.
+- **Acceptance:** Adding a new `AppType` variant requires no DB migration; existing MCP/skills tests pass; sync round-trip preserves enablement.
+
+### DB-18: `proxy_config.app_type` CHECK constraint hard-codes the app list and defaults are duplicated in four places
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** CHECK `app_type IN ('claude','codex','gemini','grokbuild')` at `schema.rs:127`, `:840`, `:1402`; `migrate_v13_to_v14` (1393-1491) rebuilds the whole table only to extend that list. Per-app defaults are repeated in `schema.rs:148-183` (claude: 6/90/180/600/8/3/90/0.7/15), `schema.rs:783-795` (claude: 6/45/90/.../0.6/15 — already drifted), `dao/proxy.rs:326-333`, `dao/proxy.rs:362-415`, and the "not found" fallback at `dao/proxy.rs:255-268` (3/60/120/600/4/2/60/0.6/10). `ensure_proxy_config_row_exists` (319-357) will hit the CHECK for any other app type.
+- **Problem:** Each new proxied app needs a table rebuild migration; defaults silently diverge between fresh installs and migrated installs.
+- **Proposal:** Drop the CHECK (validate `AppType` in Rust) in the next migration; define `ProxyDefaults::for_app(AppType)` once in `proxy/types.rs` and use it from the seeder, the migration, and the DAO fallbacks; add a test that the seeded rows equal `ProxyDefaults`.
+- **Acceptance:** Only one source of per-app defaults in the tree; adding `AppType::OpenClaw` to the proxy needs no migration.
+
+### DB-19: Model pricing lives as ~900 lines of Rust in `schema.rs` and needs a release per price change
+
+**Type:** refactor · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** `seed_model_pricing` (`schema.rs:1516-2396`) and `repair_current_model_pricing` (2398-2743, each fix must carry the *old* values to avoid clobbering user edits) run on every start (2746-2757); migrations `v1→v2` and `v8→v9` wipe the table (`DELETE FROM model_pricing`, 719-721, 1263-1265), discarding user-edited prices; 7 of the last 12 commits touching `database/` are pricing seeds (`git log --oneline -12 -- src-tauri/src/database`). `model_pricing` has no `source`/`seed_version`/`updated_at` columns (`schema.rs:236-244`).
+- **Problem:** Pricing is data, not schema; users wait for an app release for a price fix, and the repair logic is fragile (any user edit that happens to equal an old builtin value gets overwritten).
+- **Proposal:** Ship pricing as a versioned asset (`resources/model_pricing.json` with `seed_version`), add `source TEXT ('builtin'|'user')` and `seed_version INTEGER` columns; on start, upsert builtin rows where `source='builtin' AND seed_version < current`; never touch `source='user'`; optional "check for pricing updates" fetching a signed JSON. Remove the `DELETE FROM model_pricing` pattern from migrations.
+- **Acceptance:** Changing a price is a JSON edit with no Rust change; test proves user-edited rows survive seed bumps and migrations.
+
+### DB-20: Whole-snapshot last-writer-wins sync with no row versioning or tombstones
+
+**Type:** refactor · **Priority:** P2 · **Effort:** XL · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/sync_protocol.rs:309-340` replaces the entire local DB with the remote dump; `providers`, `mcp_servers`, `prompts`, `skills`, `profiles` have `created_at` but no `updated_at`/`deleted_at` (`schema.rs:27-44,64-74,77-81,85-104,314-323`); `prompts` has `updated_at` but nothing uses it for merging. Manifest carries only `snapshot_id`/`device_name` (`sync_protocol.rs:62-73`).
+- **Problem:** Editing provider A on laptop and provider B on desktop, then syncing both, silently loses one edit; deletions resurrect after a sync from a stale device.
+- **Proposal:** Add `updated_at INTEGER NOT NULL`, `deleted_at INTEGER NULL` (tombstone) and `rev INTEGER` to all synced entity tables (maintained by the DAO, not triggers, so they survive DB-01's trigger ban); change the import to a merge: for each row take the higher `updated_at`, apply tombstones, keep local rows unknown to remote; purge tombstones older than N days. Keep the snapshot format as the transport (rows are already dumped per table).
+- **Acceptance:** Two-device simulation test (edit A on X, edit B on Y, sync X→remote→Y→remote→X) ends with both edits on both devices and a deletion propagating.
+
+### DB-24: Corrupt JSON columns are silently coerced to `Null`/default and can be written back
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/dao/providers.rs:46-48,153-154` — `serde_json::from_str(&settings_config_str).unwrap_or(serde_json::Value::Null)` and `ProviderMeta ... unwrap_or_default()`; `dao/mcp.rs:37-38` same for `server_config`/`tags`. `save_provider` (180-278) then serialises whatever the struct holds back into the row.
+- **Problem:** A single corrupted row (bad import, partial write) turns a provider's config into `null`; the next UI save persists `null`, destroying the original bytes that might have been recoverable. By contrast `get_current_omo_provider` (474-487) correctly surfaces the error.
+- **Proposal:** Return `Err`/log at WARN with the row id and quarantine (skip) the row in list queries, exposing a "N providers could not be parsed" count to the UI; never write back a parsed-from-garbage struct.
+- **Acceptance:** Test inserts `settings_config='{broken'`, `get_all_providers` returns the other providers plus an error list, and `save_provider` on that id refuses until the row is repaired.
+
+### DB-25: Retention windows are hard-coded (30 d logs, 7 d stream checks) with no user control or "keep forever"
+
+**Type:** feature · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/mod.rs:148-153` and `backup.rs:271-286` call `cleanup_old_stream_check_logs(7)` and `rollup_and_prune(30)`; `usage_rollup.rs:175-180` deletes all detail rows older than the cutoff, including error rows and per-request latency data that rollups do not preserve (`usage_daily_rollups` keeps only averages/counts, `schema.rs:277-296`). Backup settings are user-configurable (`settings.rs:1065-1087`) but retention is not. `session_log_sync` is never pruned (`rg "DELETE FROM session_log_sync"` → none).
+- **Problem:** Users cannot audit requests older than a month or opt out of pruning (e.g. for cost reconciliation), while heavy users cannot shorten the window to keep the DB small.
+- **Proposal:** Add `usage_retention_days` (0 = never prune) and `stream_check_retention_days` to `AppSettings`, surface them in Settings, and run the prune with those values; optionally export pruned rows to a compressed JSONL archive before deletion; prune `session_log_sync` rows whose `file_path` no longer exists.
+- **Acceptance:** Setting retention to 0 stops pruning (test); a 7-day setting prunes accordingly; `session_log_sync` shrinks after files are deleted.
+
+### DB-26: Tests run against an un-migrated in-memory schema and skip backups/concurrency/hostile import
+
+**Type:** test · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/mod.rs:182-199` — `Database::memory()` never calls `apply_schema_migrations_on_conn`; all DAO tests (e.g. `dao/proxy.rs:905-982`, `dao/profiles.rs:464-534`, `usage_rollup.rs:186-573`) use it. `database/tests.rs` has 17 tests, all schema/migration/seed; `rg` finds no tests for `cleanup_db_backups`, `restore_from_backup`, `rename_backup`, `list_backups`, `delete_backup`, no multi-threaded lock/contention test, and no negative test for `import_sql_string` (hostile SQL, wrong version, FK violations). `backup.rs:784-859` mutates process-global env (`CC_SWITCH_TEST_HOME`) under `#[serial]`.
+- **Problem:** Schema drift between fresh and migrated DBs (DB-07) and regressions in backup/restore (DB-10) or the import boundary (DB-01) are invisible to CI.
+- **Proposal:** Add a `Database::memory_migrated()` that applies the full chain and use it for DAO tests; a "fresh == migrated schema" golden test; backup rotation/restore tests on a `tempfile` dir with injected config dir (replace env var with a `OnceLock<PathBuf>` override); an import fuzz/negative-case suite; a loom-free contention smoke test (writer thread + readers) once DB-03 lands.
+- **Acceptance:** Coverage report shows `backup.rs` > 80 % line coverage; schema golden test present; CI runs the negative import suite.
+
+### DB-27: UI invalidates every usage query on each log event, amplifying read load under the single lock
+
+**Type:** performance · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/hooks/useUsageEventBridge.ts:23-26` — on `usage-log-recorded`, `queryClient.invalidateQueries({ queryKey: usageKeys.all })`; the backend debounce is 200 ms (`src-tauri/src/usage_events.rs:46-61`); each invalidated query (`get_usage_summary` 511+, `get_daily_trends` 835+, `get_provider_stats` 1175+, `get_model_stats` 1319+, `get_request_logs` 1466+) runs the correlated `EXISTS` dedup filter (`usage_stats.rs:297-343`) under the same mutex as the proxy writer.
+- **Problem:** With the dashboard open during a Claude Code session every burst of requests triggers 4-5 full aggregate scans every 200 ms, directly competing with `log_request`.
+- **Proposal:** Raise the backend debounce for the "refresh dashboard" event to ~2 s (keep the fast path for the current request list page if desired), and/or maintain the current-day bucket incrementally in `usage_daily_rollups` so summaries read rollups + a bounded tail of detail rows.
+- **Acceptance:** Under a 20 req/s synthetic load with the dashboard open, DB lock hold time attributable to UI queries is < 10 % (measure with a lock-wait histogram added in DB-03).
+
+### DB-33: No developer documentation for the schema, table ownership, retention/backup semantics or migration checklist
+
+**Type:** docs · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `ls docs` → `guides images release-notes user-manual`; `rg -il "user_version|SCHEMA_VERSION|migrate_v" docs README.md CLAUDE.md` matches only release notes. The module doc in `src-tauri/src/database/mod.rs:10-24` lists only five DAO files (there are twelve) and omits `proxy`, `usage_rollup`, `profiles`, `failover`, `stream_check`, `universal_providers`. README `README.md:419-423` claims "atomic writes", "dual-layer storage" and a Mutex-protected connection, which DB-03/DB-06 show to be only partly true.
+- **Problem:** Contributors adding a table must discover by archaeology that they need to update `create_tables_on_conn`, a migration, `SCHEMA_VERSION`, `DB_COMPAT_VERSION`, `SYNC_SKIP_TABLES`/`SYNC_PRESERVE_TABLES`, `should_trigger_for_table`, and `memory()`.
+- **Proposal:** Add `docs/dev/database.md` with an ERD (tables, keys, timestamp units), the synced/device classification, retention and backup rules, the "add a column/table" checklist, and how to test migrations against a real old DB (`tests.rs:565` already embeds a v3.8 schema; link it). Fix the module doc and README wording.
+- **Acceptance:** Doc merged; module doc lists all DAO files; README statements match behaviour.
+
+### DB-08: No migration ledger/checksums; `SCHEMA_VERSION` and sync `DB_COMPAT_VERSION` are independent hand-bumped constants
+
+**Type:** refactor · **Priority:** P3 · **Effort:** L · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/database/mod.rs:55` `SCHEMA_VERSION = 15` vs `src-tauri/src/services/sync_protocol.rs:27-28` `DB_COMPAT_VERSION = 6`, `LEGACY_DB_COMPAT_VERSION = 5`, with no code or test relating them (`validate_manifest_compat`, 186-246, requires exact equality for the current layout). `schema.rs:415-533` is a `match version { 0 => ..., 14 => ... }` chain tracking only `PRAGMA user_version` (2759-2772); no table records which migration ran when, under which app version, or with what checksum; no down migrations. Git history shows frequent schema-adjacent churn (`git log -- src-tauri/src/database`: grokbuild, pricing seeds, cache-write semantics).
+- **Problem:** Forgetting to bump `DB_COMPAT_VERSION` ships a sync format change silently; forgetting `SCHEMA_VERSION` means a migration never runs; there is no way to diagnose a half-migrated DB from the field or to detect that a migration's SQL changed after release.
+- **Proposal:** Add a `schema_migrations(version INTEGER PK, name TEXT, checksum TEXT, app_version TEXT, applied_at INTEGER)` table and a `const MIGRATIONS: &[Migration { version, name, up: fn(&Connection) }]` registry (keep Rust closures for data migrations; SQL strings hashed for checksums). Derive the sync compat version from the registry (e.g. the last migration flagged `breaks_sync: true`) and add a test asserting `DB_COMPAT_VERSION == derived`. Keep `user_version` in sync for the fast "too new" precheck (`lib.rs:426-449`).
+- **Acceptance:** Fresh DB and upgraded DB both have a populated `schema_migrations`; CI test fails if a migration is added without a registry entry or if a registered migration's checksum changes.
+- **Verification:** **partially-confirmed** — Facts confirmed: `SCHEMA_VERSION = 15` (src-tauri/src/database/mod.rs:55) and `DB_COMPAT_VERSION = 6` / `LEGACY_DB_COMPAT_VERSION = 5` (services/sync_protocol.rs:27-28) are unrelated by any code or test (the sync_protocol tests at 501-589 only use DB_COMPAT_VERSION), `validate_manifest_compat` requires exact equality for the current layout (sync_protocol.rs:221), the migration chain is a hand-written `match version` (schema.rs:427-510) tracking only `PRAGMA user_version` (2759-2772) with no ledger or checksums, and the shallow 50-commit history shows 11 schema-adjacent commits (grokbuild, pricing seeds, cache-write). The stated problem is largely mitigated, however: `dump_sql` embeds `PRAGMA user_version=N` in every sync snapshot (backup.rs:390-398) and the import path runs `apply_schema_migrations_on_conn` on the temp DB (backup.rs:125-126), which rejects a newer dump with the explicit '数据库版本过新' error (schema.rs:420-427, tested at tests.rs:208-213) and upgrades an older one, so forgetting to bump DB_COMPAT_VERSION produces a loud import failure rather than a silent format change; a half-migrated DB cannot persist because the whole chain runs under `SAVEPOINT schema_migration` with rollback (schema.rs:415-428, 515-530); and the 'too new' fast precheck already exists (lib.rs:426-449). What remains is a maintainability nice-to-have (no applied-migration ledger, no checksums, two independently bumped constants) for a desktop app with Rust-embedded migrations, so P3; the registry/ledger proposal is sound but a one-line test pinning the (SCHEMA_VERSION, DB_COMPAT_VERSION) pair would capture most of the value at far lower cost.
+
+### DB-21: `get_all_providers` issues one endpoint query per provider (N+1) and is on the tray/failover path
+
+**Type:** performance · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/dao/providers.rs:70-106` — inside the provider loop, `conn.prepare("SELECT url, added_at FROM provider_endpoints WHERE provider_id = ?1 AND app_type = ?2 ...")` per row; callers include `get_failover_providers` and `get_available_providers_for_failover` (`dao/failover.rs:586-595,670-682`).
+- **Problem:** O(N) prepared statements per call while holding the global lock; `provider_endpoints` has no index on `(provider_id, app_type)` beyond the FK (SQLite does not auto-index FK columns; `schema.rs:50-58`).
+- **Proposal:** One `SELECT provider_id, url, added_at FROM provider_endpoints WHERE app_type = ?1` grouped in Rust, plus `CREATE INDEX idx_provider_endpoints_provider ON provider_endpoints(provider_id, app_type)`.
+- **Acceptance:** SQL statement count for `get_all_providers` is 2 regardless of provider count (assert with a trace callback in a test).
+
+### DB-22: `provider_endpoints` has no uniqueness constraint; duplicates accumulate
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `schema.rs:50-58` — `provider_endpoints(id AUTOINCREMENT, provider_id, app_type, url, added_at)` with only the FK; `dao/providers.rs:333-346` does a plain `INSERT`; the service layer only trims/normalises (`src-tauri/src/services/provider/endpoints.rs:34-53`); `get_all_providers` collapses duplicates into a `HashMap` keyed by url (`dao/providers.rs:94-99`), hiding the growth.
+- **Problem:** Repeated adds (deeplink `src-tauri/src/deeplink/provider.rs:119`, UI) create duplicate rows that are invisible in the UI but exported/synced and never removed.
+- **Proposal:** Migration: de-duplicate then add `UNIQUE(provider_id, app_type, url)`; change the insert to `INSERT ... ON CONFLICT DO NOTHING`.
+- **Acceptance:** Adding the same URL twice yields one row; migration test proves existing duplicates are collapsed.
+
+### DB-23: `INSERT OR REPLACE` on parent rows with `ON DELETE CASCADE` children; REPLACE used as upsert everywhere
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/database/migration.rs:83-114` — JSON→SQLite migration uses `INSERT OR REPLACE INTO providers`, which with `PRAGMA foreign_keys=ON` deletes the existing row and cascades to `provider_endpoints`/`provider_health` (`schema.rs:56,191`) before re-inserting endpoints. `dao/mcp.rs:75-78`, `dao/skills.rs:112-116`, `dao/prompts.rs:169-171`, `dao/profiles.rs:419-421`, `dao/proxy.rs:634-642` also use `INSERT OR REPLACE`, which changes rowids and fires a DELETE+INSERT pair into the auto-sync update hook (`mod.rs:83-93`).
+- **Problem:** Child rows can be lost when the migration re-runs on a populated DB; every save produces two change notifications and rewrites the whole row even when only one column changed.
+- **Proposal:** Use `INSERT ... ON CONFLICT(pk) DO UPDATE SET ...` (SQLite ≥ 3.24, bundled version is far newer) for all upserts; keep `save_provider`'s explicit UPDATE/INSERT split as the model.
+- **Acceptance:** `rg "INSERT OR REPLACE" src-tauri/src` only remains where REPLACE semantics are intended and documented; a test asserts `provider_health` survives `migrate_from_json` on an existing provider.
+
+### DB-28: `settings` key-value table is an untyped grab-bag with no namespace or ownership
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** Keys written across the tree (`rg set_setting\(`): `official_providers_seeded`, `default_skill_repos_initialized`, `skills_ssot_migration_pending/_snapshot`, `stream_check_config`, `rectifier_config`, `optimizer_config`, `copilot_optimizer_config`, `log_config` (JSON blobs, `dao/settings.rs:244-326`), `common_config_<app>` and `common_config_<app>_cleared` (12-14, 121-136), `global_proxy_url` (141), `current_profile_id_<scope>` (`dao/profiles.rs:339-343`), `universal_providers` (`dao/universal_providers.rs:282`), plus legacy `proxy_takeover_*` still handled by deprecated methods (173-237). Table is `(key TEXT PK, value TEXT)` (`schema.rs:120`).
+- **Problem:** No way to tell which keys are device-local vs synced (DB-06), which are JSON vs scalar, or which are dead; typo'd keys fail silently; auto-sync triggers on all of them.
+- **Proposal:** Introduce a `SettingKey` enum with `scope: Device|Synced` and `kind: Bool|String|Json<T>` used by typed accessors; a migration drops dead `proxy_takeover_*` rows; the sync exporter filters by scope. Document each key.
+- **Acceptance:** All `get_setting/set_setting("literal")` call sites replaced by typed accessors; exporter test shows only `Synced` keys in `db.sql`.
+
+### DB-29: `stream_check_logs.status` persists the Rust `Debug` representation of an enum
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/dao/stream_check.rs:224` — `format!("{:?}", result.status).to_lowercase()`.
+- **Problem:** Renaming a variant (or deriving a custom `Debug`) silently changes stored values and breaks any filter/aggregate on `status`.
+- **Proposal:** Add an explicit `as_db_str()`/`FromStr` pair with a unit test pinning the string set; consider a CHECK or lookup.
+- **Acceptance:** Test enumerates variants and asserts stable strings.
+
+### DB-30: `Database::init` runs DDL before the too-new version check; secondary entry points lack the precheck
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/database/mod.rs:124` `create_tables()` (which issues ALTER/DROP/DELETE, DB-07) runs before `apply_schema_migrations()` at 141 rejects `version > SCHEMA_VERSION` (`schema.rs:421-428`). `lib.rs:426-449` adds a precheck for the normal launch path only; `backup.rs:583-595` (`restore_from_backup`) and the retry loop in `lib.rs:452-466` call `Database::init`/`create_tables` without it.
+- **Problem:** A DB produced by a newer build that reaches these paths is mutated by an older binary before being rejected.
+- **Proposal:** Move the version check to the first statement of `Database::init` (and `restore_from_backup`, `import_sql_string_inner`), before any DDL; keep the `lib.rs` precheck for the UI message.
+- **Acceptance:** Test: open a DB with `user_version = SCHEMA_VERSION + 1` via `init()`-equivalent on a temp path; `sqlite_master` and `settings` are byte-identical afterwards.
+
+### DB-31: `update_provider_health` uses an unindexed read-then-REPLACE and relies on a FK to a possibly-deleted provider
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/database/dao/proxy.rs:595-657` — reads `consecutive_failures`, computes in Rust, then `INSERT OR REPLACE` with two correlated sub-selects; `provider_health` has `FOREIGN KEY (provider_id, app_type) REFERENCES providers ON DELETE CASCADE` (`schema.rs:186-192`), so a health update racing a provider delete fails with an FK error that surfaces as a proxy warning.
+- **Problem:** Three statements per failure/success event on the hot path; non-atomic increment under future multi-connection access (DB-03).
+- **Proposal:** Single `INSERT ... ON CONFLICT DO UPDATE SET consecutive_failures = CASE WHEN excluded.is_healthy ... END` statement; swallow `SQLITE_CONSTRAINT_FOREIGNKEY` for deleted providers.
+- **Acceptance:** One statement per call (trace assertion); deleting a provider mid-stream produces no error log.
+
+### DB-32: `DB_COMPAT_VERSION` strict equality blocks sync between app versions that are actually compatible
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/services/sync_protocol.rs:186-246` — for the current layout `db_compat_version != DB_COMPAT_VERSION` is rejected in both directions, while the importer already runs `apply_schema_migrations_on_conn` on the temp DB (`backup.rs:125-126`), i.e. older dumps are upgradable.
+- **Problem:** A user with two machines on adjacent releases cannot sync at all once the constant is bumped, even for additive changes.
+- **Proposal:** Accept `remote <= local` (upgrade on import, like file restore) and reject only `remote > local`; tie the constant to the migration registry (DB-08).
+- **Acceptance:** Test: dump at compat N-1 imports into compat N; N+1 is rejected with the existing localized error.
+
+### DB-34: Startup seeding and fixups run as hundreds of individual autocommits
+
+**Type:** performance · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/schema.rs:2374-2392` (`INSERT OR IGNORE` per pricing row, ~200 rows) and `2398-2743` (`UPDATE ... WHERE model_id = ? AND <old values>` per fix) are called from `ensure_model_pricing_seeded_on_conn` (2751-2756) on every start and on every `get_model_pricing` command (`src-tauri/src/commands/usage.rs:125-127`), with no enclosing transaction; `create_tables_on_conn` likewise issues ~40 autocommit DDL/DML statements.
+- **Problem:** Dozens of journal round-trips on every launch and on every open of the pricing page; partial failure leaves a half-seeded table.
+- **Proposal:** Wrap seed+repair in one `unchecked_transaction` and gate it on a `seed_version` setting (DB-19); drop the re-seed from the `get_model_pricing` command.
+- **Acceptance:** SQLite trace shows one `BEGIN/COMMIT` around seeding; pricing page open issues zero writes.

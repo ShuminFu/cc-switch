@@ -1,0 +1,376 @@
+# Frontend architecture — findings (FE-ARCH-xx)
+
+Part of the [next-phase proposals](../README.md). 36 findings. Priorities: P1 = 4, P2 = 18, P3 = 14.
+
+## Area summary
+
+The frontend has a reasonable three-layer skeleton (hand-written `src/lib/api/*` invoke wrappers -> TanStack Query hooks in `src/lib/query/*` and `src/hooks/*` -> components) with strict TypeScript, Prettier, Vitest+MSW and a useful `useTauriEvent` helper, and it has clearly been kept alive under heavy feature growth (8 managed apps, 268 Tauri commands, 2.5k i18n keys). The main structural risk is that the shell never got a router or a state model: `src/App.tsx` is a 1,673-line god component that owns navigation (a 14-value `View` union), per-view header actions wired through `useRef<any>` imperative handles, 12 `useState`, 6 `useRef`, 12 `useEffect` and 45 string comparisons on `activeApp`, and pages are still modelled as dialogs (`open`/`onOpenChange`). The second risk is the untyped Rust<->TS boundary: 291 hand-written `invoke` calls, duplicated wrappers, hooks that bypass the API layer, and type drift that already produces a real bug (`autoSyncConfirmed` is silently dropped by the Rust `AppSettings` struct). The query layer has no single key registry (77 literal `queryKey` arrays outside `lib/query`), two competing `useProxyStatus`/`useProxyConfig` implementations, 2-second polling where backend events already exist, and over-invalidation of third-party usage endpoints. Tooling is missing in ways that let drift accumulate: no ESLint config despite CONTRIBUTING referencing `pnpm lint`, no bundle analysis, all locales/presets/icons (~2.5 MB of source data) in the main chunk, no lazy routes. Suggested direction for the next phase: (1) introduce a router + app capability registry and dismantle `App.tsx`; (2) generate the command/event bindings from Rust with tauri-specta and delete the hand-written wrappers; (3) centralise query keys, invalidation and error handling; (4) land ESLint/knip/visualizer in CI and lazy-load pages, locales and presets.
+
+## Index
+
+| ID | Title | Type | Priority | Effort | Confidence |
+|---|---|---|---|---|---|
+| [FE-ARCH-01](#fe-arch-01) | `autoSyncConfirmed` setting is silently dropped by the backend (type drift between TS `Settings` and Rust `AppSettings`) | bug | P1 | S | high |
+| [FE-ARCH-02](#fe-arch-02) | Replace the `App.tsx` god component with a router-driven shell and page-owned header actions | refactor | P1 | XL | high |
+| [FE-ARCH-03](#fe-arch-03) | Generate the Tauri command/event bindings from Rust (tauri-specta) instead of 291 hand-written `invoke` wrappers | refactor | P1 | L | high |
+| [FE-ARCH-04](#fe-arch-04) | Centralise TanStack Query keys and fix namespace collisions that over-invalidate third-party usage endpoints | refactor | P1 | M | high |
+| [FE-ARCH-05](#fe-arch-05) | Duplicate/competing proxy hooks, 2-second polling and sequential invalidation; backend events already exist but are not used | performance | P2 | M | high |
+| [FE-ARCH-06](#fe-arch-06) | `useProvidersQuery` swallows backend errors, so failures render as an empty provider list | bug | P2 | S | high |
+| [FE-ARCH-07](#fe-arch-07) | Linting and repo tooling are missing (ESLint referenced in CONTRIBUTING but absent, no knip, no bundle analysis, no Storybook) | tech-debt | P2 | M | high |
+| [FE-ARCH-08](#fe-arch-08) | Main bundle carries all locales, ~11k lines of presets, ~1 MB of icons and every page eagerly | performance | P2 | M | high |
+| [FE-ARCH-09](#fe-arch-09) | Per-card query fan-out and unstable props make the provider list O(N) IPC pollers and O(N) re-renders on every shell state change | performance | P2 | M | high |
+| [FE-ARCH-10](#fe-arch-10) | App identity/capabilities are duplicated across 5+ hand-maintained lists and 45+ string comparisons; hardcoded label maps are already wrong for new apps | refactor | P2 | M | high |
+| [FE-ARCH-11](#fe-arch-11) | Error handling uses three incompatible protocols (string substring matching, JSON codes, raw messages) and toasts fire from every layer | refactor | P2 | L | high |
+| [FE-ARCH-12](#fe-arch-12) | i18n is leaky: 459 hardcoded Chinese `defaultValue`s, 366 raw CJK literals, zh-TW missing 30 keys with English fallback, `<html lang>` never updated | tech-debt | P2 | M | high |
+| [FE-ARCH-13](#fe-arch-13) | Dead and stale abstractions: unused zod schemas, deprecated API methods, 15 never-invoked Rust commands, dead `delete` of an already-stripped key | tech-debt | P2 | S | high |
+| [FE-ARCH-14](#fe-arch-14) | Forms use react-hook-form + zod in only 3 of ~20 forms, and the zod schema deliberately bypasses required-field validation | refactor | P2 | L | high |
+| [FE-ARCH-15](#fe-arch-15) | Shared-layer test coverage is thin and the i18n/Tauri test doubles hide whole classes of bugs | test | P2 | M | high |
+| [FE-ARCH-16](#fe-arch-16) | Command palette and a keyboard-shortcut registry (cmdk is already shipped) | feature | P2 | M | high |
+| [FE-ARCH-17](#fe-arch-17) | Undo for destructive config changes (delete/switch/sort) via a change journal | feature | P2 | L | medium |
+| [FE-ARCH-19](#fe-arch-19) | Event subscriptions are duplicated outside `useTauriEvent` with weaker lifecycles, and the event names are not a shared contract | tech-debt | P2 | S | high |
+| [FE-ARCH-20](#fe-arch-20) | Accessibility baseline: icon-only buttons without labels, hidden scrollbars, no reduced-motion handling | ux | P2 | S | high |
+| [FE-ARCH-27](#fe-arch-27) | No frontend architecture/conventions documentation; agent instruction files are gitignored | docs | P2 | S | high |
+| [FE-ARCH-28](#fe-arch-28) | `Provider.settingsConfig: Record<string, any>` and ~100 `any` tokens undermine the core data model | tech-debt | P2 | M | high |
+| [FE-ARCH-34](#fe-arch-34) | Presets as data: move the 11k-line preset tables out of the bundle into versioned, validated, user-extensible JSON | feature | P2 | L | medium |
+| [FE-ARCH-18](#fe-arch-18) | Optimistic updates for switch, sort and delete | feature | P3 | M | high |
+| [FE-ARCH-21](#fe-arch-21) | Inline-SVG icon rendering and permissive CSP deserve a hardening pass; sponsored presets carry tracking parameters | security | P3 | S | medium |
+| [FE-ARCH-22](#fe-arch-22) | `localStorage` keys are scattered and written from multiple places without validation | tech-debt | P3 | S | high |
+| [FE-ARCH-23](#fe-arch-23) | `useSettings` duplicates an 80 %-identical save pipeline twice and copies `sanitizeDir` three times | tech-debt | P3 | S | high |
+| [FE-ARCH-24](#fe-arch-24) | Settings form state is reset from the server query, so background settings refreshes clobber unsaved edits | bug | P3 | S | medium |
+| [FE-ARCH-25](#fe-arch-25) | Global query defaults (`staleTime: 0`, `refetchOnWindowFocus: true`) are wrong for a tray-resident desktop app | performance | P3 | S | high |
+| [FE-ARCH-26](#fe-arch-26) | No browser/Tauri transport abstraction: `pnpm dev:renderer` and Storybook cannot run, tests mock `@tauri-apps/api` wholesale | tech-debt | P3 | M | high |
+| [FE-ARCH-29](#fe-arch-29) | Layering inversions: query layer imports hooks, API layer imports UI concerns, config imports components | tech-debt | P3 | S | high |
+| [FE-ARCH-30](#fe-arch-30) | Addressable pages for deep links and tray navigation | feature | P3 | M | medium |
+| [FE-ARCH-31](#fe-arch-31) | `src/types.ts` (737 lines) mixes every domain while `src/types/*` holds a random subset | tech-debt | P3 | S | high |
+| [FE-ARCH-32](#fe-arch-32) | `UpdateContext` is a hand-rolled async state machine with duplicated storage-migration code; it should be a query | refactor | P3 | S | high |
+| [FE-ARCH-33](#fe-arch-33) | Stricter TypeScript compiler options are off (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`) | tech-debt | P3 | M | high |
+| [FE-ARCH-35](#fe-arch-35) | Two different provider sort implementations with different locale rules | bug | P3 | S | medium |
+| [FE-ARCH-36](#fe-arch-36) | Success/error toast policy: 2-second global duration hides errors; warnings and successes compete | ux | P3 | S | high |
+
+## Findings
+
+### FE-ARCH-01: `autoSyncConfirmed` setting is silently dropped by the backend (type drift between TS `Settings` and Rust `AppSettings`)
+
+**Type:** bug · **Priority:** P1 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/types.ts:381-382` declares `autoSyncConfirmed?: boolean`; `src/components/settings/WebdavSyncSection.tsx:428-445` reads `settings?.autoSyncConfirmed` and persists it with `onAutoSave?.({ autoSyncConfirmed: true })`; `src/hooks/useSettings.ts:182-222` sends the merged object to `settingsApi.save` -> `save_settings` (`src-tauri/src/commands/settings.rs:62-71`) which deserialises into `AppSettings` (`src-tauri/src/settings.rs:341-491`). That struct has no `auto_sync_confirmed` field and no `deny_unknown_fields`/`flatten`, so serde discards the value. A field diff of the two structs also shows Rust-only `currentProviderGrokbuild/Hermes/Openclaw/Opencode`, `webdavBackup` and TS-only `autoSyncConfirmed`.
+- **Problem:** The "auto-sync traffic warning" confirmation can never be persisted, so users are re-prompted on every toggle; more generally nothing checks that the TS `Settings` shape matches `AppSettings`, so any new frontend-only field is a silent no-op.
+- **Proposal:** Add `auto_sync_confirmed: Option<bool>` to `AppSettings` (and a Rust unit test in `merge_settings_for_save`), then remove the root cause by generating the `Settings` type from Rust (see FE-ARCH-03) or at minimum adding a contract test that round-trips every `Settings` key through `save_settings`/`get_settings` in the MSW state (`tests/msw/state.ts`).
+- **Acceptance:** Toggling WebDAV auto-sync, confirming, restarting the app and toggling again does not re-prompt; a CI test fails when a key exists in `src/types.ts` `Settings` but not in `AppSettings`.
+
+### FE-ARCH-02: Replace the `App.tsx` god component with a router-driven shell and page-owned header actions
+
+**Type:** refactor · **Priority:** P1 · **Effort:** XL · **Confidence:** high
+
+- **Evidence:** `src/App.tsx` is 1,673 lines. Navigation is a hand-rolled `View` union (`src/App.tsx:99-113`) persisted to `localStorage` (`144-168`, `184-186`) with fallback effects (`216-236`); `hasSessionSupport` (`295-302`) lists every value `sharedFeatureApp` can take, so it is always `true` and the fallback effect at `223-236` is dead logic. Header buttons call child methods through `useRef<any>` imperative handles (`255-258`, `1292`, `1304`, `1313`, `1327-1349`, `1386`) backed by `useImperativeHandle` in `src/components/mcp/UnifiedMcpPanel.tsx:116`, `src/components/prompts/PromptPanel.tsx:71`, `src/components/skills/SkillsPage.tsx:214`, `src/components/skills/UnifiedSkillsPanel.tsx:341`. Per-view header actions are a 110-line `currentView ===` ladder (`1288-1395`); the page title is a 20-line ladder (`1171-1192`). Pages are still dialogs: `SettingsPage` takes `open`/`onOpenChange` (`src/components/settings/SettingsPage.tsx:61-66`) and is rendered with `open={true}` (`src/App.tsx:899-904`, `908-913`, `939-942`). Deep-linking into a settings tab is done by `setSettingsDefaultTab("usage"); setCurrentView("settings")` (`1215-1236`). 45 `activeApp === "..."`/`sharedFeatureApp === "..."` comparisons live in this one file.
+- **Problem:** Every new app or page touches the same file in 6-8 places (view union, VALID_VIEWS, title ladder, header-action ladder, content switch, capability `if`s), there is no addressable page state (no deep links, no back-stack, no testable navigation), and the imperative `useRef<any>` bridge defeats type checking between the shell and pages.
+- **Proposal:** Introduce a memory-history router (TanStack Router or react-router `createMemoryRouter`) with one route per page (`/providers/:appId`, `/settings/:tab?`, `/mcp`, `/skills`, `/skills/discover`, `/sessions/:appId`, `/openclaw/env`...). Each page declares its own header actions via a `PageHeader` slot/portal (or route `staticData`) instead of `forwardRef` handles. Move the app capability matrix (skills/sessions/mcp/prompts/proxy/failover/additive-mode) into a registry (FE-ARCH-10) so `App.tsx` becomes a ~200-line layout with `<Outlet/>`. Persist last route instead of `cc-switch-last-view`. Keep the Linux drag-bar/window-controls code in a `TitleBar` component.
+- **Acceptance:** `App.tsx` < 300 lines; no `useRef<any>`/`useImperativeHandle` between shell and pages; adding a page requires a route file plus a registry entry only; `tests/integration/App.test.tsx` navigates via router APIs; `ccswitch://` deep links can target a route (FE-ARCH-30).
+
+### FE-ARCH-03: Generate the Tauri command/event bindings from Rust (tauri-specta) instead of 291 hand-written `invoke` wrappers
+
+**Type:** refactor · **Priority:** P1 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** 23 files under `src/lib/api/` plus `src/hooks/useProxyStatus.ts`, `src/hooks/useProxyConfig.ts`, `src/App.tsx:520,538`, `src/components/theme-provider.tsx:109`, `src/components/DatabaseUpgrade.tsx:65,102,271,282`, `src/lib/clipboard.ts:5` contain 291 `invoke(` calls for 268 Rust commands (`rg '#\[tauri::command\]' src-tauri/src | wc -l` = 268). Return types are asserted, never checked: `src/lib/api/providers.ts:50-52` (`async getAll(): Promise<Record<string, Provider>> { return await invoke(...) }`), `src/lib/api/vscode.ts:13-15` returns untyped `unknown`. Duplicates: `settingsApi.pickDirectory` and `settingsApi.selectConfigDirectory` both call `pick_directory` (`src/lib/api/settings.ts:76-82`); `vscodeApi.exportConfigToFile/importConfigFromFile/saveFileDialog/openFileDialog` (`src/lib/api/vscode.ts:73-93`) duplicate `settingsApi` (`settings.ts:119-133`). Hooks bypass the layer with raw `invoke` (`src/hooks/useProxyStatus.ts:26,36,42,69,94,126,176,196,205`, `src/hooks/useProxyConfig.ts:21,27`). Rust command names are inconsistent: `queryProviderUsage`/`testUsageScript` are camelCase fn names (`src-tauri/src/commands/provider.rs:383,677`, called from `src/lib/api/usage.ts:23,37`). TS types mirror Rust casing by hand and mix conventions in one file (`src/types/proxy.ts:14-30` `ProxyStatus` snake_case vs `67-73` `CircuitBreakerConfig` camelCase). `Cargo.toml` has no `specta`/`ts-rs`/`typeshare`.
+- **Problem:** The boundary is the largest source of drift and silent bugs (FE-ARCH-01), every new command costs a Rust fn + wrapper + TS type + MSW handler, and nothing stops a renamed Rust command from breaking the UI at runtime.
+- **Proposal:** Adopt `tauri-specta` v2 + `specta-typescript`: derive `specta::Type` on command argument/return structs, register commands and typed events (`provider-switched`, `usage-cache-updated`, `profile-applied`...) in the builder, emit `src/lib/bindings.ts` on `cargo build`/`pnpm tauri dev`, and add a CI step that fails when the committed bindings are stale. Migrate `src/lib/api/*` to thin re-exports over `commands.*` (or delete them), replace the raw `invoke` sites in hooks/components, and delete `src/types/proxy.ts`-style mirrors. Normalise Rust command names to snake_case while doing it. Keep `tests/msw` working by generating the handler name list from the same bindings.
+- **Acceptance:** `src/lib/bindings.ts` is generated and checked in CI; zero `invoke(` calls outside `src/lib/bindings.ts`; `Settings`, `Provider`, `ProxyStatus` and event payload types come from the bindings; MSW handlers are typed against the bindings.
+
+### FE-ARCH-04: Centralise TanStack Query keys and fix namespace collisions that over-invalidate third-party usage endpoints
+
+**Type:** refactor · **Priority:** P1 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** 77 literal `queryKey: [...]` arrays exist outside `src/lib/query` (e.g. `src/components/providers/ProviderList.tsx:100-104` `["opencodeLiveProviderIds"]`, `194-199` `["claudeDesktopStatus"]`); string keys are repeated across files (`["providers"` 23 sites, `["skills"` 21, `["proxyStatus"` 18, `["mcp"` 9). Partial key factories live in hook files, not the query layer (`src/hooks/useOpenClaw.ts:14-22`, `src/hooks/useHermes.ts:26-32`) and are imported back into the query layer (`src/lib/query/mutations.ts:10-11`). `usageKeys.script` is `["usage", providerId, appType]` (`src/lib/query/usage.ts:148-149`) in the same namespace as `["usage","summary",...]`, so `invalidateQueries({ queryKey: usageKeys.all })` on pricing edits (`usage.ts:378,389`) and on every `usage-log-recorded` event (`src/hooks/useUsageEventBridge.ts:26`, fired on each proxied request) also refetches every provider card's usage-script query, i.e. an HTTP call per provider to third-party quota endpoints. `omo.ts:20` invalidates `["providers"]` for all apps.
+- **Problem:** Without one registry, invalidation is guesswork (see FE-ARCH-05), keys drift between producer and consumer, and the `usage` collision turns a local log write into N outbound quota requests while the proxy is busy.
+- **Proposal:** Create `src/lib/query/keys.ts` with a hierarchical factory (`keys.providers.all`, `keys.providers.byApp(appId)`, `keys.usage.dashboard.*`, `keys.usage.script(providerId, appId)` under a distinct root such as `["usage-script", ...]`, `keys.proxy.status`, ...). Move `openclawKeys`/`hermesKeys`/`omoKeys` there. Enable `@tanstack/eslint-plugin-query` (`no-rest-destructuring`, `exhaustive-deps`) once ESLint exists (FE-ARCH-07) and add a custom lint forbidding literal arrays in `queryKey` outside `keys.ts`.
+- **Acceptance:** `rg 'queryKey: \["' src` returns matches only inside `src/lib/query/keys.ts`; a unit test asserts `usage-log-recorded` does not invalidate `usage-script` queries; mutations reference keys by factory only.
+
+### FE-ARCH-05: Duplicate/competing proxy hooks, 2-second polling and sequential invalidation; backend events already exist but are not used
+
+**Type:** performance · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** Two `useProxyStatus` implementations share key `["proxyStatus"]` with different `refetchInterval`: `src/lib/query/proxy.ts:12-18` (unconditional 5 s) and `src/hooks/useProxyStatus.ts:19-31` (2 s only while running). `useProxyConfig` is implemented twice (`src/hooks/useProxyConfig.ts:14-48`, `src/lib/query/proxy.ts:137-166`). `useIsProxyRunning`, `useIsLiveTakeoverActive`, `useProxyTakeoverStatus` poll every 2 s (`src/lib/query/proxy.ts:23-51`); `useProviderHealth`/`useCircuitBreakerStats` poll every 5 s per provider (`src/lib/query/failover.ts:12-19,83-90`). Rust emits `proxy-flags-changed` (`src-tauri/src/tray.rs:581`) but no frontend listener exists (`rg 'proxy-flags-changed' src` is empty). Mutations `await` invalidations one after another (`src/lib/query/mutations.ts:86-110`, `159-175`, `206-231`, `272-305`; `src/lib/query/profiles.ts:122-131`), and `handleImportSuccess` invalidates then refetches the same key (`src/App.tsx:830-843`).
+- **Problem:** Polling at 2 s from several hooks keeps the webview and the Rust state lock busy while the app sits in the tray, the two `useProxyStatus` variants race on the same cache entry, and serial `await`s make switch/add feel slower than necessary.
+- **Proposal:** Keep one proxy module in `src/lib/query/proxy.ts`; delete `src/hooks/useProxyStatus.ts`/`useProxyConfig.ts` or make them re-exports. Subscribe to `proxy-flags-changed`/`provider-switched` via `useTauriEvent` and invalidate on event, falling back to a 15-30 s poll only while `status.running`. Run invalidations with `Promise.all`. Add a backend `get_provider_health_all(app)` and poll it once per list instead of per card (see FE-ARCH-09).
+- **Acceptance:** Idle app issues no IPC calls for proxy status more often than every 15 s; only one `useProxyStatus` export; mutation `onSuccess` handlers use `Promise.all`; `proxy-flags-changed` has a listener.
+
+### FE-ARCH-06: `useProvidersQuery` swallows backend errors, so failures render as an empty provider list
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/lib/query/queries.ts:68-88` wraps both `providersApi.getAll` and `getCurrent` in `try/catch` that only `console.error`s and returns `{ providers: {}, currentProviderId: "" }`; `src/App.tsx:279-283,983-987` passes only `isLoading` to `ProviderList`, which then shows `ProviderEmptyState`. There is no `ErrorBoundary` anywhere in `src` (`rg 'ErrorBoundary|componentDidCatch' src` is empty).
+- **Problem:** A DB/config read failure looks exactly like "you have no providers" (with an inviting "add provider" empty state), the query never enters `isError`, `retry: 1` never applies, and a render crash anywhere blanks the whole window.
+- **Proposal:** Let `queryFn` throw (keep `placeholderData: keepPreviousData` so the previous list stays visible), render an error state with a retry button in `ProviderList`, and add a top-level `ErrorBoundary` in `src/main.tsx` offering "copy diagnostics / open config folder / restart" via existing `settingsApi.openAppConfigFolder`/`restart`.
+- **Acceptance:** MSW test: `get_providers` returning 500 shows an error state with retry, not the empty state; throwing inside a page renders the boundary UI instead of a white screen.
+
+### FE-ARCH-07: Linting and repo tooling are missing (ESLint referenced in CONTRIBUTING but absent, no knip, no bundle analysis, no Storybook)
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `CONTRIBUTING.md:45,60,173,188` document `pnpm lint` / "ESLint for linting"; `package.json:6-16` has no `lint` script and no `eslint*` devDependency; no `.eslintrc*`/`eslint.config.*` exists at repo root; `.github/workflows/ci.yml:47-54` runs only `typecheck`, `format:check`, `test:unit`. Three `eslint-disable` comments reference rules that never run (`src/lib/requestOverrides.ts:72`, `src/lib/userAgent.ts:14`, `src/components/settings/AboutSection.tsx:424`). 167 `useEffect(` sites have no `react-hooks/exhaustive-deps` enforcement. `@lobehub/icons-static-svg` is in `dependencies` (`package.json:54`) although it is only read by `scripts/extract-icons.js:40`. `vite.config.ts` has no visualizer/`manualChunks`; no `packageManager` field although CI pins pnpm `10.12.3` (`ci.yml:28`).
+- **Problem:** Contributors (and the AI-review workflow in `.github/workflows/claude.yml:59`, which assumes "a linter would catch" style issues) rely on a lint step that does not exist; dead exports, unused deps and hook-dependency bugs accumulate unnoticed.
+- **Proposal:** Add `eslint.config.js` (typescript-eslint recommended-type-checked, `react-hooks`, `react-refresh`, `@tanstack/eslint-plugin-query`, `jsx-a11y`, `i18next/no-literal-string`), `pnpm lint` + `pnpm lint:deps` (`knip`) in CI, `rollup-plugin-visualizer` with a size budget check, `packageManager: "pnpm@10.12.3"`, move `@lobehub/icons-static-svg` to devDependencies. Consider Storybook (or Ladle) for `src/components/ui/*` and the provider forms once a browser transport exists (FE-ARCH-29).
+- **Acceptance:** CI runs `pnpm lint` and `knip` green; `eslint-disable` comments point at active rules; a PR that adds 200 KB to the main chunk fails the size budget.
+- **Verification:** **confirmed** — Every citation holds: CONTRIBUTING.md:45/60/173/188 promise `pnpm lint`/ESLint, package.json:6-16 has no `lint` script and no eslint/knip/visualizer/`packageManager` entry (grep exit 1), no `.eslintrc*`/`eslint.config.*` exists outside node_modules, .github/workflows/ci.yml:28 pins pnpm 10.12.3 while lines 47-54 run only typecheck/format:check/test:unit, claude.yml:59 tells the review bot to skip 'anything a linter ... would catch', and the three `eslint-disable` comments (src/lib/requestOverrides.ts:72, src/lib/userAgent.ts:14, src/components/settings/AboutSection.tsx:424) are the only ones in src and name rules nothing runs. `useEffect(` count is exactly 167; `@lobehub/icons-static-svg` (package.json:54) is referenced only by scripts/extract-icons.js:40, and because the 97 extracted SVGs are committed under src/icons/extracted and src/components/IconPicker.tsx:6 imports from there, moving it to devDependencies is safe; vite.config.ts has no visualizer/manualChunks; there are no git hooks, no biome/oxlint, no `engines`/.npmrc and no CLAUDE.md. Partial mitigation the reviewer omitted: tsconfig.json enables `strict`, `noUnusedLocals`, `noUnusedParameters` and `noFallthroughCasesInSwitch`, enforced in CI via `pnpm typecheck`, so unused locals/params are caught, but not dead exports, unused deps, exhaustive-deps or a11y. Priority lowered to P2: a documentation/process gap with diffuse maintainability impact, not an exploitable or data-loss issue for a key-storing desktop app. The core proposal (ESLint config + `pnpm lint` in CI, `packageManager`, dep move, reconcile CONTRIBUTING) is sound and unimplemented, but the rollup-visualizer size budget and Storybook items are scope creep with no evidence of a bundle-size problem anywhere in the repo.
+
+### FE-ARCH-08: Main bundle carries all locales, ~11k lines of presets, ~1 MB of icons and every page eagerly
+
+**Type:** performance · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src/i18n/index.ts:4-7` statically imports all four locale JSON files (`src/i18n/locales/*.json` = 665 KB, 2,583 leaf keys each). Preset tables total 10,746 lines (`src/config/openclawProviderPresets.ts` 2,509, `opencodeProviderPresets.ts` 2,054, `hermesProviderPresets.ts` 1,527, `codexProviderPresets.ts` 1,522, `claudeProviderPresets.ts` 1,396, `claudeDesktopProviderPresets.ts` 1,145, `geminiProviderPresets.ts` 461) and are statically imported by 20 component/hook files (e.g. `src/components/providers/ProviderCard.tsx`, `src/hooks/useProviderActions.ts`). `src/icons/extracted` is 1,004,378 bytes across 97 files; `src/icons/extracted/index.ts` (135 KB) inlines SVG strings into a `Record<string,string>` (`index.ts:31`) plus 25 raster imports. There are no `React.lazy`/route-level `import()` calls (`rg 'React\.lazy|lazy\(' src` empty; the only dynamic imports are `src/lib/updater.ts:31` and `src/components/UsageScriptModal.tsx:512-575`); recharts, CodeMirror, framer-motion (11 files) and flexsearch all load at startup; `vite.config.ts:14-17` sets no `manualChunks`.
+- **Problem:** Startup parses megabytes of data the user never sees (three locales, presets for seven apps, icons for providers not configured), and heavy pages (usage dashboard with recharts, session manager with flexsearch, CodeMirror editors) are paid for on the providers screen.
+- **Proposal:** Lazy-load pages with `React.lazy` + `Suspense` at the router level (FE-ARCH-02); load locales on demand with `i18next-resources-to-backend` (`import(\`./locales/${lng}.json\`)`); split presets per app into JSON chunks loaded when the Add-Provider dialog opens (or serve them from Rust, FE-ARCH-36); switch `ProviderIcon` to `?url` imports for all large SVGs (3 already use it, `index.ts`) and lazy `<img>`; add `manualChunks` for recharts/codemirror; enforce with the visualizer budget from FE-ARCH-07.
+- **Acceptance:** Initial JS chunk for the providers view is at least 50 % smaller than today's single bundle (measure with `vite build --mode analyze`); switching language fetches one locale chunk; opening the usage dashboard loads recharts on demand.
+
+### FE-ARCH-09: Per-card query fan-out and unstable props make the provider list O(N) IPC pollers and O(N) re-renders on every shell state change
+
+**Type:** performance · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** Each `ProviderCard` mounts `useProviderHealth(provider.id, appId)` (`src/components/providers/ProviderCard.tsx:176` -> `src/lib/query/failover.ts:12-19`, `refetchInterval: 5000`, enabled whenever ids are non-empty, regardless of proxy state) and `useUsageQuery` (`ProviderCard.tsx:259`). `ProviderCard` is not memoised (the only `memo(` in the app is `src/components/sessions/SessionMessageItem.tsx:30`), and `App.tsx:994-1029` passes ~15 freshly created inline arrow callbacks to `ProviderList` on every render, while `useProxyStatus` (2 s polling) and `useOpenClawHealth` keep `App` re-rendering. `ProviderList` wraps items in framer-motion `AnimatePresence` (`src/components/providers/ProviderList.tsx:15`) and does not virtualise; `@tanstack/react-virtual` is a dependency used only in `src/components/sessions/SessionManagerPage.tsx:331`.
+- **Problem:** With 30+ providers (common for aggregator users) the list issues 30 health IPC calls every 5 s and re-renders every card every 2 s, and drag-sort/animation work scales with N.
+- **Proposal:** Add a batched `get_provider_health_all(app_type)` command consumed once in `ProviderList` and enable it only when `isProxyRunning` or the provider is in the failover queue; wrap `ProviderCard` in `React.memo` with stable callbacks (`useCallback`/`useEvent`-style handlers in a `useProviderListActions` hook); virtualise the list with `useVirtualizer` beyond ~20 items; honour `prefers-reduced-motion` and disable per-item `motion` for lists > 20.
+- **Acceptance:** React Profiler shows `ProviderCard` not re-rendering when proxy status polls; IPC call count per minute is constant in N; 200-provider fixture scrolls at 60 fps in dev.
+
+### FE-ARCH-10: App identity/capabilities are duplicated across 5+ hand-maintained lists and 45+ string comparisons; hardcoded label maps are already wrong for new apps
+
+**Type:** refactor · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** App id lists: `src/App.tsx:125-134` (`VALID_APPS`), `src/App.tsx:193-202` (`VisibleApps` default), `src/components/AppSwitcher.tsx:21-30` (`ALL_APPS`), `src/config/appConfig.tsx:18-27` (`APP_IDS`) and `30-40` (`SKILLS_APP_IDS`, `MCP_APP_IDS`), `src/hooks/useDirectorySettings.ts:31-42`. Type unions: `AppId` (`src/lib/api/types.ts:2-10`), identical `AppType` in `src/lib/api/skills.ts:5-13`, different `AppType` in `src/lib/api/config.ts:4` and `src/types/usage.ts:175`; `appType: string` everywhere in proxy/failover APIs (`src/lib/api/proxy.ts:40-45,87-93`, `src/lib/api/failover.ts:27-31,65-98`). Capability checks are inline (`src/App.tsx:284-302`, `1001-1028`, `1250-1270`, `1409-1416`). Label maps fall through incorrectly: `src/hooks/useProxyStatus.ts:128-137` labels openclaw/hermes/claude-desktop as "OpenCode"; `src/lib/query/failover.ts:224-232` labels opencode/openclaw/hermes as "Gemini"; `src/lib/api/env.ts:45` checks env conflicts for only `claude/codex/gemini`; `isTakeoverActive` in `src/hooks/useProxyStatus.ts:216-221` ignores `claude-desktop`/`opencode` keys present in `ProxyTakeoverStatus` (`src/types/proxy.ts:44-53`).
+- **Problem:** Adding the 9th app (the repo went from 3 to 8 in this version line) means editing ~10 files, and the fall-through label bugs show that the lists already disagree.
+- **Proposal:** Create `src/config/apps.ts` exporting `APP_REGISTRY: Record<AppId, AppDefinition>` with `label`, `icon`, `defaultConfigDir`, `capabilities: { skills, mcp, prompts, sessions, proxy, failover, additiveLive, profiles, envConflicts }`, `settingsDirKey`, and derive `APP_IDS`, `VisibleApps`, `AppSwitcher` order, directory settings, env checks and header buttons from it. Replace `appType: string` params with `AppId`. Delete the duplicate `AppType` unions.
+- **Acceptance:** One file defines apps; `rg 'activeApp === "' src/App.tsx` < 5; label maps in `useProxyStatus`/`failover.ts` are replaced by `APP_REGISTRY[app].label`; a new app can be added with a registry entry + preset file + Rust support only.
+- **Verification:** **partially-confirmed** — All list/type/signature citations hold verbatim (src/App.tsx:125-134 and 193-202; src/components/AppSwitcher.tsx:21-30; src/config/appConfig.tsx:18-40; src/hooks/useDirectorySettings.ts:8-15 and 31-42; src/lib/api/types.ts:2-10 identical to src/lib/api/skills.ts:5-13; src/lib/api/config.ts:4 and src/types/usage.ts:175 differ, the latter deliberately per its comment at 170-174; src/lib/api/proxy.ts:40-45,87-93 and src/lib/api/failover.ts:27-31,65-98 take `appType: string`), the `(activeApp|sharedFeatureApp) [!=]== "` count in App.tsx is exactly 45, src/types.ts:278-287 (`VisibleApps`) is one more hand-written list, 25 non-test frontend files hardcode `"hermes"`, and I found an uncited disagreement: src/components/settings/ProxyTabContent.tsx:180 iterates ["claude","codex","gemini"] for failover tabs while src/components/proxy/ProxyPanel.tsx:277 and App.tsx:1266-1268 include grokbuild. However the 'already wrong for new apps' bug claims are latent, not user-visible: the 'OpenCode' fall-through at src/hooks/useProxyStatus.ts:128-137 is reached only from ProxyPanel.tsx:277 (["claude","codex","gemini","grokbuild"]) and ProxyToggle, which App.tsx:1251-1264 renders only for those four apps; the 'Gemini' fall-through at src/lib/query/failover.ts:224-232 is reached only from FailoverToggle (same four apps, App.tsx:1266) and FailoverQueueManager (three apps, ProxyTabContent.tsx:180); and the backend hardcodes opencode/openclaw takeover to false at src-tauri/src/services/proxy.rs:713-715 ('don't support proxy features'). `isTakeoverActive` (useProxyStatus.ts:216-221) has no consumer anywhere in src, and the Rust `ProxyTakeoverStatus` (src-tauri/src/proxy/types.rs:112-119) has no `claude-desktop` or `hermes` field at all, so the ignored keys have zero runtime effect; the real defect there, which the finding misses, is that src/types/proxy.ts:44-53 declares `hermes: boolean` as required although the backend never sends it. src/lib/api/env.ts:45 limiting to claude/codex/gemini mirrors the backend, which defines keywords only for those three apps (src-tauri/src/services/env_checker.rs:37-39), so that item is a backend limitation rather than frontend list drift. The proposal is partly implemented already: `APP_ICON_MAP: Record<AppId, AppConfig>` (appConfig.tsx:42-130) carries `label` and `icon` for all eight apps and is already the label source in src/components/common/AppCountBar.tsx:29 and AppToggleGroup.tsx:24, so the registry should extend appConfig.tsx with capabilities/dirs rather than add a parallel apps.ts, the two toast maps can use `APP_ICON_MAP[app].label` today, and priority is lowered to P2 because no live bug exists, the cost is maintainability only, and the '3 to 8' history is unverifiable in this shallow clone (earliest visible types.ts already lists seven apps).
+
+### FE-ARCH-11: Error handling uses three incompatible protocols (string substring matching, JSON codes, raw messages) and toasts fire from every layer
+
+**Type:** refactor · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** 415 `toast.*(` calls, 287 of them in `src/components`; the same operation can toast twice (mutation `onError` in `src/lib/query/mutations.ts:131-139` plus caller handling in `src/hooks/useProviderActions.ts:264-308`, which also swallows with an empty `catch {}` at `306-308`); hooks both toast and rethrow (`src/hooks/usePromptActions.ts:40-43`, `src/hooks/useSettings.ts:298-304`). API-layer code toasts (`src/lib/api/model-fetch.ts:48-94`). Backend errors are classified by substring on localized text: `translateMcpBackendError` matches Chinese backend strings (`src/utils/errorUtils.ts:45-107`), `showFetchModelsError` matches `"HTTP 401"`/`"timed out"` (`model-fetch.ts:70-90`), `isTransientUsageError` matches both English and Chinese phrases (`src/lib/query/queries.ts:142-167`), while skills use JSON `{code, context}` (`src/lib/errors/skillErrorParser.ts:16-26`) and hermes uses a magic string constant (`src/hooks/useHermes.ts:20`). Global toast duration is 2 s for errors too (`src/components/ui/sonner.tsx:17`).
+- **Problem:** Error UX is inconsistent (silent, double, or vanishing-in-2 s), and classification breaks whenever a Rust message is reworded or translated.
+- **Proposal:** Define one serialisable `AppError { code: string; message: string; context?: Record<string,string>; retryable?: boolean }` in Rust (thiserror + serde, returned from every command) and generate its TS type; add `QueryCache`/`MutationCache` `onError` defaults in `queryClient.ts` that map `code` -> i18n key and toast once; remove per-layer toasts except where a component needs custom UX; make error toasts `duration: 6000` + `closeButton`. Replace all substring matchers with `code` checks.
+- **Acceptance:** `rg 'includes\("HTTP|includes\("MCP' src` is empty; a mutation failure produces exactly one toast in tests; error toasts persist >= 6 s.
+
+### FE-ARCH-12: i18n is leaky: 459 hardcoded Chinese `defaultValue`s, 366 raw CJK literals, zh-TW missing 30 keys with English fallback, `<html lang>` never updated
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `rg 'defaultValue:\s*"[^"]*[\x{4e00}-\x{9fff}]' src` = 459 (e.g. `src/App.tsx:321,441,523`, `src/lib/query/mutations.ts:124,135`); 366 further CJK literals in TSX outside `src/i18n`; zod messages are hardcoded Chinese (`src/lib/schemas/provider.ts:40-43`, `settings.ts:6`, `mcp.ts:10,17,25`, `common.ts:39,46`); `src/index.html:2-6` has `lang="zh-CN"` and a Chinese `<title>`, and nothing sets `document.documentElement.lang` on language change (`rg 'documentElement.lang' src` empty). A key diff shows `zh-TW.json` lacks 30 keys present in `en/zh/ja` (`settings.manualInstallCommands`, `settings.updateAllTools`, `settings.currentVersion`, `settings.toolInstall`, ...), and `fallbackLng: "en"` (`src/i18n/index.ts:82`) means Traditional-Chinese users see English for those strings rather than Simplified Chinese.
+- **Problem:** Translations drift silently, the source language is effectively Chinese-in-code, and screen readers/spellcheck get the wrong document language.
+- **Proposal:** Adopt key-only `t()` (strip `defaultValue`), enforce with `i18next/no-literal-string`; add `scripts/check-i18n.ts` to CI that fails on missing/extra keys per locale; set `fallbackLng: { "zh-TW": ["zh", "en"], default: ["en"] }`; update `document.documentElement.lang` in an `i18n.on("languageChanged")` handler; localise zod via `z.config({ customError })`/error map; make `index.html` title/lang neutral.
+- **Acceptance:** CI i18n check passes with 0 missing keys; `rg '[\x{4e00}-\x{9fff}]' src --glob '!src/i18n/**'` returns only comments; `document.documentElement.lang` equals the active locale in a test.
+
+### FE-ARCH-13: Dead and stale abstractions: unused zod schemas, deprecated API methods, 15 never-invoked Rust commands, dead `delete` of an already-stripped key
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `settingsSchema` (`src/lib/schemas/settings.ts:10-80`) is imported nowhere (`rg settingsSchema src --glob '!src/lib/schemas/*'` empty) and already lacks ~20 `Settings` fields (`silentStartup`, `visibleApps`, `s3Sync`, `hermesConfigDir`, `enableFailoverToggle`, ...); `jsonConfigSchema`/`tomlConfigSchema` (`schemas/common.ts`) and `mcpServerSchema` (`schemas/mcp.ts`) have no consumers either, only `providerSchema` is used (`ProviderForm.tsx:404`, `ClaudeDesktopProviderForm.tsx:345`, `GrokBuildProviderForm.tsx:159`). `src/lib/query/mutations.ts:80` `delete (newProvider as any).providerKey` is dead because `providerKey` was already destructured out at `28-34`. `mcpApi` still ships four `@deprecated` methods (`src/lib/api/mcp.ts:35-85`) and `skillsApi` a legacy block (`skills.ts:225-252`). Diffing invoked names against Rust commands shows 15 commands never called from the frontend (`check_app_update_available`, `enter_lightweight_mode`, `exit_lightweight_mode`, `is_lightweight_mode`, `get_claude_config_status`, `get_claude_plugin_status`, `get_config_status`, `get_copilot_optimizer_config`, `set_copilot_optimizer_config`, `get_hermes_live_provider`, `import_from_deeplink`, `is_claude_plugin_applied`, `read_claude_plugin_config`, plus `get_init_error`/`get_skills_migration_result` which are called only via raw `invoke` in `main.tsx`/`App.tsx`).
+- **Problem:** Stale schemas invite someone to "validate settings" with a wrong shape; deprecated wrappers and orphan commands add surface for the specta migration and confuse new contributors.
+- **Proposal:** Run `knip` (FE-ARCH-07) and delete unused exports; remove the deprecated `mcpApi`/`skillsApi` methods after confirming no callers; either wire or delete the orphan Rust commands (lightweight mode and copilot optimizer look like unfinished features worth a decision); drop the dead `delete`.
+- **Acceptance:** `knip` reports 0 unused exports/files; every Rust `#[tauri::command]` has at least one frontend call or a tracking issue.
+
+### FE-ARCH-14: Forms use react-hook-form + zod in only 3 of ~20 forms, and the zod schema deliberately bypasses required-field validation
+
+**Type:** refactor · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** `useForm(` appears in only `src/components/providers/forms/ProviderForm.tsx:404`, `ClaudeDesktopProviderForm.tsx:345`, `GrokBuildProviderForm.tsx:159`; `providerSchema` comments "必填校验移至 handleSubmit 中用 toast 提示" and makes `name` an unconstrained `z.string()` (`src/lib/schemas/provider.ts:38-39`). Settings use a hand-rolled `useState` form (`src/hooks/useSettingsForm.ts:76-167`) with defaults duplicated in three places (`110-129`, `139-150`, `177-196`); `UsageScriptModal.tsx` (1,621 lines) and the MCP/OpenClaw/Hermes panels hand-roll state (22 `useState`-based form files under settings/mcp/skills/openclaw/hermes). `ProviderForm.tsx` is 2,578 lines. `src/components/ui/form.tsx` (shadcn Form) exists but is barely used.
+- **Problem:** Validation rules, dirty tracking and error display differ per form; the biggest form is unmaintainable and the schema that exists does not validate what users need.
+- **Proposal:** Standardise on RHF + zod + `ui/form.tsx`; model provider forms as a discriminated union schema per app (`z.discriminatedUnion("appId", [...])`) and split `ProviderForm.tsx` into per-app modules sharing a `useProviderFormCore`; migrate settings to RHF with `values` + `resetOptions: { keepDirtyValues: true }` (also fixes FE-ARCH-24); put required-field rules back in the schema.
+- **Acceptance:** Every form submits through `handleSubmit(zodResolver(schema))`; no form file > 600 lines; `providerSchema.name` rejects empty names in a unit test.
+
+### FE-ARCH-15: Shared-layer test coverage is thin and the i18n/Tauri test doubles hide whole classes of bugs
+
+**Type:** test · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** 72 test files, but `tests/lib` has only `keepLastGoodUsage`, `userAgent`, `requestOverrides` (+ `src/lib/version.test.ts`); no tests for `useTauriEvent`, `UpdateContext`, `i18n/index.ts` language resolution, `errorUtils.translateMcpBackendError`, `usageRange`, `base64`, `tomlUtils`, `deepClone`, `uuid`, `authBinding`, `platform`, `skillErrorParser`, `useUsageCacheBridge`, `useUsageEventBridge`, `useSessionSearch`, or the invalidation matrix in `mutations.ts`/`profiles.ts`. `tests/msw/handlers.ts` covers 51 of 268 commands; unknown commands fall through to "warn" (`tests/setupTests.ts:11`). `tests/setupTests.ts:12-22` initialises i18n with empty resources, so every component test asserts on keys, never on rendered text or interpolation. No end-to-end test exists (no Playwright/WebdriverIO/`tauri-driver` config).
+- **Problem:** The layers most likely to break during the proposed refactors (query keys, events, settings round-trip, i18n) have the least coverage; the i18n double means a missing key or broken interpolation never fails a test.
+- **Proposal:** Add unit tests per `src/lib` module and for every mutation's invalidation set (assert on `queryClient.getQueryCache()` state); generate the MSW handler list from the command bindings (FE-ARCH-03) so unhandled commands fail loudly (`onUnhandledRequest: "error"`); load the real `en.json` in `setupTests.ts`; add a `tauri-driver` smoke suite (launch, add provider, switch, delete) on Linux CI.
+- **Acceptance:** `tests/lib` covers every file in `src/lib` except bindings; MSW `onUnhandledRequest: "error"`; one e2e job in `ci.yml`.
+
+### FE-ARCH-16: Command palette and a keyboard-shortcut registry (cmdk is already shipped)
+
+**Type:** feature · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** The only global shortcuts are Cmd/Ctrl+`,` and Escape (`src/App.tsx:600-625`) and Cmd/Ctrl+F in `src/components/providers/ProviderList.tsx:247-266`; both are ad-hoc `window.addEventListener("keydown")` effects with their own `isTextEditableTarget` guards. `cmdk` is a dependency (`package.json:77`) and `src/components/ui/command.tsx` is used by `ProfileSwitcher.tsx` and `OmoFormFields.tsx` only.
+- **Problem:** Power users switch providers/apps many times a day through header clicks; there is no discoverable shortcut list and new shortcuts would be scattered across components.
+- **Proposal:** Add `src/lib/shortcuts.ts` (registry + `useShortcut` hook with scopes and `isTextEditableTarget` handling) and a `⌘K` palette built on `ui/command.tsx` with actions: switch app, switch provider (fuzzy over all apps), open page, toggle proxy/failover, run connectivity check, open config folder, change language/theme. Expose a `?`/`⌘/` overlay listing registered shortcuts.
+- **Acceptance:** `⌘K` opens the palette from any page; the two existing listeners are replaced by registry entries; shortcuts are listed in an overlay and in the user manual.
+
+### FE-ARCH-17: Undo for destructive config changes (delete/switch/sort) via a change journal
+
+**Type:** feature · **Priority:** P2 · **Effort:** L · **Confidence:** medium
+
+- **Evidence:** Mutations are fire-and-forget with a success toast only (`src/lib/query/mutations.ts:197-261` delete, `263-337` switch; `src/hooks/useDragSort.ts:77-109` sort). The only recovery path is DB backups (`src/hooks/useBackupManager.ts`, `restoreDbBackup` invalidating everything at `25`). Sonner already supports action buttons (used for "copy" at `mutations.ts:327-333`).
+- **Problem:** Deleting the wrong provider or applying a profile (`profiles.ts:114-153` applies providers+MCP+skills across apps) cannot be reverted short of restoring a whole DB backup.
+- **Proposal:** Backend: record a small reversible journal entry per mutating command (`provider.delete` -> stored provider JSON, `switch` -> previous id, `sort` -> previous indices, `profile.apply` -> previous snapshot) with an `undo_last_change(id)` command. Frontend: success toasts for these actions get an "Undo" action (5-8 s), plus a "Recent changes" panel in Settings. This is also the foundation for optimistic updates (FE-ARCH-18).
+- **Acceptance:** Deleting a provider then clicking Undo restores it with identical `settingsConfig`/`meta`/`sortIndex`; profile apply is undoable; journal is bounded (e.g. last 50).
+
+### FE-ARCH-19: Event subscriptions are duplicated outside `useTauriEvent` with weaker lifecycles, and the event names are not a shared contract
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/hooks/useTauriEvent.ts:15-38` is the safe pattern, yet `src/hooks/useUsageEventBridge.ts:18-40` re-implements it, `src/App.tsx:351-379` hand-rolls `providersApi.onSwitched`, `src/components/DeepLinkImportDialog.tsx:53-94` subscribes inside an effect keyed on `[t]` (re-subscribes on every language change) using `promise.then(fn => fn())` cleanup, and `src/components/DatabaseUpgrade.tsx:97` manages an `unlistenRef`. Event names are untyped strings on both sides; Rust emits `proxy-flags-changed` (`src-tauri/src/tray.rs:581`) which nobody listens to, and the frontend listens for `universal-provider-synced` (`src/App.tsx:381`) and `profile-applied` (`392`) while Rust's `emit("...")` grep shows only `provider-switched`, `usage-cache-updated`, `proxy-flags-changed`, `deeplink-import`, `webdav-sync-status-updated` emitted via `app.emit` (others may use `emit_to`/`emit_all`, so verify).
+- **Problem:** Lifecycle bugs (double subscriptions under StrictMode, leaks on unmount) are one copy-paste away, and renaming an event on either side fails silently.
+- **Proposal:** Export a typed `AppEvents` map (generated by specta events, FE-ARCH-03, or a hand-written `src/lib/events.ts` with payload types), make `useTauriEvent<K extends keyof AppEvents>(name: K, handler)` the only subscription API, migrate the five manual sites, and add a Rust unit test or build-time check that every emitted name exists in the map.
+- **Acceptance:** `rg 'await listen\(|listen<' src --glob '!src/hooks/useTauriEvent.ts'` is empty; event names are keys of one TS type; a test proves subscribe/unsubscribe under StrictMode double-mount.
+
+### FE-ARCH-20: Accessibility baseline: icon-only buttons without labels, hidden scrollbars, no reduced-motion handling
+
+**Type:** ux · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** 18 icon-only header buttons in `src/App.tsx` rely on `title` only (e.g. `1425-1460`, `1464-1508`, `1512-1559`) and the back button has no accessible name at all (`1157-1170`); across `src` there are only 62 `aria-*` attributes and 5 `role=` usages. `src/index.css:125-150` hides scrollbars globally (`scrollbar-width: none`, `::-webkit-scrollbar { display: none }`). framer-motion is used in 11 files with no `prefers-reduced-motion` check (`rg 'useReducedMotion|prefers-reduced-motion' src` empty). No `jsx-a11y` lint (FE-ARCH-07).
+- **Problem:** Screen-reader and keyboard users cannot identify the primary navigation buttons; hidden scrollbars remove the only visual affordance for long provider lists on Windows/Linux.
+- **Proposal:** Add `aria-label` to all icon buttons (wrap in a `IconButton` component that requires `label`), enable `jsx-a11y` rules, wrap the app in `MotionConfig reducedMotion="user"`, show thin overlay scrollbars instead of hiding them, and ensure the provider list supports arrow-key navigation (dnd-kit `KeyboardSensor` already exists in `useDragSort.ts:48-50`).
+- **Acceptance:** axe-core run in a Vitest/jsdom test on the shell reports 0 serious violations; every `size="icon"` button has an accessible name.
+
+### FE-ARCH-27: No frontend architecture/conventions documentation; agent instruction files are gitignored
+
+**Type:** docs · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `docs/` contains only `user-manual/`, `images/`, `release-notes/`; `README.md:447-480` lists commands only; `CONTRIBUTING.md` describes setup and a non-existent lint step; `.gitignore:14-16` excludes `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`. The code shows the consequence: three ways to subscribe to events (FE-ARCH-19), two proxy hooks (FE-ARCH-05), keys defined in hooks vs lib (FE-ARCH-04), toasts in every layer (FE-ARCH-11).
+- **Problem:** Conventions exist only in reviewers' heads; the large refactors proposed here need written target architecture to coordinate.
+- **Proposal:** Add `docs/dev/frontend-architecture.md` (layers and allowed imports, query key/invalidation policy, error/toast policy, i18n policy, event policy, how to add an app/page), ADRs for router and specta adoption, and commit an `AGENTS.md` (remove from `.gitignore`) so AI-assisted contributions follow the same rules; enforce import layering with `dependency-cruiser`.
+- **Acceptance:** Doc exists and is linked from CONTRIBUTING; `dependency-cruiser` runs in CI with the documented rules.
+
+### FE-ARCH-28: `Provider.settingsConfig: Record<string, any>` and ~100 `any` tokens undermine the core data model
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src/types.ts:14` (`settingsConfig: Record<string, any>`), `src/types.ts:77,485,513` (`body?: any`, index signatures `[key: string]: any`), `McpServerSpec | Record<string, any>` in `src/lib/api/mcp.ts:22`; heavy casting downstream (`src/hooks/useProviderActions.ts:164-179` casts `settingsConfig` four times to read Codex `config`; `src/utils/providerConfigUtils.ts` has 20 `any` tokens). `src/App.tsx` has 12 `any`s: eight `as any` casts for `WebkitAppRegion` styles (`1064,1069,1143,1149,1153,1256,1275,1286`) and four `useRef<any>` (`255-258`). Two `as unknown as number` casts in `src/components/UsageScriptModal.tsx:1470,1502`.
+- **Problem:** The provider config shape is where most app-specific logic branches, yet TypeScript cannot help; the WebkitAppRegion casts repeat the same workaround eight times.
+- **Proposal:** Model `settingsConfig` as a discriminated union keyed by app (`ClaudeSettingsConfig`, `CodexSettingsConfig { auth; config: string }`, `GeminiSettingsConfig`, `OpenCodeProviderConfig`, `OpenClawProviderConfig`, `HermesProviderConfig`, `GrokBuildConfig`) with `Provider<A extends AppId = AppId>` and narrowing helpers; augment `React.CSSProperties` with `WebkitAppRegion` in `src/vite-env.d.ts`; turn on `@typescript-eslint/no-explicit-any` as a warning first.
+- **Acceptance:** `rg '\bany\b' src --glob '!*.test.*'` drops below 20; `useProviderActions.switchProvider` reads Codex config without casts.
+
+### FE-ARCH-34: Presets as data: move the 11k-line preset tables out of the bundle into versioned, validated, user-extensible JSON
+
+**Type:** feature · **Priority:** P2 · **Effort:** L · **Confidence:** medium
+
+- **Evidence:** Presets are TypeScript arrays (`src/config/*ProviderPresets.ts`, 10,746 lines) whose shape is already pure data (`ProviderPreset` at `src/config/claudeProviderPresets.ts:25-74`); `addIconsToPresets`/`inferIconForPreset` (`src/config/iconInference.ts:42-77`) post-process them at runtime; preset-only tests exist per vendor (`tests/config/*.test.ts`, 10 files). Adding or fixing a partner endpoint requires a full app release; preset files are among the most-changed files (`claudeProviderPresets.ts` 5 commits, `codexProviderPresets.ts` 4 in six months).
+- **Problem:** Release cadence is coupled to vendor churn, the bundle carries every preset (FE-ARCH-08), and users/communities cannot add their own presets.
+- **Proposal:** Define a JSON schema (zod on the frontend, serde on the backend) for presets, ship the built-in set as JSON assets loaded lazily per app, add `~/.cc-switch/presets/*.json` user overrides merged by a Rust `get_presets(app)` command, and optionally a signed remote preset feed with a settings toggle. Keep sponsor flags (`isPartner`, `primePartner`, `partnerPromotionKey`) explicit in the schema.
+- **Acceptance:** Presets load via a command and are absent from the main chunk; a user-dropped JSON preset appears in the selector; schema validation errors are surfaced, not fatal.
+
+### FE-ARCH-18: Optimistic updates for switch, sort and delete
+
+**Type:** feature · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** Only `useSetAutoFailoverEnabled` implements `onMutate`/rollback (`src/lib/query/failover.ts:210-222,249-256`) and `usePromptActions.toggleEnabled` hand-rolls optimistic local state (`src/hooks/usePromptActions.ts:76-127`). `useSwitchProviderMutation` waits for the round-trip and then invalidates (`mutations.ts:263-315`); drag-sort invalidates after the IPC call (`useDragSort.ts:77-86`) so the list snaps back to the old order until the refetch lands.
+- **Problem:** Switching feels laggy relative to a local tool, and sort flicker after drop is visible.
+- **Proposal:** Add `onMutate` handlers that patch `keys.providers.byApp(appId)` (`currentProviderId`, `sortIndex`, removed entry) with rollback in `onError` and `invalidate` in `onSettled`, reusing the pattern already in `failover.ts`.
+- **Acceptance:** In tests with a 500 ms delayed MSW handler, the card highlight/order changes immediately and reverts on failure.
+
+### FE-ARCH-21: Inline-SVG icon rendering and permissive CSP deserve a hardening pass; sponsored presets carry tracking parameters
+
+**Type:** security · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/components/ProviderIcon.tsx:79` renders `dangerouslySetInnerHTML={{ __html: iconSvg }}` where `iconSvg` comes from the build-time `icons` map gated by `hasIcon(icon)` (`ProviderIcon.tsx:29-34`); `icon` values originate from provider config, presets and deep links (`src/lib/api/deeplink.ts:18`), so the gate is the only control. `src-tauri/tauri.conf.json:29` CSP allows `connect-src ... https: http:` and `img-src ... https: http:` plus `style-src 'unsafe-inline'`. Preset files contain ~180 affiliate/UTM-tagged URLs (e.g. `src/config/claudeProviderPresets.ts:96-97` `?from=CH_4HHXMRYF`, `116` `aff=WB6M6F67`, `131-134` `utm_*`), opened through `settingsApi.openExternal` which validates `http(s)` only (`src/lib/api/settings.ts:215-226`).
+- **Problem:** If `icons` ever becomes user-extensible (FE-ARCH-36) the inline SVG path becomes an XSS vector; the broad CSP gives little defence in depth for a webview that does not need direct network access (the frontend never calls `fetch` itself); affiliate links are legitimate but undisclosed to users beyond the `isPartner` badge.
+- **Proposal:** Keep SVG icons as `<img src>`/`?url` only (drop `dangerouslySetInnerHTML`), tighten CSP `connect-src` to `ipc: http://ipc.localhost` and `img-src` to `'self' data: asset:`, and add a short "sponsored preset" note in the preset selector plus a settings toggle to strip tracking params when opening partner links.
+- **Acceptance:** No `dangerouslySetInnerHTML` in `src`; CSP has no `http:`/`https:` in `connect-src`; partner presets show a disclosure tooltip.
+
+### FE-ARCH-22: `localStorage` keys are scattered and written from multiple places without validation
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `cc-switch-last-app` is written by `src/components/AppSwitcher.tsx:30,41` and read by `src/App.tsx:124-142` with an unchecked `as AppId` cast; `cc-switch-last-view` (`App.tsx:144-168,184-186`); `language` is read/written in `src/i18n/index.ts:16`, `src/hooks/useSettingsForm.ts:84`, `src/hooks/useSettings.ts:279,416`; theme in `src/components/theme-provider.tsx:37,52`; update-dismiss key with a legacy-key migration duplicated twice (`src/contexts/UpdateContext.tsx:41-57,75-84`); session filters in `src/components/sessions/SessionManagerPage.tsx:109-270`; `env_banner_dismissed` in `sessionStorage` (`App.tsx:501,578,1115`).
+- **Problem:** No single place documents client-side persisted state, casts trust stale values, and the same key is owned by two components.
+- **Proposal:** Add `src/lib/storage.ts` with a typed, zod-validated `createStoredValue(key, schema, default)` helper (including a versioned migration hook), and route all reads/writes through it.
+- **Acceptance:** `rg 'localStorage\.|sessionStorage\.' src --glob '!src/lib/storage.ts'` is empty; each key has a schema and a test for an invalid stored value.
+
+### FE-ARCH-23: `useSettings` duplicates an 80 %-identical save pipeline twice and copies `sanitizeDir` three times
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `autoSaveSettings` (`src/hooks/useSettings.ts:182-308`) and `saveSettings` (`312-492`) both sanitise six directories, strip `webdavSync`/`s3Sync`, capture `prevPluginEnabled`, call `saveMutation`, handle `launchOnStartup`, onboarding skip, Claude plugin sync, language persistence and tray refresh; `sanitizeDir` is defined in `useSettings.ts:49`, `useSettingsForm.ts:48`, `useDirectorySettings.ts:57`. The directory list omits `hermesConfigDir` in the explicit payload (`204-213`, `344-353`), relying on the spread to carry it.
+- **Problem:** Each new settings side effect must be added twice; divergence between the two paths is likely (e.g. `saveSettings` syncs live config on directory change at `431-455`, `autoSaveSettings` does not).
+- **Proposal:** Extract `buildSettingsPayload(form)` and `runSettingsSideEffects(prev, next)` (or move side effects into the Rust `save_settings` command, which already computes `unify_codex_changed`), and have both hooks call them; keep one `sanitizeDir` in `src/utils`.
+- **Acceptance:** One save pipeline function covered by a unit test that enumerates side effects by diffing `prev`/`next`.
+
+### FE-ARCH-24: Settings form state is reset from the server query, so background settings refreshes clobber unsaved edits
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/hooks/useSettingsForm.ts:103-134` copies `data` into local `settingsState` whenever the `data` reference changes; `src/App.tsx:403-433` invalidates `["settings"]` on every `webdav-sync-status-updated`/`s3-sync-status-updated` event (auto-sync runs periodically and changes `webdavSync.status`, which defeats TanStack's structural sharing), and `src/lib/query/queryClient.ts:5-9` sets `staleTime: 0` with `refetchOnWindowFocus: true`.
+- **Problem:** A user editing directory overrides in the Advanced tab while an auto-sync completes (or when any other field changes server-side) loses in-progress edits without warning.
+- **Proposal:** Only seed the form from server data on first load or when the form is not dirty (track `isDirty`), or migrate settings to RHF `values` + `keepDirtyValues` (FE-ARCH-14); have the sync-status handlers update only the `webdavSync.status` slice via `setQueryData` instead of invalidating the whole settings query.
+- **Acceptance:** Test: dirty an Advanced-tab field, emit `webdav-sync-status-updated`, assert the field keeps the edited value.
+
+### FE-ARCH-25: Global query defaults (`staleTime: 0`, `refetchOnWindowFocus: true`) are wrong for a tray-resident desktop app
+
+**Type:** performance · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/lib/query/queryClient.ts:3-13`. Combined with per-query `refetchInterval`s (`proxy.ts:16,27,38,49`, `failover.ts:17,88`, `usage.ts:10`) and `useProvidersQuery` 10 s polling while proxy runs (`queries.ts:65-67`).
+- **Problem:** Every focus of the window refetches providers, settings, skills, MCP, profiles and all mounted usage queries at once; most of this data only changes through the app's own mutations or Rust events.
+- **Proposal:** Set `staleTime: 30_000` and `refetchOnWindowFocus: false` globally, opt specific queries (proxy status, usage dashboard) into focus/interval refetch, and lean on event-driven invalidation (FE-ARCH-05/19).
+- **Acceptance:** Focusing the window after 5 s idle triggers 0 IPC calls for providers/settings; proxy status still refreshes on focus.
+
+### FE-ARCH-26: No browser/Tauri transport abstraction: `pnpm dev:renderer` and Storybook cannot run, tests mock `@tauri-apps/api` wholesale
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `package.json:10` defines `dev:renderer: vite`, but `src/main.tsx:67-74,79` calls `listen`/`invoke` unguarded (no `isTauri` check anywhere: `rg 'isTauri|__TAURI' src` empty), so the renderer throws outside Tauri. `tests/msw/tauriMocks.ts:7-57` replaces `@tauri-apps/api/core` and `/event` with an HTTP shim to MSW.
+- **Problem:** UI work and visual testing require the full Rust build; Storybook/Ladle (FE-ARCH-07) is impossible; the test shim duplicates what a transport layer would provide.
+- **Proposal:** Introduce `src/lib/transport.ts` (`invoke`, `listen`, `emit`) selected at startup: Tauri IPC when `window.__TAURI_INTERNALS__` exists, otherwise an in-memory/MSW-backed fake with seeded providers. Generated bindings (FE-ARCH-03) call the transport. Reuse the same fake for Vitest and Storybook.
+- **Acceptance:** `pnpm dev:renderer` renders the providers page with fake data in a browser; `tests/msw/tauriMocks.ts` is replaced by the transport fake.
+
+### FE-ARCH-29: Layering inversions: query layer imports hooks, API layer imports UI concerns, config imports components
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/lib/query/mutations.ts:10-11` imports `openclawKeys`/`invalidateHermesProviderCaches` from `src/hooks/*`; `src/hooks/useProviderActions.ts:15-20` imports from `src/lib/query` (cycle hooks <-> lib/query); `src/lib/api/model-fetch.ts:2-3` imports `i18next` and `sonner` into the API layer; `src/lib/query/subscription.ts:8` imports `src/config/constants`; `src/config/appConfig.tsx:3-9` imports `BrandIcons`/`ProviderIcon` components; `src/types/omo.ts:26-115` stores runtime data (`OMO_BUILTIN_AGENTS` with model names) in a types file.
+- **Problem:** There is no enforceable direction of dependencies, which blocks moving query keys/bindings into `lib` cleanly and makes tree-shaking/lazy loading harder (config pulls components).
+- **Proposal:** Define the allowed graph (`config` -> `types`; `lib/api` -> `types`; `lib/query` -> `lib/api`, `config`; `hooks` -> `lib/*`; `components` -> everything) and enforce with `dependency-cruiser`; move icon JSX out of `appConfig.tsx` (store icon names, render in `AppSwitcher`), move `OMO_BUILTIN_*` to `src/config/omo.ts`, and move `showFetchModelsError` to a hook.
+- **Acceptance:** `dependency-cruiser` passes with the rules; `src/config` has no `.tsx` files.
+
+### FE-ARCH-30: Addressable pages for deep links and tray navigation
+
+**Type:** feature · **Priority:** P3 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** Deep links only import resources (`src/components/DeepLinkImportDialog.tsx:53-78`, Rust `src-tauri/src/lib.rs:846-855`); navigation intents inside the app are encoded as state pairs (`setSettingsDefaultTab("about"); setCurrentView("settings")` at `src/App.tsx:1225-1227`, `1234-1236`); the tray menu updates providers via `update_tray_menu` but cannot open a specific page.
+- **Problem:** Support docs cannot link to "Settings -> Usage", the tray cannot open "Sessions for Codex", and tests cannot start on a page.
+- **Proposal:** With the router from FE-ARCH-02, define `ccswitch://open/<route>` handled by Rust emitting a typed `navigate` event (`{ path, search }`), and use the same event for tray items (Open settings, Open usage dashboard, Open sessions for app X).
+- **Acceptance:** `ccswitch://open/settings/usage` opens the usage tab; a tray item opens the session manager; route is visible in React devtools state.
+
+### FE-ARCH-31: `src/types.ts` (737 lines) mixes every domain while `src/types/*` holds a random subset
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/types.ts` defines Provider/UsageScript/ProviderMeta (`11-234`), Settings (`343-452`), Session (`454-470`), MCP (`473-530`), Universal provider (`537-588`), OpenCode (`595-634`), OpenClaw (`641-715`), Hermes (`721-737`); `src/types/` has `env`, `icon`, `omo`, `proxy`, `subscription`, `usage`. API files define more domain types (`src/lib/api/skills.ts:16-134`, `profiles.ts:9-55`, `prompts.ts:4-12`, `copilot.ts:13-159`, `auth.ts:3-30`). `src/types.ts` is the 5th most-changed file in the last six months (9 commits).
+- **Problem:** No rule says where a type lives, which produces duplicates (FE-ARCH-10) and merge conflicts on one hot file.
+- **Proposal:** After FE-ARCH-03 most wire types are generated; keep only UI-side types, split by domain into `src/types/{provider,settings,session,mcp,openclaw,hermes,universal}.ts`, and re-export from `src/types/index.ts`.
+- **Acceptance:** No file under `src/types` exceeds 300 lines; API files export no domain interfaces that also exist in bindings.
+
+### FE-ARCH-32: `UpdateContext` is a hand-rolled async state machine with duplicated storage-migration code; it should be a query
+
+**Type:** refactor · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/contexts/UpdateContext.tsx:34-38` five `useState`s, `59-101` manual in-flight guard, `41-57` and `75-84` duplicate legacy-key migration, `96` rethrows after setting `error`, `119-126` kicks a check 1 s after mount. `src/lib/updater.ts:34-44` uses four `as any` casts on the updater plugin result.
+- **Problem:** It duplicates what `useQuery` provides (dedupe, error state, refetch) and is untested.
+- **Proposal:** `useQuery({ queryKey: keys.app.update, queryFn: checkForUpdate, staleTime: 1h, retry: false })` plus a tiny `dismissedVersion` stored value (FE-ARCH-22); type the plugin result with `Update` from `@tauri-apps/plugin-updater`.
+- **Acceptance:** `UpdateContext.tsx` removed or < 40 lines; `updater.ts` has no `as any`; a test covers "dismissed version equals available version".
+
+### FE-ARCH-33: Stricter TypeScript compiler options are off (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`)
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `tsconfig.json:3-21` enables `strict`, `noUnusedLocals/Parameters`, `noFallthroughCasesInSwitch` only. Index accesses on provider maps are common (`providers[currentProviderId]` in `src/hooks/useSettings.ts:144`, `tests/integration/App.test.tsx` mocks, `src/App.tsx:763-765`).
+- **Problem:** `Record<string, Provider>` lookups type as defined values, hiding undefined paths that the UI then guards inconsistently.
+- **Proposal:** Enable `noUncheckedIndexedAccess` and `verbatimModuleSyntax` first (fix fallout mechanically), then evaluate `exactOptionalPropertyTypes` after the Settings type is generated.
+- **Acceptance:** `pnpm typecheck` passes with the new flags; no new `!` non-null assertions introduced beyond a documented allow-list.
+
+### FE-ARCH-35: Two different provider sort implementations with different locale rules
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/lib/query/queries.ts:24-45` sorts by `sortIndex` then `createdAt` then `localeCompare(..., "zh-CN")` (hardcoded locale); `src/hooks/useDragSort.ts:20-42` re-sorts the same map by `sortIndex`-defined-first, `createdAt`, then `localeCompare` with the i18n locale. Tie-breaking differs (`queries.ts` treats missing `sortIndex` as `MAX_SAFE_INTEGER`; `useDragSort` skips `createdAt` when either is 0).
+- **Problem:** The list order shown can differ from the order used to compute drag indices, producing wrong `sortIndex` writes after a drag when some providers lack `sortIndex`/`createdAt`.
+- **Proposal:** Export one `sortProviders(providers, locale)` from `src/utils/providerSort.ts`, use it in both places, and cover the tie-break cases with a unit test.
+- **Acceptance:** `useDragSort` consumes the already-sorted array from the query; test with mixed missing fields yields identical order in both paths.
+
+### FE-ARCH-36: Success/error toast policy: 2-second global duration hides errors; warnings and successes compete
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/ui/sonner.tsx:17` `duration: 2000` applies to every toast lacking an explicit duration, including errors in `src/lib/query/mutations.ts:133-138`, `186-193`, `253-259`, `src/lib/query/profiles.ts:37-39`, `src/hooks/useSettings.ts:298-304`; switch success is followed by a second "restart required" warning (`src/hooks/useProviderActions.ts:269-304`).
+- **Problem:** Users miss error details (copy action exists only for switch failures at `mutations.ts:327-333`).
+- **Proposal:** In the global error handler (FE-ARCH-11) set `duration: 6000`, `closeButton: true`, and a "Copy details" action for all errors; cap simultaneous toasts (`visibleToasts`), and collapse "switched + restart required" into one toast with description.
+- **Acceptance:** Every `toast.error` renders >= 6 s with a copy action; no mutation produces two toasts for one user action.
