@@ -985,6 +985,82 @@ command = "legacy-cmd"
 
     #[tokio::test]
     #[serial]
+    async fn switch_command_waits_for_switch_lock_off_the_calling_thread() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        let state = Arc::new(AppState::new(db.clone()));
+
+        for (id, token) in [("a", "token-a"), ("b", "token-b")] {
+            let provider = Provider::with_id(
+                id.into(),
+                format!("Claude {id}"),
+                json!({
+                    "env": {
+                        "ANTHROPIC_API_KEY": token,
+                        "ANTHROPIC_BASE_URL": format!("https://api.{id}.example")
+                    }
+                }),
+                None,
+            );
+            db.save_provider("claude", &provider)
+                .expect("save provider");
+        }
+        db.set_current_provider("claude", "a")
+            .expect("set current provider");
+        crate::settings::set_current_provider(&AppType::Claude, Some("a"))
+            .expect("set local current provider");
+        write_json_file(
+            &get_claude_settings_path(),
+            &json!({
+                "env": {
+                    "ANTHROPIC_API_KEY": "token-a",
+                    "ANTHROPIC_BASE_URL": "https://api.a.example"
+                }
+            }),
+        )
+        .expect("seed live settings");
+
+        // Simulate a concurrent takeover / hot switch holding the per-app lock.
+        let guard = state.proxy_service.lock_switch_for_app("claude").await;
+
+        let switch_state = state.clone();
+        let mut switch = Box::pin(crate::commands::run_switch_off_main(move || {
+            ProviderService::switch(&switch_state, AppType::Claude, "b")
+        }));
+
+        // The calling (single-threaded) task keeps running while the switch
+        // waits for the lock on the blocking pool.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(300), &mut switch)
+                .await
+                .is_err(),
+            "switch must wait for the held per-app lock"
+        );
+        assert_eq!(
+            crate::settings::get_current_provider(&AppType::Claude).as_deref(),
+            Some("a"),
+            "switch must not apply while the lock is held"
+        );
+
+        drop(guard);
+        tokio::time::timeout(std::time::Duration::from_secs(10), switch)
+            .await
+            .expect("switch completes after the lock is released")
+            .expect("switch succeeds");
+
+        assert_eq!(
+            crate::settings::get_current_provider(&AppType::Claude).as_deref(),
+            Some("b")
+        );
+        let live: serde_json::Value =
+            read_json_file(&get_claude_settings_path()).expect("read live settings");
+        assert_eq!(live["env"]["ANTHROPIC_API_KEY"], "token-b");
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn update_current_claude_provider_syncs_live_when_proxy_takeover_detected_without_backup()
     {
         let _home = TempHome::new();
