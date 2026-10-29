@@ -120,3 +120,8 @@ tempfile = "3"
 insta = "1"
 # Self dev-dependency: integration tests (tests/proxy_golden.rs) link the lib with `testkit` enabled.
 cc-switch = { path = ".", features = ["testkit"] }
+# CCS-116 bindings spike: only linked into test builds; see docs/dev/adr/bindings.md.
+specta = { version = "=2.0.0-rc.25", features = ["derive", "function", "serde_json"] }
+specta-typescript = "=0.0.12"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+tauri = { version = "2.8.2", features = ["specta"] }

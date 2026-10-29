@@ -314,10 +314,11 @@ export function useRequestLogs({
     customStartDate: range.customStartDate,
     customEndDate: range.customEndDate,
     liveEndTime: range.liveEndTime,
-    appType: filters.appType,
-    providerName: filters.providerName,
-    model: filters.model,
-    statusCode: filters.statusCode,
+    // 生成的 LogFilters 中 Option<T> 映射为 `T | null`，查询键统一用 undefined
+    appType: filters.appType ?? undefined,
+    providerName: filters.providerName ?? undefined,
+    model: filters.model ?? undefined,
+    statusCode: filters.statusCode ?? undefined,
   };
 
   return useQuery({

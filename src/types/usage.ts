@@ -1,5 +1,11 @@
 // 使用统计相关类型定义
 
+import type {
+  ModelPricingInfo,
+  PaginatedLogs_Serialize,
+  RequestLogDetail_Serialize,
+} from "@/shared/bindings";
+
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -7,120 +13,25 @@ export interface TokenUsage {
   cacheCreationTokens: number;
 }
 
-export interface RequestLog {
-  requestId: string;
-  providerId: string;
-  providerName?: string;
-  appType: string;
-  model: string;
-  requestModel?: string;
-  /** 写入时实际用于计价的模型名；路由接管 + request 计价模式下可能与 model 不同 */
-  pricingModel?: string;
-  costMultiplier: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-  inputCostUsd: string;
-  outputCostUsd: string;
-  cacheReadCostUsd: string;
-  cacheCreationCostUsd: string;
-  totalCostUsd: string;
-  isStreaming: boolean;
-  latencyMs: number;
-  firstTokenMs?: number;
-  durationMs?: number;
-  statusCode: number;
-  errorMessage?: string;
-  createdAt: number;
-  dataSource?: string;
-}
+// 与后端 DTO 一一对应的类型由 tauri-specta 生成（src/shared/bindings.ts，
+// 见 docs/dev/adr/bindings.md），这里只做命名映射，不再手写字段。
+export type {
+  DailyStats,
+  DataSourceSummary,
+  LogFilters,
+  ModelStats,
+  ProviderStats,
+  SessionSyncResult,
+  UsageSummary,
+  UsageSummaryByApp,
+} from "@/shared/bindings";
 
-export interface SessionSyncResult {
-  imported: number;
-  skipped: number;
-  filesScanned: number;
-  errors: string[];
-}
+/** 后端返回的请求日志（序列化方向，`skip_serializing_if` 字段为可选） */
+export type RequestLog = RequestLogDetail_Serialize;
 
-export interface DataSourceSummary {
-  dataSource: string;
-  requestCount: number;
-  totalCostUsd: string;
-}
+export type PaginatedLogs = PaginatedLogs_Serialize;
 
-export interface PaginatedLogs {
-  data: RequestLog[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export interface ModelPricing {
-  modelId: string;
-  displayName: string;
-  inputCostPerMillion: string;
-  outputCostPerMillion: string;
-  cacheReadCostPerMillion: string;
-  cacheCreationCostPerMillion: string;
-}
-
-export interface UsageSummary {
-  totalRequests: number;
-  totalCost: string;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalCacheCreationTokens: number;
-  totalCacheReadTokens: number;
-  successRate: number;
-  /** input + output + cache_creation + cache_read, all cache-normalized */
-  realTotalTokens: number;
-  /** cache_read / (input + cache_creation + cache_read), range 0–1 */
-  cacheHitRate: number;
-}
-
-export interface UsageSummaryByApp {
-  appType: string;
-  summary: UsageSummary;
-}
-
-export interface DailyStats {
-  date: string;
-  requestCount: number;
-  totalCost: string;
-  totalTokens: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalCacheCreationTokens: number;
-  totalCacheReadTokens: number;
-}
-
-export interface ProviderStats {
-  providerId: string;
-  providerName: string;
-  requestCount: number;
-  totalTokens: number;
-  totalCost: string;
-  successRate: number;
-  avgLatencyMs: number;
-}
-
-export interface ModelStats {
-  model: string;
-  requestCount: number;
-  totalTokens: number;
-  totalCost: string;
-  avgCostPerRequest: string;
-}
-
-export interface LogFilters {
-  appType?: string;
-  providerName?: string;
-  model?: string;
-  statusCode?: number;
-  startDate?: number;
-  endDate?: number;
-}
+export type ModelPricing = ModelPricingInfo;
 
 /**
  * Dashboard 顶栏的全局筛选维度，作用于 Hero / 趋势图 / 三个统计 Tab。
@@ -136,15 +47,7 @@ export interface UsageScopeFilters {
   model?: string;
 }
 
-export interface ProviderLimitStatus {
-  providerId: string;
-  dailyUsage: string;
-  dailyLimit?: string;
-  dailyExceeded: boolean;
-  monthlyUsage: string;
-  monthlyLimit?: string;
-  monthlyExceeded: boolean;
-}
+export type { ProviderLimitStatus } from "@/shared/bindings";
 
 export type UsageRangePreset = "today" | "1d" | "7d" | "14d" | "30d" | "custom";
 

@@ -139,6 +139,7 @@ impl serde::Serialize for AppError {
 /// 序列化为 SCREAMING_SNAKE_CASE 字符串，新增变体时同步更新 `ALL`
 /// 与前端 `src/lib/api/ipc.ts` 中的 `IpcErrorCode`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     /// 未分类错误（含尚未迁移的 String 错误）
@@ -238,11 +239,14 @@ impl std::fmt::Display for ErrorCode {
 /// 线上形态：`{ code, message, details, i18nKey }`。`message` 保持原有的
 /// 人类可读文案，`details` 携带插值参数，`i18nKey` 来自 `AppError::Localized`。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct IpcError {
     pub code: ErrorCode,
     pub message: String,
     /// 装箱以控制 `Result<T, IpcError>` 的体积（clippy::result_large_err）
+    // specta 对 serde_json::Value 内联展开会无限递归，导出为 unknown
+    #[cfg_attr(test, specta(type = Option<specta_typescript::Unknown>))]
     pub details: Option<Box<serde_json::Value>>,
     pub i18n_key: Option<String>,
 }

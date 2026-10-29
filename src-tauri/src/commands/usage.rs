@@ -9,6 +9,7 @@ use tauri::State;
 
 /// 获取使用量汇总
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_usage_summary(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -31,6 +32,7 @@ pub fn get_usage_summary(
 
 /// 获取按 app_type 拆分的使用量汇总
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_usage_summary_by_app(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -51,6 +53,7 @@ pub fn get_usage_summary_by_app(
 
 /// 获取每日趋势
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_usage_trends(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -73,6 +76,7 @@ pub fn get_usage_trends(
 
 /// 获取 Provider 统计
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_provider_stats(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -95,6 +99,7 @@ pub fn get_provider_stats(
 
 /// 获取模型统计
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_model_stats(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -117,6 +122,7 @@ pub fn get_model_stats(
 
 /// 获取请求日志列表
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_request_logs(
     state: State<'_, AppState>,
     filters: LogFilters,
@@ -131,6 +137,7 @@ pub fn get_request_logs(
 
 /// 获取单个请求详情
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_request_detail(
     state: State<'_, AppState>,
     request_id: String,
@@ -143,6 +150,7 @@ pub fn get_request_detail(
 
 /// 获取模型定价列表
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, IpcError> {
     log::info!("获取模型定价列表");
     state.db.ensure_model_pricing_seeded()?;
@@ -193,6 +201,7 @@ pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingI
 
 /// 更新模型定价
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn update_model_pricing(
     state: State<'_, AppState>,
     model_id: String,
@@ -273,6 +282,7 @@ pub fn update_model_pricing(
 
 /// 检查 Provider 使用限额
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn check_provider_limits(
     state: State<'_, AppState>,
     provider_id: String,
@@ -286,6 +296,7 @@ pub fn check_provider_limits(
 
 /// 删除模型定价
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), IpcError> {
     let db = state.db.clone();
     let conn = crate::database::lock_conn!(db.conn);
@@ -304,6 +315,7 @@ pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Res
 ///
 /// 文件扫描与数据库写入在阻塞线程池中执行，避免在主线程上运行导致界面卡顿。
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub async fn sync_session_usage(
     state: State<'_, AppState>,
 ) -> Result<crate::services::session_usage::SessionSyncResult, IpcError> {
@@ -314,6 +326,7 @@ pub async fn sync_session_usage(
 
 /// 获取数据来源分布
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_usage_data_sources(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::services::session_usage::DataSourceSummary>, IpcError> {
@@ -322,6 +335,7 @@ pub fn get_usage_data_sources(
 
 /// 模型定价信息
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPricingInfo {
     pub model_id: String,
@@ -330,4 +344,76 @@ pub struct ModelPricingInfo {
     pub output_cost_per_million: String,
     pub cache_read_cost_per_million: String,
     pub cache_creation_cost_per_million: String,
+}
+
+/// CCS-116 bindings spike：用 tauri-specta 为 usage 领域生成 TS 类型。
+///
+/// 只在测试构建中启用（specta 系列为 dev-dependencies），运行时仍走
+/// `generate_handler!`。决策与已知问题见 `docs/dev/adr/bindings.md`。
+/// 修改 usage DTO 后用 `UPDATE_BINDINGS=1 cargo test --lib usage_bindings` 重新生成。
+#[cfg(test)]
+mod usage_bindings {
+    use super::*;
+    use specta_typescript::Typescript;
+    use tauri_specta::{collect_commands, Builder, ErrorHandlingMode};
+
+    const BINDINGS_PATH: &str = "../src/shared/bindings.ts";
+
+    fn builder() -> Builder<tauri::Wry> {
+        Builder::<tauri::Wry>::new()
+            .commands(collect_commands![
+                get_usage_summary,
+                get_usage_summary_by_app,
+                get_usage_trends,
+                get_provider_stats,
+                get_model_stats,
+                get_request_logs,
+                get_request_detail,
+                get_model_pricing,
+                update_model_pricing,
+                check_provider_limits,
+                delete_model_pricing,
+                sync_session_usage,
+                get_usage_data_sources,
+            ])
+            // 现有前端 `invoke` 封装在失败时抛出归一化的 IpcError
+            .error_handling(ErrorHandlingMode::Throw)
+            // u64/i64 计数与时间戳目前即以 JS number 传输
+            .dangerously_cast_bigints_to_number()
+    }
+
+    fn render() -> String {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("usage.ts");
+        builder()
+            .export(
+                Typescript::default().header(
+                    "// @generated by `cargo test --lib usage_bindings` (tauri-specta). Do not edit.\n\
+                     // Regenerate with UPDATE_BINDINGS=1. See docs/dev/adr/bindings.md.",
+                ),
+                &path,
+            )
+            .expect("export usage bindings");
+        std::fs::read_to_string(&path)
+            .expect("read generated bindings")
+            .replace("\r\n", "\n")
+    }
+
+    #[test]
+    fn usage_bindings_are_up_to_date() {
+        let generated = render();
+        let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(BINDINGS_PATH);
+        if std::env::var_os("UPDATE_BINDINGS").is_some() {
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(&target, &generated).unwrap();
+            return;
+        }
+        let committed = std::fs::read_to_string(&target)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
+        assert!(
+            committed == generated,
+            "src/shared/bindings.ts is stale; rerun with UPDATE_BINDINGS=1"
+        );
+    }
 }

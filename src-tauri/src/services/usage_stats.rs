@@ -16,6 +16,7 @@ use std::str::FromStr;
 
 /// 使用量汇总
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSummary {
     pub total_requests: u64,
@@ -24,6 +25,7 @@ pub struct UsageSummary {
     pub total_output_tokens: u64,
     pub total_cache_creation_tokens: u64,
     pub total_cache_read_tokens: u64,
+    #[cfg_attr(test, specta(type = specta_typescript::Number))]
     pub success_rate: f32,
     /// input + output + cache_creation + cache_read — the total tokens
     /// actually processed by the model (including cache hits). Used as the
@@ -31,11 +33,13 @@ pub struct UsageSummary {
     pub real_total_tokens: u64,
     /// cache_read / (input + cache_creation + cache_read). Range 0.0–1.0.
     /// Reported as a fraction; multiply by 100 in UI for percentage display.
+    #[cfg_attr(test, specta(type = specta_typescript::Number))]
     pub cache_hit_rate: f64,
 }
 
 /// Per-app-type usage summary used by the dashboard breakdown rail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSummaryByApp {
     pub app_type: String,
@@ -62,6 +66,7 @@ fn derive_real_total_and_hit_rate(
 
 /// 每日统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DailyStats {
     pub date: String,
@@ -76,6 +81,7 @@ pub struct DailyStats {
 
 /// Provider 统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderStats {
     pub provider_id: String,
@@ -83,12 +89,14 @@ pub struct ProviderStats {
     pub request_count: u64,
     pub total_tokens: u64,
     pub total_cost: String,
+    #[cfg_attr(test, specta(type = specta_typescript::Number))]
     pub success_rate: f32,
     pub avg_latency_ms: u64,
 }
 
 /// 模型统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ModelStats {
     pub model: String,
@@ -100,7 +108,9 @@ pub struct ModelStats {
 
 /// 请求日志过滤器
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[cfg_attr(test, derive(specta::Type))]
+// 所有字段均可缺省（前端只传设置了的筛选项）
+#[serde(rename_all = "camelCase", default)]
 pub struct LogFilters {
     pub app_type: Option<String>,
     pub provider_name: Option<String>,
@@ -112,6 +122,7 @@ pub struct LogFilters {
 
 /// 分页请求日志响应
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PaginatedLogs {
     pub data: Vec<RequestLogDetail>,
@@ -122,6 +133,7 @@ pub struct PaginatedLogs {
 
 /// 请求日志详情
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct RequestLogDetail {
     pub request_id: String,
@@ -1687,6 +1699,7 @@ impl Database {
 
 /// Provider 限额状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderLimitStatus {
     pub provider_id: String,
