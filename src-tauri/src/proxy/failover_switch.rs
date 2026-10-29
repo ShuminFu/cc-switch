@@ -7,6 +7,7 @@
 
 use crate::database::Database;
 use crate::error::AppError;
+use crate::proxy::runtime_config::RuntimeConfigStore;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -19,14 +20,20 @@ use tokio::sync::RwLock;
 pub struct FailoverSwitchManager {
     /// 正在处理中的切换（key = "app_type:provider_id"）
     pending_switches: Arc<RwLock<HashSet<String>>>,
-    db: Arc<Database>,
+    /// 运行时配置快照（读取 proxy_config.enabled 不直连数据库）
+    runtime_config: Arc<RuntimeConfigStore>,
 }
 
 impl FailoverSwitchManager {
     pub fn new(db: Arc<Database>) -> Self {
+        Self::with_runtime_config(Arc::new(RuntimeConfigStore::new(db)))
+    }
+
+    /// 使用共享的运行时配置快照创建（代理服务器内与 `ProxyState` 共用同一份）
+    pub fn with_runtime_config(runtime_config: Arc<RuntimeConfigStore>) -> Self {
         Self {
             pending_switches: Arc::new(RwLock::new(HashSet::new())),
-            db,
+            runtime_config,
         }
     }
 
@@ -80,7 +87,7 @@ impl FailoverSwitchManager {
     ) -> Result<bool, AppError> {
         // 检查该应用是否已被代理接管（enabled=true）
         // 只有被接管的应用才允许执行故障转移切换
-        let app_enabled = match self.db.get_proxy_config_for_app(app_type).await {
+        let app_enabled = match self.runtime_config.app_proxy_config(app_type).await {
             Ok(config) => config.enabled,
             Err(e) => {
                 log::warn!("[FO-002] 无法读取 {app_type} 配置: {e}，跳过切换");
@@ -144,13 +151,15 @@ mod tests {
 
     async fn set_app_enabled(manager: &FailoverSwitchManager, app_type: &str, enabled: bool) {
         let mut config = manager
-            .db
+            .runtime_config
+            .db()
             .get_proxy_config_for_app(app_type)
             .await
             .expect("read proxy config");
         config.enabled = enabled;
         manager
-            .db
+            .runtime_config
+            .db()
             .update_proxy_config_for_app(config)
             .await
             .expect("update proxy config");

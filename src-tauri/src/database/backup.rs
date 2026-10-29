@@ -147,6 +147,8 @@ impl Database {
                 .step(-1)
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
+        // Backup API 整库覆盖不经过 update hook，需手动让运行时配置快照失效
+        self.mark_config_changed();
 
         let backup_id = backup_path
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
@@ -650,6 +652,8 @@ impl Database {
                 .step(-1)
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
+        // Backup API 整库覆盖不经过 update hook，需手动让运行时配置快照失效
+        self.mark_config_changed();
 
         // Step 3: Run schema migrations (backup may be from an older version)
         self.create_tables()?;

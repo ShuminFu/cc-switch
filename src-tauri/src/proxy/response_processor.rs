@@ -628,7 +628,7 @@ async fn log_usage_internal(
 ) {
     use super::usage::logger::UsageLogger;
 
-    let logger = UsageLogger::new(&state.db);
+    let logger = UsageLogger::new(&state.db).with_runtime_config(&state.runtime_config);
     let (multiplier, pricing_model_source) =
         logger.resolve_pricing_config(provider_id, app_type).await;
     let pricing_model = if pricing_model_source == PRICING_SOURCE_REQUEST {
@@ -810,20 +810,13 @@ mod tests {
     use crate::database::Database;
     use crate::error::AppError;
     use crate::provider::ProviderMeta;
-    use crate::proxy::failover_switch::FailoverSwitchManager;
     use crate::proxy::handler_context::{
         non_streaming_body_timeout, DEFAULT_NON_STREAMING_BODY_TIMEOUT,
     };
-    use crate::proxy::provider_router::ProviderRouter;
-    use crate::proxy::providers::{
-        codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore,
-    };
-    use crate::proxy::types::{AppProxyConfig, ProxyConfig, ProxyStatus};
+    use crate::proxy::types::{AppProxyConfig, ProxyConfig};
     use rust_decimal::Decimal;
-    use std::collections::HashMap;
     use std::str::FromStr;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
 
     fn app_proxy_config(auto_failover_enabled: bool, non_streaming_timeout: u32) -> AppProxyConfig {
         AppProxyConfig {
@@ -1025,18 +1018,7 @@ mod tests {
     }
 
     fn build_state(db: Arc<Database>) -> ProxyState {
-        ProxyState {
-            db: db.clone(),
-            config: Arc::new(RwLock::new(ProxyConfig::default())),
-            status: Arc::new(RwLock::new(ProxyStatus::default())),
-            start_time: Arc::new(RwLock::new(None)),
-            current_providers: Arc::new(RwLock::new(HashMap::new())),
-            provider_router: Arc::new(ProviderRouter::new(db.clone())),
-            gemini_shadow: Arc::new(GeminiShadowStore::default()),
-            codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
-            app_handle: None,
-            failover_manager: Arc::new(FailoverSwitchManager::new(db)),
-        }
+        ProxyState::for_db(db, ProxyConfig::default())
     }
 
     fn seed_pricing(db: &Database) -> Result<(), AppError> {

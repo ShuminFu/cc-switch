@@ -46,7 +46,8 @@ use crate::config::get_app_config_dir;
 use crate::error::AppError;
 use rusqlite::{hooks::Action, Connection};
 use serde::Serialize;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 // DAO 方法通过 impl Database 提供，无需额外导出
 
@@ -78,12 +79,27 @@ pub(crate) use lock_conn;
 /// rusqlite::Connection 本身不是 Sync 的，因此需要这层包装。
 pub struct Database {
     pub(crate) conn: Mutex<Connection>,
+    /// 配置类数据的变更代数（见 [`Database::config_generation`]）
+    config_generation: Arc<AtomicU64>,
 }
 
-fn register_db_change_hook(conn: &Connection) {
+/// 每个代理请求都会写入的高频表：写入它们不代表配置变化，不推进配置代数，
+/// 否则代理的运行时配置快照会在每个请求后失效。
+const CONFIG_GENERATION_EXEMPT_TABLES: &[&str] = &[
+    "proxy_request_logs",
+    "provider_health",
+    "stream_check_logs",
+    "usage_daily_rollups",
+    "session_log_sync",
+];
+
+fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>) {
     conn.update_hook(Some(
-        |action: Action, _database: &str, table: &str, _row_id: i64| match action {
+        move |action: Action, _database: &str, table: &str, _row_id: i64| match action {
             Action::SQLITE_INSERT | Action::SQLITE_UPDATE | Action::SQLITE_DELETE => {
+                if !CONFIG_GENERATION_EXEMPT_TABLES.contains(&table) {
+                    config_generation.fetch_add(1, Ordering::Release);
+                }
                 crate::services::webdav_auto_sync::notify_db_changed(table);
                 crate::services::s3_auto_sync::notify_db_changed(table);
             }
@@ -116,10 +132,12 @@ impl Database {
             conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
-        register_db_change_hook(&conn);
+        let config_generation = Arc::new(AtomicU64::new(0));
+        register_db_change_hook(&conn, config_generation.clone());
 
         let db = Self {
             conn: Mutex::new(conn),
+            config_generation,
         };
         db.create_tables()?;
 
@@ -187,15 +205,32 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
-        register_db_change_hook(&conn);
+        let config_generation = Arc::new(AtomicU64::new(0));
+        register_db_change_hook(&conn, config_generation.clone());
 
         let db = Self {
             conn: Mutex::new(conn),
+            config_generation,
         };
         db.create_tables()?;
         db.ensure_model_pricing_seeded()?;
 
         Ok(db)
+    }
+
+    /// 配置类数据的变更代数。
+    ///
+    /// 除 [`CONFIG_GENERATION_EXEMPT_TABLES`] 外任意表的 INSERT/UPDATE/DELETE 都会推进它；
+    /// 代理的运行时配置快照据此判断是否需要重新从数据库加载。
+    pub(crate) fn config_generation(&self) -> u64 {
+        self.config_generation.load(Ordering::Acquire)
+    }
+
+    /// 手动推进配置代数。
+    ///
+    /// 用于 update hook 观察不到的整库替换（Backup API 写回主库）等场景。
+    pub(crate) fn mark_config_changed(&self) {
+        self.config_generation.fetch_add(1, Ordering::Release);
     }
 
     pub(crate) fn get_auto_vacuum_mode(conn: &Connection) -> Result<i32, AppError> {

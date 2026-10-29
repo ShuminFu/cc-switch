@@ -11,11 +11,13 @@
 use super::{
     endpoints::{RouteMethod, CLIENT_ENDPOINTS},
     failover_switch::FailoverSwitchManager,
+    forwarder::ForwarderDeps,
     handlers,
     inbound_auth::{self, InboundGuard},
     log_codes::srv as log_srv,
     provider_router::ProviderRouter,
     providers::{codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore},
+    runtime_config::RuntimeConfigStore,
     types::*,
     ProxyError,
 };
@@ -49,10 +51,70 @@ pub struct ProxyState {
     pub gemini_shadow: Arc<GeminiShadowStore>,
     /// Codex Chat bridge history，用于恢复 previous_response_id 指向的 tool call
     pub codex_chat_history: Arc<CodexChatHistoryStore>,
-    /// AppHandle，用于发射事件和更新托盘菜单
-    pub app_handle: Option<tauri::AppHandle>,
-    /// 故障转移切换管理器
-    pub failover_manager: Arc<FailoverSwitchManager>,
+    /// 运行时配置快照（per-app 代理配置、整流/优化器配置、供应商、计费默认值），
+    /// 请求路径只读快照，不直连数据库
+    pub runtime_config: Arc<RuntimeConfigStore>,
+    /// forwarder 的共享依赖（含 AppHandle 与故障转移切换管理器；每个请求只克隆这一个 `Arc`）
+    pub forwarder_deps: Arc<ForwarderDeps>,
+}
+
+impl ProxyState {
+    /// 由各共享组件组装状态，并派生 [`ForwarderDeps`]
+    pub(crate) fn new(
+        db: Arc<Database>,
+        config: ProxyConfig,
+        runtime_config: Arc<RuntimeConfigStore>,
+        provider_router: Arc<ProviderRouter>,
+        failover_manager: Arc<FailoverSwitchManager>,
+        app_handle: Option<tauri::AppHandle>,
+    ) -> Self {
+        let status = Arc::new(RwLock::new(ProxyStatus::default()));
+        let current_providers = Arc::new(RwLock::new(std::collections::HashMap::new()));
+        let gemini_shadow = Arc::new(GeminiShadowStore::default());
+        let codex_chat_history = Arc::new(CodexChatHistoryStore::default());
+        let forwarder_deps = Arc::new(ForwarderDeps {
+            router: provider_router.clone(),
+            status: status.clone(),
+            current_providers: current_providers.clone(),
+            gemini_shadow: gemini_shadow.clone(),
+            codex_chat_history: codex_chat_history.clone(),
+            failover_manager,
+            app_handle,
+        });
+        Self {
+            db,
+            config: Arc::new(RwLock::new(config)),
+            status,
+            start_time: Arc::new(RwLock::new(None)),
+            current_providers,
+            provider_router,
+            gemini_shadow,
+            codex_chat_history,
+            runtime_config,
+            forwarder_deps,
+        }
+    }
+
+    /// 只依赖数据库的状态（共享同一份运行时配置快照）
+    #[cfg(test)]
+    pub(crate) fn for_db(db: Arc<Database>, config: ProxyConfig) -> Self {
+        let runtime_config = Arc::new(RuntimeConfigStore::new(db.clone()));
+        let provider_router = Arc::new(ProviderRouter::with_runtime_config(
+            db.clone(),
+            runtime_config.clone(),
+        ));
+        let failover_manager = Arc::new(FailoverSwitchManager::with_runtime_config(
+            runtime_config.clone(),
+        ));
+        Self::new(
+            db,
+            config,
+            runtime_config,
+            provider_router,
+            failover_manager,
+            None,
+        )
+    }
 }
 
 /// 代理HTTP服务器
@@ -70,23 +132,26 @@ impl ProxyServer {
         db: Arc<Database>,
         app_handle: Option<tauri::AppHandle>,
     ) -> Self {
+        // 运行时配置快照：路由器、故障转移管理器与请求上下文共用同一份
+        let runtime_config = Arc::new(RuntimeConfigStore::new(db.clone()));
         // 创建共享的 ProviderRouter（熔断器状态将跨所有请求保持）
-        let provider_router = Arc::new(ProviderRouter::new(db.clone()));
+        let provider_router = Arc::new(ProviderRouter::with_runtime_config(
+            db.clone(),
+            runtime_config.clone(),
+        ));
         // 创建故障转移切换管理器
-        let failover_manager = Arc::new(FailoverSwitchManager::new(db.clone()));
+        let failover_manager = Arc::new(FailoverSwitchManager::with_runtime_config(
+            runtime_config.clone(),
+        ));
 
-        let state = ProxyState {
+        let state = ProxyState::new(
             db,
-            config: Arc::new(RwLock::new(config.clone())),
-            status: Arc::new(RwLock::new(ProxyStatus::default())),
-            start_time: Arc::new(RwLock::new(None)),
-            current_providers: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            config.clone(),
+            runtime_config,
             provider_router,
-            gemini_shadow: Arc::new(GeminiShadowStore::default()),
-            codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
-            app_handle,
             failover_manager,
-        };
+            app_handle,
+        );
 
         Self {
             config,
@@ -375,6 +440,8 @@ impl ProxyServer {
     /// 在不重启服务的情况下更新运行时配置
     pub async fn apply_runtime_config(&self, config: &ProxyConfig) {
         *self.state.config.write().await = config.clone();
+        // 运行时配置变更后让快照失效，下一个请求重新加载
+        self.state.runtime_config.invalidate();
     }
 
     /// 热更新熔断器配置

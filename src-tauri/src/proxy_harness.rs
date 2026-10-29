@@ -292,21 +292,36 @@ async fn mock_handler(State(state): State<MockState>, request: Request) -> Respo
 
 thread_local! {
     static DB_STATEMENTS: Cell<u64> = const { Cell::new(0) };
+    static DB_READ_STATEMENTS: Cell<u64> = const { Cell::new(0) };
     static DB_COUNTER_PAUSED: Cell<bool> = const { Cell::new(false) };
+}
+
+fn is_read_statement(sql: &str) -> bool {
+    let keyword = sql.split_whitespace().next().unwrap_or_default();
+    keyword.eq_ignore_ascii_case("SELECT") || keyword.eq_ignore_ascii_case("WITH")
 }
 
 fn count_statement(sql: &str) {
     // SQLite also traces trigger programs as `-- TRIGGER name`; only count statements.
-    if DB_COUNTER_PAUSED.with(Cell::get) || sql.trim_start().starts_with("--") {
+    let sql = sql.trim_start();
+    if DB_COUNTER_PAUSED.with(Cell::get) || sql.starts_with("--") {
         return;
     }
     DB_STATEMENTS.with(|count| count.set(count.get() + 1));
+    if is_read_statement(sql) {
+        DB_READ_STATEMENTS.with(|count| count.set(count.get() + 1));
+    }
 }
 
 /// SQL statements executed on this thread by harness databases, excluding
 /// the harness's own inspection queries.
 pub fn db_statement_count() -> u64 {
     DB_STATEMENTS.with(Cell::get)
+}
+
+/// The read (`SELECT` / `WITH`) subset of [`db_statement_count`].
+pub fn db_read_statement_count() -> u64 {
+    DB_READ_STATEMENTS.with(Cell::get)
 }
 
 /// Run a harness inspection query without counting its statements.

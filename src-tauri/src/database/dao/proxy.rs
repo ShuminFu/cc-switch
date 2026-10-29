@@ -605,23 +605,12 @@ impl Database {
 
         let now = chrono::Utc::now().to_rfc3339();
 
-        // 先查询当前状态
-        let current = conn.query_row(
-            "SELECT consecutive_failures FROM provider_health
-             WHERE provider_id = ?1 AND app_type = ?2",
-            rusqlite::params![provider_id, app_type],
-            |row| Ok(row.get::<_, i64>(0)? as u32),
-        );
-
+        // 新行的初始状态（相当于此前失败次数为 0）
         let (is_healthy, consecutive_failures) = if success {
-            // 成功：重置失败计数
             (1, 0)
         } else {
-            // 失败：增加失败计数
-            let failures = current.unwrap_or(0) + 1;
             // 使用传入的阈值而非硬编码
-            let healthy = if failures >= failure_threshold { 0 } else { 1 };
-            (healthy, failures)
+            (if failure_threshold <= 1 { 0 } else { 1 }, 1)
         };
 
         let (last_success_at, last_failure_at) = if success {
@@ -630,17 +619,23 @@ impl Database {
             (None, Some(now.clone()))
         };
 
-        // UPSERT
+        // 单条 UPSERT：已有行时在 SQL 内基于旧值累加失败计数（成功则清零），
+        // 免去请求路径上「先 SELECT 再写」的额外查询
         conn.execute(
-            "INSERT OR REPLACE INTO provider_health
+            "INSERT INTO provider_health
              (provider_id, app_type, is_healthy, consecutive_failures,
               last_success_at, last_failure_at, last_error, updated_at)
-             VALUES (?1, ?2, ?3, ?4,
-                     COALESCE(?5, (SELECT last_success_at FROM provider_health
-                                   WHERE provider_id = ?1 AND app_type = ?2)),
-                     COALESCE(?6, (SELECT last_failure_at FROM provider_health
-                                   WHERE provider_id = ?1 AND app_type = ?2)),
-                     ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(provider_id, app_type) DO UPDATE SET
+                 consecutive_failures = CASE WHEN ?9 THEN 0
+                                             ELSE provider_health.consecutive_failures + 1 END,
+                 is_healthy = CASE WHEN ?9 THEN 1
+                                   WHEN provider_health.consecutive_failures + 1 >= ?10 THEN 0
+                                   ELSE 1 END,
+                 last_success_at = COALESCE(excluded.last_success_at, provider_health.last_success_at),
+                 last_failure_at = COALESCE(excluded.last_failure_at, provider_health.last_failure_at),
+                 last_error = excluded.last_error,
+                 updated_at = excluded.updated_at",
             rusqlite::params![
                 provider_id,
                 app_type,
@@ -650,6 +645,8 @@ impl Database {
                 last_failure_at,
                 error_msg,
                 &now,
+                success,
+                failure_threshold as i64,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;

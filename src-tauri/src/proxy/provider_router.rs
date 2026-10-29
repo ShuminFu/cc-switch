@@ -10,6 +10,7 @@ use crate::proxy::circuit_breaker::{
     AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
 };
 use crate::proxy::protocol::{AppRef, BreakerKey};
+use crate::proxy::runtime_config::RuntimeConfigStore;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -19,15 +20,25 @@ use tokio::sync::RwLock;
 pub struct ProviderRouter {
     /// 数据库连接
     db: Arc<Database>,
+    /// 运行时配置快照（请求路径上的配置/供应商读取不再直连数据库）
+    runtime_config: Arc<RuntimeConfigStore>,
     /// 熔断器管理器 - 每个（应用, 供应商）一个熔断器
     circuit_breakers: Arc<RwLock<HashMap<BreakerKey, Arc<CircuitBreaker>>>>,
 }
 
 impl ProviderRouter {
-    /// 创建新的供应商路由器
+    /// 创建新的供应商路由器（独立的运行时配置快照，测试用）
+    #[cfg(test)]
     pub fn new(db: Arc<Database>) -> Self {
+        let runtime_config = Arc::new(RuntimeConfigStore::new(db.clone()));
+        Self::with_runtime_config(db, runtime_config)
+    }
+
+    /// 使用共享的运行时配置快照创建路由器（代理服务器内与 `ProxyState` 共用同一份）
+    pub fn with_runtime_config(db: Arc<Database>, runtime_config: Arc<RuntimeConfigStore>) -> Self {
         Self {
             db,
+            runtime_config,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -42,8 +53,8 @@ impl ProviderRouter {
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
 
-        // 检查该应用的自动故障转移开关是否开启（从 proxy_config 表读取）
-        let auto_failover_enabled = match self.db.get_proxy_config_for_app(app_type).await {
+        // 检查该应用的自动故障转移开关是否开启（proxy_config，经运行时配置快照）
+        let auto_failover_enabled = match self.runtime_config.app_proxy_config(app_type).await {
             Ok(config) => config.auto_failover_enabled,
             Err(e) => {
                 log::error!("[{app_type}] 读取 proxy_config 失败: {e}，默认禁用故障转移");
@@ -51,22 +62,15 @@ impl ProviderRouter {
             }
         };
 
+        let app_providers = self.runtime_config.app_providers(app_type)?;
+
         if auto_failover_enabled {
             // 故障转移开启：仅按队列顺序依次尝试（P1 → P2 → ...）
-            let all_providers = self.db.get_all_providers(app_type)?;
+            // 使用 DAO 返回的队列排序，确保和前端展示一致
+            total_providers = app_providers.failover_queue.len();
 
-            // 使用 DAO 返回的排序结果，确保和前端展示一致
-            let ordered_ids: Vec<String> = self
-                .db
-                .get_failover_queue(app_type)?
-                .into_iter()
-                .map(|item| item.provider_id)
-                .collect();
-
-            total_providers = ordered_ids.len();
-
-            for provider_id in ordered_ids {
-                let Some(provider) = all_providers.get(&provider_id).cloned() else {
+            for provider_id in &app_providers.failover_queue {
+                let Some(provider) = app_providers.all.get(provider_id).cloned() else {
                     continue;
                 };
 
@@ -83,15 +87,11 @@ impl ProviderRouter {
             // 故障转移关闭：仅使用当前供应商，跳过熔断器检查
             let current_id = AppType::from_str(app_type)
                 .ok()
-                .and_then(|app_enum| {
-                    crate::settings::get_effective_current_provider(&self.db, &app_enum)
-                        .ok()
-                        .flatten()
-                })
-                .or_else(|| self.db.get_current_provider(app_type).ok().flatten());
+                .and_then(|app_enum| app_providers.effective_current_provider(&app_enum))
+                .or_else(|| app_providers.db_current.clone());
 
             if let Some(current_id) = current_id {
-                if let Some(current) = self.db.get_provider_by_id(&current_id, app_type)? {
+                if let Some(current) = app_providers.all.get(&current_id).cloned() {
                     total_providers = 1;
                     result.push(current);
                 }
@@ -139,7 +139,7 @@ impl ProviderRouter {
 
         // 1. 按应用独立获取熔断器配置；读取失败时回退到熔断器自身的阈值，
         //    保证数据库健康状态与熔断器使用同一个阈值
-        let failure_threshold = match self.db.get_proxy_config_for_app(app_type).await {
+        let failure_threshold = match self.runtime_config.app_proxy_config(app_type).await {
             Ok(app_config) => app_config.circuit_failure_threshold,
             Err(e) => {
                 let fallback = breaker.failure_threshold().await;
@@ -255,7 +255,11 @@ impl ProviderRouter {
         }
 
         // 按应用独立读取熔断器配置
-        let config = match self.db.get_proxy_config_for_app(key.app().as_str()).await {
+        let config = match self
+            .runtime_config
+            .app_proxy_config(key.app().as_str())
+            .await
+        {
             Ok(app_config) => CircuitBreakerConfig::from(&app_config),
             Err(_) => CircuitBreakerConfig::default(),
         };

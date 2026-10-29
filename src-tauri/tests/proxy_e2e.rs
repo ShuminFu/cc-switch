@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use cc_switch_lib::proxy_harness::{
-    db_statement_count, HarnessCircuit, HarnessHealth, MockReply, MockUpstream, ProxyHarness,
+    db_read_statement_count, db_statement_count, HarnessCircuit, HarnessHealth, MockReply,
+    MockUpstream, ProxyHarness,
 };
 use serde_json::{json, Value};
 
@@ -885,6 +886,58 @@ async fn foreign_host_text_plain_post_is_rejected_on_the_wire() {
 }
 
 // ============================================================================
+// Runtime config snapshot
+// ============================================================================
+
+#[tokio::test]
+async fn config_and_provider_changes_reach_the_next_request_without_restart() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::messages("from a", 10, 5).await;
+    let b = MockUpstream::messages("from b", 10, 5).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .spawn()
+        .await;
+
+    // Warm the snapshot on the current provider.
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(first_text(&json_body(response).await), "from a");
+
+    // Switching the current provider is a plain DB write; the cached snapshot
+    // must notice it on the very next request.
+    harness
+        .db()
+        .set_current_provider("claude", "b")
+        .expect("switch current provider");
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(first_text(&json_body(response).await), "from b");
+
+    // Same for per-app proxy_config: enable failover with only `a` queued.
+    harness
+        .db()
+        .add_to_failover_queue("claude", "a")
+        .expect("queue a");
+    let mut config = harness
+        .db()
+        .get_proxy_config_for_app("claude")
+        .await
+        .expect("read proxy config");
+    config.auto_failover_enabled = true;
+    harness
+        .db()
+        .update_proxy_config_for_app(config)
+        .await
+        .expect("enable failover");
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(first_text(&json_body(response).await), "from a");
+
+    assert_eq!(a.hits(), 2);
+    assert_eq!(b.hits(), 1);
+    harness.shutdown().await;
+}
+
+// ============================================================================
 // Baseline: latency, allocations and SQL statements per request
 // ============================================================================
 
@@ -924,6 +977,7 @@ async fn perf_baseline_non_streaming_request() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let statements_before = db_statement_count();
+    let reads_before = db_read_statement_count();
     let (allocs_before, bytes_before) = allocation_snapshot();
     let mut latencies_ms = Vec::with_capacity(MEASURED_REQUESTS);
     for _ in 0..MEASURED_REQUESTS {
@@ -941,11 +995,13 @@ async fn perf_baseline_non_streaming_request() {
     assert_eq!(logs.len(), WARMUP_REQUESTS + MEASURED_REQUESTS);
     tokio::time::sleep(Duration::from_millis(100)).await;
     let statements = db_statement_count() - statements_before;
+    let reads = db_read_statement_count() - reads_before;
     let (allocs_after, bytes_after) = allocation_snapshot();
 
     latencies_ms.sort_by(|a, b| a.partial_cmp(b).expect("finite latency"));
     let n = MEASURED_REQUESTS as f64;
     let statements_per_request = statements as f64 / n;
+    let reads_per_request = reads as f64 / n;
     let allocations_per_request = (allocs_after - allocs_before) as f64 / n;
     let measured = json!({
         "scenario": "non-streaming Claude /v1/messages, single provider, usage logging on",
@@ -958,6 +1014,7 @@ async fn perf_baseline_non_streaming_request() {
             "max": round2(*latencies_ms.last().expect("latencies")),
         },
         "db_statements_per_request": round2(statements_per_request),
+        "db_reads_per_request": round2(reads_per_request),
         "allocations_per_request": allocations_per_request.round(),
         "allocated_bytes_per_request": ((bytes_after - bytes_before) as f64 / n).round(),
     });
@@ -984,7 +1041,7 @@ async fn perf_baseline_non_streaming_request() {
         entry["_note"] = json!(
             "Proxy e2e baseline (CCS-014), measured by tests/proxy_e2e.rs::perf_baseline_non_streaming_request. \
              Refresh with `CC_SWITCH_UPDATE_PERF_BASELINE=1 cargo test --manifest-path src-tauri/Cargo.toml --test proxy_e2e perf_baseline`, then `npx prettier --write docs/dev/perf-baseline.json`. \
-             Gates: db_statements_per_request must not grow; allocations_per_request may not exceed 3x. Latency is informational."
+             Gates: db_reads_per_request must be 0 (runtime config snapshot, CCS-124); db_statements_per_request must not grow; allocations_per_request may not exceed 3x. Latency is informational."
         );
         baseline["proxy_e2e"] = entry;
         std::fs::write(
@@ -994,6 +1051,14 @@ async fn perf_baseline_non_streaming_request() {
         .expect("write perf baseline");
         return;
     }
+
+    // Steady-state requests are served from the runtime config snapshot (CCS-124):
+    // the only statements left are the request-log and provider-health writes.
+    assert_eq!(
+        reads, 0,
+        "proxied requests must not read the database once the runtime config snapshot is warm \
+         ({reads} SELECTs over {MEASURED_REQUESTS} requests)"
+    );
 
     let recorded = &baseline["proxy_e2e"];
     let max_statements = recorded["db_statements_per_request"]
