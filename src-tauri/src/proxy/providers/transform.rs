@@ -497,6 +497,11 @@ fn convert_message_to_openai(
 /// 将 Anthropic image block 转换为 OpenAI image_url content part
 fn image_block_to_openai_part(block: &Value) -> Option<Value> {
     let source = block.get("source")?;
+    // URL 图片源直接透传，避免拼出空的 data URL
+    if source.get("type").and_then(|t| t.as_str()) == Some("url") {
+        let url = source.get("url").and_then(|u| u.as_str())?;
+        return Some(json!({"type": "image_url", "image_url": {"url": url}}));
+    }
     let media_type = source
         .get("media_type")
         .and_then(|m| m.as_str())
@@ -1253,6 +1258,34 @@ mod tests {
                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJDRA=="}},
                 {"type": "text", "text": "Describe it"}
             ])
+        );
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_tool_result_url_image_keeps_url() {
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "call_1",
+                    "content": [
+                        {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
+                    ]
+                }]
+            }]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["content"], "[image attached]");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(
+            messages[1]["content"],
+            json!([{"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}])
         );
     }
 

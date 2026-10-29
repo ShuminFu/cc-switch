@@ -35,3 +35,4 @@ p0-golden-testkit-chat-gemini
   - `cargo test --lib proxy::providers::transform` -> 286 passed, 0 failed.
   - `cargo test --test proxy_golden` -> 6 passed, 0 failed (new snapshot reviewed).
   - `cargo test --lib` -> 2136 passed, 0 failed, 3 ignored.
+- **Review:** All acceptance criteria verified against the code and tests. One gap fixed: `image_block_to_openai_part` only handled base64 sources, so a `{"type":"url"}` image inside a tool_result (which previously reached the upstream as harmless JSON text) would now have become an empty `data:image/png;base64,` image_url and could be rejected upstream. URL sources now pass through as `image_url.url` (base64 behaviour unchanged); added `test_anthropic_to_openai_tool_result_url_image_keeps_url`. Re-verified: fmt/clippy clean, `proxy::providers::transform` 287 passed, `--test proxy_golden` 6 passed, `--lib` 2137 passed, full `cargo test --no-fail-fast` 2293 passed / 0 failed.
