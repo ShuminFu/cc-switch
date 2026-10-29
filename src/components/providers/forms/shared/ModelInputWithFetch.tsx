@@ -57,7 +57,12 @@ export function ModelInputWithFetch({
         />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" className="shrink-0">
+            <Button
+              aria-label={t("common.selectModel")}
+              variant="outline"
+              size="icon"
+              className="shrink-0"
+            >
               <ChevronDown className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -98,7 +103,13 @@ export function ModelInputWithFetch({
           autoComplete="off"
           className="flex-1"
         />
-        <Button variant="outline" size="icon" className="shrink-0" disabled>
+        <Button
+          aria-label={t("common.loading")}
+          variant="outline"
+          size="icon"
+          className="shrink-0"
+          disabled
+        >
           <Loader2 className="h-4 w-4 animate-spin" />
         </Button>
       </div>

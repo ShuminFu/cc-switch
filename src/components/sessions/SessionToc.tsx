@@ -83,6 +83,7 @@ export function SessionTocDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button
+          aria-label={t("sessionManager.tocTitle")}
           size="icon"
           className="fixed bottom-20 right-4 xl:hidden size-10 rounded-full shadow-lg z-30"
         >

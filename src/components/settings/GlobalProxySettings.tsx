@@ -238,6 +238,9 @@ export function GlobalProxySettings() {
             className="font-mono text-sm pr-10"
           />
           <Button
+            aria-label={
+              showPassword ? t("common.hidePassword") : t("common.showPassword")
+            }
             type="button"
             variant="ghost"
             size="icon"

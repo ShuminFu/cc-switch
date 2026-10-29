@@ -778,6 +778,7 @@ export function OpenCodeFormFields({
                     className="flex-1"
                   />
                   <Button
+                    aria-label={t("common.delete")}
                     type="button"
                     variant="ghost"
                     size="icon"
@@ -891,6 +892,7 @@ export function OpenCodeFormFields({
                     className="flex-1"
                   />
                   <Button
+                    aria-label={t("common.delete")}
                     type="button"
                     variant="ghost"
                     size="icon"
@@ -974,6 +976,7 @@ export function OpenCodeFormFields({
                           })}
                         </span>
                         <Button
+                          aria-label={t("common.add")}
                           type="button"
                           variant="ghost"
                           size="sm"
@@ -1028,6 +1031,7 @@ export function OpenCodeFormFields({
                                 className="flex-1"
                               />
                               <Button
+                                aria-label={t("common.delete")}
                                 type="button"
                                 variant="ghost"
                                 size="icon"
@@ -1053,6 +1057,7 @@ export function OpenCodeFormFields({
                           })}
                         </span>
                         <Button
+                          aria-label={t("common.add")}
                           type="button"
                           variant="ghost"
                           size="sm"
@@ -1113,6 +1118,7 @@ export function OpenCodeFormFields({
                                 className="flex-1"
                               />
                               <Button
+                                aria-label={t("common.delete")}
                                 type="button"
                                 variant="ghost"
                                 size="icon"

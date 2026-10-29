@@ -40,7 +40,16 @@
     "deleting": "削除中...",
     "auto": "自動",
     "enabled": "有効",
-    "notSet": "未設定"
+    "notSet": "未設定",
+    "dismiss": "閉じる",
+    "selectModel": "モデルを選択",
+    "showPassword": "パスワードを表示",
+    "hidePassword": "パスワードを隠す",
+    "openDocs": "ドキュメントを開く",
+    "previousPage": "前のページ",
+    "nextPage": "次のページ",
+    "previousMonth": "前の月",
+    "nextMonth": "次の月"
   },
   "firstRunNotice": {
     "title": "CC Switch へようこそ",

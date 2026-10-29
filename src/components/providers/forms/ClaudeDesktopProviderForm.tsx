@@ -1124,6 +1124,7 @@ export function ClaudeDesktopProviderForm({
                               })}
                             </label>
                             <Button
+                              aria-label={t("common.delete")}
                               type="button"
                               variant="ghost"
                               size="icon"

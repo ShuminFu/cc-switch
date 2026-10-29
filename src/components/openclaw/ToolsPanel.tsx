@@ -202,6 +202,7 @@ const ToolsPanel: React.FC = () => {
                 className="font-mono text-xs"
               />
               <Button
+                aria-label={t("common.delete")}
                 variant="ghost"
                 size="icon"
                 className="flex-shrink-0 h-9 w-9 text-muted-foreground hover:text-destructive"
@@ -241,6 +242,7 @@ const ToolsPanel: React.FC = () => {
                 className="font-mono text-xs"
               />
               <Button
+                aria-label={t("common.delete")}
                 variant="ghost"
                 size="icon"
                 className="flex-shrink-0 h-9 w-9 text-muted-foreground hover:text-destructive"

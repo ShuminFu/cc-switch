@@ -1129,6 +1129,7 @@ function App() {
             {currentView !== "providers" ? (
               <div className="flex items-center gap-2">
                 <Button
+                  aria-label={t("common.back")}
                   variant="outline"
                   size="icon"
                   onClick={() =>
@@ -1538,6 +1539,7 @@ function App() {
                     </div>
 
                     <Button
+                      aria-label={t("provider.addProvider")}
                       onClick={() => setIsAddOpen(true)}
                       size="icon"
                       className={`ml-2 ${addActionButtonClass}`}

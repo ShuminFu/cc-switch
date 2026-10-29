@@ -368,6 +368,7 @@ export function OpenClawFormFields({
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
+                              aria-label={t("common.selectModel")}
                               variant="outline"
                               size="icon"
                               className="shrink-0"
@@ -429,6 +430,7 @@ export function OpenClawFormFields({
                     />
                   </div>
                   <Button
+                    aria-label={t("common.delete")}
                     type="button"
                     variant="ghost"
                     size="icon"

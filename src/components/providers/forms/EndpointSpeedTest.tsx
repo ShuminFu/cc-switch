@@ -542,6 +542,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
               className="flex-1"
             />
             <Button
+              aria-label={t("common.add")}
               type="button"
               onClick={handleAddEndpoint}
               variant="outline"
@@ -622,6 +623,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
                     )}
 
                     <button
+                      aria-label={t("common.delete")}
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();

@@ -306,6 +306,7 @@ const AgentsDefaultsPanel: React.FC = () => {
                       </SelectContent>
                     </Select>
                     <Button
+                      aria-label={t("common.delete")}
                       variant="ghost"
                       size="icon"
                       className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"

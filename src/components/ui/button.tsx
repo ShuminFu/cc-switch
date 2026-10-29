@@ -48,13 +48,53 @@ export interface ButtonProps
   asChild?: boolean;
 }
 
+// 图标按钮没有可见文字，必须通过 aria-label / aria-labelledby / title 提供可访问名称
+export function hasAccessibleName(el: HTMLElement): boolean {
+  return Boolean(
+    el.getAttribute("aria-label")?.trim() ||
+      el.getAttribute("aria-labelledby")?.trim() ||
+      el.getAttribute("title")?.trim() ||
+      el.textContent?.trim(),
+  );
+}
+
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
+    const localRef = React.useRef<HTMLButtonElement | null>(null);
+    const warnedRef = React.useRef(false);
+
+    const setRefs = React.useCallback(
+      (node: HTMLButtonElement | null) => {
+        localRef.current = node;
+        if (typeof ref === "function") {
+          ref(node);
+        } else if (ref) {
+          ref.current = node;
+        }
+      },
+      [ref],
+    );
+
+    // 开发模式下提醒缺少可访问名称的图标按钮
+    React.useEffect(() => {
+      if (!import.meta.env.DEV || size !== "icon" || warnedRef.current) {
+        return;
+      }
+      const el = localRef.current;
+      if (el && !hasAccessibleName(el)) {
+        warnedRef.current = true;
+        console.warn(
+          '[Button] size="icon" button has no accessible name; add an aria-label.',
+          el,
+        );
+      }
+    });
+
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
-        ref={ref}
+        ref={setRefs}
         {...props}
       />
     );

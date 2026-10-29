@@ -148,6 +148,7 @@ export function EnvWarningBanner({
                   </Button>
 
                   <Button
+                    aria-label={t("common.dismiss")}
                     variant="ghost"
                     size="icon"
                     onClick={onDismiss}

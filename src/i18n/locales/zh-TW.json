@@ -40,7 +40,16 @@
     "deleting": "刪除中...",
     "auto": "自動",
     "enabled": "已啟用",
-    "notSet": "未設定"
+    "notSet": "未設定",
+    "dismiss": "忽略",
+    "selectModel": "選擇模型",
+    "showPassword": "顯示密碼",
+    "hidePassword": "隱藏密碼",
+    "openDocs": "開啟文件",
+    "previousPage": "上一頁",
+    "nextPage": "下一頁",
+    "previousMonth": "上個月",
+    "nextMonth": "下個月"
   },
   "firstRunNotice": {
     "title": "歡迎使用 CC Switch",

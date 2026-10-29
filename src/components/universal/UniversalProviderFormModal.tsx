@@ -434,6 +434,9 @@ requires_openai_auth = true`;
                 className="pr-10"
               />
               <Button
+                aria-label={
+                  showApiKey ? t("apiKeyInput.hide") : t("apiKeyInput.show")
+                }
                 type="button"
                 variant="ghost"
                 size="icon"

@@ -817,6 +817,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                         }}
                       />
                       <Button
+                        aria-label={t("common.close")}
                         variant="ghost"
                         size="icon"
                         className="absolute right-1 top-1/2 -translate-y-1/2 size-6"
@@ -991,6 +992,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
+                              aria-label={t("sessionManager.searchSessions")}
                               variant="ghost"
                               size="icon"
                               className="size-7"
@@ -1128,6 +1130,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
+                              aria-label={t("common.refresh")}
                               variant="ghost"
                               size="icon"
                               className="size-7"
@@ -1583,6 +1586,9 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
+                              aria-label={t("sessionManager.copyCommand", {
+                                defaultValue: "复制命令",
+                              })}
                               variant="ghost"
                               size="icon"
                               className="size-7 shrink-0"

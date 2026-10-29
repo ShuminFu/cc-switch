@@ -1030,6 +1030,7 @@ export function OmoFormFields({
             <Settings className="h-3.5 w-3.5" />
           </Button>
           <Button
+            aria-label={t("common.delete")}
             type="button"
             variant="ghost"
             size="icon"

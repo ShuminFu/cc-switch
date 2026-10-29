@@ -170,7 +170,7 @@ export function BackupListSection({
       {/* Backup policy settings */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label className="text-sm">
+          <Label htmlFor="backup-interval" className="text-sm">
             {t("settings.backupManager.intervalLabel", {
               defaultValue: "Auto-backup Interval",
             })}
@@ -181,7 +181,7 @@ export function BackupListSection({
               onSettingsChange({ backupIntervalHours: Number(v) })
             }
           >
-            <SelectTrigger className="h-9">
+            <SelectTrigger id="backup-interval" className="h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -225,7 +225,7 @@ export function BackupListSection({
         </div>
 
         <div className="space-y-2">
-          <Label className="text-sm">
+          <Label htmlFor="backup-retain" className="text-sm">
             {t("settings.backupManager.retainLabel", {
               defaultValue: "Backup Retention",
             })}
@@ -236,7 +236,7 @@ export function BackupListSection({
               onSettingsChange({ backupRetainCount: Number(v) })
             }
           >
-            <SelectTrigger className="h-9">
+            <SelectTrigger id="backup-retain" className="h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -326,6 +326,7 @@ export function BackupListSection({
                         disabled={isRenaming}
                       />
                       <Button
+                        aria-label={t("common.confirm")}
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 shrink-0"
@@ -335,6 +336,7 @@ export function BackupListSection({
                         <Check className="h-3.5 w-3.5" />
                       </Button>
                       <Button
+                        aria-label={t("common.cancel")}
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 shrink-0"

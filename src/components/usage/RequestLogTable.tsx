@@ -324,6 +324,7 @@ export function RequestLogTable({
             <span>{t("usage.totalRecords", { total })}</span>
             <div className="flex items-center gap-1">
               <Button
+                aria-label={t("common.previousPage")}
                 size="sm"
                 variant="outline"
                 disabled={page === 0}
@@ -373,6 +374,7 @@ export function RequestLogTable({
                 );
               })()}
               <Button
+                aria-label={t("common.nextPage")}
                 size="sm"
                 variant="outline"
                 disabled={page >= totalPages - 1}

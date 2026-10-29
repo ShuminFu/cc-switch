@@ -1,5 +1,6 @@
 import React from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
   footer,
   contentClassName,
 }) => {
+  const { t } = useTranslation();
   React.useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden";
@@ -126,6 +128,7 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
               style={{ ...DRAG_REGION_STYLE } as React.CSSProperties}
             >
               <Button
+                aria-label={t("common.back")}
                 type="button"
                 variant="outline"
                 size="icon"

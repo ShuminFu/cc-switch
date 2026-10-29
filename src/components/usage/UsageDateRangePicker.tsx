@@ -407,6 +407,7 @@ export function UsageDateRangePicker({
             {/* Month navigation */}
             <div className="flex items-center justify-between mb-1.5">
               <Button
+                aria-label={t("common.previousMonth")}
                 type="button"
                 size="icon"
                 variant="ghost"
@@ -435,6 +436,7 @@ export function UsageDateRangePicker({
                 })}
               </button>
               <Button
+                aria-label={t("common.nextMonth")}
                 type="button"
                 size="icon"
                 variant="ghost"

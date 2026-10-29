@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +18,7 @@ export function ModelDropdown({
   models: FetchedModel[];
   onSelect: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const grouped: Record<string, FetchedModel[]> = {};
   for (const model of models) {
     const vendor = model.ownedBy || "Other";
@@ -28,7 +30,12 @@ export function ModelDropdown({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon" className="shrink-0">
+        <Button
+          aria-label={t("common.selectModel")}
+          variant="outline"
+          size="icon"
+          className="shrink-0"
+        >
           <ChevronDown className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>

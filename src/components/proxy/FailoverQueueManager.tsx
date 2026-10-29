@@ -200,6 +200,7 @@ export function FailoverQueueManager({
           </SelectContent>
         </Select>
         <Button
+          aria-label={t("common.add")}
           onClick={handleAddProvider}
           disabled={disabled || !selectedProviderId || addToQueue.isPending}
           size="icon"

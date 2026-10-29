@@ -40,7 +40,16 @@
     "deleting": "Deleting...",
     "auto": "Auto",
     "enabled": "Enabled",
-    "notSet": "Not Set"
+    "notSet": "Not Set",
+    "dismiss": "Dismiss",
+    "selectModel": "Select model",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "openDocs": "Open documentation",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "previousMonth": "Previous month",
+    "nextMonth": "Next month"
   },
   "firstRunNotice": {
     "title": "Welcome to CC Switch",

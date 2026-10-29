@@ -40,7 +40,16 @@
     "deleting": "删除中...",
     "auto": "自动",
     "enabled": "已开启",
-    "notSet": "未设置"
+    "notSet": "未设置",
+    "dismiss": "忽略",
+    "selectModel": "选择模型",
+    "showPassword": "显示密码",
+    "hidePassword": "隐藏密码",
+    "openDocs": "打开文档",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "previousMonth": "上个月",
+    "nextMonth": "下个月"
   },
   "firstRunNotice": {
     "title": "欢迎使用 CC Switch",

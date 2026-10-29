@@ -525,6 +525,7 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
           </span>
           {skill.readmeUrl && (
             <button
+              aria-label={t("common.openDocs")}
               type="button"
               onClick={openDocs}
               className="text-muted-foreground/60 hover:text-foreground flex-shrink-0"

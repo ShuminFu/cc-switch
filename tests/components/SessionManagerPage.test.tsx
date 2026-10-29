@@ -13,6 +13,7 @@ import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
 import { sessionsApi } from "@/lib/api/sessions";
 import type { SessionMessage, SessionMeta } from "@/types";
 import { setSessionFixtures } from "../msw/state";
+import { findUnnamedButtons } from "../a11y/buttonName";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -247,6 +248,31 @@ describe("SessionManagerPage", () => {
     expect(screen.queryByText("Alpha Session")).not.toBeInTheDocument();
     expect(toastErrorMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalled();
+  });
+
+  it("gives the toolbar and detail icon buttons accessible names", async () => {
+    const { container } = renderPage();
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Alpha Session" }),
+      ).toBeInTheDocument(),
+    );
+
+    expect(
+      screen.getByRole("button", { name: "common.refresh" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "复制命令" }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "sessionManager.searchSessions" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "common.close" }),
+    ).toBeInTheDocument();
+
+    expect(await findUnnamedButtons(container)).toEqual([]);
   });
 
   it("removes a deleted session from filtered search results", async () => {
