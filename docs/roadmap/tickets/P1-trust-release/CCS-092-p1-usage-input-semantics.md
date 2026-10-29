@@ -15,9 +15,9 @@ The cache-inclusive/exclusive input rule is copied in 5 places that disagree, so
 Add `AppType::input_semantics()` and have all 5 sites call it. The SQL helper generates its CASE from the enum.
 
 ## Acceptance criteria / verification
-- [ ] The cost golden table is fully green, with the #[ignore] removed from the grokbuild rows
-- [ ] `grep -rn 'cache-inclusive\|CACHE_INCLUSIVE' src-tauri/src` shows a single definition
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml cost_golden`
+- [x] The cost golden table is fully green, with the #[ignore] removed from the grokbuild rows
+- [x] `grep -rn 'cache-inclusive\|CACHE_INCLUSIVE' src-tauri/src` shows a single definition
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml cost_golden`
 
 ## Dependencies
 p0-cost-golden-table
@@ -70,3 +70,15 @@ oracle vs. the single source) and
 - `cargo fmt` clean; `cargo clippy -- -D warnings` clean
 - `cargo test --lib` → 2256 passed, 0 failed (2 ignored: live S3 tests)
 - `cargo test --no-fail-fast` (full) → 2422 passed, 0 failed
+
+**Review.** Independently re-verified `07178fe`: every former copy of the rule
+now calls `AppType::input_semantics()` (grep finds no remaining
+`"codex" | "gemini"` input-semantics match; the `allow_missing_cache_creation`
+dedup list is a separate rule and correctly left alone). Re-applying the old
+`codex | gemini` backfill match makes `cost_golden_backfill_path` and
+`cost_golden_backfill_path_grokbuild_cache_rows` fail, so the tests do assert
+the fix. fmt/clippy clean, `cargo test --lib` 2256 passed / 0 failed, full
+`cargo test --no-fail-fast` 2422 passed / 0 failed. Known limitation (out of
+scope): the backfill only touches zero-cost rows, so grokbuild rows already
+backfilled with the old rule keep their overcharged cost until re-priced.
+Review follow-up only ticked the acceptance boxes and added this note.
