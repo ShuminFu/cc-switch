@@ -919,3 +919,130 @@ fn ensure_incremental_auto_vacuum_rebuilds_existing_file_db() {
         "file db should persist INCREMENTAL auto_vacuum after VACUUM rebuild"
     );
 }
+
+/// 在隔离的 home 下写入一个备份文件，返回其文件名
+fn write_backup_file(
+    home: &std::path::Path,
+    filename: &str,
+    version: i32,
+    provider_id: Option<&str>,
+) -> String {
+    let backup_dir = home.join(".cc-switch").join("backups");
+    std::fs::create_dir_all(&backup_dir).expect("create backup dir");
+    let conn = Connection::open(backup_dir.join(filename)).expect("open backup db");
+    Database::create_tables_on_conn(&conn).expect("create backup tables");
+    if let Some(id) = provider_id {
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, meta)
+             VALUES (?1, 'claude', 'Backup Provider', '{}', '{}')",
+            params![id],
+        )
+        .expect("insert backup provider");
+    }
+    Database::set_user_version(&conn, version).expect("set backup version");
+    filename.to_string()
+}
+
+fn seed_main_provider(db: &Database) {
+    let conn = db.conn.lock().expect("lock conn");
+    conn.execute(
+        "INSERT INTO providers (id, app_type, name, settings_config, meta)
+         VALUES ('main-provider', 'claude', 'Main Provider', '{}', '{}')",
+        [],
+    )
+    .expect("insert main provider");
+    Database::set_user_version(&conn, SCHEMA_VERSION).expect("set main version");
+}
+
+fn provider_ids(db: &Database) -> Vec<String> {
+    let conn = db.conn.lock().expect("lock conn");
+    let mut stmt = conn
+        .prepare("SELECT id FROM providers ORDER BY id")
+        .expect("prepare");
+    let ids = stmt
+        .query_map([], |row| row.get(0))
+        .expect("query providers")
+        .collect::<Result<Vec<String>, _>>()
+        .expect("collect providers");
+    ids
+}
+
+fn main_user_version(db: &Database) -> i32 {
+    let conn = db.conn.lock().expect("lock conn");
+    Database::get_user_version(&conn).expect("read main version")
+}
+
+#[test]
+fn restore_from_backup_rejects_newer_version_and_keeps_main_db() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let db = Database::memory().expect("create memory db");
+    seed_main_provider(&db);
+    db.set_setting("local_marker", "kept").expect("set marker");
+
+    let future = write_backup_file(
+        home.path(),
+        "future.db",
+        SCHEMA_VERSION + 1,
+        Some("future-provider"),
+    );
+    let err = db
+        .restore_from_backup(&future)
+        .expect_err("restoring a backup from a newer version must fail");
+    match &err {
+        AppError::Localized { key, .. } => assert_eq!(*key, "error.backupFromNewerVersion"),
+        other => panic!("unexpected error: {other}"),
+    }
+
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+    assert_eq!(
+        db.get_setting("local_marker")
+            .expect("read marker")
+            .as_deref(),
+        Some("kept")
+    );
+}
+
+#[test]
+fn restore_from_backup_rejects_invalid_backup_and_keeps_main_db() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let db = Database::memory().expect("create memory db");
+    seed_main_provider(&db);
+
+    // 空库（无供应商/MCP）在临时库校验阶段被拒绝
+    let empty = write_backup_file(home.path(), "empty.db", SCHEMA_VERSION, None);
+    assert!(db.restore_from_backup(&empty).is_err());
+
+    // 非 SQLite 文件
+    let garbage_path = home
+        .path()
+        .join(".cc-switch")
+        .join("backups")
+        .join("garbage.db");
+    std::fs::write(&garbage_path, b"definitely not a sqlite database file").expect("write garbage");
+    assert!(db.restore_from_backup("garbage.db").is_err());
+
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+}
+
+#[test]
+fn restore_from_backup_replaces_main_db_after_temp_validation() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let db = Database::memory().expect("create memory db");
+    seed_main_provider(&db);
+
+    let good = write_backup_file(
+        home.path(),
+        "good.db",
+        SCHEMA_VERSION,
+        Some("backup-provider"),
+    );
+    db.restore_from_backup(&good).expect("restore valid backup");
+
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["backup-provider".to_string()]);
+}

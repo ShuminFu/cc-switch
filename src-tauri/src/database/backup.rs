@@ -2,7 +2,7 @@
 //!
 //! 提供 SQL 导出/导入和二进制快照备份功能。
 
-use super::{lock_conn, Database};
+use super::{lock_conn, Database, SCHEMA_VERSION};
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
 use chrono::{Local, Utc};
@@ -10,7 +10,7 @@ use rusqlite::backup::Backup;
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 use rusqlite::limits::Limit;
 use rusqlite::types::ValueRef;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -669,38 +669,83 @@ impl Database {
             )));
         }
 
+        // Step 1: Open the backup read-only and reject newer schemas before touching anything
+        let source_conn =
+            Connection::open_with_flags(&backup_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        let backup_version = Self::get_user_version(&source_conn)?;
+        if backup_version > SCHEMA_VERSION {
+            return Err(AppError::localized(
+                "error.backupFromNewerVersion",
+                format!(
+                    "该备份来自更新版本的 CC Switch（数据库版本 {backup_version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再恢复。"
+                ),
+                format!(
+                    "This backup was created by a newer version of CC Switch (database version {backup_version}); this app supports up to {SCHEMA_VERSION}. Please update the app before restoring it."
+                ),
+            ));
+        }
+
         let local_settings = self.read_local_only_settings()?;
 
-        // Step 1: Create safety backup of current database
+        // Step 2: Copy the backup into a temp database and migrate/validate it there,
+        // so a broken backup never replaces the main database
+        let temp_file = NamedTempFile::new().map_err(|e| AppError::IoContext {
+            context: "创建临时数据库文件失败".to_string(),
+            source: e,
+        })?;
+        let mut temp_conn =
+            Connection::open(temp_file.path()).map_err(|e| AppError::Database(e.to_string()))?;
+        Self::copy_database(&source_conn, &mut temp_conn)?;
+        drop(source_conn);
+
+        Self::create_tables_on_conn(&temp_conn)?;
+        Self::apply_schema_migrations_on_conn(&temp_conn)?;
+        Self::validate_basic_state(&temp_conn)?;
+        Self::ensure_model_pricing_seeded_on_conn(&temp_conn)?;
+        Self::write_local_only_settings(&temp_conn, &local_settings)?;
+
+        // Step 3: Create safety backup of current database
         let safety_backup = self.backup_database_file()?;
         let safety_id = safety_backup
+            .as_ref()
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
             .unwrap_or_default();
 
-        // Step 2: Open the backup file and restore it to the main database
-        let source_conn =
-            Connection::open(&backup_path).map_err(|e| AppError::Database(e.to_string()))?;
-
-        {
+        // Step 4: Write the validated temp database into the main database;
+        // roll back to the safety backup if the copy fails midway
+        let restore_result = {
             let mut main_conn = lock_conn!(self.conn);
-            let backup = Backup::new(&source_conn, &mut main_conn)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            backup
-                .step(-1)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-        }
-
-        // Step 3: Run schema migrations (backup may be from an older version)
-        self.create_tables()?;
-        self.apply_schema_migrations()?;
-        self.ensure_model_pricing_seeded()?;
-        {
-            let conn = lock_conn!(self.conn);
-            Self::write_local_only_settings(&conn, &local_settings)?;
+            Self::copy_database(&temp_conn, &mut main_conn)
+        };
+        if let Err(err) = restore_result {
+            log::error!("Restoring backup {filename} failed, rolling back: {err}");
+            if let Some(safety_path) = safety_backup.as_ref() {
+                let rollback =
+                    Connection::open_with_flags(safety_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                        .map_err(|e| AppError::Database(e.to_string()))
+                        .and_then(|safety_conn| {
+                            let mut main_conn = lock_conn!(self.conn);
+                            Self::copy_database(&safety_conn, &mut main_conn)
+                        });
+                if let Err(rollback_err) = rollback {
+                    log::error!("Rolling back to safety backup {safety_id} failed: {rollback_err}");
+                }
+            }
+            return Err(err);
         }
 
         log::info!("Database restored from backup: {filename}, safety backup: {safety_id}");
         Ok(safety_id)
+    }
+
+    /// 使用 SQLite Backup API 将 `source` 完整复制到 `dest`
+    fn copy_database(source: &Connection, dest: &mut Connection) -> Result<(), AppError> {
+        let backup = Backup::new(source, dest).map_err(|e| AppError::Database(e.to_string()))?;
+        backup
+            .step(-1)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
     }
 
     /// Rename a backup file. Returns the new filename.
