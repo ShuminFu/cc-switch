@@ -14,6 +14,7 @@
 //! ├── mod.rs        - Database 结构体 + 初始化
 //! ├── schema.rs     - 表结构定义 + Schema 迁移
 //! ├── backup.rs     - SQL 导入导出 + 快照备份
+//! ├── journal.rs    - journal_mode / synchronous / busy_timeout
 //! ├── migration.rs  - JSON → SQLite 数据迁移
 //! └── dao/          - 数据访问对象
 //!     ├── providers.rs
@@ -25,6 +26,7 @@
 
 pub(crate) mod backup;
 mod dao;
+pub(crate) mod journal;
 mod migration;
 mod schema;
 
@@ -115,6 +117,11 @@ impl Database {
             // before creating any tables so no rebuild is needed later.
             conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
                 .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        // WAL + busy_timeout（云同步目录 / 网络文件系统保持 DELETE）；
+        // 必须在 auto_vacuum 之后：切换 WAL 会写入库头，之后新库无法再设置 auto_vacuum
+        if let Some(parent) = db_path.parent() {
+            journal::configure_file_connection(&conn, parent)?;
         }
         register_db_change_hook(&conn);
 

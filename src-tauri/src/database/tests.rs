@@ -1046,3 +1046,103 @@ fn restore_from_backup_replaces_main_db_after_temp_validation() {
     assert_eq!(main_user_version(&db), SCHEMA_VERSION);
     assert_eq!(provider_ids(&db), vec!["backup-provider".to_string()]);
 }
+
+fn journal_mode(db: &Database) -> String {
+    let conn = db.conn.lock().expect("lock conn");
+    journal::current_journal_mode(&conn).expect("read journal_mode")
+}
+
+#[test]
+fn init_uses_wal_with_busy_timeout_on_local_dir() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let _settings = crate::settings::scoped_settings_store();
+
+    let db = Database::init().expect("init database");
+    assert_eq!(journal_mode(&db), "wal");
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous;", [], |r| r.get(0))
+            .expect("synchronous");
+        assert_eq!(sync, 1, "WAL database should use synchronous=NORMAL");
+        let timeout: i64 = conn
+            .query_row("PRAGMA busy_timeout;", [], |r| r.get(0))
+            .expect("busy_timeout");
+        assert_eq!(timeout, 5000);
+        // 切换 WAL 不能影响新库的 incremental auto_vacuum
+        assert_eq!(
+            Database::get_auto_vacuum_mode(&conn).expect("auto_vacuum"),
+            2
+        );
+    }
+
+    // WAL 下读者不被未提交的写事务阻塞
+    let db_path = home.path().join(".cc-switch").join("cc-switch.db");
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        conn.execute_batch(
+            "BEGIN IMMEDIATE; INSERT INTO settings (key, value) VALUES ('pending', 'x');",
+        )
+        .expect("open write transaction");
+        let reader = Connection::open(&db_path).expect("open reader");
+        let count: i64 = reader
+            .query_row(
+                "SELECT COUNT(*) FROM settings WHERE key = 'pending'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("read while writer holds the lock");
+        assert_eq!(count, 0);
+        conn.execute_batch("COMMIT;").expect("commit");
+    }
+
+    // 快照备份文件不应保持 WAL（只读打开时会留下 -wal / -shm）
+    let backup = db
+        .backup_database_file()
+        .expect("backup")
+        .expect("backup path");
+    let backup_conn = Connection::open(&backup).expect("open backup");
+    assert_eq!(
+        journal::current_journal_mode(&backup_conn).expect("backup journal_mode"),
+        "delete"
+    );
+    drop(backup_conn);
+
+    // 内存快照（WebDAV / S3 导出路径）可见已提交的写入
+    let snapshot = db.snapshot_to_memory().expect("snapshot");
+    let count: i64 = snapshot
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'pending'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("query snapshot");
+    assert_eq!(count, 1);
+    let sql = db.export_sql_string_for_sync().expect("export for sync");
+    assert!(sql.contains("'pending'"));
+}
+
+#[test]
+fn init_keeps_delete_journal_in_cloud_sync_dir() {
+    let root = tempfile::tempdir().expect("tempdir");
+    // 模拟 HOME 位于 Dropbox 中：数据目录为 <tmp>/Dropbox/.cc-switch
+    let home = root.path().join("Dropbox");
+    std::fs::create_dir_all(&home).expect("create simulated cloud home");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(&home));
+    let _settings = crate::settings::scoped_settings_store();
+
+    let db = Database::init().expect("init database");
+    assert_eq!(journal_mode(&db), "delete");
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        let timeout: i64 = conn
+            .query_row("PRAGMA busy_timeout;", [], |r| r.get(0))
+            .expect("busy_timeout");
+        assert_eq!(timeout, 5000);
+    }
+    drop(db);
+    let dir = home.join(".cc-switch");
+    assert!(!dir.join("cc-switch.db-wal").exists());
+    assert!(!dir.join("cc-switch.db-shm").exists());
+}

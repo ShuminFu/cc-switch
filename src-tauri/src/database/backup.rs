@@ -442,6 +442,9 @@ impl Database {
             let mut dest_conn =
                 Connection::open(&backup_path).map_err(|e| AppError::Database(e.to_string()))?;
             Self::copy_database(conn, &mut dest_conn)?;
+            // Backup API 会连同库头复制 WAL 标记；备份文件独立存放、常以只读方式打开，
+            // 切回 DELETE 以免留下 -wal / -shm 文件
+            super::journal::set_journal_mode(&dest_conn, "delete")?;
         }
 
         Self::cleanup_db_backups(&backup_dir)?;
