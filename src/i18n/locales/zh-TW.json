@@ -1113,6 +1113,17 @@
       "hint": "仍要儲存嗎？儲存後切換此供應商時可能失敗，可以之後再補全。",
       "saveAnyway": "仍要儲存"
     },
+    "liveDiff": {
+      "title": "確認設定檔變更",
+      "description": "儲存後將把以下變更寫入應用的 live 設定檔，請確認後再儲存。",
+      "current": "目前",
+      "afterSave": "儲存後",
+      "newFile": "新檔案",
+      "deletedFile": "將被刪除",
+      "unchangedLines": "{{count}} 行未變更",
+      "back": "返回編輯",
+      "confirm": "儲存"
+    },
     "unsavedChanges": {
       "title": "放棄未儲存的變更？",
       "message": "此供應商有尚未儲存的修改，現在關閉將遺失這些修改。",

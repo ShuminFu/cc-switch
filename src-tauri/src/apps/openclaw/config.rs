@@ -476,6 +476,10 @@ fn write_root_section(section: &str, value: &Value) -> Result<OpenClawWriteOutco
 
 fn create_openclaw_backup(source: &str) -> Result<PathBuf, AppError> {
     let backup_dir = get_app_config_dir().join("backups").join("openclaw");
+    // 写入预览不落盘，也不该创建备份或清理旧备份
+    if crate::config::is_capturing_writes() {
+        return Ok(backup_dir);
+    }
     fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
 
     let base_id = format!("openclaw_{}", Local::now().format("%Y%m%d_%H%M%S"));

@@ -1,6 +1,7 @@
 import type {
   COMMANDS,
   commands,
+  LiveWritePreview,
   Provider_Serialize,
   ProxyStatus,
 } from "@/shared/bindings";
@@ -22,6 +23,7 @@ interface ResultOverrides {
   get_providers: Record<string, Provider_Serialize>;
   get_current_provider: string;
   get_proxy_status: ProxyStatus;
+  preview_live_write: LiveWritePreview;
 }
 
 /** 命令的返回值类型；没有生成类型的命令为 `unknown`。 */

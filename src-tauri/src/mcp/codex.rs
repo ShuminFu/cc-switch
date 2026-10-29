@@ -359,9 +359,7 @@ pub fn sync_single_server_to_codex(
     // 读取现有的 config.toml
     let config_path = crate::codex_config::get_codex_config_path();
 
-    let mut doc = if config_path.exists() {
-        let content =
-            std::fs::read_to_string(&config_path).map_err(|e| AppError::io(&config_path, e))?;
+    let mut doc = if let Some(content) = crate::config::read_text_file_if_exists(&config_path)? {
         // 解析失败必须报错而不是用空文档顶替：写回空文档会把用户
         // config.toml 里的其它段落（model/model_providers/注释等）整体清空
         content
@@ -407,12 +405,9 @@ pub fn remove_server_from_codex(id: &str) -> Result<(), AppError> {
     }
     let config_path = crate::codex_config::get_codex_config_path();
 
-    if !config_path.exists() {
+    let Some(content) = crate::config::read_text_file_if_exists(&config_path)? else {
         return Ok(()); // 文件不存在，无需删除
-    }
-
-    let content =
-        std::fs::read_to_string(&config_path).map_err(|e| AppError::io(&config_path, e))?;
+    };
 
     // 尝试解析现有配置，如果失败则直接返回（无法删除不存在的内容）
     let mut doc = match content.parse::<toml_edit::DocumentMut>() {

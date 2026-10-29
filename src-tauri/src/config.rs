@@ -261,8 +261,8 @@ fn sort_json_keys(value: &Value) -> Value {
 
 /// 写入 JSON 配置文件（键按字母排序，确保确定性输出）
 pub fn write_json_file<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
-    // 确保目录存在
-    if let Some(parent) = path.parent() {
+    // 确保目录存在（预览捕获期间不落盘，也不建目录）
+    if let Some(parent) = path.parent().filter(|_| !is_capturing_writes()) {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
@@ -276,7 +276,7 @@ pub fn write_json_file<T: Serialize>(path: &Path, data: &T) -> Result<(), AppErr
 
 /// 原子写入文本文件（用于 TOML/纯文本）
 pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = path.parent().filter(|_| !is_capturing_writes()) {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
     atomic_write(path, data.as_bytes())
@@ -307,6 +307,10 @@ pub fn atomic_write_secret(path: &Path, data: &[u8]) -> Result<(), AppError> {
 }
 
 fn atomic_write_impl(path: &Path, data: &[u8], owner_only: bool) -> Result<(), AppError> {
+    if capture_write(path, Some(data)) {
+        return Ok(());
+    }
+
     let resolved = resolve_write_target(path)?;
     let path = resolved.as_path();
 
@@ -635,10 +639,105 @@ pub fn copy_file(from: &Path, to: &Path) -> Result<(), AppError> {
 
 /// 删除文件
 pub fn delete_file(path: &Path) -> Result<(), AppError> {
+    if capture_write(path, None) {
+        return Ok(());
+    }
     if path.exists() {
         fs::remove_file(path).map_err(|e| AppError::io(path, e))?;
     }
     Ok(())
+}
+
+/// 读取文本文件，不存在时返回 `None`。
+///
+/// 写入预览捕获期间优先返回本线程已捕获的待写内容（已捕获删除则视为不存在），
+/// 让"先写再读同一文件"的写入流程（如 Gemini 先写 settings.json 再改
+/// `security.auth.selectedType`、写 live 后重投影 MCP）在预览里看到前一步的结果。
+pub fn read_text_file_if_exists(path: &Path) -> Result<Option<String>, AppError> {
+    if let Some(captured) = captured_contents(path) {
+        return Ok(captured.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()));
+    }
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(path)
+        .map(Some)
+        .map_err(|e| AppError::io(path, e))
+}
+
+// ============================================================================
+// 写入预览捕获
+// ============================================================================
+
+/// 预览捕获到的一次写入：`contents` 为 `None` 表示删除
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturedWrite {
+    pub path: PathBuf,
+    pub contents: Option<Vec<u8>>,
+}
+
+thread_local! {
+    static WRITE_CAPTURE: std::cell::RefCell<Option<Vec<CapturedWrite>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// 在捕获模式下执行 `op`：本线程内经 [`atomic_write`] / [`atomic_write_secret`] /
+/// [`write_json_file`] / [`write_text_file`] / [`delete_file`] 的写入只被记录、
+/// 不落盘，返回 `op` 的结果与按发生顺序记录的写入。
+///
+/// 只拦截经这些函数的写入：数据库写入、直接调用 `std::fs` 的建目录 / 删除不受影响，
+/// 需要在预览中跳过的副作用由调用方用 [`is_capturing_writes`] 自行判断。
+/// 嵌套调用时内层的记录同时并入外层。
+pub fn capture_writes<R>(op: impl FnOnce() -> R) -> (R, Vec<CapturedWrite>) {
+    /// 结束（含 panic）时恢复外层捕获状态
+    struct Restore(Option<Vec<CapturedWrite>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let outer = self.0.take();
+            WRITE_CAPTURE.with(|cell| *cell.borrow_mut() = outer);
+        }
+    }
+
+    let mut restore = Restore(WRITE_CAPTURE.with(|cell| cell.borrow_mut().replace(Vec::new())));
+    let result = op();
+    let captured = WRITE_CAPTURE.with(|cell| cell.borrow_mut().take().unwrap_or_default());
+    if let Some(outer) = restore.0.as_mut() {
+        outer.extend(captured.iter().cloned());
+    }
+    drop(restore);
+    (result, captured)
+}
+
+/// 当前线程是否处于 [`capture_writes`] 的捕获模式
+pub fn is_capturing_writes() -> bool {
+    WRITE_CAPTURE.with(|cell| cell.borrow().is_some())
+}
+
+/// 捕获模式下记录一次写入并返回 `true`；否则返回 `false`，由调用方真正写盘
+fn capture_write(path: &Path, contents: Option<&[u8]>) -> bool {
+    WRITE_CAPTURE.with(|cell| match cell.borrow_mut().as_mut() {
+        Some(writes) => {
+            writes.push(CapturedWrite {
+                path: path.to_path_buf(),
+                contents: contents.map(<[u8]>::to_vec),
+            });
+            true
+        }
+        None => false,
+    })
+}
+
+/// 捕获模式下 `path` 最近一次被捕获的内容（`Some(None)` 表示已捕获删除）
+fn captured_contents(path: &Path) -> Option<Option<Vec<u8>>> {
+    WRITE_CAPTURE.with(|cell| {
+        cell.borrow().as_ref().and_then(|writes| {
+            writes
+                .iter()
+                .rev()
+                .find(|write| write.path == path)
+                .map(|write| write.contents.clone())
+        })
+    })
 }
 
 #[cfg(test)]
@@ -1122,5 +1221,78 @@ mod tests {
             serde_json::to_string(&sorted_a).unwrap(),
             serde_json::to_string(&sorted_b).unwrap(),
         );
+    }
+
+    #[test]
+    fn capture_writes_preview_records_writes_without_touching_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let existing = dir.path().join("settings.json");
+        fs::write(&existing, "old").expect("seed");
+        let created = dir.path().join("nested").join("config.toml");
+
+        let (result, writes) = capture_writes(|| -> Result<(), AppError> {
+            assert!(is_capturing_writes());
+            write_json_file(&existing, &serde_json::json!({ "b": 1, "a": 2 }))?;
+            write_text_file(&created, "x = 1")?;
+            // 同一线程内的后续读取看到待写内容
+            assert_eq!(
+                read_text_file_if_exists(&created)?.as_deref(),
+                Some("x = 1")
+            );
+            delete_file(&existing)?;
+            assert_eq!(read_text_file_if_exists(&existing)?, None);
+            Ok(())
+        });
+        result.expect("captured writes succeed");
+        assert!(!is_capturing_writes());
+
+        assert_eq!(fs::read_to_string(&existing).unwrap(), "old");
+        assert!(!created.exists());
+        assert!(!dir.path().join("nested").exists(), "no directory created");
+        assert_eq!(
+            writes,
+            vec![
+                CapturedWrite {
+                    path: existing.clone(),
+                    contents: Some(b"{\n  \"a\": 2,\n  \"b\": 1\n}".to_vec()),
+                },
+                CapturedWrite {
+                    path: created,
+                    contents: Some(b"x = 1".to_vec()),
+                },
+                CapturedWrite {
+                    path: existing,
+                    contents: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn capture_writes_preview_nested_records_reach_the_outer_capture() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("a.txt");
+
+        let ((inner, outer_seen), outer) = capture_writes(|| {
+            let ((), inner) = capture_writes(|| {
+                atomic_write(&path, b"inner").expect("captured write");
+            });
+            let seen = read_text_file_if_exists(&path).expect("read");
+            (inner, seen)
+        });
+
+        assert_eq!(inner.len(), 1);
+        assert_eq!(outer, inner);
+        assert_eq!(outer_seen.as_deref(), Some("inner"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn capture_writes_preview_restores_state_after_panic() {
+        let result = std::panic::catch_unwind(|| {
+            capture_writes(|| panic!("boom"));
+        });
+        assert!(result.is_err());
+        assert!(!is_capturing_writes());
     }
 }

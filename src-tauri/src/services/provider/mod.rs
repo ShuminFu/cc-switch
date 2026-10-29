@@ -5,6 +5,7 @@
 mod codex_official;
 mod endpoints;
 mod live;
+mod preview;
 mod usage;
 
 use indexmap::IndexMap;
@@ -27,6 +28,8 @@ pub use live::{
     should_import_default_config_on_startup, sync_current_to_live,
     update_toml_common_config_snippet,
 };
+
+pub use preview::{LiveFilePreview, LivePreviewSkipReason, LiveWritePreview};
 
 // Internal re-exports (pub(crate))
 pub(crate) use crate::apps::claude::sanitize_settings_for_live as sanitize_claude_settings_for_live;

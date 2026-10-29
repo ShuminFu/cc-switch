@@ -17,10 +17,7 @@ fn should_sync_grokbuild_mcp() -> bool {
 
 fn read_config_text() -> Result<String, AppError> {
     let path = crate::grok_config::get_grok_config_path();
-    if !path.exists() {
-        return Ok(String::new());
-    }
-    std::fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))
+    Ok(crate::config::read_text_file_if_exists(&path)?.unwrap_or_default())
 }
 
 fn json_server_to_grokbuild_toml_table(server_spec: &Value) -> Result<toml_edit::Table, AppError> {
@@ -160,10 +157,9 @@ pub fn remove_server_from_grokbuild(id: &str) -> Result<(), AppError> {
         return Ok(());
     }
     let path = crate::grok_config::get_grok_config_path();
-    if !path.exists() {
+    let Some(text) = crate::config::read_text_file_if_exists(&path)? else {
         return Ok(());
-    }
-    let text = read_config_text()?;
+    };
     let mut doc = match text.parse::<toml_edit::DocumentMut>() {
         Ok(doc) => doc,
         Err(error) => {

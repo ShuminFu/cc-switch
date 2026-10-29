@@ -1113,6 +1113,17 @@
       "hint": "仍要保存吗？保存后切换此供应商时可能失败，可以之后再补全。",
       "saveAnyway": "仍要保存"
     },
+    "liveDiff": {
+      "title": "确认配置文件改动",
+      "description": "保存后将把以下改动写入应用的 live 配置文件，请确认后再保存。",
+      "current": "当前",
+      "afterSave": "保存后",
+      "newFile": "新文件",
+      "deletedFile": "将被删除",
+      "unchangedLines": "{{count}} 行未改动",
+      "back": "返回编辑",
+      "confirm": "保存"
+    },
     "unsavedChanges": {
       "title": "放弃未保存的更改？",
       "message": "此供应商有尚未保存的修改，现在关闭将丢失这些修改。",

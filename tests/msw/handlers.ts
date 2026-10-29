@@ -130,6 +130,13 @@ export const handlers = [
     return true;
   }),
 
+  // 默认不写 live（等同非当前供应商），保存流程不弹 diff；需要时在用例内覆盖
+  command("preview_live_write", () => ({
+    writesLive: false,
+    skipReason: "notCurrent" as const,
+    files: [],
+  })),
+
   command("delete_provider", async (request) => {
     const { id, app } = await withJson<{ id: string; app: AppId }>(request);
     deleteProvider(app, id);

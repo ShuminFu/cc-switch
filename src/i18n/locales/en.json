@@ -1113,6 +1113,17 @@
       "hint": "Save anyway? Switching to this provider may fail; you can fill these in later.",
       "saveAnyway": "Save anyway"
     },
+    "liveDiff": {
+      "title": "Review changes to config files",
+      "description": "Saving writes these changes to the app's live config files. Check them before saving.",
+      "current": "Current",
+      "afterSave": "After save",
+      "newFile": "New file",
+      "deletedFile": "Will be deleted",
+      "unchangedLines": "{{count}} unchanged lines",
+      "back": "Back to editing",
+      "confirm": "Save"
+    },
     "unsavedChanges": {
       "title": "Discard unsaved changes?",
       "message": "You have unsaved edits in this provider. Closing now will discard them.",

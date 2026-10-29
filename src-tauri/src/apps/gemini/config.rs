@@ -267,8 +267,9 @@ pub fn read_gemini_env() -> Result<HashMap<String, String>, AppError> {
 pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppError> {
     let path = get_gemini_env_path();
 
-    // 确保目录存在
-    if let Some(parent) = path.parent() {
+    // 确保目录存在（写入预览只捕获内容，不建目录、不改权限）
+    let capturing = crate::config::is_capturing_writes();
+    if let Some(parent) = path.parent().filter(|_| !capturing) {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
 
         // 设置目录权限为 700（仅所有者可读写执行）
@@ -294,7 +295,7 @@ pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppE
 
     // 设置文件权限为 600（仅所有者可读写）
     #[cfg(unix)]
-    {
+    if !capturing {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(&path)
             .map_err(|e| AppError::io(&path, e))?
@@ -411,18 +412,12 @@ pub fn get_gemini_settings_path() -> PathBuf {
 fn update_selected_type(selected_type: &str) -> Result<(), AppError> {
     let settings_path = get_gemini_settings_path();
 
-    // 确保目录存在
-    if let Some(parent) = settings_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
-    }
-
-    // 读取现有的 settings.json（如果存在）
-    let mut settings_content = if settings_path.exists() {
-        let content =
-            fs::read_to_string(&settings_path).map_err(|e| AppError::io(&settings_path, e))?;
-        serde_json::from_str::<Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
+    // 读取现有的 settings.json（如果存在；写入预览期间读到本次已捕获的待写内容）
+    let mut settings_content = match crate::config::read_text_file_if_exists(&settings_path)? {
+        Some(content) => {
+            serde_json::from_str::<Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
+        }
+        None => serde_json::json!({}),
     };
 
     // 只更新 security.auth.selectedType 字段

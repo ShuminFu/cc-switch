@@ -5,6 +5,7 @@ use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
 use crate::error::{AppError, IpcError};
 use crate::provider::{ClaudeDesktopMode, Provider};
+use crate::services::provider::LiveWritePreview;
 use crate::services::{
     EndpointLatency, ProviderService, ProviderSortUpdate, SpeedtestService, SwitchResult,
 };
@@ -60,6 +61,19 @@ pub fn update_provider(
 ) -> Result<bool, IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
     ProviderService::update(state.inner(), app_type, original_id.as_deref(), provider)
+        .map_err(IpcError::from)
+}
+
+/// 预览保存供应商时将写入 live 配置的内容（不写盘）
+#[tauri::command]
+pub fn preview_live_write(
+    state: State<'_, AppState>,
+    app: String,
+    provider: Provider,
+    original_id: Option<String>,
+) -> Result<LiveWritePreview, IpcError> {
+    let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
+    ProviderService::preview_live_write(state.inner(), app_type, original_id.as_deref(), provider)
         .map_err(IpcError::from)
 }
 
