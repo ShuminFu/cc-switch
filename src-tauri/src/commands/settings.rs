@@ -590,6 +590,7 @@ mod tests {
                     migrated_state_rows: 7,
                     codex_config_dir: None,
                 }),
+                deleted_builtin_model_pricing: vec!["claude-sonnet-5".to_string()],
             }),
             ..AppSettings::default()
         };
@@ -627,6 +628,14 @@ mod tests {
             .expect("official unify migration marker should be preserved");
         assert_eq!(unify_migration.migrated_jsonl_files, 5);
         assert_eq!(unify_migration.migrated_state_rows, 7);
+        assert_eq!(
+            merged
+                .local_migrations
+                .as_ref()
+                .map(|migrations| migrations.deleted_builtin_model_pricing.clone()),
+            Some(vec!["claude-sonnet-5".to_string()]),
+            "deleted builtin pricing markers should be preserved"
+        );
     }
 
     /// incoming 带有 local_migrations（哪怕是空的）也不能覆盖后端维护的标记。
@@ -643,6 +652,7 @@ mod tests {
                     migrated_state_rows: 2,
                     codex_config_dir: None,
                 }),
+                deleted_builtin_model_pricing: Vec::new(),
             }),
             ..AppSettings::default()
         };

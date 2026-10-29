@@ -1342,3 +1342,73 @@ fn restore_backup_over_newer_db_downgrades_and_keeps_newer_copy() {
     assert_eq!(main_user_version(&db), SCHEMA_VERSION);
     assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
 }
+
+fn model_pricing_ids(db: &Database) -> Vec<String> {
+    let conn = db.conn.lock().expect("lock conn");
+    let mut stmt = conn
+        .prepare("SELECT model_id FROM model_pricing")
+        .expect("prepare pricing query");
+    stmt.query_map([], |row| row.get(0))
+        .expect("query pricing")
+        .collect::<Result<_, _>>()
+        .expect("collect pricing")
+}
+
+#[test]
+fn deleted_builtin_model_pricing_stays_deleted_after_restart() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let builtin = "claude-sonnet-5";
+
+    {
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::init().expect("init database");
+        assert!(model_pricing_ids(&db).iter().any(|id| id == builtin));
+
+        db.delete_model_pricing(builtin)
+            .expect("delete builtin pricing");
+        // 自定义定价不需要删除标记
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute(
+                "INSERT INTO model_pricing (model_id, display_name, input_cost_per_million,
+                     output_cost_per_million) VALUES ('my-custom-model', 'Custom', '1', '2')",
+                [],
+            )
+            .expect("insert custom pricing");
+        }
+        db.delete_model_pricing("my-custom-model")
+            .expect("delete custom pricing");
+        assert_eq!(
+            crate::settings::deleted_builtin_model_pricing_ids(),
+            vec![builtin.to_string()]
+        );
+
+        // 读取前的 seed（旧的读取路径）也不能把它插回来
+        db.ensure_model_pricing_seeded().expect("ensure seeded");
+        assert!(!model_pricing_ids(&db).iter().any(|id| id == builtin));
+    }
+
+    // 模拟重启：重新从 settings.json 加载设置并重新打开数据库
+    {
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::init().expect("re-init database");
+        let ids = model_pricing_ids(&db);
+        assert!(
+            !ids.iter().any(|id| id == builtin),
+            "deleted builtin pricing was reseeded on restart"
+        );
+        assert!(ids.iter().any(|id| id == "claude-opus-4-8"));
+
+        // 清除删除标记（用户重新添加同名定价时）后，下次启动恢复内置定价
+        crate::settings::set_builtin_model_pricing_deleted(builtin, false)
+            .expect("clear deleted marker");
+    }
+
+    {
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::init().expect("re-init database");
+        assert!(model_pricing_ids(&db).iter().any(|id| id == builtin));
+        assert!(crate::settings::deleted_builtin_model_pricing_ids().is_empty());
+    }
+}

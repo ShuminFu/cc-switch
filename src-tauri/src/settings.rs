@@ -296,6 +296,10 @@ pub struct LocalMigrations {
     /// 这样重新开启能把"关闭期间"落入 openai 桶的官方会话补迁进来。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_official_history_unify_v1: Option<CodexOfficialHistoryUnifyMigration>,
+    /// 用户删除过的内置模型定价 ID。启动时 seed 内置定价会跳过这些 ID，
+    /// 避免被删除的内置定价在下次启动时又被插回来；用户重新添加同名定价时移除。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deleted_builtin_model_pricing: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1023,6 +1027,34 @@ pub fn clear_codex_official_history_unify_migration() -> Result<(), AppError> {
     mutate_settings(|settings| {
         if let Some(migrations) = settings.local_migrations.as_mut() {
             migrations.codex_official_history_unify_v1 = None;
+        }
+    })
+}
+
+/// 用户删除过的内置模型定价 ID（seed 时跳过）
+pub fn deleted_builtin_model_pricing_ids() -> Vec<String> {
+    get_settings()
+        .local_migrations
+        .map(|migrations| migrations.deleted_builtin_model_pricing)
+        .unwrap_or_default()
+}
+
+/// 记录或清除"内置模型定价已被用户删除"的标记。状态未变化时不写文件。
+pub fn set_builtin_model_pricing_deleted(model_id: &str, deleted: bool) -> Result<(), AppError> {
+    let already = deleted_builtin_model_pricing_ids()
+        .iter()
+        .any(|id| id == model_id);
+    if already == deleted {
+        return Ok(());
+    }
+    mutate_settings(|settings| {
+        let migrations = settings
+            .local_migrations
+            .get_or_insert_with(Default::default);
+        let ids = &mut migrations.deleted_builtin_model_pricing;
+        ids.retain(|id| id != model_id);
+        if deleted {
+            ids.push(model_id.to_string());
         }
     })
 }

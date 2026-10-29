@@ -7,6 +7,16 @@ use crate::error::AppError;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
+/// (model_id, display_name, input, output, cache_read, cache_creation)
+type BuiltinModelPricing = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+);
+
 #[derive(Serialize)]
 struct LegacySkillMigrationRow {
     directory: String,
@@ -1510,11 +1520,11 @@ impl Database {
         Ok(())
     }
 
-    /// 插入默认模型定价数据
+    /// 内置模型定价数据
     /// 格式: (model_id, display_name, input, output, cache_read, cache_creation)
     /// 注意: model_id 使用短横线格式（如 claude-haiku-4-5），与 API 返回的模型名称标准化后一致
-    fn seed_model_pricing(conn: &Connection) -> Result<(), AppError> {
-        let pricing_data = [
+    fn builtin_model_pricing() -> &'static [BuiltinModelPricing] {
+        &[
             // Claude Fable 5（Opus 之上的新档）
             (
                 "claude-fable-5",
@@ -2369,7 +2379,24 @@ impl Database {
             ("codex-mini", "Codex Mini", "0.75", "3", "0.025", "0"),
             ("gpt-5-mini", "GPT-5 Mini", "0.25", "2", "0.025", "0"),
             ("gpt-5-nano", "GPT-5 Nano", "0.05", "0.40", "0.005", "0"),
-        ];
+        ]
+    }
+
+    /// 是否为内置（seed）模型定价
+    pub(crate) fn is_builtin_model_pricing(model_id: &str) -> bool {
+        Self::builtin_model_pricing()
+            .iter()
+            .any(|(id, ..)| *id == model_id)
+    }
+
+    /// 插入默认模型定价数据（INSERT OR IGNORE，不覆盖已有行）。
+    /// 用户删除过的内置定价（记录在 settings 的 `local_migrations` 中）会被跳过。
+    fn seed_model_pricing(conn: &Connection) -> Result<(), AppError> {
+        let deleted = crate::settings::deleted_builtin_model_pricing_ids();
+        let pricing_data: Vec<_> = Self::builtin_model_pricing()
+            .iter()
+            .filter(|(model_id, ..)| !deleted.iter().any(|id| id == model_id))
+            .collect();
 
         let mut stmt = conn
             .prepare(
@@ -2379,7 +2406,7 @@ impl Database {
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )
             .map_err(|e| AppError::Database(format!("准备模型定价语句失败: {e}")))?;
-        for (model_id, display_name, input, output, cache_read, cache_creation) in pricing_data {
+        for (model_id, display_name, input, output, cache_read, cache_creation) in &pricing_data {
             stmt.execute(rusqlite::params![
                 model_id,
                 display_name,
@@ -2742,16 +2769,33 @@ impl Database {
         Ok(())
     }
 
-    /// 确保模型定价表具备默认数据
+    /// 确保模型定价表具备默认数据。仅在启动 / 恢复数据库时调用，读取定价列表时不再调用，
+    /// 否则会把用户刚删除的内置定价又插回来。
     pub fn ensure_model_pricing_seeded(&self) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         Self::ensure_model_pricing_seeded_on_conn(&conn)
     }
 
     pub(crate) fn ensure_model_pricing_seeded_on_conn(conn: &Connection) -> Result<(), AppError> {
-        // 每次启动都执行 INSERT OR IGNORE，增量追加新模型；仅修复仍等于旧内置值的定价。
+        // 每次启动都执行 INSERT OR IGNORE，增量追加新模型（跳过用户删除过的内置定价）；
+        // 仅修复仍等于旧内置值的定价。
         Self::seed_model_pricing(conn)?;
         Self::repair_current_model_pricing(conn)
+    }
+
+    /// 删除模型定价。内置定价会先在 settings 中记录删除标记，
+    /// 确保之后的启动 seed 不会把它恢复。
+    pub fn delete_model_pricing(&self, model_id: &str) -> Result<(), AppError> {
+        if Self::is_builtin_model_pricing(model_id) {
+            crate::settings::set_builtin_model_pricing_deleted(model_id, true)?;
+        }
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "DELETE FROM model_pricing WHERE model_id = ?1",
+            params![model_id],
+        )
+        .map_err(|e| AppError::Database(format!("删除模型定价失败: {e}")))?;
+        Ok(())
     }
 
     // --- 辅助方法 ---

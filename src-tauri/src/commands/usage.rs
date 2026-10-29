@@ -124,8 +124,6 @@ pub fn get_request_detail(
 #[tauri::command]
 pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, AppError> {
     log::info!("获取模型定价列表");
-    state.db.ensure_model_pricing_seeded()?;
-
     let db = state.db.clone();
     let conn = crate::database::lock_conn!(db.conn);
 
@@ -221,6 +219,9 @@ pub fn update_model_pricing(
         }
     }
 
+    // 用户重新添加被删除过的内置定价：清除删除标记
+    crate::settings::set_builtin_model_pricing_deleted(&model_id, false)?;
+
     {
         let conn = crate::database::lock_conn!(db.conn);
         conn.execute(
@@ -260,14 +261,7 @@ pub fn check_provider_limits(
 /// 删除模型定价
 #[tauri::command]
 pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), AppError> {
-    let db = state.db.clone();
-    let conn = crate::database::lock_conn!(db.conn);
-
-    conn.execute(
-        "DELETE FROM model_pricing WHERE model_id = ?1",
-        rusqlite::params![model_id],
-    )
-    .map_err(|e| AppError::Database(format!("删除模型定价失败: {e}")))?;
+    state.db.delete_model_pricing(&model_id)?;
 
     log::info!("已删除模型定价: {model_id}");
     Ok(())
