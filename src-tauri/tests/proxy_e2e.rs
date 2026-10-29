@@ -732,12 +732,27 @@ async fn router_returns_400_for_malformed_json_on_every_body_reading_route() {
     let host = format!("127.0.0.1:{}", harness.port());
     let token = harness.token().to_string();
 
+    // 覆盖 ClientEndpoint 表生成的全部 POST 路由别名（Claude Desktop 需 gateway token，单独鉴权）
     for uri in [
         "/v1/messages",
+        "/claude/v1/messages",
+        "/chat/completions",
         "/v1/chat/completions",
+        "/v1/v1/chat/completions",
+        "/codex/v1/chat/completions",
+        "/responses",
         "/v1/responses",
+        "/v1/v1/responses",
+        "/codex/v1/responses",
+        "/responses/compact",
         "/v1/responses/compact",
+        "/v1/v1/responses/compact",
+        "/codex/v1/responses/compact",
+        "/grokbuild/v1/responses",
+        "/grokbuild/v1/responses/compact",
         "/v1beta/models/gemini-pro:generateContent",
+        "/gemini/v1beta/models/gemini-pro:generateContent",
+        "/gemini/v1/models/gemini-pro:generateContent",
     ] {
         let request = axum::http::Request::builder()
             .method("POST")

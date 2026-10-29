@@ -429,12 +429,17 @@ mod tests {
 
     #[test]
     fn proxy_routes_are_mounted_by_the_proxy_server() {
-        let server = include_str!("../proxy/server.rs");
+        // server.rs 依据 CLIENT_ENDPOINTS 生成代理路由
+        let paths: Vec<&str> = crate::proxy::endpoints::CLIENT_ENDPOINTS
+            .iter()
+            .flat_map(|endpoint| endpoint.paths.iter().copied())
+            .collect();
         for d in APPS {
             if let Some(route) = d.proxy_route {
+                let prefix = format!("{route}/v1");
                 assert!(
-                    server.contains(&format!("\"{route}/v1")),
-                    "{route} not mounted in proxy/server.rs"
+                    paths.iter().any(|path| path.starts_with(&prefix)),
+                    "{route} not mounted by proxy/endpoints.rs"
                 );
             }
         }

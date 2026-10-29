@@ -9,6 +9,7 @@
 //! a direct (non-proxied) CLI request.
 
 use super::{
+    endpoints::{RouteMethod, CLIENT_ENDPOINTS},
     failover_switch::FailoverSwitchManager,
     handlers,
     inbound_auth::{self, InboundGuard},
@@ -20,7 +21,7 @@ use super::{
 };
 use crate::database::Database;
 use axum::{
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, Request, State},
     routing::{any, get, post},
     Router,
 };
@@ -331,81 +332,34 @@ impl ProxyServer {
     }
 
     fn build_router(&self, guard: Arc<InboundGuard>) -> Router {
-        Router::new()
+        let mut router = Router::new()
             // 健康检查
             .route("/health", get(handlers::health_check))
             .route("/status", get(handlers::get_status))
-            // Claude API (支持带前缀和不带前缀两种格式)
-            .route("/v1/messages", post(handlers::handle_messages))
-            .route("/claude/v1/messages", post(handlers::handle_messages))
-            // Claude Desktop 3P 本地 gateway（独立 provider namespace）
+            // Claude Desktop 3P 本地 gateway 模型列表
             .route(
                 "/claude-desktop/v1/models",
                 get(handlers::handle_claude_desktop_models),
             )
-            .route(
-                "/claude-desktop/v1/messages",
-                post(handlers::handle_claude_desktop_messages),
-            )
-            // OpenAI Chat Completions API (Codex CLI，支持带前缀和不带前缀)
-            .route("/chat/completions", post(handlers::handle_chat_completions))
-            .route(
-                "/v1/chat/completions",
-                post(handlers::handle_chat_completions),
-            )
-            .route(
-                "/v1/v1/chat/completions",
-                post(handlers::handle_chat_completions),
-            )
-            .route(
-                "/codex/v1/chat/completions",
-                post(handlers::handle_chat_completions),
-            )
             // OpenAI Models API (Codex CLI reachability check)
             .route("/models", get(handlers::handle_models))
-            .route("/v1/models", get(handlers::handle_models))
-            // OpenAI Responses API (Codex CLI，支持带前缀和不带前缀)
-            .route("/responses", post(handlers::handle_responses))
-            .route("/v1/responses", post(handlers::handle_responses))
-            .route("/v1/v1/responses", post(handlers::handle_responses))
-            .route("/codex/v1/responses", post(handlers::handle_responses))
-            // Grok Build uses the Responses protocol but has an independent
-            // provider namespace and failover queue.
-            .route(
-                "/grokbuild/v1/responses",
-                post(handlers::handle_grokbuild_responses),
-            )
-            // OpenAI Responses Compact API (Codex CLI 远程压缩，透传)
-            .route(
-                "/responses/compact",
-                post(handlers::handle_responses_compact),
-            )
-            .route(
-                "/v1/responses/compact",
-                post(handlers::handle_responses_compact),
-            )
-            .route(
-                "/v1/v1/responses/compact",
-                post(handlers::handle_responses_compact),
-            )
-            .route(
-                "/codex/v1/responses/compact",
-                post(handlers::handle_responses_compact),
-            )
-            .route(
-                "/grokbuild/v1/responses/compact",
-                post(handlers::handle_grokbuild_responses_compact),
-            )
-            // Gemini API (支持带前缀和不带前缀)
-            //
-            // 用 `any(..)` 覆盖所有 HTTP 方法：除了 POST `:generateContent` /
-            // `:streamGenerateContent` / `:countTokens` 之外，Gemini SDK / CLI 还会发
-            // GET `/models`、GET `/models/<id>` 等只读端点。如果只挂 POST，这些 GET
-            // 请求会在路由层 404，绕过本地代理的统计、整流和故障转移。
-            .route("/v1beta/*path", any(handlers::handle_gemini))
-            .route("/gemini/v1beta/*path", any(handlers::handle_gemini))
-            // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
-            .route("/gemini/v1/*path", any(handlers::handle_gemini))
+            .route("/v1/models", get(handlers::handle_models));
+
+        // 代理端点：路由由 CLIENT_ENDPOINTS 表生成，统一交给 handle_proxied
+        for client in CLIENT_ENDPOINTS {
+            let handler = move |State(state): State<ProxyState>, request: Request| {
+                handlers::handle_proxied(state, request, client)
+            };
+            let method_router = match client.method {
+                RouteMethod::Post => post(handler),
+                RouteMethod::Any => any(handler),
+            };
+            for path in client.paths {
+                router = router.route(path, method_router.clone());
+            }
+        }
+
+        router
             // 提高默认请求体大小限制（避免 413 Payload Too Large）。
             // 注意：DefaultBodyLimit 只对 axum 提取器生效，接收原始 Request 的 handler
             // 通过 `handlers::read_request_body` 以同一上限 MAX_REQUEST_BODY_BYTES 自行限流。
