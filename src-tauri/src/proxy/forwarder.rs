@@ -2,6 +2,7 @@
 //!
 //! 负责将请求转发到上游Provider，支持故障转移
 
+use super::handler_context::DEFAULT_NON_STREAMING_BODY_TIMEOUT;
 use super::hyper_client::ProxyResponse;
 use super::{
     body_filter::filter_private_params_with_whitelist,
@@ -2219,7 +2220,7 @@ impl RequestForwarder {
             // 自动解压 feature，这里拿到的是原始字节；不解压的话，压缩过的错误体会
             // 在 from_utf8 处变成非 UTF-8 而被丢弃，隐藏掉上游的限流/鉴权等详情。
             let encoding = get_content_encoding(response.headers());
-            let raw = response.bytes().await?;
+            let raw = self.read_body_bounded(response).await?;
             let decoded = match encoding {
                 Some(encoding) => match decompress_body(&encoding, &raw) {
                     Ok(Some(decompressed)) => decompressed,
@@ -2269,6 +2270,27 @@ impl RequestForwarder {
         Ok(ProxyResponse::buffered(status, headers, body))
     }
 
+    /// 在 retry loop 内整包读取响应体（错误体 / 2xx 语义校验），始终带上限。
+    ///
+    /// 故障转移关闭时 `non_streaming_timeout` 为 0，raw hyper 路径的 body 不会被
+    /// 预先缓冲；这里回退到 [`DEFAULT_NON_STREAMING_BODY_TIMEOUT`]，避免上游发完
+    /// 响应头后卡住 body 时请求永久挂起。
+    async fn read_body_bounded(&self, response: ProxyResponse) -> Result<Bytes, ProxyError> {
+        let body_timeout = if self.non_streaming_timeout.is_zero() {
+            DEFAULT_NON_STREAMING_BODY_TIMEOUT
+        } else {
+            self.non_streaming_timeout
+        };
+        tokio::time::timeout(body_timeout, response.bytes())
+            .await
+            .map_err(|_| {
+                ProxyError::Timeout(format!(
+                    "响应体读取超时: {}s（上游发完响应头后 body 未到达）",
+                    body_timeout.as_secs()
+                ))
+            })?
+    }
+
     /// Some Anthropic-compatible gateways return an Anthropic error envelope with
     /// HTTP 2xx. Validate it inside the retry loop so the request can fail over to
     /// the next provider; the response transformer runs too late for that.
@@ -2279,7 +2301,7 @@ impl RequestForwarder {
         let status = response.status();
         let headers = response.headers().clone();
         let encoding = get_content_encoding(&headers);
-        let raw = response.bytes().await?;
+        let raw = self.read_body_bounded(response).await?;
         let decoded = match encoding {
             Some(encoding) => match decompress_body(&encoding, &raw) {
                 Ok(Some(decompressed)) => decompressed,
@@ -2304,7 +2326,7 @@ impl RequestForwarder {
         let status = response.status();
         let headers = response.headers().clone();
         let encoding = get_content_encoding(&headers);
-        let raw = response.bytes().await?;
+        let raw = self.read_body_bounded(response).await?;
         let decoded = match encoding {
             Some(encoding) => match decompress_body(&encoding, &raw) {
                 Ok(Some(decompressed)) => decompressed,
@@ -3801,6 +3823,56 @@ mod tests {
             prepared.bytes().await.unwrap(),
             Bytes::from_static(b"{\"ok\":true}")
         );
+    }
+
+    /// 故障转移关闭（non_streaming_timeout = 0）时，retry loop 内的整包读取
+    /// （2xx 语义校验、错误体）也必须有上限，不能在上游卡住 body 时永久挂起。
+    #[tokio::test]
+    async fn bounded_body_reads_time_out_on_stalled_body_with_failover_off() {
+        let forwarder = test_forwarder(Duration::ZERO, Duration::ZERO);
+        let stalled = || {
+            ProxyResponse::streamed(
+                StatusCode::OK,
+                HeaderMap::new(),
+                futures::stream::once(async {
+                    Ok::<Bytes, std::io::Error>(Bytes::from_static(b"{"))
+                })
+                .chain(futures::stream::pending()),
+            )
+        };
+
+        tokio::time::pause();
+        let started = tokio::time::Instant::now();
+        let guard = Duration::from_secs(3600);
+
+        let err = tokio::time::timeout(guard, forwarder.read_body_bounded(stalled()))
+            .await
+            .expect("error-body read must not hang when failover is off")
+            .expect_err("stalled body should time out");
+        assert!(matches!(err, ProxyError::Timeout(_)), "got {err:?}");
+
+        let err = tokio::time::timeout(
+            guard,
+            forwarder.validate_responses_success_response(stalled()),
+        )
+        .await
+        .expect("responses validation must not hang when failover is off")
+        .err()
+        .expect("stalled body should time out");
+        assert!(matches!(err, ProxyError::Timeout(_)), "got {err:?}");
+
+        let err = tokio::time::timeout(
+            guard,
+            forwarder.validate_codex_anthropic_success_response(stalled()),
+        )
+        .await
+        .expect("anthropic validation must not hang when failover is off")
+        .err()
+        .expect("stalled body should time out");
+        assert!(matches!(err, ProxyError::Timeout(_)), "got {err:?}");
+
+        assert!(started.elapsed() >= DEFAULT_NON_STREAMING_BODY_TIMEOUT * 3);
+        assert!(started.elapsed() < guard);
     }
 
     #[tokio::test]
