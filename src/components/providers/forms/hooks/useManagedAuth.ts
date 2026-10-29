@@ -22,10 +22,13 @@ export function useManagedAuth(
     useState<ManagedAuthDeviceCodeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
-  );
-  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Each login attempt owns its own timer handles. Bumping attemptRef
+  // invalidates every async continuation (onSuccess awaits, in-flight polls)
+  // that belongs to an older attempt, so it can never touch newer state.
+  const attemptRef = useRef(0);
+  const mountedRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
     data: authStatus,
@@ -38,25 +41,38 @@ export function useManagedAuth(
   });
 
   const stopPolling = useCallback(() => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
+    attemptRef.current += 1;
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
     }
-    if (pollingTimeoutRef.current) {
-      clearTimeout(pollingTimeoutRef.current);
-      pollingTimeoutRef.current = null;
+    if (expiryTimerRef.current) {
+      clearTimeout(expiryTimerRef.current);
+      expiryTimerRef.current = null;
     }
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       stopPolling();
     };
   }, [stopPolling]);
 
   const startLoginMutation = useMutation({
-    mutationFn: () => authApi.authStartLogin(authProvider, githubDomain),
-    onSuccess: async (response) => {
+    mutationFn: (_attempt: number) =>
+      authApi.authStartLogin(authProvider, githubDomain),
+    onSuccess: async (response, attempt) => {
+      const isCurrent = () =>
+        mountedRef.current && attemptRef.current === attempt;
+      if (!isCurrent()) return;
+
+      // Clear any handles left over before arming this attempt's timers.
+      stopPolling();
+      const token = attemptRef.current;
+      const isActive = () => mountedRef.current && attemptRef.current === token;
+
       setDeviceCode(response);
       setPollingState("polling");
       setError(null);
@@ -66,23 +82,33 @@ export function useManagedAuth(
       } catch (e) {
         console.debug("[ManagedAuth] Failed to copy user code:", e);
       }
+      if (!isActive()) return;
 
       try {
         await settingsApi.openExternal(response.verification_uri);
       } catch (e) {
         console.debug("[ManagedAuth] Failed to open browser:", e);
       }
+      if (!isActive()) return;
 
       // Add a small buffer on top of GitHub's suggested interval to avoid
       // hitting slow_down responses too aggressively during device polling.
       const interval = Math.max((response.interval || 5) + 3, 8) * 1000;
       const expiresAt = Date.now() + response.expires_in * 1000;
 
+      const expire = () => {
+        stopPolling();
+        setPollingState("error");
+        setError("Device code expired. Please try again.");
+      };
+
+      // Chained setTimeout: the next poll is only scheduled once the current
+      // one settles, so polls never overlap.
       const pollOnce = async () => {
+        pollTimerRef.current = null;
+        if (!isActive()) return;
         if (Date.now() > expiresAt) {
-          stopPolling();
-          setPollingState("error");
-          setError("Device code expired. Please try again.");
+          expire();
           return;
         }
 
@@ -92,15 +118,20 @@ export function useManagedAuth(
             response.device_code,
             githubDomain,
           );
+          if (!isActive()) return;
           if (newAccount) {
             stopPolling();
+            const doneToken = attemptRef.current;
             setPollingState("success");
             await refetchStatus();
             await queryClient.invalidateQueries({ queryKey });
+            if (!mountedRef.current || attemptRef.current !== doneToken) return;
             setPollingState("idle");
             setDeviceCode(null);
+            return;
           }
         } catch (e) {
+          if (!isActive()) return;
           const errorMessage = e instanceof Error ? e.message : String(e);
           if (
             !errorMessage.includes("pending") &&
@@ -109,19 +140,19 @@ export function useManagedAuth(
             stopPolling();
             setPollingState("error");
             setError(errorMessage);
+            return;
           }
         }
+
+        if (!isActive()) return;
+        pollTimerRef.current = setTimeout(() => void pollOnce(), interval);
       };
 
+      expiryTimerRef.current = setTimeout(expire, response.expires_in * 1000);
       void pollOnce();
-      pollingIntervalRef.current = setInterval(pollOnce, interval);
-      pollingTimeoutRef.current = setTimeout(() => {
-        stopPolling();
-        setPollingState("error");
-        setError("Device code expired. Please try again.");
-      }, response.expires_in * 1000);
     },
-    onError: (e) => {
+    onError: (e, attempt) => {
+      if (!mountedRef.current || attemptRef.current !== attempt) return;
       setPollingState("error");
       setError(e instanceof Error ? e.message : String(e));
     },
@@ -182,7 +213,7 @@ export function useManagedAuth(
     setDeviceCode(null);
     setError(null);
     stopPolling();
-    startLoginMutation.mutate();
+    startLoginMutation.mutate(attemptRef.current);
   }, [startLoginMutation, stopPolling]);
 
   const cancelAuth = useCallback(() => {
@@ -224,6 +255,7 @@ export function useManagedAuth(
     deviceCode,
     error,
     isPolling: pollingState === "polling",
+    isStartingAuth: startLoginMutation.isPending,
     isAddingAccount: startLoginMutation.isPending || pollingState === "polling",
     isRemovingAccount: removeAccountMutation.isPending,
     isSettingDefaultAccount: setDefaultAccountMutation.isPending,

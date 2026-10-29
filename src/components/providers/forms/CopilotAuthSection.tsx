@@ -70,6 +70,7 @@ export const CopilotAuthSection: React.FC<CopilotAuthSectionProps> = ({
     error,
     isPolling,
     isAddingAccount,
+    isStartingAuth,
     isRemovingAccount,
     isSettingDefaultAccount,
     addAccount,
@@ -278,7 +279,10 @@ export const CopilotAuthSection: React.FC<CopilotAuthSectionProps> = ({
           onClick={addAccount}
           className="w-full"
           variant="outline"
-          disabled={deploymentType === "enterprise" && !enterpriseDomain.trim()}
+          disabled={
+            isStartingAuth ||
+            (deploymentType === "enterprise" && !enterpriseDomain.trim())
+          }
         >
           <Github className="mr-2 h-4 w-4" />
           {t("copilot.loginWithGitHub", "使用 GitHub 登录")}
@@ -372,6 +376,7 @@ export const CopilotAuthSection: React.FC<CopilotAuthSectionProps> = ({
               onClick={addAccount}
               variant="outline"
               size="sm"
+              disabled={isStartingAuth}
             >
               {t("copilot.retry", "重试")}
             </Button>

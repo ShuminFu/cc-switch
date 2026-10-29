@@ -62,6 +62,7 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
     error,
     isPolling,
     isAddingAccount,
+    isStartingAuth,
     isRemovingAccount,
     isSettingDefaultAccount,
     addAccount,
@@ -232,6 +233,7 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
           onClick={addAccount}
           className="w-full"
           variant="outline"
+          disabled={isStartingAuth}
         >
           <Sparkles className="mr-2 h-4 w-4" />
           {t("codexOauth.loginWithChatGPT", "使用 ChatGPT 登录")}
@@ -319,6 +321,7 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
               onClick={addAccount}
               variant="outline"
               size="sm"
+              disabled={isStartingAuth}
             >
               {t("codexOauth.retry", "重试")}
             </Button>
