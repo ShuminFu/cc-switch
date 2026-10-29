@@ -3337,7 +3337,7 @@ del \"%~f0\" >nul 2>&1
     })?;
 
     let bat_path = bat_file.to_string_lossy();
-    let ps_cmd = format!("& '{}'", bat_path);
+    let ps_cmd = format!("& {}", powershell_single_quote(&bat_path));
 
     // Try the preferred terminal first
     let result = match terminal {
@@ -3402,6 +3402,24 @@ fn escape_windows_batch_value(value: &str) -> String {
         .replace('(', "^(")
         .replace(')', "^)")
 }
+
+/// 生成 PowerShell 单引号字符串字面量：单引号内只有 `'` 需要转义（写成 `''`）。
+/// PowerShell 同样把 U+2018/U+2019/U+201A/U+201B 当作单引号，一并加倍。
+/// 用于 `& '<path>'`，避免 `C:\Users\O'Brien\...` 这类路径解析失败。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn powershell_single_quote(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('\'');
+    for ch in value.chars() {
+        if matches!(ch, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            quoted.push(ch);
+        }
+        quoted.push(ch);
+    }
+    quoted.push('\'');
+    quoted
+}
+
 /// Windows: Run a start command with common error handling
 #[cfg(target_os = "windows")]
 fn run_windows_start_command(args: &[&str], terminal_name: &str) -> Result<(), String> {
@@ -3578,7 +3596,7 @@ read -r _
                 .map_err(|e| format!("写入批处理文件失败: {e}"))?;
 
         let bat_path = bat_file.to_string_lossy();
-        let ps_cmd = format!("& '{}'", bat_path);
+        let ps_cmd = format!("& {}", powershell_single_quote(&bat_path));
 
         let result = match terminal {
             "powershell" => run_windows_start_command(
@@ -5506,6 +5524,54 @@ mod tests {
         assert_eq!(
             command,
             "pushd \"\\\\server\\share\\100%%^&^(test^)\" || exit /b 1\r\n"
+        );
+    }
+
+    #[test]
+    fn powershell_single_quote_doubles_apostrophes() {
+        assert_eq!(
+            powershell_single_quote(r"C:\Users\O'Brien\AppData\Local\Temp\x.bat"),
+            r"'C:\Users\O''Brien\AppData\Local\Temp\x.bat'"
+        );
+        assert_eq!(
+            powershell_single_quote(r"C:\Temp\plain.bat"),
+            r"'C:\Temp\plain.bat'"
+        );
+        assert_eq!(powershell_single_quote("''"), "''''''");
+        // `$`、反引号、`&` 在单引号内是字面量，不应被改写。
+        assert_eq!(
+            powershell_single_quote(r"C:\a$b`c&d\x.bat"),
+            r"'C:\a$b`c&d\x.bat'"
+        );
+    }
+
+    #[test]
+    fn powershell_single_quote_doubles_typographic_single_quotes() {
+        assert_eq!(
+            powershell_single_quote("C:\\Users\\O\u{2019}Brien\\x.bat"),
+            "'C:\\Users\\O\u{2019}\u{2019}Brien\\x.bat'"
+        );
+        assert_eq!(
+            powershell_single_quote("\u{2018}\u{201A}\u{201B}"),
+            "'\u{2018}\u{2018}\u{201A}\u{201A}\u{201B}\u{201B}'"
+        );
+    }
+
+    #[test]
+    fn powershell_single_quote_used_at_windows_launch_sites() {
+        // 两个 Windows 启动点都是 cfg(windows)，Linux 上无法直接运行，
+        // 因此检查源码确保不再手工拼接未转义的 `& '<path>'`。
+        let source = include_str!("misc.rs");
+        let unescaped = concat!("format!(\"& '", "{}'\"");
+        assert!(
+            !source.contains(unescaped),
+            "PowerShell launch command must use powershell_single_quote"
+        );
+        assert_eq!(
+            source
+                .matches("format!(\"& {}\", powershell_single_quote(&bat_path))")
+                .count(),
+            2
         );
     }
 
