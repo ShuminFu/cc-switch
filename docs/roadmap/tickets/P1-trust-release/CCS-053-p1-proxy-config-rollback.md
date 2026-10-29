@@ -1,6 +1,6 @@
 # CCS-053: [proxy] Roll back the server and DB config when a port or address change fails to bind
 
-**Status:** Open · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p1-high`, `area:proxy`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p1-high`, `area:proxy`
 
 > **Ticket key:** `p1-proxy-config-rollback` · **Phase:** P1 · **Priority:** p1-high · **Effort:** S · **Depends on:** `p1-proxy-lifecycle-lock`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -17,8 +17,29 @@ Verified finding proxy-port-change-no-rollback. update_config saves the new addr
 - Write `previous` back to the DB on any failure, or persist only after a successful start.
 
 ## Acceptance criteria / verification
-- [ ] Tokio test: start on a free port, occupy a second port, and update_config to it returns Err. Afterwards get_status().running is true, get_config().listen_port is the original, and a TCP connect to the original succeeds.
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml update_config`
+- [x] Tokio test: start on a free port, occupy a second port, and update_config to it returns Err. Afterwards get_status().running is true, get_config().listen_port is the original, and a TCP connect to the original succeeds.
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml update_config`
 
 ## Dependencies
 p1-proxy-lifecycle-lock
+
+## Implementation notes
+
+**Summary.** `ProxyService::update_config` (src-tauri/src/services/proxy.rs) now delegates restarts to a new `restart_with_config` helper (called under the existing `lifecycle` lock from CCS-054):
+- **Port changed:** the new server is bound first; only after a successful bind (and ephemeral-port persist) is it swapped into `self.server` and the old server stopped. A failed bind leaves the old server untouched and running.
+- **Same port, address changed:** the old server must be stopped first (the port would conflict). If the new config fails to start, a server is restarted from `previous` and put back into the server slot. If stopping the old server fails, it is put back and an error is returned.
+- **Any failure:** `previous` is written back to the DB, so later startups and the Live takeover keep using the working address/port. Takeover Live rewrites only happen after a successful restart, as before.
+
+**Files.** `src-tauri/src/services/proxy.rs` (implementation + 2 tokio tests).
+
+**Commits.** `2bd2dfb` (code + tests); this ticket-file update in a follow-up docs commit.
+
+**Tests added.**
+- `update_config_to_occupied_port_keeps_original_server_and_config`: starts on a free port, occupies a second port, and `update_config` to it returns Err. Then `get_status().running` is true with the original port, `get_config().listen_port` is the original, and a TCP connect to the original succeeds.
+- `update_config_to_invalid_address_restores_previous_server`: a same-port change to an invalid address returns Err. The previous server is restored on the original port and the DB keeps the old address/port.
+
+**Verification.**
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib update_config`: 2 passed. With the old restart logic swapped back in temporarily, both tests FAILED (regression confirmed).
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`: clean.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`: clean.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2111 passed, 0 failed, 3 ignored.
