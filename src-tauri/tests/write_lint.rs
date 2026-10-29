@@ -11,11 +11,8 @@ use std::path::{Path, PathBuf};
 
 /// Files allowed to open files for writing directly.
 const OPEN_OPTIONS_ALLOWLIST: &[&str] = &[
-    // atomic_write itself (create_new temp file with 0600)
+    // atomic_write / atomic_write_secret (create_new temp file with 0600)
     "src/config.rs",
-    // OAuth token stores: 0600 create on unix
-    "src/proxy/providers/copilot_auth.rs",
-    "src/proxy/providers/codex_oauth_auth.rs",
     // settings.json save; moves to atomic_write in CCS-084
     "src/settings.rs",
     // append-only crash log

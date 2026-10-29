@@ -292,6 +292,21 @@ pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
 /// - 目标是符号链接（如 stow/chezmoi 管理的配置）时写入链接指向的真实文件，
 ///   链接本身保持不变，见 [`resolve_write_target`]。
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
+    atomic_write_impl(path, data, false)
+}
+
+/// 原子写入敏感文件（OAuth token 等长期凭据）
+///
+/// 与 [`atomic_write`] 相同（fsync、失败清理、跟随符号链接），但不沿用目标的
+/// 现有权限，每次写入都强制仅属主可访问：
+/// - unix：文件权限固定为 0600；
+/// - Windows：rename 前为临时文件设置受保护的 DACL，仅授予当前用户完全控制，
+///   不继承父目录的 ACE（同卷 rename 保留安全描述符）。
+pub fn atomic_write_secret(path: &Path, data: &[u8]) -> Result<(), AppError> {
+    atomic_write_impl(path, data, true)
+}
+
+fn atomic_write_impl(path: &Path, data: &[u8], owner_only: bool) -> Result<(), AppError> {
     let resolved = resolve_write_target(path)?;
     let path = resolved.as_path();
 
@@ -326,7 +341,14 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     // 从这里开始临时文件已存在：任何提前返回都由 guard 删除它
     let mut guard = TempFileGuard::new(&tmp);
     // 按值传入，返回时句柄即关闭（Windows 上 rename/删除前必须先关闭）
-    write_and_sync(f, &tmp, path, data)?;
+    write_and_sync(f, &tmp, path, data, owner_only)?;
+    #[cfg(windows)]
+    if owner_only {
+        owner_only_acl::apply(&tmp).map_err(|e| AppError::IoContext {
+            context: format!("设置仅属主 ACL 失败: {}", tmp.display()),
+            source: e,
+        })?;
+    }
 
     rename_replace(&tmp, path).map_err(|e| AppError::IoContext {
         context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
@@ -387,21 +409,32 @@ fn resolve_write_target(path: &Path) -> Result<PathBuf, AppError> {
     )))
 }
 
-/// 写入临时文件，目标已存在时沿用其权限（unix），并在关闭前 `sync_all`
-fn write_and_sync(mut f: fs::File, tmp: &Path, target: &Path, data: &[u8]) -> Result<(), AppError> {
+/// 写入临时文件并在关闭前 `sync_all`。unix 上 `owner_only` 时强制 0600，
+/// 否则目标已存在时沿用其权限。
+fn write_and_sync(
+    mut f: fs::File,
+    tmp: &Path,
+    target: &Path,
+    data: &[u8],
+    owner_only: bool,
+) -> Result<(), AppError> {
     f.write_all(data).map_err(|e| AppError::io(tmp, e))?;
     f.flush().map_err(|e| AppError::io(tmp, e))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(target) {
+        if owner_only {
+            // 创建时的 0600 可能被 umask 进一步收紧，这里显式固定
+            f.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|e| AppError::io(tmp, e))?;
+        } else if let Ok(meta) = fs::metadata(target) {
             let perm = meta.permissions().mode();
             let _ = f.set_permissions(fs::Permissions::from_mode(perm));
         }
     }
     #[cfg(not(unix))]
-    let _ = target;
+    let _ = (target, owner_only);
 
     f.sync_all().map_err(|e| AppError::io(tmp, e))
 }
@@ -457,6 +490,125 @@ fn rename_replace(from: &Path, to: &Path) -> std::io::Result<()> {
     #[cfg(not(windows))]
     {
         fs::rename(from, to)
+    }
+}
+
+/// Windows 上为文件设置仅当前用户可访问的 ACL
+#[cfg(windows)]
+mod owner_only_acl {
+    use std::ffi::c_void;
+    use std::io;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+    use std::ptr;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, ERROR_SUCCESS, HANDLE};
+    use windows_sys::Win32::Security::Authorization::{
+        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, NO_MULTIPLE_TRUSTEE,
+        SET_ACCESS, SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+    };
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TokenUser, ACL, DACL_SECURITY_INFORMATION, NO_INHERITANCE,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    /// 当前进程用户的 `TOKEN_USER`（缓冲区内含 SID）
+    pub(super) struct CurrentUser {
+        // u64 对齐，满足 TOKEN_USER 内指针的对齐要求
+        buf: Vec<u64>,
+    }
+
+    impl CurrentUser {
+        pub(super) fn query() -> io::Result<Self> {
+            let mut token: HANDLE = ptr::null_mut();
+            // SAFETY: GetCurrentProcess 返回伪句柄；token 为有效输出指针
+            if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let result = Self::from_token(token);
+            // SAFETY: token 由 OpenProcessToken 成功返回
+            unsafe { CloseHandle(token) };
+            result
+        }
+
+        fn from_token(token: HANDLE) -> io::Result<Self> {
+            let mut len = 0u32;
+            // SAFETY: 首次调用仅查询所需长度
+            unsafe { GetTokenInformation(token, TokenUser, ptr::null_mut(), 0, &mut len) };
+            if len == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+            // SAFETY: buf 至少 len 字节
+            if unsafe {
+                GetTokenInformation(
+                    token,
+                    TokenUser,
+                    buf.as_mut_ptr().cast::<c_void>(),
+                    len,
+                    &mut len,
+                )
+            } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self { buf })
+        }
+
+        pub(super) fn sid(&self) -> *mut c_void {
+            // SAFETY: buf 由 GetTokenInformation(TokenUser) 填充
+            unsafe { (*self.buf.as_ptr().cast::<TOKEN_USER>()).User.Sid }
+        }
+    }
+
+    pub(super) fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
+    }
+
+    /// 用仅含当前用户（完全控制）的受保护 DACL 替换文件的 DACL
+    pub(super) fn apply(path: &Path) -> io::Result<()> {
+        let user = CurrentUser::query()?;
+        let access = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: FILE_ALL_ACCESS,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: NO_INHERITANCE,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: ptr::null_mut(),
+                MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                ptstrName: user.sid().cast::<u16>(),
+            },
+        };
+
+        let mut acl: *mut ACL = ptr::null_mut();
+        // SAFETY: access 在调用期间有效；acl 由系统分配，下面 LocalFree 释放
+        let rc = unsafe { SetEntriesInAclW(1, &access, ptr::null(), &mut acl) };
+        if rc != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(rc as i32));
+        }
+
+        let name = wide(path);
+        // SAFETY: name 以 NUL 结尾；acl 为上面构造的有效 ACL
+        let rc = unsafe {
+            SetNamedSecurityInfoW(
+                name.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                acl,
+                ptr::null(),
+            )
+        };
+        // SAFETY: acl 由 SetEntriesInAclW 通过 LocalAlloc 分配
+        unsafe { LocalFree(acl.cast::<c_void>()) };
+        if rc != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(rc as i32));
+        }
+        Ok(())
     }
 }
 
@@ -561,6 +713,135 @@ mod tests {
         atomic_write(&shared, b"{\"k\":1}").expect("overwrite");
         let mode = fs::metadata(&shared).expect("meta").permissions().mode() & 0o777;
         assert_eq!(mode, 0o640);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_secret_forces_owner_only_on_create_and_rewrite() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode_of = |p: &Path| fs::metadata(p).expect("meta").permissions().mode() & 0o777;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store").join("token.json");
+        atomic_write_secret(&path, b"{\"v\":1}").expect("create");
+        assert_eq!(mode_of(&path), 0o600);
+
+        // 与 atomic_write 不同：已存在的宽松权限会被收紧，而不是沿用
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("chmod");
+        atomic_write_secret(&path, b"{\"v\":2}").expect("rewrite");
+        assert_eq!(mode_of(&path), 0o600);
+        assert_eq!(fs::read(&path).expect("read"), b"{\"v\":2}");
+        assert!(leftover_tmp_files(path.parent().unwrap()).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_secret_keeps_symlink_and_restricts_target() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("dotfiles").join("token.json");
+        fs::create_dir_all(target.parent().unwrap()).expect("mkdir");
+        fs::write(&target, b"{}").expect("seed");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).expect("chmod");
+        let link = dir.path().join("token.json");
+        symlink(&target, &link).expect("symlink");
+
+        atomic_write_secret(&link, b"{\"v\":1}").expect("write via link");
+
+        assert_link_written_through(&link, &target, b"{\"v\":1}");
+        let mode = fs::metadata(&target).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    /// 读取文件 DACL，断言只有一条授予当前用户的 ACCESS_ALLOWED ACE，且不继承
+    #[cfg(windows)]
+    fn assert_owner_only_acl(path: &Path) {
+        use std::ffi::c_void;
+        use std::ptr;
+        use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS};
+        use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows_sys::Win32::Security::{
+            AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
+            ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+            PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
+        };
+        // winnt.h ACCESS_ALLOWED_ACE_TYPE
+        const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+
+        let user = owner_only_acl::CurrentUser::query().expect("current user");
+        let name = owner_only_acl::wide(path);
+        let mut dacl: *mut ACL = ptr::null_mut();
+        let mut sd: PSECURITY_DESCRIPTOR = ptr::null_mut();
+        // SAFETY: name 以 NUL 结尾；输出指针均有效，sd 在末尾 LocalFree
+        let rc = unsafe {
+            GetNamedSecurityInfoW(
+                name.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut dacl,
+                ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        assert_eq!(rc, ERROR_SUCCESS, "GetNamedSecurityInfoW failed");
+        assert!(!dacl.is_null(), "file has a NULL DACL (everyone allowed)");
+
+        let mut control = 0u16;
+        let mut revision = 0u32;
+        // SAFETY: sd 由 GetNamedSecurityInfoW 返回
+        assert_ne!(
+            unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) },
+            0
+        );
+        assert_ne!(control & SE_DACL_PROTECTED, 0, "DACL must not inherit");
+
+        let mut info = ACL_SIZE_INFORMATION::default();
+        // SAFETY: info 大小与 AclSizeInformation 匹配
+        assert_ne!(
+            unsafe {
+                GetAclInformation(
+                    dacl,
+                    (&mut info as *mut ACL_SIZE_INFORMATION).cast::<c_void>(),
+                    std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                    AclSizeInformation,
+                )
+            },
+            0
+        );
+        assert_eq!(info.AceCount, 1, "DACL must contain only the current user");
+
+        let mut ace: *mut c_void = ptr::null_mut();
+        // SAFETY: 索引 0 < AceCount
+        assert_ne!(unsafe { GetAce(dacl, 0, &mut ace) }, 0);
+        let ace = ace.cast::<ACCESS_ALLOWED_ACE>();
+        // SAFETY: ace 指向 DACL 内的有效 ACE；SidStart 为 SID 起始位置
+        unsafe {
+            assert_eq!((*ace).Header.AceType, ACCESS_ALLOWED_ACE_TYPE);
+            let sid = ptr::addr_of_mut!((*ace).SidStart).cast::<c_void>();
+            assert_ne!(
+                EqualSid(sid, user.sid()),
+                0,
+                "ACE is not for the current user"
+            );
+            LocalFree(sd);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_write_secret_sets_owner_only_acl() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store").join("token.json");
+        atomic_write_secret(&path, b"{\"v\":1}").expect("create");
+        assert_owner_only_acl(&path);
+
+        atomic_write_secret(&path, b"{\"v\":2}").expect("rewrite");
+        assert_owner_only_acl(&path);
+        assert_eq!(fs::read(&path).expect("read"), b"{\"v\":2}");
+        assert!(leftover_tmp_files(path.parent().unwrap()).is_empty());
     }
 
     #[cfg(unix)]

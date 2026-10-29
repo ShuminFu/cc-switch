@@ -17,8 +17,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -1261,59 +1259,10 @@ impl CopilotAuthManager {
         *migration_error = message;
     }
 
+    /// 原子写入 token 存储：0600 / Windows 仅属主 ACL、fsync、跟随符号链接
     fn write_store_atomic(&self, content: &str) -> Result<(), CopilotAuthError> {
-        if let Some(parent) = self.storage_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let parent = self
-            .storage_path
-            .parent()
-            .ok_or_else(|| CopilotAuthError::IoError("无效的存储路径".to_string()))?;
-        let file_name = self
-            .storage_path
-            .file_name()
-            .ok_or_else(|| CopilotAuthError::IoError("无效的存储文件名".to_string()))?
-            .to_string_lossy()
-            .to_string();
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let tmp_path = parent.join(format!("{file_name}.tmp.{ts}"));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-
-            let mut file = fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .mode(0o600)
-                .open(&tmp_path)?;
-            file.write_all(content.as_bytes())?;
-            file.flush()?;
-
-            fs::rename(&tmp_path, &self.storage_path)?;
-            fs::set_permissions(&self.storage_path, fs::Permissions::from_mode(0o600))?;
-        }
-
-        #[cfg(windows)]
-        {
-            let mut file = fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&tmp_path)?;
-            file.write_all(content.as_bytes())?;
-            file.flush()?;
-
-            if self.storage_path.exists() {
-                let _ = fs::remove_file(&self.storage_path);
-            }
-            fs::rename(&tmp_path, &self.storage_path)?;
-        }
-
-        Ok(())
+        crate::config::atomic_write_secret(&self.storage_path, content.as_bytes())
+            .map_err(|e| CopilotAuthError::IoError(e.to_string()))
     }
 
     /// 使用指定 token 获取 GitHub 用户信息
@@ -1930,6 +1879,50 @@ mod tests {
             let api_endpoints = manager.api_endpoints.read().await;
             assert!(api_endpoints.is_empty());
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_token_store_is_owner_only_after_first_write_and_rewrite() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode_of =
+            |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+        let temp_dir = tempdir().unwrap();
+        let manager = CopilotAuthManager::new(temp_dir.path().to_path_buf());
+        let user = |id: u64, login: &str| GitHubUser {
+            login: login.to_string(),
+            id,
+            avatar_url: None,
+        };
+
+        manager
+            .add_account_internal(
+                "gho_first".to_string(),
+                user(1, "alice"),
+                DEFAULT_GITHUB_DOMAIN.to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(mode_of(&manager.storage_path), 0o600);
+
+        // 外部把权限放宽后，下一次保存必须重新收紧
+        std::fs::set_permissions(
+            &manager.storage_path,
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        manager
+            .add_account_internal(
+                "gho_second".to_string(),
+                user(2, "bob"),
+                DEFAULT_GITHUB_DOMAIN.to_string(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(mode_of(&manager.storage_path), 0o600);
+        let content = std::fs::read_to_string(&manager.storage_path).unwrap();
+        assert!(content.contains("gho_second"));
     }
 
     #[tokio::test]
