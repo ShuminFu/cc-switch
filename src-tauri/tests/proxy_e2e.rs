@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use cc_switch_lib::proxy_harness::{
     db_read_statement_count, db_statement_count, HarnessCircuit, HarnessHealth, MockReply,
-    MockUpstream, ProxyHarness,
+    MockUpstream, ProxyHarness, RawMockUpstream,
 };
 use serde_json::{json, Value};
 
@@ -1080,6 +1080,163 @@ async fn foreign_host_text_plain_post_is_rejected_on_the_wire() {
     let response = harness.messages(&simple_request()).await;
     assert_eq!(response.status(), 200);
     assert_eq!(upstream.hits(), 1);
+
+    harness.shutdown().await;
+}
+
+// ============================================================================
+// Header casing on the wire
+// ============================================================================
+
+/// Head of a raw `/v1/messages` request to the proxy; `extra` header lines go
+/// before the body framing headers.
+fn raw_messages_head(harness: &ProxyHarness, extra: &str, body: &str) -> String {
+    format!(
+        "POST /v1/messages HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nX-Api-Key: {}\r\n\
+         Anthropic-Version: 2023-06-01\r\n{extra}Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\r\n",
+        harness.port(),
+        harness.token(),
+        body.len()
+    )
+}
+
+/// Read one HTTP/1.1 response (Content-Length or chunked) and return its status.
+async fn read_raw_response(stream: &mut tokio::net::TcpStream, buf: &mut Vec<u8>) -> u16 {
+    use tokio::io::AsyncReadExt;
+
+    async fn fill(stream: &mut tokio::net::TcpStream, buf: &mut Vec<u8>) {
+        let mut chunk = [0u8; 8192];
+        let n = stream.read(&mut chunk).await.expect("read proxy response");
+        assert!(n > 0, "proxy closed the connection");
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    fn find(buf: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+        buf.get(from..)?
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .map(|pos| pos + from)
+    }
+
+    let head_end = loop {
+        if let Some(pos) = find(buf, 0, b"\r\n\r\n") {
+            break pos + 4;
+        }
+        fill(stream, buf).await;
+    };
+    let head = String::from_utf8_lossy(&buf[..head_end]).to_ascii_lowercase();
+    let status: u16 = head[9..12].parse().expect("status code");
+    let header = |name: &str| {
+        head.lines()
+            .find_map(|line| line.strip_prefix(name))
+            .map(|value| value.trim().to_string())
+    };
+    let end = if let Some(length) = header("content-length:") {
+        let end = head_end + length.parse::<usize>().expect("content length");
+        while buf.len() < end {
+            fill(stream, buf).await;
+        }
+        end
+    } else {
+        assert_eq!(header("transfer-encoding:").as_deref(), Some("chunked"));
+        let mut pos = head_end;
+        loop {
+            let line_end = loop {
+                if let Some(at) = find(buf, pos, b"\r\n") {
+                    break at;
+                }
+                fill(stream, buf).await;
+            };
+            let size_line = String::from_utf8_lossy(&buf[pos..line_end]).into_owned();
+            let size = usize::from_str_radix(size_line.split(';').next().unwrap().trim(), 16)
+                .expect("chunk size");
+            pos = line_end + 2;
+            if size == 0 {
+                // No trailers from the proxy: just the final CRLF.
+                while buf.len() < pos + 2 {
+                    fill(stream, buf).await;
+                }
+                break pos + 2;
+            }
+            while buf.len() < pos + size + 2 {
+                fill(stream, buf).await;
+            }
+            pos += size + 2;
+        }
+    };
+    buf.drain(..end);
+    status
+}
+
+#[tokio::test]
+async fn original_header_casing_is_captured_per_request_on_keep_alive_connections() {
+    use tokio::io::AsyncWriteExt;
+
+    let _env = TestEnv::new();
+    let upstream = RawMockUpstream::spawn().await;
+    let harness = ProxyHarness::builder()
+        .provider_url("raw", upstream.base_url())
+        .spawn()
+        .await;
+    let body = simple_request().to_string();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", harness.port()))
+        .await
+        .expect("connect to proxy");
+    stream.set_nodelay(true).expect("disable nagle");
+    let mut buf = Vec::new();
+
+    // A: the first request on the connection.
+    let a = raw_messages_head(&harness, "X-Foo-A: 1\r\n", &body) + &body;
+    stream.write_all(a.as_bytes()).await.expect("write A");
+    assert_eq!(read_raw_response(&mut stream, &mut buf).await, 200);
+
+    // B: a later keep-alive request whose head is larger than 8 KB.
+    let padding = format!("X-Padding: {}\r\n", "p".repeat(9_000));
+    let b = raw_messages_head(
+        &harness,
+        &format!("X-Bar-B: 1\r\n{padding}X-After-Eight-K: 1\r\n"),
+        &body,
+    ) + &body;
+    stream.write_all(b.as_bytes()).await.expect("write B");
+    assert_eq!(read_raw_response(&mut stream, &mut buf).await, 200);
+
+    // C: a head split across two writes, in the middle of a header name.
+    let c = raw_messages_head(&harness, "X-Split-Header: 1\r\n", &body) + &body;
+    let split = c.find("X-Split-He").expect("split marker") + "X-Split-He".len();
+    stream
+        .write_all(&c.as_bytes()[..split])
+        .await
+        .expect("write C part 1");
+    stream.flush().await.expect("flush C part 1");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    stream
+        .write_all(&c.as_bytes()[split..])
+        .await
+        .expect("write C part 2");
+    assert_eq!(read_raw_response(&mut stream, &mut buf).await, 200);
+
+    let heads = upstream.heads();
+    assert_eq!(heads.len(), 3, "upstream heads: {heads:#?}");
+    let a_names = upstream.header_names(0);
+    assert!(a_names.iter().any(|n| n == "X-Foo-A"), "A: {a_names:?}");
+    assert!(
+        a_names.iter().any(|n| n == "Anthropic-Version"),
+        "A: {a_names:?}"
+    );
+
+    let b_names = upstream.header_names(1);
+    assert!(b_names.iter().any(|n| n == "X-Bar-B"), "B: {b_names:?}");
+    assert!(
+        b_names.iter().any(|n| n == "X-After-Eight-K"),
+        "B: {b_names:?}"
+    );
+    assert!(!b_names.iter().any(|n| n == "X-Foo-A"), "B: {b_names:?}");
+
+    let c_names = upstream.header_names(2);
+    assert!(
+        c_names.iter().any(|n| n == "X-Split-Header"),
+        "C: {c_names:?}"
+    );
 
     harness.shutdown().await;
 }

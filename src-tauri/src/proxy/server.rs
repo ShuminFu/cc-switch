@@ -246,30 +246,15 @@ impl ProxyServer {
 
                         let app = app.clone();
                         tokio::spawn(async move {
-                            // Peek raw TCP bytes to capture original header casing
-                            // before hyper parses (and lowercases) the header names.
-                            let original_cases = {
-                                let mut peek_buf = vec![0u8; 8192];
-                                match stream.peek(&mut peek_buf).await {
-                                    Ok(n) => {
-                                        let cases = super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..n]);
-                                        log::debug!(
-                                            "[ProxyServer] Peeked {} bytes, captured {} header casings",
-                                            n, cases.cases.len()
-                                        );
-                                        cases
-                                    }
-                                    Err(e) => {
-                                        log::debug!("[ProxyServer] peek failed (non-fatal): {e}");
-                                        super::hyper_client::OriginalHeaderCases::default()
-                                    }
-                                }
-                            };
+                            // Record each request head's original header casing from
+                            // the bytes hyper reads, before hyper lowercases the names.
+                            let recorder = super::header_case::SharedHeaderCaseRecorder::default();
+                            let io = super::header_case::RecordingIo::new(stream, recorder.clone());
 
                             // service_fn 将 axum Router（tower::Service）桥接到 hyper
                             let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                                 let mut router = app.clone();
-                                let cases = original_cases.clone();
+                                let cases = super::header_case::take_cases(&recorder, &req);
                                 async move {
                                     // 将 hyper::body::Incoming 转为 axum::body::Body，保留 extensions
                                     let (mut parts, body) = req.into_parts();
@@ -285,7 +270,7 @@ impl ProxyServer {
 
                             if let Err(e) = hyper::server::conn::http1::Builder::new()
                                 .preserve_header_case(true)
-                                .serve_connection(TokioIo::new(stream), service)
+                                .serve_connection(TokioIo::new(io), service)
                                 .await
                             {
                                 // Connection reset / broken pipe 等在代理场景下很常见，debug 级别

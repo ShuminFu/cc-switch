@@ -287,6 +287,119 @@ async fn mock_handler(State(state): State<MockState>, request: Request) -> Respo
 }
 
 // ============================================================================
+// Raw-recording mock upstream
+// ============================================================================
+
+/// Mock upstream that records each request head exactly as it arrived on the
+/// wire (header-name casing and order included), which the axum-based
+/// [`MockUpstream`] cannot see. Every request on every connection, keep-alive
+/// included, gets a successful Anthropic message reply.
+pub struct RawMockUpstream {
+    addr: SocketAddr,
+    heads: Arc<Mutex<Vec<String>>>,
+    handle: JoinHandle<()>,
+}
+
+impl RawMockUpstream {
+    pub async fn spawn() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind raw mock upstream");
+        let addr = listener.local_addr().expect("raw mock upstream address");
+        let heads = Arc::new(Mutex::new(Vec::new()));
+        let recorded = heads.clone();
+        let handle = tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(raw_mock_connection(stream, recorded.clone()));
+            }
+        });
+        Self {
+            addr,
+            heads,
+            handle,
+        }
+    }
+
+    pub fn base_url(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
+    /// Raw request heads received so far (request line and header lines,
+    /// without the final empty line), in arrival order.
+    pub fn heads(&self) -> Vec<String> {
+        self.heads.lock().expect("raw mock heads lock").clone()
+    }
+
+    /// Header names of request `index` with their wire casing, in order.
+    pub fn header_names(&self, index: usize) -> Vec<String> {
+        self.heads()[index]
+            .lines()
+            .skip(1)
+            .filter_map(|line| line.split_once(':').map(|(name, _)| name.to_string()))
+            .collect()
+    }
+}
+
+impl Drop for RawMockUpstream {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+async fn raw_mock_connection(mut stream: tokio::net::TcpStream, heads: Arc<Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut buf = Vec::new();
+    loop {
+        let head_end = loop {
+            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos;
+            }
+            let mut chunk = [0u8; 8192];
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        };
+        let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
+        let content_length = head
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        let request_end = head_end + 4 + content_length;
+        while buf.len() < request_end {
+            let mut chunk = [0u8; 8192];
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        }
+        buf.drain(..request_end);
+
+        let index = {
+            let mut heads = heads.lock().expect("raw mock heads lock");
+            heads.push(head);
+            heads.len() - 1
+        };
+        let mut reply = MockReply::message("raw", 1, 1);
+        let MockReply::Json { body, .. } = &mut reply else {
+            unreachable!("message replies are JSON")
+        };
+        body["id"] = json!(format!("msg_raw_{index}"));
+        let body = body.to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        if stream.write_all(response.as_bytes()).await.is_err() {
+            return;
+        }
+    }
+}
+
+// ============================================================================
 // Database statement counter
 // ============================================================================
 
@@ -376,6 +489,13 @@ impl ProxyHarnessBuilder {
     pub fn provider_with_meta(mut self, id: &str, upstream: &MockUpstream, meta: Value) -> Self {
         self.providers
             .push((id.to_string(), upstream.base_url(), Some(meta)));
+        self
+    }
+
+    /// Add a Claude provider whose base URL is `base_url` (e.g. a
+    /// [`RawMockUpstream`]).
+    pub fn provider_url(mut self, id: &str, base_url: String) -> Self {
+        self.providers.push((id.to_string(), base_url, None));
         self
     }
 
