@@ -288,8 +288,13 @@ pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
 ///   保证断电后目标要么是旧内容、要么是完整的新内容；
 /// - 直接依赖 `fs::rename` 的替换语义（Windows 上为 `MoveFileExW` +
 ///   `MOVEFILE_REPLACE_EXISTING`），不再预先删除目标文件；
-/// - 任一步骤失败都会清理临时文件（其中可能含有密钥）。
+/// - 任一步骤失败都会清理临时文件（其中可能含有密钥）；
+/// - 目标是符号链接（如 stow/chezmoi 管理的配置）时写入链接指向的真实文件，
+///   链接本身保持不变，见 [`resolve_write_target`]。
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
+    let resolved = resolve_write_target(path)?;
+    let path = resolved.as_path();
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
@@ -337,6 +342,49 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+/// 符号链接最多跟随的跳数（与 Linux 的 `MAXSYMLINKS` 一致）
+const MAX_SYMLINK_HOPS: usize = 40;
+
+/// 解析 `atomic_write` 的真实写入目标
+///
+/// rename 会替换链接本身而不是其指向的文件：链接被换成普通文件，真实目标
+/// 静默过期（Windows 上链接被删除）。因此：
+/// - 非链接（或路径不存在）原样返回；
+/// - 链接可解析时使用 `canonicalize` 的结果；
+/// - 悬空链接逐跳 `read_link`（相对目标按链接所在目录解析），直到遇到非链接路径，
+///   超过 [`MAX_SYMLINK_HOPS`] 视为循环并报错。
+fn resolve_write_target(path: &Path) -> Result<PathBuf, AppError> {
+    let is_link = |p: &Path| {
+        fs::symlink_metadata(p)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    };
+
+    if !is_link(path) {
+        return Ok(path.to_path_buf());
+    }
+    if let Ok(canonical) = fs::canonicalize(path) {
+        return Ok(canonical);
+    }
+
+    let mut current = path.to_path_buf();
+    for _ in 0..MAX_SYMLINK_HOPS {
+        let target = fs::read_link(&current).map_err(|e| AppError::io(&current, e))?;
+        current = match current.parent() {
+            Some(parent) if target.is_relative() => parent.join(target),
+            _ => target,
+        };
+        if !is_link(&current) {
+            return Ok(current);
+        }
+    }
+
+    Err(AppError::Config(format!(
+        "符号链接层级过多: {}",
+        path.display()
+    )))
 }
 
 /// 写入临时文件，目标已存在时沿用其权限（unix），并在关闭前 `sync_all`
@@ -513,6 +561,102 @@ mod tests {
         atomic_write(&shared, b"{\"k\":1}").expect("overwrite");
         let mode = fs::metadata(&shared).expect("meta").permissions().mode() & 0o777;
         assert_eq!(mode, 0o640);
+    }
+
+    #[cfg(unix)]
+    fn assert_link_written_through(link: &Path, target: &Path, content: &[u8]) {
+        let meta = fs::symlink_metadata(link).expect("link meta");
+        assert!(meta.file_type().is_symlink(), "link was replaced by a file");
+        assert_eq!(fs::read(target).expect("read target"), content);
+        assert_eq!(fs::read(link).expect("read via link"), content);
+        assert!(leftover_tmp_files(link.parent().unwrap()).is_empty());
+        assert!(leftover_tmp_files(target.parent().unwrap()).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_follows_absolute_symlink() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dotfiles = dir.path().join("dotfiles");
+        let home = dir.path().join("home");
+        fs::create_dir_all(&dotfiles).expect("mkdir");
+        fs::create_dir_all(&home).expect("mkdir");
+        let target = dotfiles.join("settings.json");
+        fs::write(&target, b"{}").expect("seed");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o640)).expect("chmod");
+        let link = home.join("settings.json");
+        symlink(&target, &link).expect("symlink");
+
+        atomic_write(&link, b"{\"k\":1}").expect("write");
+        assert_link_written_through(&link, &target, b"{\"k\":1}");
+        let mode = fs::metadata(&target).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_follows_relative_symlink_chain() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dotfiles = dir.path().join("dotfiles");
+        let home = dir.path().join("home");
+        fs::create_dir_all(&dotfiles).expect("mkdir");
+        fs::create_dir_all(&home).expect("mkdir");
+        let target = dotfiles.join("config.toml");
+        fs::write(&target, b"old").expect("seed");
+        // home/config.toml -> home/.hop -> ../dotfiles/config.toml
+        symlink("../dotfiles/config.toml", home.join(".hop")).expect("symlink");
+        let link = home.join("config.toml");
+        symlink(".hop", &link).expect("symlink");
+
+        atomic_write(&link, b"new = true\n").expect("write");
+        assert_link_written_through(&link, &target, b"new = true\n");
+        assert!(fs::symlink_metadata(home.join(".hop"))
+            .expect("hop meta")
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_creates_target_of_dangling_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dotfiles = dir.path().join("dotfiles");
+        let home = dir.path().join("home");
+        fs::create_dir_all(&dotfiles).expect("mkdir");
+        fs::create_dir_all(&home).expect("mkdir");
+        let target = dotfiles.join("auth.json");
+        let link = home.join("auth.json");
+        symlink("../dotfiles/auth.json", &link).expect("symlink");
+        assert!(!target.exists());
+
+        atomic_write(&link, b"{\"token\":\"x\"}").expect("write");
+        assert_link_written_through(&link, &target, b"{\"token\":\"x\"}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_rejects_symlink_loop() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let a = dir.path().join("a.json");
+        let b = dir.path().join("b.json");
+        symlink(&b, &a).expect("symlink");
+        symlink(&a, &b).expect("symlink");
+
+        let err = atomic_write(&a, b"{}").expect_err("loop must fail");
+        assert!(matches!(err, AppError::Config(_)), "{err:?}");
+        assert!(fs::symlink_metadata(&a)
+            .expect("meta")
+            .file_type()
+            .is_symlink());
+        assert!(leftover_tmp_files(dir.path()).is_empty());
     }
 
     #[test]
