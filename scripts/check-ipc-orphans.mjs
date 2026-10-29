@@ -17,8 +17,11 @@ import { fileURLToPath } from "node:url";
 
 const HANDLER_START = "tauri::generate_handler![";
 const SNAKE_CASE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+// Type arguments may not contain parentheses: otherwise `invoke<T>(cmd)` in a
+// wrapper would lazily extend to a later `>("name"` and swallow the invokes in
+// between.
 const INVOKE_CALL =
-  /\binvoke\s*(?:<[\s\S]*?>)?\s*\(\s*(["'`])([A-Za-z0-9_]+)\1/g;
+  /\binvoke\s*(?:<[^()]*?>)?\s*\(\s*(["'`])([A-Za-z0-9_]+)\1/g;
 const STRING_LITERAL = /(["'`])([A-Za-z0-9_]+)\1/g;
 
 /** Command names in the `generate_handler!` list, in registration order. */

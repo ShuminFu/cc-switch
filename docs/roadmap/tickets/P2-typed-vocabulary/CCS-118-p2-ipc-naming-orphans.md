@@ -55,3 +55,9 @@ p2-bindings-generate
 - `pnpm typecheck`: passes.
 - `pnpm test:unit`: 152 files / 1460 tests passed, including the new `checkIpcOrphans` (3) and `tests/msw/handlers.test.ts`.
 - `pnpm format:check`: clean.
+
+**Review.** All three acceptance criteria hold. `forbid(non_snake_case)` is active in `commands/mod.rs`, and no `allow(non_snake_case)` is left in `src-tauri/src`. `update_tray_menu` in `lib.rs` is the only command outside `commands/`, and it has no camelCase arguments. The orphan script reports 0. A stricter cross-check, which required every registered command to appear as a literal `invoke("…")` call and not just any string literal, also found none. Wire keys are unchanged: every renamed argument maps back to its old camelCase key, and the only `rename_all` used is `camelCase`, which is the default. Review fixes:
+- The `launch_session_terminal` doc comment again names the wire keys the webview sends, `{providerId, sessionId}`.
+- The `INVOKE_CALL` regex in `check-ipc-orphans.mjs` matched type arguments with `[\s\S]*?`. A non-literal `invoke<T>(cmd)` in a wrapper could therefore extend lazily to a later `>("name"` and skip every `invoke("…")` in between, so the unknown-command check never saw them. Type arguments may no longer contain parentheses, and a regression case was added to `tests/scripts/checkIpcOrphans.test.ts`. The case fails against the old regex, which reported only 1 of the 2 unknown commands.
+
+Re-verified with `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test --no-fail-fast` (all 19 binaries ok; lib: 2224 passed), `pnpm typecheck`, `pnpm format:check` and `pnpm test:unit` (152 files / 1460 tests). One earlier full run hit a single failure in `migrations::every_released_schema_migrates_to_current`. That failure did not recur in 3 isolated runs or in a second full run. The test does not touch the command layer.

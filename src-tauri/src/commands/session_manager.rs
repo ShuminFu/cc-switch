@@ -20,7 +20,7 @@ pub async fn get_session_messages(
     .map_err(|e| format!("Failed to load session messages: {e}"))?
 }
 
-/// 在终端中恢复会话。webview 只能指定 `{provider_id, session_id}`：
+/// 在终端中恢复会话。webview 只能指定 `{providerId, sessionId}`：
 /// 恢复命令与工作目录都由后端根据扫描到的会话元数据和固定模板生成，
 /// 任何 IPC 参数都不会被当作 shell 字符串执行。
 #[tauri::command]

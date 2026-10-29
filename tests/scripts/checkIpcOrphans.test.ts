@@ -37,13 +37,17 @@ describe("checkIpcOrphans", () => {
         'await invoke<Provider[]>("get_providers", { app });',
         "return invoke(\n  'queryProviderUsage',\n  { providerId },\n);",
         'invoke("removed_command");',
+        // 包装函数的 invoke<T>(cmd) 不能吞掉其后的调用
+        "invoke<T>(cmd, args);",
+        'invoke("also_removed");',
+        'invoke<string>("get_providers");',
       ].join("\n"),
       "src/b.ts": 'const cmd = "open_external";',
     });
     expect(result).toEqual({
       total: 4,
       orphans: ["unused_command"],
-      unknown: ["removed_command"],
+      unknown: ["also_removed", "removed_command"],
       badNames: ["queryProviderUsage"],
     });
   });
