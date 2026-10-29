@@ -325,8 +325,12 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     })?;
     guard.disarm();
 
+    // rename 已完成，因此目录 fsync 失败只记录日志：
+    // 部分文件系统（如某些网络文件系统）不支持对目录 fsync。
     #[cfg(unix)]
-    sync_dir(parent);
+    if let Err(e) = sync_dir(parent) {
+        log::warn!("fsync 目录失败: {}: {e}", parent.display());
+    }
 
     Ok(())
 }
@@ -404,13 +408,16 @@ fn rename_replace(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
-/// fsync 父目录以持久化 rename 产生的目录项。rename 已完成，因此失败只记录日志：
-/// 部分文件系统（如某些网络文件系统）不支持对目录 fsync。
+/// fsync 父目录以持久化 rename 产生的目录项
 #[cfg(unix)]
-fn sync_dir(dir: &Path) {
-    if let Err(e) = fs::File::open(dir).and_then(|d| d.sync_all()) {
-        log::warn!("fsync 目录失败: {}: {e}", dir.display());
-    }
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    // 相对路径 `foo.json` 的 parent 是空路径，需按当前目录处理
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    fs::File::open(dir)?.sync_all()
 }
 
 #[cfg(test)]
@@ -457,6 +464,16 @@ mod tests {
         assert!(leftover_tmp_files(dir.path()).is_empty());
         assert!(target.is_dir());
         assert_eq!(fs::read(target.join("keep")).expect("read"), b"x");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_dir_treats_empty_parent_as_current_dir() {
+        // `Path::new("foo.json").parent()` 为空路径；不应因此跳过目录 fsync
+        let parent = Path::new("foo.json").parent().expect("parent");
+        assert!(parent.as_os_str().is_empty());
+        assert!(fs::File::open(parent).is_err());
+        sync_dir(parent).expect("empty parent must fsync the current dir");
     }
 
     #[cfg(unix)]

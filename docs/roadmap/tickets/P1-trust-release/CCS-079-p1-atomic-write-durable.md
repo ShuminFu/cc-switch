@@ -56,3 +56,9 @@ p0-config-writer-snapshots
 
 ### Remaining
 - "On Windows CI, overwrite works without remove_file": the `#[cfg(windows)]` retry branch was not compiled or run here (no Windows target installed). The overwrite test is platform-neutral and will cover it on the Windows runner. On Windows the directory-target test takes about 200 ms because ERROR_ACCESS_DENIED is retried.
+
+### Review
+- I checked each acceptance criterion against ed7aac2. They hold: the file is fsynced before the rename, the directory is fsynced after it, the Windows `remove_file` is gone, the guard cleans up on error, and the tests really check the fix. The `rename_replace` and `write_and_sync` bodies, copied verbatim, also compile with `rustc --target x86_64-pc-windows-gnu`. That proves the `#[cfg(windows)]` branch type-checks, but it was not run.
+- Fixed one gap: for a relative target such as `foo.json`, `path.parent()` is an empty path. `File::open("")` fails, so the directory fsync was always skipped and a warning was logged on every write. `sync_dir` now treats an empty parent as `.` and returns `io::Result`, and `atomic_write` still only logs on failure. New test: `sync_dir_treats_empty_parent_as_current_dir`.
+- Left out of scope: `proxy/providers/copilot_auth.rs` and `codex_oauth_auth.rs` have their own temp-file-and-rename writers, and those still have no fsync.
+- Re-verified: `cargo test --lib` 2219 passed, 0 failed; `--test config_writers` 16 passed; fmt and clippy `-D warnings` clean. Status stays Partial until the Windows CI run.
