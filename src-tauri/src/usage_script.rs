@@ -455,17 +455,29 @@ fn build_script_with_vars(
     user_id: Option<&str>,
 ) -> String {
     let mut replaced = script_code
-        .replace("{{apiKey}}", api_key)
-        .replace("{{baseUrl}}", base_url);
+        .replace("{{apiKey}}", &escape_js_string_content(api_key))
+        .replace("{{baseUrl}}", &escape_js_string_content(base_url));
 
     if let Some(token) = access_token {
-        replaced = replaced.replace("{{accessToken}}", token);
+        replaced = replaced.replace("{{accessToken}}", &escape_js_string_content(token));
     }
     if let Some(uid) = user_id {
-        replaced = replaced.replace("{{userId}}", uid);
+        replaced = replaced.replace("{{userId}}", &escape_js_string_content(uid));
     }
 
     replaced
+}
+
+/// 将变量值转义为可安全放入 JS 字符串字面量（"..."、'...' 或 `...`）内部的内容，不添加外层引号。
+/// 先用 JSON 字符串转义处理 `"`、`\` 和控制字符，再额外转义 `'`、反引号与 `${`。
+/// 普通值（字母、数字、`-_.:/` 等）保持原样，与旧行为一致。
+fn escape_js_string_content(value: &str) -> String {
+    let quoted = serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""));
+    let inner = &quoted[1..quoted.len() - 1];
+    inner
+        .replace('\'', "\\'")
+        .replace('`', "\\`")
+        .replace("${", "\\${")
 }
 
 /// 验证 base_url 的基本安全性
@@ -741,6 +753,69 @@ mod tests {
         })
         .expect("plain script should evaluate");
         assert_eq!(value, "2,4,6");
+    }
+
+    /// 在沙箱中求值替换变量后的脚本，返回字符串结果
+    fn eval_with_vars(
+        script: &str,
+        api_key: &str,
+        base_url: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<String, AppError> {
+        let script = build_script_with_vars(script, api_key, base_url, access_token, user_id);
+        run_with_hard_timeout(Duration::from_secs(10), move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(run_sandboxed(script, JS_EXEC_TIMEOUT, |ctx, script| {
+                ctx.eval::<String, _>(script)
+                    .map_err(|e| AppError::Message(e.to_string()))
+            }))
+        })
+    }
+
+    #[test]
+    fn usage_script_placeholder_with_quote_and_backslash_evaluates_literally() {
+        let value = eval_with_vars(r#""Bearer {{apiKey}}""#, r#"ab"c\d"#, "", None, None)
+            .expect("escaped api key must keep the script valid");
+        assert_eq!(value, r#"Bearer ab"c\d"#);
+    }
+
+    #[test]
+    fn usage_script_placeholder_values_survive_every_string_context() {
+        let tricky = "q\"s'b`t${x}\\n\nl\u{2028}e";
+        for script in [
+            r#""{{apiKey}}|{{baseUrl}}|{{accessToken}}|{{userId}}""#,
+            "'{{apiKey}}|{{baseUrl}}|{{accessToken}}|{{userId}}'",
+            "`{{apiKey}}|{{baseUrl}}|{{accessToken}}|{{userId}}`",
+        ] {
+            let value = eval_with_vars(script, tricky, tricky, Some(tricky), Some(tricky))
+                .unwrap_or_else(|e| panic!("script {script} failed: {e}"));
+            assert_eq!(value, [tricky; 4].join("|"), "script: {script}");
+        }
+    }
+
+    #[test]
+    fn usage_script_ordinary_placeholder_values_are_unchanged() {
+        let script = r#"({ url: "{{baseUrl}}/api", auth: "Bearer {{apiKey}}", t: "{{accessToken}}", u: "{{userId}}" })"#;
+        let api_key = "sk-AbC_123.xyz-789";
+        let base_url = "https://api.example.com:8443/v1";
+        let raw = script
+            .replace("{{apiKey}}", api_key)
+            .replace("{{baseUrl}}", base_url)
+            .replace("{{accessToken}}", "tok_ABC-123")
+            .replace("{{userId}}", "42");
+        assert_eq!(
+            build_script_with_vars(script, api_key, base_url, Some("tok_ABC-123"), Some("42")),
+            raw
+        );
+        // 未提供的可选变量保持占位符原样
+        assert_eq!(
+            build_script_with_vars("{{accessToken}}{{userId}}", "", "", None, None),
+            "{{accessToken}}{{userId}}"
+        );
     }
 
     #[test]
