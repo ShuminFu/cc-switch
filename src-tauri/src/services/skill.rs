@@ -2343,6 +2343,16 @@ impl SkillService {
                 continue;
             }
 
+            // enclosed_name() 只保证不越过归档根；去掉顶层目录后
+            // `repo-main/../x` 会变成 `../x`，因此要求只含普通路径段
+            if !relative_path
+                .components()
+                .all(|c| matches!(c, Component::Normal(_)))
+            {
+                log::warn!("跳过不安全的 ZIP 条目: {}", file.name());
+                continue;
+            }
+
             let outpath = dest.join(&relative_path);
             let remaining = max_total_bytes.saturating_sub(total_bytes);
 
@@ -3274,6 +3284,34 @@ mod tests {
         assert!(!temp.path().join("x").join("escape.txt").exists());
         assert!(!dest.join("escape.txt").exists());
         assert!(!dest.parent().unwrap().join("escape.txt").exists());
+    }
+
+    #[test]
+    fn extract_repo_archive_skips_entries_escaping_dest_after_root_strip() {
+        // enclosed_name() 只保证不越过归档根，去掉顶层目录后仍可能带 `..`
+        let temp = tempdir().expect("tempdir");
+        let dest = temp.path().join("x").join("dest");
+        fs::create_dir_all(&dest).expect("create dest");
+        let zip = build_zip(&[
+            ("repo-main/", ZipTestEntry::Dir),
+            ("repo-main/SKILL.md", ZipTestEntry::File(b"ok")),
+            ("repo-main/../escape1.txt", ZipTestEntry::File(b"pwned")),
+            (
+                "repo-main/a/../../escape2.txt",
+                ZipTestEntry::File(b"pwned"),
+            ),
+            ("repo-main/../escape-dir/", ZipTestEntry::Dir),
+            ("repo-main/../link.md", ZipTestEntry::Symlink("SKILL.md")),
+        ]);
+
+        SkillService::extract_repo_archive(zip, &dest, 100, 1024 * 1024)
+            .expect("unsafe entries should be skipped, not abort extraction");
+
+        assert!(dest.join("SKILL.md").is_file());
+        let parent = temp.path().join("x");
+        for name in ["escape1.txt", "escape2.txt", "escape-dir", "link.md"] {
+            assert!(!parent.join(name).exists(), "{name} escaped dest");
+        }
     }
 
     #[test]
