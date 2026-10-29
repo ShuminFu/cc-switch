@@ -53,3 +53,16 @@ new strings were added; the button keeps its label and swaps its icon.
 - `pnpm typecheck`: clean.
 - `pnpm test:unit`: 121 test files passed.
 - `pnpm format:check`: all files formatted.
+
+**Review.** I checked the change against the code. `ProvidersHome` passes
+`switchingProviderId` on to `ProviderList` through `...listProps`. Every
+`onSwitch` path in `ProviderActions` (normal, OMO, additive add, Hermes
+Enable) is disabled while a switch is pending, and the actions that do not
+switch stay enabled. One gap: in the RTL test the second click lands on a
+disabled button, so React never runs the handler, and the re-entrancy guard
+in `switchProvider` was not tested on its own. I added two hook tests in
+`tests/hooks/useProviderActions.test.tsx`. One checks that a pending switch
+for the same app blocks a second `mutateAsync` (it fails with the guard
+removed). The other checks that a pending switch for another app does not
+set `switchingProviderId` or block a switch. Re-verified: `pnpm typecheck`
+clean, `pnpm test:unit` all files passed, `pnpm format:check` clean.

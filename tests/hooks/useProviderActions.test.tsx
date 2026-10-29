@@ -37,7 +37,11 @@ const deleteProviderMutation = {
   mutateAsync: deleteProviderMutateAsync,
   isPending: false,
 };
-const switchProviderMutation = {
+const switchProviderMutation: {
+  mutateAsync: typeof switchProviderMutateAsync;
+  isPending: boolean;
+  variables?: { appId: string; providerId: string };
+} = {
   mutateAsync: switchProviderMutateAsync,
   isPending: false,
 };
@@ -128,6 +132,7 @@ beforeEach(() => {
   updateProviderMutation.isPending = false;
   deleteProviderMutation.isPending = false;
   switchProviderMutation.isPending = false;
+  switchProviderMutation.variables = undefined;
 
   useAddProviderMutationMock.mockClear();
   useUpdateProviderMutationMock.mockClear();
@@ -650,6 +655,48 @@ describe("useProviderActions", () => {
 
     expect(settingsApiGetMock).not.toHaveBeenCalled();
     expect(settingsApiApplyMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores a second switch while one is pending for the same app", async () => {
+    switchProviderMutation.isPending = true;
+    switchProviderMutation.variables = {
+      appId: "claude",
+      providerId: "provider-1",
+    };
+    const { wrapper } = createWrapper();
+
+    const { result } = renderHook(() => useProviderActions("claude"), {
+      wrapper,
+    });
+
+    expect(result.current.switchingProviderId).toBe("provider-1");
+
+    await result.current.switchProvider(createProvider({ id: "provider-2" }));
+
+    expect(switchProviderMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("does not carry another app's pending switch into the active app", async () => {
+    switchProviderMutation.isPending = true;
+    switchProviderMutation.variables = {
+      appId: "codex",
+      providerId: "provider-1",
+    };
+    switchProviderMutateAsync.mockResolvedValueOnce({ warnings: [] });
+    const { wrapper } = createWrapper();
+
+    const { result } = renderHook(() => useProviderActions("claude"), {
+      wrapper,
+    });
+
+    expect(result.current.switchingProviderId).toBeUndefined();
+
+    await result.current.switchProvider(createProvider({ id: "provider-2" }));
+
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith({
+      appId: "claude",
+      providerId: "provider-2",
+    });
   });
 
   it("should track pending state of all mutations in isLoading", () => {
