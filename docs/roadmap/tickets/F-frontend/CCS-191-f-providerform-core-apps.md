@@ -9,8 +9,8 @@
 Add features/providers/forms/<app>/{schema,toSettingsConfig,fromProvider,Fields}.tsx for each app, with presets loaded lazily.
 
 ## Acceptance criteria / verification
-- [ ] Goldens unchanged; unit tests for toSettingsConfig and fromProvider per app
-- [ ] `pnpm typecheck` and `pnpm test:unit`
+- [x] Goldens unchanged; unit tests for toSettingsConfig and fromProvider per app
+- [x] `pnpm typecheck` and `pnpm test:unit`
 
 ## Dependencies
 f-providerform-shell
@@ -110,3 +110,14 @@ No backend piece was needed.
   clean.
 - `npx vite build`: the four preset chunks listed above are emitted
   separately.
+
+**Review.** An independent review checked each editor's save path (validation
+order, settingsConfig build, meta keys and their undefined-clears values, the
+Claude Desktop official and route saves, Grok Build's reuse of the Codex table)
+against the pre-split `ProviderFormFull`, `ClaudeDesktopProviderForm` and
+`GrokBuildProviderForm`, and found no behaviour change. No static value import
+of the four preset tables remains (all other references are `import type`),
+and a fresh `vite build` emits them as separate chunks. Re-ran
+`CI=true pnpm test:unit` (132 files, 1326 tests passed), `pnpm typecheck` and
+`pnpm format:check` (clean). The only change from the review was ticking the
+acceptance-criteria boxes, which had been left unchecked.
