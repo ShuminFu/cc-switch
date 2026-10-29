@@ -75,7 +75,10 @@ pub(crate) fn current_journal_mode(conn: &Connection) -> Result<String, AppError
 
 /// 目录不适合 WAL 时返回原因（云同步目录或网络文件系统），本地目录返回 None
 pub(crate) fn non_local_storage_reason(dir: &Path) -> Option<String> {
-    if let Some(provider) = cloud_sync_root(dir) {
+    // 同时检查解析符号链接后的真实路径：~/.cc-switch 可能是指向同步目录的软链接
+    let canonical = std::fs::canonicalize(dir).ok();
+    let provider = cloud_sync_root(dir).or_else(|| canonical.as_deref().and_then(cloud_sync_root));
+    if let Some(provider) = provider {
         return Some(format!("a {provider} sync folder"));
     }
     network_filesystem(dir).map(|fs| format!("a network filesystem ({fs})"))
@@ -249,6 +252,21 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         // CI 的临时目录不应位于云同步目录或网络文件系统上
         assert_eq!(non_local_storage_reason(dir.path()), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_into_cloud_sync_root_is_detected() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let target = root.path().join("Dropbox").join("cc-switch");
+        std::fs::create_dir_all(&target).expect("create cloud dir");
+        let link = root.path().join(".cc-switch");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        assert_eq!(cloud_sync_root(&link), None);
+        assert_eq!(
+            non_local_storage_reason(&link).as_deref(),
+            Some("a Dropbox sync folder")
+        );
     }
 
     #[test]

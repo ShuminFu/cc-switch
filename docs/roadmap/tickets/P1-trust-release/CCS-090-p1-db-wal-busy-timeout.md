@@ -83,3 +83,16 @@ busy_timeout was 0.
   into a scratch crate with the same libc 0.2.183 and windows-sys 0.61.2 and ran
   `cargo clippy -D warnings` for `x86_64-apple-darwin` and `x86_64-pc-windows-gnu`: clean. They have
   not been run on real macOS or Windows hosts, or on real network or cloud mounts.
+
+**Review.** I checked each acceptance criterion against d5d8ccf/ce53ffa: WAL on a local temp dir,
+DELETE on a simulated Dropbox home, busy_timeout=5000 in both cases, auto_vacuum preserved, backup
+files switched to DELETE, and sync/export tests passing under WAL. All hold. I also checked call
+sites: `Database::init` is the only long-lived file connection to `cc-switch.db`, and nothing copies
+the DB file at the filesystem level, where a `-wal` file could be missed. Restore and import go
+through the Backup API, which keeps the destination in WAL. One gap is fixed: cloud-sync detection
+only looked at the literal path, so a `~/.cc-switch` symlinked into `~/Dropbox/…`, a common
+dotfile-sync setup, would have used WAL. `non_local_storage_reason` now also checks the
+`canonicalize`d path. statfs already follows symlinks. New test:
+`journal::tests::symlink_into_cloud_sync_root_is_detected` (unix). Re-verified: fmt and clippy
+`-D warnings` clean, `--lib database::` 58 passed, full `--no-fail-fast` suite with lib 2248
+passed / 0 failed and all integration suites green.
