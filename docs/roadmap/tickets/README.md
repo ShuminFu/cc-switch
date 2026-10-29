@@ -61,32 +61,32 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-053](P1-trust-release/CCS-053-p1-proxy-config-rollback.md) | bug | p1 | S | [proxy] Roll back the server and DB config when a port or address change fails to bind | CCS-054 | Done |
 | [CCS-054](P1-trust-release/CCS-054-p1-proxy-lifecycle-lock.md) | bug | p2 | S | [proxy] Serialize proxy start/stop with a lifecycle mutex and stop holding the server lock across shutdown |  | Done |
 | [CCS-055](P1-trust-release/CCS-055-p1-proxy-first-byte-timeout.md) | bug | p2 | S | [proxy] Apply the streaming first-byte timeout on the native-Claude raw path | CCS-052 | Done |
-| [CCS-056](P1-trust-release/CCS-056-p1-proxy-raw-body-timeout.md) | bug | p3 | S | [proxy] Bound non-streaming body reads on the raw path when failover is off |  | Open |
-| [CCS-057](P1-trust-release/CCS-057-p1-proxy-auth-guard-refresh.md) | bug | p3 | S | [proxy] Stop holding the Copilot/Codex auth read guard across network token refresh |  | Open |
-| [CCS-058](P1-trust-release/CCS-058-p1-proxy-mask-url.md) | security | p3 | S | [proxy] Make mask_url panic-free and never echo credentials from unparseable proxy URLs |  | Open |
-| [CCS-059](P1-trust-release/CCS-059-p1-proxy-connect-status.md) | bug | p3 | S | [proxy] Parse the CONNECT status line instead of substring-matching " 200 " |  | Open |
-| [CCS-060](P1-trust-release/CCS-060-p1-proxy-connect-userinfo.md) | bug | p3 | S | [proxy] Percent-decode proxy credentials before building Proxy-Authorization |  | Open |
-| [CCS-061](P1-trust-release/CCS-061-p1-proxy-connect-ipv6.md) | bug | p3 | S | [proxy] Strip IPv6 brackets before TCP connect and TLS server-name parsing |  | Open |
-| [CCS-062](P1-trust-release/CCS-062-p1-bridge-tool-result.md) | bug | p2 | S | [bridge] Convert array tool_result content properly in Anthropic->OpenAI Chat (text, images, is_error) | CCS-008 | Open |
-| [CCS-063](P1-trust-release/CCS-063-p1-bridge-image-document.md) | bug | p2 | S | [bridge] Handle URL-source images and document blocks in Anthropic->OpenAI Chat | CCS-008 | Open |
-| [CCS-064](P1-trust-release/CCS-064-p1-bridge-chat-stream-terminal.md) | bug | p2 | M | [bridge] Port the terminal state machine to the Chat->Anthropic stream converter | CCS-008 | Open |
-| [CCS-065](P1-trust-release/CCS-065-p1-bridge-stop-reason-tool-use.md) | bug | p2 | S | [bridge] Map finish_reason stop to tool_use when tool calls were emitted | CCS-008 | Open |
-| [CCS-066](P1-trust-release/CCS-066-p1-bridge-gemini-delta.md) | bug | p3 | S | [bridge] Decide Gemini cumulative vs incremental mode once per stream | CCS-008 | Open |
-| [CCS-067](P1-trust-release/CCS-067-p1-usage-script-sandbox.md) | security | p1 | M | [usage-script] Run usage scripts with interrupt, memory and stack limits off the tokio workers |  | Open |
-| [CCS-068](P1-trust-release/CCS-068-p1-usage-script-placeholder-escape.md) | bug | p3 | S | [usage-script] Escape placeholder values for a JS string context |  | Open |
-| [CCS-069](P1-trust-release/CCS-069-p1-deeplink-script-disabled.md) | security | p1 | S | [deeplink] Store deeplink-delivered usage scripts disabled until the user reviews and enables them | CCS-067 | Open |
-| [CCS-070](P1-trust-release/CCS-070-p1-deeplink-env-allowlist.md) | security | p2 | S | [deeplink] Allow-list env keys imported from Claude deeplinks and flag process-hijacking variables |  | Open |
-| [CCS-071](P1-trust-release/CCS-071-p1-deeplink-dialog-guard.md) | security | p3 | S | [deeplink] Do not replace the request under an open confirm dialog |  | Open |
-| [CCS-072](P1-trust-release/CCS-072-p1-deeplink-mask-value.md) | security | p3 | S | [deeplink] Use one masking helper that shows at most 4 characters |  | Open |
-| [CCS-073](P1-trust-release/CCS-073-p1-deeplink-confirm-diff.md) | feature | p2 | M | [deeplink] Show a full import preview with a risk diff in the confirm dialog | CCS-070, CCS-069 | Open |
-| [CCS-074](P1-trust-release/CCS-074-p1-ipc-session-terminal.md) | security | p1 | S | [ipc] Make launch_session_terminal build its resume command on the backend |  | Open |
-| [CCS-075](P1-trust-release/CCS-075-p1-ipc-path-validation.md) | security | p1 | M | [ipc] Validate path arguments of privileged commands against allowed roots or dialog-issued tokens |  | Open |
-| [CCS-076](P1-trust-release/CCS-076-p1-session-load-messages-roots.md) | security | p3 | S | [sessions] Apply the provider-root check to load_messages and the sqlite delete paths |  | Open |
-| [CCS-077](P1-trust-release/CCS-077-p1-csp-tighten.md) | security | p3 | S | [security] Narrow the CSP connect-src and img-src |  | Open |
-| [CCS-078](P1-trust-release/CCS-078-p1-asset-protocol-remove.md) | security | p3 | S | [security] Remove the unused asset protocol and protocol-asset feature |  | Open |
-| [CCS-079](P1-trust-release/CCS-079-p1-atomic-write-durable.md) | bug | p1 | S | [config] Make atomic_write durable, Windows-safe and free of leftover temp files | CCS-012 | Open |
-| [CCS-080](P1-trust-release/CCS-080-p1-atomic-write-perms.md) | security | p1 | S | [config] Create new files written by atomic_write with 0600 permissions | CCS-079 | Open |
-| [CCS-081](P1-trust-release/CCS-081-p1-atomic-write-symlink.md) | bug | p2 | S | [config] Write through symlinked config files instead of replacing the link | CCS-079 | Open |
+| [CCS-056](P1-trust-release/CCS-056-p1-proxy-raw-body-timeout.md) | bug | p3 | S | [proxy] Bound non-streaming body reads on the raw path when failover is off |  | Done |
+| [CCS-057](P1-trust-release/CCS-057-p1-proxy-auth-guard-refresh.md) | bug | p3 | S | [proxy] Stop holding the Copilot/Codex auth read guard across network token refresh |  | Done |
+| [CCS-058](P1-trust-release/CCS-058-p1-proxy-mask-url.md) | security | p3 | S | [proxy] Make mask_url panic-free and never echo credentials from unparseable proxy URLs |  | Done |
+| [CCS-059](P1-trust-release/CCS-059-p1-proxy-connect-status.md) | bug | p3 | S | [proxy] Parse the CONNECT status line instead of substring-matching " 200 " |  | Done |
+| [CCS-060](P1-trust-release/CCS-060-p1-proxy-connect-userinfo.md) | bug | p3 | S | [proxy] Percent-decode proxy credentials before building Proxy-Authorization |  | Done |
+| [CCS-061](P1-trust-release/CCS-061-p1-proxy-connect-ipv6.md) | bug | p3 | S | [proxy] Strip IPv6 brackets before TCP connect and TLS server-name parsing |  | Partial |
+| [CCS-062](P1-trust-release/CCS-062-p1-bridge-tool-result.md) | bug | p2 | S | [bridge] Convert array tool_result content properly in Anthropic->OpenAI Chat (text, images, is_error) | CCS-008 | Done |
+| [CCS-063](P1-trust-release/CCS-063-p1-bridge-image-document.md) | bug | p2 | S | [bridge] Handle URL-source images and document blocks in Anthropic->OpenAI Chat | CCS-008 | Done |
+| [CCS-064](P1-trust-release/CCS-064-p1-bridge-chat-stream-terminal.md) | bug | p2 | M | [bridge] Port the terminal state machine to the Chat->Anthropic stream converter | CCS-008 | Done |
+| [CCS-065](P1-trust-release/CCS-065-p1-bridge-stop-reason-tool-use.md) | bug | p2 | S | [bridge] Map finish_reason stop to tool_use when tool calls were emitted | CCS-008 | Done |
+| [CCS-066](P1-trust-release/CCS-066-p1-bridge-gemini-delta.md) | bug | p3 | S | [bridge] Decide Gemini cumulative vs incremental mode once per stream | CCS-008 | Done |
+| [CCS-067](P1-trust-release/CCS-067-p1-usage-script-sandbox.md) | security | p1 | M | [usage-script] Run usage scripts with interrupt, memory and stack limits off the tokio workers |  | Done |
+| [CCS-068](P1-trust-release/CCS-068-p1-usage-script-placeholder-escape.md) | bug | p3 | S | [usage-script] Escape placeholder values for a JS string context |  | Done |
+| [CCS-069](P1-trust-release/CCS-069-p1-deeplink-script-disabled.md) | security | p1 | S | [deeplink] Store deeplink-delivered usage scripts disabled until the user reviews and enables them | CCS-067 | Done |
+| [CCS-070](P1-trust-release/CCS-070-p1-deeplink-env-allowlist.md) | security | p2 | S | [deeplink] Allow-list env keys imported from Claude deeplinks and flag process-hijacking variables |  | Done |
+| [CCS-071](P1-trust-release/CCS-071-p1-deeplink-dialog-guard.md) | security | p3 | S | [deeplink] Do not replace the request under an open confirm dialog |  | Done |
+| [CCS-072](P1-trust-release/CCS-072-p1-deeplink-mask-value.md) | security | p3 | S | [deeplink] Use one masking helper that shows at most 4 characters |  | Done |
+| [CCS-073](P1-trust-release/CCS-073-p1-deeplink-confirm-diff.md) | feature | p2 | M | [deeplink] Show a full import preview with a risk diff in the confirm dialog | CCS-070, CCS-069 | Done |
+| [CCS-074](P1-trust-release/CCS-074-p1-ipc-session-terminal.md) | security | p1 | S | [ipc] Make launch_session_terminal build its resume command on the backend |  | Done |
+| [CCS-075](P1-trust-release/CCS-075-p1-ipc-path-validation.md) | security | p1 | M | [ipc] Validate path arguments of privileged commands against allowed roots or dialog-issued tokens |  | Done |
+| [CCS-076](P1-trust-release/CCS-076-p1-session-load-messages-roots.md) | security | p3 | S | [sessions] Apply the provider-root check to load_messages and the sqlite delete paths |  | Done |
+| [CCS-077](P1-trust-release/CCS-077-p1-csp-tighten.md) | security | p3 | S | [security] Narrow the CSP connect-src and img-src |  | Partial |
+| [CCS-078](P1-trust-release/CCS-078-p1-asset-protocol-remove.md) | security | p3 | S | [security] Remove the unused asset protocol and protocol-asset feature |  | Partial |
+| [CCS-079](P1-trust-release/CCS-079-p1-atomic-write-durable.md) | bug | p1 | S | [config] Make atomic_write durable, Windows-safe and free of leftover temp files | CCS-012 | Partial |
+| [CCS-080](P1-trust-release/CCS-080-p1-atomic-write-perms.md) | security | p1 | S | [config] Create new files written by atomic_write with 0600 permissions | CCS-079 | Done |
+| [CCS-081](P1-trust-release/CCS-081-p1-atomic-write-symlink.md) | bug | p2 | S | [config] Write through symlinked config files instead of replacing the link | CCS-079 | Done |
 | [CCS-082](P1-trust-release/CCS-082-p1-route-writes-atomic-lint.md) | refactor | p2 | S | [config] Route the remaining config writers through atomic_write and ban std::fs::write | CCS-080, CCS-012 | Open |
 | [CCS-083](P1-trust-release/CCS-083-p1-oauth-token-store-hardening.md) | security | p2 | M | [auth] Harden the Copilot and Codex OAuth token stores | CCS-080 | Open |
 | [CCS-084](P1-trust-release/CCS-084-p1-settings-atomic-save.md) | bug | p1 | S | [settings] Save settings.json atomically and back up a corrupt file instead of silently resetting | CCS-080 | Open |
@@ -129,8 +129,8 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-116](P2-typed-vocabulary/CCS-116-p2-bindings-spike.md) | chore | p1 | S | [ipc] Time-boxed tauri-specta spike on the usage domain, with a written decision | CCS-114 | Open |
 | [CCS-117](P2-typed-vocabulary/CCS-117-p2-bindings-generate.md) | refactor | p1 | L | [ipc] Generate src/shared/bindings.ts with a CI dirty check and typed MSW handlers | CCS-116 | Open |
 | [CCS-118](P2-typed-vocabulary/CCS-118-p2-ipc-naming-orphans.md) | chore | p3 | M | [ipc] Normalize command and argument casing, and wire up or delete orphan commands | CCS-117 | Open |
-| [CCS-119](P2-typed-vocabulary/CCS-119-p2-fe-app-registry.md) | refactor | p2 | M | [apps-ui] Add the frontend app registry and replace VALID_APPS and the capability chains | CCS-113 | Open |
-| [CCS-120](P2-typed-vocabulary/CCS-120-p2-eslint-ratchets.md) | chore | p2 | S | [lint] Ban raw invoke outside the bindings layer and ratchet app-literal comparisons | CCS-117, CCS-119, CCS-017 | Open |
+| [CCS-119](P2-typed-vocabulary/CCS-119-p2-fe-app-registry.md) | refactor | p2 | M | [apps-ui] Add the frontend app registry and replace VALID_APPS and the capability chains | CCS-113 | Partial |
+| [CCS-120](P2-typed-vocabulary/CCS-120-p2-eslint-ratchets.md) | chore | p2 | S | [lint] Ban raw invoke outside the bindings layer and ratchet app-literal comparisons | CCS-117, CCS-119, CCS-017 | Done |
 | [CCS-121](P2-typed-vocabulary/CCS-121-p2-deps-modernize.md) | chore | p3 | M | [deps] Replace serde_yaml, consolidate the JSON5 crates and drop once_cell | CCS-012 | Open |
 | [CCS-122](P2-typed-vocabulary/CCS-122-p2-feature-actionable-errors.md) | feature | p3 | M | [errors] Add actions to error toasts based on IpcError codes | CCS-115 | Open |
 
@@ -220,24 +220,24 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | ID | Kind | Pri | Effort | Title | Depends on | Status |
 |---|---|---|---|---|---|---|
 | [CCS-189](F-frontend/CCS-189-f-settingsconfig-goldens.md) | chore | p1 | S | [provider-form] Add per-app, per-preset settingsConfig golden snapshots | CCS-039 | Done |
-| [CCS-190](F-frontend/CCS-190-f-providerform-shell.md) | refactor | p2 | L | [provider-form] Turn ProviderForm into a shell with a base schema, a discriminated union and an inline error summary | CCS-189, CCS-119 | Open |
-| [CCS-191](F-frontend/CCS-191-f-providerform-core-apps.md) | refactor | p2 | L | [provider-form] Extract the Claude, Claude Desktop, Grok, Codex and Gemini form modules | CCS-190 | Open |
-| [CCS-192](F-frontend/CCS-192-f-providerform-additive-apps.md) | refactor | p2 | L | [provider-form] Extract the OpenCode, OpenClaw and Hermes form modules, with component tests | CCS-190 | Open |
-| [CCS-193](F-frontend/CCS-193-f-i18n-validation-messages.md) | bug | p3 | M | [i18n] Localize zod and editor validation messages | CCS-190, CCS-020 | Open |
-| [CCS-194](F-frontend/CCS-194-f-query-keys.md) | refactor | p2 | M | [query] Add query-key factories, invalidateProviderGraph and per-query staleTime | CCS-119 | Open |
-| [CCS-195](F-frontend/CCS-195-f-mutation-appid-variables.md) | bug | p3 | S | [query] Bind provider mutation invalidation to the variables' appId, not activeApp | CCS-194 | Open |
-| [CCS-196](F-frontend/CCS-196-f-mutation-live-ids.md) | bug | p3 | S | [query] Invalidate the OpenCode and OpenClaw live-provider-id caches on add, update and delete | CCS-194 | Open |
-| [CCS-197](F-frontend/CCS-197-f-app-shell-split.md) | refactor | p2 | M | [shell] Split App.tsx into AppHeader, a ViewTitle map and confirm orchestration | CCS-119 | Open |
-| [CCS-198](F-frontend/CCS-198-f-lazy-views-locales.md) | refactor | p3 | M | [perf] Lazy-load heavy views, per-app presets and locales | CCS-197 | Open |
-| [CCS-199](F-frontend/CCS-199-f-typed-i18n.md) | refactor | p3 | M | [i18n] Type the i18n keys and remove the 691 inline defaultValue fallbacks | CCS-020, CCS-198 | Open |
-| [CCS-200](F-frontend/CCS-200-f-radix-dialog-component-tests.md) | refactor | p3 | M | [ui] Move custom overlays to Radix Dialog and add component tests for the large panels | CCS-191 | Open |
+| [CCS-190](F-frontend/CCS-190-f-providerform-shell.md) | refactor | p2 | L | [provider-form] Turn ProviderForm into a shell with a base schema, a discriminated union and an inline error summary | CCS-189, CCS-119 | Done |
+| [CCS-191](F-frontend/CCS-191-f-providerform-core-apps.md) | refactor | p2 | L | [provider-form] Extract the Claude, Claude Desktop, Grok, Codex and Gemini form modules | CCS-190 | Done |
+| [CCS-192](F-frontend/CCS-192-f-providerform-additive-apps.md) | refactor | p2 | L | [provider-form] Extract the OpenCode, OpenClaw and Hermes form modules, with component tests | CCS-190 | Done |
+| [CCS-193](F-frontend/CCS-193-f-i18n-validation-messages.md) | bug | p3 | M | [i18n] Localize zod and editor validation messages | CCS-190, CCS-020 | Partial |
+| [CCS-194](F-frontend/CCS-194-f-query-keys.md) | refactor | p2 | M | [query] Add query-key factories, invalidateProviderGraph and per-query staleTime | CCS-119 | Done |
+| [CCS-195](F-frontend/CCS-195-f-mutation-appid-variables.md) | bug | p3 | S | [query] Bind provider mutation invalidation to the variables' appId, not activeApp | CCS-194 | Done |
+| [CCS-196](F-frontend/CCS-196-f-mutation-live-ids.md) | bug | p3 | S | [query] Invalidate the OpenCode and OpenClaw live-provider-id caches on add, update and delete | CCS-194 | Done |
+| [CCS-197](F-frontend/CCS-197-f-app-shell-split.md) | refactor | p2 | M | [shell] Split App.tsx into AppHeader, a ViewTitle map and confirm orchestration | CCS-119 | Done |
+| [CCS-198](F-frontend/CCS-198-f-lazy-views-locales.md) | refactor | p3 | M | [perf] Lazy-load heavy views, per-app presets and locales | CCS-197 | Done |
+| [CCS-199](F-frontend/CCS-199-f-typed-i18n.md) | refactor | p3 | M | [i18n] Type the i18n keys and remove the 691 inline defaultValue fallbacks | CCS-020, CCS-198 | Done |
+| [CCS-200](F-frontend/CCS-200-f-radix-dialog-component-tests.md) | refactor | p3 | M | [ui] Move custom overlays to Radix Dialog and add component tests for the large panels | CCS-191 | Done |
 | [CCS-201](F-frontend/CCS-201-f-tauri-driver-e2e.md) | chore | p2 | M | [e2e] Add a tauri-driver and WebdriverIO smoke on Linux that gates release | CCS-024, CCS-023 | Partial |
 | [CCS-202](F-frontend/CCS-202-f-resize-listener-leak.md) | bug | p3 | S | [shell] Unregister the onResized listener when App unmounts before it resolves |  | Done |
 | [CCS-203](F-frontend/CCS-203-f-safe-storage.md) | bug | p3 | S | [shell] Wrap all localStorage access in safe helpers |  | Done |
 | [CCS-204](F-frontend/CCS-204-f-a11y-icon-buttons.md) | bug | p3 | S | [a11y] Give icon-only buttons accessible names |  | Done |
 | [CCS-205](F-frontend/CCS-205-f-live-diff-preview.md) | feature | p3 | M | [provider-form] Preview the diff of the target live config before saving | CCS-190, CCS-149 | Open |
-| [CCS-206](F-frontend/CCS-206-f-unsaved-changes-guard.md) | feature | p3 | S | [provider-form] Guard against closing the Add/Edit panel with unsaved changes | CCS-190, CCS-200 | Open |
-| [CCS-207](F-frontend/CCS-207-f-switching-state.md) | feature | p3 | S | [providers] Show a switching state and disable the other Switch buttons while a switch is pending | CCS-195 | Open |
-| [CCS-208](F-frontend/CCS-208-f-command-palette.md) | feature | p3 | S | [shell] Add a Cmd/Ctrl-K command palette to search and switch providers across apps | CCS-194, CCS-207 | Open |
+| [CCS-206](F-frontend/CCS-206-f-unsaved-changes-guard.md) | feature | p3 | S | [provider-form] Guard against closing the Add/Edit panel with unsaved changes | CCS-190, CCS-200 | Done |
+| [CCS-207](F-frontend/CCS-207-f-switching-state.md) | feature | p3 | S | [providers] Show a switching state and disable the other Switch buttons while a switch is pending | CCS-195 | Done |
+| [CCS-208](F-frontend/CCS-208-f-command-palette.md) | feature | p3 | S | [shell] Add a Cmd/Ctrl-K command palette to search and switch providers across apps | CCS-194, CCS-207 | Done |
 | [CCS-209](F-frontend/CCS-209-f-unpriced-requests-export.md) | feature | p3 | S | [usage] Filter and export unpriced requests, with a shortcut to add model pricing | CCS-159, CCS-021 | Open |
-| [CCS-210](F-frontend/CCS-210-f-markdowneditor-stale-onchange.md) | bug | p3 | S | [editor] Stop MarkdownEditor capturing a stale onChange |  | Open |
+| [CCS-210](F-frontend/CCS-210-f-markdowneditor-stale-onchange.md) | bug | p3 | S | [editor] Stop MarkdownEditor capturing a stale onChange |  | Done |
