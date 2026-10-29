@@ -1,0 +1,75 @@
+===== claude_native_raw_write =====
+POST /v1/messages?beta=true HTTP/1.1
+Host: 127.0.0.1:<PORT>
+User-Agent: claude-cli/2.0
+Anthropic-Version: 2023-06-01
+Anthropic-Beta: claude-code-20250219,fine-grained-tool-streaming-2025-05-14
+Accept-Encoding: gzip, br
+X-Custom: 1
+Content-Type: application/json
+authorization: Bearer sk-upstream
+Content-Length: 117
+
+{"max_tokens":64,"messages":[{"content":"hi","role":"user"}],"metadata":{"user_id":"u1"},"model":"claude-sonnet-4-5"}
+===== claude_to_openai_chat_with_overrides =====
+POST /v1/chat/completions?x-id=1 HTTP/1.1
+user-agent: my-agent/1.0
+accept: application/json
+accept-encoding: identity
+authorization: Bearer sk-upstream
+x-stainless-lang: js
+content-type: application/json
+x-extra: 1
+host: 127.0.0.1:<PORT>
+content-length: 107
+
+{"max_tokens":64,"messages":[{"content":"hi","role":"user"}],"model":"claude-sonnet-4-5","temperature":0.5}
+===== claude_native_get_without_body =====
+GET /v1/models HTTP/1.1
+Accept: application/json
+Authorization: Bearer sk-upstream
+Anthropic-Beta: claude-code-20250219
+Anthropic-Version: 2023-06-01
+Content-Type: application/json
+Host: 127.0.0.1:<PORT>
+
+
+===== codex_to_anthropic_impersonating_claude_code =====
+POST /v1/messages?x=1 HTTP/1.1
+user-agent: claude-cli/1.0.119 (external, cli)
+accept: application/json
+authorization: Bearer sk-codex-upstream
+accept-encoding: identity
+x-app: cli
+anthropic-beta: claude-code-20250219,context-1m-2025-08-07
+anthropic-version: 2023-06-01
+content-type: application/json
+host: 127.0.0.1:<PORT>
+content-length: 333
+
+{"max_tokens":4096,"messages":[{"content":[{"cache_control":{"type":"ephemeral"},"text":"hi","type":"text"}],"role":"user"}],"model":"claude-sonnet-4-5","stream":false,"system":[{"text":"You are Claude Code, Anthropic's official CLI for Claude.","type":"text"},{"cache_control":{"type":"ephemeral"},"text":"Be terse","type":"text"}]}
+===== codex_to_anthropic_plain_full_endpoint =====
+POST /v1/messages HTTP/1.1
+x-app: codex
+user-agent: codex_cli_rs/0.1
+x-api-key: sk-codex-upstream
+accept-encoding: identity
+accept: application/json
+anthropic-version: 2023-06-01
+content-type: application/json
+host: 127.0.0.1:<PORT>
+content-length: 152
+
+{"max_tokens":8192,"messages":[{"content":[{"cache_control":{"type":"ephemeral"},"text":"hi","type":"text"}],"role":"user"}],"model":"claude-haiku-4-5"}
+===== codex_to_openai_chat =====
+POST /v1/chat/completions?x=1 HTTP/1.1
+host: 127.0.0.1:<PORT>
+authorization: Bearer sk-codex-upstream
+originator: codex_cli_rs
+accept-encoding: identity
+user-agent: codex_cli_rs/0.1
+content-type: application/json
+accept: */*
+content-length: 100
+
+{"messages":[{"content":"Be terse","role":"system"},{"content":"hi","role":"user"}],"model":"gpt-5"}

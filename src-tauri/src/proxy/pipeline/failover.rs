@@ -13,10 +13,16 @@
 //! 不同（回到更高优先级的 provider）计一次 `recovery_count`。两者都以
 //! `current_providers` 中记录的「最近一次实际使用的 provider」去重，
 //! 并发请求在异步切换落地前各自成功时只计一次。
+//!
+//! 一次尝试失败后由 [`settle_failure`] 决定去向：记入 provider 健康度后继续故障转移，
+//! 或作为客户端错误直接返回（只释放 HalfOpen permit）。
 
+use super::classify::{build_retryable_failure_log, categorize_proxy_error};
+use super::recovery::{RecoveryDecision, RecoveryState};
 use crate::provider::Provider;
 use crate::proxy::circuit_breaker::HalfOpenPermit;
-use crate::proxy::forwarder::ForwarderDeps;
+use crate::proxy::error::{ErrorCategory, ProxyError};
+use crate::proxy::forwarder::{ForwardError, ForwarderDeps};
 use crate::proxy::types::ProxyStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -228,6 +234,111 @@ impl Attempt<'_, '_> {
             .release_permit_neutral(&self.provider.id, recorder.app_type, self.permit.as_ref())
             .await;
         recorder.fail_request(message).await;
+    }
+}
+
+// ==================== 失败尝试的去向 ====================
+
+/// 单家 provider 尝试失败后的去向
+pub(crate) enum AttemptFailure {
+    /// 记录完毕，换下一家 provider 继续故障转移
+    Continue(ProxyError),
+    /// 客户端错误，没有 provider 能修复：直接返回
+    Abort(Box<ForwardError>),
+}
+
+/// [`settle_failure`] 的输入
+pub(crate) struct AttemptFailureInput<'a> {
+    pub error: ProxyError,
+    pub decision: RecoveryDecision,
+    pub recovery: &'a RecoveryState,
+    pub provider: &'a Provider,
+    pub attempted_providers: usize,
+    pub total_providers: usize,
+    pub app_type: &'a str,
+}
+
+/// 记录一次失败的尝试，决定继续故障转移还是直接返回
+pub(crate) async fn settle_failure(
+    failure: AttemptFailureInput<'_>,
+    attempt: Attempt<'_, '_>,
+) -> AttemptFailure {
+    let AttemptFailureInput {
+        error: e,
+        provider,
+        app_type,
+        ..
+    } = failure;
+    let abort = |error| {
+        AttemptFailure::Abort(Box::new(ForwardError {
+            error,
+            provider: Some(provider.clone()),
+        }))
+    };
+
+    // 恢复策略识别出错误但无法修复：客户端兼容性问题，换哪家 provider 都会被拒绝
+    // —— 不记录熔断器，仅释放 HalfOpen permit
+    if failure.decision == RecoveryDecision::ClientError {
+        attempt.fail_request(e.to_string()).await;
+        return abort(e);
+    }
+
+    // 恢复重试仍失败，且没有其他策略可用。
+    // Provider 错误：本家上游/网络确实出问题，下一家 provider 可能可用 → 继续故障转移。
+    // 客户端错误：整流后请求仍违法，下一家也修不好 → 直接返回。
+    if let Some(strategy) = failure.recovery.last() {
+        strategy.log_retry_failed(app_type, &e);
+        log::warn!(
+            "[{app_type}] [Recovery] provider={} retry failed after trace=[{}]",
+            provider.id,
+            failure.recovery.trace()
+        );
+        let is_provider_error = match &e {
+            ProxyError::Timeout(_) | ProxyError::ForwardFailed(_) => true,
+            ProxyError::UpstreamError { status, .. } => *status >= 500,
+            _ => false,
+        };
+        if !is_provider_error {
+            attempt.fail_request(e.to_string()).await;
+            return abort(e);
+        }
+        let message = format!(
+            "Provider {} {}重试失败: {}",
+            provider.name,
+            strategy.label(),
+            e
+        );
+        attempt.fail_provider(e.to_string(), message).await;
+        return AttemptFailure::Continue(e);
+    }
+
+    // 先分类错误，决定是否计入 provider 健康度
+    // —— NonRetryable / ClientAbort 是客户端层错误，无论换哪家 provider 都会被拒绝，
+    //    不应污染熔断器和数据库健康度（与 release_permit_neutral 同语义）。
+    match categorize_proxy_error(&e, provider) {
+        ErrorCategory::Retryable => {
+            // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
+            attempt
+                .fail_provider(
+                    e.to_string(),
+                    format!("Provider {} 失败: {}", provider.name, e),
+                )
+                .await;
+
+            let (log_code, log_message) = build_retryable_failure_log(
+                &provider.name,
+                failure.attempted_providers,
+                failure.total_providers,
+                &e,
+            );
+            log::warn!("[{app_type}] [{log_code}] {log_message}");
+            AttemptFailure::Continue(e)
+        }
+        ErrorCategory::NonRetryable | ErrorCategory::ClientAbort => {
+            // 不可重试：客户端层错误或客户端断连 → 不污染健康度，仅释放 HalfOpen permit
+            attempt.fail_request(e.to_string()).await;
+            abort(e)
+        }
     }
 }
 
