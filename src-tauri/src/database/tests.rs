@@ -187,7 +187,6 @@ fn existing_skill_repo_selection_is_not_supplemented() {
 fn schema_migration_sets_user_version_when_missing() {
     let conn = Connection::open_in_memory().expect("open memory db");
 
-    Database::create_tables_on_conn(&conn).expect("create tables");
     assert_eq!(
         Database::get_user_version(&conn).expect("read version before"),
         0
@@ -204,7 +203,7 @@ fn schema_migration_sets_user_version_when_missing() {
 #[test]
 fn schema_migration_rejects_future_version() {
     let conn = Connection::open_in_memory().expect("open memory db");
-    Database::create_tables_on_conn(&conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("create tables");
     Database::set_user_version(&conn, SCHEMA_VERSION + 1).expect("set future version");
 
     let err =
@@ -301,9 +300,9 @@ fn schema_migration_aligns_column_defaults_and_types() {
 }
 
 #[test]
-fn schema_create_tables_include_pricing_model_columns() {
+fn schema_fresh_database_includes_pricing_model_columns() {
     let conn = Connection::open_in_memory().expect("open memory db");
-    Database::create_tables_on_conn(&conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("migrate fresh database");
 
     let multiplier = get_column_info(&conn, "proxy_config", "default_cost_multiplier");
     assert_eq!(multiplier.r#type, "TEXT");
@@ -459,109 +458,6 @@ fn migration_v10_to_v11_rebuilds_rollups_with_request_model_dimension() {
 }
 
 #[test]
-fn schema_create_tables_repairs_dev_global_profile_marker() {
-    let conn = Connection::open_in_memory().expect("open memory db");
-
-    // 模拟跑过未发布开发版的库：user_version 已是 12（迁移不会再跑），
-    // 但 current 标记还是全局 key（现按应用分组）
-    conn.execute_batch(
-        r#"
-        CREATE TABLE profiles (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            payload TEXT NOT NULL,
-            sort_order INTEGER,
-            created_at INTEGER,
-            updated_at INTEGER
-        );
-        INSERT INTO profiles (id, name, payload) VALUES ('p1', 'Project A', '{}');
-        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
-        INSERT INTO settings (key, value) VALUES ('current_profile_id', 'p1');
-        "#,
-    )
-    .expect("seed dev v12 shape");
-    Database::set_user_version(&conn, 12).expect("set user_version=12");
-
-    Database::create_tables_on_conn(&conn).expect("create tables should repair marker");
-
-    // 全局 current 标记改名为 claude 组标记，旧 key 删除
-    let claude_marker: String = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'current_profile_id_claude'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("scoped current marker");
-    assert_eq!(claude_marker, "p1");
-    let old_marker: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM settings WHERE key = 'current_profile_id'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("count old marker");
-    assert_eq!(old_marker, 0);
-
-    // 修复必须幂等：再跑一遍不应破坏已迁移的标记
-    Database::create_tables_on_conn(&conn).expect("repair is idempotent");
-    let claude_marker: String = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'current_profile_id_claude'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("scoped current marker survives");
-    assert_eq!(claude_marker, "p1");
-}
-
-#[test]
-fn schema_create_tables_repairs_legacy_proxy_config_singleton_to_per_app() {
-    let conn = Connection::open_in_memory().expect("open memory db");
-
-    // 模拟测试版 v2：user_version=2，但 proxy_config 仍是单例结构（无 app_type）
-    Database::set_user_version(&conn, 2).expect("set user_version");
-    conn.execute_batch(
-        r#"
-        CREATE TABLE proxy_config (
-            id INTEGER PRIMARY KEY,
-            enabled INTEGER NOT NULL DEFAULT 0,
-            listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
-            listen_port INTEGER NOT NULL DEFAULT 5000,
-            max_retries INTEGER NOT NULL DEFAULT 3,
-            request_timeout INTEGER NOT NULL DEFAULT 300,
-            enable_logging INTEGER NOT NULL DEFAULT 1,
-            target_app TEXT NOT NULL DEFAULT 'claude',
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO proxy_config (id, enabled) VALUES (1, 1);
-        "#,
-    )
-    .expect("seed legacy proxy_config");
-
-    Database::create_tables_on_conn(&conn).expect("create tables should repair proxy_config");
-
-    assert!(
-        Database::has_column(&conn, "proxy_config", "app_type").expect("check app_type"),
-        "proxy_config should be migrated to per-app structure"
-    );
-
-    let count: i32 = conn
-        .query_row("SELECT COUNT(*) FROM proxy_config", [], |r| r.get(0))
-        .expect("count rows");
-    assert_eq!(count, 4, "per-app proxy_config should have 4 rows");
-
-    // 新结构下应能按 app_type 查询
-    let _: i32 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM proxy_config WHERE app_type = 'claude'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("query by app_type");
-}
-
-#[test]
 fn migration_from_v3_8_schema_v1_to_current_schema_v3() {
     let conn = Connection::open_in_memory().expect("open memory db");
     conn.execute("PRAGMA foreign_keys = ON;", [])
@@ -602,8 +498,7 @@ fn migration_from_v3_8_schema_v1_to_current_schema_v3() {
     )
     .expect("seed legacy skill");
 
-    // 按应用启动流程：先 create_tables（补齐新增表），再 apply_schema_migrations（按 user_version 迁移）
-    Database::create_tables_on_conn(&conn).expect("create tables");
+    // 按应用启动流程：按 user_version 逐步迁移（新增表由引入它们的步骤创建）
     Database::apply_schema_migrations_on_conn(&conn).expect("apply migrations");
 
     assert_eq!(
@@ -899,7 +794,7 @@ fn ensure_incremental_auto_vacuum_rebuilds_existing_file_db() {
     let conn = Connection::open(&path).expect("open temp db");
     conn.execute("PRAGMA auto_vacuum = NONE;", [])
         .expect("set none auto_vacuum");
-    Database::create_tables_on_conn(&conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("create tables");
 
     assert_eq!(
         Database::get_auto_vacuum_mode(&conn).expect("auto_vacuum before rebuild"),
@@ -930,7 +825,7 @@ fn write_backup_file(
     let backup_dir = home.join(".cc-switch").join("backups");
     std::fs::create_dir_all(&backup_dir).expect("create backup dir");
     let conn = Connection::open(backup_dir.join(filename)).expect("open backup db");
-    Database::create_tables_on_conn(&conn).expect("create backup tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("create backup tables");
     if let Some(id) = provider_id {
         conn.execute(
             "INSERT INTO providers (id, app_type, name, settings_config, meta)

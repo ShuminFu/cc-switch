@@ -6,6 +6,7 @@
 //! - `user_version == SCHEMA_VERSION`
 //! - 归一化后的 sqlite_master / table_info 与全新数据库一致
 //! - 用户数据行被保留
+//! - `schema_migrations` 审计表恰好记录本次执行的每个迁移步骤（CCS-145）
 //! - 再次启动迁移是 no-op（数据与 schema 不变，不再创建迁移前备份）
 //! - `SCHEMA_VERSION + 1` 的数据库会被当前应用拒绝
 //!
@@ -65,6 +66,7 @@ const USER_DATA_TABLES: &[&str] = &[
     "profiles",
     "skills",
     "proxy_config",
+    "schema_migrations",
 ];
 
 fn fixtures_dir() -> PathBuf {
@@ -507,6 +509,17 @@ fn fresh_schema() -> SchemaShape {
     schema_shape(&conn)
 }
 
+/// `schema_migrations` 审计表中版本大于 `version` 的记录（按执行顺序）
+fn applied_migrations_after(conn: &Connection, version: i32) -> Vec<i32> {
+    let mut stmt = conn
+        .prepare("SELECT version FROM schema_migrations WHERE version > ?1 ORDER BY id")
+        .expect("prepare schema_migrations query");
+    stmt.query_map([version], |row| row.get(0))
+        .expect("query schema_migrations")
+        .collect::<Result<_, _>>()
+        .expect("read schema_migrations")
+}
+
 /// 在当前测试环境中再次启动，断言没有任何变化，也不会再做迁移前备份
 fn assert_second_init_is_noop(label: &str) {
     let before = full_snapshot(&open(&db_path()));
@@ -590,6 +603,11 @@ fn every_released_schema_migrates_to_current() {
         );
         assert_schema_eq(&label, &schema_shape(&after), &expected);
         assert_rows_preserved(&label, &before, &after);
+        assert_eq!(
+            applied_migrations_after(&after, version),
+            ((version + 1)..=SCHEMA_VERSION).collect::<Vec<_>>(),
+            "{label}: schema_migrations must record each applied step once"
+        );
         drop(after);
 
         assert_second_init_is_noop(&label);

@@ -3,8 +3,9 @@
 This page says what CC Switch does when two builds disagree about the database
 schema: a downgrade or channel switch on one machine, and devices running
 different versions that share a sync remote. It also says when to bump each
-version constant. Anyone changing `src-tauri/src/database/schema.rs` or the
-sync format should read it first. The PR template has a checkbox for it.
+version constant. Anyone changing the database schema or the
+sync format should read it first. Migrations live in
+`src-tauri/src/database/migrations/`. The PR template has a checkbox for it.
 
 ## Version numbers
 
@@ -18,11 +19,21 @@ sync format should read it first. The PR template has a checkbox for it.
 ## Rules for schema changes
 
 1. **Forward migration only.** A build opens any database with
-   `user_version <= SCHEMA_VERSION` and migrates it up, one step at a time, in
-   `apply_schema_migrations_on_conn`. Never remove a migration step.
-   `tests/migrations.rs` replays every `tests/fixtures/db/v{N}.sql`.
-2. **Bump `SCHEMA_VERSION` for every change to the stored schema.** Add a
-   `vN → vN+1` step and a fixture made with `scripts/gen-db-fixture.sh`.
+   `user_version <= SCHEMA_VERSION` and migrates it up, one step at a time,
+   through the ordered `MIGRATIONS` table in `database/migrations/mod.rs`. A new
+   database starts at v0 and runs every step, beginning with the frozen v1
+   baseline. Never remove or edit a released step, and never repair the schema
+   outside a step: errors propagate and roll the whole run back. Each applied
+   step is recorded in the device-local `schema_migrations` table (not synced).
+   `tests/migrations.rs` replays every `tests/fixtures/db/v{N}.sql`, and a unit
+   test checks that `MIGRATIONS` is contiguous and ends at `SCHEMA_VERSION`.
+2. **Bump `SCHEMA_VERSION` for every change to the stored schema.** Append a
+   `Migration { version: N + 1, .. }` step and a fixture made with
+   `scripts/gen-db-fixture.sh`. The step declares its `db_compat` impact:
+   `DbCompatImpact::Additive`, or `DbCompatImpact::Breaking { db_compat_version }`
+   together with the `DB_COMPAT_VERSION` bump described below. `PrePolicy` marks
+   the non-additive steps released before this policy (v15 and earlier) and is
+   rejected for new steps.
 3. **Keep changes additive within one `DB_COMPAT_VERSION`.** That means new
    tables, new columns with a default value, and new indexes. Do not rename or
    drop a table or column, and do not change what an existing column means.
@@ -97,6 +108,6 @@ pre-import backup is taken and before anything is written.
 
 ## Checklist for a schema PR
 
-- [ ] `SCHEMA_VERSION` bumped, with a migration step and a `tests/fixtures/db/v{N}.sql` fixture
-- [ ] The change is additive, or `DB_COMPAT_VERSION` is bumped and the release notes say so
+- [ ] `SCHEMA_VERSION` bumped, with a step appended to `MIGRATIONS` and a `tests/fixtures/db/v{N}.sql` fixture
+- [ ] The step declares `db_compat`: `Additive`, or `Breaking` with the `DB_COMPAT_VERSION` bump and release notes
 - [ ] `cargo test --manifest-path src-tauri/Cargo.toml migrations sync_protocol` passes

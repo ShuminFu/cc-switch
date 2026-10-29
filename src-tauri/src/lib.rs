@@ -414,7 +414,7 @@ pub fn run() {
             // 若迁移失败（数据库损坏/权限不足/user_version 过新等），需要给用户明确提示，
             // 否则表现可能只是“应用打不开/闪退”。
             //
-            // 预检：数据库版本过新时，必须先于任何 schema 写操作（create_tables 内含
+            // 预检：数据库版本过新时，必须先于任何 schema 写操作（迁移步骤内含
             // DROP/ALTER 等 DDL）进入恢复界面，避免旧应用对读不懂的更新版 DB 落写。
             match crate::database::Database::stored_user_version_exceeds_supported(&db_path) {
                 Ok(Some(version)) => {

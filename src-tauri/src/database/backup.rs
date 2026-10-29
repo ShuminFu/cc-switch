@@ -25,6 +25,8 @@ const SYNC_SKIP_TABLES: &[&str] = &[
     "proxy_live_backup",
     "usage_daily_rollups",
     "session_log_sync",
+    // 迁移审计记录属于本设备
+    "schema_migrations",
 ];
 
 /// Tables whose local data is preserved (restored from local snapshot) during WebDAV import.
@@ -35,6 +37,8 @@ const SYNC_PRESERVE_TABLES: &[&str] = &[
     "proxy_live_backup",
     "usage_daily_rollups",
     "session_log_sync",
+    // 迁移审计记录属于本设备
+    "schema_migrations",
 ];
 
 /// Settings rows that belong to this install only: never exported, and kept
@@ -153,8 +157,7 @@ impl Database {
         // 头部可伪造：以实际执行后的 user_version 再校验一次
         Self::ensure_dump_version_supported(Self::get_user_version(&temp_conn)?)?;
 
-        // 补齐缺失表/索引并进行基础校验
-        Self::create_tables_on_conn(&temp_conn)?;
+        // 迁移到当前 schema 并进行基础校验
         Self::apply_schema_migrations_on_conn(&temp_conn)?;
         Self::validate_basic_state(&temp_conn)?;
         if let Some(local_snapshot) = local_snapshot.as_ref() {
@@ -414,7 +417,7 @@ impl Database {
         Ok(Some(backup_path))
     }
 
-    /// 迁移前备份：在任何 DDL（create_tables / schema 迁移）之前调用。
+    /// 迁移前备份：在任何 DDL（schema 迁移）之前调用。
     ///
     /// 已有数据库且 `user_version < SCHEMA_VERSION`（含 v0）时，用 SQLite Online Backup API
     /// 生成快照（WAL 中尚未 checkpoint 的写入也会包含在内）；旧版 `config.json` 仍存在时
@@ -849,7 +852,6 @@ impl Database {
         Self::copy_database(&source_conn, &mut temp_conn)?;
         drop(source_conn);
 
-        Self::create_tables_on_conn(&temp_conn)?;
         Self::apply_schema_migrations_on_conn(&temp_conn)?;
         Self::validate_basic_state(&temp_conn)?;
         Self::ensure_model_pricing_seeded_on_conn(&temp_conn)?;
@@ -934,7 +936,6 @@ impl Database {
         Self::copy_database(&source_conn, &mut temp_conn)?;
         drop(source_conn);
 
-        Self::create_tables_on_conn(&temp_conn)?;
         Self::apply_schema_migrations_on_conn(&temp_conn)?;
         Self::validate_basic_state(&temp_conn)?;
         Self::ensure_model_pricing_seeded_on_conn(&temp_conn)?;
