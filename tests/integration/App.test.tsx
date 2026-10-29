@@ -10,6 +10,7 @@ import {
   setCurrentProviderId,
   setLiveProviderIds,
   setProviders,
+  setSettings,
 } from "../msw/state";
 import { emitTauriEvent } from "../msw/tauriMocks";
 
@@ -503,6 +504,42 @@ describe("App integration with MSW", () => {
     expect(toastErrorMock).not.toHaveBeenCalled();
 
     switchSpy.mockRestore();
+  });
+
+  it("offers the palette takeover action only where the header proxy switch is shown", async () => {
+    setSettings({ enableLocalProxy: true });
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    fireEvent.click(await screen.findByTestId("first-run-notice-confirm"));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(
+      await screen.findByText("commandPalette.enableTakeover"),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    // 累加模式应用（OpenClaw 等）头部不显示代理开关，面板也不应提供接管操作
+    fireEvent.click(screen.getByText("switch-openclaw"));
+    await waitFor(() =>
+      expect(screen.getByTestId("app-switcher").textContent).toContain(
+        "openclaw",
+      ),
+    );
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(
+      await screen.findByPlaceholderText("commandPalette.placeholder"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("commandPalette.enableTakeover"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("commandPalette.openSettings")).toBeInTheDocument();
   });
 
   it("renders with defaults when localStorage getItem and setItem throw", async () => {

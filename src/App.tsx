@@ -344,7 +344,9 @@ function App() {
         onOpenSettings={() => openSettings("general")}
         onAddProvider={() => setIsAddOpen(true)}
         onToggleTakeover={
-          settingsData?.enableLocalProxy && activeApp !== "claude-desktop"
+          settingsData?.enableLocalProxy &&
+          activeApp !== "claude-desktop" &&
+          !activeAppCaps.additive
             ? () =>
                 void setTakeoverForApp({
                   appType: activeApp,
