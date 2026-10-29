@@ -24,16 +24,14 @@ pub async fn get_session_messages(
     .map_err(|e| format!("Failed to load session messages: {e}"))?
 }
 
+/// 在终端中恢复会话。webview 只能指定 `{providerId, sessionId}`：
+/// 恢复命令与工作目录都由后端根据扫描到的会话元数据和固定模板生成，
+/// 任何 IPC 参数都不会被当作 shell 字符串执行。
 #[tauri::command]
 pub async fn launch_session_terminal(
-    command: String,
-    cwd: Option<String>,
-    custom_config: Option<String>,
+    providerId: String,
+    sessionId: String,
 ) -> Result<bool, String> {
-    let command = command.clone();
-    let cwd = cwd.clone();
-    let custom_config = custom_config.clone();
-
     // Read preferred terminal from global settings
     let preferred = crate::settings::get_preferred_terminal();
     // Map global setting terminal names to session terminal names
@@ -45,11 +43,12 @@ pub async fn launch_session_terminal(
     };
 
     tauri::async_runtime::spawn_blocking(move || {
+        let resume = session_manager::resolve_resume_target(&providerId, &sessionId)?;
         session_manager::terminal::launch_terminal(
             &target,
-            &command,
-            cwd.as_deref(),
-            custom_config.as_deref(),
+            &resume.command,
+            resume.cwd.as_deref(),
+            None,
         )
     })
     .await

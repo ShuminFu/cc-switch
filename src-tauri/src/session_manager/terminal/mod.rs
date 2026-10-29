@@ -315,9 +315,9 @@ fn build_shell_command(command: &str, cwd: Option<&str>) -> String {
     }
 }
 
+/// POSIX 单引号转义：双引号内仍会展开 `$(...)` 与反引号，因此统一使用单引号。
 fn shell_escape(value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{escaped}\"")
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 fn escape_osascript(value: &str) -> String {
@@ -377,6 +377,15 @@ mod tests {
         );
 
         // Verify shell_escape works correctly for paths with spaces
-        assert_eq!(shell_escape(cwd), "\"/tmp/project dir\"");
+        assert_eq!(shell_escape(cwd), "'/tmp/project dir'");
+    }
+
+    #[test]
+    fn shell_escape_neutralizes_command_substitution_in_cwd() {
+        assert_eq!(
+            build_shell_command("claude --resume abc", Some("/tmp/$(rm -rf ~)")),
+            "cd '/tmp/$(rm -rf ~)' && claude --resume abc"
+        );
+        assert_eq!(shell_escape("it's"), "'it'\"'\"'s'");
     }
 }

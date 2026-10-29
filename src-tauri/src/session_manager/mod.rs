@@ -93,6 +93,103 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
     sessions
 }
 
+/// 根据固定模板构建会话恢复命令。session id 作为单个 shell 参数被引用，
+/// 永远不会以原始字符串拼接进 shell；不支持 CLI 恢复的 provider 返回 None。
+pub fn build_resume_command(provider_id: &str, session_id: &str) -> Option<String> {
+    let program = match provider_id {
+        "claude" => "claude --resume",
+        "codex" => "codex resume",
+        "gemini" => "gemini --resume",
+        "grokbuild" => "grok --resume",
+        "opencode" => "opencode -s",
+        _ => return None,
+    };
+    Some(format!("{program} {}", shell_quote_arg(session_id)))
+}
+
+/// 只由安全字符组成的参数保持原样（保证常见 UUID 形式的命令可读），
+/// 其余一律走 POSIX 单引号转义。
+fn shell_quote_arg(value: &str) -> String {
+    let is_plain = !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if is_plain {
+        value.to_string()
+    } else {
+        shell_single_quote(value)
+    }
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+/// 校验来自 webview 的 session id：拒绝空值、控制字符以及会被 CLI 当作选项的前导 `-`。
+fn validate_resume_session_id(session_id: &str) -> Result<(), String> {
+    if session_id.trim().is_empty() {
+        return Err("Session id is empty".to_string());
+    }
+    if session_id.starts_with('-') {
+        return Err("Session id must not start with '-'".to_string());
+    }
+    if session_id.chars().any(char::is_control) {
+        return Err("Session id contains control characters".to_string());
+    }
+    Ok(())
+}
+
+/// 恢复会话所需的终端参数：由后端生成的命令与会话元数据中的工作目录。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeTarget {
+    pub command: String,
+    pub cwd: Option<String>,
+}
+
+/// 按 `{provider_id, session_id}` 在后端扫描到的会话中查找目标，并用固定模板生成恢复命令。
+/// webview 不再能提供命令字符串或工作目录。
+pub fn resolve_resume_target(provider_id: &str, session_id: &str) -> Result<ResumeTarget, String> {
+    validate_resume_session_id(session_id)?;
+    let sessions = scan_provider_sessions(provider_id)?;
+    resume_target_from_sessions(&sessions, provider_id, session_id)
+}
+
+fn scan_provider_sessions(provider_id: &str) -> Result<Vec<SessionMeta>, String> {
+    let sessions = match provider_id {
+        "codex" => codex::scan_sessions(),
+        "claude" => claude::scan_sessions(),
+        "opencode" => opencode::scan_sessions(),
+        "gemini" => gemini::scan_sessions(),
+        "grokbuild" => grokbuild::scan_sessions(),
+        "openclaw" | "hermes" => {
+            return Err(format!(
+                "Provider {provider_id} does not support terminal resume"
+            ))
+        }
+        _ => return Err(format!("Unsupported provider: {provider_id}")),
+    };
+    Ok(sessions)
+}
+
+fn resume_target_from_sessions(
+    sessions: &[SessionMeta],
+    provider_id: &str,
+    session_id: &str,
+) -> Result<ResumeTarget, String> {
+    validate_resume_session_id(session_id)?;
+    let meta = sessions
+        .iter()
+        .find(|meta| meta.provider_id == provider_id && meta.session_id == session_id)
+        .ok_or_else(|| format!("Session not found: {provider_id}/{session_id}"))?;
+    let command = build_resume_command(provider_id, &meta.session_id)
+        .ok_or_else(|| format!("Provider {provider_id} does not support terminal resume"))?;
+    let cwd = meta
+        .project_dir
+        .clone()
+        .filter(|dir| !dir.trim().is_empty());
+    Ok(ResumeTarget { command, cwd })
+}
+
 pub fn load_messages(provider_id: &str, source_path: &str) -> Result<Vec<SessionMessage>, String> {
     // SQLite sessions use a "sqlite:" prefixed source_path
     if provider_id == "opencode" && source_path.starts_with("sqlite:") {
@@ -355,5 +452,106 @@ mod tests {
             outcomes[2].error.as_deref(),
             Some("Session was not deleted")
         );
+    }
+
+    fn session_meta(provider_id: &str, session_id: &str, project_dir: Option<&str>) -> SessionMeta {
+        SessionMeta {
+            provider_id: provider_id.to_string(),
+            session_id: session_id.to_string(),
+            title: None,
+            summary: None,
+            project_dir: project_dir.map(str::to_string),
+            created_at: None,
+            last_active_at: None,
+            source_path: None,
+            resume_command: build_resume_command(provider_id, session_id),
+        }
+    }
+
+    #[test]
+    fn resume_command_uses_fixed_templates_for_plain_ids() {
+        assert_eq!(
+            build_resume_command("claude", "abc-123").as_deref(),
+            Some("claude --resume abc-123")
+        );
+        assert_eq!(
+            build_resume_command("codex", "019a_x.y").as_deref(),
+            Some("codex resume 019a_x.y")
+        );
+        assert_eq!(
+            build_resume_command("gemini", "g1").as_deref(),
+            Some("gemini --resume g1")
+        );
+        assert_eq!(
+            build_resume_command("grokbuild", "k1").as_deref(),
+            Some("grok --resume k1")
+        );
+        assert_eq!(
+            build_resume_command("opencode", "ses_1").as_deref(),
+            Some("opencode -s ses_1")
+        );
+        assert_eq!(build_resume_command("openclaw", "x"), None);
+        assert_eq!(build_resume_command("hermes", "x"), None);
+        assert_eq!(build_resume_command("unknown", "x"), None);
+    }
+
+    #[test]
+    fn resume_command_single_quotes_shell_metacharacters_in_session_id() {
+        assert_eq!(
+            build_resume_command("claude", "abc;rm -rf ~").as_deref(),
+            Some("claude --resume 'abc;rm -rf ~'")
+        );
+        assert_eq!(
+            build_resume_command("codex", "a'$(id)'b").as_deref(),
+            Some("codex resume 'a'\"'\"'$(id)'\"'\"'b'")
+        );
+    }
+
+    #[test]
+    fn resume_target_quotes_malicious_session_id_and_uses_backend_cwd() {
+        let sessions = vec![
+            session_meta("codex", "abc;rm -rf ~", Some("/tmp/project")),
+            session_meta("claude", "abc;rm -rf ~", Some("/tmp/other")),
+        ];
+
+        let target = resume_target_from_sessions(&sessions, "claude", "abc;rm -rf ~")
+            .expect("resolve target");
+
+        assert_eq!(
+            target,
+            ResumeTarget {
+                command: "claude --resume 'abc;rm -rf ~'".to_string(),
+                cwd: Some("/tmp/other".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn resume_target_rejects_unknown_or_unsafe_session_ids() {
+        let sessions = vec![
+            session_meta("claude", "known", None),
+            session_meta("claude", "-x", None),
+            session_meta("claude", "a\nb", None),
+        ];
+
+        assert!(resume_target_from_sessions(&sessions, "claude", "known;rm -rf ~").is_err());
+        assert!(resume_target_from_sessions(&sessions, "codex", "known").is_err());
+        assert!(resume_target_from_sessions(&sessions, "claude", "-x").is_err());
+        assert!(resume_target_from_sessions(&sessions, "claude", "a\nb").is_err());
+        assert!(resume_target_from_sessions(&sessions, "claude", "  ").is_err());
+        assert_eq!(
+            resume_target_from_sessions(&sessions, "claude", "known")
+                .expect("known session")
+                .cwd,
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_resume_target_rejects_providers_without_cli_resume() {
+        assert!(resolve_resume_target("openclaw", "abc").is_err());
+        assert!(resolve_resume_target("hermes", "abc").is_err());
+        assert!(resolve_resume_target("unknown", "abc").is_err());
+        assert!(resolve_resume_target("claude", "-abc").is_err());
     }
 }

@@ -39,16 +39,18 @@ export const sessionsApi = {
     return await invoke("delete_sessions", { items });
   },
 
+  /**
+   * Resume a session in the preferred terminal. Only the session identity is
+   * sent; the backend builds the resume command and working directory itself.
+   */
   async launchTerminal(options: {
-    command: string;
-    cwd?: string | null;
-    customConfig?: string | null;
+    providerId: string;
+    sessionId: string;
   }): Promise<boolean> {
-    const { command, cwd, customConfig } = options;
+    const { providerId, sessionId } = options;
     return await invoke("launch_session_terminal", {
-      command,
-      cwd,
-      customConfig,
+      providerId,
+      sessionId,
     });
   },
 };

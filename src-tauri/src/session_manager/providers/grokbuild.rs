@@ -189,7 +189,7 @@ fn parse_summary(path: &Path) -> Option<SessionMeta> {
         created_at,
         last_active_at,
         source_path: Some(path.to_string_lossy().to_string()),
-        resume_command: Some(format!("grok --resume {session_id}")),
+        resume_command: crate::session_manager::build_resume_command("grokbuild", &session_id),
     })
 }
 
