@@ -30,13 +30,14 @@ How we run it for now:
   keeps dev-dependency features out of normal builds, so the shipped binary
   and `cargo build` are unchanged.
 - **The generator is a test.**
-  `commands::usage::usage_bindings::usage_bindings_are_up_to_date` renders the
+  `bindings::bindings_are_up_to_date` (`src-tauri/src/bindings.rs`, moved
+  there from `commands::usage` in CCS-117) renders the
   bindings and fails when `src/shared/bindings.ts` is stale. That makes the
   test both the CI dirty check and a compile-time inventory of the registered
   commands. Regenerate with:
 
   ```bash
-  cd src-tauri && UPDATE_BINDINGS=1 cargo test --lib usage_bindings
+  cd src-tauri && UPDATE_BINDINGS=1 cargo test --lib bindings
   ```
 
 - **Types are consumed now. The generated `commands` object is not, yet.**
@@ -76,10 +77,41 @@ How we run it for now:
 - The release build has no new dependencies. Binding generation needs
   `cargo test` (debug, test cfg).
 
+## CCS-117 rollout
+
+- `Type` is now also derived (test cfg only) on `AppType`, `Provider` (with
+  `ProviderMeta` and its nested DTOs; `settingsConfig` and
+  `localProxyRequestOverrides.body` export as `unknown`), `ProxyStatus` and
+  `ActiveTarget`. They are registered with `Builder::typ` because their
+  commands do not carry `#[specta::specta]` yet.
+- The builder also exports `COMMANDS`, every command name in the
+  `generate_handler!` list in `lib.rs` (parsed from the source by
+  `registered_commands()`). Adding or removing a command therefore also makes
+  the committed bindings stale.
+- CI: the Linux `Backend Checks` job has a `Check generated bindings` step. It
+  regenerates the file and fails with a `git diff` when it differs from the
+  committed one. The full `cargo test` run on every OS also fails on a stale
+  file.
+- `src/types/proxy.ts` re-exports the generated `ProxyStatus`/`ActiveTarget`.
+- MSW: `tests/msw/handlers.ts` registers mocks through `command(name, resolve)`.
+  `name` must be a generated `CommandName` and `resolve` must return the
+  generated result type (`tests/msw/commands.ts`), or an `HttpResponse` to
+  simulate a failure. `tests/msw/handlers.test.ts` requires every registered
+  command to have a handler or to be listed in
+  `tests/msw/unmockedCommands.ts`, rejects handlers for unregistered commands,
+  and checks `AppId` equals the generated `AppType_Serialize`.
+- Observed drift fixed by the typing: the backend always serialises
+  `Provider.inFailoverQueue` (it is `#[serde(default)] bool`), while the
+  frontend type has it optional. The `get_providers` mock now fills it in.
+  Five mocks for commands that no longer exist were removed
+  (`import_mcp_from_claude`, `import_mcp_from_codex`,
+  `select_config_directory`, `reorder_failover_queue`,
+  `set_failover_item_enabled`).
+
 ## Follow-ups (not part of the spike)
 
-1. Roll `Type`/`specta::specta` out to the remaining domains: Provider (with `settingsConfig` as `unknown`), AppType, ProxyStatus. Then grow `src/shared/bindings.ts` from a single builder that lists every command (Phase 5 `collect_commands!` split).
-2. Run the bindings dirty check in CI as its own step, either as a named `cargo test --lib usage_bindings` run or as part of the existing Rust test job.
+1. Roll `Type`/`specta::specta` out to the remaining domains (CCS-117 covered the Provider, AppType and ProxyStatus DTOs, but not their commands). Then grow `src/shared/bindings.ts` from a single builder that lists every command (Phase 5 `collect_commands!` split).
+2. ~~Run the bindings dirty check in CI as its own step.~~ Done in CCS-117.
 3. Decide whether to switch the runtime handler to `Builder::invoke_handler()` and use the generated `commands` with an `IpcError`-normalising `typed_error_impl`. Normalise the camelCase command names (`queryProviderUsage`, `testUsageScript`) first.
 4. Bump Tauri to a version whose `tauri-macros` emits `__tauri_command_name_*`, then move to tauri-specta rc.26+.
-5. Type `tests/msw/handlers.ts` against the generated types.
+5. ~~Type `tests/msw/handlers.ts` against the generated types.~~ Done in CCS-117. The remaining step is to add `#[specta::specta]` to the provider and proxy commands so `ResultOverrides` in `tests/msw/commands.ts` can go away.

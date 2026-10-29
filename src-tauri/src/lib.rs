@@ -2,6 +2,8 @@ mod app_config;
 mod app_store;
 mod apps;
 mod auto_launch;
+#[cfg(test)]
+mod bindings;
 mod claude_desktop_config;
 mod claude_mcp;
 mod claude_plugin;

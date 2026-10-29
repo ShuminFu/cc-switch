@@ -11,29 +11,8 @@ export interface ProxyConfig {
   non_streaming_timeout: number;
 }
 
-export interface ProxyStatus {
-  running: boolean;
-  address: string;
-  port: number;
-  active_connections: number;
-  total_requests: number;
-  success_requests: number;
-  failed_requests: number;
-  success_rate: number;
-  uptime_seconds: number;
-  current_provider: string | null;
-  current_provider_id: string | null;
-  last_request_at: string | null;
-  last_error: string | null;
-  failover_count: number;
-  active_targets?: ActiveTarget[];
-}
-
-export interface ActiveTarget {
-  app_type: string;
-  provider_name: string;
-  provider_id: string;
-}
+// 与后端 DTO 一一对应，由 tauri-specta 生成（src/shared/bindings.ts）
+export type { ActiveTarget, ProxyStatus } from "@/shared/bindings";
 
 export interface ProxyServerInfo {
   address: string;
