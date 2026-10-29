@@ -1886,6 +1886,7 @@
       "idExists": "この識別子は既に存在します。別のものを選んでください。",
       "jsonInvalid": "JSON 形式が無効です",
       "tomlInvalid": "TOML 形式が無効です",
+      "validationFailed": "MCP サーバーの設定が無効です",
       "commandRequired": "コマンドを入力してください",
       "singleServerObjectRequired": "単一の MCP サーバーオブジェクトを貼り付けてください（トップレベルの mcpServers は不要）",
       "saveFailed": "保存に失敗しました",

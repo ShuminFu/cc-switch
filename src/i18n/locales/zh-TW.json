@@ -1886,6 +1886,7 @@
       "idExists": "該標識已存在，請更換",
       "jsonInvalid": "JSON 格式錯誤，請檢查",
       "tomlInvalid": "TOML 格式錯誤，請檢查",
+      "validationFailed": "MCP 伺服器設定無效",
       "commandRequired": "請填寫命令",
       "singleServerObjectRequired": "此處只需單個伺服器物件，請不要貼上包含 mcpServers 的整份設定",
       "saveFailed": "儲存失敗",

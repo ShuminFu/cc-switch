@@ -1886,6 +1886,7 @@
       "idExists": "Identifier already exists. Please choose another.",
       "jsonInvalid": "Invalid JSON format",
       "tomlInvalid": "Invalid TOML format",
+      "validationFailed": "Invalid MCP server configuration",
       "commandRequired": "Please enter command",
       "singleServerObjectRequired": "Please paste a single MCP server object (do not include top-level mcpServers)",
       "saveFailed": "Save failed",
