@@ -19,6 +19,7 @@ import { SkillConfirmation } from "./deeplink/SkillConfirmation";
 import { ProviderIcon } from "./ProviderIcon";
 import { invalidateProviderGraph } from "@/entities/provider/invalidate";
 import { providerKeys } from "@/entities/provider/keys";
+import { classifyClaudeEnvKey } from "@/lib/deeplink/envKeys";
 
 interface DeeplinkError {
   url: string;
@@ -296,6 +297,20 @@ export function DeepLinkImportDialog() {
     return value;
   };
 
+  // Split Claude env keys by how the backend treats them on import
+  const claudeEnvGroups = useMemo(() => {
+    const groups = {
+      allowed: [] as Array<[string, string]>,
+      denied: [] as Array<[string, string]>,
+      unlisted: [] as Array<[string, string]>,
+    };
+    if (parsedConfig?.type !== "claude" || !parsedConfig.env) return groups;
+    for (const [key, value] of Object.entries(parsedConfig.env)) {
+      groups[classifyClaudeEnvKey(key)].push([key, String(value)]);
+    }
+    return groups;
+  }, [parsedConfig]);
+
   const getTitle = () => {
     if (!request) return t("deeplink.confirmImport");
     switch (request.resource) {
@@ -532,21 +547,19 @@ export function DeepLinkImportDialog() {
                           {parsedConfig.type === "claude" &&
                             parsedConfig.env && (
                               <div className="space-y-1.5">
-                                {Object.entries(parsedConfig.env).map(
-                                  ([key, value]) => (
-                                    <div
-                                      key={key}
-                                      className="grid grid-cols-2 gap-2 text-xs"
-                                    >
-                                      <span className="font-mono text-muted-foreground truncate">
-                                        {key}
-                                      </span>
-                                      <span className="font-mono truncate">
-                                        {maskValue(key, String(value))}
-                                      </span>
-                                    </div>
-                                  ),
-                                )}
+                                {claudeEnvGroups.allowed.map(([key, value]) => (
+                                  <div
+                                    key={key}
+                                    className="grid grid-cols-2 gap-2 text-xs"
+                                  >
+                                    <span className="font-mono text-muted-foreground truncate">
+                                      {key}
+                                    </span>
+                                    <span className="font-mono truncate">
+                                      {maskValue(key, value)}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
                             )}
 
@@ -612,6 +625,54 @@ export function DeepLinkImportDialog() {
                                 )}
                               </div>
                             )}
+                        </div>
+                      )}
+
+                      {/* Non-allow-listed Claude env keys: full values, highlighted */}
+                      {claudeEnvGroups.unlisted.length > 0 && (
+                        <div
+                          role="alert"
+                          data-testid="deeplink-unlisted-env"
+                          className="rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3 space-y-2"
+                        >
+                          <div className="text-xs font-semibold text-red-700 dark:text-red-300">
+                            {t("deeplink.unlistedEnvTitle")}
+                          </div>
+                          <div className="text-xs text-red-700 dark:text-red-300">
+                            {t("deeplink.unlistedEnvDescription")}
+                          </div>
+                          {claudeEnvGroups.unlisted.map(([key, value]) => (
+                            <div key={key} className="text-xs space-y-0.5">
+                              <div className="font-mono font-medium break-all">
+                                {key}
+                              </div>
+                              <div className="font-mono break-all whitespace-pre-wrap">
+                                {value}
+                              </div>
+                            </div>
+                          ))}
+                          {request.enabled && (
+                            <div className="text-xs font-medium text-red-700 dark:text-red-300">
+                              {t("deeplink.unlistedEnvNoAutoSwitch")}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Process-hijacking Claude env keys dropped by the backend */}
+                      {claudeEnvGroups.denied.length > 0 && (
+                        <div
+                          data-testid="deeplink-denied-env"
+                          className="rounded-lg border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20 p-3 space-y-1 text-xs text-yellow-800 dark:text-yellow-200"
+                        >
+                          <div className="font-semibold">
+                            {t("deeplink.deniedEnvTitle")}
+                          </div>
+                          <div className="font-mono break-all">
+                            {claudeEnvGroups.denied
+                              .map(([key]) => key)
+                              .join(", ")}
+                          </div>
                         </div>
                       )}
 

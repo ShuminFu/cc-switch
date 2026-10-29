@@ -2415,6 +2415,10 @@
     "configUrl": "設定檔 URL",
     "configMergeError": "合併設定檔失敗",
     "primaryEndpoint": "主",
+    "unlistedEnvTitle": "無法識別的環境變數",
+    "unlistedEnvDescription": "以下變數不在已知 Claude Code 設定的允許清單中，將被寫入 Claude 的 settings.json，並被 hooks、Bash 工具和 MCP 服務繼承。請僅在信任來源時匯入。",
+    "unlistedEnvNoAutoSwitch": "不會自動切換到該供應商，請在確認這些值後手動啟用。",
+    "deniedEnvTitle": "基於安全考量已移除（可改變子行程的啟動方式）：",
     "mcp": {
       "title": "批次匯入 MCP Servers",
       "targetApps": "目標應用程式",

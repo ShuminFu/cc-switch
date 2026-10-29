@@ -2415,6 +2415,10 @@
     "configUrl": "Config File URL",
     "configMergeError": "Failed to merge configuration file",
     "primaryEndpoint": "Primary",
+    "unlistedEnvTitle": "Unrecognized environment variables",
+    "unlistedEnvDescription": "These variables are not on the allow-list of known Claude Code settings. They will be written to Claude's settings.json and inherited by hooks, the Bash tool and MCP servers. Import only if you trust the source.",
+    "unlistedEnvNoAutoSwitch": "The provider will not be switched to automatically; enable it manually after reviewing these values.",
+    "deniedEnvTitle": "Removed for safety (can alter how child processes start):",
     "mcp": {
       "title": "Batch Import MCP Servers",
       "targetApps": "Target Apps",

@@ -2415,6 +2415,10 @@
     "configUrl": "配置文件 URL",
     "configMergeError": "合并配置文件失败",
     "primaryEndpoint": "主",
+    "unlistedEnvTitle": "无法识别的环境变量",
+    "unlistedEnvDescription": "以下变量不在已知 Claude Code 配置的允许列表中，将被写入 Claude 的 settings.json，并被 hooks、Bash 工具和 MCP 服务继承。请仅在信任来源时导入。",
+    "unlistedEnvNoAutoSwitch": "不会自动切换到该供应商，请在确认这些值后手动启用。",
+    "deniedEnvTitle": "出于安全考虑已移除（可改变子进程的启动方式）：",
     "mcp": {
       "title": "批量导入 MCP Servers",
       "targetApps": "目标应用",

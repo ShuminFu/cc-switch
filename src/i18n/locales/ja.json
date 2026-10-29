@@ -2415,6 +2415,10 @@
     "configUrl": "設定ファイル URL",
     "configMergeError": "設定ファイルのマージに失敗しました",
     "primaryEndpoint": "メイン",
+    "unlistedEnvTitle": "認識されない環境変数",
+    "unlistedEnvDescription": "以下の変数は既知の Claude Code 設定の許可リストにありません。Claude の settings.json に書き込まれ、hooks、Bash ツール、MCP サーバーに継承されます。信頼できる提供元の場合のみインポートしてください。",
+    "unlistedEnvNoAutoSwitch": "このプロバイダーには自動で切り替わりません。値を確認した後、手動で有効にしてください。",
+    "deniedEnvTitle": "安全のため削除されました（子プロセスの起動方法を変更できます）：",
     "mcp": {
       "title": "MCP サーバーを一括インポート",
       "targetApps": "ターゲットアプリ",
