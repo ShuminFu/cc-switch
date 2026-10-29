@@ -66,5 +66,13 @@ p0-ci-build-smoke, p0-ci-release-gated
 **Remaining / notes.**
 - A GitHub Actions run is needed to confirm acceptance item 1 on `ubuntu-22.04` and on `ubuntu-22.04-arm` (release only). It should then be added as a required check under branch protection.
 - A flake showed up while writing the spec. Switching right after adding the first provider sometimes left the list showing the new provider as "In Use" while the live file and DB held the provider just switched to. The likely cause is a late refetch of the current-provider query from the add mutation overwriting the switch result. This was not root-caused. The spec now waits for the add to settle in both the UI and the file before switching. The race itself may deserve its own ticket.
+
+**Review.** The wiring checks out against both acceptance items. The smoke runs after the debug build in `tauri-build-smoke`. On each Linux release leg it runs on the AppImage before `Prepare Linux Assets` and the upload, with no secrets and no `continue-on-error`, and `publish-release` needs the whole matrix. WebView automation is gated only on the `TAURI_WEBVIEW_AUTOMATION` env var that tauri-driver sets, not on debug builds, so the release AppImage can be driven.
+
+Re-running the smoke surfaced a flake that would block releases at random: 4 failures in 31 runs on the debug binary, all at "switched to DeepSeek". The UI and the base URL were correct, but the stored key was `sk-ccswitch-e2e-smoke`. WebKitWebDriver had dropped a keystroke from the typed key, and the add step only checked the base URL, so the bad key surfaced two steps later. This is probably what the earlier "In Use" flake was too, not an app-side race. Follow-up fix:
+  - the spec retypes the key until the field holds exactly `API_KEY`;
+  - the add step now also checks `ANTHROPIC_AUTH_TOKEN`.
+
+After the fix: 30 of 30 runs pass on the debug binary and 5 of 5 on the AppImage. `pnpm typecheck`, `pnpm format:check` and `pnpm test:unit` (108 files, 1153 tests) all pass. The Status stays Partial until a GitHub Actions run is green.
 - `e2e/pnpm-lock.yaml` is not covered by `audit.yml`. It is dev-only test tooling that never ships, and its install scripts stay blocked by pnpm's default.
 

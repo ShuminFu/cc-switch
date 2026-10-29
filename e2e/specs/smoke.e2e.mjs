@@ -78,7 +78,18 @@ describe("CC Switch release smoke", () => {
 
     const apiKey = await $("#apiKey");
     await apiKey.waitForDisplayed();
-    await apiKey.setValue(API_KEY);
+    // WebKitWebDriver occasionally drops a keystroke while the form is still
+    // re-rendering after the preset was applied; retype until the field holds
+    // exactly the key, so a lost character cannot surface as a wrong token
+    // steps later.
+    await browser.waitUntil(
+      async () => {
+        await apiKey.clearValue();
+        await apiKey.setValue(API_KEY);
+        return (await apiKey.getValue()) === API_KEY;
+      },
+      { timeout: 20_000, interval: 250, timeoutMsg: "API key was not typed" },
+    );
 
     await $('[data-testid="add-provider-submit"]').click();
     await providerCard(PRESET_NAME).waitForExist();
@@ -88,7 +99,9 @@ describe("CC Switch release smoke", () => {
     // list to show that too before switching, so a late refetch from the add
     // cannot overwrite the next switch in the UI.
     await waitForClaudeEnv(
-      (env) => env.ANTHROPIC_BASE_URL === PRESET_BASE_URL,
+      (env) =>
+        env.ANTHROPIC_BASE_URL === PRESET_BASE_URL &&
+        env.ANTHROPIC_AUTH_TOKEN === API_KEY,
       `${claudeSettingsPath} was not written for the first provider`,
     );
     await expect(await mainAction(PRESET_NAME)).toBeDisabled({ wait: 20_000 });
