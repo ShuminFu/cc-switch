@@ -28,6 +28,9 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // 编辑器只在依赖变化时重建，监听器通过 ref 读取最新的 onChange，避免闭包捕获首次渲染的回调
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     if (!editorRef.current) return;
@@ -68,8 +71,8 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       extensions.push(
         placeholderExt(placeholderText),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged && onChange) {
-            onChange(update.state.doc.toString());
+          if (update.docChanged) {
+            onChangeRef.current?.(update.state.doc.toString());
           }
         }),
       );
@@ -130,7 +133,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       view.destroy();
       viewRef.current = null;
     };
-  }, [darkMode, readOnly, minHeight, maxHeight, placeholderText]); // 添加 placeholderText 依赖以支持国际化切换
+  }, [darkMode, readOnly, minHeight, maxHeight, placeholderText]); // 添加 placeholderText 依赖以支持国际化切换；onChange 经 onChangeRef 读取，不放入依赖
 
   // 当 value 从外部改变时更新编辑器内容
   useEffect(() => {
