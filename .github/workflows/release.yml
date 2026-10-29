@@ -326,6 +326,42 @@ jobs:
           [ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ] || unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           pnpm tauri build --bundles appimage,deb,rpm
 
+      # E2E smoke on the AppImage that is about to ship (CCS-201): the same
+      # tauri-driver + WebdriverIO spec ci.yml runs on the debug build. It runs
+      # before Prepare Linux Assets / upload-artifact, so a failing smoke means
+      # this matrix leg uploads nothing and publish-release (needs: release)
+      # never runs. No secrets in env.
+      - name: Install E2E deps (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb
+          cargo install tauri-driver --version 2.1.0 --locked
+          pnpm install --dir e2e --frozen-lockfile --ignore-workspace
+
+      - name: E2E smoke (AppImage)
+        if: runner.os == 'Linux'
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(find src-tauri/target/release/bundle -name "*.AppImage" | head -1 || true)
+          if [ -z "$APPIMAGE" ]; then
+            echo "❌ No AppImage found under target/release/bundle" >&2
+            exit 1
+          fi
+          chmod +x "$APPIMAGE"
+          CC_SWITCH_E2E_APP="$PWD/$APPIMAGE" xvfb-run -a pnpm --dir e2e test
+
+      - name: Upload E2E failure artifacts (Linux)
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-smoke-appimage-${{ matrix.arch || runner.arch }}
+          path: e2e/artifacts/
+          if-no-files-found: ignore
+
       - name: Prepare macOS Assets
         if: runner.os == 'macOS'
         shell: bash

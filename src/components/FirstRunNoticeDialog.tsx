@@ -57,7 +57,10 @@ export function FirstRunNoticeDialog() {
           </DialogDescription>
         </div>
         <DialogFooter>
-          <Button onClick={handleAcknowledge}>
+          <Button
+            data-testid="first-run-notice-confirm"
+            onClick={handleAcknowledge}
+          >
             {t("firstRunNotice.confirm")}
           </Button>
         </DialogFooter>

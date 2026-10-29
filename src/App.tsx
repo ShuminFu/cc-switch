@@ -1539,6 +1539,7 @@ function App() {
                     </div>
 
                     <Button
+                      data-testid="add-provider"
                       aria-label={t("provider.addProvider")}
                       onClick={() => setIsAddOpen(true)}
                       size="icon"

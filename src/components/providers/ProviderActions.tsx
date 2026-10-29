@@ -271,6 +271,7 @@ export function ProviderActions({
         <Button
           size="sm"
           variant={buttonState.variant}
+          data-testid="provider-main-action"
           onClick={handleMainButtonClick}
           disabled={buttonState.disabled}
           className={cn("w-[4.5rem] px-2.5", buttonState.className)}

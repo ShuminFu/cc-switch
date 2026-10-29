@@ -408,6 +408,7 @@ export function ProviderPresetSelector({
             <button
               key={entry.id}
               type="button"
+              data-preset-name={entry.preset.name}
               onClick={() => onPresetChange(entry.id)}
               className={`${getPresetButtonClass(isSelected, entry.preset)} relative`}
               style={getPresetButtonStyle(isSelected, entry.preset)}

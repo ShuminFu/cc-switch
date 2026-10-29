@@ -89,6 +89,7 @@ export function ConfirmDialog({
             {cancelText || t("common.cancel")}
           </Button>
           <Button
+            data-testid="confirm-dialog-confirm"
             variant={variant === "info" ? "default" : "destructive"}
             onClick={() =>
               // 未渲染勾选框时不得回传 defaultChecked 残留值

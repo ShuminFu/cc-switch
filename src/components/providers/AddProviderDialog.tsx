@@ -326,6 +326,7 @@ export function AddProviderDialog({
         <Button
           type="submit"
           form="provider-form"
+          data-testid="add-provider-submit"
           disabled={isFormSubmitting}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >

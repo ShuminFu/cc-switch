@@ -81,6 +81,7 @@ export function ProxyToggle({ className, activeApp }: ProxyToggleProps) {
         />
       )}
       <Switch
+        data-testid="proxy-takeover-switch"
         checked={takeoverEnabled}
         onCheckedChange={handleToggle}
         disabled={isPending}

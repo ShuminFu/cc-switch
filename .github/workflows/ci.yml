@@ -235,6 +235,30 @@ jobs:
           test -f dist/index.html
           test -x src-tauri/target/debug/cc-switch
 
+      # E2E smoke (CCS-201): drive the debug binary through tauri-driver +
+      # WebdriverIO under xvfb: first run, add a preset, switch providers and
+      # check ~/.claude/settings.json, proxy takeover on and restore. The app
+      # runs with a temp HOME. release.yml runs the same spec on the AppImage.
+      - name: Install E2E system deps
+        run: |
+          sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb
+          cargo install tauri-driver --version 2.1.0 --locked
+
+      - name: Install E2E dependencies
+        run: pnpm install --dir e2e --frozen-lockfile --ignore-workspace
+
+      - name: E2E smoke (debug build)
+        timeout-minutes: 10
+        run: xvfb-run -a pnpm --dir e2e test
+
+      - name: Upload E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-smoke-debug
+          path: e2e/artifacts/
+          if-no-files-found: ignore
+
   # Report-only coverage (CCS-019): never blocks a PR. Thresholds are ratcheted
   # in P5 (target: 75% lines for proxy/ and database/). Baseline numbers live in
   # docs/dev/perf-baseline.json.

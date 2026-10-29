@@ -307,6 +307,8 @@ export function ProviderCard({
 
   return (
     <div
+      data-testid="provider-card"
+      data-provider-name={provider.name}
       className={cn(
         "relative overflow-hidden rounded-xl border border-border p-4 transition-all duration-300",
         "bg-card text-card-foreground group",
