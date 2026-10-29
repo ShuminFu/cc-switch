@@ -31,6 +31,17 @@ import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
+// 与后端 inbound_auth::is_loopback_listen_address 保持一致：
+// 非回环监听会把代理暴露给局域网，需要在 UI 上提示。
+function isLoopbackListenAddress(address: string): boolean {
+  const addr = address
+    .trim()
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase();
+  if (addr === "" || addr === "localhost" || addr === "::1") return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(addr);
+}
+
 interface ProxyPanelProps {
   enableLocalProxy: boolean;
   onEnableLocalProxyChange: (checked: boolean) => void;
@@ -553,6 +564,17 @@ export function ProxyPanel({
                         "代理服务器监听的 IP 地址（推荐 127.0.0.1）",
                     })}
                   </p>
+                  {!isLoopbackListenAddress(listenAddress) && (
+                    <p
+                      role="alert"
+                      className="text-xs text-yellow-600 dark:text-yellow-500"
+                    >
+                      {t("proxy.settings.fields.listenAddress.lanWarning", {
+                        defaultValue:
+                          "非回环地址会把代理暴露给局域网。其他设备必须携带本机的代理 token 才能访问，且不再接受旧的 PROXY_MANAGED 占位符。",
+                      })}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">

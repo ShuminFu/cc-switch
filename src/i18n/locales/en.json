@@ -2526,7 +2526,8 @@
         "listenAddress": {
           "label": "Listen Address",
           "placeholder": "127.0.0.1",
-          "description": "IP address the routing server listens on (recommended: 127.0.0.1)"
+          "description": "IP address the routing server listens on (recommended: 127.0.0.1)",
+          "lanWarning": "A non-loopback address exposes the proxy to your local network. Other devices must send this machine's proxy token, and the legacy PROXY_MANAGED placeholder is no longer accepted."
         },
         "listenPort": {
           "label": "Listen Port",

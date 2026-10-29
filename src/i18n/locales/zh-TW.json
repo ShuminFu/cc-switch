@@ -2526,7 +2526,8 @@
         "listenAddress": {
           "label": "監聽位址",
           "placeholder": "127.0.0.1",
-          "description": "路由伺服器監聽的 IP 位址（推薦 127.0.0.1）"
+          "description": "路由伺服器監聽的 IP 位址（推薦 127.0.0.1）",
+          "lanWarning": "非迴環位址會把代理暴露給區域網路。其他裝置必須攜帶本機的代理 token 才能存取，且不再接受舊的 PROXY_MANAGED 佔位符。"
         },
         "listenPort": {
           "label": "監聽連接埠",

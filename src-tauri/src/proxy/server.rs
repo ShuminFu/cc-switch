@@ -11,6 +11,7 @@
 use super::{
     failover_switch::FailoverSwitchManager,
     handlers,
+    inbound_auth::{self, InboundGuard},
     log_codes::srv as log_srv,
     provider_router::ProviderRouter,
     providers::{codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore},
@@ -102,11 +103,26 @@ impl ProxyServer {
                 .parse()
                 .map_err(|e| ProxyError::BindFailed(format!("无效的地址: {e}")))?;
 
+        // 每个安装独立的入站 token：所有非健康检查请求都必须携带
+        let token = inbound_auth::get_or_create_inbound_token(&self.state.db)
+            .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
+        let loopback = inbound_auth::is_loopback_listen_address(&self.config.listen_address);
+        if !loopback {
+            // 非回环监听会把代理暴露给局域网：必须强制 token 鉴权，且不兼容旧占位符
+            if token.trim().is_empty() {
+                return Err(ProxyError::BindFailed(
+                    "非回环监听地址必须启用代理 token 鉴权".to_string(),
+                ));
+            }
+            log::warn!(
+                "[{}] 代理监听非回环地址 {}，局域网请求必须携带本机代理 token",
+                log_srv::NON_LOOPBACK_BIND,
+                self.config.listen_address
+            );
+        }
+
         // 创建关闭通道
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
-
-        // 构建路由
-        let app = self.build_router();
 
         // 绑定监听器
         let listener = tokio::net::TcpListener::bind(&addr)
@@ -116,6 +132,13 @@ impl ProxyServer {
             .local_addr()
             .map_err(|e| ProxyError::BindFailed(e.to_string()))?;
         let actual_port = local_addr.port();
+
+        // 构建路由（Host 校验需要实际监听端口）
+        let app = self.build_router(Arc::new(InboundGuard::new(
+            &self.config.listen_address,
+            actual_port,
+            token,
+        )));
 
         log::info!("[{}] 代理服务器启动于 {local_addr}", log_srv::STARTED);
 
@@ -288,7 +311,21 @@ impl ProxyServer {
         );
     }
 
-    fn build_router(&self) -> Router {
+    /// 构建监听 `port` 时使用的完整路由（含入站鉴权中间件）
+    ///
+    /// 与 [`ProxyServer::start`] 使用的路由完全一致，供进程内测试直接驱动。
+    #[cfg(feature = "testkit")]
+    pub fn router_for_port(&self, port: u16) -> Result<Router, ProxyError> {
+        let token = inbound_auth::get_or_create_inbound_token(&self.state.db)
+            .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
+        Ok(self.build_router(Arc::new(InboundGuard::new(
+            &self.config.listen_address,
+            port,
+            token,
+        ))))
+    }
+
+    fn build_router(&self, guard: Arc<InboundGuard>) -> Router {
         Router::new()
             // 健康检查
             .route("/health", get(handlers::health_check))
@@ -366,6 +403,11 @@ impl ProxyServer {
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
             // 提高默认请求体大小限制（避免 413 Payload Too Large）
             .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
+            // 入站鉴权：Host / Origin / Content-Type / token，失败时不会进入 handler 与转发器
+            .layer(axum::middleware::from_fn_with_state(
+                guard,
+                inbound_auth::enforce_inbound_auth,
+            ))
             .with_state(self.state.clone())
     }
 

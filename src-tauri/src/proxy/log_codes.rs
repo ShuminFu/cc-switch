@@ -28,6 +28,8 @@ pub mod srv {
     pub const TASK_ERROR: &str = "SRV-004";
     pub const ACCEPT_ERR: &str = "SRV-005";
     pub const CONN_ERR: &str = "SRV-006";
+    pub const INBOUND_REJECTED: &str = "SRV-007";
+    pub const NON_LOOPBACK_BIND: &str = "SRV-008";
 }
 
 /// 转发器日志码

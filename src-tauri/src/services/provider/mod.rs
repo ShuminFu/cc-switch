@@ -1090,8 +1090,12 @@ command = "legacy-cmd"
             live.get("env")
                 .and_then(|env| env.get("ANTHROPIC_API_KEY"))
                 .and_then(|v| v.as_str()),
-            Some("PROXY_MANAGED"),
-            "takeover placeholder should stay intact"
+            Some(
+                crate::proxy::inbound_auth::get_or_create_inbound_token(&db)
+                    .expect("read proxy inbound token")
+                    .as_str()
+            ),
+            "takeover token should stay intact (bound to the per-install token)"
         );
         assert_eq!(
             live.get("env")

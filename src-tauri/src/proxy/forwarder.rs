@@ -37,8 +37,6 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::RwLock;
 
-const PROXY_AUTH_PLACEHOLDER: &str = "PROXY_MANAGED";
-
 fn validate_codex_official_authorization(headers: &http::HeaderMap) -> Result<(), ProxyError> {
     let authorization = headers
         .get(http::header::AUTHORIZATION)
@@ -48,9 +46,11 @@ fn validate_codex_official_authorization(headers: &http::HeaderMap) -> Result<()
         None | Some("") => Err(ProxyError::AuthError(
             "Codex 官方登录不可用，请先在 Codex 中完成 ChatGPT 登录".to_string(),
         )),
-        Some(value) if value.contains(PROXY_AUTH_PLACEHOLDER) => Err(ProxyError::AuthError(
-            "已切换到 OpenAI 官方供应商，请重启 Codex 或新建会话以加载官方登录配置".to_string(),
-        )),
+        Some(value) if super::inbound_auth::contains_proxy_token(value) => {
+            Err(ProxyError::AuthError(
+                "已切换到 OpenAI 官方供应商，请重启 Codex 或新建会话以加载官方登录配置".to_string(),
+            ))
+        }
         Some(_) => Ok(()),
     }
 }
@@ -3133,7 +3133,7 @@ fn headers_contain_proxy_placeholder(headers: &http::HeaderMap) -> bool {
     headers.values().any(|value| {
         value
             .to_str()
-            .map(|value| value.contains(PROXY_AUTH_PLACEHOLDER))
+            .map(super::inbound_auth::contains_proxy_token)
             .unwrap_or(false)
     })
 }
@@ -4296,6 +4296,15 @@ mod tests {
         );
         let error = validate_codex_official_authorization(&headers)
             .expect_err("stale placeholder must be rejected");
+        assert!(matches!(error, ProxyError::AuthError(message) if message.contains("重启 Codex")));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer ccs-proxy-0123456789abcdef0123456789abcdef"),
+        );
+        let error = validate_codex_official_authorization(&headers)
+            .expect_err("stale per-install proxy token must be rejected");
         assert!(matches!(error, ProxyError::AuthError(message) if message.contains("重启 Codex")));
     }
 

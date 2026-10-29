@@ -18,6 +18,7 @@ mod handlers;
 mod health;
 pub mod http_client;
 pub mod hyper_client;
+pub mod inbound_auth;
 pub(crate) mod json_canonical;
 pub mod log_codes;
 pub mod media_sanitizer;

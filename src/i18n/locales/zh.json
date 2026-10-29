@@ -2526,7 +2526,8 @@
         "listenAddress": {
           "label": "监听地址",
           "placeholder": "127.0.0.1",
-          "description": "路由服务器监听的 IP 地址（推荐 127.0.0.1）"
+          "description": "路由服务器监听的 IP 地址（推荐 127.0.0.1）",
+          "lanWarning": "非回环地址会把代理暴露给局域网。其他设备必须携带本机的代理 token 才能访问，且不再接受旧的 PROXY_MANAGED 占位符。"
         },
         "listenPort": {
           "label": "监听端口",

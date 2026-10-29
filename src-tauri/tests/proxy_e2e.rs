@@ -550,6 +550,157 @@ async fn request_logs_record_success_and_failure_rows() {
 }
 
 // ============================================================================
+// Inbound auth (CCS-049)
+// ============================================================================
+
+fn router_request(
+    host: &str,
+    content_type: &str,
+    extra_headers: &[(&str, &str)],
+) -> axum::http::Request<axum::body::Body> {
+    let mut builder = axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header("host", host)
+        .header("content-type", content_type)
+        .header("anthropic-version", "2023-06-01");
+    for (name, value) in extra_headers {
+        builder = builder.header(*name, *value);
+    }
+    builder
+        .body(axum::body::Body::from(simple_request().to_string()))
+        .expect("build router request")
+}
+
+#[tokio::test]
+async fn router_rejects_untrusted_requests_before_the_forwarder() {
+    use tower::ServiceExt;
+
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::message("leaked", 10, 5)).await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+    let loopback_host = format!("127.0.0.1:{}", harness.port());
+    let evil_host = format!("evil.example:{}", harness.port());
+    let token = harness.token().to_string();
+
+    let cases: Vec<(&str, axum::http::Request<axum::body::Body>, u16)> = vec![
+        (
+            "text/plain POST with Origin evil.example",
+            router_request(
+                &loopback_host,
+                "text/plain",
+                &[("origin", "https://evil.example"), ("x-api-key", &token)],
+            ),
+            403,
+        ),
+        (
+            "Host evil.example:PORT",
+            router_request(&evil_host, "application/json", &[("x-api-key", &token)]),
+            403,
+        ),
+        (
+            "missing token",
+            router_request(&loopback_host, "application/json", &[]),
+            401,
+        ),
+        (
+            "wrong token",
+            router_request(
+                &loopback_host,
+                "application/json",
+                &[("x-api-key", "ccs-proxy-ffffffffffffffffffffffffffffffff")],
+            ),
+            401,
+        ),
+        (
+            "real-looking upstream key instead of the proxy token",
+            router_request(
+                &loopback_host,
+                "application/json",
+                &[("authorization", "Bearer sk-ant-not-the-proxy-token")],
+            ),
+            401,
+        ),
+    ];
+
+    for (name, request, expected) in cases {
+        let response = harness
+            .router()
+            .oneshot(request)
+            .await
+            .expect("router response");
+        assert_eq!(response.status().as_u16(), expected, "{name}");
+    }
+    assert_eq!(upstream.hits(), 0, "no rejected request reaches upstream");
+    assert!(
+        harness.request_logs().is_empty(),
+        "rejected requests are not logged as proxied traffic"
+    );
+
+    // A loopback Host with the valid token reaches the mock upstream.
+    let response = harness
+        .router()
+        .oneshot(router_request(
+            &loopback_host,
+            "application/json",
+            &[("x-api-key", &token)],
+        ))
+        .await
+        .expect("router response");
+    assert_eq!(response.status(), 200);
+    assert_eq!(upstream.hits(), 1);
+    assert_eq!(
+        upstream.requests()[0].headers["authorization"],
+        "Bearer sk-harness-p1",
+        "the proxy token is replaced by the provider credential"
+    );
+    assert!(
+        !upstream.requests()[0].headers.contains_key("x-api-key"),
+        "the proxy token never reaches upstream"
+    );
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn foreign_host_text_plain_post_is_rejected_on_the_wire() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::message("leaked", 10, 5)).await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    // curl -H 'Host: attacker.test' -H 'Content-Type: text/plain' -d '{}' http://127.0.0.1:PORT/v1/messages
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", harness.port()))
+        .await
+        .expect("connect to proxy");
+    stream
+        .write_all(
+            b"POST /v1/messages HTTP/1.1\r\nHost: attacker.test\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+        )
+        .await
+        .expect("write raw request");
+    let mut raw = Vec::new();
+    stream
+        .read_to_end(&mut raw)
+        .await
+        .expect("read raw response");
+    let raw = String::from_utf8_lossy(&raw);
+    assert!(
+        raw.starts_with("HTTP/1.1 403"),
+        "unexpected response: {raw}"
+    );
+    assert_eq!(upstream.hits(), 0);
+
+    // The same request from a real client with the token goes through.
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(upstream.hits(), 1);
+
+    harness.shutdown().await;
+}
+
+// ============================================================================
 // Baseline: latency, allocations and SQL statements per request
 // ============================================================================
 

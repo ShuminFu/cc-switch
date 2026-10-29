@@ -19,7 +19,6 @@ pub const CC_SWITCH_CODEX_MODEL_PROVIDER_ID: &str = "custom";
 /// cleaned up without mistaking a user's own local provider for takeover.
 pub const CC_SWITCH_CODEX_OFFICIAL_PROXY_PROVIDER_ID: &str = "cc-switch-official";
 pub const CC_SWITCH_CODEX_MODEL_CATALOG_FILENAME: &str = "cc-switch-model-catalog.json";
-const CODEX_PROXY_AUTH_PLACEHOLDER: &str = "PROXY_MANAGED";
 
 /// Top-level `config.toml` key that controls Codex's built-in web-search tool.
 pub(crate) const CODEX_WEB_SEARCH_FIELD: &str = "web_search";
@@ -1392,7 +1391,7 @@ fn remove_codex_proxy_placeholders_from_providers(providers: &mut toml_edit::Tab
             let should_remove = table
                 .get("experimental_bearer_token")
                 .and_then(|item| item.as_str())
-                == Some(CODEX_PROXY_AUTH_PLACEHOLDER);
+                .is_some_and(crate::proxy::inbound_auth::is_proxy_token);
             if should_remove {
                 table.remove("experimental_bearer_token");
             }
@@ -1400,7 +1399,7 @@ fn remove_codex_proxy_placeholders_from_providers(providers: &mut toml_edit::Tab
             let should_remove = table
                 .get("experimental_bearer_token")
                 .and_then(|value| value.as_str())
-                == Some(CODEX_PROXY_AUTH_PLACEHOLDER);
+                .is_some_and(crate::proxy::inbound_auth::is_proxy_token);
             if should_remove {
                 table.remove("experimental_bearer_token");
             }
@@ -1445,7 +1444,16 @@ pub fn apply_codex_official_proxy_route(
     remove_codex_proxy_placeholders_from_providers(&mut providers);
 
     // The local proxy currently exposes HTTP/SSE, not Codex websocket routes.
-    let table = codex_official_provider_table(Some(proxy_base_url), false);
+    let mut table = codex_official_provider_table(Some(proxy_base_url), false);
+    // The ChatGPT login owns `Authorization`, so the local proxy token travels
+    // in its own header. The live writer binds the placeholder to the
+    // per-install token; the forwarder never sends it upstream.
+    let mut proxy_headers = toml_edit::InlineTable::new();
+    proxy_headers.insert(
+        "x-api-key",
+        crate::proxy::inbound_auth::LEGACY_PROXY_TOKEN.into(),
+    );
+    table["http_headers"] = toml_edit::value(proxy_headers);
 
     providers.insert(
         CC_SWITCH_CODEX_OFFICIAL_PROXY_PROVIDER_ID,

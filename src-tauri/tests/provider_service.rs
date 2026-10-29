@@ -639,8 +639,9 @@ wire_api = "responses"
         "enabling takeover should point Codex config.toml at the local proxy"
     );
     assert!(
-        config_after_takeover.contains("PROXY_MANAGED"),
-        "enabling takeover should move the proxy placeholder into config.toml"
+        config_after_takeover.contains(r#"experimental_bearer_token = "ccs-proxy-"#)
+            && !config_after_takeover.contains("PROXY_MANAGED"),
+        "enabling takeover should move the per-install proxy token into config.toml"
     );
     assert!(
         !config_after_takeover.contains("https://api.deepseek.com/v1"),
@@ -686,8 +687,8 @@ wire_api = "responses"
         "disabling takeover should restore the selected DeepSeek live config"
     );
     assert!(
-        !restored_config.contains("PROXY_MANAGED"),
-        "restored live config must not keep the proxy placeholder"
+        !restored_config.contains("PROXY_MANAGED") && !restored_config.contains("ccs-proxy-"),
+        "restored live config must not keep the proxy token"
     );
 }
 
@@ -1622,8 +1623,9 @@ wire_api = "responses"
         "live config should remain pointed at the local proxy"
     );
     assert!(
-        live_config.contains("PROXY_MANAGED"),
-        "live config should keep the proxy bearer placeholder"
+        live_config.contains(r#"experimental_bearer_token = "ccs-proxy-"#)
+            && !live_config.contains("PROXY_MANAGED"),
+        "live config should keep the (per-install) proxy bearer token"
     );
     assert!(
         live_config.contains(r#"model_provider = "deepseek-new""#)

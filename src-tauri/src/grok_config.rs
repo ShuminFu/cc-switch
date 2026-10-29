@@ -261,10 +261,12 @@ pub fn update_api_key(config_toml: &str, api_key: &str) -> Result<String, AppErr
     update_selected_model_string(config_toml, "api_key", api_key)
 }
 
-pub fn has_proxy_placeholder(config_toml: &str, token_placeholder: &str) -> bool {
+/// Whether the selected model's inline api_key is a CC Switch proxy token
+/// (the per-install token or the legacy placeholder).
+pub fn has_proxy_token(config_toml: &str) -> bool {
     extract_model_config(config_toml)
         .and_then(|config| config.api_key)
-        .is_some_and(|api_key| api_key == token_placeholder)
+        .is_some_and(|api_key| crate::proxy::inbound_auth::is_proxy_token(&api_key))
 }
 
 pub fn base_url_matches(config_toml: &str, predicate: impl FnOnce(&str) -> bool) -> bool {
@@ -432,7 +434,7 @@ context_window = 500000
         let selected = extract_model_config(&updated).expect("updated selected model");
         assert_eq!(selected.base_url, "http://127.0.0.1:15721/grokbuild/v1");
         assert_eq!(selected.api_key.as_deref(), Some("PROXY_MANAGED"));
-        assert!(has_proxy_placeholder(&updated, "PROXY_MANAGED"));
+        assert!(has_proxy_token(&updated));
     }
 
     #[test]

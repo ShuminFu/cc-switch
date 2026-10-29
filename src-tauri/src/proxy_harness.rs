@@ -348,6 +348,8 @@ impl ProxyHarnessBuilder {
 
     pub async fn spawn(self) -> ProxyHarness {
         assert!(!self.providers.is_empty(), "harness needs a provider");
+        // Same process-level TLS provider the app installs at startup (lib.rs).
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let db = Arc::new(Database::memory().expect("in-memory database"));
         install_statement_counter(&db);
 
@@ -406,6 +408,8 @@ impl ProxyHarnessBuilder {
         };
         let server = ProxyServer::new(config, db.clone(), None);
         let info = server.start().await.expect("start proxy server");
+        let token = crate::proxy::inbound_auth::get_or_create_inbound_token(&db)
+            .expect("read proxy inbound token");
         let client = reqwest::Client::builder()
             .no_proxy()
             .build()
@@ -415,6 +419,8 @@ impl ProxyHarnessBuilder {
             server,
             db,
             base_url: format!("http://127.0.0.1:{}", info.port),
+            port: info.port,
+            token,
             client,
         }
     }
@@ -465,6 +471,8 @@ pub struct ProxyHarness {
     server: ProxyServer,
     db: Arc<Database>,
     base_url: String,
+    port: u16,
+    token: String,
     client: reqwest::Client,
 }
 
@@ -491,13 +499,31 @@ impl ProxyHarness {
         &self.db
     }
 
+    /// Port the proxy listens on.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// The per-install inbound token the proxy expects from clients.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// The proxy's full router (inbound auth included), for in-process
+    /// `tower::ServiceExt::oneshot` requests against the same state.
+    pub fn router(&self) -> Router {
+        self.server
+            .router_for_port(self.port)
+            .expect("build proxy router")
+    }
+
     /// POST a Claude Messages request to the proxy.
     pub async fn messages(&self, body: &Value) -> reqwest::Response {
         self.client
             .post(self.url("/v1/messages"))
             .header("content-type", "application/json")
             .header("anthropic-version", "2023-06-01")
-            .header("x-api-key", "sk-client-placeholder")
+            .header("x-api-key", &self.token)
             .json(body)
             .send()
             .await
