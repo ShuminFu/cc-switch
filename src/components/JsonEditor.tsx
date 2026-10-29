@@ -37,6 +37,9 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
   const { t } = useTranslation();
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // 编辑器只在依赖变化时重建，监听器通过 ref 读取最新的 onChange，避免闭包捕获首次渲染的回调
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   // JSON linter 函数
   const jsonLinter = useMemo(
@@ -145,7 +148,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           const newValue = update.state.doc.toString();
-          onChange(newValue);
+          onChangeRef.current(newValue);
         }
       }),
     ];
@@ -208,7 +211,7 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
       view.destroy();
       viewRef.current = null;
     };
-  }, [darkMode, rows, height, language, jsonLinter]); // 依赖项中不包含 onChange 和 placeholder，避免不必要的重建
+  }, [darkMode, rows, height, language, jsonLinter]); // 依赖项中不包含 onChange（经 onChangeRef 读取）和 placeholder，避免不必要的重建
 
   // 当 value 从外部改变时更新编辑器内容
   useEffect(() => {
