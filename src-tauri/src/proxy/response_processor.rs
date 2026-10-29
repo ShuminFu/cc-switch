@@ -3,6 +3,7 @@
 //! 统一处理流式和非流式 API 响应
 
 use super::{
+    capture::{tap_stream, CaptureHandle, CaptureSide},
     content_encoding::{decompress_body, get_content_encoding},
     forwarder::ActiveConnectionGuard,
     handler_config::{
@@ -354,6 +355,7 @@ pub(crate) fn transformed_sse_response(
         parser_config_for(client_format),
         MissingStreamUsage::SkipUnbillable,
     );
+    let sse_stream = tap_stream(ctx.capture.clone(), CaptureSide::Client, sse_stream);
     let logged_stream = create_logged_passthrough_stream(
         sse_stream,
         ctx.tag,
@@ -562,6 +564,7 @@ pub(crate) fn create_usage_collector(
     let tag = ctx.tag;
     let start_time = ctx.start_time;
     let session_id = ctx.session_id.clone();
+    let capture = ctx.capture.clone();
 
     Some(SseUsageCollector::new(
         start_time,
@@ -598,9 +601,10 @@ pub(crate) fn create_usage_collector(
             let session_id = session_id.clone();
             let request_model = request_model.clone();
             let outbound_model = fallback_model.clone();
+            let capture = capture.clone();
 
             tokio::spawn(async move {
-                log_usage_internal(
+                let request_id = log_usage_internal(
                     &state,
                     &provider_id,
                     app_type_str,
@@ -615,6 +619,7 @@ pub(crate) fn create_usage_collector(
                     Some(session_id),
                 )
                 .await;
+                link_capture(capture.as_ref(), request_id);
             });
         },
     ))
@@ -692,9 +697,10 @@ fn usage_log_task(
         .unwrap_or_else(|| ctx.request_model.clone());
     let latency_ms = ctx.latency_ms();
     let session_id = ctx.session_id.clone();
+    let capture = ctx.capture.clone();
 
     async move {
-        log_usage_internal(
+        let request_id = log_usage_internal(
             &state,
             &provider_id,
             &app_type_str,
@@ -709,6 +715,14 @@ fn usage_log_task(
             Some(session_id),
         )
         .await;
+        link_capture(capture.as_ref(), request_id);
+    }
+}
+
+/// 把抓包关联到刚写入的请求日志行，供请求日志按 request_id 导出缺陷报告
+fn link_capture(capture: Option<&CaptureHandle>, request_id: Option<String>) {
+    if let (Some(capture), Some(request_id)) = (capture, request_id) {
+        capture.set_request_id(&request_id);
     }
 }
 
@@ -754,6 +768,8 @@ pub(crate) fn usage_logging_enabled(state: &ProxyState) -> bool {
 /// （路由接管映射后的真值，无映射时等于 request_model）。该模式的语义是
 /// 「按代理发出的请求计价、不信任上游回显」，接管场景下发出的请求模型是
 /// 映射后的 Y 而非客户端别名 X，按 X 计价会用错定价表行。
+///
+/// 返回写入的 request_id；写入失败时为 None。
 #[allow(clippy::too_many_arguments)]
 async fn log_usage_internal(
     state: &ProxyState,
@@ -768,7 +784,7 @@ async fn log_usage_internal(
     is_streaming: bool,
     status_code: u16,
     session_id: Option<String>,
-) {
+) -> Option<String> {
     use super::usage::logger::UsageLogger;
 
     let logger = UsageLogger::new(&state.db).with_runtime_config(&state.runtime_config);
@@ -791,8 +807,8 @@ async fn log_usage_internal(
         usage.cache_creation_tokens
     );
 
-    if let Err(e) = logger.log_with_calculation(
-        request_id,
+    match logger.log_with_calculation(
+        request_id.clone(),
         provider_id.to_string(),
         app_type.to_string(),
         model.to_string(),
@@ -807,7 +823,11 @@ async fn log_usage_internal(
         None, // provider_type
         is_streaming,
     ) {
-        log::warn!("[USG-001] 记录使用量失败: {e}");
+        Ok(()) => Some(request_id),
+        Err(e) => {
+            log::warn!("[USG-001] 记录使用量失败: {e}");
+            None
+        }
     }
 }
 

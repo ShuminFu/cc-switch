@@ -9,6 +9,7 @@
 //! a direct (non-proxied) CLI request.
 
 use super::{
+    capture::CaptureStore,
     endpoints::{RouteMethod, CLIENT_ENDPOINTS},
     failover_switch::FailoverSwitchManager,
     forwarder::ForwarderDeps,
@@ -56,6 +57,8 @@ pub struct ProxyState {
     pub runtime_config: Arc<RuntimeConfigStore>,
     /// forwarder 的共享依赖（含 AppHandle 与故障转移切换管理器；每个请求只克隆这一个 `Arc`）
     pub forwarder_deps: Arc<ForwarderDeps>,
+    /// 缺陷报告抓包（默认为应用级共享存储，见 [`CaptureStore::global`]）
+    pub capture: Arc<CaptureStore>,
 }
 
 impl ProxyState {
@@ -92,6 +95,7 @@ impl ProxyState {
             codex_chat_history,
             runtime_config,
             forwarder_deps,
+            capture: CaptureStore::global(),
         }
     }
 
@@ -159,6 +163,12 @@ impl ProxyServer {
             shutdown_tx: Arc::new(RwLock::new(None)),
             server_handle: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// 替换抓包存储（须在 [`start`](Self::start) 之前调用；测试用独立存储隔离彼此）
+    #[cfg_attr(not(feature = "testkit"), allow(dead_code))]
+    pub(crate) fn set_capture_store(&mut self, store: Arc<CaptureStore>) {
+        self.state.capture = store;
     }
 
     pub async fn start(&self) -> Result<ProxyServerInfo, ProxyError> {

@@ -9,6 +9,7 @@
 //! - Claude 的格式转换逻辑保留在此文件（用于 OpenRouter 旧接口回退）
 
 use super::{
+    capture::{tap_stream, CaptureBridge, CaptureSide},
     content_encoding::{decompress_body, get_content_encoding, is_supported_content_encoding},
     endpoints::{BodyDecoding, ClientEndpoint, UpstreamEndpoint},
     error_mapper::{get_error_message, map_proxy_error_to_status},
@@ -191,6 +192,12 @@ pub(crate) async fn handle_proxied(
         ctx = ctx.with_model_from_uri(&uri);
     }
 
+    // 缺陷报告抓包：开启期间记录客户端请求（脱敏后）
+    ctx.capture = state.capture.begin(ctx.app_type_str, &ctx.provider.id);
+    if let Some(capture) = &ctx.capture {
+        capture.record_client_request(&method, &uri, &headers, &body);
+    }
+
     let endpoint = upstream_endpoint(&uri, client.upstream);
     let is_stream = body
         .get("stream")
@@ -223,6 +230,9 @@ pub(crate) async fn handle_proxied(
             if let Some(provider) = err.provider.take() {
                 ctx.provider = provider;
             }
+            if let Some(capture) = ctx.capture.take() {
+                state.capture.discard(&capture);
+            }
             log_forward_error(&state, &ctx, is_stream, &err.error);
             return render_forward_error(client.client_format, &ctx, &endpoint, err.error);
         }
@@ -234,6 +244,17 @@ pub(crate) async fn handle_proxied(
     // 响应解码只读成功那次尝试的路由计划，不再按最终 provider 重新推导格式
     let plan = result.plan;
     let response = result.response;
+    // 只抓协议桥请求；透传请求的记录直接丢弃
+    if let Some(capture) = ctx.capture.take() {
+        match CaptureBridge::from_decode(plan.response_decode()) {
+            Some(bridge) => {
+                capture.set_route(&ctx.provider.id, bridge, plan.quirks.codex_oauth);
+                capture.set_upstream_status(response.status().as_u16());
+                ctx.capture = Some(capture);
+            }
+            None => state.capture.discard(&capture),
+        }
+    }
 
     let parser_config = match plan.response_decode() {
         ResponseDecode::AnthropicFrom(api_format) => {
@@ -391,8 +412,12 @@ async fn handle_claude_transform(
                 tool_schema_hints: tool_schema_hints.clone(),
             },
         );
-        let (client_format, sse_stream) =
-            decode_upstream(decoder, ctx.tag, Box::pin(response.bytes_stream()));
+        let upstream = tap_stream(
+            ctx.capture.clone(),
+            CaptureSide::Upstream,
+            response.bytes_stream(),
+        );
+        let (client_format, sse_stream) = decode_upstream(decoder, ctx.tag, Box::pin(upstream));
         return Ok(transformed_sse_response(
             sse_stream,
             client_format,
@@ -407,6 +432,9 @@ async fn handle_claude_transform(
     let body_timeout = ctx.non_streaming_body_timeout();
     let (response_headers, _status, body_bytes) =
         read_decoded_body(response, ctx.tag, body_timeout).await?;
+    if let Some(capture) = &ctx.capture {
+        capture.record_body(CaptureSide::Upstream, &body_bytes);
+    }
 
     let upstream_response: Value = if aggregate_codex_oauth_responses_sse {
         responses_sse_to_response_value(&String::from_utf8_lossy(&body_bytes))?
@@ -487,6 +515,9 @@ async fn handle_claude_transform(
         status.as_u16(),
     );
 
+    if let Some(capture) = &ctx.capture {
+        capture.record_json(CaptureSide::Client, &anthropic_response);
+    }
     rebuilt_json_response(status, response_headers, &anthropic_response, ctx.tag)
 }
 
@@ -566,8 +597,12 @@ async fn handle_codex_chat_to_responses_transform(
             tool_context,
             history: state.codex_chat_history.clone(),
         });
-        let (client_format, sse_stream) =
-            decode_upstream(decoder, ctx.tag, Box::pin(response.bytes_stream()));
+        let upstream = tap_stream(
+            ctx.capture.clone(),
+            CaptureSide::Upstream,
+            response.bytes_stream(),
+        );
+        let (client_format, sse_stream) = decode_upstream(decoder, ctx.tag, Box::pin(upstream));
         // 上游遵守 OpenAI 语义省略 usage 时，Chat→Responses 转换器会合成一个
         // 全 0 的 response.completed；全 0 usage 由 tap 收尾时跳过，不写空行。
         return Ok(transformed_sse_response(
@@ -584,6 +619,9 @@ async fn handle_codex_chat_to_responses_transform(
     let body_timeout = ctx.non_streaming_body_timeout();
     let (response_headers, status, body_bytes) =
         read_decoded_body(response, ctx.tag, body_timeout).await?;
+    if let Some(capture) = &ctx.capture {
+        capture.record_body(CaptureSide::Upstream, &body_bytes);
+    }
     // 与 Claude 侧 handle_claude_transform 对称的兜底嗅探（#2234）：
     // 上游对 stream:false 返回未标记 Content-Type 的 SSE 体时按 SSE 聚合。
     let chat_response = parse_upstream_json(
@@ -617,6 +655,9 @@ async fn handle_codex_chat_to_responses_transform(
         status.as_u16(),
     );
 
+    if let Some(capture) = &ctx.capture {
+        capture.record_json(CaptureSide::Client, &responses_response);
+    }
     rebuilt_json_response(status, response_headers, &responses_response, ctx.tag)
 }
 
@@ -650,8 +691,12 @@ async fn handle_codex_anthropic_to_responses_transform(
     // explicit JSON media type. Explicit JSON is buffered below so 2xx error
     // envelopes and gateways that ignore stream:true can be converted faithfully.
     if response.is_sse() || (is_stream && !response.is_json()) {
-        let (client_format, sse_stream) =
-            decode_upstream(codec, ctx.tag, Box::pin(response.bytes_stream()));
+        let upstream = tap_stream(
+            ctx.capture.clone(),
+            CaptureSide::Upstream,
+            response.bytes_stream(),
+        );
+        let (client_format, sse_stream) = decode_upstream(codec, ctx.tag, Box::pin(upstream));
         return Ok(transformed_sse_response(
             sse_stream,
             client_format,
@@ -665,6 +710,9 @@ async fn handle_codex_anthropic_to_responses_transform(
     let body_timeout = ctx.non_streaming_body_timeout();
     let (response_headers, status, body_bytes) =
         read_decoded_body(response, ctx.tag, body_timeout).await?;
+    if let Some(capture) = &ctx.capture {
+        capture.record_body(CaptureSide::Upstream, &body_bytes);
+    }
     // Fallback sniffing symmetric to the chat / claude side (#2234): when the
     // upstream returns an Anthropic SSE body with an unmarked Content-Type,
     // aggregate it back into a message before continuing the conversion.
@@ -708,6 +756,9 @@ async fn handle_codex_anthropic_to_responses_transform(
         status.as_u16(),
     );
 
+    if let Some(capture) = &ctx.capture {
+        capture.record_json(CaptureSide::Client, &responses_response);
+    }
     rebuilt_json_response(status, response_headers, &responses_response, ctx.tag)
 }
 

@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useRequestLogs } from "@/lib/query/usage";
+import { useProxyCaptureStatus } from "@/lib/query/proxy";
 import {
   getFreshInputTokens,
   isUnpricedUsage,
@@ -26,6 +27,10 @@ import {
 } from "@/types/usage";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
+import {
+  BugReportCaptureToggle,
+  ExportBugReportButton,
+} from "./BugReportCapture";
 import {
   fmtInt,
   fmtUsd,
@@ -80,6 +85,11 @@ export function RequestLogTable({
       refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
     },
   });
+
+  const { data: captureStatus } = useProxyCaptureStatus(
+    refreshIntervalMs > 0 ? Math.min(refreshIntervalMs, 5000) : 5000,
+  );
+  const capturedRequestIds = new Set(captureStatus?.capturedRequestIds ?? []);
 
   const logs = result?.data ?? [];
   const total = result?.total ?? 0;
@@ -143,6 +153,10 @@ export function RequestLogTable({
               onApply={onRangeChange}
             />
           )}
+
+          <div className="ml-auto">
+            <BugReportCaptureToggle status={captureStatus} />
+          </div>
         </div>
       </div>
 
@@ -308,6 +322,13 @@ export function RequestLogTable({
                           >
                             {log.statusCode}
                           </span>
+                          {capturedRequestIds.has(log.requestId) && (
+                            <span className="ml-1 inline-flex align-middle">
+                              <ExportBugReportButton
+                                requestId={log.requestId}
+                              />
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="text-center text-xs text-muted-foreground">
                           {log.dataSource || "proxy"}

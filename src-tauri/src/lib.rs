@@ -1378,6 +1378,11 @@ pub fn run() {
             commands::get_proxy_status,
             commands::get_proxy_config,
             commands::update_proxy_config,
+            // Bug report capture
+            commands::start_proxy_capture,
+            commands::stop_proxy_capture,
+            commands::get_proxy_capture_status,
+            commands::export_proxy_bug_report,
             // Global & Per-App Config
             commands::get_global_proxy_config,
             commands::update_global_proxy_config,

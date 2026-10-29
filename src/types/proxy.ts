@@ -118,3 +118,13 @@ export interface AppProxyConfig {
   circuitErrorRateThreshold: number;
   circuitMinRequests: number;
 }
+
+// 缺陷报告抓包状态（CCS-138）
+export interface CaptureStatus {
+  active: boolean;
+  // 自动关闭时间（Unix 毫秒）
+  expiresAt: number | null;
+  remainingSecs: number;
+  // 可导出的请求 ID（最新的在前）
+  capturedRequestIds: string[];
+}

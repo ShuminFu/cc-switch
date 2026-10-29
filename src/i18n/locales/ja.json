@@ -1610,6 +1610,16 @@
     "withMultiplier": "倍率込み",
     "requestDetail": "リクエスト詳細",
     "requestNotFound": "リクエストが見つかりません",
+    "bugReport": {
+      "captureStart": "不具合報告用にキャプチャ",
+      "captureActive": "キャプチャ中 · 残り {{minutes}} 分",
+      "captureHint": "今後 {{minutes}} 分間、プロトコル変換を経由したリクエストを（秘匿化して）記録し、不具合報告としてエクスポートできるようにします",
+      "captureStopHint": "キャプチャを停止",
+      "captureFailed": "キャプチャの切り替えに失敗しました: {{error}}",
+      "export": "不具合報告をエクスポート",
+      "exported": "不具合報告を {{path}} に保存しました",
+      "exportFailed": "不具合報告のエクスポートに失敗しました: {{error}}"
+    },
     "basicInfo": "基本情報",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "キャッシュ作成コスト",

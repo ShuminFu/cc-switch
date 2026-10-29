@@ -1610,6 +1610,16 @@
     "withMultiplier": "含倍率",
     "requestDetail": "请求详情",
     "requestNotFound": "请求未找到",
+    "bugReport": {
+      "captureStart": "抓包以反馈问题",
+      "captureActive": "抓包中 · 剩余 {{minutes}} 分钟",
+      "captureHint": "在接下来的 {{minutes}} 分钟内记录经过协议转换的请求（已脱敏），可导出为缺陷报告",
+      "captureStopHint": "停止抓包",
+      "captureFailed": "切换抓包失败：{{error}}",
+      "export": "导出缺陷报告",
+      "exported": "缺陷报告已保存到 {{path}}",
+      "exportFailed": "导出缺陷报告失败：{{error}}"
+    },
     "basicInfo": "基本信息",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "缓存写入成本",

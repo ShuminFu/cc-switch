@@ -1610,6 +1610,16 @@
     "withMultiplier": "with multiplier",
     "requestDetail": "Request Detail",
     "requestNotFound": "Request not found",
+    "bugReport": {
+      "captureStart": "Capture bug reports",
+      "captureActive": "Capturing · {{minutes}} min left",
+      "captureHint": "Record bridged requests (redacted) for {{minutes}} minutes so they can be exported as bug reports",
+      "captureStopHint": "Stop capturing requests",
+      "captureFailed": "Failed to change bug report capture: {{error}}",
+      "export": "Export bug report",
+      "exported": "Bug report saved to {{path}}",
+      "exportFailed": "Failed to export bug report: {{error}}"
+    },
     "basicInfo": "Basic Info",
     "tokenUsage": "Token Usage",
     "cacheCreationCost": "Cache Creation Cost",

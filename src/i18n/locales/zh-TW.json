@@ -1610,6 +1610,16 @@
     "withMultiplier": "含倍率",
     "requestDetail": "請求詳情",
     "requestNotFound": "請求未找到",
+    "bugReport": {
+      "captureStart": "擷取以回報問題",
+      "captureActive": "擷取中 · 剩餘 {{minutes}} 分鐘",
+      "captureHint": "在接下來的 {{minutes}} 分鐘內記錄經過協定轉換的請求（已遮蔽敏感資訊），可匯出為缺陷報告",
+      "captureStopHint": "停止擷取",
+      "captureFailed": "切換擷取失敗：{{error}}",
+      "export": "匯出缺陷報告",
+      "exported": "缺陷報告已儲存到 {{path}}",
+      "exportFailed": "匯出缺陷報告失敗：{{error}}"
+    },
     "basicInfo": "基本資訊",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "快取寫入成本",

@@ -5,6 +5,7 @@
 use crate::app_config::AppType;
 use crate::provider::Provider;
 use crate::proxy::{
+    capture::CaptureHandle,
     extract_session_id,
     forwarder::{RequestForwarder, RequestScope},
     protocol::WireFormat,
@@ -86,6 +87,8 @@ pub struct RequestContext {
     pub optimizer_config: OptimizerConfig,
     /// Copilot 优化器配置
     pub copilot_optimizer_config: CopilotOptimizerConfig,
+    /// 缺陷报告抓包句柄（仅在用户开启抓包期间存在）
+    pub capture: Option<CaptureHandle>,
 }
 
 impl RequestContext {
@@ -189,6 +192,7 @@ impl RequestContext {
             rectifier_config,
             optimizer_config,
             copilot_optimizer_config,
+            capture: None,
         })
     }
 
@@ -255,6 +259,7 @@ impl RequestContext {
                 non_streaming_timeout: Duration::from_secs(non_streaming_timeout),
                 streaming_first_byte_timeout: Duration::from_secs(first_byte_timeout),
                 max_attempts: RequestScope::max_attempts_for(max_retries),
+                capture: self.capture.clone(),
             },
         )
     }

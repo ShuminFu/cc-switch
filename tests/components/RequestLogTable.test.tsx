@@ -4,6 +4,9 @@ import { RequestLogTable } from "@/components/usage/RequestLogTable";
 import type { UsageRangeSelection } from "@/types/usage";
 
 const useRequestLogsMock = vi.hoisted(() => vi.fn());
+const captureStatusMock = vi.hoisted(() => vi.fn());
+const toggleCaptureMock = vi.hoisted(() => vi.fn());
+const exportBugReportMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -11,8 +14,12 @@ vi.mock("react-i18next", () => ({
       key: string,
       options?: {
         defaultValue?: string;
+        minutes?: number;
       },
-    ) => options?.defaultValue ?? key,
+    ) =>
+      options?.minutes != null
+        ? `${key}(${options.minutes})`
+        : (options?.defaultValue ?? key),
     i18n: {
       resolvedLanguage: "en",
       language: "en",
@@ -22,6 +29,19 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/lib/query/usage", () => ({
   useRequestLogs: (args: unknown) => useRequestLogsMock(args),
+}));
+
+vi.mock("@/lib/query/proxy", () => ({
+  BUG_REPORT_CAPTURE_MINUTES: 10,
+  useProxyCaptureStatus: () => ({ data: captureStatusMock() }),
+  useToggleProxyCapture: () => ({
+    mutate: toggleCaptureMock,
+    isPending: false,
+  }),
+  useExportBugReport: () => ({
+    mutate: exportBugReportMock,
+    isPending: false,
+  }),
 }));
 
 vi.mock("@/components/ui/button", () => ({
@@ -57,6 +77,15 @@ vi.mock("@/components/ui/table", () => ({
 
 describe("RequestLogTable", () => {
   beforeEach(() => {
+    captureStatusMock.mockReset();
+    captureStatusMock.mockReturnValue({
+      active: false,
+      expiresAt: null,
+      remainingSecs: 0,
+      capturedRequestIds: [],
+    });
+    toggleCaptureMock.mockReset();
+    exportBugReportMock.mockReset();
     useRequestLogsMock.mockReset();
     useRequestLogsMock.mockImplementation(
       ({ page = 0, pageSize = 20 }: { page?: number; pageSize?: number }) => ({
@@ -156,6 +185,95 @@ describe("RequestLogTable", () => {
           range,
         }),
       );
+    });
+  });
+
+  describe("bug report capture (CCS-138)", () => {
+    const logRow = (requestId: string) => ({
+      requestId,
+      providerId: "p1",
+      providerName: "Provider",
+      appType: "claude",
+      model: "gpt-4o",
+      requestModel: "claude-sonnet-4-5",
+      costMultiplier: "1",
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      inputCostUsd: "0",
+      outputCostUsd: "0",
+      cacheReadCostUsd: "0",
+      cacheCreationCostUsd: "0",
+      totalCostUsd: "0.0001",
+      isStreaming: true,
+      latencyMs: 1200,
+      firstTokenMs: 300,
+      statusCode: 200,
+      createdAt: 1_710_000_000,
+      dataSource: "proxy",
+    });
+
+    const renderTable = () =>
+      render(
+        <RequestLogTable
+          range={{ preset: "today" }}
+          rangeLabel="Today"
+          appType="all"
+          refreshIntervalMs={0}
+        />,
+      );
+
+    it("arms capture from the toolbar", () => {
+      renderTable();
+      const toggle = screen.getByRole("button", {
+        name: "usage.bugReport.captureStart",
+      });
+      expect(toggle).toHaveAttribute("aria-pressed", "false");
+      fireEvent.click(toggle);
+      expect(toggleCaptureMock).toHaveBeenCalledWith(true);
+    });
+
+    it("shows the remaining time and stops an active capture", () => {
+      captureStatusMock.mockReturnValue({
+        active: true,
+        expiresAt: Date.now() + 240_000,
+        remainingSecs: 230,
+        capturedRequestIds: [],
+      });
+      renderTable();
+      const toggle = screen.getByRole("button", {
+        name: "usage.bugReport.captureActive(4)",
+      });
+      expect(toggle).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(toggle);
+      expect(toggleCaptureMock).toHaveBeenCalledWith(false);
+    });
+
+    it("offers Export bug report only on captured rows", () => {
+      useRequestLogsMock.mockReturnValue({
+        data: {
+          data: [logRow("req-captured"), logRow("req-plain")],
+          total: 2,
+          page: 0,
+          pageSize: 20,
+        },
+        isLoading: false,
+      });
+      captureStatusMock.mockReturnValue({
+        active: false,
+        expiresAt: null,
+        remainingSecs: 0,
+        capturedRequestIds: ["req-captured"],
+      });
+      renderTable();
+
+      const exportButtons = screen.getAllByRole("button", {
+        name: "usage.bugReport.export",
+      });
+      expect(exportButtons).toHaveLength(1);
+      fireEvent.click(exportButtons[0]);
+      expect(exportBugReportMock).toHaveBeenCalledWith("req-captured");
     });
   });
 });

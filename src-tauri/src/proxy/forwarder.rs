@@ -9,6 +9,7 @@
 
 use super::hyper_client::ProxyResponse;
 use super::{
+    capture::CaptureHandle,
     failover_switch::FailoverSwitchManager,
     pipeline::{
         auth,
@@ -137,6 +138,8 @@ pub struct RequestScope {
     /// max_retries=3（默认）表示最多 4 家。loop 同时受 providers.len() 自然限制。
     /// 使用 [`RequestScope::max_attempts_for`] 计算。
     pub max_attempts: usize,
+    /// 缺陷报告抓包句柄：每次尝试记录实际发往上游的请求
+    pub capture: Option<CaptureHandle>,
 }
 
 impl RequestScope {
@@ -477,6 +480,14 @@ impl RequestForwarder {
         )?;
 
         log_outbound_request(adapter.name(), &target.url, &built.body);
+        if let Some(capture) = &self.req.capture {
+            capture.record_upstream_request(
+                request.method,
+                &target.url,
+                &ordered_headers,
+                &built.body,
+            );
+        }
 
         let response = transport::send(
             UpstreamRequest {

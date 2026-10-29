@@ -6,6 +6,7 @@ import type {
   ProxyTakeoverStatus,
   GlobalProxyConfig,
   AppProxyConfig,
+  CaptureStatus,
 } from "@/types/proxy";
 
 export const proxyApi = {
@@ -116,5 +117,27 @@ export const proxyApi = {
   // 设置计费模式来源
   async setPricingModelSource(appType: string, value: string): Promise<void> {
     return invoke("set_pricing_model_source", { appType, value });
+  },
+
+  // ========== 缺陷报告抓包 API ==========
+
+  // 开启抓包（minutes 分钟后自动关闭）
+  async startCapture(minutes?: number): Promise<CaptureStatus> {
+    return invoke("start_proxy_capture", { minutes });
+  },
+
+  // 立即关闭抓包
+  async stopCapture(): Promise<CaptureStatus> {
+    return invoke("stop_proxy_capture");
+  },
+
+  // 获取抓包状态
+  async getCaptureStatus(): Promise<CaptureStatus> {
+    return invoke("get_proxy_capture_status");
+  },
+
+  // 导出缺陷报告 zip；保存位置由后端对话框选择，取消时返回 null
+  async exportBugReport(requestId: string): Promise<string | null> {
+    return invoke("export_proxy_bug_report", { requestId });
   },
 };

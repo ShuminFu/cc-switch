@@ -30,6 +30,7 @@ use tokio::task::JoinHandle;
 
 use crate::database::Database;
 use crate::provider::Provider;
+use crate::proxy::capture::CaptureStore;
 use crate::proxy::server::ProxyServer;
 use crate::proxy::types::{AppProxyConfig, ProxyConfig};
 
@@ -580,7 +581,11 @@ impl ProxyHarnessBuilder {
             enable_logging: true,
             ..ProxyConfig::default()
         };
-        let server = ProxyServer::new(config, db.clone(), None);
+        let mut server = ProxyServer::new(config, db.clone(), None);
+        // Private capture store: arming capture in one scenario must not record
+        // the requests of concurrent scenarios.
+        let capture = Arc::new(CaptureStore::default());
+        server.set_capture_store(capture.clone());
         let info = server.start().await.expect("start proxy server");
         let token = crate::proxy::inbound_auth::get_or_create_inbound_token(&db)
             .expect("read proxy inbound token");
@@ -592,6 +597,7 @@ impl ProxyHarnessBuilder {
         ProxyHarness {
             server,
             db,
+            capture,
             base_url: format!("http://127.0.0.1:{}", info.port),
             port: info.port,
             token,
@@ -644,6 +650,7 @@ pub struct HarnessHealth {
 pub struct ProxyHarness {
     server: ProxyServer,
     db: Arc<Database>,
+    capture: Arc<CaptureStore>,
     base_url: String,
     port: u16,
     token: String,
@@ -671,6 +678,11 @@ impl ProxyHarness {
 
     pub fn db(&self) -> &Database {
         &self.db
+    }
+
+    /// Bug report capture store of this proxy (disarmed until a test arms it).
+    pub fn capture(&self) -> &CaptureStore {
+        &self.capture
     }
 
     /// Port the proxy listens on.
