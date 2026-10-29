@@ -11,16 +11,16 @@ use super::{
     failover_switch::FailoverSwitchManager,
     json_canonical::{canonicalize_value, short_value_hash},
     log_codes::fwd as log_fwd,
-    pipeline::failover::{Attempt, AttemptRecorder},
+    pipeline::{
+        failover::{Attempt, AttemptRecorder},
+        recovery::{RecoveryDecision, RecoveryInput, RecoveryState},
+    },
     provider_router::ProviderRouter,
     providers::{
         codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore, get_adapter,
         AuthInfo, AuthStrategy, ProviderAdapter, ProviderType,
     },
-    thinking_budget_rectifier::{rectify_thinking_budget, should_rectify_thinking_budget},
-    thinking_rectifier::{
-        normalize_thinking_type, rectify_anthropic_request, should_rectify_thinking_signature,
-    },
+    thinking_rectifier::normalize_thinking_type,
     types::{CopilotOptimizerConfig, OptimizerConfig, ProxyStatus, RectifierConfig},
     ProxyError,
 };
@@ -201,30 +201,11 @@ impl RequestForwarder {
         replaced_images
     }
 
-    /// 反应式 media 重试判定：上游因图片输入报错后，是否应替换图片块并对同一供应商重试一次。
-    ///
-    /// 受 `enabled && request_media_fallback` 管辖；不涉及 `request_media_heuristic`——
-    /// 这里是上游"实测"错误后的纯恢复，不是预测，故启发式开关与它无关。
-    fn media_retry_should_trigger(
-        &self,
-        adapter_name: &str,
-        already_retried: bool,
-        provider_body: &Value,
-        error: &ProxyError,
-    ) -> bool {
-        matches!(adapter_name, "Claude" | "Codex")
-            && self.req.rectifier_config.enabled
-            && self.req.rectifier_config.request_media_fallback
-            && !already_retried
-            && super::media_sanitizer::contains_image_blocks(provider_body)
-            && super::media_sanitizer::is_unsupported_image_error(error)
-    }
-
     pub fn new(shared: Arc<ForwarderDeps>, req: RequestScope) -> Self {
         Self { shared, req }
     }
 
-    /// 整流（thinking signature 或 budget）重试失败后的统一收尾。
+    /// 恢复策略（media 降级、thinking signature 或 budget 整流）重试失败后的统一收尾。
     ///
     /// `None` 表示已记录熔断器、累积 `last_error`/`last_provider`，
     /// 调用方应 `continue` 让下一家 provider 继续故障转移；
@@ -352,12 +333,6 @@ impl RequestForwarder {
 
         // 依次尝试每个供应商
         for provider in providers.iter() {
-            // 整流器重试标记：每个 provider 独立持有，避免标记跨 provider 短路故障转移
-            // —— 首家 provider 整流后被 5xx/timeout 击落时，下家仍能用整流后的请求体走整流流程
-            let mut rectifier_retried = false;
-            let mut budget_rectifier_retried = false;
-            let mut media_rectifier_retried = false;
-
             // 上限检查：尊重用户在 AppProxyConfig.max_retries 上配置的「重试次数」。
             // 放在熔断器 allow 检查之前，避免在已经超限时还占用 HalfOpen 探测名额。
             if attempted_providers >= self.req.max_attempts {
@@ -395,21 +370,57 @@ impl RequestForwarder {
 
             attempted_providers += 1;
 
-            // 转发请求（每个 Provider 只尝试一次，重试由客户端控制）
-            match self
-                .forward(
-                    app_type,
-                    &method,
-                    provider,
-                    endpoint,
-                    &provider_body,
-                    &headers,
-                    &extensions,
-                    adapter.as_ref(),
-                )
-                .await
-            {
+            // 恢复策略状态：每个 provider 独立持有，避免标记跨 provider 短路故障转移
+            // —— 首家 provider 恢复后被 5xx/timeout 击落时，下家仍能独立走恢复流程
+            let mut recovery = RecoveryState::default();
+            let provider_type = ProviderType::from_app_type_and_config(app_type, provider);
+            let is_anthropic_provider = matches!(
+                provider_type,
+                ProviderType::Claude | ProviderType::ClaudeAuth
+            );
+
+            // 转发请求：每个 Provider 只发送原始请求一次；上游拒绝请求体时，
+            // 命中的恢复策略改写请求体后对同一 Provider 再发送（每个策略最多一次，不计入熔断器）
+            let (outcome, decision) = loop {
+                match self
+                    .forward(
+                        app_type,
+                        &method,
+                        provider,
+                        endpoint,
+                        &provider_body,
+                        &headers,
+                        &extensions,
+                        adapter.as_ref(),
+                    )
+                    .await
+                {
+                    Ok(success) => break (Ok(success), RecoveryDecision::Unhandled),
+                    Err(e) => {
+                        let decision = recovery.recover(
+                            &RecoveryInput {
+                                app_type: app_type_str,
+                                provider_id: &provider.id,
+                                adapter_name: adapter.name(),
+                                is_anthropic_provider,
+                                config: &self.req.rectifier_config,
+                                error: &e,
+                            },
+                            &mut provider_body,
+                        );
+                        if matches!(decision, RecoveryDecision::Retry(_)) {
+                            continue;
+                        }
+                        break (Err(e), decision);
+                    }
+                }
+            };
+
+            let e = match outcome {
                 Ok((response, plan, outbound_model)) => {
+                    if let Some(strategy) = recovery.last() {
+                        strategy.log_retry_succeeded(app_type_str);
+                    }
                     attempt.succeed().await;
 
                     return Ok(ForwardResult {
@@ -420,312 +431,78 @@ impl RequestForwarder {
                         connection_guard: None,
                     });
                 }
-                Err(e) => {
-                    // 检测是否需要触发整流器（仅 Claude/ClaudeAuth 供应商）
-                    let provider_type = ProviderType::from_app_type_and_config(app_type, provider);
-                    let is_anthropic_provider = matches!(
-                        provider_type,
-                        ProviderType::Claude | ProviderType::ClaudeAuth
-                    );
-                    let mut signature_rectifier_non_retryable_client_error = false;
+                Err(e) => e,
+            };
 
-                    if self.media_retry_should_trigger(
-                        adapter.name(),
-                        media_rectifier_retried,
-                        &provider_body,
+            // 恢复策略识别出错误但无法修复：客户端兼容性问题，换哪家 provider 都会被拒绝
+            // —— 不记录熔断器，仅释放 HalfOpen permit
+            if decision == RecoveryDecision::ClientError {
+                attempt.fail_request(e.to_string()).await;
+                return Err(ForwardError {
+                    error: e,
+                    provider: Some(provider.clone()),
+                });
+            }
+
+            // 恢复重试仍失败，且没有其他策略可用
+            if let Some(strategy) = recovery.last() {
+                strategy.log_retry_failed(app_type_str, &e);
+                log::warn!(
+                    "[{app_type_str}] [Recovery] provider={} retry failed after trace=[{}]",
+                    provider.id,
+                    recovery.trace()
+                );
+                if let Some(err) = self
+                    .handle_rectifier_retry_failure(
+                        e,
+                        attempt,
+                        provider,
+                        strategy.label(),
+                        &mut last_error,
+                        &mut last_provider,
+                    )
+                    .await
+                {
+                    return Err(err);
+                }
+                continue;
+            }
+
+            // 先分类错误，决定是否计入 provider 健康度
+            // —— NonRetryable / ClientAbort 是客户端层错误，无论换哪家 provider 都会被拒绝，
+            //    不应污染熔断器和数据库健康度（与 release_permit_neutral 同语义）。
+            let category = self.categorize_proxy_error(&e, provider);
+
+            match category {
+                ErrorCategory::Retryable => {
+                    // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
+                    attempt
+                        .fail_provider(
+                            e.to_string(),
+                            format!("Provider {} 失败: {}", provider.name, e),
+                        )
+                        .await;
+
+                    let (log_code, log_message) = build_retryable_failure_log(
+                        &provider.name,
+                        attempted_providers,
+                        providers.len(),
                         &e,
-                    ) {
-                        let mut media_body = provider_body.clone();
-                        let replaced_images =
-                            super::media_sanitizer::replace_image_blocks_with_marker(
-                                &mut media_body,
-                            );
+                    );
+                    log::warn!("[{app_type_str}] [{log_code}] {log_message}");
 
-                        if replaced_images > 0 {
-                            let _ = std::mem::replace(&mut media_rectifier_retried, true);
-                            let model = media_body
-                                .get("model")
-                                .and_then(Value::as_str)
-                                .unwrap_or("");
-                            log::info!(
-                                "[{app_type_str}] [Media] Upstream rejected image input; retrying provider={} model={} with {replaced_images} image block(s) replaced by {}",
-                                provider.id,
-                                model,
-                                super::media_sanitizer::UNSUPPORTED_IMAGE_MARKER
-                            );
-
-                            match self
-                                .forward(
-                                    app_type,
-                                    &method,
-                                    provider,
-                                    endpoint,
-                                    &media_body,
-                                    &headers,
-                                    &extensions,
-                                    adapter.as_ref(),
-                                )
-                                .await
-                            {
-                                Ok((response, plan, outbound_model)) => {
-                                    log::info!(
-                                        "[{app_type_str}] [Media] Unsupported-image retry succeeded"
-                                    );
-                                    attempt.succeed().await;
-
-                                    return Ok(ForwardResult {
-                                        response,
-                                        provider: provider.clone(),
-                                        plan,
-                                        outbound_model,
-                                        connection_guard: None,
-                                    });
-                                }
-                                Err(retry_err) => {
-                                    log::warn!(
-                                        "[{app_type_str}] [Media] Unsupported-image retry still failed: {retry_err}"
-                                    );
-                                    if let Some(err) = self
-                                        .handle_rectifier_retry_failure(
-                                            retry_err,
-                                            attempt,
-                                            provider,
-                                            "media 降级",
-                                            &mut last_error,
-                                            &mut last_provider,
-                                        )
-                                        .await
-                                    {
-                                        return Err(err);
-                                    }
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-
-                    if is_anthropic_provider {
-                        let error_message = extract_error_message(&e);
-                        if should_rectify_thinking_signature(
-                            error_message.as_deref(),
-                            &self.req.rectifier_config,
-                        ) {
-                            // 已经重试过：直接返回错误（不可重试客户端错误）
-                            if rectifier_retried {
-                                log::warn!("[{app_type_str}] [RECT-005] 整流器已触发过，不再重试");
-                                // 释放 HalfOpen permit（不记录熔断器，这是客户端兼容性问题）
-                                attempt.fail_request(e.to_string()).await;
-                                return Err(ForwardError {
-                                    error: e,
-                                    provider: Some(provider.clone()),
-                                });
-                            }
-
-                            // 首次触发：整流请求体
-                            let rectified = rectify_anthropic_request(&mut provider_body);
-
-                            // 整流未生效：继续尝试 budget 整流路径，避免误判后短路
-                            if !rectified.applied {
-                                log::warn!(
-                                    "[{app_type_str}] [RECT-006] thinking 签名整流器触发但无可整流内容，继续检查 budget；若 budget 也未命中则按客户端错误返回"
-                                );
-                                signature_rectifier_non_retryable_client_error = true;
-                            } else {
-                                log::info!(
-                                    "[{}] [RECT-001] thinking 签名整流器触发, 移除 {} thinking blocks, {} redacted_thinking blocks, {} signature fields",
-                                    app_type_str,
-                                    rectified.removed_thinking_blocks,
-                                    rectified.removed_redacted_thinking_blocks,
-                                    rectified.removed_signature_fields
-                                );
-
-                                // 标记已重试（当前逻辑下重试后必定 return，保留标记以备将来扩展）
-                                let _ = std::mem::replace(&mut rectifier_retried, true);
-
-                                // 使用同一供应商重试（不计入熔断器）
-                                match self
-                                    .forward(
-                                        app_type,
-                                        &method,
-                                        provider,
-                                        endpoint,
-                                        &provider_body,
-                                        &headers,
-                                        &extensions,
-                                        adapter.as_ref(),
-                                    )
-                                    .await
-                                {
-                                    Ok((response, plan, outbound_model)) => {
-                                        log::info!("[{app_type_str}] [RECT-002] 整流重试成功");
-                                        attempt.succeed().await;
-
-                                        return Ok(ForwardResult {
-                                            response,
-                                            provider: provider.clone(),
-                                            plan,
-                                            outbound_model,
-                                            connection_guard: None,
-                                        });
-                                    }
-                                    Err(retry_err) => {
-                                        log::warn!(
-                                            "[{app_type_str}] [RECT-003] 整流重试仍失败: {retry_err}"
-                                        );
-                                        if let Some(err) = self
-                                            .handle_rectifier_retry_failure(
-                                                retry_err,
-                                                attempt,
-                                                provider,
-                                                "整流",
-                                                &mut last_error,
-                                                &mut last_provider,
-                                            )
-                                            .await
-                                        {
-                                            return Err(err);
-                                        }
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 检测是否需要触发 budget 整流器（仅 Claude/ClaudeAuth 供应商）
-                    if is_anthropic_provider {
-                        let error_message = extract_error_message(&e);
-                        if should_rectify_thinking_budget(
-                            error_message.as_deref(),
-                            &self.req.rectifier_config,
-                        ) {
-                            // 已经重试过：直接返回错误（不可重试客户端错误）
-                            if budget_rectifier_retried {
-                                log::warn!(
-                                    "[{app_type_str}] [RECT-013] budget 整流器已触发过，不再重试"
-                                );
-                                attempt.fail_request(e.to_string()).await;
-                                return Err(ForwardError {
-                                    error: e,
-                                    provider: Some(provider.clone()),
-                                });
-                            }
-
-                            let budget_rectified = rectify_thinking_budget(&mut provider_body);
-                            if !budget_rectified.applied {
-                                log::warn!(
-                                    "[{app_type_str}] [RECT-014] budget 整流器触发但无可整流内容，不做无意义重试"
-                                );
-                                attempt.fail_request(e.to_string()).await;
-                                return Err(ForwardError {
-                                    error: e,
-                                    provider: Some(provider.clone()),
-                                });
-                            }
-
-                            log::info!(
-                                "[{}] [RECT-010] thinking budget 整流器触发, before={:?}, after={:?}",
-                                app_type_str,
-                                budget_rectified.before,
-                                budget_rectified.after
-                            );
-
-                            let _ = std::mem::replace(&mut budget_rectifier_retried, true);
-
-                            // 使用同一供应商重试（不计入熔断器）
-                            match self
-                                .forward(
-                                    app_type,
-                                    &method,
-                                    provider,
-                                    endpoint,
-                                    &provider_body,
-                                    &headers,
-                                    &extensions,
-                                    adapter.as_ref(),
-                                )
-                                .await
-                            {
-                                Ok((response, plan, outbound_model)) => {
-                                    log::info!("[{app_type_str}] [RECT-011] budget 整流重试成功");
-                                    attempt.succeed().await;
-
-                                    return Ok(ForwardResult {
-                                        response,
-                                        provider: provider.clone(),
-                                        plan,
-                                        outbound_model,
-                                        connection_guard: None,
-                                    });
-                                }
-                                Err(retry_err) => {
-                                    log::warn!(
-                                        "[{app_type_str}] [RECT-012] budget 整流重试仍失败: {retry_err}"
-                                    );
-                                    if let Some(err) = self
-                                        .handle_rectifier_retry_failure(
-                                            retry_err,
-                                            attempt,
-                                            provider,
-                                            "budget 整流",
-                                            &mut last_error,
-                                            &mut last_provider,
-                                        )
-                                        .await
-                                    {
-                                        return Err(err);
-                                    }
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-
-                    if signature_rectifier_non_retryable_client_error {
-                        attempt.fail_request(e.to_string()).await;
-                        return Err(ForwardError {
-                            error: e,
-                            provider: Some(provider.clone()),
-                        });
-                    }
-
-                    // 先分类错误，决定是否计入 provider 健康度
-                    // —— NonRetryable / ClientAbort 是客户端层错误，无论换哪家 provider 都会被拒绝，
-                    //    不应污染熔断器和数据库健康度（与 release_permit_neutral 同语义）。
-                    let category = self.categorize_proxy_error(&e, provider);
-
-                    match category {
-                        ErrorCategory::Retryable => {
-                            // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
-                            attempt
-                                .fail_provider(
-                                    e.to_string(),
-                                    format!("Provider {} 失败: {}", provider.name, e),
-                                )
-                                .await;
-
-                            let (log_code, log_message) = build_retryable_failure_log(
-                                &provider.name,
-                                attempted_providers,
-                                providers.len(),
-                                &e,
-                            );
-                            log::warn!("[{app_type_str}] [{log_code}] {log_message}");
-
-                            last_error = Some(e);
-                            last_provider = Some(provider.clone());
-                            // 继续尝试下一个供应商
-                            continue;
-                        }
-                        ErrorCategory::NonRetryable | ErrorCategory::ClientAbort => {
-                            // 不可重试：客户端层错误或客户端断连 → 不污染健康度，仅释放 HalfOpen permit
-                            attempt.fail_request(e.to_string()).await;
-                            return Err(ForwardError {
-                                error: e,
-                                provider: Some(provider.clone()),
-                            });
-                        }
-                    }
+                    last_error = Some(e);
+                    last_provider = Some(provider.clone());
+                    // 继续尝试下一个供应商
+                    continue;
+                }
+                ErrorCategory::NonRetryable | ErrorCategory::ClientAbort => {
+                    // 不可重试：客户端层错误或客户端断连 → 不污染健康度，仅释放 HalfOpen permit
+                    attempt.fail_request(e.to_string()).await;
+                    return Err(ForwardError {
+                        error: e,
+                        provider: Some(provider.clone()),
+                    });
                 }
             }
         }
@@ -2256,14 +2033,6 @@ impl RequestForwarder {
             // 其他错误（数据库/内部错误等）：不是换供应商能解决的问题
             _ => ErrorCategory::NonRetryable,
         }
-    }
-}
-
-/// 从 ProxyError 中提取错误消息
-fn extract_error_message(error: &ProxyError) -> Option<String> {
-    match error {
-        ProxyError::UpstreamError { body, .. } => body.clone(),
-        _ => Some(error.to_string()),
     }
 }
 
@@ -4322,6 +4091,7 @@ mod tests {
     }
 
     // ===== P3: forwarder 层 media 开关回归测试 =====
+    use crate::proxy::pipeline::recovery::media_downgrade_should_trigger;
     // 验证 gate 在 forwarder 这一层的"接线"，而非 media_sanitizer 纯函数本身。
 
     fn forwarder_with_rectifier(config: RectifierConfig) -> RequestForwarder {
@@ -4444,7 +4214,12 @@ mod tests {
     fn reactive_triggers_when_all_switches_on() {
         let fwd = forwarder_with_rectifier(RectifierConfig::default());
         let body = body_with_image("any-model");
-        assert!(fwd.media_retry_should_trigger("Claude", false, &body, &image_unsupported_error()));
+        assert!(media_downgrade_should_trigger(
+            &fwd.req.rectifier_config,
+            "Claude",
+            &body,
+            &image_unsupported_error()
+        ));
     }
 
     #[test]
@@ -4459,7 +4234,12 @@ mod tests {
             ),
         };
 
-        assert!(fwd.media_retry_should_trigger("Codex", false, &body, &error));
+        assert!(media_downgrade_should_trigger(
+            &fwd.req.rectifier_config,
+            "Codex",
+            &body,
+            &error
+        ));
     }
 
     #[test]
@@ -4470,9 +4250,9 @@ mod tests {
             ..RectifierConfig::default()
         });
         let body = body_with_image("any-model");
-        assert!(!fwd.media_retry_should_trigger(
+        assert!(!media_downgrade_should_trigger(
+            &fwd.req.rectifier_config,
             "Claude",
-            false,
             &body,
             &image_unsupported_error()
         ));
@@ -4485,9 +4265,9 @@ mod tests {
             ..RectifierConfig::default()
         });
         let body = body_with_image("any-model");
-        assert!(!fwd.media_retry_should_trigger(
+        assert!(!media_downgrade_should_trigger(
+            &fwd.req.rectifier_config,
             "Claude",
-            false,
             &body,
             &image_unsupported_error()
         ));
@@ -4501,7 +4281,12 @@ mod tests {
             ..RectifierConfig::default()
         });
         let body = body_with_image("any-model");
-        assert!(fwd.media_retry_should_trigger("Claude", false, &body, &image_unsupported_error()));
+        assert!(media_downgrade_should_trigger(
+            &fwd.req.rectifier_config,
+            "Claude",
+            &body,
+            &image_unsupported_error()
+        ));
     }
 
     #[tokio::test]

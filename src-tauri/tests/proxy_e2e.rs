@@ -598,6 +598,84 @@ async fn media_rectifier_replaces_images_when_upstream_rejects_them() {
     harness.shutdown().await;
 }
 
+#[tokio::test]
+async fn recovery_strategies_chain_on_the_same_provider() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::sequence(vec![
+        MockReply::error(400, "This model does not support image input"),
+        MockReply::error(
+            400,
+            "messages.0.content.0: Invalid `signature` in `thinking` block",
+        ),
+        MockReply::message("recovered", 10, 5),
+    ])
+    .await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let request = json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "messages": [{
+            "role": "assistant",
+            "content": [
+                { "type": "thinking", "thinking": "hmm", "signature": "forged" },
+                {
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo=" }
+                }
+            ]
+        }]
+    });
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(first_text(&json_body(response).await), "recovered");
+
+    let requests = upstream.requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "media downgrade, then signature rectifier"
+    );
+    let downgraded = requests[1].json()["messages"][0]["content"].to_string();
+    assert!(downgraded.contains("[Unsupported Image]"), "{downgraded}");
+    assert!(downgraded.contains("\"thinking\""), "{downgraded}");
+    let rectified = requests[2].json()["messages"][0]["content"].to_string();
+    assert!(rectified.contains("[Unsupported Image]"), "{rectified}");
+    assert!(!rectified.contains("\"thinking\""), "{rectified}");
+    assert_eq!(harness.wait_for_health("p1", &healthy()).await, healthy());
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn recovery_strategy_is_applied_at_most_once() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::error(
+        400,
+        "thinking.enabled.budget_tokens: Input should be greater than or equal to 1024",
+    ))
+    .await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let request = json!({
+        "model": MODEL,
+        "max_tokens": 512,
+        "thinking": { "type": "enabled", "budget_tokens": 256 },
+        "messages": [{ "role": "user", "content": "think" }]
+    });
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 400);
+    assert_eq!(
+        upstream.hits(),
+        2,
+        "the original request plus a single budget-rectified retry"
+    );
+    // Rectifier give-ups are client errors and leave provider health untouched.
+    assert_eq!(harness.health("p1").await, healthy());
+
+    harness.shutdown().await;
+}
+
 // ============================================================================
 // Streaming and usage logging
 // ============================================================================
