@@ -1,5 +1,5 @@
 intent = "An `event: error` SSE event from the upstream is surfaced as a single Anthropic error event carrying its message and code."
-source_commit = "CCS-064"
+source_commit = "06ff23c"
 ported_from = "src/proxy/providers/streaming.rs::tests::test_sse_error_event_emits_error_event"
 
 [invariants]

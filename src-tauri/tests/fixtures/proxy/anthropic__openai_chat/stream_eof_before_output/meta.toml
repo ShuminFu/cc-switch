@@ -1,5 +1,5 @@
 intent = "A stream that hits EOF before any output emits a single stream_truncated error instead of nothing."
-source_commit = "CCS-064"
+source_commit = "06ff23c"
 ported_from = "src/proxy/providers/streaming.rs::tests::test_empty_stream_emits_truncation_error"
 
 [invariants]

@@ -1,5 +1,5 @@
 intent = "An in-band {error} payload inside a 2xx SSE stream is surfaced as a single Anthropic error event, not swallowed."
-source_commit = "CCS-064"
+source_commit = "06ff23c"
 ported_from = "src/proxy/providers/streaming.rs::tests::test_in_band_error_payload_emits_error_event"
 
 [invariants]
