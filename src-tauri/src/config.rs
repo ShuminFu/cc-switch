@@ -309,11 +309,15 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
         .as_nanos();
     tmp.push(format!("{file_name}.tmp.{ts}"));
 
-    let f = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)
-        .map_err(|e| AppError::io(&tmp, e))?;
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    // 新建文件默认仅属主可读写（可能含 API Key）；目标已存在时在 write_and_sync 中沿用其权限
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let f = opts.open(&tmp).map_err(|e| AppError::io(&tmp, e))?;
     // 从这里开始临时文件已存在：任何提前返回都由 guard 删除它
     let mut guard = TempFileGuard::new(&tmp);
     // 按值传入，返回时句柄即关闭（Windows 上 rename/删除前必须先关闭）
@@ -335,7 +339,7 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 写入临时文件，沿用目标文件的权限（unix），并在关闭前 `sync_all`
+/// 写入临时文件，目标已存在时沿用其权限（unix），并在关闭前 `sync_all`
 fn write_and_sync(mut f: fs::File, tmp: &Path, target: &Path, data: &[u8]) -> Result<(), AppError> {
     f.write_all(data).map_err(|e| AppError::io(tmp, e))?;
     f.flush().map_err(|e| AppError::io(tmp, e))?;
@@ -489,6 +493,26 @@ mod tests {
         atomic_write(&path, b"{\"k\":1}").expect("write");
         let mode = fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_creates_new_files_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let fresh = dir.path().join("new").join("auth.json");
+        atomic_write(&fresh, b"{\"OPENAI_API_KEY\":\"sk\"}").expect("create");
+        let mode = fs::metadata(&fresh).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        // 已存在的目标保留原权限（即使比 0600 宽松）
+        let shared = dir.path().join("settings.json");
+        fs::write(&shared, b"{}").expect("seed");
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o640)).expect("chmod");
+        atomic_write(&shared, b"{\"k\":1}").expect("overwrite");
+        let mode = fs::metadata(&shared).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640);
     }
 
     #[test]
