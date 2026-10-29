@@ -3171,30 +3171,13 @@ impl ProxyService {
             || new_config.listen_port != previous.listen_port;
 
         if require_restart {
-            // 单独语句取出实例，避免写锁跨越 stop() 的等待
-            let old_server = self.server.write().await.take();
-            if let Some(server) = old_server {
-                server
-                    .stop()
-                    .await
-                    .map_err(|e| format!("重启前停止代理服务器失败: {e}"))?;
-            }
-
-            let app_handle = self.app_handle.read().await.clone();
-            let new_server = ProxyServer::new(new_config.clone(), self.db.clone(), app_handle);
-            let info = new_server
-                .start()
-                .await
-                .map_err(|e| format!("重启代理服务器失败: {e}"))?;
-            if let Err(e) = self
-                .persist_ephemeral_listen_port_if_needed(&new_config, info.port)
-                .await
-            {
-                let _ = new_server.stop().await;
+            if let Err(e) = self.restart_with_config(&new_config, &previous).await {
+                // 新配置无法启动：数据库回滚到旧配置，避免下次启动重复失败
+                if let Err(db_err) = self.db.update_proxy_config(previous.clone()).await {
+                    log::warn!("回滚代理配置失败: {db_err}");
+                }
                 return Err(e);
             }
-
-            *self.server.write().await = Some(new_server);
             log::info!("代理配置已更新，服务器已自动重启应用最新配置");
 
             // 如果当前存在任意 app 的 Live 接管，需要同步更新 Live 中的代理地址（否则客户端仍指向旧端口）
@@ -3234,6 +3217,83 @@ impl ProxyService {
         }
 
         Ok(())
+    }
+
+    /// 以新配置重启代理服务器（调用方须已持有 `lifecycle` 锁）
+    ///
+    /// 端口变更时先绑定新端口再停止旧服务器，失败时旧服务器保持运行；
+    /// 仅地址变更（同端口）时须先停止旧服务器，新配置启动失败则用 `previous` 重新启动。
+    async fn restart_with_config(
+        &self,
+        new_config: &ProxyConfig,
+        previous: &ProxyConfig,
+    ) -> Result<(), String> {
+        let app_handle = self.app_handle.read().await.clone();
+
+        if new_config.listen_port != previous.listen_port {
+            let new_server =
+                ProxyServer::new(new_config.clone(), self.db.clone(), app_handle.clone());
+            let info = new_server
+                .start()
+                .await
+                .map_err(|e| format!("重启代理服务器失败: {e}"))?;
+            if let Err(e) = self
+                .persist_ephemeral_listen_port_if_needed(new_config, info.port)
+                .await
+            {
+                let _ = new_server.stop().await;
+                return Err(e);
+            }
+
+            // 单独语句换出实例，避免写锁跨越 stop() 的等待
+            let old_server = self.server.write().await.replace(new_server);
+            if let Some(server) = old_server {
+                if let Err(e) = server.stop().await {
+                    log::warn!("停止旧代理服务器失败: {e}");
+                }
+            }
+            return Ok(());
+        }
+
+        // 单独语句取出实例，避免写锁跨越 stop() 的等待
+        let old_server = self.server.write().await.take();
+        if let Some(server) = old_server {
+            if let Err(e) = server.stop().await {
+                // 旧服务器停止失败时放回原处，保持运行状态
+                *self.server.write().await = Some(server);
+                return Err(format!("重启前停止代理服务器失败: {e}"));
+            }
+        }
+
+        let new_server = ProxyServer::new(new_config.clone(), self.db.clone(), app_handle.clone());
+        let start_result = match new_server.start().await {
+            Ok(info) => match self
+                .persist_ephemeral_listen_port_if_needed(new_config, info.port)
+                .await
+            {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    let _ = new_server.stop().await;
+                    Err(e)
+                }
+            },
+            Err(e) => Err(format!("重启代理服务器失败: {e}")),
+        };
+        if start_result.is_ok() {
+            *self.server.write().await = Some(new_server);
+            return start_result;
+        }
+
+        // 新配置启动失败：用旧配置恢复服务器，避免已接管的客户端指向已关闭的端口
+        let restored = ProxyServer::new(previous.clone(), self.db.clone(), app_handle);
+        match restored.start().await {
+            Ok(_) => {
+                *self.server.write().await = Some(restored);
+                log::warn!("新代理配置启动失败，已恢复旧配置");
+            }
+            Err(e) => log::error!("新代理配置启动失败，且恢复旧配置失败: {e}"),
+        }
+        start_result
     }
 
     /// 检查服务器是否正在运行
@@ -3849,6 +3909,72 @@ mod tests {
             .expect("get status");
 
         stopping.await.expect("join stop task").expect("stop proxy");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn update_config_to_occupied_port_keeps_original_server_and_config() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        use_ephemeral_proxy_port(&db).await;
+        let service = ProxyService::new(db.clone());
+        let info = service.start().await.expect("start proxy");
+        let original_port = info.port;
+
+        // 占用另一个端口，使切换到该端口时绑定失败
+        let occupied = std::net::TcpListener::bind("127.0.0.1:0").expect("occupy port");
+        let occupied_port = occupied.local_addr().expect("occupied addr").port();
+
+        let mut new_config = service.get_config().await.expect("get config");
+        new_config.listen_port = occupied_port;
+        let result = service.update_config(&new_config).await;
+        assert!(result.is_err(), "binding an occupied port must fail");
+
+        let status = service.get_status().await.expect("get status");
+        assert!(status.running, "original server must keep running");
+        assert_eq!(status.port, original_port);
+        let config = service.get_config().await.expect("get config");
+        assert_eq!(config.listen_port, original_port, "DB must keep old port");
+        tokio::net::TcpStream::connect(("127.0.0.1", original_port))
+            .await
+            .expect("original port must still accept connections");
+
+        drop(occupied);
+        service.stop().await.expect("stop proxy");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn update_config_to_invalid_address_restores_previous_server() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        use_ephemeral_proxy_port(&db).await;
+        let service = ProxyService::new(db.clone());
+        let info = service.start().await.expect("start proxy");
+        let original_port = info.port;
+        let previous = service.get_config().await.expect("get config");
+
+        // 同端口仅改地址：须先停旧服务器，新地址无效时应以旧配置恢复
+        let mut new_config = previous.clone();
+        new_config.listen_address = "not-an-address".to_string();
+        let result = service.update_config(&new_config).await;
+        assert!(result.is_err(), "an invalid address must fail");
+
+        let status = service.get_status().await.expect("get status");
+        assert!(status.running, "previous server must be restored");
+        assert_eq!(status.port, original_port);
+        let config = service.get_config().await.expect("get config");
+        assert_eq!(config.listen_address, previous.listen_address);
+        assert_eq!(config.listen_port, original_port);
+        tokio::net::TcpStream::connect(("127.0.0.1", original_port))
+            .await
+            .expect("restored server must accept connections");
+
+        service.stop().await.expect("stop proxy");
     }
 
     #[tokio::test]
