@@ -34,7 +34,7 @@ p2-bindings-generate, p2-fe-app-registry, p0-ci-eslint-prettier
 
 **Files:** `eslint.config.js`, `eslint-rules/index.js` (new), `eslint-rules/index.d.ts` (new), `eslint-suppressions.json`, `tests/lint/eslintConfig.test.ts`, `src/App.tsx`, `src/components/providers/AddProviderDialog.tsx`, `src/components/providers/ProviderCard.tsx`, `src/components/providers/forms/ProviderForm.tsx`, `src/components/providers/forms/hooks/{useApiKeyLink,useHermesFormState,useOpenclawFormState,useOpencodeFormState,useProviderCategory}.ts`, `src/lib/query/mutations.ts`.
 
-**Commits:** see the follow-up docs commit for the code SHA.
+**Commits:** `b60f594` (code, tests, baseline and these notes); this SHA was filled in by a follow-up docs commit.
 
 **Verification.**
 - `pnpm lint`: clean.
