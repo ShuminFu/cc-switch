@@ -8,6 +8,7 @@ import {
   appLabel,
   appsWithCap,
   isAppId,
+  sharedFeatureAppOf,
   useAppCaps,
 } from "@/entities/app/registry";
 import { APP_ICON_MAP, MCP_APP_IDS, SKILLS_APP_IDS } from "@/config/appConfig";
@@ -78,6 +79,23 @@ describe("app registry", () => {
       ALL_APP_IDS.filter((id) => id !== "claude-desktop"),
     );
     expect(appsWithCap("additive")).toEqual(["opencode", "openclaw", "hermes"]);
+    expect(appsWithCap("proxyTakeover")).toEqual(
+      ALL_APP_IDS.filter(
+        (id) => id !== "claude-desktop" && !appCaps(id).additive,
+      ),
+    );
+    expect(appsWithCap("healthCheck")).toEqual(["openclaw"]);
+    expect(appsWithCap("setDefault")).toEqual(["openclaw", "hermes"]);
+    expect(appsWithCap("defaultIsSwitch")).toEqual(["hermes"]);
+  });
+
+  it("routes shared feature views of Claude Desktop to Claude", () => {
+    expect(sharedFeatureAppOf("claude-desktop")).toBe("claude");
+    for (const id of ALL_APP_IDS) {
+      if (id !== "claude-desktop") {
+        expect(sharedFeatureAppOf(id)).toBe(id);
+      }
+    }
   });
 
   it("treats unknown apps as having no capabilities", () => {
@@ -86,6 +104,10 @@ describe("app registry", () => {
       skills: false,
       mcp: false,
       additive: false,
+      proxyTakeover: false,
+      healthCheck: false,
+      setDefault: false,
+      defaultIsSwitch: false,
     });
   });
 

@@ -32,11 +32,32 @@ import { invalidateProviderGraph } from "@/entities/provider/invalidate";
 import { providerKeys } from "@/entities/provider/keys";
 import { classifyClaudeEnvKey } from "@/lib/deeplink/envKeys";
 import { maskSecret, maskValue } from "@/lib/deeplink/mask";
+import { isAppId } from "@/entities/app/registry";
+import type { AppId } from "@/lib/api/types";
 
 interface DeeplinkError {
   url: string;
   error: string;
 }
+
+/** Shape of the embedded provider config: env vars, or Codex auth + TOML */
+type ConfigKind = "claudeEnv" | "codexToml" | "geminiEnv";
+
+interface DeeplinkAppFormat {
+  config: ConfigKind;
+  /** Separate Haiku / Sonnet / Opus model fields instead of a single model */
+  tieredModels: boolean;
+}
+
+/** Provider deep-link formats per app; apps not listed have no config preview */
+const DEEPLINK_APP_FORMATS: Partial<Record<AppId, DeeplinkAppFormat>> = {
+  claude: { config: "claudeEnv", tieredModels: true },
+  codex: { config: "codexToml", tieredModels: false },
+  gemini: { config: "geminiEnv", tieredModels: false },
+};
+
+const deeplinkAppFormat = (app: unknown): DeeplinkAppFormat | undefined =>
+  isAppId(app) ? DEEPLINK_APP_FORMATS[app] : undefined;
 
 export function DeepLinkImportDialog() {
   const { t } = useTranslation();
@@ -83,6 +104,9 @@ export function DeepLinkImportDialog() {
   };
 
   useEffect(() => {
+    // Same ref object as requestSeqRef; held locally so the cleanup bumps the
+    // counter this listener compares against.
+    const requestSeq = requestSeqRef;
     // Listen for deep link import events
     const unlistenImport = listen<DeepLinkImportRequest>(
       "deeplink-import",
@@ -101,7 +125,7 @@ export function DeepLinkImportDialog() {
           return;
         }
 
-        const seq = ++requestSeqRef.current;
+        const seq = ++requestSeq.current;
         let nextRequest: DeepLinkImportRequest = event.payload;
         let nextPreview: DeepLinkImportPreview | null = null;
         const hasConfig = !!(event.payload.config || event.payload.configUrl);
@@ -151,7 +175,7 @@ export function DeepLinkImportDialog() {
         }
 
         // A newer request (or unmount) superseded this one while merging
-        if (seq !== requestSeqRef.current) return;
+        if (seq !== requestSeq.current) return;
 
         setRequest(nextRequest);
         setPreview(nextPreview);
@@ -172,7 +196,7 @@ export function DeepLinkImportDialog() {
 
     return () => {
       // Drop any merge still in flight for this listener
-      requestSeqRef.current++;
+      requestSeq.current++;
       unlistenImport.then((fn) => fn());
       unlistenError.then((fn) => fn());
     };
@@ -312,7 +336,7 @@ export function DeepLinkImportDialog() {
 
   // Parse config file content for display
   interface ParsedConfig {
-    type: "claude" | "codex" | "gemini";
+    type: ConfigKind;
     env?: Record<string, string>;
     auth?: Record<string, string>;
     tomlConfig?: string;
@@ -337,25 +361,26 @@ export function DeepLinkImportDialog() {
       const decoded = b64ToUtf8(request.config);
       const parsed = JSON.parse(decoded) as Record<string, unknown>;
 
-      if (request.app === "claude") {
+      const format = deeplinkAppFormat(request.app)?.config;
+      if (format === "claudeEnv") {
         // Claude 格式: { env: { ANTHROPIC_AUTH_TOKEN: ..., ... } }
         return {
-          type: "claude",
+          type: "claudeEnv",
           env: (parsed.env as Record<string, string>) || {},
           raw: parsed,
         };
-      } else if (request.app === "codex") {
+      } else if (format === "codexToml") {
         // Codex 格式: { auth: { OPENAI_API_KEY: ... }, config: "TOML string" }
         return {
-          type: "codex",
+          type: "codexToml",
           auth: (parsed.auth as Record<string, string>) || {},
           tomlConfig: (parsed.config as string) || "",
           raw: parsed,
         };
-      } else if (request.app === "gemini") {
+      } else if (format === "geminiEnv") {
         // Gemini 格式: 扁平结构 { GEMINI_API_KEY: ..., GEMINI_BASE_URL: ... }
         return {
-          type: "gemini",
+          type: "geminiEnv",
           env: parsed as Record<string, string>,
           raw: parsed,
         };
@@ -374,7 +399,7 @@ export function DeepLinkImportDialog() {
       denied: [] as Array<[string, string]>,
       unlisted: [] as Array<[string, string]>,
     };
-    if (parsedConfig?.type !== "claude" || !parsedConfig.env) return groups;
+    if (parsedConfig?.type !== "claudeEnv" || !parsedConfig.env) return groups;
     for (const [key, value] of Object.entries(parsedConfig.env)) {
       groups[classifyClaudeEnvKey(key)].push([key, String(value)]);
     }
@@ -558,7 +583,7 @@ export function DeepLinkImportDialog() {
                   </div>
 
                   {/* Model Fields - 根据应用类型显示不同的模型字段 */}
-                  {request.app === "claude" ? (
+                  {deeplinkAppFormat(request.app)?.tieredModels ? (
                     <>
                       {/* Claude 四种模型字段 */}
                       {request.haikuModel && (
@@ -659,7 +684,7 @@ export function DeepLinkImportDialog() {
                           </div>
 
                           {/* Claude config */}
-                          {parsedConfig.type === "claude" &&
+                          {parsedConfig.type === "claudeEnv" &&
                             parsedConfig.env && (
                               <div className="space-y-1.5">
                                 {claudeEnvGroups.allowed.map(([key, value]) => (
@@ -679,7 +704,7 @@ export function DeepLinkImportDialog() {
                             )}
 
                           {/* Codex config */}
-                          {parsedConfig.type === "codex" && (
+                          {parsedConfig.type === "codexToml" && (
                             <div className="space-y-2">
                               {parsedConfig.auth &&
                                 Object.keys(parsedConfig.auth).length > 0 && (
@@ -720,7 +745,7 @@ export function DeepLinkImportDialog() {
                           )}
 
                           {/* Gemini config */}
-                          {parsedConfig.type === "gemini" &&
+                          {parsedConfig.type === "geminiEnv" &&
                             parsedConfig.env && (
                               <div className="space-y-1.5">
                                 {Object.entries(parsedConfig.env).map(

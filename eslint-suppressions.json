@@ -1,17 +1,7 @@
 {
-  "src/App.tsx": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 2
-    }
-  },
   "src/components/DatabaseUpgrade.tsx": {
     "no-restricted-imports": {
       "count": 1
-    }
-  },
-  "src/components/DeepLinkImportDialog.tsx": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 7
     }
   },
   "src/components/JsonEditor.tsx": {
@@ -57,11 +47,6 @@
       "count": 5
     }
   },
-  "src/components/deeplink/McpConfirmation.tsx": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
   "src/components/mcp/McpFormModal.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
@@ -91,11 +76,6 @@
     },
     "react-hooks/exhaustive-deps": {
       "count": 2
-    }
-  },
-  "src/components/providers/ProviderActions.tsx": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 7
     }
   },
   "src/components/providers/ProviderCard.tsx": {
@@ -149,11 +129,6 @@
       "count": 5
     },
     "no-control-regex": {
-      "count": 1
-    }
-  },
-  "src/components/providers/forms/hooks/useCommonConfigSnippet.ts": {
-    "react-hooks/exhaustive-deps": {
       "count": 1
     }
   },
@@ -319,11 +294,6 @@
   "src/lib/query/usage.ts": {
     "@tanstack/query/exhaustive-deps": {
       "count": 6
-    }
-  },
-  "src/lib/schemas/common.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
     }
   },
   "src/lib/updater.ts": {

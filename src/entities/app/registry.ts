@@ -20,12 +20,22 @@ export interface AppCaps {
   mcp: boolean;
   /** 累加模式：多个供应商同时写入 live 配置（而非切换单一当前供应商） */
   additive: boolean;
+  /** 支持本地代理接管 live 配置（Claude Desktop 走独立路由，累加模式应用不支持） */
+  proxyTakeover: boolean;
+  /** 提供配置健康检查（显示健康警告横幅） */
+  healthCheck: boolean;
+  /** 已加入配置的供应商可指定一个默认（OpenClaw 默认模型 / Hermes 启用） */
+  setDefault: boolean;
+  /** 「设为默认」即切换当前供应商，显示为「启用 / 使用中」 */
+  defaultIsSwitch: boolean;
 }
 
 export interface AppDescriptor {
   id: AppId;
   label: string;
   caps: AppCaps;
+  /** 会话 / Skills / MCP 等共享功能视图所借用的应用；缺省为自身 */
+  featureHost?: AppId;
 }
 
 const caps = (overrides: Partial<AppCaps> = {}): AppCaps => ({
@@ -33,6 +43,10 @@ const caps = (overrides: Partial<AppCaps> = {}): AppCaps => ({
   skills: true,
   mcp: true,
   additive: false,
+  proxyTakeover: true,
+  healthCheck: false,
+  setDefault: false,
+  defaultIsSwitch: false,
   ...overrides,
 });
 
@@ -42,18 +56,44 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
   {
     id: "claude-desktop",
     label: "Claude Desktop",
-    caps: caps({ sessions: false, skills: false, mcp: false }),
+    caps: caps({
+      sessions: false,
+      skills: false,
+      mcp: false,
+      proxyTakeover: false,
+    }),
+    featureHost: "claude",
   },
   { id: "codex", label: "Codex", caps: caps() },
   { id: "gemini", label: "Gemini", caps: caps() },
   { id: "grokbuild", label: "Grok Build", caps: caps() },
-  { id: "opencode", label: "OpenCode", caps: caps({ additive: true }) },
+  {
+    id: "opencode",
+    label: "OpenCode",
+    caps: caps({ additive: true, proxyTakeover: false }),
+  },
   {
     id: "openclaw",
     label: "OpenClaw",
-    caps: caps({ skills: false, mcp: false, additive: true }),
+    caps: caps({
+      skills: false,
+      mcp: false,
+      additive: true,
+      proxyTakeover: false,
+      healthCheck: true,
+      setDefault: true,
+    }),
   },
-  { id: "hermes", label: "Hermes", caps: caps({ additive: true }) },
+  {
+    id: "hermes",
+    label: "Hermes",
+    caps: caps({
+      additive: true,
+      proxyTakeover: false,
+      setDefault: true,
+      defaultIsSwitch: true,
+    }),
+  },
 ];
 
 const BY_ID = new Map<string, AppDescriptor>(
@@ -65,6 +105,10 @@ const NO_CAPS: AppCaps = {
   skills: false,
   mcp: false,
   additive: false,
+  proxyTakeover: false,
+  healthCheck: false,
+  setDefault: false,
+  defaultIsSwitch: false,
 };
 
 /** 全部应用 ID（按注册表顺序） */
@@ -87,6 +131,11 @@ export function appLabel(id: string): string {
 /** 应用能力；未知 ID 视为不具备任何能力 */
 export function appCaps(id: string): AppCaps {
   return BY_ID.get(id)?.caps ?? NO_CAPS;
+}
+
+/** 共享功能视图（会话 / Skills / MCP 等）应使用的应用 ID */
+export function sharedFeatureAppOf(id: AppId): AppId {
+  return BY_ID.get(id)?.featureHost ?? id;
 }
 
 /** 具备某项能力的应用 ID（按注册表顺序） */

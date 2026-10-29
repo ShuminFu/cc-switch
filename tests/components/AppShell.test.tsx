@@ -159,7 +159,16 @@ describe("app feature nav", () => {
     render(
       <AppFeatureNav
         activeApp="claude-desktop"
-        caps={{ sessions: false, skills: false, mcp: true, additive: false }}
+        caps={{
+          sessions: false,
+          skills: false,
+          mcp: true,
+          additive: false,
+          proxyTakeover: false,
+          healthCheck: false,
+          setDefault: false,
+          defaultIsSwitch: false,
+        }}
         onNavigate={onNavigate}
       />,
     );

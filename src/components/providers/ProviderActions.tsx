@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AppId } from "@/lib/api";
+import { appCaps } from "@/entities/app/registry";
 
 interface ProviderActionsProps {
   appId?: AppId;
@@ -89,12 +90,10 @@ export function ProviderActions({
 }: ProviderActionsProps) {
   const { t } = useTranslation();
   const iconButtonClass = "h-8 w-8 p-1";
+  const caps = appCaps(appId ?? "");
 
-  // 累加模式应用（OpenCode 非 OMO / OpenClaw / Hermes）
-  const isAdditiveMode =
-    (appId === "opencode" && !isOmo) ||
-    appId === "openclaw" ||
-    appId === "hermes";
+  // 累加模式应用（OpenCode 非 OMO / OpenClaw / Hermes）；OMO 分支总是优先处理
+  const isAdditiveMode = caps.additive && !isOmo;
 
   // 故障转移模式下的按钮逻辑（累加模式和 OMO 应用不支持故障转移）
   const isFailoverMode =
@@ -247,7 +246,7 @@ export function ProviderActions({
   const isMainButtonSwitching = isSwitching && mainActionSwitches;
 
   // Hermes 的「启用」按钮（onSetAsDefault）同样走切换流程
-  const setAsDefaultSwitches = appId === "hermes";
+  const setAsDefaultSwitches = caps.defaultIsSwitch;
   const isSetAsDefaultSwitching = setAsDefaultSwitches && isSwitching;
   const isSetAsDefaultBlocked = setAsDefaultSwitches && isSwitchPending;
 
@@ -257,16 +256,16 @@ export function ProviderActions({
 
   return (
     <div className="flex items-center gap-1.5">
-      {(appId === "openclaw" || appId === "hermes") &&
+      {caps.setDefault &&
         isInConfig &&
         onSetAsDefault &&
         (() => {
-          const activeLabel =
-            appId === "hermes" ? t("provider.inUse") : t("provider.isDefault");
-          const inactiveLabel =
-            appId === "hermes"
-              ? t("provider.enable")
-              : t("provider.setAsDefault");
+          const activeLabel = caps.defaultIsSwitch
+            ? t("provider.inUse")
+            : t("provider.isDefault");
+          const inactiveLabel = caps.defaultIsSwitch
+            ? t("provider.enable")
+            : t("provider.setAsDefault");
           return (
             <Button
               size="sm"
