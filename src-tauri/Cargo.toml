@@ -113,6 +113,8 @@ strip = "symbols"
 
 [dev-dependencies]
 serial_test = "3"
+# test-util: tokio::time::pause/advance for deterministic timeout tests
+tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
 insta = "1"
 # Self dev-dependency: integration tests (tests/proxy_golden.rs) link the lib with `testkit` enabled.

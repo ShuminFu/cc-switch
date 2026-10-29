@@ -78,7 +78,8 @@ pub(crate) fn strip_entity_headers_for_rebuilt_body(headers: &mut HeaderMap) {
 ///
 /// `body_timeout`: 整包超时。当非零时用 `tokio::time::timeout` 包住 `.bytes()` 调用，
 /// 防止上游发完响应头后卡住 body 导致请求永远挂住。
-/// 传入 `Duration::ZERO` 表示不启用超时（故障转移关闭时）。
+/// 传入 `Duration::ZERO` 表示不启用超时；handler 调用方通过
+/// `RequestContext::non_streaming_body_timeout()` 获取，始终非零（故障转移关闭时兜底 600s）。
 pub(crate) async fn read_decoded_body(
     response: ProxyResponse,
     tag: &str,
@@ -213,13 +214,7 @@ pub async fn handle_non_streaming(
     // guard 在函数 scope 内持有，整包响应读取完成后随函数返回一并 drop
     _connection_guard: Option<ActiveConnectionGuard>,
 ) -> Result<Response, ProxyError> {
-    // 整包超时：仅在故障转移开启且配置值非零时生效
-    let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
-            Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
-        } else {
-            Duration::ZERO
-        };
+    let body_timeout = ctx.non_streaming_body_timeout();
     let (mut response_headers, status, body_bytes) =
         read_decoded_body(response, ctx.tag, body_timeout).await?;
     strip_hop_by_hop_response_headers(&mut response_headers);
@@ -816,16 +811,113 @@ mod tests {
     use crate::error::AppError;
     use crate::provider::ProviderMeta;
     use crate::proxy::failover_switch::FailoverSwitchManager;
+    use crate::proxy::handler_context::{
+        non_streaming_body_timeout, DEFAULT_NON_STREAMING_BODY_TIMEOUT,
+    };
     use crate::proxy::provider_router::ProviderRouter;
     use crate::proxy::providers::{
         codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore,
     };
-    use crate::proxy::types::{ProxyConfig, ProxyStatus};
+    use crate::proxy::types::{AppProxyConfig, ProxyConfig, ProxyStatus};
     use rust_decimal::Decimal;
     use std::collections::HashMap;
     use std::str::FromStr;
     use std::sync::Arc;
     use tokio::sync::RwLock;
+
+    fn app_proxy_config(auto_failover_enabled: bool, non_streaming_timeout: u32) -> AppProxyConfig {
+        AppProxyConfig {
+            app_type: "claude".to_string(),
+            enabled: true,
+            auto_failover_enabled,
+            max_retries: 0,
+            streaming_first_byte_timeout: 60,
+            streaming_idle_timeout: 120,
+            non_streaming_timeout,
+            circuit_failure_threshold: 4,
+            circuit_success_threshold: 2,
+            circuit_timeout_seconds: 60,
+            circuit_error_rate_threshold: 0.5,
+            circuit_min_requests: 10,
+        }
+    }
+
+    #[test]
+    fn test_non_streaming_body_timeout_is_never_zero() {
+        assert_eq!(
+            non_streaming_body_timeout(&app_proxy_config(true, 30)),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            non_streaming_body_timeout(&app_proxy_config(true, 0)),
+            DEFAULT_NON_STREAMING_BODY_TIMEOUT
+        );
+        assert_eq!(
+            non_streaming_body_timeout(&app_proxy_config(false, 30)),
+            DEFAULT_NON_STREAMING_BODY_TIMEOUT
+        );
+        assert_eq!(DEFAULT_NON_STREAMING_BODY_TIMEOUT, Duration::from_secs(600));
+    }
+
+    /// 上游发完响应头和 1 字节 body 后停住：故障转移关闭时 raw hyper 路径的
+    /// `read_decoded_body` 也必须在兜底超时后返回 `ProxyError::Timeout`，而不是永久挂起。
+    #[tokio::test]
+    async fn test_read_decoded_body_times_out_on_stalled_hyper_body_with_failover_off() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await.unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\n\r\n{",
+                )
+                .await
+                .unwrap();
+            socket.flush().await.unwrap();
+            // 保持连接打开但不再发送任何数据
+            std::future::pending::<()>().await;
+        });
+
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut sender, conn) =
+            hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream))
+                .await
+                .unwrap();
+        let conn_task = tokio::spawn(conn);
+        let request = http::Request::builder()
+            .uri("/v1/messages")
+            .header("host", addr.to_string())
+            .body(http_body_util::Empty::<Bytes>::new())
+            .unwrap();
+        let response = sender.send_request(request).await.unwrap();
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        let body_timeout = non_streaming_body_timeout(&app_proxy_config(false, 30));
+
+        // 响应头已到达，之后冻结时钟，由 tokio 自动推进到下一个定时器
+        tokio::time::pause();
+        let started = tokio::time::Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(3600),
+            read_decoded_body(ProxyResponse::Hyper(response), "Test", body_timeout),
+        )
+        .await
+        .expect("read_decoded_body must not hang when failover is off");
+
+        match result {
+            Err(ProxyError::Timeout(_)) => {}
+            other => panic!("expected ProxyError::Timeout, got {other:?}"),
+        }
+        assert!(started.elapsed() >= DEFAULT_NON_STREAMING_BODY_TIMEOUT);
+        assert!(started.elapsed() < Duration::from_secs(3600));
+
+        server.abort();
+        conn_task.abort();
+    }
 
     #[test]
     fn test_strip_sse_field_accepts_optional_space() {

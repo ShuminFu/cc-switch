@@ -12,7 +12,25 @@ use crate::proxy::{
     ProxyError,
 };
 use axum::http::HeaderMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// 非流式整包读取的兜底超时（秒）。
+///
+/// 故障转移关闭（或配置为 0）时仍需一个上限，否则 raw hyper 路径在上游发完
+/// 响应头后卡住 body 时会永久挂起；取值与 reqwest 客户端的 600s 总超时一致。
+pub(crate) const DEFAULT_NON_STREAMING_BODY_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// 计算非流式响应体读取超时
+///
+/// - 故障转移开启且配置值 > 0：使用配置值
+/// - 其他情况：使用 [`DEFAULT_NON_STREAMING_BODY_TIMEOUT`]
+pub(crate) fn non_streaming_body_timeout(app_config: &AppProxyConfig) -> Duration {
+    if app_config.auto_failover_enabled && app_config.non_streaming_timeout > 0 {
+        Duration::from_secs(app_config.non_streaming_timeout as u64)
+    } else {
+        DEFAULT_NON_STREAMING_BODY_TIMEOUT
+    }
+}
 
 /// 流式超时配置
 #[derive(Debug, Clone, Copy)]
@@ -255,6 +273,12 @@ impl RequestContext {
     #[inline]
     pub fn latency_ms(&self) -> u64 {
         self.start_time.elapsed().as_millis() as u64
+    }
+
+    /// 获取非流式响应体读取超时（始终非零，见 [`non_streaming_body_timeout`]）
+    #[inline]
+    pub fn non_streaming_body_timeout(&self) -> Duration {
+        non_streaming_body_timeout(&self.app_config)
     }
 
     /// 获取流式超时配置
