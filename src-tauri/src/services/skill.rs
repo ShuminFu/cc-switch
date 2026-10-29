@@ -2637,6 +2637,8 @@ impl SkillService {
 
         let ssot_dir = Self::get_ssot_dir()?;
         let mut installed = Vec::new();
+        // 同一 ZIP 内可能有多个同名目录（如 a/foo 与 b/foo），只安装第一个
+        let mut seen_install_names: HashSet<String> = HashSet::new();
         let existing_skills = db.get_all_installed_skills()?;
         let zip_stem = zip_path
             .file_stem()
@@ -2688,6 +2690,15 @@ impl SkillService {
                     )));
                 }
             };
+
+            if !seen_install_names.insert(install_name.to_ascii_lowercase()) {
+                log::warn!(
+                    "Skill directory '{}' appears more than once in ZIP, skipping {}",
+                    install_name,
+                    skill_dir.display()
+                );
+                continue;
+            }
 
             // 检查是否已有同名 directory 的 skill
             let conflict = existing_skills

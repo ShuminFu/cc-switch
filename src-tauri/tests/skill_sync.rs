@@ -421,3 +421,37 @@ fn migration_snapshot_overrides_multi_source_directory_inference() {
         "migration should no longer infer OpenCode enablement from a duplicate directory alone"
     );
 }
+
+#[test]
+fn install_from_zip_skips_duplicate_install_names_in_one_archive() {
+    use std::io::Write;
+
+    let test_env = TestEnv::new();
+    let home = test_env.home();
+    let state = create_test_state().expect("create test state");
+
+    // 两个不同父目录下的同名 skill 目录：a/foo 与 b/foo
+    let zip_path = home.join("dupes.zip");
+    {
+        let file = fs::File::create(&zip_path).expect("create zip");
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        for parent in ["a", "b"] {
+            zip.start_file(format!("{parent}/foo/SKILL.md"), options)
+                .expect("start file");
+            zip.write_all(format!("---\nname: Foo {parent}\n---\n").as_bytes())
+                .expect("write entry");
+        }
+        zip.finish().expect("finish zip");
+    }
+
+    let installed = SkillService::install_from_zip(&state.db, &zip_path, &AppType::Claude)
+        .expect("install from zip");
+
+    assert_eq!(installed.len(), 1, "same-name folders must install once");
+    assert_eq!(installed[0].id, "local:foo");
+    assert_eq!(installed[0].directory, "foo");
+
+    let all = state.db.get_all_installed_skills().expect("list skills");
+    assert_eq!(all.values().filter(|s| s.directory == "foo").count(), 1);
+}

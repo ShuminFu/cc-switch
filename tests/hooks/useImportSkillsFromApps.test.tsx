@@ -60,3 +60,33 @@ describe("mergeImportedSkills", () => {
     expect(merged.map((s) => s.id).sort()).toEqual(["skill-a", "skill-b"]);
   });
 });
+
+// CCS-109: install hooks (single install and ZIP install) reuse the same merge,
+// so a ZIP result holding the same id twice must still leave one cache entry.
+describe("mergeImportedSkills with duplicate ids inside one result", () => {
+  it("keeps a single entry when the imported list repeats an id", () => {
+    const first = makeSkill({ id: "local:foo", name: "Foo A" });
+    const second = makeSkill({ id: "local:foo", name: "Foo B" });
+    const merged = mergeImportedSkills([], [first, second]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toBe(second);
+  });
+
+  it("dedupes repeated ids even when no cache exists yet", () => {
+    const first = makeSkill({ id: "local:foo", name: "Foo A" });
+    const second = makeSkill({ id: "local:foo", name: "Foo B" });
+    const merged = mergeImportedSkills(undefined, [first, second]);
+    expect(merged).toEqual([second]);
+  });
+
+  it("replaces an existing cache entry when a single install returns the same id", () => {
+    const existing = [
+      makeSkill({ id: "local:foo", name: "Old" }),
+      makeSkill({ id: "skill-b", directory: "skill-b" }),
+    ];
+    const reinstalled = makeSkill({ id: "local:foo", name: "New" });
+    const merged = mergeImportedSkills(existing, [reinstalled]);
+    expect(merged.filter((s) => s.id === "local:foo")).toEqual([reinstalled]);
+    expect(merged).toHaveLength(2);
+  });
+});
