@@ -10,7 +10,7 @@
 //! split across TCP reads.
 //!
 //! The recorder is passive: when it cannot follow the stream (malformed
-//! framing, oversized head, protocol upgrade, a request it did not see) it
+//! framing, oversized head, a `CONNECT` tunnel, a request it did not see) it
 //! stops recording and the affected requests fall back to an empty case map.
 
 use super::hyper_client::OriginalHeaderCases;
@@ -117,7 +117,12 @@ impl HeaderCaseRecorder {
         uri: &http::Uri,
     ) -> OriginalHeaderCases {
         match self.heads.pop_front() {
-            Some(head) if head.method == method.as_str() && head.target == uri.to_string() => {
+            // Compare parsed URIs (hyper parses the same target bytes), so
+            // e.g. an absolute-form target without a path still matches.
+            Some(head)
+                if head.method == method.as_str()
+                    && head.target.parse::<http::Uri>().ok().as_ref() == Some(uri) =>
+            {
                 head.cases
             }
             other => {
@@ -197,8 +202,8 @@ impl HeaderCaseRecorder {
         self.heads.push_back(recorded);
         self.framing = framing;
         if framing == Framing::Disabled {
-            // Keep the head just queued (the upgrade request itself still
-            // reaches the service); later bytes are not HTTP/1.1 requests.
+            // Keep the head just queued (the CONNECT request itself still
+            // reaches the service); later bytes may be a tunnel, not HTTP/1.1.
             self.pending = Vec::new();
         }
     }
@@ -221,7 +226,9 @@ fn parse_head(head: &[u8]) -> Option<(RecordedHead, Framing)> {
     let mut content_length: Option<u64> = None;
     let mut chunked = false;
     let mut has_transfer_encoding = false;
-    let mut upgrade = method.eq_ignore_ascii_case("CONNECT");
+    // An `Upgrade` header alone keeps the stream HTTP/1.1: the proxy never
+    // answers 101 and hyper keeps serving requests after any other status.
+    let connect = method.eq_ignore_ascii_case("CONNECT");
 
     for header in req.headers.iter() {
         let lower = header.name.to_ascii_lowercase();
@@ -246,13 +253,12 @@ fn parse_head(head: &[u8]) -> Option<(RecordedHead, Framing)> {
                     .next()
                     .is_some_and(|coding| coding.trim().eq_ignore_ascii_case("chunked"));
             }
-            "upgrade" => upgrade = true,
             _ => {}
         }
         cases.push((lower, header.name.as_bytes().to_vec()));
     }
 
-    let framing = if upgrade {
+    let framing = if connect {
         Framing::Disabled
     } else if has_transfer_encoding {
         if !chunked {
@@ -442,11 +448,32 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_stops_recording_after_the_upgrade_request() {
+    fn upgrade_header_does_not_stop_recording() {
+        // e.g. `curl --http2` against http:// sends `Upgrade: h2c`; the proxy
+        // answers normally and the connection stays HTTP/1.1.
         let mut recorder = HeaderCaseRecorder::default();
-        recorder.feed(b"GET /ws HTTP/1.1\r\nUpgrade: websocket\r\n\r\nGET /x HTTP/1.1\r\n\r\n");
-        assert_eq!(take(&mut recorder, "GET", "/ws"), ["Upgrade"]);
+        recorder.feed(
+            b"GET /a HTTP/1.1\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\n\r\n\
+              GET /b HTTP/1.1\r\nX-After-Upgrade: 1\r\n\r\n",
+        );
+        assert_eq!(take(&mut recorder, "GET", "/a"), ["Connection", "Upgrade"]);
+        assert_eq!(take(&mut recorder, "GET", "/b"), ["X-After-Upgrade"]);
+    }
+
+    #[test]
+    fn connect_stops_recording_after_the_connect_request() {
+        let mut recorder = HeaderCaseRecorder::default();
+        recorder
+            .feed(b"CONNECT example.com:443 HTTP/1.1\r\nHost: x\r\n\r\nGET /x HTTP/1.1\r\n\r\n");
+        assert_eq!(take(&mut recorder, "CONNECT", "example.com:443"), ["Host"]);
         assert!(take(&mut recorder, "GET", "/x").is_empty());
+    }
+
+    #[test]
+    fn absolute_form_target_without_path_matches() {
+        let mut recorder = HeaderCaseRecorder::default();
+        recorder.feed(b"GET http://example.com HTTP/1.1\r\nX-Abs: 1\r\n\r\n");
+        assert_eq!(take(&mut recorder, "GET", "http://example.com"), ["X-Abs"]);
     }
 
     #[test]
