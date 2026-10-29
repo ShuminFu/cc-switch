@@ -246,15 +246,8 @@ impl ProviderRouter {
             }
         }
 
-        // 如果不存在，获取写锁创建
-        let mut breakers = self.circuit_breakers.write().await;
-
-        // 双重检查，防止竞争条件
-        if let Some(breaker) = breakers.get(key) {
-            return breaker.clone();
-        }
-
-        // 按应用独立读取熔断器配置
+        // 按应用独立读取熔断器配置；必须在拿写锁之前完成，
+        // 否则快照未命中时的数据库读取会阻塞所有熔断器查询
         let config = match self
             .runtime_config
             .app_proxy_config(key.app().as_str())
@@ -263,6 +256,14 @@ impl ProviderRouter {
             Ok(app_config) => CircuitBreakerConfig::from(&app_config),
             Err(_) => CircuitBreakerConfig::default(),
         };
+
+        // 如果不存在，获取写锁创建（持锁期间不再有 await）
+        let mut breakers = self.circuit_breakers.write().await;
+
+        // 双重检查，防止竞争条件（并发创建时以先插入者为准）
+        if let Some(breaker) = breakers.get(key) {
+            return breaker.clone();
+        }
 
         log::debug!(
             "[{}] 创建熔断器: provider_id={}",
@@ -344,6 +345,71 @@ mod tests {
             .get_or_create_circuit_breaker(&BreakerKey::new("claude", "test"))
             .await;
         assert!(breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial]
+    async fn test_concurrent_breaker_creation_yields_single_entry() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = Arc::new(ProviderRouter::new(db));
+        let key = BreakerKey::new("claude", "concurrent");
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(16));
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                let router = router.clone();
+                let key = key.clone();
+                let barrier = barrier.clone();
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    router.get_or_create_circuit_breaker(&key).await
+                })
+            })
+            .collect();
+
+        let mut breakers = Vec::new();
+        for handle in handles {
+            breakers.push(handle.await.unwrap());
+        }
+
+        let first = &breakers[0];
+        assert!(breakers.iter().all(|b| Arc::ptr_eq(first, b)));
+        let map = router.circuit_breakers.read().await;
+        assert_eq!(map.len(), 1);
+        assert!(Arc::ptr_eq(first, map.get(&key).unwrap()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial]
+    async fn test_breaker_creation_does_not_hold_map_lock_during_db_read() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = Arc::new(ProviderRouter::new(db.clone()));
+        let key = BreakerKey::new("claude", "slow-db");
+
+        let handle = {
+            // 持有数据库连接锁，让创建熔断器时的配置读取阻塞在数据库上
+            let conn = db.conn.lock().unwrap();
+            let handle = {
+                let router = router.clone();
+                let key = key.clone();
+                tokio::spawn(async move { router.get_or_create_circuit_breaker(&key).await })
+            };
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
+            // 配置读取阻塞期间，熔断器表仍可被其他请求读取
+            assert!(
+                router.circuit_breakers.try_read().is_ok(),
+                "breaker map lock is held while reading the config from the database"
+            );
+            drop(conn);
+            handle
+        };
+
+        let breaker = handle.await.unwrap();
+        let map = router.circuit_breakers.read().await;
+        assert!(Arc::ptr_eq(&breaker, map.get(&key).unwrap()));
     }
 
     #[tokio::test]
