@@ -1014,16 +1014,21 @@ impl ProxyService {
     /// 在清空 Live Token 之前调用，确保数据库中的 Provider 配置有最新的 Token。
     /// 这样代理才能从数据库读取到正确的认证信息。
     async fn sync_live_to_provider(&self, app_type: &AppType) -> Result<(), String> {
-        let live_config = match app_type {
-            AppType::Claude => self.read_claude_live()?,
-            AppType::Codex => self.read_codex_live()?,
-            AppType::Gemini => self.read_gemini_live()?,
-            AppType::GrokBuild => self.read_grok_live()?,
-            _ => return Err("该应用不支持代理功能".to_string()),
-        };
+        let live_config = self.read_live_for_takeover(app_type)?;
 
         self.sync_live_config_to_provider(app_type, &live_config)
             .await
+    }
+
+    /// 读取支持代理接管的应用的 Live 配置
+    fn read_live_for_takeover(&self, app_type: &AppType) -> Result<Value, String> {
+        match app_type {
+            AppType::Claude => self.read_claude_live(),
+            AppType::Codex => self.read_codex_live(),
+            AppType::Gemini => self.read_gemini_live(),
+            AppType::GrokBuild => self.read_grok_live(),
+            _ => Err("该应用不支持代理功能".to_string()),
+        }
     }
 
     async fn sync_live_config_to_provider(
@@ -1287,24 +1292,13 @@ impl ProxyService {
     }
 
     async fn sync_live_to_providers(&self) -> Result<(), String> {
-        if let Ok(live_config) = self.read_claude_live() {
-            self.sync_live_config_to_provider(&AppType::Claude, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_codex_live() {
-            self.sync_live_config_to_provider(&AppType::Codex, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_gemini_live() {
-            self.sync_live_config_to_provider(&AppType::Gemini, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_grok_live() {
-            self.sync_live_config_to_provider(&AppType::GrokBuild, &live_config)
-                .await?;
+        for app_type in
+            crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER).map(|d| &d.app)
+        {
+            if let Ok(live_config) = self.read_live_for_takeover(app_type) {
+                self.sync_live_config_to_provider(app_type, &live_config)
+                    .await?;
+            }
         }
 
         log::info!("Live 配置 Token 同步完成");

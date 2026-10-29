@@ -52,26 +52,10 @@ impl McpApps {
 
     /// 获取所有启用的应用列表
     pub fn enabled_apps(&self) -> Vec<AppType> {
-        let mut apps = Vec::new();
-        if self.claude {
-            apps.push(AppType::Claude);
-        }
-        if self.codex {
-            apps.push(AppType::Codex);
-        }
-        if self.gemini {
-            apps.push(AppType::Gemini);
-        }
-        if self.grokbuild {
-            apps.push(AppType::GrokBuild);
-        }
-        if self.opencode {
-            apps.push(AppType::OpenCode);
-        }
-        if self.hermes {
-            apps.push(AppType::Hermes);
-        }
-        apps
+        crate::apps::registry::with_caps(crate::apps::AppCaps::MCP)
+            .map(|d| d.app.clone())
+            .filter(|app| self.is_enabled_for(app))
+            .collect()
     }
 
     /// 检查是否所有应用都未启用
@@ -133,26 +117,10 @@ impl SkillApps {
 
     /// 获取所有启用的应用列表
     pub fn enabled_apps(&self) -> Vec<AppType> {
-        let mut apps = Vec::new();
-        if self.claude {
-            apps.push(AppType::Claude);
-        }
-        if self.codex {
-            apps.push(AppType::Codex);
-        }
-        if self.gemini {
-            apps.push(AppType::Gemini);
-        }
-        if self.grokbuild {
-            apps.push(AppType::GrokBuild);
-        }
-        if self.opencode {
-            apps.push(AppType::OpenCode);
-        }
-        if self.hermes {
-            apps.push(AppType::Hermes);
-        }
-        apps
+        crate::apps::registry::with_caps(crate::apps::AppCaps::SKILLS)
+            .map(|d| d.app.clone())
+            .filter(|app| self.is_enabled_for(app))
+            .collect()
     }
 
     /// 检查是否所有应用都未启用
@@ -359,6 +327,7 @@ pub struct PromptRoot {
     pub hermes: PromptConfig,
 }
 
+use crate::apps::{AppDescriptor, SyncMode, APPS};
 use crate::config::{copy_file, get_app_config_dir, get_app_config_path, write_json_file};
 use crate::error::AppError;
 use crate::prompt_files::prompt_file_path;
@@ -384,17 +353,13 @@ pub enum AppType {
 }
 
 impl AppType {
+    /// 应用描述符（见 [`crate::apps::APPS`]）
+    pub fn descriptor(&self) -> &'static AppDescriptor {
+        crate::apps::registry::descriptor(self)
+    }
+
     pub fn as_str(&self) -> &str {
-        match self {
-            AppType::Claude => "claude",
-            AppType::ClaudeDesktop => "claude-desktop",
-            AppType::Codex => "codex",
-            AppType::Gemini => "gemini",
-            AppType::GrokBuild => "grokbuild",
-            AppType::OpenCode => "opencode",
-            AppType::OpenClaw => "openclaw",
-            AppType::Hermes => "hermes",
-        }
+        self.descriptor().slug
     }
 
     /// Check if this app uses additive mode
@@ -402,25 +367,12 @@ impl AppType {
     /// - Switch mode (false): Only the current provider is written to live config (Claude, Codex, Gemini)
     /// - Additive mode (true): All providers are written to live config (OpenCode, OpenClaw, Hermes)
     pub fn is_additive_mode(&self) -> bool {
-        matches!(
-            self,
-            AppType::OpenCode | AppType::OpenClaw | AppType::Hermes
-        )
+        self.descriptor().sync_mode == SyncMode::Additive
     }
 
     /// Return an iterator over all app types
     pub fn all() -> impl Iterator<Item = AppType> {
-        [
-            AppType::Claude,
-            AppType::ClaudeDesktop,
-            AppType::Codex,
-            AppType::Gemini,
-            AppType::GrokBuild,
-            AppType::OpenCode,
-            AppType::OpenClaw,
-            AppType::Hermes,
-        ]
-        .into_iter()
+        APPS.iter().map(|d| d.app.clone())
     }
 }
 
@@ -429,21 +381,15 @@ impl FromStr for AppType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let normalized = s.trim().to_lowercase();
-        match normalized.as_str() {
-            "claude" => Ok(AppType::Claude),
-            "claude-desktop" | "claude_desktop" | "claudedesktop" => Ok(AppType::ClaudeDesktop),
-            "codex" => Ok(AppType::Codex),
-            "gemini" => Ok(AppType::Gemini),
-            "grokbuild" | "grok-build" | "grok_build" | "grok" => Ok(AppType::GrokBuild),
-            "opencode" => Ok(AppType::OpenCode),
-            "openclaw" => Ok(AppType::OpenClaw),
-            "hermes" => Ok(AppType::Hermes),
-            other => Err(AppError::localized(
-                "unsupported_app",
-                format!("不支持的应用标识: '{other}'。可选值: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes。"),
-                format!("Unsupported app id: '{other}'. Allowed: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes."),
-            )),
+        if let Some(d) = crate::apps::registry::find_by_id(&normalized) {
+            return Ok(d.app.clone());
         }
+        let allowed = APPS.iter().map(|d| d.slug).collect::<Vec<_>>().join(", ");
+        Err(AppError::localized(
+            "unsupported_app",
+            format!("不支持的应用标识: '{normalized}'。可选值: {allowed}。"),
+            format!("Unsupported app id: '{normalized}'. Allowed: {allowed}."),
+        ))
     }
 }
 

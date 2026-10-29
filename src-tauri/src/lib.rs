@@ -1,5 +1,6 @@
 mod app_config;
 mod app_store;
+mod apps;
 mod auto_launch;
 mod claude_desktop_config;
 mod claude_mcp;
@@ -794,15 +795,9 @@ pub fn run() {
             if app_state.db.is_prompts_table_empty().unwrap_or(false) {
                 log::info!("Prompts table empty, importing from live configurations...");
 
-                for app in [
-                    crate::app_config::AppType::Claude,
-                    crate::app_config::AppType::Codex,
-                    crate::app_config::AppType::Gemini,
-                    crate::app_config::AppType::GrokBuild,
-                    crate::app_config::AppType::OpenCode,
-                    crate::app_config::AppType::OpenClaw,
-                    crate::app_config::AppType::Hermes,
-                ] {
+                for app in crate::apps::registry::with_caps(crate::apps::AppCaps::PROMPTS)
+                    .map(|d| d.app.clone())
+                {
                     match crate::services::prompt::PromptService::import_from_file_on_first_launch(
                         &app_state,
                         app.clone(),
@@ -1725,11 +1720,9 @@ pub(crate) fn remove_tray_icon_before_exit(app_handle: &tauri::AppHandle) {
 ///
 /// 检查 `proxy_config.enabled` 字段，如果有任一应用的状态为 `true`，
 /// 则自动启动代理服务并接管对应应用的 Live 配置。
-const PROXY_STARTUP_APP_TYPES: [&str; 4] = ["claude", "codex", "gemini", "grokbuild"];
-
 async fn enabled_proxy_apps_on_startup(db: &database::Database) -> Vec<&'static str> {
     let mut apps = Vec::new();
-    for app_type in PROXY_STARTUP_APP_TYPES {
+    for app_type in apps::registry::with_caps(apps::AppCaps::PROXY_TAKEOVER).map(|d| d.slug) {
         if db
             .get_proxy_config_for_app(app_type)
             .await

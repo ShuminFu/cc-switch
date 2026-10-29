@@ -6,6 +6,8 @@
 //! summing `input_tokens` across providers must route through
 //! [`fresh_input_sql`] to recover a consistent semantics.
 
+use crate::apps::InputTokenSemantics;
+
 /// Set of `app_type` values whose stored `input_tokens` already includes
 /// `cache_read_tokens`. Aggregations subtract cache reads from these rows
 /// to recover the fresh-input semantics used by Claude.
@@ -16,7 +18,14 @@
 /// style provider not added here) shows up loudly as a too-low cache hit
 /// rate, which is easier to catch than the silent over-deduction that
 /// would happen with the opposite default.
-const CACHE_INCLUSIVE_APP_TYPES: &[&str] = &["codex", "gemini", "grokbuild"];
+///
+/// The list is derived from [`crate::apps::APPS`] (`input_token_semantics`).
+fn cache_inclusive_app_types() -> impl Iterator<Item = &'static str> {
+    crate::apps::APPS
+        .iter()
+        .filter(|d| d.input_token_semantics == InputTokenSemantics::CacheInclusive)
+        .map(|d| d.slug)
+}
 
 pub(crate) const INPUT_TOKEN_SEMANTICS_LEGACY: i64 = 0;
 pub(crate) const INPUT_TOKEN_SEMANTICS_TOTAL: i64 = 1;
@@ -37,8 +46,7 @@ pub fn fresh_input_sql(alias: &str) -> String {
     } else {
         format!("{alias}.")
     };
-    let app_type_list = CACHE_INCLUSIVE_APP_TYPES
-        .iter()
+    let app_type_list = cache_inclusive_app_types()
         .map(|t| format!("'{t}'"))
         .collect::<Vec<_>>()
         .join(", ");
@@ -167,6 +175,13 @@ mod tests {
         let sql = format!("SELECT {expr} FROM proxy_request_logs l");
         let value: i64 = conn.query_row(&sql, [], |row| row.get(0)).unwrap();
         assert_eq!(value, 500);
+    }
+
+    #[test]
+    fn cache_inclusive_apps_come_from_registry() {
+        let apps: Vec<&str> = cache_inclusive_app_types().collect();
+        assert_eq!(apps, vec!["codex", "gemini", "grokbuild"]);
+        assert!(fresh_input_sql("").contains("app_type IN ('codex', 'gemini', 'grokbuild')"));
     }
 
     #[test]
