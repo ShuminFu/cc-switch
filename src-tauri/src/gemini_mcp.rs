@@ -20,7 +20,11 @@ fn read_json_value(path: &Path) -> Result<Value, AppError> {
 }
 
 fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
+    // 写入预览只捕获内容，不建目录
+    if let Some(parent) = path
+        .parent()
+        .filter(|_| !crate::config::is_capturing_writes())
+    {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
     let json =

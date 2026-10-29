@@ -90,3 +90,22 @@ would change the result.
   waits for confirm, "back" cancels, preview failure saves directly;
   `liveDiff.test.ts` unit tests); `pnpm format:check` clean; eslint on touched
   files clean.
+
+**Review.** One missed read-after-write site: Claude Desktop "restore official"
+writes `deploymentMode: "1p"` to the 3P `claude_desktop_config.json` and then
+re-reads that file from disk to strip `enterpriseConfig`. During a preview the
+re-read saw the old file, so when `enterpriseConfig` was present the preview
+showed `"3p"` while the save writes `"1p"`. `read_json_or_empty` in
+`apps/claude_desktop/config.rs` now goes through `config::read_text_file_if_exists`
+(test `claude_desktop_restore_preview_matches_real_restore`, which fails without
+the fix). The `create_dir_all` calls in the Codex `auth.json`/`config.toml`
+writer, the Hermes `config.yaml` writer and the Gemini MCP `settings.json`
+writer are skipped while capturing, so a preview no longer creates directories.
+Known limit, not changed: during proxy takeover of Claude/Codex the preview
+reports `proxyTakeover` and the form saves without a diff, although with the
+proxy running the save also rewrites the proxy-safe live file
+(`refresh_live_after_provider_save`). Previewing that path would need the live
+backup update, a DB write, to run first, so it stays out of the preview.
+Re-verified: `cargo test --no-fail-fast` all passed, `cargo clippy` (lib and
+`--tests`) with `-D warnings` clean, `cargo fmt` clean, `pnpm typecheck` clean,
+`pnpm test:unit` passed.

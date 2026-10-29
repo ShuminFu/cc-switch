@@ -451,7 +451,11 @@ fn write_yaml_section_to_config_locked(
         None
     };
 
-    if let Some(parent) = config_path.parent() {
+    // 写入预览只捕获内容，不建目录
+    if let Some(parent) = config_path
+        .parent()
+        .filter(|_| !crate::config::is_capturing_writes())
+    {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 

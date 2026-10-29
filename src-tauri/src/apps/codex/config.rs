@@ -217,7 +217,11 @@ pub fn write_codex_live_atomic(
     let auth_path = get_codex_auth_path();
     let config_path = get_codex_config_path();
 
-    if let Some(parent) = auth_path.parent() {
+    // 写入预览只捕获内容，不建目录
+    if let Some(parent) = auth_path
+        .parent()
+        .filter(|_| !crate::config::is_capturing_writes())
+    {
         std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
