@@ -220,6 +220,10 @@ struct CodexOAuthStore {
 }
 
 /// Codex OAuth 认证管理器（多账号）
+///
+/// 所有可变状态都在内部 `Arc<RwLock<..>>` 中，`clone()` 共享同一份状态，
+/// 便于在外层 guard 下克隆后释放 guard 再执行联网刷新。
+#[derive(Clone)]
 pub struct CodexOAuthManager {
     accounts: Arc<RwLock<HashMap<String, CodexAccountData>>>,
     default_account_id: Arc<RwLock<Option<String>>>,

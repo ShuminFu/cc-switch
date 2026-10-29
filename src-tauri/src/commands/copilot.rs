@@ -13,6 +13,17 @@ use tokio::sync::RwLock;
 /// Copilot 认证状态
 pub struct CopilotAuthState(pub Arc<RwLock<CopilotAuthManager>>);
 
+impl CopilotAuthState {
+    /// 克隆一份共享内部状态的管理器句柄，并立即释放外层读锁。
+    ///
+    /// 代理转发路径应使用它，而不是在持有外层 guard 的情况下 await 联网的
+    /// token 刷新——否则 UI 命令的 `write()` 会被阻塞，且 tokio 的公平 RwLock
+    /// 会让后续代理请求的 `read()` 也排在该 writer 之后。
+    pub async fn manager(&self) -> CopilotAuthManager {
+        self.0.read().await.clone()
+    }
+}
+
 // ==================== 设备码流程 ====================
 
 /// 启动设备码流程
@@ -40,7 +51,7 @@ pub async fn copilot_poll_for_auth(
     github_domain: Option<String>,
     state: State<'_, CopilotAuthState>,
 ) -> Result<bool, String> {
-    let auth_manager = state.0.write().await;
+    let auth_manager = state.0.read().await;
     match auth_manager
         .poll_for_token(&device_code, github_domain.as_deref())
         .await
@@ -69,7 +80,7 @@ pub async fn copilot_poll_for_account(
     github_domain: Option<String>,
     state: State<'_, CopilotAuthState>,
 ) -> Result<Option<GitHubAccount>, String> {
-    let auth_manager = state.0.write().await;
+    let auth_manager = state.0.read().await;
     match auth_manager
         .poll_for_token(&device_code, github_domain.as_deref())
         .await
@@ -102,7 +113,7 @@ pub async fn copilot_remove_account(
     account_id: String,
     state: State<'_, CopilotAuthState>,
 ) -> Result<(), String> {
-    let auth_manager = state.0.write().await;
+    let auth_manager = state.0.read().await;
     auth_manager
         .remove_account(&account_id)
         .await
@@ -115,7 +126,7 @@ pub async fn copilot_set_default_account(
     account_id: String,
     state: State<'_, CopilotAuthState>,
 ) -> Result<(), String> {
-    let auth_manager = state.0.write().await;
+    let auth_manager = state.0.read().await;
     auth_manager
         .set_default_account(&account_id)
         .await
@@ -143,7 +154,7 @@ pub async fn copilot_is_authenticated(state: State<'_, CopilotAuthState>) -> Res
 /// 注销所有 Copilot 认证
 #[tauri::command]
 pub async fn copilot_logout(state: State<'_, CopilotAuthState>) -> Result<(), String> {
-    let auth_manager = state.0.write().await;
+    let auth_manager = state.0.read().await;
     auth_manager.clear_auth().await.map_err(|e| e.to_string())
 }
 

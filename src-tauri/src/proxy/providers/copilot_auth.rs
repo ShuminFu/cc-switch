@@ -408,6 +408,10 @@ struct CopilotAuthStore {
 }
 
 /// Copilot 认证管理器（支持多账号）
+///
+/// 所有可变状态都在内部 `Arc<RwLock<..>>` 中，`clone()` 得到的是共享同一份状态的句柄，
+/// 调用方可以在外层 guard 下克隆后立即释放 guard，再去执行可能联网的 token 刷新。
+#[derive(Clone)]
 pub struct CopilotAuthManager {
     /// 所有 GitHub 账号（key = GitHub user ID）
     accounts: Arc<RwLock<HashMap<String, GitHubAccountData>>>,
@@ -429,6 +433,9 @@ pub struct CopilotAuthManager {
     pending_migration: Arc<RwLock<Option<String>>>,
     /// 旧认证数据迁移失败时的状态消息
     migration_error: Arc<RwLock<Option<String>>>,
+    /// 测试用：覆盖 GitHub API 基础地址（指向本地 mock）
+    #[cfg(test)]
+    api_base_override: Option<String>,
 }
 
 impl CopilotAuthManager {
@@ -447,6 +454,8 @@ impl CopilotAuthManager {
             storage_path,
             pending_migration: Arc::new(RwLock::new(None)),
             migration_error: Arc::new(RwLock::new(None)),
+            #[cfg(test)]
+            api_base_override: None,
         };
 
         // 尝试从磁盘加载（同步，不发起网络请求）
@@ -1335,8 +1344,16 @@ impl CopilotAuthManager {
     ) -> Result<(), CopilotAuthError> {
         log::debug!("[CopilotAuth] 获取账号 {account_id} 的 Copilot Token (domain: {domain})");
 
+        #[cfg(test)]
+        let token_url = match &self.api_base_override {
+            Some(base) => format!("{base}/copilot_internal/v2/token"),
+            None => copilot_token_url(domain),
+        };
+        #[cfg(not(test))]
+        let token_url = copilot_token_url(domain);
+
         let response = crate::proxy::http_client::get()
-            .get(copilot_token_url(domain))
+            .get(token_url)
             .header("Authorization", format!("token {github_token}"))
             .header("User-Agent", COPILOT_USER_AGENT)
             .header("Editor-Version", COPILOT_EDITOR_VERSION)
@@ -2079,5 +2096,116 @@ mod tests {
 
         let account = GitHubAccount::from(&data);
         assert_eq!(account.id, "company.ghe.com:99999");
+    }
+
+    /// 启动一个本地 mock：每个请求延迟 `delay` 后返回一个新的 Copilot token。
+    /// 每收到一个请求就通过 `notify` 通知一次，便于测试确认刷新已在进行中。
+    async fn spawn_delayed_token_mock(
+        delay: std::time::Duration,
+        notify: Arc<tokio::sync::Notify>,
+    ) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut served = 0u32;
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                served += 1;
+                let notify = notify.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 1024];
+                    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match socket.read(&mut chunk).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                        }
+                    }
+                    notify.notify_one();
+                    tokio::time::sleep(delay).await;
+                    let body = format!(
+                        r#"{{"token":"tok_{served}","expires_at":{}}}"#,
+                        chrono::Utc::now().timestamp() + 3600
+                    );
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// 回归测试：代理路径刷新 token（联网、较慢）期间，UI 命令的 `write()` 不应被阻塞。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_token_refresh_does_not_hold_outer_guard() {
+        use crate::commands::CopilotAuthState;
+        use std::time::Duration;
+
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let base = spawn_delayed_token_mock(Duration::from_secs(2), notify.clone()).await;
+
+        let temp_dir = tempdir().unwrap();
+        let mut manager = CopilotAuthManager::new(temp_dir.path().to_path_buf());
+        manager.api_base_override = Some(base);
+        manager.accounts.write().await.insert(
+            "1".to_string(),
+            GitHubAccountData {
+                github_token: "gho_test".to_string(),
+                user: GitHubUser {
+                    login: "tester".to_string(),
+                    id: 1,
+                    avatar_url: None,
+                },
+                authenticated_at: 1700000000,
+                github_domain: DEFAULT_GITHUB_DOMAIN.to_string(),
+            },
+        );
+        let tokens = manager.copilot_tokens.clone();
+        let state = Arc::new(CopilotAuthState(Arc::new(RwLock::new(manager))));
+
+        // 旧写法：持有外层读锁 await 刷新 → write() 在 200ms 内拿不到锁。
+        // 这同时证明 mock 确实让刷新耗时 2s，下面的断言才有意义。
+        let held = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let guard = state.0.read().await;
+                guard.get_valid_token_for_account("1").await
+            })
+        };
+        notify.notified().await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), state.0.write())
+                .await
+                .is_err(),
+            "holding the outer read guard across the refresh should block write()"
+        );
+        assert_eq!(held.await.unwrap().unwrap(), "tok_1");
+
+        // 清空缓存，迫使下一次调用再次联网刷新
+        tokens.write().await.clear();
+
+        // 新写法：克隆管理器后释放 guard → 刷新期间 write() 立即成功。
+        let refresh = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let manager = state.manager().await;
+                manager.get_valid_token_for_account("1").await
+            })
+        };
+        notify.notified().await;
+        let write_guard = tokio::time::timeout(Duration::from_millis(200), state.0.write())
+            .await
+            .expect("write() must not wait for the in-flight token refresh");
+        drop(write_guard);
+        assert!(!refresh.is_finished(), "refresh should still be in flight");
+        assert_eq!(refresh.await.unwrap().unwrap(), "tok_2");
     }
 }

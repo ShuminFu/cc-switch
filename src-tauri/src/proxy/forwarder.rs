@@ -1304,7 +1304,7 @@ impl RequestForwarder {
         if is_copilot && !is_full_url {
             if let Some(app_handle) = &self.app_handle {
                 let copilot_state = app_handle.state::<CopilotAuthState>();
-                let copilot_auth = copilot_state.0.read().await;
+                let copilot_auth = copilot_state.manager().await;
 
                 // 从 provider.meta 获取关联的 GitHub 账号 ID
                 let account_id = provider
@@ -1577,8 +1577,8 @@ impl RequestForwarder {
             if auth.strategy == AuthStrategy::GitHubCopilot {
                 if let Some(app_handle) = &self.app_handle {
                     let copilot_state = app_handle.state::<CopilotAuthState>();
-                    let copilot_auth: tokio::sync::RwLockReadGuard<'_, CopilotAuthManager> =
-                        copilot_state.0.read().await;
+                    // 克隆管理器后立即释放外层 guard，避免联网刷新期间阻塞 UI 写锁
+                    let copilot_auth: CopilotAuthManager = copilot_state.manager().await;
 
                     // 从 provider.meta 获取关联的 GitHub 账号 ID（多账号支持）
                     let account_id = provider
@@ -1628,8 +1628,8 @@ impl RequestForwarder {
             if auth.strategy == AuthStrategy::CodexOAuth {
                 if let Some(app_handle) = &self.app_handle {
                     let codex_state = app_handle.state::<CodexOAuthState>();
-                    let codex_auth: tokio::sync::RwLockReadGuard<'_, CodexOAuthManager> =
-                        codex_state.0.read().await;
+                    // 克隆管理器后立即释放外层 guard，避免联网刷新期间阻塞 UI 写锁
+                    let codex_auth: CodexOAuthManager = codex_state.manager().await;
 
                     // 从 provider.meta 获取关联的 ChatGPT 账号 ID
                     let account_id = provider
@@ -2500,7 +2500,7 @@ impl RequestForwarder {
             return;
         };
         let copilot_state = app_handle.state::<CopilotAuthState>();
-        let copilot_auth = copilot_state.0.read().await;
+        let copilot_auth = copilot_state.manager().await;
         let account_id = provider
             .meta
             .as_ref()
@@ -2534,7 +2534,7 @@ impl RequestForwarder {
         };
 
         let copilot_state = app_handle.state::<CopilotAuthState>();
-        let copilot_auth = copilot_state.0.read().await;
+        let copilot_auth = copilot_state.manager().await;
         let account_id = provider
             .meta
             .as_ref()

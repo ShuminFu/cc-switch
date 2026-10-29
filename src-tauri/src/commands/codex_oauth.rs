@@ -15,6 +15,15 @@ use tokio::sync::RwLock;
 /// Codex OAuth 认证状态
 pub struct CodexOAuthState(pub Arc<RwLock<CodexOAuthManager>>);
 
+impl CodexOAuthState {
+    /// 克隆一份共享内部状态的管理器句柄，并立即释放外层读锁。
+    ///
+    /// 代理转发路径应使用它，避免在持有外层 guard 时 await 联网的 token 刷新。
+    pub async fn manager(&self) -> CodexOAuthManager {
+        self.0.read().await.clone()
+    }
+}
+
 /// 查询 Codex OAuth (ChatGPT Plus/Pro) 订阅额度
 ///
 /// - `account_id` 未指定时回退到 `CodexOAuthManager` 的默认账号
