@@ -31,7 +31,7 @@ p2-app-registry-ipc
 
 **Files:** `src/entities/app/registry.ts` (new), `src/App.tsx`, `src/hooks/useProxyStatus.ts`, `src/components/proxy/ProxyToggle.tsx`, `src/config/appConfig.tsx`, `tests/entities/appRegistry.test.tsx` (new), `tests/hooks/useProxyStatus.test.tsx`.
 
-**Commits:** see `git log --grep CCS-119`.
+**Commits:** `6dd19ed` (code, tests and these notes); this SHA was filled in by a follow-up docs commit.
 
 **Verification.**
 - `pnpm typecheck`: clean.
