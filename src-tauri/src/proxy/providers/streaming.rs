@@ -413,8 +413,9 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         current_model = Some(chunk.model.clone());
                                     }
 
-                                    let chunk_usage_json =
-                                        chunk.usage.as_ref().map(build_anthropic_usage_json);
+                                    // 非对象 usage（如字符串）视为缺失，避免以零值覆盖已收到的有效 usage
+                                    let chunk_usage = chunk.usage.as_ref().filter(|u| u.is_object());
+                                    let chunk_usage_json = chunk_usage.map(build_anthropic_usage_json);
                                     if let Some(usage_json) = &chunk_usage_json {
                                         latest_usage = Some(usage_json.clone());
                                         if let Some((_, pending_usage)) = pending_message_delta.as_mut() {
@@ -429,7 +430,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                 "input_tokens": 0,
                                                 "output_tokens": 0
                                             });
-                                            if let Some(u) = &chunk.usage {
+                                            if let Some(u) = chunk_usage {
                                                 start_usage = build_anthropic_usage_json(u);
                                                 start_usage["output_tokens"] = json!(0);
                                             }
@@ -1250,6 +1251,43 @@ mod tests {
                 .pointer("/usage/cache_creation_input_tokens")
                 .and_then(|v| v.as_u64()),
             Some(50)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_non_object_usage_chunk_does_not_overwrite_earlier_usage() {
+        // usage 交由 UsageIR 按 Value 解析后，非对象 usage 不再导致整个 chunk 解析失败；
+        // 它必须被当作缺失，而不是以零值覆盖之前收到的有效 usage。
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_bad\",\"model\":\"glm-5.1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":7,\"prompt_tokens_details\":{\"cached_tokens\":40}}}\n\n",
+            "data: {\"id\":\"chatcmpl_bad\",\"model\":\"glm-5.1\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":\"n/a\"}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+        let message_delta = events
+            .iter()
+            .find(|event| event_type(event) == Some("message_delta"))
+            .expect("should emit message_delta with usage");
+
+        assert_eq!(
+            message_delta
+                .pointer("/usage/input_tokens")
+                .and_then(|v| v.as_u64()),
+            Some(60)
+        );
+        assert_eq!(
+            message_delta
+                .pointer("/usage/cache_read_input_tokens")
+                .and_then(|v| v.as_u64()),
+            Some(40)
+        );
+        assert_eq!(
+            message_delta
+                .pointer("/usage/output_tokens")
+                .and_then(|v| v.as_u64()),
+            Some(7)
         );
     }
 
