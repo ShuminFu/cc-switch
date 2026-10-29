@@ -35,6 +35,10 @@ const SYNC_PRESERVE_TABLES: &[&str] = &[
     "session_log_sync",
 ];
 
+/// Settings rows that belong to this install only: never exported, and kept
+/// from the local database on SQL import, sync import and backup restore.
+const LOCAL_ONLY_SETTING_KEYS: &[&str] = &[crate::proxy::inbound_auth::INBOUND_TOKEN_SETTING_KEY];
+
 /// A database backup entry for the UI
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -104,6 +108,8 @@ impl Database {
         // 导入前备份现有数据库
         let backup_path = self.backup_database_file()?;
 
+        let local_settings = self.read_local_only_settings()?;
+
         let local_snapshot = if preserve_tables.is_empty() {
             None
         } else {
@@ -130,6 +136,7 @@ impl Database {
         if let Some(local_snapshot) = local_snapshot.as_ref() {
             Self::restore_tables(local_snapshot, &temp_conn, preserve_tables)?;
         }
+        Self::write_local_only_settings(&temp_conn, &local_settings)?;
 
         // 使用 Backup 将临时库原子写回主库
         {
@@ -442,6 +449,11 @@ impl Database {
                 continue;
             }
 
+            // 本安装专属的 settings 行（如代理入站 token）不导出
+            let settings_key_idx = (table == "settings")
+                .then(|| columns.iter().position(|c| c == "key"))
+                .flatten();
+
             let mut stmt = conn
                 .prepare(&format!("SELECT * FROM \"{table}\""))
                 .map_err(|e| AppError::Database(e.to_string()))?;
@@ -450,6 +462,20 @@ impl Database {
                 .map_err(|e| AppError::Database(e.to_string()))?;
 
             while let Some(row) = rows.next().map_err(|e| AppError::Database(e.to_string()))? {
+                if let Some(key_idx) = settings_key_idx {
+                    if let ValueRef::Text(key) = row
+                        .get_ref(key_idx)
+                        .map_err(|e| AppError::Database(e.to_string()))?
+                    {
+                        if LOCAL_ONLY_SETTING_KEYS
+                            .iter()
+                            .any(|local| local.as_bytes() == key)
+                        {
+                            continue;
+                        }
+                    }
+                }
+
                 let mut values = Vec::with_capacity(columns.len());
                 for idx in 0..columns.len() {
                     let value = row
@@ -472,6 +498,38 @@ impl Database {
 
         output.push_str("COMMIT;\nPRAGMA foreign_keys=ON;\n");
         Ok(output)
+    }
+
+    /// 读取本安装专属的 settings 行（键, 本机值）
+    fn read_local_only_settings(&self) -> Result<Vec<(&'static str, Option<String>)>, AppError> {
+        LOCAL_ONLY_SETTING_KEYS
+            .iter()
+            .map(|key| Ok((*key, self.get_setting(key)?)))
+            .collect()
+    }
+
+    /// 把本机原值写回目标库：本机没有时删除导入进来的值，避免沿用其他安装的 token
+    fn write_local_only_settings(
+        conn: &Connection,
+        settings: &[(&'static str, Option<String>)],
+    ) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "settings")? {
+            return Ok(());
+        }
+        for (key, value) in settings {
+            match value {
+                Some(value) => conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![key, value],
+                ),
+                None => conn.execute(
+                    "DELETE FROM settings WHERE key = ?1",
+                    rusqlite::params![key],
+                ),
+            }
+            .map_err(|e| AppError::Database(format!("保留本机设置 {key} 失败: {e}")))?;
+        }
+        Ok(())
     }
 
     /// 获取表的列名列表
@@ -572,6 +630,8 @@ impl Database {
             )));
         }
 
+        let local_settings = self.read_local_only_settings()?;
+
         // Step 1: Create safety backup of current database
         let safety_backup = self.backup_database_file()?;
         let safety_id = safety_backup
@@ -595,6 +655,10 @@ impl Database {
         self.create_tables()?;
         self.apply_schema_migrations()?;
         self.ensure_model_pricing_seeded()?;
+        {
+            let conn = lock_conn!(self.conn);
+            Self::write_local_only_settings(&conn, &local_settings)?;
+        }
 
         log::info!("Database restored from backup: {filename}, safety backup: {safety_id}");
         Ok(safety_id)
@@ -695,6 +759,52 @@ mod tests {
     use crate::error::AppError;
     use crate::settings::{update_settings, AppSettings};
     use serial_test::serial;
+
+    #[test]
+    fn proxy_inbound_token_stays_with_this_install_across_export_and_import() -> Result<(), AppError>
+    {
+        use crate::proxy::inbound_auth::{get_or_create_inbound_token, INBOUND_TOKEN_SETTING_KEY};
+
+        let remote_db = Database::memory()?;
+        let remote_token = get_or_create_inbound_token(&remote_db)?;
+        remote_db.set_setting("remote_marker", "1")?;
+        {
+            let conn = crate::database::lock_conn!(remote_db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta)
+                 VALUES ('remote-provider', 'claude', 'Remote Provider', '{}', '{}')",
+                [],
+            )?;
+        }
+        let full_sql = remote_db.export_sql_string()?;
+        let sync_sql = remote_db.export_sql_string_for_sync()?;
+        assert!(!full_sql.contains(&remote_token), "full export leaks token");
+        assert!(!sync_sql.contains(&remote_token), "sync export leaks token");
+
+        // An import keeps the local token, so the running proxy guard and the
+        // live configs written from the DB keep agreeing.
+        let local_db = Database::memory()?;
+        let local_token = get_or_create_inbound_token(&local_db)?;
+        local_db.import_sql_string_for_sync(&sync_sql)?;
+        assert_eq!(get_or_create_inbound_token(&local_db)?, local_token);
+        assert_eq!(local_db.get_setting("remote_marker")?.as_deref(), Some("1"));
+        local_db.import_sql_string(&full_sql)?;
+        assert_eq!(get_or_create_inbound_token(&local_db)?, local_token);
+
+        // A foreign token inside an older export is not adopted.
+        let legacy_sql = full_sql.replacen(
+            "COMMIT;",
+            &format!(
+                "INSERT INTO \"settings\" (\"key\", \"value\") VALUES ('{INBOUND_TOKEN_SETTING_KEY}', '{remote_token}');\nCOMMIT;"
+            ),
+            1,
+        );
+        let fresh_db = Database::memory()?;
+        fresh_db.import_sql_string(&legacy_sql)?;
+        assert_eq!(fresh_db.get_setting(INBOUND_TOKEN_SETTING_KEY)?, None);
+        assert_ne!(get_or_create_inbound_token(&fresh_db)?, remote_token);
+        Ok(())
+    }
 
     #[test]
     fn sync_import_preserves_local_only_tables() -> Result<(), AppError> {

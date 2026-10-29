@@ -37,7 +37,9 @@ pub const INBOUND_TOKEN_PREFIX: &str = "ccs-proxy-";
 /// token 随机部分长度（uuid v4 simple 格式，32 个十六进制字符）
 const INBOUND_TOKEN_RANDOM_LEN: usize = 32;
 
-const INBOUND_TOKEN_SETTING_KEY: &str = "proxy_inbound_token";
+/// 入站 token 在 settings 表中的键。它只属于本安装：SQL 导出不包含该行，
+/// 导入 / 同步 / 从备份恢复时保留本机原值（见 `database::backup`）。
+pub(crate) const INBOUND_TOKEN_SETTING_KEY: &str = "proxy_inbound_token";
 
 /// 不要求 token 的路径：健康检查不含敏感信息；Claude Desktop gateway 由
 /// handler 校验自己的 gateway token。Host / Origin / Content-Type 检查仍然生效。
