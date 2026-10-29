@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_dup","model":"gpt-4o","choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}
+
+data: [DONE]
+
+data: [DONE]
+

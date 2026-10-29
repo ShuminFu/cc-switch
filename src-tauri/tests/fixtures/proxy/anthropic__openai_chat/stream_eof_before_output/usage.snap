@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: A stream that hits EOF before any output emits a single stream_truncated error instead of nothing.
+---
+# stream
+null

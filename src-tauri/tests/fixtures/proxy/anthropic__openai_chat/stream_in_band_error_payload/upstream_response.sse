@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_inband","model":"gpt-4o","choices":[{"delta":{"content":"partial"}}]}
+
+data: {"error":{"message":"Rate limit exceeded","type":"rate_limit_error","code":429}}
+
+data: [DONE]
+

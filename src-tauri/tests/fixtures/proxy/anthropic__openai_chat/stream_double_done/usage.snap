@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "A repeated [DONE] produces exactly one message_delta and one message_stop."
+---
+# stream
+{
+  "input_tokens": 3,
+  "output_tokens": 1,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_dup",
+  "billable": true
+}

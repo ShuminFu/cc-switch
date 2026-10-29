@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl_nodelta","model":"gpt-4o","choices":[{"delta":{"content":"hi"}}]}
+
+data: {"id":"chatcmpl_nodelta","model":"gpt-4o","choices":[{"delta":null,"finish_reason":null}]}
+
+data: {"id":"chatcmpl_nodelta","model":"gpt-4o","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2}}
+
+data: [DONE]
+

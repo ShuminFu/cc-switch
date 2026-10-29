@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "An in-band {error} payload inside a 2xx SSE stream is surfaced as a single Anthropic error event, not swallowed."
+---
+# stream
+null

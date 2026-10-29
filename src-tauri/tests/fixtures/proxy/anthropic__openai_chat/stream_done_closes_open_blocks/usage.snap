@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "[DONE] without a preceding finish_reason closes the open text block before message_delta (end_turn) and message_stop."
+---
+# stream
+null

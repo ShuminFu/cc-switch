@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "An `event: error` SSE event from the upstream is surfaced as a single Anthropic error event carrying its message and code."
+---
+# stream
+null

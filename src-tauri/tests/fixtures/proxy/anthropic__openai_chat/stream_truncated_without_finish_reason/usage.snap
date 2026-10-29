@@ -1,6 +1,6 @@
 ---
 source: tests/proxy_golden.rs
-description: "A stream that ends before any finish_reason emits no success terminal events (no message_delta, no message_stop)."
+description: A stream that hits EOF after text but before any finish_reason closes the open block and is finalized as truncated (stop_reason max_tokens).
 ---
 # stream
 null

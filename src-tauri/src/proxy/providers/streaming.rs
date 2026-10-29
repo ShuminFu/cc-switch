@@ -5,7 +5,7 @@
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -24,12 +24,15 @@ struct OpenAIStreamChunk {
 
 #[derive(Debug, Deserialize)]
 struct StreamChoice {
+    // 部分兼容上游在携带 finish_reason / usage 的收尾 chunk 中省略 delta 或发送
+    // `"delta": null`；不能因此丢弃整个 chunk。
+    #[serde(default, deserialize_with = "deserialize_null_as_default")]
     delta: Delta,
     #[serde(default)]
     finish_reason: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct Delta {
     #[serde(default)]
     content: Option<String>,
@@ -57,6 +60,15 @@ struct DeltaFunction {
     name: Option<String>,
     #[serde(default)]
     arguments: Option<String>,
+}
+
+/// 将 JSON `null` 视为字段缺失，回退到类型默认值。
+fn deserialize_null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// OpenAI 流式响应的 usage 信息（完整版）
@@ -145,6 +157,188 @@ fn build_message_delta_event(stop_reason: Option<String>, usage_json: Option<Val
     })
 }
 
+fn anthropic_sse(event_name: &str, payload: &Value) -> Bytes {
+    Bytes::from(format!(
+        "event: {event_name}\ndata: {}\n\n",
+        serde_json::to_string(payload).unwrap_or_default()
+    ))
+}
+
+fn anthropic_error_sse(message: &str, error_type: &str) -> Bytes {
+    anthropic_sse(
+        "error",
+        &json!({
+            "type": "error",
+            "error": {"type": error_type, "message": message}
+        }),
+    )
+}
+
+/// 提取上游 in-band 错误（顶层 `error` 字段或 `event: error` 事件）的 message 与 type。
+fn upstream_error_details(payload: Option<&Value>, raw: &str) -> (String, String) {
+    let error = payload.map(|value| match value.get("error") {
+        Some(error) if !error.is_null() => error,
+        _ => value,
+    });
+    let message = error
+        .and_then(|error| {
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .or_else(|| error.as_str())
+        })
+        .map(str::to_string)
+        .or_else(|| payload.is_none().then(|| raw.trim().to_string()))
+        .filter(|message| !message.trim().is_empty())
+        .unwrap_or_else(|| "OpenAI Chat upstream emitted an error event".to_string());
+    let error_type = error
+        .and_then(|error| {
+            error
+                .get("type")
+                .and_then(Value::as_str)
+                .or_else(|| error.get("code").and_then(Value::as_str))
+        })
+        .filter(|error_type| !error_type.trim().is_empty())
+        .unwrap_or("upstream_error")
+        .to_string();
+    (message, error_type)
+}
+
+fn build_message_start_event(
+    message_id: Option<&String>,
+    model: Option<&String>,
+    usage: Value,
+) -> Value {
+    json!({
+        "type": "message_start",
+        "message": {
+            "id": message_id.cloned().unwrap_or_default(),
+            "type": "message",
+            "role": "assistant",
+            "model": model.cloned().unwrap_or_default(),
+            "usage": usage
+        }
+    })
+}
+
+/// 关闭所有仍打开的 content block（文本/思考块与工具块）。
+///
+/// 已累积参数但尚未拿到 id/name 的工具块会以兜底 id/name 补发 start，
+/// 保证每个工具调用都在 message_delta 之前完整开闭。
+fn close_open_blocks(
+    current_non_tool_block_type: &mut Option<&'static str>,
+    current_non_tool_block_index: &mut Option<u32>,
+    tool_blocks_by_index: &mut HashMap<usize, ToolBlockState>,
+    open_tool_block_indices: &mut HashSet<u32>,
+) -> Vec<Bytes> {
+    let mut events = Vec::new();
+
+    if let Some(index) = current_non_tool_block_index.take() {
+        events.push(anthropic_sse(
+            "content_block_stop",
+            &json!({"type": "content_block_stop", "index": index}),
+        ));
+    }
+    *current_non_tool_block_type = None;
+
+    // Late start for blocks that accumulated args before id/name arrived.
+    let mut late_tool_starts: Vec<(u32, String, String, String)> = Vec::new();
+    for (tool_idx, state) in tool_blocks_by_index.iter_mut() {
+        if state.started {
+            continue;
+        }
+        let has_payload =
+            !state.pending_args.is_empty() || !state.id.is_empty() || !state.name.is_empty();
+        if !has_payload {
+            continue;
+        }
+        let fallback_id = if state.id.is_empty() {
+            format!("tool_call_{tool_idx}")
+        } else {
+            state.id.clone()
+        };
+        let fallback_name = if state.name.is_empty() {
+            "unknown_tool".to_string()
+        } else {
+            state.name.clone()
+        };
+        state.started = true;
+        let pending = std::mem::take(&mut state.pending_args);
+        late_tool_starts.push((state.anthropic_index, fallback_id, fallback_name, pending));
+    }
+    late_tool_starts.sort_unstable_by_key(|(index, _, _, _)| *index);
+    for (index, id, name, pending) in late_tool_starts {
+        events.push(anthropic_sse(
+            "content_block_start",
+            &json!({
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": id,
+                    "name": name
+                }
+            }),
+        ));
+        open_tool_block_indices.insert(index);
+        if !pending.is_empty() {
+            events.push(anthropic_sse(
+                "content_block_delta",
+                &json!({
+                    "type": "content_block_delta",
+                    "index": index,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": pending
+                    }
+                }),
+            ));
+        }
+    }
+
+    let mut tool_indices: Vec<u32> = open_tool_block_indices.drain().collect();
+    tool_indices.sort_unstable();
+    for index in tool_indices {
+        events.push(anthropic_sse(
+            "content_block_stop",
+            &json!({"type": "content_block_stop", "index": index}),
+        ));
+    }
+
+    events
+}
+
+/// 唯一的消息收尾出口：补发缺失的 message_start，再发送一次 message_delta 与一次
+/// message_stop。调用前须先关闭所有 content block；`has_sent_message_stop` 保证
+/// 重复调用（如重复的 `[DONE]`）不会再发出第二个 message_stop。
+fn finalize_message(
+    has_sent_message_start: &mut bool,
+    has_sent_message_stop: &mut bool,
+    message_id: Option<&String>,
+    model: Option<&String>,
+    (stop_reason, usage_json): (Option<String>, Option<Value>),
+) -> Vec<Bytes> {
+    if *has_sent_message_stop {
+        return Vec::new();
+    }
+    let mut events = Vec::new();
+    if !*has_sent_message_start {
+        let event = build_message_start_event(message_id, model, default_anthropic_usage_json());
+        events.push(anthropic_sse("message_start", &event));
+        *has_sent_message_start = true;
+    }
+    events.push(anthropic_sse(
+        "message_delta",
+        &build_message_delta_event(stop_reason, usage_json),
+    ));
+    events.push(anthropic_sse(
+        "message_stop",
+        &json!({"type": "message_stop"}),
+    ));
+    *has_sent_message_stop = true;
+    events
+}
+
 /// 创建 Anthropic SSE 流
 pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
@@ -173,7 +367,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
 
         tokio::pin!(stream);
 
-        while let Some(chunk) = stream.next().await {
+        'upstream: while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     crate::proxy::sse::append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
@@ -183,30 +377,72 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                             continue;
                         }
 
+                        let is_error_event = line
+                            .lines()
+                            .filter_map(|l| strip_sse_field(l, "event"))
+                            .any(|event| event.trim() == "error");
+
                         for l in line.lines() {
                             if let Some(data) = strip_sse_field(l, "data") {
-                                if data.trim() == "[DONE]" {
-                                    log::debug!("[Claude/OpenRouter] <<< OpenAI SSE: [DONE]");
-
-                                    // 流正常结束，发出缓存的 message_delta（含完整 usage）。
-                                    if let Some((stop_reason, usage_json)) = pending_message_delta.take() {
-                                        let event = build_message_delta_event(stop_reason, usage_json);
-                                        let sse_data = format!("event: message_delta\ndata: {}\n\n",
-                                            serde_json::to_string(&event).unwrap_or_default());
-                                        log::debug!("[Claude/OpenRouter] >>> Anthropic SSE: message_delta (from pending)");
-                                        yield Ok(Bytes::from(sse_data));
-                                    }
-
-                                    let event = json!({"type": "message_stop"});
-                                    let sse_data = format!("event: message_stop\ndata: {}\n\n",
-                                        serde_json::to_string(&event).unwrap_or_default());
-                                    log::debug!("[Claude/OpenRouter] >>> Anthropic SSE: message_stop");
-                                    yield Ok(Bytes::from(sse_data));
-                                    has_sent_message_stop = true;
+                                // message_stop 之后的任何数据（如重复的 [DONE]）都忽略。
+                                if has_sent_message_stop {
+                                    log::debug!("[Claude/OpenRouter] <<< ignoring SSE data after message_stop");
                                     continue;
                                 }
 
-                                if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
+                                if data.trim() == "[DONE]" {
+                                    log::debug!("[Claude/OpenRouter] <<< OpenAI SSE: [DONE]");
+
+                                    for event in close_open_blocks(
+                                        &mut current_non_tool_block_type,
+                                        &mut current_non_tool_block_index,
+                                        &mut tool_blocks_by_index,
+                                        &mut open_tool_block_indices,
+                                    ) {
+                                        yield Ok(event);
+                                    }
+
+                                    // 流正常结束，发出缓存的 message_delta（含完整 usage）。
+                                    // 未收到 finish_reason 的裸 [DONE] 按正常结束处理。
+                                    let pending = pending_message_delta.take().unwrap_or_else(|| {
+                                        let stop_reason = if tool_blocks_by_index.values().any(|state| state.started) {
+                                            "tool_use"
+                                        } else {
+                                            "end_turn"
+                                        };
+                                        (Some(stop_reason.to_string()), latest_usage.clone())
+                                    });
+                                    has_emitted_message_delta = true;
+                                    for event in finalize_message(
+                                        &mut has_sent_message_start,
+                                        &mut has_sent_message_stop,
+                                        message_id.as_ref(),
+                                        current_model.as_ref(),
+                                        pending,
+                                    ) {
+                                        yield Ok(event);
+                                    }
+                                    log::debug!("[Claude/OpenRouter] >>> Anthropic SSE: message_delta + message_stop");
+                                    continue;
+                                }
+
+                                let value = serde_json::from_str::<Value>(data).ok();
+                                let has_error_field = value
+                                    .as_ref()
+                                    .and_then(|value| value.get("error"))
+                                    .is_some_and(|error| !error.is_null());
+                                if is_error_event || has_error_field {
+                                    let (message, error_type) =
+                                        upstream_error_details(value.as_ref(), data);
+                                    log::error!("[Claude/OpenRouter] <<< upstream in-band error: {error_type}: {message}");
+                                    yield Ok(anthropic_error_sse(&message, &error_type));
+                                    stream_ended_with_error = true;
+                                    break 'upstream;
+                                }
+
+                                if let Some(chunk) = value
+                                    .and_then(|value| serde_json::from_value::<OpenAIStreamChunk>(value).ok())
+                                {
                                     log::debug!("[Claude/OpenRouter] <<< SSE chunk received");
 
                                     if message_id.is_none() && !chunk.id.is_empty() {
@@ -250,16 +486,11 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                 }
                                             }
 
-                                            let event = json!({
-                                                "type": "message_start",
-                                                "message": {
-                                                    "id": message_id.clone().unwrap_or_default(),
-                                                    "type": "message",
-                                                    "role": "assistant",
-                                                    "model": current_model.clone().unwrap_or_default(),
-                                                    "usage": start_usage
-                                                }
-                                            });
+                                            let event = build_message_start_event(
+                                                message_id.as_ref(),
+                                                current_model.as_ref(),
+                                                start_usage,
+                                            );
                                             let sse_data = format!("event: message_start\ndata: {}\n\n",
                                                 serde_json::to_string(&event).unwrap_or_default());
                                             yield Ok(Bytes::from(sse_data));
@@ -528,93 +759,13 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             }
                                             has_emitted_message_delta = true;
 
-                                            if let Some(index) = current_non_tool_block_index.take() {
-                                                let event = json!({
-                                                    "type": "content_block_stop",
-                                                    "index": index
-                                                });
-                                                let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
-                                                    serde_json::to_string(&event).unwrap_or_default());
-                                                yield Ok(Bytes::from(sse_data));
-                                            }
-                                            current_non_tool_block_type = None;
-
-                                            // Late start for blocks that accumulated args before id/name arrived.
-                                            let mut late_tool_starts: Vec<(u32, String, String, String)> =
-                                                Vec::new();
-                                            for (tool_idx, state) in tool_blocks_by_index.iter_mut() {
-                                                if state.started {
-                                                    continue;
-                                                }
-                                                let has_payload = !state.pending_args.is_empty()
-                                                    || !state.id.is_empty()
-                                                    || !state.name.is_empty();
-                                                if !has_payload {
-                                                    continue;
-                                                }
-                                                let fallback_id = if state.id.is_empty() {
-                                                    format!("tool_call_{tool_idx}")
-                                                } else {
-                                                    state.id.clone()
-                                                };
-                                                let fallback_name = if state.name.is_empty() {
-                                                    "unknown_tool".to_string()
-                                                } else {
-                                                    state.name.clone()
-                                                };
-                                                state.started = true;
-                                                let pending = std::mem::take(&mut state.pending_args);
-                                                late_tool_starts.push((
-                                                    state.anthropic_index,
-                                                    fallback_id,
-                                                    fallback_name,
-                                                    pending,
-                                                ));
-                                            }
-                                            late_tool_starts.sort_unstable_by_key(|(index, _, _, _)| *index);
-                                            for (index, id, name, pending) in late_tool_starts {
-                                                let event = json!({
-                                                    "type": "content_block_start",
-                                                    "index": index,
-                                                    "content_block": {
-                                                        "type": "tool_use",
-                                                        "id": id,
-                                                        "name": name
-                                                    }
-                                                });
-                                                let sse_data = format!("event: content_block_start\ndata: {}\n\n",
-                                                    serde_json::to_string(&event).unwrap_or_default());
-                                                yield Ok(Bytes::from(sse_data));
-                                                open_tool_block_indices.insert(index);
-                                                if !pending.is_empty() {
-                                                    let delta_event = json!({
-                                                        "type": "content_block_delta",
-                                                        "index": index,
-                                                        "delta": {
-                                                            "type": "input_json_delta",
-                                                            "partial_json": pending
-                                                        }
-                                                    });
-                                                    let delta_sse = format!("event: content_block_delta\ndata: {}\n\n",
-                                                        serde_json::to_string(&delta_event).unwrap_or_default());
-                                                    yield Ok(Bytes::from(delta_sse));
-                                                }
-                                            }
-
-                                            if !open_tool_block_indices.is_empty() {
-                                                let mut tool_indices: Vec<u32> =
-                                                    open_tool_block_indices.iter().copied().collect();
-                                                tool_indices.sort_unstable();
-                                                for index in tool_indices {
-                                                    let event = json!({
-                                                        "type": "content_block_stop",
-                                                        "index": index
-                                                    });
-                                                    let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
-                                                        serde_json::to_string(&event).unwrap_or_default());
-                                                    yield Ok(Bytes::from(sse_data));
-                                                }
-                                                open_tool_block_indices.clear();
+                                            for event in close_open_blocks(
+                                                &mut current_non_tool_block_type,
+                                                &mut current_non_tool_block_index,
+                                                &mut tool_blocks_by_index,
+                                                &mut open_tool_block_indices,
+                                            ) {
+                                                yield Ok(event);
                                             }
 
                                             // 缓存 message_delta，等到 [DONE] 时发送（以便收集完整的 usage）
@@ -644,28 +795,56 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
             }
         }
 
-        // 流自然结束但未收到 [DONE] 时，确保发送缓存的 message_delta 和 message_stop。
+        // 流自然结束但未收到 [DONE] 时，通过同一收尾出口发送 message_delta 和 message_stop。
         // 若上游已显式报错，则只保留 error 事件，避免把失败伪装成成功完成。
-        if !stream_ended_with_error {
-            let emitted_pending_message_delta = if let Some((stop_reason, usage_json)) =
-                pending_message_delta.take()
-            {
-                let event = build_message_delta_event(stop_reason, usage_json);
-                let sse_data = format!("event: message_delta\ndata: {}\n\n",
-                    serde_json::to_string(&event).unwrap_or_default());
-                log::debug!("[Claude/OpenRouter] >>> Anthropic SSE: message_delta (at stream end)");
-                yield Ok(Bytes::from(sse_data));
-                true
+        if !stream_ended_with_error && !has_sent_message_stop {
+            if let Some(pending) = pending_message_delta.take() {
+                for event in close_open_blocks(
+                    &mut current_non_tool_block_type,
+                    &mut current_non_tool_block_index,
+                    &mut tool_blocks_by_index,
+                    &mut open_tool_block_indices,
+                ) {
+                    yield Ok(event);
+                }
+                log::debug!("[Claude/OpenRouter] >>> Anthropic SSE: message_delta + message_stop (at stream end)");
+                for event in finalize_message(
+                    &mut has_sent_message_start,
+                    &mut has_sent_message_stop,
+                    message_id.as_ref(),
+                    current_model.as_ref(),
+                    pending,
+                ) {
+                    yield Ok(event);
+                }
+            } else if next_content_index > 0 && tool_blocks_by_index.is_empty() {
+                // 未收到 finish_reason 就 EOF：仅有文本/思考输出时可安全收尾，
+                // 以 max_tokens 标记为不完整的截断回合（与 Responses 转换器一致）。
+                log::warn!("[Claude/OpenRouter] upstream stream ended before finish_reason; finalizing as truncated");
+                for event in close_open_blocks(
+                    &mut current_non_tool_block_type,
+                    &mut current_non_tool_block_index,
+                    &mut tool_blocks_by_index,
+                    &mut open_tool_block_indices,
+                ) {
+                    yield Ok(event);
+                }
+                for event in finalize_message(
+                    &mut has_sent_message_start,
+                    &mut has_sent_message_stop,
+                    message_id.as_ref(),
+                    current_model.as_ref(),
+                    (Some("max_tokens".to_string()), latest_usage.clone()),
+                ) {
+                    yield Ok(event);
+                }
             } else {
-                false
-            };
-
-            if emitted_pending_message_delta && !has_sent_message_stop {
-                let event = json!({"type": "message_stop"});
-                let sse_data = format!("event: message_stop\ndata: {}\n\n",
-                    serde_json::to_string(&event).unwrap_or_default());
-                log::debug!("[Claude/OpenRouter] >>> Anthropic SSE: message_stop (at stream end)");
-                yield Ok(Bytes::from(sse_data));
+                // 无任何输出，或工具参数可能不完整：无法安全收尾，显式报错。
+                log::warn!("[Claude/OpenRouter] upstream stream ended before finish_reason without safe partial output");
+                yield Ok(anthropic_error_sse(
+                    "OpenAI Chat upstream stream ended before a finish_reason",
+                    "stream_truncated",
+                ));
             }
         }
     }
@@ -1198,18 +1377,177 @@ mod tests {
         );
     }
 
+    fn event_types(events: &[Value]) -> Vec<&str> {
+        events.iter().filter_map(event_type).collect()
+    }
+
+    fn count_events(events: &[Value], kind: &str) -> usize {
+        events
+            .iter()
+            .filter(|event| event_type(event) == Some(kind))
+            .count()
+    }
+
     #[tokio::test]
-    async fn test_stream_end_without_finish_reason_does_not_emit_success_terminal_events() {
+    async fn test_eof_after_text_without_finish_reason_finalizes_as_truncated() {
         let input = "data: {\"id\":\"chatcmpl_truncated\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n";
 
         let events = collect_anthropic_events(input).await;
 
-        assert!(!events
+        assert_eq!(
+            event_types(&events),
+            vec![
+                "message_start",
+                "content_block_start",
+                "content_block_delta",
+                "content_block_stop",
+                "message_delta",
+                "message_stop"
+            ]
+        );
+        let delta = events
             .iter()
-            .any(|event| event_type(event) == Some("message_delta")));
-        assert!(!events
+            .find(|event| event_type(event) == Some("message_delta"))
+            .unwrap();
+        assert_eq!(delta["delta"]["stop_reason"], "max_tokens");
+    }
+
+    #[tokio::test]
+    async fn test_eof_during_tool_arguments_without_finish_reason_is_error() {
+        let input = "data: {\"id\":\"chatcmpl_tool\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{\\\"cmd\\\":\"}}]}}]}\n\n";
+
+        let events = collect_anthropic_events(input).await;
+
+        assert_eq!(count_events(&events, "message_delta"), 0);
+        assert_eq!(count_events(&events, "message_stop"), 0);
+        let last = events.last().unwrap();
+        assert_eq!(event_type(last), Some("error"));
+        assert_eq!(last["error"]["type"], "stream_truncated");
+    }
+
+    #[tokio::test]
+    async fn test_empty_stream_emits_truncation_error() {
+        let events = collect_anthropic_events("").await;
+
+        assert_eq!(event_types(&events), vec!["error"]);
+        assert_eq!(events[0]["error"]["type"], "stream_truncated");
+    }
+
+    #[tokio::test]
+    async fn test_finish_chunk_without_delta_keeps_finish_reason_and_usage() {
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_nodelta\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_nodelta\",\"model\":\"gpt-4o\",\"choices\":[{\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2}}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        let delta = events
             .iter()
-            .any(|event| event_type(event) == Some("message_stop")));
+            .find(|event| event_type(event) == Some("message_delta"))
+            .expect("message_delta");
+        assert_eq!(delta["delta"]["stop_reason"], "end_turn");
+        assert_eq!(delta["usage"]["input_tokens"], 4);
+        assert_eq!(delta["usage"]["output_tokens"], 2);
+        assert_eq!(count_events(&events, "message_stop"), 1);
+    }
+
+    #[tokio::test]
+    async fn test_finish_chunk_with_null_delta_keeps_finish_reason() {
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_null\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":null,\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        assert_eq!(
+            event_types(&events),
+            vec!["message_start", "message_delta", "message_stop"]
+        );
+        assert_eq!(events[1]["delta"]["stop_reason"], "end_turn");
+    }
+
+    #[tokio::test]
+    async fn test_in_band_error_payload_emits_error_event() {
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_err\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+            "data: {\"error\":{\"message\":\"Rate limit exceeded\",\"type\":\"rate_limit_error\",\"code\":429}}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        let last = events.last().unwrap();
+        assert_eq!(event_type(last), Some("error"));
+        assert_eq!(last["error"]["type"], "rate_limit_error");
+        assert_eq!(last["error"]["message"], "Rate limit exceeded");
+        assert_eq!(count_events(&events, "error"), 1);
+        assert_eq!(count_events(&events, "message_delta"), 0);
+        assert_eq!(count_events(&events, "message_stop"), 0);
+    }
+
+    #[tokio::test]
+    async fn test_sse_error_event_emits_error_event() {
+        let input = concat!(
+            "event: error\n",
+            "data: {\"message\":\"upstream overloaded\",\"code\":\"overloaded\"}\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        assert_eq!(event_types(&events), vec!["error"]);
+        assert_eq!(events[0]["error"]["type"], "overloaded");
+        assert_eq!(events[0]["error"]["message"], "upstream overloaded");
+    }
+
+    #[tokio::test]
+    async fn test_done_without_finish_reason_closes_open_blocks() {
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_done\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        assert_eq!(
+            event_types(&events),
+            vec![
+                "message_start",
+                "content_block_start",
+                "content_block_delta",
+                "content_block_stop",
+                "message_delta",
+                "message_stop"
+            ]
+        );
+        assert_eq!(events[4]["delta"]["stop_reason"], "end_turn");
+    }
+
+    #[tokio::test]
+    async fn test_bare_done_never_emits_message_stop_before_message_start() {
+        let events = collect_anthropic_events("data: [DONE]\n\n").await;
+
+        assert_eq!(
+            event_types(&events),
+            vec!["message_start", "message_delta", "message_stop"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repeated_done_emits_single_message_stop() {
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_dup\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        assert_eq!(count_events(&events, "message_delta"), 1);
+        assert_eq!(count_events(&events, "message_stop"), 1);
+        assert_eq!(event_type(events.last().unwrap()), Some("message_stop"));
     }
 
     #[tokio::test]

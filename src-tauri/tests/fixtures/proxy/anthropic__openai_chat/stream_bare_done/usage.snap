@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: "A bare [DONE] with no prior chunk still emits message_start before message_delta and message_stop."
+---
+# stream
+null
