@@ -301,13 +301,17 @@ export function mergeCustomModelsIntoStore(
   return updated;
 }
 
+// 稳定的空默认值：OMO Slim 不传 categories，若默认值写成字面量 {}，
+// 每次渲染都是新对象，会让依赖 [categories] 的 effect 无限 setState 重渲染。
+const EMPTY_CATEGORIES: Record<string, Record<string, unknown>> = {};
+
 export function OmoFormFields({
   modelOptions,
   modelVariantsMap = {},
   presetMetaMap: _presetMetaMap = {},
   agents,
   onAgentsChange,
-  categories = {},
+  categories = EMPTY_CATEGORIES,
   onCategoriesChange,
   otherFieldsStr,
   onOtherFieldsStrChange,

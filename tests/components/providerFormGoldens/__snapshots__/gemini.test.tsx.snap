@@ -1,0 +1,650 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProviderForm settingsConfig goldens: gemini > custom custom > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "",
+    "notes": "",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+      },
+    },
+    "websiteUrl": "",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-0 Google Official > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "gemini",
+    "iconColor": "#4285F4",
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "Google Official",
+    "notes": "",
+    "presetCategory": "official",
+    "presetId": "gemini-0",
+    "settingsConfig": {
+      "config": {},
+      "env": {},
+    },
+    "websiteUrl": "https://ai.google.dev/",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-1 Shengsuanyun > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "shengsuanyun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.shengsuanyun",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "gemini-1",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "google/gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://router.shengsuanyun.com/api",
+      },
+    },
+    "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-2 Unity2.ai > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "unity2",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "Unity2.ai",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "gemini-2",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.1-pro",
+        "GOOGLE_GEMINI_BASE_URL": "https://api.unity2.ai",
+      },
+    },
+    "websiteUrl": "https://unity2.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-3 SubRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "subrouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "SubRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "gemini-3",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://subrouter.ai/v1beta",
+      },
+    },
+    "websiteUrl": "https://subrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-4 Qiniu > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "qiniu",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.qiniu",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "gemini-4",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.1-pro-preview",
+        "GOOGLE_GEMINI_BASE_URL": "https://api.qnaigc.com/bypass/vertex",
+      },
+    },
+    "websiteUrl": "https://s.qiniu.com/nMvAvy",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-5 Code0 > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "code0",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "Code0",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "gemini-5",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.1-pro-preview",
+        "GOOGLE_GEMINI_BASE_URL": "https://code0.ai",
+      },
+    },
+    "websiteUrl": "https://code0.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-6 PackyCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "packycode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "PackyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-6",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://www.packyapi.com",
+      },
+    },
+    "websiteUrl": "https://www.packyapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-7 APIKEY.FUN > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apikeyfun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "APIKEY.FUN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-7",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://api.apikey.fun",
+      },
+    },
+    "websiteUrl": "https://apikey.fun",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-8 APINebula > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apinebula",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "APINebula",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-8",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://apinebula.com",
+      },
+    },
+    "websiteUrl": "https://apinebula.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-9 Cubence > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cubence",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "Cubence",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-9",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://api.cubence.com",
+      },
+    },
+    "websiteUrl": "https://cubence.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-10 AIGoCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aigocode",
+    "iconColor": "#5B7FFF",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "AIGoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-10",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://api.aigocode.com",
+      },
+    },
+    "websiteUrl": "https://aigocode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-11 AICodeMirror > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aicodemirror",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "AICodeMirror",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-11",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://api.aicodemirror.com/api/gemini",
+      },
+    },
+    "websiteUrl": "https://www.aicodemirror.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-12 CrazyRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "crazyrouter",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "CrazyRouter",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-12",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://cn.crazyrouter.com",
+      },
+    },
+    "websiteUrl": "https://www.crazyrouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-13 SSSAiCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sssaicode",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "SSSAiCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-13",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://node-hk.sssaicodeapi.com/api",
+      },
+    },
+    "websiteUrl": "https://sssaicodeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-14 ETok.ai > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "etok",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "ETok.ai",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-14",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://api.etok.ai/v1beta",
+      },
+    },
+    "websiteUrl": "https://etok.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-15 E-FlowCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "eflowcode",
+    "iconColor": "#000000",
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "E-FlowCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "gemini-15",
+    "settingsConfig": {
+      "config": {
+        "general": {
+          "previewFeatures": true,
+          "sessionRetention": {
+            "enabled": true,
+            "maxAge": "30d",
+            "warningAcknowledged": true,
+          },
+        },
+        "mcpServers": {},
+        "security": {
+          "auth": {
+            "selectedType": "gemini-api-key",
+          },
+        },
+      },
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://e-flowcode.cc",
+      },
+    },
+    "websiteUrl": "https://e-flowcode.cc",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-16 CherryIN > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cherryin",
+    "iconColor": "",
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "CherryIN",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "gemini-16",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "google/gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://open.cherryin.net",
+      },
+    },
+    "websiteUrl": "https://open.cherryin.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-17 OpenRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "openrouter",
+    "iconColor": "#6566F1",
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "gemini-17",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://openrouter.ai/api",
+      },
+    },
+    "websiteUrl": "https://openrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-18 TheRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "TheRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "gemini-18",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "https://api.therouter.ai",
+      },
+    },
+    "websiteUrl": "https://therouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: gemini > gemini-19 自定义 > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "自定义",
+    "notes": "",
+    "presetCategory": "custom",
+    "presetId": "gemini-19",
+    "settingsConfig": {
+      "config": {},
+      "env": {
+        "GEMINI_API_KEY": "sk-golden-test-key",
+        "GEMINI_MODEL": "gemini-3.5-flash",
+        "GOOGLE_GEMINI_BASE_URL": "",
+      },
+    },
+    "websiteUrl": "",
+  },
+  "submitted": true,
+}
+`;

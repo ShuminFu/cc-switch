@@ -1,0 +1,2380 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProviderForm settingsConfig goldens: opencode > custom custom > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "",
+    "notes": "",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {},
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-0 Shengsuanyun > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "shengsuanyun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.shengsuanyun",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-0",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "anthropic/claude-opus-4.8": {
+          "name": "Claude Opus 4.8",
+        },
+        "anthropic/claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "Shengsuanyun",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://router.shengsuanyun.com/api/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-1 Qiniu > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "qiniu",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.qiniu",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-1",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "Qiniu",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.qnaigc.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://s.qiniu.com/nMvAvy",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-2 FennoAI > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "fenno",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "FennoAI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-2",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "FennoAI",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.fenno.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://api.fenno.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-3 ZetaAPI > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zetaapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ZetaAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-3",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "ZetaAPI",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.zetaapi.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://zetaapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-4 TeamoRouter > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "teamorouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "TeamoRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-4",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "TeamoRouter",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.teamorouter.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://teamorouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-5 Amux > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "amux",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Amux",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-5",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "Amux",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.amux.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://amux.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-6 Code0 > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "code0",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Code0",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-6",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "Code0",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://code0.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://code0.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-7 NekoCode > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nekocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "NekoCode",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-7",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "NekoCode",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://nekocode.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://nekocode.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-8 火山Agentplan > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "huoshan",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "火山Agentplan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-8",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "ark-code-latest": {
+          "name": "Ark Code Latest",
+        },
+      },
+      "name": "火山Agentplan",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-9 BytePlus > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "byteplus",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "BytePlus",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-9",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "ark-code-latest": {
+          "name": "Ark Code Latest",
+        },
+      },
+      "name": "BytePlus",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-10 DouBaoSeed > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "doubao",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "DouBaoSeed",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-10",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "doubao-seed-2-1-pro-260628": {
+          "name": "Doubao Seed 2.1 Pro",
+        },
+      },
+      "name": "DouBaoSeed",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://ark.cn-beijing.volces.com/api/v3",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-11 CCSub > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ccsub",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CCSub",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-11",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "CCSub",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://www.ccsub.net/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.ccsub.net",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-12 SubRouter > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "subrouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SubRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-12",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "SubRouter",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://subrouter.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://subrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-13 Unity2.ai > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "unity2",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Unity2.ai",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-13",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "Unity2.ai",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.unity2.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://unity2.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-14 DeepSeek > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "deepseek",
+    "iconColor": "#1E88E5",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "DeepSeek",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-14",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash",
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro",
+        },
+      },
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.deepseek.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://platform.deepseek.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-15 Zhipu GLM > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-15",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "glm-5.1": {
+          "name": "GLM-5.1",
+        },
+      },
+      "name": "Zhipu GLM",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://open.bigmodel.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-16 Zhipu GLM en > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-16",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "glm-5.1": {
+          "name": "GLM-5.1",
+        },
+      },
+      "name": "Zhipu GLM en",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.z.ai/api/coding/paas/v4",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://z.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-17 Bailian > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "bailian",
+    "iconColor": "#624AFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Bailian",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-17",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {},
+      "name": "Bailian",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-18 Kimi > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-18",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "kimi-k2.7-code": {
+          "name": "Kimi K2.7 Code",
+        },
+      },
+      "name": "Kimi",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.moonshot.cn/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://platform.kimi.com?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-19 Kimi For Coding > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-19",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "kimi-for-coding": {
+          "name": "Kimi For Coding",
+        },
+      },
+      "name": "Kimi For Coding",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.kimi.com/coding/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.kimi.com/code/?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-20 StepFun > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-20",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "step-3.5-flash": {
+          "name": "Step 3.5 Flash",
+        },
+        "step-3.5-flash-2603": {
+          "name": "Step 3.5 Flash 2603",
+        },
+      },
+      "name": "StepFun",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.stepfun.com/step_plan/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.com/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-21 StepFun en > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-21",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "step-3.5-flash": {
+          "name": "Step 3.5 Flash",
+        },
+        "step-3.5-flash-2603": {
+          "name": "Step 3.5 Flash 2603",
+        },
+      },
+      "name": "StepFun en",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.stepfun.ai/step_plan/v1",
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.ai/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-22 StepFun Step Plan > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#005AFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun Step Plan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-22",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "step-3.5-flash": {
+          "name": "Step 3.5 Flash",
+        },
+      },
+      "name": "StepFun Step Plan",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.stepfun.com/step_plan/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.com/docs/zh/step-plan/overview",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-23 ModelScope > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "modelscope",
+    "iconColor": "#624AFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ModelScope",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-23",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "ZhipuAI/GLM-5.1": {
+          "name": "GLM-5.1",
+        },
+      },
+      "name": "ModelScope",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api-inference.modelscope.cn/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://modelscope.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-24 KAT-Coder > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "catcoder",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "KAT-Coder",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-24",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "KAT-Coder-Pro": {
+          "name": "KAT-Coder Pro",
+        },
+      },
+      "name": "KAT-Coder",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://vanchin.streamlake.ai/api/gateway/v1/endpoints/\${ENDPOINT_ID}/openai",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://console.streamlake.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-25 Longcat > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "longcat",
+    "iconColor": "#29E154",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Longcat",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-25",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "LongCat-2.0": {
+          "name": "LongCat 2.0",
+          "options": {
+            "thinking": {
+              "type": "disabled",
+            },
+          },
+        },
+      },
+      "name": "Longcat",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.longcat.chat/openai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://longcat.chat/platform",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-26 MiniMax > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-26",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "MiniMax-M2.7": {
+          "name": "MiniMax M2.7",
+        },
+      },
+      "name": "MiniMax",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.minimaxi.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://platform.minimaxi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-27 MiniMax en > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-27",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "MiniMax-M2.7": {
+          "name": "MiniMax M2.7",
+        },
+      },
+      "name": "MiniMax en",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.minimax.io/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://platform.minimax.io",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-28 BaiLing > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "BaiLing",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-28",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "Ling-2.5-1T": {
+          "name": "Ling 2.5-1T",
+        },
+      },
+      "name": "BaiLing",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.tbox.cn/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://alipaytbox.yuque.com/sxs0ba/ling/get_started",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-29 Xiaomi MiMo > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-29",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "mimo-v2.5": {
+          "limit": {
+            "context": 1048576,
+            "output": 131072,
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+            ],
+            "output": [
+              "text",
+            ],
+          },
+          "name": "MiMo V2.5",
+        },
+        "mimo-v2.5-pro": {
+          "limit": {
+            "context": 1048576,
+            "output": 131072,
+          },
+          "modalities": {
+            "input": [
+              "text",
+            ],
+            "output": [
+              "text",
+            ],
+          },
+          "name": "MiMo V2.5 Pro",
+        },
+      },
+      "name": "Xiaomi MiMo",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.xiaomimimo.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-30 Xiaomi MiMo Token Plan (China) > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo Token Plan (China)",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "opencode-30",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "mimo-v2.5": {
+          "limit": {
+            "context": 1048576,
+            "output": 131072,
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image",
+            ],
+            "output": [
+              "text",
+            ],
+          },
+          "name": "MiMo V2.5",
+        },
+        "mimo-v2.5-pro": {
+          "limit": {
+            "context": 1048576,
+            "output": 131072,
+          },
+          "modalities": {
+            "input": [
+              "text",
+            ],
+            "output": [
+              "text",
+            ],
+          },
+          "name": "MiMo V2.5 Pro",
+        },
+      },
+      "name": "Xiaomi MiMo Token Plan (China)",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://token-plan-cn.xiaomimimo.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com/#/token-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-31 OpenCode Go > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "opencode",
+    "iconColor": "#211E1E",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenCode Go",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-31",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash",
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro",
+        },
+        "glm-5.2": {
+          "name": "GLM 5.2",
+        },
+        "kimi-k2.7-code": {
+          "name": "Kimi K2.7 Code",
+        },
+        "mimo-v2.5-pro": {
+          "name": "MiMo V2.5 Pro",
+        },
+      },
+      "name": "OpenCode Go",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://opencode.ai/zen/go/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://opencode.ai/go",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-32 AiHubMix > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aihubmix",
+    "iconColor": "#006FFB",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AiHubMix",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-32",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "AiHubMix",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://aihubmix.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://aihubmix.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-33 CherryIN > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cherryin",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CherryIN",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-33",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "anthropic/claude-opus-4.8": {
+          "name": "Claude Opus 4.8",
+        },
+        "anthropic/claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "CherryIN",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://open.cherryin.net/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://open.cherryin.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-34 DMXAPI > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "DMXAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-34",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "DMXAPI",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://www.dmxapi.cn/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.dmxapi.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-35 OpenRouter > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "openrouter",
+    "iconColor": "#6566F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-35",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "anthropic/claude-opus-4.8": {
+          "name": "Claude Opus 4.8",
+        },
+        "anthropic/claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "OpenRouter",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://openrouter.ai/api/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://openrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-36 TheRouter > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "TheRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-36",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "anthropic/claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+        "google/gemini-3.5-flash": {
+          "name": "Gemini 3.5 Flash",
+        },
+        "openai/gpt-5.2": {
+          "name": "GPT-5.2",
+        },
+        "openai/gpt-5.3-codex": {
+          "name": "GPT-5.3 Codex",
+        },
+        "qwen/qwen3-coder-480b": {
+          "name": "Qwen3 Coder 480B",
+        },
+      },
+      "name": "TheRouter",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.therouter.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://therouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-37 Novita AI > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "novita",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Novita AI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-37",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "zai-org/glm-5.1": {
+          "name": "GLM-5.1",
+        },
+      },
+      "name": "Novita AI",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.novita.ai/openai",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://novita.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-38 Nvidia > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nvidia",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Nvidia",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-38",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "moonshotai/kimi-k2.5": {
+          "name": "Kimi K2.5",
+        },
+      },
+      "name": "Nvidia",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://integrate.api.nvidia.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://build.nvidia.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-39 PIPELLM > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pipellm",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "PIPELLM",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-39",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-haiku-4-5-20251001": {
+          "name": "claude-haiku-4-5-20251001",
+        },
+        "claude-opus-4-8": {
+          "name": "claude-opus-4-8",
+        },
+        "claude-sonnet-5": {
+          "name": "claude-sonnet-5",
+        },
+      },
+      "name": "PIPELLM",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://cc-api.pipellm.ai",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://code.pipellm.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-40 PackyCode > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "packycode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "PackyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-40",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "PackyCode",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://www.packyapi.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.packyapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-41 APIKEY.FUN > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apikeyfun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "APIKEY.FUN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-41",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-haiku-4-5": {
+          "name": "Claude Haiku 4.5",
+        },
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "APIKEY.FUN",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.apikey.fun/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://apikey.fun",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-42 APINebula > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apinebula",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "APINebula",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-42",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "APINebula",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://apinebula.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://apinebula.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-43 AtlasCloud > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "atlascloud",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AtlasCloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-43",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "zai-org/glm-5.1": {
+          "name": "GLM 5.1",
+        },
+      },
+      "name": "AtlasCloud",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.atlascloud.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.atlascloud.ai/console/coding-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-44 SudoCode > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sudocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SudoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-44",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.6-sol": {
+          "name": "GPT-5.6 Sol",
+        },
+      },
+      "name": "SudoCode",
+      "npm": "@ai-sdk/openai",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.sudocode.chat/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://sudocode.chat",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-45 Cubence > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cubence",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Cubence",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-45",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "Cubence",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.cubence.com/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://cubence.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-46 AIGoCode > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aigocode",
+    "iconColor": "#5B7FFF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AIGoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-46",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "AIGoCode",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.aigocode.com",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://aigocode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-47 RightCode > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "rc",
+    "iconColor": "#E96B2C",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "RightCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-47",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+        },
+      },
+      "name": "RightCode",
+      "npm": "@ai-sdk/openai",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://right.codes/codex/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.right.codes",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-48 AICodeMirror > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aicodemirror",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AICodeMirror",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-48",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4.8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "AICodeMirror",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.aicodemirror.com/api/claudecode",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.aicodemirror.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-49 ClaudeCN > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "claudecn",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ClaudeCN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-49",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-haiku-4-5": {
+          "name": "Claude Haiku 4.5",
+        },
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "ClaudeCN",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://claudecn.top",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://claudecn.top",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-50 RunAPI > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "runapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "RunAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "opencode-50",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-haiku-4-5": {
+          "name": "Claude Haiku 4.5",
+        },
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "RunAPI",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://runapi.co",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://runapi.co",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-51 CrazyRouter > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "crazyrouter",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CrazyRouter",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-51",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "CrazyRouter",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://cn.crazyrouter.com",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.crazyrouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-52 SSSAiCode > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sssaicode",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SSSAiCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-52",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "SSSAiCode",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://node-hk.sssaicodeapi.com/api/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://sssaicodeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-53 Micu > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "micu",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Micu",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-53",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "Micu",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://www.micuapi.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://www.micuapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-54 ETok.ai > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "etok",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ETok.ai",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-54",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+      },
+      "name": "ETok",
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://api.etok.ai/v1",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://etok.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-55 E-FlowCode > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "eflowcode",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "E-FlowCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "opencode-55",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "gpt-5.2-codex": {
+          "name": "gpt-5.2-codex",
+        },
+        "gpt-5.3-codex": {
+          "name": "gpt-5.3-codex",
+        },
+      },
+      "npm": "@ai-sdk/openai",
+      "options": {
+        "apiKey": "sk-golden-test-key",
+        "baseURL": "https://e-flowcode.cc/v1",
+      },
+    },
+    "websiteUrl": "https://e-flowcode.cc",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-56 AWS Bedrock > create 1`] = `
+{
+  "filled": [
+    "opencode-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aws",
+    "iconColor": "#FF9900",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AWS Bedrock",
+    "notes": "",
+    "presetCategory": "cloud_provider",
+    "presetId": "opencode-56",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "models": {
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+          "name": "Claude Haiku 4.5",
+        },
+        "global.anthropic.claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+        },
+        "global.anthropic.claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+        },
+        "us.amazon.nova-pro-v1:0": {
+          "name": "Amazon Nova Pro",
+        },
+        "us.deepseek.r1-v1:0": {
+          "name": "DeepSeek R1",
+        },
+        "us.meta.llama4-maverick-17b-instruct-v1:0": {
+          "name": "Meta Llama 4 Maverick",
+        },
+      },
+      "name": "AWS Bedrock",
+      "npm": "@ai-sdk/amazon-bedrock",
+      "options": {
+        "accessKeyId": "\${accessKeyId}",
+        "apiKey": "sk-golden-test-key",
+        "region": "\${region}",
+        "secretAccessKey": "\${secretAccessKey}",
+        "setCacheKey": true,
+      },
+    },
+    "websiteUrl": "https://aws.amazon.com/bedrock/",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-57 Oh My OpenCode > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "opencode",
+    "iconColor": "#8B5CF6",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "OMO",
+    "notes": "",
+    "presetCategory": "omo",
+    "presetId": "opencode-57",
+    "providerKey": "omo-00000000",
+    "settingsConfig": {},
+    "websiteUrl": "https://github.com/code-yeongyu/oh-my-openagent",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: opencode > opencode-58 Oh My OpenCode Slim > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "opencode",
+    "iconColor": "#6366F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "OMO Slim",
+    "notes": "",
+    "presetCategory": "omo-slim",
+    "presetId": "opencode-58",
+    "providerKey": "omo-slim-00000000",
+    "settingsConfig": {},
+    "websiteUrl": "https://github.com/alvinunreal/oh-my-opencode-slim",
+  },
+  "submitted": true,
+}
+`;

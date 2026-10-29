@@ -1,0 +1,2362 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-0 Claude Official > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "anthropic",
+    "iconColor": "#D4915D",
+    "meta": {
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Claude Official",
+    "notes": "",
+    "presetCategory": "official",
+    "presetId": "claude-0",
+    "settingsConfig": {
+      "env": {},
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.anthropic.com/claude-code",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-1 Shengsuanyun > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "shengsuanyun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.shengsuanyun",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-1",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://router.shengsuanyun.com/api",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-haiku-4.5",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.8",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-5",
+        "ANTHROPIC_MODEL": "anthropic/claude-sonnet-5",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-2 PatewayAI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pateway",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "apiKeyField": "ANTHROPIC_API_KEY",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "PatewayAI",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-2",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.pateway.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://pateway.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-3 火山Agentplan > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "huoshan",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "火山Agentplan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-3",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://ark.cn-beijing.volces.com/api/coding",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ark-code-latest",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "ark-code-latest",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "ark-code-latest",
+        "ANTHROPIC_MODEL": "ark-code-latest",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-4 BytePlus > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "byteplus",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "BytePlus",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-4",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://ark.ap-southeast.bytepluses.com/api/coding",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ark-code-latest",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "ark-code-latest",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "ark-code-latest",
+        "ANTHROPIC_MODEL": "ark-code-latest",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-5 DouBaoSeed > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "doubao",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "DouBaoSeed",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-5",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://ark.cn-beijing.volces.com/api/compatible",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "doubao-seed-2-1-pro-260628",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "doubao-seed-2-1-pro-260628",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "doubao-seed-2-1-pro-260628",
+        "ANTHROPIC_MODEL": "doubao-seed-2-1-pro-260628",
+        "API_TIMEOUT_MS": "3000000",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-6 CCSub > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ccsub",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "CCSub",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-6",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.ccsub.net",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.ccsub.net",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-7 SubRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "subrouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SubRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-7",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://subrouter.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://subrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-8 Unity2.ai > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "unity2",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Unity2.ai",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-8",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.unity2.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://unity2.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-9 Qiniu > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "qiniu",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.qiniu",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-9",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.qnaigc.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://s.qiniu.com/nMvAvy",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-10 FennoAI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "fenno",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "FennoAI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-10",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.fenno.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://api.fenno.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-11 ZetaAPI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zetaapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ZetaAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-11",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.zetaapi.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://zetaapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-12 TeamoRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "teamorouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "TeamoRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-12",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.teamorouter.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://teamorouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-13 Amux > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "amux",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Amux",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-13",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.amux.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://amux.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-14 Gemini Native > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "gemini",
+    "iconColor": "#4285F4",
+    "meta": {
+      "apiFormat": "gemini_native",
+      "apiKeyField": "ANTHROPIC_API_KEY",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Gemini Native",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-14",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://generativelanguage.googleapis.com",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gemini-3.5-flash",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "gemini-3.5-flash",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "gemini-3.5-flash",
+        "ANTHROPIC_MODEL": "gemini-3.5-flash",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://ai.google.dev/gemini-api",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-15 DeepSeek > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "deepseek",
+    "iconColor": "#1E88E5",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "DeepSeek",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-15",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-pro",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-pro",
+        "ANTHROPIC_MODEL": "deepseek-v4-pro",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://platform.deepseek.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-16 OpenCode Go > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "opencode",
+    "iconColor": "#211E1E",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenCode Go",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-16",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://opencode.ai/zen/go",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-v4-flash",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-flash",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-v4-flash",
+        "ANTHROPIC_MODEL": "deepseek-v4-flash",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://opencode.ai/go",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-17 Zhipu GLM > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-17",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.1",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.1",
+        "ANTHROPIC_MODEL": "glm-5.1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://open.bigmodel.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-18 Zhipu GLM en > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-18",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.1",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.1",
+        "ANTHROPIC_MODEL": "glm-5.1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://z.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-19 Baidu Qianfan Coding Plan > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "baidu",
+    "iconColor": "#2932E1",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Baidu Qianfan Coding Plan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-19",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://qianfan.baidubce.com/anthropic/coding",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qianfan-code-latest",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "qianfan-code-latest",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "qianfan-code-latest",
+        "ANTHROPIC_MODEL": "qianfan-code-latest",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://cloud.baidu.com/product/qianfan_modelbuilder",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-20 Bailian > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "bailian",
+    "iconColor": "#624AFF",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Bailian",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-20",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-21 Bailian For Coding > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "bailian",
+    "iconColor": "#624AFF",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Bailian For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-21",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-22 Kimi > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-22",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-k2.7-code",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-k2.7-code",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-k2.7-code",
+        "ANTHROPIC_MODEL": "kimi-k2.7-code",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://platform.kimi.com?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-23 Kimi For Coding > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-23",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.kimi.com/coding/",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kimi-for-coding",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "kimi-for-coding",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "kimi-for-coding",
+        "ANTHROPIC_MODEL": "kimi-for-coding",
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "262144",
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "262144",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.kimi.com/code/?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-24 StepFun > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-24",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.stepfun.com/step_plan",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "step-3.5-flash-2603",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "step-3.5-flash-2603",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "step-3.5-flash-2603",
+        "ANTHROPIC_MODEL": "step-3.5-flash-2603",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://platform.stepfun.com/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-25 StepFun en > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-25",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.stepfun.ai/step_plan",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "step-3.5-flash-2603",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "step-3.5-flash-2603",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "step-3.5-flash-2603",
+        "ANTHROPIC_MODEL": "step-3.5-flash-2603",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://platform.stepfun.ai/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-26 ModelScope > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "modelscope",
+    "iconColor": "#624AFF",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ModelScope",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-26",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api-inference.modelscope.cn",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "ZhipuAI/GLM-5.1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "ZhipuAI/GLM-5.1",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "ZhipuAI/GLM-5.1",
+        "ANTHROPIC_MODEL": "ZhipuAI/GLM-5.1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://modelscope.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-27 KAT-Coder > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+    "template-ENDPOINT_ID",
+  ],
+  "payload": {
+    "icon": "catcoder",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "KAT-Coder",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-27",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://vanchin.streamlake.ai/api/gateway/v1/endpoints/golden-template-ENDPOINT_ID/claude-code-proxy",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "KAT-Coder-Air V1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "KAT-Coder-Pro V1",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "KAT-Coder-Pro V1",
+        "ANTHROPIC_MODEL": "KAT-Coder-Pro V1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://console.streamlake.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-28 Longcat > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "longcat",
+    "iconColor": "#29E154",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Longcat",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-28",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.longcat.chat/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "LongCat-2.0",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "LongCat-2.0",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "LongCat-2.0",
+        "ANTHROPIC_MODEL": "LongCat-2.0",
+        "ANTHROPIC_SMALL_FAST_MODEL": "LongCat-2.0",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "131072",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://longcat.chat/platform",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-29 MiniMax > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-29",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMax-M2.7",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "MiniMax-M2.7",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "MiniMax-M2.7",
+        "ANTHROPIC_MODEL": "MiniMax-M2.7",
+        "API_TIMEOUT_MS": "3000000",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://platform.minimaxi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-30 MiniMax en > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-30",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMax-M2.7",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "MiniMax-M2.7",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "MiniMax-M2.7",
+        "ANTHROPIC_MODEL": "MiniMax-M2.7",
+        "API_TIMEOUT_MS": "3000000",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": 1,
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://platform.minimax.io",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-31 BaiLing > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "BaiLing",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-31",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.tbox.cn/api/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "Ling-2.5-1T",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "Ling-2.5-1T",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "Ling-2.5-1T",
+        "ANTHROPIC_MODEL": "Ling-2.5-1T",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://alipaytbox.yuque.com/sxs0ba/ling/get_started",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-32 AiHubMix > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aihubmix",
+    "iconColor": "#006FFB",
+    "meta": {
+      "apiFormat": "anthropic",
+      "apiKeyField": "ANTHROPIC_API_KEY",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AiHubMix",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-32",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://aihubmix.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://aihubmix.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-33 CherryIN > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cherryin",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "CherryIN",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-33",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://open.cherryin.net",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-haiku-4.5",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.8",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-5",
+        "ANTHROPIC_MODEL": "anthropic/claude-sonnet-5",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://open.cherryin.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-34 SiliconFlow > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#6E29F6",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SiliconFlow",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-34",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.siliconflow.cn",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "Pro/MiniMaxAI/MiniMax-M2.7",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "Pro/MiniMaxAI/MiniMax-M2.7",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "Pro/MiniMaxAI/MiniMax-M2.7",
+        "ANTHROPIC_MODEL": "Pro/MiniMaxAI/MiniMax-M2.7",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://siliconflow.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-35 SiliconFlow en > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SiliconFlow en",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-35",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.siliconflow.com",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMaxAI/MiniMax-M2.7",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "MiniMaxAI/MiniMax-M2.7",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "MiniMaxAI/MiniMax-M2.7",
+        "ANTHROPIC_MODEL": "MiniMaxAI/MiniMax-M2.7",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://siliconflow.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-36 DMXAPI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "DMXAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-36",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.dmxapi.cn",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.dmxapi.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-37 PackyCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "packycode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "PackyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-37",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.packyapi.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.packyapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-38 APIKEY.FUN > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apikeyfun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "APIKEY.FUN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-38",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.apikey.fun",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://apikey.fun",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-39 APINebula > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apinebula",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "APINebula",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-39",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://apinebula.com",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://apinebula.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-40 AtlasCloud > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "atlascloud",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AtlasCloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-40",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.atlascloud.ai",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "zai-org/glm-5.1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "zai-org/glm-5.1",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "zai-org/glm-5.1",
+        "ANTHROPIC_MODEL": "zai-org/glm-5.1",
+        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.atlascloud.ai/console/coding-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-41 SudoCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sudocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SudoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-41",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.sudocode.chat",
+        "API_TIMEOUT_MS": "300000",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://sudocode.chat",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-42 ClaudeAPI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "claudeapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ClaudeAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-42",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://gw.claudeapi.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://claudeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-43 Code0 > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "code0",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Code0",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-43",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://code0.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://code0.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-44 NekoCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nekocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "NekoCode",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-44",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://nekocode.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://nekocode.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-45 ClaudeCN > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "claudecn",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ClaudeCN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-45",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://claudecn.top",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://claudecn.top",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-46 RunAPI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "runapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "RunAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-46",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://runapi.co",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://runapi.co",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-47 RelaxyCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "relaxcode",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "RelaxyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-47",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.relaxycode.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.relaxycode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-48 Cubence > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cubence",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Cubence",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-48",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.cubence.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://cubence.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-49 AIGoCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aigocode",
+    "iconColor": "#5B7FFF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AIGoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-49",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.aigocode.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://aigocode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-50 RightCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "rc",
+    "iconColor": "#E96B2C",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "RightCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-50",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.right.codes/claude",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.right.codes",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-51 AICodeMirror > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aicodemirror",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AICodeMirror",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-51",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.aicodemirror.com/api/claudecode",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.aicodemirror.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-52 CrazyRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "crazyrouter",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "CrazyRouter",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-52",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://cn.crazyrouter.com",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.crazyrouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-53 SSSAiCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sssaicode",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SSSAiCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-53",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://node-hk.sssaicodeapi.com/api",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://sssaicodeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-54 Compshare > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.ucloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-54",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.modelverse.cn",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-55 Compshare Coding Plan > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.ucloudCoding",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-55",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://cp.compshare.cn",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-56 Micu > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "micu",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Micu",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-56",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.micuapi.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://www.micuapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-57 ETok.ai > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "etok",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ETok.ai",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-57",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.etok.ai",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://etok.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-58 E-FlowCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "eflowcode",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "E-FlowCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-58",
+    "settingsConfig": {
+      "ENABLE_TOOL_SEARCH": true,
+      "effortLevel": "high",
+      "enabledPlugins": {
+        "superpowers@superpowers-marketplace": true,
+      },
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://e-flowcode.cc",
+      },
+      "includeCoAuthoredBy": false,
+      "skipWebFetchPreflight": true,
+    },
+    "websiteUrl": "https://e-flowcode.cc",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-59 OpenRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "openrouter",
+    "iconColor": "#6566F1",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-59",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-haiku-4.5",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.8",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-5",
+        "ANTHROPIC_MODEL": "anthropic/claude-sonnet-5",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://openrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-60 TheRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "TheRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-60",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.therouter.ai",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-haiku-4.5",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.8",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-5",
+        "ANTHROPIC_MODEL": "anthropic/claude-sonnet-5",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://therouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-60 TheRouter > edit (known drift) 1`] = `
+{
+  "icon": "",
+  "iconColor": "",
+  "meta": {
+    "apiFormat": "anthropic",
+    "apiKeyField": "ANTHROPIC_API_KEY",
+    "commonConfigEnabled": true,
+    "endpointAutoSelect": true,
+  },
+  "name": "TheRouter",
+  "notes": "",
+  "settingsConfig": {
+    "env": {
+      "ANTHROPIC_API_KEY": "",
+      "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+      "ANTHROPIC_BASE_URL": "https://api.therouter.ai",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-haiku-4.5",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.8",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-5",
+      "ANTHROPIC_MODEL": "anthropic/claude-sonnet-5",
+    },
+    "includeCoAuthoredBy": false,
+  },
+  "websiteUrl": "https://therouter.ai",
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-61 Novita AI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "novita",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Novita AI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-61",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.novita.ai/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "zai-org/glm-5.1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "zai-org/glm-5.1",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "zai-org/glm-5.1",
+        "ANTHROPIC_MODEL": "zai-org/glm-5.1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://novita.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-62 GitHub Copilot > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "github",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "authBinding": {
+        "authProvider": "github_copilot",
+        "source": "managed_account",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+      "providerType": "github_copilot",
+    },
+    "name": "GitHub Copilot",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-62",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_BASE_URL": "https://api.githubcopilot.com",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4.5",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-sonnet-5",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+        "ANTHROPIC_MODEL": "claude-sonnet-5",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://github.com/features/copilot",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-63 Codex > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "openai",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "authBinding": {
+        "authProvider": "codex_oauth",
+        "source": "managed_account",
+      },
+      "codexFastMode": false,
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+      "providerType": "codex_oauth",
+    },
+    "name": "Codex",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-63",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_BASE_URL": "https://chatgpt.com/backend-api/codex",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5.6-luna",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "gpt-5.6",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.6",
+        "ANTHROPIC_MODEL": "gpt-5.6",
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "372000",
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "372000",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://openai.com/chatgpt/pricing",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-64 Nvidia > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nvidia",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Nvidia",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-64",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://integrate.api.nvidia.com",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "moonshotai/kimi-k2.5",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "moonshotai/kimi-k2.5",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "moonshotai/kimi-k2.5",
+        "ANTHROPIC_MODEL": "moonshotai/kimi-k2.5",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://build.nvidia.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-65 PIPELLM > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pipellm",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "PIPELLM",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-65",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://cc-api.pipellm.ai",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5-20251001",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+        "ANTHROPIC_MODEL": "claude-opus-4-8",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://code.pipellm.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-66 Xiaomi MiMo > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-66",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.xiaomimimo.com/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mimo-v2.5-pro",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "mimo-v2.5-pro",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "mimo-v2.5-pro",
+        "ANTHROPIC_MODEL": "mimo-v2.5-pro",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-67 Xiaomi MiMo Token Plan (China) > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo Token Plan (China)",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-67",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://token-plan-cn.xiaomimimo.com/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mimo-v2.5-pro",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "mimo-v2.5-pro",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "mimo-v2.5-pro",
+        "ANTHROPIC_MODEL": "mimo-v2.5-pro",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com/#/token-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-68 AWS Bedrock (AKSK) > create 1`] = `
+{
+  "filled": [
+    "template-AWS_ACCESS_KEY_ID",
+    "template-AWS_SECRET_ACCESS_KEY",
+  ],
+  "payload": {
+    "icon": "aws",
+    "iconColor": "#FF9900",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AWS Bedrock (AKSK)",
+    "notes": "",
+    "presetCategory": "cloud_provider",
+    "presetId": "claude-68",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_BASE_URL": "https://bedrock-runtime.us-west-2.amazonaws.com",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "global.anthropic.claude-opus-4-8",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "global.anthropic.claude-sonnet-5",
+        "ANTHROPIC_MODEL": "global.anthropic.claude-opus-4-8",
+        "AWS_ACCESS_KEY_ID": "golden-template-AWS_ACCESS_KEY_ID",
+        "AWS_REGION": "us-west-2",
+        "AWS_SECRET_ACCESS_KEY": "golden-template-AWS_SECRET_ACCESS_KEY",
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://aws.amazon.com/bedrock/",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > claude-69 AWS Bedrock (API Key) > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aws",
+    "iconColor": "#FF9900",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AWS Bedrock (API Key)",
+    "notes": "",
+    "presetCategory": "cloud_provider",
+    "presetId": "claude-69",
+    "settingsConfig": {
+      "apiKey": "sk-golden-test-key",
+      "env": {
+        "ANTHROPIC_BASE_URL": "https://bedrock-runtime.us-west-2.amazonaws.com",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "global.anthropic.claude-opus-4-8",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "global.anthropic.claude-sonnet-5",
+        "ANTHROPIC_MODEL": "global.anthropic.claude-opus-4-8",
+        "AWS_REGION": "us-west-2",
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+      },
+      "includeCoAuthoredBy": false,
+    },
+    "websiteUrl": "https://aws.amazon.com/bedrock/",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude > custom custom > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "commonConfigEnabled": false,
+      "endpointAutoSelect": true,
+    },
+    "name": "",
+    "notes": "",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+      },
+    },
+    "websiteUrl": "",
+  },
+  "submitted": true,
+}
+`;

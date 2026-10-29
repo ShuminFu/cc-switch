@@ -94,7 +94,9 @@ export function GrokBuildProviderForm({
   const [isPartner, setIsPartner] = useState(
     initialData?.meta?.isPartner ?? false,
   );
-  const [partnerPromotionKey, setPartnerPromotionKey] = useState<string>();
+  const [partnerPromotionKey, setPartnerPromotionKey] = useState<
+    string | undefined
+  >(initialData?.meta?.partnerPromotionKey);
   const [profile, setProfile] = useState(initialConfig.model);
   const [upstreamModel, setUpstreamModel] = useState(
     initialConfig.upstreamModel ?? initialConfig.model,

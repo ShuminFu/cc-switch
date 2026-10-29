@@ -1,0 +1,2826 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-0 OpenAI Official > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "openai",
+    "iconColor": "#00A67E",
+    "meta": {
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenAI Official",
+    "notes": "",
+    "presetCategory": "official",
+    "presetId": "codex-0",
+    "settingsConfig": {
+      "auth": {},
+      "config": "",
+    },
+    "websiteUrl": "https://chatgpt.com/codex",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-1 Shengsuanyun > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "shengsuanyun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.shengsuanyun",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-1",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "openai/gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "shengsuanyun"
+base_url = "https://router.shengsuanyun.com/api/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-2 PatewayAI > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pateway",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "PatewayAI",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-2",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "patewayai"
+base_url = "https://api.pateway.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://pateway.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-3 火山Agentplan > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "huoshan",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "火山Agentplan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-3",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "ark-code-latest"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "ark_agentplan"
+base_url = "https://ark.cn-beijing.volces.com/api/coding/v3"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 256000,
+            "displayName": "Ark Code Latest",
+            "model": "ark-code-latest",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-4 BytePlus > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "byteplus",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "BytePlus",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-4",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "ark-code-latest"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "byteplus"
+base_url = "https://ark.ap-southeast.bytepluses.com/api/coding/v3"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 256000,
+            "displayName": "Ark Code Latest",
+            "model": "ark-code-latest",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-5 DouBaoSeed > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "doubao",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "DouBaoSeed",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-5",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "doubao-seed-2-1-pro-260628"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "doubaoseed"
+base_url = "https://ark.cn-beijing.volces.com/api/v3"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 262144,
+            "displayName": "Doubao Seed 2.1 Pro",
+            "model": "doubao-seed-2-1-pro-260628",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-6 CCSub > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ccsub",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "CCSub",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-6",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "ccsub"
+base_url = "https://www.ccsub.net/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.ccsub.net",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-7 SubRouter > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "subrouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SubRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-7",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "subrouter"
+base_url = "https://subrouter.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://subrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-8 Unity2.ai > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "unity2",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Unity2.ai",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-8",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "unity2"
+base_url = "https://api.unity2.ai"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://unity2.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-9 Qiniu > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "qiniu",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.qiniu",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-9",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "qiniu"
+base_url = "https://api.qnaigc.com/bypass/openai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://s.qiniu.com/nMvAvy",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-10 FennoAI > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "fenno",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "FennoAI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-10",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "fenno"
+base_url = "https://api.fenno.ai"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://api.fenno.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-11 ZetaAPI > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zetaapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ZetaAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-11",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "zetaapi"
+base_url = "https://api.zetaapi.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://zetaapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-12 TeamoRouter > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "teamorouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "TeamoRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-12",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "teamorouter"
+base_url = "https://api.teamorouter.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://teamorouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-13 Amux > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "amux",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Amux",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-13",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "amux"
+base_url = "https://api.amux.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://amux.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-14 Code0 > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "code0",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Code0",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-14",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "code0"
+base_url = "https://code0.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://code0.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-15 NekoCode > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nekocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "NekoCode",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-15",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "nekocode"
+base_url = "https://nekocode.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://nekocode.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-16 Azure OpenAI > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "azure",
+    "iconColor": "#0078D4",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Azure OpenAI",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-16",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "Azure OpenAI"
+base_url = "https://YOUR_RESOURCE_NAME.openai.azure.com/openai"
+env_key = "OPENAI_API_KEY"
+query_params = { "api-version" = "2025-04-01-preview" }
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-17 DeepSeek > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "deepseek",
+    "iconColor": "#1E88E5",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "codexChatReasoning": {
+        "effortParam": "reasoning_effort",
+        "effortValueMode": "deepseek",
+        "outputFormat": "reasoning_content",
+        "supportsEffort": true,
+        "supportsThinking": true,
+        "thinkingParam": "thinking",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "DeepSeek",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-17",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "deepseek-v4-flash"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "deepseek"
+base_url = "https://api.deepseek.com"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 1000000,
+            "displayName": "DeepSeek V4 Flash",
+            "model": "deepseek-v4-flash",
+          },
+          {
+            "contextWindow": 1000000,
+            "displayName": "DeepSeek V4 Pro",
+            "model": "deepseek-v4-pro",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://platform.deepseek.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-18 Zhipu GLM > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "codexChatReasoning": {
+        "effortParam": "none",
+        "outputFormat": "reasoning_content",
+        "supportsEffort": false,
+        "supportsThinking": true,
+        "thinkingParam": "thinking",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-18",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "glm-5.2"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "zhipu_glm"
+base_url = "https://open.bigmodel.cn/api/coding/paas/v4"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 200000,
+            "displayName": "GLM-5.2",
+            "model": "glm-5.2",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://open.bigmodel.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-19 Zhipu GLM en > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "codexChatReasoning": {
+        "effortParam": "none",
+        "outputFormat": "reasoning_content",
+        "supportsEffort": false,
+        "supportsThinking": true,
+        "thinkingParam": "thinking",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-19",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "glm-5.2"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "zhipu_glm_en"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 200000,
+            "displayName": "GLM-5.2",
+            "model": "glm-5.2",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://z.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-20 Baidu Qianfan Coding Plan > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "baidu",
+    "iconColor": "#2932E1",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Baidu Qianfan Coding Plan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-20",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "qianfan-code-latest"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "qianfan_coding"
+base_url = "https://qianfan.baidubce.com/v2/coding"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 131072,
+            "displayName": "Qianfan Code Latest",
+            "model": "qianfan-code-latest",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://cloud.baidu.com/product/qianfan_modelbuilder",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-21 Bailian > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "bailian",
+    "iconColor": "#624AFF",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Bailian",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-21",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "qwen3-coder-plus"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "bailian"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 1048576,
+            "displayName": "Qwen3 Coder Plus",
+            "model": "qwen3-coder-plus",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-22 Kimi > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "codexChatReasoning": {
+        "effortParam": "none",
+        "outputFormat": "reasoning_content",
+        "supportsEffort": false,
+        "supportsThinking": true,
+        "thinkingParam": "thinking",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-22",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "kimi-k2.7-code"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "kimi"
+base_url = "https://api.moonshot.cn/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 262144,
+            "displayName": "Kimi K2.7 Code",
+            "model": "kimi-k2.7-code",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://platform.kimi.com?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-23 Kimi For Coding > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "codexChatReasoning": {
+        "effortParam": "none",
+        "outputFormat": "reasoning_content",
+        "supportsEffort": false,
+        "supportsThinking": true,
+        "thinkingParam": "thinking",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+      "promptCacheRouting": "enabled",
+    },
+    "name": "Kimi For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-23",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "kimi-for-coding"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "kimi_coding"
+base_url = "https://api.kimi.com/coding/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 262144,
+            "displayName": "Kimi For Coding",
+            "model": "kimi-for-coding",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://www.kimi.com/code/?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-24 StepFun > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-24",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "step-3.7-flash"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "stepfun"
+base_url = "https://api.stepfun.com/step_plan/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 262144,
+            "displayName": "Step 3.7 Flash",
+            "model": "step-3.7-flash",
+          },
+          {
+            "contextWindow": 262144,
+            "displayName": "Step 3.5 Flash 2603",
+            "model": "step-3.5-flash-2603",
+          },
+          {
+            "contextWindow": 262144,
+            "displayName": "Step 3.5 Flash",
+            "model": "step-3.5-flash",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.com/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-25 StepFun en > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-25",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "step-3.7-flash"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "stepfun_en"
+base_url = "https://api.stepfun.ai/step_plan/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 262144,
+            "displayName": "Step 3.7 Flash",
+            "model": "step-3.7-flash",
+          },
+          {
+            "contextWindow": 262144,
+            "displayName": "Step 3.5 Flash 2603",
+            "model": "step-3.5-flash-2603",
+          },
+          {
+            "contextWindow": 262144,
+            "displayName": "Step 3.5 Flash",
+            "model": "step-3.5-flash",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.ai/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-26 ModelScope > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "modelscope",
+    "iconColor": "#624AFF",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "codexChatReasoning": {
+        "effortParam": "none",
+        "outputFormat": "reasoning_content",
+        "supportsEffort": false,
+        "supportsThinking": true,
+        "thinkingParam": "thinking",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ModelScope",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-26",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "ZhipuAI/GLM-5.1"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "modelscope"
+base_url = "https://api-inference.modelscope.cn/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 200000,
+            "displayName": "ZhipuAI / GLM-5.1",
+            "model": "ZhipuAI/GLM-5.1",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://modelscope.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-27 Longcat > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "longcat",
+    "iconColor": "#29E154",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Longcat",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-27",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "LongCat-2.0"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "longcat"
+base_url = "https://api.longcat.chat/openai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 1048576,
+            "displayName": "LongCat 2.0",
+            "model": "LongCat-2.0",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://longcat.chat/platform",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-28 MiniMax > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-28",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "MiniMax-M3"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "minimax"
+base_url = "https://api.minimaxi.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "baseInstructions": "You are Codex, a coding agent based on MiniMax-M3. You and the user share the same workspace and collaborate to achieve the user's goals.",
+            "contextWindow": 1000000,
+            "displayName": "MiniMax-M3",
+            "inputModalities": [
+              "text",
+              "image",
+            ],
+            "model": "MiniMax-M3",
+            "supportsParallelToolCalls": true,
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://platform.minimaxi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-29 MiniMax en > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-29",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "MiniMax-M3"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "minimax_en"
+base_url = "https://api.minimax.io/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "baseInstructions": "You are Codex, a coding agent based on MiniMax-M3. You and the user share the same workspace and collaborate to achieve the user's goals.",
+            "contextWindow": 1000000,
+            "displayName": "MiniMax-M3",
+            "inputModalities": [
+              "text",
+              "image",
+            ],
+            "model": "MiniMax-M3",
+            "supportsParallelToolCalls": true,
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://platform.minimax.io",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-30 BaiLing > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "BaiLing",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-30",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "Ling-2.6-1T"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "bailing"
+base_url = "https://api.tbox.cn/api/llm/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 262144,
+            "displayName": "Ling-2.6-1T",
+            "model": "Ling-2.6-1T",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://alipaytbox.yuque.com/sxs0ba/ling/get_started",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-31 Xiaomi MiMo > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-31",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "mimo-v2.5-pro"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "xiaomi_mimo"
+base_url = "https://api.xiaomimimo.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "baseInstructions": "You are MiMo, an AI assistant developed by Xiaomi. Today's date: {date} {week}. Your knowledge cutoff date is December 2024.",
+            "contextWindow": 1048576,
+            "displayName": "MiMo V2.5 Pro",
+            "inputModalities": [
+              "text",
+            ],
+            "model": "mimo-v2.5-pro",
+          },
+          {
+            "baseInstructions": "You are MiMo, an AI assistant developed by Xiaomi. Today's date: {date} {week}. Your knowledge cutoff date is December 2024.",
+            "contextWindow": 1048576,
+            "displayName": "MiMo V2.5",
+            "inputModalities": [
+              "text",
+              "image",
+            ],
+            "model": "mimo-v2.5",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-32 Xiaomi MiMo Token Plan (China) > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo Token Plan (China)",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "codex-32",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "mimo-v2.5-pro"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "xiaomi_mimo_token_plan"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "baseInstructions": "You are MiMo, an AI assistant developed by Xiaomi. Today's date: {date} {week}. Your knowledge cutoff date is December 2024.",
+            "contextWindow": 1048576,
+            "displayName": "MiMo V2.5 Pro",
+            "inputModalities": [
+              "text",
+            ],
+            "model": "mimo-v2.5-pro",
+          },
+          {
+            "baseInstructions": "You are MiMo, an AI assistant developed by Xiaomi. Today's date: {date} {week}. Your knowledge cutoff date is December 2024.",
+            "contextWindow": 1048576,
+            "displayName": "MiMo V2.5",
+            "inputModalities": [
+              "text",
+              "image",
+            ],
+            "model": "mimo-v2.5",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com/#/token-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-33 SiliconFlow > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#6E29F6",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SiliconFlow",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-33",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "Pro/MiniMaxAI/MiniMax-M2.7"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "siliconflow"
+base_url = "https://api.siliconflow.cn/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 200000,
+            "displayName": "Pro / MiniMax M2.7",
+            "model": "Pro/MiniMaxAI/MiniMax-M2.7",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://siliconflow.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-34 SiliconFlow en > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SiliconFlow en",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-34",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "MiniMaxAI/MiniMax-M2.7"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "siliconflow_en"
+base_url = "https://api.siliconflow.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 200000,
+            "displayName": "MiniMax M2.7",
+            "model": "MiniMaxAI/MiniMax-M2.7",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://siliconflow.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-35 Novita AI > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "novita",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "codexChatReasoning": {
+        "effortParam": "none",
+        "outputFormat": "reasoning_content",
+        "supportsEffort": false,
+        "supportsThinking": true,
+        "thinkingParam": "thinking",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Novita AI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-35",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "zai-org/glm-5.1"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "novita"
+base_url = "https://api.novita.ai/openai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 202800,
+            "displayName": "GLM-5.1",
+            "model": "zai-org/glm-5.1",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://novita.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-36 Nvidia > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nvidia",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "codexChatReasoning": {
+        "effortParam": "none",
+        "outputFormat": "reasoning_content",
+        "supportsEffort": false,
+        "supportsThinking": true,
+        "thinkingParam": "thinking",
+      },
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Nvidia",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-36",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "moonshotai/kimi-k2.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "nvidia"
+base_url = "https://integrate.api.nvidia.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 262144,
+            "displayName": "Kimi K2.5",
+            "model": "moonshotai/kimi-k2.5",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://build.nvidia.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-37 OpenCode Go > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "opencode",
+    "iconColor": "#211E1E",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenCode Go",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-37",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "glm-5.2"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "opencode_go"
+base_url = "https://opencode.ai/zen/go/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 204800,
+            "displayName": "GLM 5.2",
+            "model": "glm-5.2",
+          },
+          {
+            "contextWindow": 204800,
+            "displayName": "GLM 5.1",
+            "model": "glm-5.1",
+          },
+          {
+            "contextWindow": 262144,
+            "displayName": "Kimi K2.7 Code",
+            "model": "kimi-k2.7-code",
+          },
+          {
+            "displayName": "DeepSeek V4 Pro",
+            "model": "deepseek-v4-pro",
+          },
+          {
+            "displayName": "DeepSeek V4 Flash",
+            "model": "deepseek-v4-flash",
+          },
+          {
+            "contextWindow": 1048576,
+            "displayName": "MiMo V2.5 Pro",
+            "model": "mimo-v2.5-pro",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://opencode.ai/go",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-38 AiHubMix > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AiHubMix",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-38",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "aihubmix"
+base_url = "https://aihubmix.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://aihubmix.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-39 CherryIN > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cherryin",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "CherryIN",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-39",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "openai/gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "cherryin"
+base_url = "https://open.cherryin.net/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://open.cherryin.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-40 DMXAPI > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "DMXAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-40",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "dmxapi"
+base_url = "https://www.dmxapi.cn/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.dmxapi.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-41 PackyCode > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "packycode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "PackyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-41",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "packycode"
+base_url = "https://www.packyapi.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.packyapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-42 APIKEY.FUN > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apikeyfun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "APIKEY.FUN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-42",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "APIKEY.FUN"
+base_url = "https://api.apikey.fun/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://apikey.fun",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-43 APINebula > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apinebula",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "APINebula",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-43",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "APINebula"
+base_url = "https://apinebula.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://apinebula.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-44 AtlasCloud > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "atlascloud",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_chat",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AtlasCloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-44",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "zai-org/glm-5.1"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "AtlasCloud"
+base_url = "https://api.atlascloud.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+      "modelCatalog": {
+        "models": [
+          {
+            "contextWindow": 200000,
+            "displayName": "GLM 5.1",
+            "model": "zai-org/glm-5.1",
+          },
+        ],
+      },
+    },
+    "websiteUrl": "https://www.atlascloud.ai/console/coding-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-45 SudoCode > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sudocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SudoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-45",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.6-sol"
+review_model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "SudoCode"
+base_url = "https://api.sudocode.chat/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://sudocode.chat",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-46 ClaudeCN > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "claudecn",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ClaudeCN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-46",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "claudecn"
+base_url = "https://claudecn.top/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://claudecn.top",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-47 RunAPI > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "runapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "RunAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-47",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "runapi"
+base_url = "https://runapi.co/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://runapi.co",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-48 RelaxyCode > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "relaxcode",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "RelaxyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-48",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "relaxycode"
+base_url = "https://www.relaxycode.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.relaxycode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-49 Cubence > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cubence",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Cubence",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-49",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "cubence"
+base_url = "https://api.cubence.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://cubence.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-50 AIGoCode > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aigocode",
+    "iconColor": "#5B7FFF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AIGoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-50",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "aigocode"
+base_url = "https://api.aigocode.com"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://aigocode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-51 RightCode > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "rc",
+    "iconColor": "#E96B2C",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "RightCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-51",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "rightcode"
+base_url = "https://right.codes/codex/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.right.codes",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-52 AICodeMirror > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aicodemirror",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "AICodeMirror",
+    "notes": "",
+    "presetId": "codex-52",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "aicodemirror"
+base_url = "https://api.aicodemirror.com/api/codex/backend-api/codex"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.aicodemirror.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-53 CrazyRouter > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "crazyrouter",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "CrazyRouter",
+    "notes": "",
+    "presetId": "codex-53",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "crazyrouter"
+base_url = "https://cn.crazyrouter.com/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.crazyrouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-54 SSSAiCode > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sssaicode",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "SSSAiCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-54",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "sssaicode"
+base_url = "https://node-hk.sssaicodeapi.com/api/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://sssaicodeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-55 Compshare > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.ucloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-55",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "compshare"
+base_url = "https://api.modelverse.cn/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-56 Compshare Coding Plan > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.ucloudCoding",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-56",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "compshare_coding"
+base_url = "https://cp.compshare.cn/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-57 Micu > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "micu",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "Micu",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-57",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "micu"
+base_url = "https://www.micuapi.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://www.micuapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-58 ETok.ai > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "etok",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "ETok.ai",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-58",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "etok"
+base_url = "https://api.etok.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://etok.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-59 E-FlowCode > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "eflowcode",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "E-FlowCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "codex-59",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+personality = "pragmatic"
+
+[model_providers.custom]
+name = "E-FlowCode"
+base_url = "https://e-flowcode.cc/v1"
+wire_api = "responses"
+requires_openai_auth = true
+model_context_window = 1000000
+model_auto_compact_token_limit = 9000000",
+    },
+    "websiteUrl": "https://e-flowcode.cc",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-60 PIPELLM > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pipellm",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "PIPELLM",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-60",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "PIPELLM"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://cc-api.pipellm.ai/v1"",
+    },
+    "websiteUrl": "https://code.pipellm.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-61 OpenRouter > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "openrouter",
+    "iconColor": "#6566F1",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-61",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://openrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > codex-62 TheRouter > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "TheRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "codex-62",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "openai/gpt-5.3-codex"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "therouter"
+base_url = "https://api.therouter.ai/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "https://therouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: codex > custom custom > create 1`] = `
+{
+  "filled": [
+    "codexApiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "commonConfigEnabled": true,
+      "endpointAutoSelect": true,
+    },
+    "name": "",
+    "notes": "",
+    "settingsConfig": {
+      "auth": {
+        "OPENAI_API_KEY": "sk-golden-test-key",
+      },
+      "config": "model_provider = "custom"
+model = "gpt-5.6"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true",
+    },
+    "websiteUrl": "",
+  },
+  "submitted": true,
+}
+`;

@@ -1,0 +1,2543 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-0 Claude Desktop Official > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "anthropic",
+    "iconColor": "#D4915D",
+    "meta": {},
+    "name": "Claude Desktop Official",
+    "notes": "",
+    "presetCategory": "official",
+    "presetId": "claude-desktop-0",
+    "settingsConfig": {
+      "env": {},
+    },
+    "websiteUrl": "https://claude.ai/download",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-1 Shengsuanyun > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "shengsuanyun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "providerForm.presets.shengsuanyun",
+    "notes": "",
+    "partnerPromotionKey": "shengsuanyun",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-1",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://router.shengsuanyun.com/api",
+      },
+    },
+    "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-2 PatewayAI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pateway",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "PatewayAI",
+    "notes": "",
+    "partnerPromotionKey": "patewayai",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-2",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.pateway.ai",
+      },
+    },
+    "websiteUrl": "https://pateway.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-3 Qiniu > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "qiniu",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "providerForm.presets.qiniu",
+    "notes": "",
+    "partnerPromotionKey": "qiniu",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-3",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.qnaigc.com",
+      },
+    },
+    "websiteUrl": "https://s.qiniu.com/nMvAvy",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-4 FennoAI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "fenno",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "FennoAI",
+    "notes": "",
+    "partnerPromotionKey": "fenno",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-4",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.fenno.ai",
+      },
+    },
+    "websiteUrl": "https://api.fenno.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-5 ZetaAPI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zetaapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "ZetaAPI",
+    "notes": "",
+    "partnerPromotionKey": "zetaapi",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-5",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.zetaapi.ai",
+      },
+    },
+    "websiteUrl": "https://zetaapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-6 TeamoRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "teamorouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "TeamoRouter",
+    "notes": "",
+    "partnerPromotionKey": "teamorouter",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-6",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.teamorouter.com",
+      },
+    },
+    "websiteUrl": "https://teamorouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-7 Amux > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "amux",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "Amux",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-7",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.amux.ai",
+      },
+    },
+    "websiteUrl": "https://amux.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-8 火山Agentplan > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "huoshan",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "ark-code-latest",
+          "model": "ark-code-latest",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "ark-code-latest",
+          "model": "ark-code-latest",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "ark-code-latest",
+          "model": "ark-code-latest",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "ark-code-latest",
+          "model": "ark-code-latest",
+        },
+      },
+    },
+    "name": "火山Agentplan",
+    "notes": "",
+    "partnerPromotionKey": "volcengine_agentplan",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-8",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://ark.cn-beijing.volces.com/api/coding",
+      },
+    },
+    "websiteUrl": "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-9 BytePlus > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "byteplus",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "ark-code-latest",
+          "model": "ark-code-latest",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "ark-code-latest",
+          "model": "ark-code-latest",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "ark-code-latest",
+          "model": "ark-code-latest",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "ark-code-latest",
+          "model": "ark-code-latest",
+        },
+      },
+    },
+    "name": "BytePlus",
+    "notes": "",
+    "partnerPromotionKey": "byteplus",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-9",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://ark.ap-southeast.bytepluses.com/api/coding",
+      },
+    },
+    "websiteUrl": "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-10 DouBaoSeed > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "doubao",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "doubao-seed-2-1-pro-260628",
+          "model": "doubao-seed-2-1-pro-260628",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "doubao-seed-2-1-pro-260628",
+          "model": "doubao-seed-2-1-pro-260628",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "doubao-seed-2-1-pro-260628",
+          "model": "doubao-seed-2-1-pro-260628",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "doubao-seed-2-1-pro-260628",
+          "model": "doubao-seed-2-1-pro-260628",
+        },
+      },
+    },
+    "name": "DouBaoSeed",
+    "notes": "",
+    "partnerPromotionKey": "doubaoseed",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-10",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://ark.cn-beijing.volces.com/api/compatible",
+      },
+    },
+    "websiteUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-11 CCSub > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ccsub",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "CCSub",
+    "notes": "",
+    "partnerPromotionKey": "ccsub",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-11",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.ccsub.net",
+      },
+    },
+    "websiteUrl": "https://www.ccsub.net",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-12 SubRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "subrouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "SubRouter",
+    "notes": "",
+    "partnerPromotionKey": "subrouter",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-12",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://subrouter.ai",
+      },
+    },
+    "websiteUrl": "https://subrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-13 Unity2.ai > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "unity2",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "Unity2.ai",
+    "notes": "",
+    "partnerPromotionKey": "unity2",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-13",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.unity2.ai",
+      },
+    },
+    "websiteUrl": "https://unity2.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-14 Gemini Native > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "gemini",
+    "iconColor": "#4285F4",
+    "meta": {
+      "apiFormat": "gemini_native",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "gemini-3.5-flash",
+          "model": "gemini-3.5-flash",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "gemini-3.5-flash",
+          "model": "gemini-3.5-flash",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "gemini-3.5-flash",
+          "model": "gemini-3.5-flash",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "gemini-3.5-flash",
+          "model": "gemini-3.5-flash",
+        },
+      },
+    },
+    "name": "Gemini Native",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-14",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://generativelanguage.googleapis.com",
+      },
+    },
+    "websiteUrl": "https://ai.google.dev/gemini-api",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-15 GitHub Copilot > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "github",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "authBinding": {
+        "authProvider": "github_copilot",
+        "source": "managed_account",
+      },
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "claude-haiku-4.5",
+          "model": "claude-haiku-4.5",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+      },
+      "providerType": "github_copilot",
+    },
+    "name": "GitHub Copilot",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-15",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_BASE_URL": "https://api.githubcopilot.com",
+      },
+    },
+    "websiteUrl": "https://github.com/features/copilot",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-16 Codex > create 1`] = `
+{
+  "filled": [],
+  "payload": {
+    "icon": "openai",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_responses",
+      "authBinding": {
+        "authProvider": "codex_oauth",
+        "source": "managed_account",
+      },
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "gpt-5.6",
+          "model": "gpt-5.6",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "gpt-5.6-luna",
+          "model": "gpt-5.6-luna",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "gpt-5.6",
+          "model": "gpt-5.6",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "gpt-5.6",
+          "model": "gpt-5.6",
+        },
+      },
+      "codexFastMode": false,
+      "providerType": "codex_oauth",
+    },
+    "name": "Codex",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-16",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_BASE_URL": "https://chatgpt.com/backend-api/codex",
+      },
+    },
+    "websiteUrl": "https://openai.com/chatgpt/pricing",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-17 DeepSeek > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "deepseek",
+    "iconColor": "#1E88E5",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "deepseek-v4-pro",
+          "model": "deepseek-v4-pro",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "deepseek-v4-flash",
+          "model": "deepseek-v4-flash",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "deepseek-v4-pro",
+          "model": "deepseek-v4-pro",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "deepseek-v4-pro",
+          "model": "deepseek-v4-pro",
+        },
+      },
+    },
+    "name": "DeepSeek",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-17",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+      },
+    },
+    "websiteUrl": "https://platform.deepseek.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-18 OpenCode Go > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "opencode",
+    "iconColor": "#211E1E",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "deepseek-v4-flash",
+          "model": "deepseek-v4-flash",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "deepseek-v4-flash",
+          "model": "deepseek-v4-flash",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "deepseek-v4-flash",
+          "model": "deepseek-v4-flash",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "deepseek-v4-flash",
+          "model": "deepseek-v4-flash",
+        },
+      },
+    },
+    "name": "OpenCode Go",
+    "notes": "",
+    "partnerPromotionKey": "opencode_go",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-18",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://opencode.ai/zen/go",
+      },
+    },
+    "websiteUrl": "https://opencode.ai/go",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-19 Zhipu GLM > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "glm-5.1",
+          "model": "glm-5.1",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "glm-5.1",
+          "model": "glm-5.1",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "glm-5.1",
+          "model": "glm-5.1",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "glm-5.1",
+          "model": "glm-5.1",
+        },
+      },
+    },
+    "name": "Zhipu GLM",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-19",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+      },
+    },
+    "websiteUrl": "https://open.bigmodel.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-20 Zhipu GLM en > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "glm-5.1",
+          "model": "glm-5.1",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "glm-5.1",
+          "model": "glm-5.1",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "glm-5.1",
+          "model": "glm-5.1",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "glm-5.1",
+          "model": "glm-5.1",
+        },
+      },
+    },
+    "name": "Zhipu GLM en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-20",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+      },
+    },
+    "websiteUrl": "https://z.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-21 Baidu Qianfan Coding Plan > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "baidu",
+    "iconColor": "#2932E1",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "qianfan-code-latest",
+          "model": "qianfan-code-latest",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "qianfan-code-latest",
+          "model": "qianfan-code-latest",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "qianfan-code-latest",
+          "model": "qianfan-code-latest",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "qianfan-code-latest",
+          "model": "qianfan-code-latest",
+        },
+      },
+    },
+    "name": "Baidu Qianfan Coding Plan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-21",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://qianfan.baidubce.com/anthropic/coding",
+      },
+    },
+    "websiteUrl": "https://cloud.baidu.com/product/qianfan_modelbuilder",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-22 Bailian > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "bailian",
+    "iconColor": "#624AFF",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "claude-haiku-4-5",
+          "model": "claude-haiku-4-5",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "claude-opus-4-8",
+          "model": "claude-opus-4-8",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+      },
+    },
+    "name": "Bailian",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-22",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
+      },
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-23 Bailian For Coding > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "bailian",
+    "iconColor": "#624AFF",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "claude-haiku-4-5",
+          "model": "claude-haiku-4-5",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "claude-opus-4-8",
+          "model": "claude-opus-4-8",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+      },
+    },
+    "name": "Bailian For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-23",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+      },
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-24 Kimi > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "kimi-k2.7-code",
+          "model": "kimi-k2.7-code",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "kimi-k2.7-code",
+          "model": "kimi-k2.7-code",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "kimi-k2.7-code",
+          "model": "kimi-k2.7-code",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "kimi-k2.7-code",
+          "model": "kimi-k2.7-code",
+        },
+      },
+    },
+    "name": "Kimi",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-24",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.moonshot.cn/anthropic",
+      },
+    },
+    "websiteUrl": "https://platform.kimi.com?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-25 Kimi For Coding > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "claude-haiku-4-5",
+          "model": "claude-haiku-4-5",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "claude-opus-4-8",
+          "model": "claude-opus-4-8",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "claude-sonnet-5",
+          "model": "claude-sonnet-5",
+        },
+      },
+    },
+    "name": "Kimi For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-25",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.kimi.com/coding",
+      },
+    },
+    "websiteUrl": "https://www.kimi.com/code/?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-26 StepFun > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "step-3.5-flash-2603",
+          "model": "step-3.5-flash-2603",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "step-3.5-flash-2603",
+          "model": "step-3.5-flash-2603",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "step-3.5-flash-2603",
+          "model": "step-3.5-flash-2603",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "step-3.5-flash-2603",
+          "model": "step-3.5-flash-2603",
+        },
+      },
+    },
+    "name": "StepFun",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-26",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.stepfun.com/step_plan",
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.com/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-27 StepFun en > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "step-3.5-flash-2603",
+          "model": "step-3.5-flash-2603",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "step-3.5-flash-2603",
+          "model": "step-3.5-flash-2603",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "step-3.5-flash-2603",
+          "model": "step-3.5-flash-2603",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "step-3.5-flash-2603",
+          "model": "step-3.5-flash-2603",
+        },
+      },
+    },
+    "name": "StepFun en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-27",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.stepfun.ai/step_plan",
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.ai/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-28 ModelScope > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "modelscope",
+    "iconColor": "#624AFF",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "ZhipuAI/GLM-5.1",
+          "model": "ZhipuAI/GLM-5.1",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "ZhipuAI/GLM-5.1",
+          "model": "ZhipuAI/GLM-5.1",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "ZhipuAI/GLM-5.1",
+          "model": "ZhipuAI/GLM-5.1",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "ZhipuAI/GLM-5.1",
+          "model": "ZhipuAI/GLM-5.1",
+        },
+      },
+    },
+    "name": "ModelScope",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-28",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api-inference.modelscope.cn",
+      },
+    },
+    "websiteUrl": "https://modelscope.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-29 Longcat > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "longcat",
+    "iconColor": "#29E154",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "LongCat-2.0",
+          "model": "LongCat-2.0",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "LongCat-2.0",
+          "model": "LongCat-2.0",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "LongCat-2.0",
+          "model": "LongCat-2.0",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "LongCat-2.0",
+          "model": "LongCat-2.0",
+        },
+      },
+    },
+    "name": "Longcat",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-29",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.longcat.chat/anthropic",
+      },
+    },
+    "websiteUrl": "https://longcat.chat/platform",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-30 MiniMax > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "MiniMax-M2.7",
+          "model": "MiniMax-M2.7",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "MiniMax-M2.7",
+          "model": "MiniMax-M2.7",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "MiniMax-M2.7",
+          "model": "MiniMax-M2.7",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "MiniMax-M2.7",
+          "model": "MiniMax-M2.7",
+        },
+      },
+    },
+    "name": "MiniMax",
+    "notes": "",
+    "partnerPromotionKey": "minimax_cn",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-30",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.minimaxi.com/anthropic",
+      },
+    },
+    "websiteUrl": "https://platform.minimaxi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-31 MiniMax en > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "MiniMax-M2.7",
+          "model": "MiniMax-M2.7",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "MiniMax-M2.7",
+          "model": "MiniMax-M2.7",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "MiniMax-M2.7",
+          "model": "MiniMax-M2.7",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "MiniMax-M2.7",
+          "model": "MiniMax-M2.7",
+        },
+      },
+    },
+    "name": "MiniMax en",
+    "notes": "",
+    "partnerPromotionKey": "minimax_en",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-31",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.minimax.io/anthropic",
+      },
+    },
+    "websiteUrl": "https://platform.minimax.io",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-32 BaiLing > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "Ling-2.5-1T",
+          "model": "Ling-2.5-1T",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "Ling-2.5-1T",
+          "model": "Ling-2.5-1T",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "Ling-2.5-1T",
+          "model": "Ling-2.5-1T",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "Ling-2.5-1T",
+          "model": "Ling-2.5-1T",
+        },
+      },
+    },
+    "name": "BaiLing",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-32",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.tbox.cn/api/anthropic",
+      },
+    },
+    "websiteUrl": "https://alipaytbox.yuque.com/sxs0ba/ling/get_started",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-33 AiHubMix > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aihubmix",
+    "iconColor": "#006FFB",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "AiHubMix",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-33",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://aihubmix.com",
+      },
+    },
+    "websiteUrl": "https://aihubmix.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-34 CherryIN > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cherryin",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "CherryIN",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-34",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://open.cherryin.net",
+      },
+    },
+    "websiteUrl": "https://open.cherryin.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-35 SiliconFlow > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#6E29F6",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "Pro/MiniMaxAI/MiniMax-M2.7",
+          "model": "Pro/MiniMaxAI/MiniMax-M2.7",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "Pro/MiniMaxAI/MiniMax-M2.7",
+          "model": "Pro/MiniMaxAI/MiniMax-M2.7",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "Pro/MiniMaxAI/MiniMax-M2.7",
+          "model": "Pro/MiniMaxAI/MiniMax-M2.7",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "Pro/MiniMaxAI/MiniMax-M2.7",
+          "model": "Pro/MiniMaxAI/MiniMax-M2.7",
+        },
+      },
+    },
+    "name": "SiliconFlow",
+    "notes": "",
+    "partnerPromotionKey": "siliconflow",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-35",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.siliconflow.cn",
+      },
+    },
+    "websiteUrl": "https://siliconflow.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-36 SiliconFlow en > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "MiniMaxAI/MiniMax-M2.7",
+          "model": "MiniMaxAI/MiniMax-M2.7",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "MiniMaxAI/MiniMax-M2.7",
+          "model": "MiniMaxAI/MiniMax-M2.7",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "MiniMaxAI/MiniMax-M2.7",
+          "model": "MiniMaxAI/MiniMax-M2.7",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "MiniMaxAI/MiniMax-M2.7",
+          "model": "MiniMaxAI/MiniMax-M2.7",
+        },
+      },
+    },
+    "name": "SiliconFlow en",
+    "notes": "",
+    "partnerPromotionKey": "siliconflow",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-36",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.siliconflow.com",
+      },
+    },
+    "websiteUrl": "https://siliconflow.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-37 DMXAPI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "DMXAPI",
+    "notes": "",
+    "partnerPromotionKey": "dmxapi",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-37",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.dmxapi.cn",
+      },
+    },
+    "websiteUrl": "https://www.dmxapi.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-38 PackyCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "packycode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "PackyCode",
+    "notes": "",
+    "partnerPromotionKey": "packycode",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-38",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.packyapi.com",
+      },
+    },
+    "websiteUrl": "https://www.packyapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-39 APIKEY.FUN > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apikeyfun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "APIKEY.FUN",
+    "notes": "",
+    "partnerPromotionKey": "apikeyfun",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-39",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.apikey.fun",
+      },
+    },
+    "websiteUrl": "https://apikey.fun",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-40 APINebula > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apinebula",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "APINebula",
+    "notes": "",
+    "partnerPromotionKey": "apinebula",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-40",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://apinebula.com",
+      },
+    },
+    "websiteUrl": "https://apinebula.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-41 AtlasCloud > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "atlascloud",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "AtlasCloud",
+    "notes": "",
+    "partnerPromotionKey": "atlascloud",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-41",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.atlascloud.ai",
+      },
+    },
+    "websiteUrl": "https://www.atlascloud.ai/console/coding-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-42 SudoCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sudocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "SudoCode",
+    "notes": "",
+    "partnerPromotionKey": "sudocode",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-42",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.sudocode.chat",
+      },
+    },
+    "websiteUrl": "https://sudocode.chat",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-43 ClaudeAPI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "claudeapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "ClaudeAPI",
+    "notes": "",
+    "partnerPromotionKey": "claudeapi",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-43",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://gw.claudeapi.com",
+      },
+    },
+    "websiteUrl": "https://claudeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-44 Code0 > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "code0",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "Code0",
+    "notes": "",
+    "partnerPromotionKey": "code0",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-44",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://code0.ai",
+      },
+    },
+    "websiteUrl": "https://code0.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-45 NekoCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nekocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "NekoCode",
+    "notes": "",
+    "partnerPromotionKey": "nekocode",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-45",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://nekocode.ai",
+      },
+    },
+    "websiteUrl": "https://nekocode.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-46 ClaudeCN > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "claudecn",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "ClaudeCN",
+    "notes": "",
+    "partnerPromotionKey": "claudecn",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-46",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://claudecn.top",
+      },
+    },
+    "websiteUrl": "https://claudecn.top",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-47 RunAPI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "runapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "RunAPI",
+    "notes": "",
+    "partnerPromotionKey": "runapi",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-47",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://runapi.co",
+      },
+    },
+    "websiteUrl": "https://runapi.co",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-48 RelaxyCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "relaxcode",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "RelaxyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-48",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.relaxycode.com",
+      },
+    },
+    "websiteUrl": "https://www.relaxycode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-49 Cubence > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cubence",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "Cubence",
+    "notes": "",
+    "partnerPromotionKey": "cubence",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-49",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.cubence.com",
+      },
+    },
+    "websiteUrl": "https://cubence.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-50 AIGoCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aigocode",
+    "iconColor": "#5B7FFF",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "AIGoCode",
+    "notes": "",
+    "partnerPromotionKey": "aigocode",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-50",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.aigocode.com",
+      },
+    },
+    "websiteUrl": "https://aigocode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-51 RightCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "rc",
+    "iconColor": "#E96B2C",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "RightCode",
+    "notes": "",
+    "partnerPromotionKey": "rightcode",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-51",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.right.codes/claude",
+      },
+    },
+    "websiteUrl": "https://www.right.codes",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-52 AICodeMirror > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aicodemirror",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "AICodeMirror",
+    "notes": "",
+    "partnerPromotionKey": "aicodemirror",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-52",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.aicodemirror.com/api/claudecode",
+      },
+    },
+    "websiteUrl": "https://www.aicodemirror.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-53 CrazyRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "crazyrouter",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "CrazyRouter",
+    "notes": "",
+    "partnerPromotionKey": "crazyrouter",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-53",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://cn.crazyrouter.com",
+      },
+    },
+    "websiteUrl": "https://www.crazyrouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-54 SSSAiCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sssaicode",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "SSSAiCode",
+    "notes": "",
+    "partnerPromotionKey": "sssaicode",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-54",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://node-hk.sssaicodeapi.com/api",
+      },
+    },
+    "websiteUrl": "https://sssaicodeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-55 Compshare > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "providerForm.presets.ucloud",
+    "notes": "",
+    "partnerPromotionKey": "ucloud",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-55",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.modelverse.cn",
+      },
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-56 Compshare Coding Plan > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "providerForm.presets.ucloudCoding",
+    "notes": "",
+    "partnerPromotionKey": "ucloud",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-56",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://cp.compshare.cn",
+      },
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-57 Micu > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "micu",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "Micu",
+    "notes": "",
+    "partnerPromotionKey": "micu",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-57",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://www.micuapi.ai",
+      },
+    },
+    "websiteUrl": "https://www.micuapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-58 ETok.ai > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "etok",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "ETok.ai",
+    "notes": "",
+    "partnerPromotionKey": "etok",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-58",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.etok.ai",
+      },
+    },
+    "websiteUrl": "https://etok.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-59 E-FlowCode > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "eflowcode",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "E-FlowCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "claude-desktop-59",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://e-flowcode.cc",
+      },
+    },
+    "websiteUrl": "https://e-flowcode.cc",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-60 OpenRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "openrouter",
+    "iconColor": "#6566F1",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "anthropic/claude-sonnet-5",
+          "model": "anthropic/claude-sonnet-5",
+          "supports1m": true,
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "anthropic/claude-haiku-4.5",
+          "model": "anthropic/claude-haiku-4.5",
+          "supports1m": true,
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "anthropic/claude-opus-4.8",
+          "model": "anthropic/claude-opus-4.8",
+          "supports1m": true,
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "anthropic/claude-sonnet-5",
+          "model": "anthropic/claude-sonnet-5",
+          "supports1m": true,
+        },
+      },
+    },
+    "name": "OpenRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-60",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+      },
+    },
+    "websiteUrl": "https://openrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-61 TheRouter > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "anthropic/claude-sonnet-5",
+          "model": "anthropic/claude-sonnet-5",
+          "supports1m": true,
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "anthropic/claude-haiku-4.5",
+          "model": "anthropic/claude-haiku-4.5",
+          "supports1m": true,
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "anthropic/claude-opus-4.8",
+          "model": "anthropic/claude-opus-4.8",
+          "supports1m": true,
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "anthropic/claude-sonnet-5",
+          "model": "anthropic/claude-sonnet-5",
+          "supports1m": true,
+        },
+      },
+    },
+    "name": "TheRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-61",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.therouter.ai",
+      },
+    },
+    "websiteUrl": "https://therouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-62 Novita AI > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "novita",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "zai-org/glm-5.1",
+          "model": "zai-org/glm-5.1",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "zai-org/glm-5.1",
+          "model": "zai-org/glm-5.1",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "zai-org/glm-5.1",
+          "model": "zai-org/glm-5.1",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "zai-org/glm-5.1",
+          "model": "zai-org/glm-5.1",
+        },
+      },
+    },
+    "name": "Novita AI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-62",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.novita.ai/anthropic",
+      },
+    },
+    "websiteUrl": "https://novita.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-63 Nvidia > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nvidia",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "openai_chat",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "moonshotai/kimi-k2.5",
+          "model": "moonshotai/kimi-k2.5",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "moonshotai/kimi-k2.5",
+          "model": "moonshotai/kimi-k2.5",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "moonshotai/kimi-k2.5",
+          "model": "moonshotai/kimi-k2.5",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "moonshotai/kimi-k2.5",
+          "model": "moonshotai/kimi-k2.5",
+        },
+      },
+    },
+    "name": "Nvidia",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-63",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://integrate.api.nvidia.com",
+      },
+    },
+    "websiteUrl": "https://build.nvidia.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-64 PIPELLM > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pipellm",
+    "iconColor": "",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "direct",
+      "claudeDesktopModelRoutes": {},
+    },
+    "name": "PIPELLM",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "claude-desktop-64",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://cc-api.pipellm.ai",
+      },
+    },
+    "websiteUrl": "https://code.pipellm.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-65 Xiaomi MiMo > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "mimo-v2.5-pro",
+          "model": "mimo-v2.5-pro",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "mimo-v2.5-pro",
+          "model": "mimo-v2.5-pro",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "mimo-v2.5-pro",
+          "model": "mimo-v2.5-pro",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "mimo-v2.5-pro",
+          "model": "mimo-v2.5-pro",
+        },
+      },
+    },
+    "name": "Xiaomi MiMo",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-65",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://api.xiaomimimo.com/anthropic",
+      },
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-66 Xiaomi MiMo Token Plan (China) > create 1`] = `
+{
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "apiFormat": "anthropic",
+      "claudeDesktopMode": "proxy",
+      "claudeDesktopModelRoutes": {
+        "claude-fable-5": {
+          "labelOverride": "mimo-v2.5-pro",
+          "model": "mimo-v2.5-pro",
+        },
+        "claude-haiku-4-5": {
+          "labelOverride": "mimo-v2.5-pro",
+          "model": "mimo-v2.5-pro",
+        },
+        "claude-opus-4-8": {
+          "labelOverride": "mimo-v2.5-pro",
+          "model": "mimo-v2.5-pro",
+        },
+        "claude-sonnet-5": {
+          "labelOverride": "mimo-v2.5-pro",
+          "model": "mimo-v2.5-pro",
+        },
+      },
+    },
+    "name": "Xiaomi MiMo Token Plan (China)",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "claude-desktop-66",
+    "settingsConfig": {
+      "env": {
+        "ANTHROPIC_AUTH_TOKEN": "sk-golden-test-key",
+        "ANTHROPIC_BASE_URL": "https://token-plan-cn.xiaomimimo.com/anthropic",
+      },
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com/#/token-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: claude-desktop > custom custom > create 1`] = `
+{
+  "errors": [
+    "请填写供应商名称",
+  ],
+  "filled": [
+    "apiKey (api key)",
+  ],
+  "submitted": false,
+}
+`;

@@ -1,0 +1,2350 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProviderForm settingsConfig goldens: hermes > custom custom > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "",
+    "notes": "",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "base_url": "",
+      "name": "",
+    },
+    "websiteUrl": "",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-0 Shengsuanyun > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "shengsuanyun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.shengsuanyun",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-0",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://router.shengsuanyun.com/api/v1",
+      "models": [
+        {
+          "id": "openai/gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "shengsuanyun",
+    },
+    "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-1 Qiniu > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "qiniu",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.qiniu",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-1",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.qnaigc.com/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "qiniu",
+    },
+    "websiteUrl": "https://s.qiniu.com/nMvAvy",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-2 FennoAI > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "fenno",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "FennoAI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-2",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.fenno.ai/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "fenno",
+    },
+    "websiteUrl": "https://api.fenno.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-3 ZetaAPI > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zetaapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ZetaAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-3",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.zetaapi.ai/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "zetaapi",
+    },
+    "websiteUrl": "https://zetaapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-4 TeamoRouter > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "teamorouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "TeamoRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-4",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.teamorouter.com/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "teamorouter",
+    },
+    "websiteUrl": "https://teamorouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-5 Amux > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "amux",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Amux",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-5",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.amux.ai/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "amux",
+    },
+    "websiteUrl": "https://amux.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-6 Code0 > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "code0",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Code0",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-6",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://code0.ai/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "code0",
+    },
+    "websiteUrl": "https://code0.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-7 NekoCode > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nekocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "NekoCode",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-7",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://nekocode.ai/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "nekocode",
+    },
+    "websiteUrl": "https://nekocode.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-8 火山Agentplan > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "huoshan",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "火山Agentplan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-8",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://ark.cn-beijing.volces.com/api/coding",
+      "models": [
+        {
+          "id": "ark-code-latest",
+          "name": "Ark Code Latest",
+        },
+      ],
+      "name": "ark_agentplan",
+    },
+    "websiteUrl": "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-9 BytePlus > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "byteplus",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "BytePlus",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-9",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://ark.ap-southeast.bytepluses.com/api/coding",
+      "models": [
+        {
+          "id": "ark-code-latest",
+          "name": "Ark Code Latest",
+        },
+      ],
+      "name": "byteplus",
+    },
+    "websiteUrl": "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-10 DouBaoSeed > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "doubao",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "DouBaoSeed",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-10",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://ark.cn-beijing.volces.com/api/compatible",
+      "models": [
+        {
+          "id": "doubao-seed-2-1-pro-260628",
+          "name": "Doubao Seed 2.1 Pro",
+        },
+      ],
+      "name": "doubao_seed",
+    },
+    "websiteUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-11 CCSub > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ccsub",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CCSub",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-11",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://www.ccsub.net/v1",
+      "models": [
+        {
+          "context_length": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "ccsub",
+    },
+    "websiteUrl": "https://www.ccsub.net",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-12 SubRouter > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "subrouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SubRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-12",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://subrouter.ai/v1",
+      "models": [
+        {
+          "context_length": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "subrouter",
+    },
+    "websiteUrl": "https://subrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-13 Unity2.ai > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "unity2",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Unity2.ai",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-13",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.unity2.ai/v1",
+      "models": [
+        {
+          "context_length": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "unity2",
+    },
+    "websiteUrl": "https://unity2.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-14 OpenRouter > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "openrouter",
+    "iconColor": "#6366F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.openrouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-14",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://openrouter.ai/api/v1",
+      "models": [
+        {
+          "context_length": 1000000,
+          "id": "anthropic/claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "context_length": 1000000,
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "context_length": 200000,
+          "id": "anthropic/claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+        },
+        {
+          "context_length": 400000,
+          "id": "openai/gpt-5.5",
+          "name": "GPT-5.5",
+        },
+        {
+          "context_length": 1000000,
+          "id": "google/gemini-3.5-flash",
+          "name": "Gemini 3.5 Flash",
+        },
+      ],
+      "name": "openrouter",
+    },
+    "websiteUrl": "https://openrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-15 DeepSeek > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "deepseek",
+    "iconColor": "#4D6BFE",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.deepseek",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-15",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.deepseek.com",
+      "models": [
+        {
+          "context_length": 1000000,
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek V4 Pro",
+        },
+        {
+          "context_length": 1000000,
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash",
+        },
+      ],
+      "name": "deepseek",
+    },
+    "websiteUrl": "https://platform.deepseek.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-16 Together AI > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "together",
+    "iconColor": "#0F6FFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.together",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-16",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.together.xyz/v1",
+      "models": [
+        {
+          "context_length": 262144,
+          "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+          "name": "Qwen3 Coder 480B",
+        },
+        {
+          "context_length": 64000,
+          "id": "deepseek-ai/DeepSeek-V3.2",
+          "name": "DeepSeek V3.2",
+        },
+        {
+          "context_length": 131072,
+          "id": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+          "name": "Llama 4 Maverick",
+        },
+      ],
+      "name": "together",
+    },
+    "websiteUrl": "https://together.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-17 Nous Research > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "hermes",
+    "iconColor": "#7C3AED",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Nous Research",
+    "notes": "",
+    "presetCategory": "official",
+    "presetId": "hermes-17",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://inference-api.nousresearch.com/v1",
+      "models": [
+        {
+          "context_length": 131072,
+          "id": "Hermes-4-405B",
+          "name": "Hermes 4 405B",
+        },
+        {
+          "context_length": 131072,
+          "id": "Hermes-4-70B",
+          "name": "Hermes 4 70B",
+        },
+      ],
+      "name": "nous",
+    },
+    "websiteUrl": "https://nousresearch.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-18 Zhipu GLM > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-18",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "models": [
+        {
+          "id": "glm-5.1",
+          "name": "GLM-5.1",
+        },
+      ],
+      "name": "zhipu_glm",
+    },
+    "websiteUrl": "https://open.bigmodel.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-19 Zhipu GLM en > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-19",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.z.ai/api/coding/paas/v4",
+      "models": [
+        {
+          "id": "glm-5.1",
+          "name": "GLM-5.1",
+        },
+      ],
+      "name": "zhipu_glm_en",
+    },
+    "websiteUrl": "https://z.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-20 Bailian > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "bailian",
+    "iconColor": "#624AFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Bailian",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-20",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "models": [
+        {
+          "id": "qwen3-coder-plus",
+          "name": "Qwen3 Coder Plus",
+        },
+        {
+          "id": "qwen3-max",
+          "name": "Qwen3 Max",
+        },
+      ],
+      "name": "bailian",
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-21 Bailian For Coding > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "bailian",
+    "iconColor": "#624AFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Bailian For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-21",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+      "models": [
+        {
+          "id": "qwen3-coder-plus",
+          "name": "Qwen3 Coder Plus",
+        },
+        {
+          "id": "qwen3-max",
+          "name": "Qwen3 Max",
+        },
+      ],
+      "name": "bailian_coding",
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-22 Kimi > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-22",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.moonshot.cn/v1",
+      "models": [
+        {
+          "id": "kimi-k2.7-code",
+          "name": "Kimi K2.7 Code",
+        },
+      ],
+      "name": "kimi",
+    },
+    "websiteUrl": "https://platform.kimi.com?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-23 Kimi For Coding > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-23",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://api.kimi.com/coding/",
+      "models": [
+        {
+          "id": "kimi-for-coding",
+          "name": "Kimi For Coding",
+        },
+      ],
+      "name": "kimi_coding",
+    },
+    "websiteUrl": "https://www.kimi.com/code/?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-24 StepFun > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#005AFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-24",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.stepfun.ai/v1",
+      "models": [
+        {
+          "id": "step-3.5-flash",
+          "name": "Step 3.5 Flash",
+        },
+      ],
+      "name": "stepfun",
+    },
+    "websiteUrl": "https://platform.stepfun.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-25 ModelScope > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "modelscope",
+    "iconColor": "#624AFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ModelScope",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-25",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api-inference.modelscope.cn/v1",
+      "models": [
+        {
+          "id": "ZhipuAI/GLM-5.1",
+          "name": "ZhipuAI / GLM-5.1",
+        },
+      ],
+      "name": "modelscope",
+    },
+    "websiteUrl": "https://modelscope.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-26 KAT-Coder > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "catcoder",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "KAT-Coder",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-26",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://vanchin.streamlake.ai/api/gateway/v1/endpoints/\${ENDPOINT_ID}/claude-code-proxy",
+      "models": [
+        {
+          "id": "KAT-Coder-Pro V1",
+          "name": "KAT-Coder Pro V1",
+        },
+        {
+          "id": "KAT-Coder-Air V1",
+          "name": "KAT-Coder Air V1",
+        },
+      ],
+      "name": "kat_coder",
+    },
+    "websiteUrl": "https://console.streamlake.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-27 Longcat > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "longcat",
+    "iconColor": "#29E154",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Longcat",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-27",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.longcat.chat/openai/v1",
+      "models": [
+        {
+          "id": "LongCat-2.0",
+          "name": "LongCat 2.0",
+        },
+      ],
+      "name": "longcat",
+    },
+    "websiteUrl": "https://longcat.chat/platform",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-28 MiniMax > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-28",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.minimaxi.com/v1",
+      "models": [
+        {
+          "id": "MiniMax-M2.7",
+          "name": "MiniMax M2.7",
+        },
+      ],
+      "name": "minimax",
+    },
+    "websiteUrl": "https://platform.minimaxi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-29 MiniMax en > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-29",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.minimax.io/v1",
+      "models": [
+        {
+          "id": "MiniMax-M2.7",
+          "name": "MiniMax M2.7",
+        },
+      ],
+      "name": "minimax_en",
+    },
+    "websiteUrl": "https://platform.minimax.io",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-30 BaiLing > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "BaiLing",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-30",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://api.tbox.cn/api/anthropic",
+      "models": [
+        {
+          "id": "Ling-2.5-1T",
+          "name": "Ling 2.5 1T",
+        },
+      ],
+      "name": "bailing",
+    },
+    "websiteUrl": "https://alipaytbox.yuque.com/sxs0ba/ling/get_started",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-31 AiHubMix > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aihubmix",
+    "iconColor": "#006FFB",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AiHubMix",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-31",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://aihubmix.com/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "aihubmix",
+    },
+    "websiteUrl": "https://aihubmix.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-32 CherryIN > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cherryin",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CherryIN",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-32",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://open.cherryin.net",
+      "models": [
+        {
+          "id": "anthropic/claude-opus-4.8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+      "name": "cherryin",
+    },
+    "websiteUrl": "https://open.cherryin.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-33 SiliconFlow > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#6E29F6",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SiliconFlow",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-33",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "models": [
+        {
+          "id": "Pro/MiniMaxAI/MiniMax-M2.7",
+          "name": "Pro / MiniMax M2.7",
+        },
+      ],
+      "name": "siliconflow",
+    },
+    "websiteUrl": "https://siliconflow.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-34 SiliconFlow en > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SiliconFlow en",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-34",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.siliconflow.com/v1",
+      "models": [
+        {
+          "id": "MiniMaxAI/MiniMax-M2.7",
+          "name": "MiniMax M2.7",
+        },
+      ],
+      "name": "siliconflow_en",
+    },
+    "websiteUrl": "https://siliconflow.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-35 DMXAPI > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "DMXAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-35",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://www.dmxapi.cn/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "dmxapi",
+    },
+    "websiteUrl": "https://www.dmxapi.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-36 PackyCode > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "packycode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "PackyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-36",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://www.packyapi.com",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "packycode",
+    },
+    "websiteUrl": "https://www.packyapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-37 APIKEY.FUN > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apikeyfun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "APIKEY.FUN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-37",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://api.apikey.fun",
+      "models": [
+        {
+          "context_length": 1000000,
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "context_length": 1000000,
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "context_length": 200000,
+          "id": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "apikeyfun",
+    },
+    "websiteUrl": "https://apikey.fun",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-38 APINebula > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apinebula",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "APINebula",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-38",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://apinebula.com/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "apinebula",
+    },
+    "websiteUrl": "https://apinebula.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-39 AtlasCloud > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "atlascloud",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AtlasCloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-39",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.atlascloud.ai/v1",
+      "models": [
+        {
+          "id": "zai-org/glm-5.1",
+          "name": "GLM 5.1",
+        },
+      ],
+      "name": "atlascloud",
+    },
+    "websiteUrl": "https://www.atlascloud.ai/console/coding-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-40 SudoCode > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sudocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SudoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-40",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "codex_responses",
+      "base_url": "https://api.sudocode.chat/v1",
+      "models": [
+        {
+          "id": "gpt-5.6-sol",
+          "name": "GPT-5.6 Sol",
+        },
+      ],
+      "name": "sudocode",
+    },
+    "websiteUrl": "https://sudocode.chat",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-41 Cubence > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cubence",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Cubence",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-41",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://api.cubence.com",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "cubence",
+    },
+    "websiteUrl": "https://cubence.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-42 ClaudeCN > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "claudecn",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ClaudeCN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-42",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://claudecn.top",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "claudecn",
+    },
+    "websiteUrl": "https://claudecn.top",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-43 RunAPI > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "runapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "RunAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-43",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://runapi.co",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "runapi",
+    },
+    "websiteUrl": "https://runapi.co",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-44 AIGoCode > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aigocode",
+    "iconColor": "#5B7FFF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AIGoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-44",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://api.aigocode.com",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "aigocode",
+    },
+    "websiteUrl": "https://aigocode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-45 RightCode > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "rc",
+    "iconColor": "#E96B2C",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "RightCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-45",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://www.right.codes/claude",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "rightcode",
+    },
+    "websiteUrl": "https://www.right.codes",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-46 AICodeMirror > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aicodemirror",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AICodeMirror",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-46",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://api.aicodemirror.com/api/claudecode",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "aicodemirror",
+    },
+    "websiteUrl": "https://www.aicodemirror.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-47 CrazyRouter > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "crazyrouter",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CrazyRouter",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-47",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://cn.crazyrouter.com",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "crazyrouter",
+    },
+    "websiteUrl": "https://www.crazyrouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-48 SSSAiCode > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sssaicode",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SSSAiCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-48",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://node-hk.sssaicodeapi.com/api",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "sssaicode",
+    },
+    "websiteUrl": "https://sssaicodeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-49 Compshare > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.ucloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-49",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.modelverse.cn/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "compshare",
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-50 Compshare Coding Plan > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.ucloudCoding",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-50",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://cp.compshare.cn/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+      "name": "compshare_coding",
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-51 Micu > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "micu",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Micu",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-51",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://www.micuapi.ai",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "micu",
+    },
+    "websiteUrl": "https://www.micuapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-52 ETok.ai > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "etok",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ETok.ai",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-52",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://api.etok.ai",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "etok",
+    },
+    "websiteUrl": "https://etok.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-53 E-FlowCode > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "eflowcode",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "E-FlowCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "hermes-53",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://e-flowcode.cc",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "eflowcode",
+    },
+    "websiteUrl": "https://e-flowcode.cc",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-54 TheRouter > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "TheRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-54",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.therouter.ai/v1",
+      "models": [
+        {
+          "id": "openai/gpt-5.5",
+          "name": "GPT-5.5",
+        },
+        {
+          "id": "openai/gpt-5.4-mini",
+          "name": "GPT-5.4 mini",
+        },
+        {
+          "id": "openai/gpt-5.4-nano",
+          "name": "GPT-5.4 nano",
+        },
+      ],
+      "name": "therouter",
+    },
+    "websiteUrl": "https://therouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-55 Novita AI > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "novita",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Novita AI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-55",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.novita.ai/v3/openai",
+      "models": [
+        {
+          "id": "zai-org/glm-5.1",
+          "name": "Zai-Org / GLM-5.1",
+        },
+      ],
+      "name": "novita",
+    },
+    "websiteUrl": "https://novita.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-56 Nvidia > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nvidia",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Nvidia",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-56",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://integrate.api.nvidia.com",
+      "models": [
+        {
+          "id": "moonshotai/kimi-k2.5",
+          "name": "Moonshot Kimi K2.5",
+        },
+      ],
+      "name": "nvidia",
+    },
+    "websiteUrl": "https://build.nvidia.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-57 PIPELLM > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pipellm",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "PIPELLM",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "hermes-57",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "anthropic_messages",
+      "base_url": "https://cc-api.pipellm.ai",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+      "name": "pipellm",
+    },
+    "websiteUrl": "https://code.pipellm.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-58 Xiaomi MiMo > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-58",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://api.xiaomimimo.com/v1",
+      "models": [
+        {
+          "id": "mimo-v2.5-pro",
+          "name": "MiMo v2.5 Pro",
+        },
+      ],
+      "name": "xiaomi_mimo",
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: hermes > hermes-59 Xiaomi MiMo Token Plan (China) > create 1`] = `
+{
+  "filled": [
+    "hermes-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo Token Plan (China)",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "hermes-59",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api_key": "sk-golden-test-key",
+      "api_mode": "chat_completions",
+      "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+      "models": [
+        {
+          "id": "mimo-v2.5-pro",
+          "name": "MiMo v2.5 Pro",
+        },
+        {
+          "id": "mimo-v2.5",
+          "name": "MiMo v2.5",
+        },
+      ],
+      "name": "xiaomi_mimo_token_plan",
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com/#/token-plan",
+  },
+  "submitted": true,
+}
+`;

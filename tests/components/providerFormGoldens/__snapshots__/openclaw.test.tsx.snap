@@ -1,0 +1,3277 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProviderForm settingsConfig goldens: openclaw > custom custom > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "",
+    "notes": "",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "",
+      "models": [],
+    },
+    "websiteUrl": "",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-0 Shengsuanyun > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "shengsuanyun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.shengsuanyun",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-0",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://router.shengsuanyun.com/api",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "anthropic/claude-opus-4.8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/anthropic/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/anthropic/claude-opus-4.8",
+      },
+      "modelCatalog": {
+        "golden-provider/anthropic/claude-opus-4.8": {
+          "alias": "Opus",
+        },
+        "golden-provider/anthropic/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-1 火山Agentplan > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "huoshan",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "火山Agentplan",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-1",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "models": [
+        {
+          "contextWindow": 256000,
+          "id": "ark-code-latest",
+          "name": "Ark Code Latest",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/ark-code-latest",
+      },
+      "modelCatalog": {
+        "golden-provider/ark-code-latest": {
+          "alias": "Ark Code",
+        },
+      },
+    },
+    "websiteUrl": "https://www.volcengine.com/activity/codingplan?ac=MMAP8JTTCAQ2&rc=6J6FV5N2&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-2 BytePlus > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "byteplus",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "BytePlus",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-2",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+      "models": [
+        {
+          "contextWindow": 256000,
+          "id": "ark-code-latest",
+          "name": "Ark Code Latest",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/ark-code-latest",
+      },
+      "modelCatalog": {
+        "golden-provider/ark-code-latest": {
+          "alias": "Ark Code",
+        },
+      },
+    },
+    "websiteUrl": "https://www.byteplus.com/en/product/modelark?utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-3 DouBaoSeed > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "doubao",
+    "iconColor": "#3370FF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "DouBaoSeed",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-3",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "models": [
+        {
+          "contextWindow": 262144,
+          "cost": {
+            "input": 0.84,
+            "output": 4.2,
+          },
+          "id": "doubao-seed-2-1-pro-260628",
+          "name": "DouBao Seed 2.1 Pro",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/doubao-seed-2-1-pro-260628",
+      },
+      "modelCatalog": {
+        "golden-provider/doubao-seed-2-1-pro-260628": {
+          "alias": "DouBao",
+        },
+      },
+    },
+    "websiteUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D&utm_campaign=hw&utm_content=ccswitch&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=ccswitch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-4 CCSub > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ccsub",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CCSub",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-4",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://www.ccsub.net/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "cost": {
+            "input": 5,
+            "output": 15,
+          },
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://www.ccsub.net",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-5 SubRouter > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "subrouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SubRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-5",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://subrouter.ai/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://subrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-6 Qiniu > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "qiniu",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.qiniu",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-6",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.qnaigc.com/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://s.qiniu.com/nMvAvy",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-7 FennoAI > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "fenno",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "FennoAI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-7",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.fenno.ai/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://api.fenno.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-8 ZetaAPI > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zetaapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ZetaAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-8",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.zetaapi.ai/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://zetaapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-9 TeamoRouter > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "teamorouter",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "TeamoRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-9",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.teamorouter.com/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://teamorouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-10 Amux > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "amux",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Amux",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-10",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.amux.ai/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://amux.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-11 Code0 > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "code0",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Code0",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-11",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://code0.ai/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://code0.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-12 NekoCode > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nekocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "NekoCode",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-12",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://nekocode.ai/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://nekocode.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-13 Unity2.ai > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "unity2",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Unity2.ai",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-13",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.unity2.ai/v1",
+      "models": [
+        {
+          "contextWindow": 400000,
+          "cost": {
+            "input": 5,
+            "output": 15,
+          },
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.5": {
+          "alias": "GPT-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://unity2.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-14 DeepSeek > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "deepseek",
+    "iconColor": "#1E88E5",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "DeepSeek",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-14",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 1.68,
+            "output": 3.36,
+          },
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek V4 Pro",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 0.14,
+            "output": 0.28,
+          },
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/deepseek-v4-pro",
+        ],
+        "primary": "golden-provider/deepseek-v4-flash",
+      },
+      "modelCatalog": {
+        "golden-provider/deepseek-v4-flash": {
+          "alias": "Flash",
+        },
+        "golden-provider/deepseek-v4-pro": {
+          "alias": "Pro",
+        },
+      },
+    },
+    "websiteUrl": "https://platform.deepseek.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-15 Zhipu GLM > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-15",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "models": [
+        {
+          "contextWindow": 128000,
+          "cost": {
+            "input": 0.001,
+            "output": 0.001,
+          },
+          "id": "glm-5.1",
+          "name": "GLM-5.1",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/glm-5.1",
+      },
+      "modelCatalog": {
+        "golden-provider/glm-5.1": {
+          "alias": "GLM",
+        },
+      },
+    },
+    "websiteUrl": "https://open.bigmodel.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-16 Zhipu GLM en > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "zhipu",
+    "iconColor": "#0F62FE",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Zhipu GLM en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-16",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "models": [
+        {
+          "contextWindow": 128000,
+          "cost": {
+            "input": 0.001,
+            "output": 0.001,
+          },
+          "id": "glm-5.1",
+          "name": "GLM-5.1",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/glm-5.1",
+      },
+      "modelCatalog": {
+        "golden-provider/glm-5.1": {
+          "alias": "GLM",
+        },
+      },
+    },
+    "websiteUrl": "https://z.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-17 Qwen Coder > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "qwen",
+    "iconColor": "#FF6A00",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Qwen Coder",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-17",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "models": [
+        {
+          "contextWindow": 32000,
+          "cost": {
+            "input": 0.002,
+            "output": 0.006,
+          },
+          "id": "qwen3.5-plus",
+          "name": "Qwen3.5 Plus",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/qwen3.5-plus",
+      },
+      "modelCatalog": {
+        "golden-provider/qwen3.5-plus": {
+          "alias": "Qwen",
+        },
+      },
+    },
+    "websiteUrl": "https://bailian.console.aliyun.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-18 Kimi > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-18",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "models": [
+        {
+          "contextWindow": 262144,
+          "cost": {
+            "input": 0.002,
+            "output": 0.006,
+          },
+          "id": "kimi-k2.7-code",
+          "name": "Kimi K2.7 Code",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/kimi-k2.7-code",
+      },
+      "modelCatalog": {
+        "golden-provider/kimi-k2.7-code": {
+          "alias": "Kimi",
+        },
+      },
+    },
+    "websiteUrl": "https://platform.kimi.com?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-19 Kimi For Coding > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "kimi",
+    "iconColor": "#6366F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Kimi For Coding",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-19",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.kimi.com/v1",
+      "models": [
+        {
+          "contextWindow": 131072,
+          "cost": {
+            "input": 0.002,
+            "output": 0.006,
+          },
+          "id": "kimi-for-coding",
+          "name": "Kimi For Coding",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/kimi-for-coding",
+      },
+      "modelCatalog": {
+        "golden-provider/kimi-for-coding": {
+          "alias": "Kimi",
+        },
+      },
+    },
+    "websiteUrl": "https://www.kimi.com/code/?aff=cc-switch",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-20 StepFun > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-20",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.stepfun.com/step_plan/v1",
+      "models": [
+        {
+          "contextWindow": 262144,
+          "id": "step-3.5-flash-2603",
+          "name": "Step 3.5 Flash 2603",
+        },
+        {
+          "contextWindow": 262144,
+          "id": "step-3.5-flash",
+          "name": "Step 3.5 Flash",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/step-3.5-flash-2603",
+      },
+      "modelCatalog": {
+        "golden-provider/step-3.5-flash": {
+          "alias": "StepFun Flash",
+        },
+        "golden-provider/step-3.5-flash-2603": {
+          "alias": "StepFun",
+        },
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.com/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-21 StepFun en > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "stepfun",
+    "iconColor": "#16D6D2",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "StepFun en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-21",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.stepfun.ai/step_plan/v1",
+      "models": [
+        {
+          "contextWindow": 262144,
+          "id": "step-3.5-flash-2603",
+          "name": "Step 3.5 Flash 2603",
+        },
+        {
+          "contextWindow": 262144,
+          "id": "step-3.5-flash",
+          "name": "Step 3.5 Flash",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/step-3.5-flash-2603",
+      },
+      "modelCatalog": {
+        "golden-provider/step-3.5-flash": {
+          "alias": "StepFun Flash",
+        },
+        "golden-provider/step-3.5-flash-2603": {
+          "alias": "StepFun",
+        },
+      },
+    },
+    "websiteUrl": "https://platform.stepfun.ai/step-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-22 MiniMax > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-22",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.minimaxi.com/v1",
+      "models": [
+        {
+          "contextWindow": 200000,
+          "cost": {
+            "input": 0.001,
+            "output": 0.004,
+          },
+          "id": "MiniMax-M2.7",
+          "name": "MiniMax M2.7",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/MiniMax-M2.7",
+      },
+      "modelCatalog": {
+        "golden-provider/MiniMax-M2.7": {
+          "alias": "MiniMax",
+        },
+      },
+    },
+    "websiteUrl": "https://platform.minimaxi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-23 MiniMax en > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "minimax",
+    "iconColor": "#FF6B6B",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "MiniMax en",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-23",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.minimax.io/v1",
+      "models": [
+        {
+          "contextWindow": 200000,
+          "cost": {
+            "input": 0.001,
+            "output": 0.004,
+          },
+          "id": "MiniMax-M2.7",
+          "name": "MiniMax M2.7",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/MiniMax-M2.7",
+      },
+      "modelCatalog": {
+        "golden-provider/MiniMax-M2.7": {
+          "alias": "MiniMax",
+        },
+      },
+    },
+    "websiteUrl": "https://platform.minimax.io",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-24 KAT-Coder > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "catcoder",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "KAT-Coder",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-24",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://vanchin.streamlake.ai/api/gateway/v1/endpoints/\${ENDPOINT_ID}/openai",
+      "models": [
+        {
+          "contextWindow": 128000,
+          "cost": {
+            "input": 0.002,
+            "output": 0.006,
+          },
+          "id": "KAT-Coder-Pro",
+          "name": "KAT-Coder Pro",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/KAT-Coder-Pro",
+      },
+      "modelCatalog": {
+        "golden-provider/KAT-Coder-Pro": {
+          "alias": "KAT-Coder",
+        },
+      },
+    },
+    "websiteUrl": "https://console.streamlake.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-25 Longcat > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "longcat",
+    "iconColor": "#29E154",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Longcat",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-25",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "authHeader": true,
+      "baseUrl": "https://api.longcat.chat/openai/v1",
+      "models": [
+        {
+          "compat": {
+            "maxTokensField": "max_tokens",
+          },
+          "contextWindow": 1048576,
+          "cost": {
+            "input": 0.001,
+            "output": 0.004,
+          },
+          "id": "LongCat-2.0",
+          "input": [
+            "text",
+          ],
+          "maxTokens": 131072,
+          "name": "LongCat 2.0",
+          "reasoning": false,
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/LongCat-2.0",
+      },
+      "modelCatalog": {
+        "golden-provider/LongCat-2.0": {
+          "alias": "LongCat",
+        },
+      },
+    },
+    "websiteUrl": "https://longcat.chat/platform",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-26 BaiLing > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "BaiLing",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-26",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.tbox.cn/v1",
+      "models": [
+        {
+          "contextWindow": 128000,
+          "cost": {
+            "input": 0.001,
+            "output": 0.004,
+          },
+          "id": "Ling-2.5-1T",
+          "name": "Ling 2.5 1T",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/Ling-2.5-1T",
+      },
+      "modelCatalog": {
+        "golden-provider/Ling-2.5-1T": {
+          "alias": "BaiLing",
+        },
+      },
+    },
+    "websiteUrl": "https://alipaytbox.yuque.com/sxs0ba/ling/get_started",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-27 Xiaomi MiMo > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-27",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.xiaomimimo.com/v1",
+      "models": [
+        {
+          "contextWindow": 1048576,
+          "cost": {
+            "cacheRead": 0.2,
+            "cacheWrite": 0,
+            "input": 1,
+            "output": 3,
+          },
+          "id": "mimo-v2.5-pro",
+          "input": [
+            "text",
+          ],
+          "maxTokens": 131072,
+          "name": "MiMo V2.5 Pro",
+          "reasoning": true,
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/mimo-v2.5-pro",
+      },
+      "modelCatalog": {
+        "golden-provider/mimo-v2.5-pro": {
+          "alias": "MiMo",
+        },
+      },
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-28 Xiaomi MiMo Token Plan (China) > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "xiaomimimo",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Xiaomi MiMo Token Plan (China)",
+    "notes": "",
+    "presetCategory": "cn_official",
+    "presetId": "openclaw-28",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+      "models": [
+        {
+          "contextWindow": 1048576,
+          "id": "mimo-v2.5-pro",
+          "input": [
+            "text",
+          ],
+          "maxTokens": 131072,
+          "name": "MiMo V2.5 Pro",
+          "reasoning": true,
+        },
+        {
+          "contextWindow": 1048576,
+          "id": "mimo-v2.5",
+          "input": [
+            "text",
+            "image",
+          ],
+          "maxTokens": 131072,
+          "name": "MiMo V2.5",
+          "reasoning": true,
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/mimo-v2.5-pro",
+      },
+      "modelCatalog": {
+        "golden-provider/mimo-v2.5": {
+          "alias": "MiMo Token Plan (China) Multimodal",
+        },
+        "golden-provider/mimo-v2.5-pro": {
+          "alias": "MiMo Token Plan (China)",
+        },
+      },
+    },
+    "websiteUrl": "https://platform.xiaomimimo.com/#/token-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-29 AiHubMix > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aihubmix",
+    "iconColor": "#006FFB",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AiHubMix",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-29",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://aihubmix.com",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://aihubmix.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-30 CherryIN > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cherryin",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CherryIN",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-30",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://open.cherryin.net",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "id": "anthropic/claude-opus-4.8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/anthropic/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/anthropic/claude-opus-4.8",
+      },
+      "modelCatalog": {
+        "golden-provider/anthropic/claude-opus-4.8": {
+          "alias": "Opus",
+        },
+        "golden-provider/anthropic/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://open.cherryin.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-31 DMXAPI > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "DMXAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-31",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://www.dmxapi.cn",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://www.dmxapi.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-32 ClaudeCN > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "claudecn",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ClaudeCN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-32",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://claudecn.top",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "contextWindow": 200000,
+          "id": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/claude-sonnet-5",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-haiku-4-5": {
+          "alias": "Haiku",
+        },
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://claudecn.top",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-33 RunAPI > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "runapi",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "RunAPI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-33",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://runapi.co",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "contextWindow": 200000,
+          "id": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/claude-sonnet-5",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-haiku-4-5": {
+          "alias": "Haiku",
+        },
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://runapi.co",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-34 OpenRouter > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "openrouter",
+    "iconColor": "#6566F1",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "OpenRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-34",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "anthropic/claude-opus-4.8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/anthropic/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/anthropic/claude-opus-4.8",
+      },
+      "modelCatalog": {
+        "golden-provider/anthropic/claude-opus-4.8": {
+          "alias": "Opus",
+        },
+        "golden-provider/anthropic/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://openrouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-35 TheRouter > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "TheRouter",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-35",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.therouter.ai/v1",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "cacheRead": 0.3,
+            "cacheWrite": 3.75,
+            "input": 3,
+            "output": 15,
+          },
+          "id": "anthropic/claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "contextWindow": 400000,
+          "cost": {
+            "cacheRead": 0.5,
+            "input": 5,
+            "output": 40,
+          },
+          "id": "openai/gpt-5.3-codex",
+          "name": "GPT-5.3 Codex",
+        },
+        {
+          "contextWindow": 400000,
+          "cost": {
+            "cacheRead": 0.175,
+            "input": 1.75,
+            "output": 14,
+          },
+          "id": "openai/gpt-5.2",
+          "name": "GPT-5.2",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "cacheRead": 0.15,
+            "input": 1.5,
+            "output": 9,
+          },
+          "id": "google/gemini-3.5-flash",
+          "name": "Gemini 3.5 Flash",
+        },
+        {
+          "contextWindow": 262144,
+          "cost": {
+            "input": 0.6,
+            "output": 2.35,
+          },
+          "id": "qwen/qwen3-coder-480b",
+          "name": "Qwen3 Coder 480B",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/openai/gpt-5.2",
+          "golden-provider/google/gemini-3.5-flash",
+        ],
+        "primary": "golden-provider/anthropic/claude-sonnet-5",
+      },
+      "modelCatalog": {
+        "golden-provider/anthropic/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+        "golden-provider/google/gemini-3.5-flash": {
+          "alias": "Gemini Flash",
+        },
+        "golden-provider/openai/gpt-5.2": {
+          "alias": "GPT-5.2",
+        },
+        "golden-provider/openai/gpt-5.3-codex": {
+          "alias": "Codex",
+        },
+        "golden-provider/qwen/qwen3-coder-480b": {
+          "alias": "Qwen Coder",
+        },
+      },
+    },
+    "websiteUrl": "https://therouter.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-36 ModelScope > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "modelscope",
+    "iconColor": "#624AFF",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ModelScope",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-36",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api-inference.modelscope.cn/v1",
+      "models": [
+        {
+          "contextWindow": 128000,
+          "cost": {
+            "input": 0.001,
+            "output": 0.001,
+          },
+          "id": "ZhipuAI/GLM-5.1",
+          "name": "GLM-5.1",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/ZhipuAI/GLM-5.1",
+      },
+      "modelCatalog": {
+        "golden-provider/ZhipuAI/GLM-5.1": {
+          "alias": "GLM",
+        },
+      },
+    },
+    "websiteUrl": "https://modelscope.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-37 SiliconFlow > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#6E29F6",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SiliconFlow",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-37",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "models": [
+        {
+          "contextWindow": 200000,
+          "cost": {
+            "input": 0.001,
+            "output": 0.004,
+          },
+          "id": "Pro/MiniMaxAI/MiniMax-M2.7",
+          "name": "MiniMax M2.7",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/Pro/MiniMaxAI/MiniMax-M2.7",
+      },
+      "modelCatalog": {
+        "golden-provider/Pro/MiniMaxAI/MiniMax-M2.7": {
+          "alias": "MiniMax",
+        },
+      },
+    },
+    "websiteUrl": "https://siliconflow.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-38 SiliconFlow en > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "siliconflow",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SiliconFlow en",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-38",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.siliconflow.com/v1",
+      "models": [
+        {
+          "contextWindow": 200000,
+          "cost": {
+            "input": 0.001,
+            "output": 0.004,
+          },
+          "id": "MiniMaxAI/MiniMax-M2.7",
+          "name": "MiniMax M2.7",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/MiniMaxAI/MiniMax-M2.7",
+      },
+      "modelCatalog": {
+        "golden-provider/MiniMaxAI/MiniMax-M2.7": {
+          "alias": "MiniMax",
+        },
+      },
+    },
+    "websiteUrl": "https://siliconflow.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-39 Novita AI > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "novita",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Novita AI",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-39",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.novita.ai/openai",
+      "models": [
+        {
+          "contextWindow": 202800,
+          "cost": {
+            "cacheRead": 0.2,
+            "input": 1,
+            "output": 3.2,
+          },
+          "id": "zai-org/glm-5.1",
+          "name": "GLM-5.1",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/zai-org/glm-5.1",
+      },
+      "modelCatalog": {
+        "golden-provider/zai-org/glm-5.1": {
+          "alias": "GLM-5.1",
+        },
+      },
+    },
+    "websiteUrl": "https://novita.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-40 Nvidia > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "nvidia",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Nvidia",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-40",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "models": [
+        {
+          "contextWindow": 131072,
+          "cost": {
+            "input": 0.002,
+            "output": 0.006,
+          },
+          "id": "moonshotai/kimi-k2.5",
+          "name": "Kimi K2.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/moonshotai/kimi-k2.5",
+      },
+      "modelCatalog": {
+        "golden-provider/moonshotai/kimi-k2.5": {
+          "alias": "Kimi",
+        },
+      },
+    },
+    "websiteUrl": "https://build.nvidia.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-41 PIPELLM > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "pipellm",
+    "iconColor": "",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "PIPELLM",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-41",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://cc-api.pipellm.ai",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "claude-opus-4-8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "claude-sonnet-5",
+        },
+        {
+          "contextWindow": 200000,
+          "cost": {
+            "input": 0.8,
+            "output": 4,
+          },
+          "id": "claude-haiku-4-5-20251001",
+          "name": "claude-haiku-4-5-20251001",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-haiku-4-5-20251001": {
+          "alias": "Haiku",
+        },
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://code.pipellm.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-42 PackyCode > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "packycode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "PackyCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-42",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://www.packyapi.com",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://www.packyapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-43 APIKEY.FUN > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apikeyfun",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "APIKEY.FUN",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-43",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.apikey.fun",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "contextWindow": 200000,
+          "id": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-haiku-4-5": {
+          "alias": "Haiku",
+        },
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://apikey.fun",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-44 APINebula > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "apinebula",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "APINebula",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-44",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://apinebula.com/v1",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.5",
+      },
+    },
+    "websiteUrl": "https://apinebula.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-45 AtlasCloud > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "atlascloud",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AtlasCloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-45",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-completions",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.atlascloud.ai/v1",
+      "models": [
+        {
+          "id": "zai-org/glm-5.1",
+          "name": "GLM 5.1",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/zai-org/glm-5.1",
+      },
+    },
+    "websiteUrl": "https://www.atlascloud.ai/console/coding-plan",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-46 SudoCode > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sudocode",
+    "iconColor": "",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SudoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-46",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-responses",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.sudocode.chat/v1",
+      "models": [
+        {
+          "id": "gpt-5.6-sol",
+          "name": "GPT-5.6 Sol",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/gpt-5.6-sol",
+      },
+    },
+    "websiteUrl": "https://sudocode.chat",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-47 Cubence > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "cubence",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Cubence",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-47",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.cubence.com",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://cubence.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-48 AIGoCode > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aigocode",
+    "iconColor": "#5B7FFF",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AIGoCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-48",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.aigocode.com",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://aigocode.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-49 RightCode > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "rc",
+    "iconColor": "#E96B2C",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "RightCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-49",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://www.right.codes/claude",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://www.right.codes",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-50 AICodeMirror > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aicodemirror",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AICodeMirror",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-50",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.aicodemirror.com/api/claudecode",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://www.aicodemirror.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-51 CrazyRouter > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "crazyrouter",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "CrazyRouter",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-51",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://cn.crazyrouter.com/v1",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://www.crazyrouter.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-52 SSSAiCode > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "sssaicode",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "SSSAiCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-52",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://node-hk.sssaicodeapi.com/api",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+          },
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/claude-sonnet-5",
+        ],
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+        "golden-provider/claude-sonnet-5": {
+          "alias": "Sonnet",
+        },
+      },
+    },
+    "websiteUrl": "https://sssaicodeapi.com",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-53 Compshare > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.ucloud",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-53",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.modelverse.cn/v1",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+      },
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-54 Compshare Coding Plan > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "ucloud",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "providerForm.presets.ucloudCoding",
+    "notes": "",
+    "presetCategory": "aggregator",
+    "presetId": "openclaw-54",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://cp.compshare.cn/v1",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+      },
+    },
+    "websiteUrl": "https://www.compshare.cn",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-55 Micu > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "micu",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "Micu",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-55",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://www.micuapi.ai",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+      },
+    },
+    "websiteUrl": "https://www.micuapi.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-56 ETok.ai > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "etok",
+    "iconColor": "#000000",
+    "isPartner": true,
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "ETok.ai",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-56",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "anthropic-messages",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://api.etok.ai",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+          },
+          "id": "claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "primary": "golden-provider/claude-opus-4-8",
+      },
+      "modelCatalog": {
+        "golden-provider/claude-opus-4-8": {
+          "alias": "Opus",
+        },
+      },
+    },
+    "websiteUrl": "https://etok.ai",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-57 E-FlowCode > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "eflowcode",
+    "iconColor": "#000000",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "E-FlowCode",
+    "notes": "",
+    "presetCategory": "third_party",
+    "presetId": "openclaw-57",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "openai-responses",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://e-flowcode.cc/v1",
+      "headers": {
+        "User-Agent": "codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal",
+      },
+      "models": [
+        {
+          "contextWindow": 200000,
+          "cost": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "input": 0,
+            "output": 0,
+          },
+          "id": "gpt-5.3-codex",
+          "maxTokens": 32000,
+          "name": "gpt-5.3-codex",
+        },
+        {
+          "id": "gpt-5.5",
+          "name": "gpt-5.5",
+        },
+        {
+          "id": "gpt-5.2-codex",
+          "name": "gpt-5.2-codex",
+        },
+        {
+          "id": "gpt-5.2",
+          "name": "gpt-5.2",
+        },
+      ],
+    },
+    "suggestedDefaults": {
+      "model": {
+        "fallbacks": [
+          "golden-provider/gpt-5.5",
+          "golden-provider/gpt-5.2-codex",
+        ],
+        "primary": "golden-provider/gpt-5.3-codex",
+      },
+      "modelCatalog": {
+        "golden-provider/gpt-5.2": {
+          "alias": "gpt-5.2",
+        },
+        "golden-provider/gpt-5.2-codex": {
+          "alias": "gpt-5.2-codex",
+        },
+        "golden-provider/gpt-5.3-codex": {
+          "alias": "gpt-5.3-codex",
+        },
+        "golden-provider/gpt-5.5": {
+          "alias": "gpt-5.5",
+        },
+      },
+    },
+    "websiteUrl": "https://e-flowcode.cc",
+  },
+  "submitted": true,
+}
+`;
+
+exports[`ProviderForm settingsConfig goldens: openclaw > openclaw-58 AWS Bedrock > create 1`] = `
+{
+  "filled": [
+    "openclaw-key",
+    "apiKey (api key)",
+  ],
+  "payload": {
+    "icon": "aws",
+    "iconColor": "#FF9900",
+    "meta": {
+      "endpointAutoSelect": true,
+    },
+    "name": "AWS Bedrock",
+    "notes": "",
+    "presetCategory": "cloud_provider",
+    "presetId": "openclaw-58",
+    "providerKey": "golden-provider",
+    "settingsConfig": {
+      "api": "bedrock-converse-stream",
+      "apiKey": "sk-golden-test-key",
+      "baseUrl": "https://bedrock-runtime.us-west-2.amazonaws.com",
+      "models": [
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "cacheRead": 0.5,
+            "cacheWrite": 6.25,
+            "input": 5,
+            "output": 25,
+          },
+          "id": "anthropic.claude-opus-4-8",
+          "name": "Claude Opus 4.8",
+        },
+        {
+          "contextWindow": 1000000,
+          "cost": {
+            "cacheRead": 0.3,
+            "cacheWrite": 3.75,
+            "input": 3,
+            "output": 15,
+          },
+          "id": "anthropic.claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+        },
+        {
+          "contextWindow": 200000,
+          "cost": {
+            "cacheRead": 0.08,
+            "cacheWrite": 1,
+            "input": 0.8,
+            "output": 4,
+          },
+          "id": "anthropic.claude-haiku-4-5-20251022-v1:0",
+          "name": "Claude Haiku 4.5",
+        },
+      ],
+    },
+    "websiteUrl": "https://aws.amazon.com/bedrock/",
+  },
+  "submitted": true,
+}
+`;
