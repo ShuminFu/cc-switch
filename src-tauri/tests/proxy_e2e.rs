@@ -776,6 +776,77 @@ async fn router_returns_400_for_malformed_json_on_every_body_reading_route() {
 }
 
 #[tokio::test]
+async fn router_applies_per_endpoint_flags_from_the_endpoint_table() {
+    use tower::ServiceExt;
+
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::message("leaked", 10, 5)).await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+    let host = format!("127.0.0.1:{}", harness.port());
+    let token = harness.token().to_string();
+
+    // Claude Desktop 端点需 gateway token：缺少 Authorization 时在读取请求体之前就返回 401
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/claude-desktop/v1/messages")
+        .header("host", &host)
+        .header("content-type", "application/json")
+        .header("x-api-key", &token)
+        .body(axum::body::Body::from("{not json"))
+        .expect("build router request");
+    let response = harness
+        .router()
+        .oneshot(request)
+        .await
+        .expect("router response");
+    assert_eq!(response.status().as_u16(), 401);
+
+    // Gemini 端点挂载为 any(..) 且允许空请求体：GET 只读端点不会在路由层 404/405，
+    // 也不会因空 body 被当成畸形 JSON 拒绝
+    for uri in [
+        "/v1beta/models",
+        "/gemini/v1beta/models",
+        "/gemini/v1/models",
+    ] {
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("host", &host)
+            .header("x-goog-api-key", &token)
+            .body(axum::body::Body::empty())
+            .expect("build router request");
+        let response = harness
+            .router()
+            .oneshot(request)
+            .await
+            .expect("router response");
+        let status = response.status().as_u16();
+        assert!(
+            !matches!(status, 400 | 404 | 405),
+            "{uri} returned {status}"
+        );
+    }
+
+    // 其余端点只挂 POST
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/v1/messages")
+        .header("host", &host)
+        .header("x-api-key", &token)
+        .body(axum::body::Body::empty())
+        .expect("build router request");
+    let response = harness
+        .router()
+        .oneshot(request)
+        .await
+        .expect("router response");
+    assert_eq!(response.status().as_u16(), 405);
+    assert_eq!(upstream.hits(), 0);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
 async fn foreign_host_text_plain_post_is_rejected_on_the_wire() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
