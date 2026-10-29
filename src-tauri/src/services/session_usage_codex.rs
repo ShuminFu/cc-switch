@@ -19,7 +19,7 @@ use crate::error::AppError;
 use crate::proxy::usage::calculator::CostCalculator;
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
+    get_sync_state, metadata_modified_nanos, update_sync_state, CompleteLines, SessionSyncResult,
 };
 use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
@@ -133,7 +133,7 @@ fn codex_history_replay_boundary(
     }
 
     let file = fs::File::open(file_path).ok()?;
-    for (index, line) in BufReader::new(file).lines().enumerate() {
+    for (index, line) in CompleteLines::new(BufReader::new(file)).enumerate() {
         let Ok(line) = line else {
             continue;
         };
@@ -420,12 +420,13 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
     let mut imported: u32 = 0;
     let mut skipped: u32 = 0;
 
-    for line_result in reader.lines() {
+    // 只遍历以 '\n' 结尾的完整行，正在写入的末尾半行不计入 offset
+    for line_result in CompleteLines::new(reader) {
         line_offset += 1;
 
         let line = match line_result {
             Ok(l) => l,
-            Err(_) => continue, // 容忍不完整的最后一行
+            Err(_) => continue, // 非 UTF-8 的完整行
         };
 
         if line.trim().is_empty() {
@@ -1025,6 +1026,53 @@ mod tests {
         drop(conn);
         assert_eq!(get_sync_state(&db, &archived_file.to_string_lossy())?.1, 4);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_codex_defers_partial_trailing_line_until_complete() -> Result<(), AppError> {
+        // 回归：末尾半行不计入 offset，补全并更新 mtime 后应被导入。
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = temp.path().join("rollout-partial.jsonl");
+        write_jsonl(
+            &file,
+            &[
+                session_meta("partial", "partial"),
+                turn_context(),
+                token_count(100, 50, 10),
+            ],
+        );
+        let second = token_count(200, 100, 20).to_string();
+        let (head, tail) = second.split_at(second.len() / 2);
+        let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        std::io::Write::write_all(&mut handle, head.as_bytes()).unwrap();
+        drop(handle);
+
+        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        let (first_mtime, offset) = get_sync_state(&db, &file.to_string_lossy())?;
+        assert_eq!(offset, 3, "未写完的半行不能计入 offset");
+
+        let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        std::io::Write::write_all(&mut handle, format!("{tail}\n").as_bytes()).unwrap();
+        handle
+            .set_modified(SystemTime::now() + std::time::Duration::from_secs(5))
+            .unwrap();
+        drop(handle);
+        assert!(metadata_modified_nanos(&fs::metadata(&file).unwrap()) > first_mtime);
+
+        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 4);
+
+        let conn = lock_conn!(db.conn);
+        let usage: (i64, i64, i64) = conn.query_row(
+            "SELECT input_tokens, cache_read_tokens, output_tokens
+             FROM proxy_request_logs
+             WHERE request_id LIKE 'codex_session:%:2'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(usage, (100, 50, 10), "第二个事件应只记录增量");
         Ok(())
     }
 

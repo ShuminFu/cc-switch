@@ -206,7 +206,8 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
     let mut messages: HashMap<String, ParsedAssistantUsage> = HashMap::new();
     let mut current_session_id: Option<String> = None;
 
-    for line_result in reader.lines() {
+    // 只遍历以 '\n' 结尾的完整行，正在写入的末尾半行不计入 offset
+    for line_result in CompleteLines::new(reader) {
         line_offset += 1;
 
         // 跳过已处理的行
@@ -216,7 +217,7 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
 
         let line = match line_result {
             Ok(l) => l,
-            Err(_) => continue, // 容忍不完整的最后一行
+            Err(_) => continue, // 非 UTF-8 的完整行
         };
 
         if line.trim().is_empty() {
@@ -356,6 +357,47 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
     update_sync_state(db, &file_path_str, file_modified, line_offset)?;
 
     Ok((imported, skipped))
+}
+
+/// 逐行读取 JSONL，只产出以 `\n` 结尾的完整行（已去掉行尾 `\n` / `\r\n`）。
+///
+/// 末尾尚未写完的半行不会被产出，也就不会计入 `last_line_offset`；
+/// 写入方补全该行后 mtime 变化，下次同步会从这一行继续解析。
+/// 非 UTF-8 的完整行产出 `Err`，调用方应计数后跳过。
+///
+/// Shared by the line-based session_usage_* parsers.
+pub(crate) struct CompleteLines<R> {
+    reader: R,
+    buf: Vec<u8>,
+}
+
+impl<R: BufRead> CompleteLines<R> {
+    pub(crate) fn new(reader: R) -> Self {
+        Self {
+            reader,
+            buf: Vec::new(),
+        }
+    }
+}
+
+impl<R: BufRead> Iterator for CompleteLines<R> {
+    type Item = Result<String, std::string::FromUtf8Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.buf.clear();
+        match self.reader.read_until(b'\n', &mut self.buf) {
+            Ok(0) | Err(_) => None,
+            // EOF 前的半行：不产出，留待下次同步
+            Ok(_) if self.buf.last() != Some(&b'\n') => None,
+            Ok(_) => {
+                self.buf.pop();
+                if self.buf.last() == Some(&b'\r') {
+                    self.buf.pop();
+                }
+                Some(String::from_utf8(std::mem::take(&mut self.buf)))
+            }
+        }
+    }
 }
 
 /// 获取 session_log_sync 表中某条目的同步进度。
@@ -867,6 +909,62 @@ mod tests {
 
         fs::remove_dir_all(&tmp).ok();
         Ok(())
+    }
+
+    #[test]
+    fn test_sync_defers_partial_trailing_line_until_complete() -> Result<(), AppError> {
+        // 回归：末尾正在写入的半行不能计入 line_offset，否则补全后会被永久跳过。
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("partial.jsonl");
+        let first = r#"{"type":"assistant","message":{"id":"msg_first","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}},"timestamp":"2026-06-07T13:01:23Z","sessionId":"session-partial"}"#;
+        let second = r#"{"type":"assistant","message":{"id":"msg_second","model":"claude-opus-4-8","stop_reason":"end_turn","usage":{"input_tokens":20,"output_tokens":7}},"timestamp":"2026-06-07T13:01:24Z","sessionId":"session-partial"}"#;
+        let (head, tail) = second.split_at(second.len() / 2);
+        fs::write(&file, format!("{first}\n{head}")).unwrap();
+
+        let (imported, _) = sync_single_file(&db, &file)?;
+        assert_eq!(imported, 1, "只有完整的第一行应被导入");
+        let (first_mtime, offset) = get_sync_state(&db, &file.to_string_lossy())?;
+        assert_eq!(offset, 1, "未写完的半行不能计入 offset");
+
+        // 写入方补全第二行并更新 mtime
+        let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        std::io::Write::write_all(&mut handle, format!("{tail}\n").as_bytes()).unwrap();
+        handle
+            .set_modified(SystemTime::now() + std::time::Duration::from_secs(5))
+            .unwrap();
+        drop(handle);
+        assert!(metadata_modified_nanos(&fs::metadata(&file).unwrap()) > first_mtime);
+
+        let (imported, _) = sync_single_file(&db, &file)?;
+        assert_eq!(imported, 1, "补全后的第二行应被导入");
+        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 2);
+
+        let conn = lock_conn!(db.conn);
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM proxy_request_logs
+             WHERE request_id IN ('session:msg_first', 'session:msg_second')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_complete_lines_skips_unterminated_tail() {
+        let lines: Vec<_> = CompleteLines::new(&b"a\r\n\nb\n\xff\nc"[..])
+            .map(|line| line.ok())
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                Some("a".to_string()),
+                Some(String::new()),
+                Some("b".to_string()),
+                None,
+            ]
+        );
     }
 
     #[test]
