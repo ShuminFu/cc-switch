@@ -94,6 +94,45 @@ fn backup_count() -> usize {
     std::fs::read_dir(dir).map(|it| it.count()).unwrap_or(0)
 }
 
+/// backups 目录中以 `suffix` 结尾的文件（按文件名排序）
+fn backup_files(suffix: &str) -> Vec<PathBuf> {
+    let dir = paths::current().app_config_dir().join("backups");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|it| {
+            it.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.to_string_lossy().ends_with(suffix))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+/// 唯一的迁移前数据库备份（auto-vacuum 重建前的备份是迁移后的 SCHEMA_VERSION，据此区分）
+fn premigration_db_backup(label: &str) -> PathBuf {
+    let backups: Vec<PathBuf> = backup_files(".db")
+        .into_iter()
+        .filter(|p| user_version(&open(p)) < SCHEMA_VERSION)
+        .collect();
+    assert_eq!(
+        backups.len(),
+        1,
+        "{label}: expected exactly one pre-migration backup, found {backups:?}"
+    );
+    backups.into_iter().next().expect("one backup")
+}
+
+/// 迁移前备份必须与升级前的数据库完全一致（版本、schema、全部数据行）
+fn assert_backup_matches(label: &str, pre: &(i32, SchemaShape, BTreeMap<String, Vec<Row>>)) {
+    let backup = full_snapshot(&open(&premigration_db_backup(label)));
+    assert_eq!(backup.0, pre.0, "{label}: backup user_version");
+    assert_schema_eq(&format!("{label} (backup)"), &backup.1, &pre.1);
+    assert_eq!(
+        backup.2, pre.2,
+        "{label}: backup data differs from pre-upgrade state"
+    );
+}
+
 fn open(path: &Path) -> Connection {
     Connection::open(path).unwrap_or_else(|e| panic!("open {}: {e}", path.display()))
 }
@@ -526,8 +565,12 @@ fn every_released_schema_migrates_to_current() {
             "{label}: fixture user_version"
         );
         load_fixture(&open(&path), &sql_path);
+        let pre = full_snapshot(&open(&path));
 
         drop(Database::init().unwrap_or_else(|e| panic!("{label}: init failed: {e}")));
+        if version < SCHEMA_VERSION {
+            assert_backup_matches(&label, &pre);
+        }
 
         let after = open(&path);
         assert_eq!(
@@ -541,6 +584,123 @@ fn every_released_schema_migrates_to_current() {
 
         assert_second_init_is_noop(&label);
     }
+}
+
+/// v0（尚未设置 user_version 的数据库）同样要在任何 DDL 之前做迁移前备份
+#[test]
+fn v0_database_gets_premigration_backup() {
+    let _env = TestEnv::new();
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    {
+        let conn = open(&path);
+        load_fixture(&conn, &fixtures_dir().join("db/v1.sql"));
+        conn.execute_batch("PRAGMA user_version = 0;")
+            .expect("reset user_version");
+    }
+    let pre = full_snapshot(&open(&path));
+    assert_eq!(pre.0, 0);
+
+    drop(Database::init().expect("init v0 database"));
+    assert_eq!(user_version(&open(&path)), SCHEMA_VERSION);
+    assert_backup_matches("v0", &pre);
+    assert_second_init_is_noop("v0");
+}
+
+/// WAL 模式下尚未 checkpoint 的写入只存在于 -wal 文件中：直接复制主库文件会丢失它们，
+/// 迁移前备份（Online Backup API）必须包含这些写入
+#[test]
+fn premigration_backup_includes_uncheckpointed_wal_writes() {
+    let _env = TestEnv::new();
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    {
+        let conn = open(&path);
+        load_fixture(&conn, &fixtures_dir().join("db/v13.sql"));
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode = WAL;", [], |row| row.get(0))
+            .expect("enable WAL");
+        assert_eq!(mode, "wal");
+    }
+
+    // 保持连接打开，关闭自动 checkpoint，让写入停留在 WAL 中
+    let writer = open(&path);
+    writer
+        .execute_batch("PRAGMA wal_autocheckpoint = 0;")
+        .expect("disable autocheckpoint");
+    writer
+        .execute(
+            "INSERT INTO settings (key, value) VALUES ('wal_marker', 'uncheckpointed')",
+            [],
+        )
+        .expect("write marker");
+    let wal_path = PathBuf::from(format!("{}-wal", path.display()));
+    assert!(
+        std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0) > 0,
+        "marker write must still be in the WAL"
+    );
+
+    // 对照：只复制主库文件拿不到 WAL 中的写入
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let copied = scratch.path().join("copy.db");
+    std::fs::copy(&path, &copied).expect("copy main db file");
+    let marker_in = |conn: &Connection| -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'wal_marker' AND value = 'uncheckpointed'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("query marker")
+            > 0
+    };
+    assert!(
+        !marker_in(&open(&copied)),
+        "a plain file copy unexpectedly saw the WAL write"
+    );
+
+    drop(Database::init().expect("init WAL database"));
+    let backup = open(&premigration_db_backup("wal"));
+    assert_eq!(user_version(&backup), 13);
+    assert!(
+        marker_in(&backup),
+        "pre-migration backup is missing the uncheckpointed WAL write"
+    );
+    drop(writer);
+}
+
+/// 迁移失败时，启动错误信息中必须包含迁移前备份 ID，且该备份文件存在
+#[test]
+fn failed_migration_error_names_the_backup_id() {
+    let _env = TestEnv::new();
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    // providers 是视图而非表：v0 → v1 的 ALTER TABLE ADD COLUMN 必然失败
+    open(&path)
+        .execute_batch("CREATE VIEW providers AS SELECT 1 AS id; PRAGMA user_version = 0;")
+        .expect("create broken v0 database");
+
+    let err = match Database::init() {
+        Ok(_) => panic!("migration of a broken v0 database must fail"),
+        Err(e) => e.to_string(),
+    };
+    let backup = premigration_db_backup("broken v0");
+    let backup_id = backup
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .expect("backup id")
+        .to_string();
+    assert!(
+        err.contains(&backup_id),
+        "startup error must name the backup id {backup_id}: {err}"
+    );
+    let view: String = open(&backup)
+        .query_row(
+            "SELECT type FROM sqlite_master WHERE name = 'providers'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("backup keeps pre-upgrade schema");
+    assert_eq!(view, "view");
 }
 
 #[test]
@@ -574,7 +734,7 @@ fn newer_schema_version_is_rejected() {
 // 旧版 config.json → SQLite
 // ---------------------------------------------------------------------------
 
-/// 模拟应用启动：config.json 存在而数据库不存在时，先加载 JSON，再 init + migrate_from_json
+/// 模拟应用启动：config.json 存在而数据库不存在时，先备份 config.json 并加载 JSON，再 init + migrate_from_json
 fn migrate_legacy_json(name: &str) -> Connection {
     let src = fixtures_dir().join("legacy").join(name);
     let dir = paths::current().app_config_dir();
@@ -583,11 +743,27 @@ fn migrate_legacy_json(name: &str) -> Connection {
         .unwrap_or_else(|e| panic!("copy {}: {e}", src.display()));
     assert!(!db_path().exists());
 
+    let backup_id = Database::backup_legacy_config_json()
+        .unwrap_or_else(|e| panic!("{name}: config.json backup failed: {e}"))
+        .expect("config.json exists, a backup id is expected");
     let config = MultiAppConfig::load().unwrap_or_else(|e| panic!("{name}: load failed: {e}"));
     let db = Database::init().expect("init database");
     db.migrate_from_json(&config)
         .unwrap_or_else(|e| panic!("{name}: migrate_from_json failed: {e}"));
     drop(db);
+
+    // JSON → SQLite 升级前，旧版 config.json 被原样备份
+    let json_backups = backup_files(".config.json");
+    assert_eq!(
+        json_backups,
+        vec![dir.join("backups").join(format!("{backup_id}.config.json"))],
+        "{name}: expected exactly the config.json backup {backup_id}"
+    );
+    assert_eq!(
+        std::fs::read(&json_backups[0]).expect("read config.json backup"),
+        std::fs::read(&src).expect("read fixture"),
+        "{name}: config.json backup differs from the pre-upgrade file"
+    );
 
     let conn = open(&db_path());
     assert_eq!(user_version(&conn), SCHEMA_VERSION, "{name}: user_version");

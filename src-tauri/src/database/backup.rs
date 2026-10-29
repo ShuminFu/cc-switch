@@ -349,36 +349,103 @@ impl Database {
             return Ok(None);
         }
 
-        let backup_dir = db_path
-            .parent()
-            .ok_or_else(|| AppError::Config("无效的数据库路径".to_string()))?
-            .join("backups");
+        let (_, backup_path) = {
+            let conn = lock_conn!(self.conn);
+            Self::snapshot_connection_to_backup(&conn)?
+        };
+        Ok(Some(backup_path))
+    }
 
+    /// 迁移前备份：在任何 DDL（create_tables / schema 迁移）之前调用。
+    ///
+    /// 已有数据库且 `user_version < SCHEMA_VERSION`（含 v0）时，用 SQLite Online Backup API
+    /// 生成快照（WAL 中尚未 checkpoint 的写入也会包含在内）；旧版 `config.json` 仍存在时
+    /// 一并复制为 `<backup_id>.config.json`。
+    ///
+    /// 返回备份 ID（无需备份时返回 None），供迁移失败时提示用户恢复。
+    pub(crate) fn create_premigration_backup(
+        conn: &Connection,
+        db_existed: bool,
+    ) -> Result<Option<String>, AppError> {
+        if !db_existed {
+            // JSON → SQLite 升级的 config.json 备份由启动流程在加载配置前完成
+            // （见 backup_legacy_config_json），此时数据库还是空的，无需快照
+            return Ok(None);
+        }
+        let version = Self::get_user_version(conn)?;
+        if version >= SCHEMA_VERSION {
+            return Ok(None);
+        }
+        log::info!("Creating pre-migration database backup (v{version} → v{SCHEMA_VERSION})");
+        let (backup_id, _) = Self::snapshot_connection_to_backup(conn)?;
+        // 数据库快照已完成，config.json 复制失败不应让调用方丢失备份 ID
+        if let Err(e) = Self::copy_legacy_config_json(&backup_id) {
+            log::warn!("Pre-migration config.json backup failed: {e}");
+        }
+        Ok(Some(backup_id))
+    }
+
+    /// JSON → SQLite 升级前备份旧版 `config.json`（原样复制为 `<backup_id>.config.json`）。
+    ///
+    /// 必须在 `MultiAppConfig::load()` 之前调用：加载时会就地升级并重写 config.json
+    /// （如 v3.6 → v3.7 MCP 结构迁移）。config.json 不存在时返回 None。
+    pub fn backup_legacy_config_json() -> Result<Option<String>, AppError> {
+        let backup_dir = get_app_config_dir().join("backups");
+        if !get_app_config_dir().join("config.json").exists() {
+            return Ok(None);
+        }
         fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+        let (backup_id, _) = Self::next_backup_id(&backup_dir);
+        Self::copy_legacy_config_json(&backup_id)?;
+        Ok(Some(backup_id))
+    }
 
+    /// 若 config.json 存在，复制到 `backups/<backup_id>.config.json`
+    fn copy_legacy_config_json(backup_id: &str) -> Result<(), AppError> {
+        let app_dir = get_app_config_dir();
+        let json_path = app_dir.join("config.json");
+        if !json_path.exists() {
+            return Ok(());
+        }
+        let backup_dir = app_dir.join("backups");
+        fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+        let dest = backup_dir.join(format!("{backup_id}.config.json"));
+        log::info!("Backing up legacy config.json to {}", dest.display());
+        fs::copy(&json_path, &dest).map_err(|e| AppError::io(&dest, e))?;
+        Ok(())
+    }
+
+    /// 生成一个未被占用的备份 ID（`db_backup_YYYYMMDD_HHMMSS[_N]`）及对应的 `.db` 路径。
+    /// 同名的 `.db` 或 `.config.json` 已存在时都会追加序号。
+    fn next_backup_id(backup_dir: &Path) -> (String, PathBuf) {
         let base_id = format!("db_backup_{}", Local::now().format("%Y%m%d_%H%M%S"));
         let mut backup_id = base_id.clone();
-        let mut backup_path = backup_dir.join(format!("{backup_id}.db"));
         let mut counter = 1;
-        while backup_path.exists() {
+        loop {
+            let backup_path = backup_dir.join(format!("{backup_id}.db"));
+            let json_path = backup_dir.join(format!("{backup_id}.config.json"));
+            if !backup_path.exists() && !json_path.exists() {
+                return (backup_id, backup_path);
+            }
             backup_id = format!("{base_id}_{counter}");
-            backup_path = backup_dir.join(format!("{backup_id}.db"));
             counter += 1;
         }
+    }
 
+    /// 使用 SQLite Online Backup API 将 `conn` 快照到 backups 目录，返回 (备份 ID, 路径)
+    fn snapshot_connection_to_backup(conn: &Connection) -> Result<(String, PathBuf), AppError> {
+        let backup_dir = get_app_config_dir().join("backups");
+        fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+
+        let (backup_id, backup_path) = Self::next_backup_id(&backup_dir);
         {
-            let conn = lock_conn!(self.conn);
             let mut dest_conn =
                 Connection::open(&backup_path).map_err(|e| AppError::Database(e.to_string()))?;
-            let backup = Backup::new(&conn, &mut dest_conn)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            backup
-                .step(-1)
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            Self::copy_database(conn, &mut dest_conn)?;
         }
 
         Self::cleanup_db_backups(&backup_dir)?;
-        Ok(Some(backup_path))
+        Ok((backup_id, backup_path))
     }
 
     /// 清理旧的数据库备份，保留最新的 N 个

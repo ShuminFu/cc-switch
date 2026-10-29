@@ -371,8 +371,15 @@ pub fn run() {
 
             // 如果需要迁移，先验证 config.json 是否可以加载（在创建数据库之前）
             // 这样如果加载失败用户选择退出，数据库文件还没被创建，下次可以正常重试
+            let mut legacy_json_backup_id = None;
             let migration_config = if !has_db && has_json {
                 log::info!("检测到旧版配置文件，验证配置文件...");
+
+                // 加载会就地升级并重写 config.json，必须先原样备份
+                match crate::database::Database::backup_legacy_config_json() {
+                    Ok(id) => legacy_json_backup_id = id,
+                    Err(e) => log::warn!("迁移前备份 config.json 失败，继续迁移: {e}"),
+                }
 
                 // 循环：支持用户重试加载配置文件
                 loop {
@@ -468,7 +475,12 @@ pub fn run() {
                     }
                     Err(e) => {
                         // 配置加载成功但迁移失败的情况极少（磁盘满等），仅记录日志
-                        log::error!("配置迁移失败: {e}，将从现有配置导入");
+                        match &legacy_json_backup_id {
+                            Some(id) => log::error!(
+                                "配置迁移失败: {e}，将从现有配置导入（迁移前备份 ID：{id}）"
+                            ),
+                            None => log::error!("配置迁移失败: {e}，将从现有配置导入"),
+                        }
                     }
                 }
             }

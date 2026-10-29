@@ -118,27 +118,29 @@ impl Database {
         }
         register_db_change_hook(&conn);
 
+        // Pre-migration backup: must run before any DDL (create_tables included), for every
+        // older version (v0 too). JSON-era upgrades back up config.json before loading it,
+        // see `backup_legacy_config_json`.
+        let backup_id = match Self::create_premigration_backup(&conn, db_exists) {
+            Ok(id) => id,
+            Err(e) => {
+                log::warn!("Pre-migration backup failed, continuing migration: {e}");
+                None
+            }
+        };
+        let with_backup_hint = |e: AppError| match &backup_id {
+            Some(id) => AppError::Database(format!(
+                "{e}\n迁移前备份 ID：{id}（位于 {}），可用于恢复数据",
+                get_app_config_dir().join("backups").display()
+            )),
+            None => e,
+        };
+
         let db = Self {
             conn: Mutex::new(conn),
         };
-        db.create_tables()?;
-
-        // Pre-migration backup: only when upgrading from an existing database
-        {
-            let conn = lock_conn!(db.conn);
-            let version = Self::get_user_version(&conn)?;
-            drop(conn);
-            if version > 0 && version < SCHEMA_VERSION {
-                log::info!(
-                    "Creating pre-migration database backup (v{version} → v{SCHEMA_VERSION})"
-                );
-                if let Err(e) = db.backup_database_file() {
-                    log::warn!("Pre-migration backup failed, continuing migration: {e}");
-                }
-            }
-        }
-
-        db.apply_schema_migrations()?;
+        db.create_tables().map_err(&with_backup_hint)?;
+        db.apply_schema_migrations().map_err(&with_backup_hint)?;
         if let Err(e) = db.ensure_incremental_auto_vacuum() {
             log::warn!("Failed to ensure incremental auto-vacuum: {e}");
         }
