@@ -10,10 +10,9 @@ import { ALL_APP_IDS } from "@/entities/app/registry";
 const ROOT = path.resolve(__dirname, "../..");
 
 // 基线中 app-id 字面量比较的总数上限：只能下降，修掉后请同步调低。
-const APP_LITERAL_BUDGET = 198;
+const APP_LITERAL_BUDGET = 173;
 // 现有直接 import invoke 的文件；不允许新增。
 const RAW_INVOKE_BASELINE = [
-  "src/App.tsx",
   "src/components/DatabaseUpgrade.tsx",
   "src/components/theme-provider.tsx",
   "src/hooks/useProxyConfig.ts",

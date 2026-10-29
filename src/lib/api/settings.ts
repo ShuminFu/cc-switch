@@ -30,6 +30,11 @@ export interface WebDavSyncResult {
   status: string;
 }
 
+export interface SkillsMigrationResult {
+  count: number;
+  error?: string;
+}
+
 export const settingsApi = {
   async get(): Promise<Settings> {
     return await invoke("get_settings");
@@ -47,6 +52,16 @@ export const settingsApi = {
   /** 按迁移备份账本把当时迁入共享桶的官方会话还原回 openai 桶（幂等） */
   async restoreCodexUnifiedHistory(): Promise<CodexUnifyHistoryRestoreResult> {
     return await invoke("restore_codex_unified_history");
+  },
+
+  /** JSON→SQLite 迁移是否成功；仅首次调用返回 true，用于一次性提示 */
+  async getMigrationResult(): Promise<boolean> {
+    return await invoke("get_migration_result");
+  },
+
+  /** Skills SSOT 迁移结果；仅首次调用返回结果，之后为 null */
+  async getSkillsMigrationResult(): Promise<SkillsMigrationResult | null> {
+    return await invoke("get_skills_migration_result");
   },
 
   async restart(): Promise<boolean> {

@@ -33,6 +33,7 @@ vi.mock("@/components/providers/ProviderList", () => ({
     onConfigureUsage,
     onOpenWebsite,
     onCreate,
+    onDelete,
     onRemoveFromConfig,
   }: any) => (
     <div>
@@ -52,6 +53,9 @@ vi.mock("@/components/providers/ProviderList", () => ({
         open-website
       </button>
       <button onClick={() => onCreate?.()}>create</button>
+      <button onClick={() => onDelete(providers[currentProviderId])}>
+        delete
+      </button>
       <button
         onClick={() => onRemoveFromConfig?.(providers[currentProviderId])}
       >
@@ -362,6 +366,36 @@ describe("App integration with MSW", () => {
       removeSpy.mockRestore();
       invalidateSpy.mockRestore();
     }
+  });
+
+  it("confirms before deleting a provider and keeps it on cancel", async () => {
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("current-provider").textContent).toBe(
+        "claude-1",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("delete"));
+    expect(screen.getByTestId("confirm-dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("cancel-delete"));
+    expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("provider-list").textContent).toContain(
+      "claude-1",
+    );
+
+    fireEvent.click(screen.getByText("delete"));
+    fireEvent.click(screen.getByText("confirm-delete"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).not.toContain(
+        '"claude-1"',
+      ),
+    );
   });
 
   it("shows toast when duplicate cannot load live provider ids", async () => {
