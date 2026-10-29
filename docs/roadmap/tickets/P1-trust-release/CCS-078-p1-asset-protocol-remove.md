@@ -1,6 +1,6 @@
 # CCS-078: [security] Remove the unused asset protocol and protocol-asset feature
 
-**Status:** Open · **Kind:** security · **Labels:** `security`, `phase:P1`, `p3-low`, `area:security`
+**Status:** Partial · **Kind:** security · **Labels:** `security`, `phase:P1`, `p3-low`, `area:security`
 
 > **Ticket key:** `p1-asset-protocol-remove` · **Phase:** P1 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -15,8 +15,20 @@ Verified finding ci-unused-asset-protocol, partially real. The asset protocol is
 Remove both together, because tauri-build checks that they match.
 
 ## Acceptance criteria / verification
-- [ ] `cargo check --manifest-path src-tauri/Cargo.toml` passes
+- [x] `cargo check --manifest-path src-tauri/Cargo.toml` passes
 - [ ] `grep -rn 'convertFileSrc\|asset://' src` finds nothing; icons still render in `pnpm tauri dev`
 
 ## Dependencies
 None.
+
+## Implementation notes
+- **Summary:** Removed `app.security.assetProtocol` from `src-tauri/tauri.conf.json` and the `protocol-asset` feature from the `tauri` dependency in `src-tauri/Cargo.toml`, together (tauri-build checks they agree). `Cargo.lock` loses the now-unused `http-range` crate. `tauri.windows.conf.json` never set the asset protocol. Added a vitest guard, `tests/lint/assetProtocol.test.ts`: no tauri config enables `assetProtocol`, the `tauri` dependency has no `protocol-asset`, and no file under `src/` uses `convertFileSrc` or `asset://`. The first two assertions fail against the previous config.
+- **Files:** `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `tests/lint/assetProtocol.test.ts`.
+- **Commits:** `690b0d8` (code + test); this ticket update follows in a separate commit.
+- **Verification:**
+  - `cargo check --manifest-path src-tauri/Cargo.toml`: OK.
+  - `cargo fmt --check`: OK. `cargo clippy -- -D warnings`: OK.
+  - `cargo test --lib`: 2215 passed, 0 failed, 3 ignored.
+  - `pnpm exec vitest run tests/lint/assetProtocol.test.ts tests/lint/csp.test.ts`: 7/7 passed. `pnpm typecheck`: OK. Prettier check on the touched files: OK.
+  - `git grep -n 'convertFileSrc\|asset://' -- src`: no matches.
+- **Remaining:** The "icons still render in `pnpm tauri dev`" check needs someone to look at the app on a desktop session, which this headless environment can't do. The risk is low: icons come from bundled imports or `data:`/`https:` URLs, and none use `asset://`.
