@@ -2415,6 +2415,8 @@
     "configDetails": "配置详情",
     "configUrl": "配置文件 URL",
     "configMergeError": "合并配置文件失败",
+    "requestIgnoredBusy": "已有导入正在进行",
+    "requestIgnoredBusyDescription": "请先完成或取消当前的导入确认，再打开新的深链接。",
     "primaryEndpoint": "主",
     "unlistedEnvTitle": "无法识别的环境变量",
     "unlistedEnvDescription": "以下变量不在已知 Claude Code 配置的允许列表中，将被写入 Claude 的 settings.json，并被 hooks、Bash 工具和 MCP 服务继承。请仅在信任来源时导入。",

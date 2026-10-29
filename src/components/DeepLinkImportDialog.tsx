@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { DeepLinkImportRequest, deeplinkApi } from "@/lib/api/deeplink";
 import {
@@ -31,7 +31,21 @@ export function DeepLinkImportDialog() {
   const queryClient = useQueryClient();
   const [request, setRequest] = useState<DeepLinkImportRequest | null>(null);
   const [isImporting, setIsImporting] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpenState] = useState(false);
+  // Refs mirror the dialog state for the event listener, which is registered
+  // once and would otherwise read stale values.
+  const isOpenRef = useRef(false);
+  const isImportingRef = useRef(false);
+  // True while a request's config is being merged (before the dialog opens)
+  const isMergingRef = useRef(false);
+  // Bumped for every accepted request; a merge result is applied only if it
+  // still belongs to the latest one (e.g. a slow remote configUrl fetch).
+  const requestSeqRef = useRef(0);
+
+  const setIsOpen = useCallback((open: boolean) => {
+    isOpenRef.current = open;
+    setIsOpenState(open);
+  }, []);
 
   // 容错判断：MCP 导入结果可能缺少 type 字段
   const isMcpImportResult = (
@@ -56,13 +70,27 @@ export function DeepLinkImportDialog() {
     const unlistenImport = listen<DeepLinkImportRequest>(
       "deeplink-import",
       async (event) => {
+        // Never swap the request under an open (or about to open) confirm
+        // dialog: the user could end up confirming content they never saw.
+        if (
+          isOpenRef.current ||
+          isImportingRef.current ||
+          isMergingRef.current
+        ) {
+          toast.warning(t("deeplink.requestIgnoredBusy"), {
+            description: t("deeplink.requestIgnoredBusyDescription"),
+          });
+          return;
+        }
+
+        const seq = ++requestSeqRef.current;
+        let nextRequest: DeepLinkImportRequest = event.payload;
+
         // If config is present, merge it to get the complete configuration
         if (event.payload.config || event.payload.configUrl) {
+          isMergingRef.current = true;
           try {
-            const mergedRequest = await deeplinkApi.mergeDeeplinkConfig(
-              event.payload,
-            );
-            setRequest(mergedRequest);
+            nextRequest = await deeplinkApi.mergeDeeplinkConfig(event.payload);
           } catch (error) {
             console.error("Failed to merge config:", error);
             toast.error(t("deeplink.configMergeError"), {
@@ -70,12 +98,16 @@ export function DeepLinkImportDialog() {
                 error instanceof Error ? error.message : String(error),
             });
             // Fall back to original request
-            setRequest(event.payload);
+            nextRequest = event.payload;
+          } finally {
+            isMergingRef.current = false;
           }
-        } else {
-          setRequest(event.payload);
         }
 
+        // A newer request (or unmount) superseded this one while merging
+        if (seq !== requestSeqRef.current) return;
+
+        setRequest(nextRequest);
         setIsOpen(true);
       },
     );
@@ -90,14 +122,17 @@ export function DeepLinkImportDialog() {
     });
 
     return () => {
+      // Drop any merge still in flight for this listener
+      requestSeqRef.current++;
       unlistenImport.then((fn) => fn());
       unlistenError.then((fn) => fn());
     };
-  }, [t]);
+  }, [t, setIsOpen]);
 
   const handleImport = async () => {
-    if (!request) return;
+    if (!request || isImportingRef.current) return;
 
+    isImportingRef.current = true;
     setIsImporting(true);
 
     try {
@@ -206,6 +241,7 @@ export function DeepLinkImportDialog() {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
+      isImportingRef.current = false;
       setIsImporting(false);
     }
   };

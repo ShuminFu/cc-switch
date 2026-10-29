@@ -2415,6 +2415,8 @@
     "configDetails": "設定の詳細",
     "configUrl": "設定ファイル URL",
     "configMergeError": "設定ファイルのマージに失敗しました",
+    "requestIgnoredBusy": "別のインポートが進行中です",
+    "requestIgnoredBusyDescription": "新しいディープリンクを開く前に、現在のインポート確認を完了またはキャンセルしてください。",
     "primaryEndpoint": "メイン",
     "unlistedEnvTitle": "認識されない環境変数",
     "unlistedEnvDescription": "以下の変数は既知の Claude Code 設定の許可リストにありません。Claude の settings.json に書き込まれ、hooks、Bash ツール、MCP サーバーに継承されます。信頼できる提供元の場合のみインポートしてください。",

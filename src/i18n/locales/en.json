@@ -2415,6 +2415,8 @@
     "configDetails": "Config Details",
     "configUrl": "Config File URL",
     "configMergeError": "Failed to merge configuration file",
+    "requestIgnoredBusy": "Another import is already in progress",
+    "requestIgnoredBusyDescription": "Finish or cancel the current import confirmation before opening a new deep link.",
     "primaryEndpoint": "Primary",
     "unlistedEnvTitle": "Unrecognized environment variables",
     "unlistedEnvDescription": "These variables are not on the allow-list of known Claude Code settings. They will be written to Claude's settings.json and inherited by hooks, the Bash tool and MCP servers. Import only if you trust the source.",
