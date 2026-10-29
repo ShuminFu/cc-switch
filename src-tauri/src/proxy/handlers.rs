@@ -41,7 +41,7 @@ use super::{
     },
     routing::{ResponseDecode, RoutePlan},
     server::{ProxyState, MAX_REQUEST_BODY_BYTES},
-    sse::{strip_sse_field, take_sse_block},
+    stream::{SseDecoder, SseEvent},
     types::*,
     usage::parser::TokenUsage,
     ProxyError,
@@ -1240,44 +1240,29 @@ fn should_use_claude_transform_streaming(
 /// 把 OpenAI Responses SSE 流聚合成一个完整的 Responses JSON 对象，供下游转成 Anthropic
 /// 非流响应。仅在 Codex OAuth 把 `stream:false` 强制升级为 SSE 的场景下调用。
 ///
-/// 复用 `proxy::sse` 的 `take_sse_block`/`strip_sse_field`：`take_sse_block` 同时支持
-/// `\n\n` 与 `\r\n\r\n` 两种分隔符，`strip_sse_field` 兼容带/不带空格的字段写法。
+/// SSE 分帧交给 `proxy::stream::SseDecoder`（CRLF/LF/CR 行尾、多行 data、注释、BOM）。
 fn responses_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
-    let mut buffer = body.trim_start_matches('\u{feff}').to_string();
+    let mut decoder = SseDecoder::new();
+    let events = decoder.feed_str(body);
     let mut completed_response: Option<Value> = None;
     let mut output_items = Vec::new();
 
     // strict=false 用于残余尾块：截断的半截 JSON 忽略而非报错，避免破坏
     // 已聚合好的完整响应（codex_oauth 聚合路径也复用本函数）
-    let mut process_block = |block: &str, strict: bool| -> Result<(), ProxyError> {
+    let mut process_event = |event: &SseEvent, strict: bool| -> Result<(), ProxyError> {
         // 残余尾块（strict=false）在已拿到 completed 后整体跳过——codex_oauth 聚合
         // 路径也复用本函数，已完成后再执行残余里的完整 response.failed/杂事件会把
         // 成功响应翻成 422（C8）。
         if !strict && completed_response.is_some() {
             return Ok(());
         }
-        let mut event_name = "";
-        let mut data_lines: Vec<&str> = Vec::new();
-
-        for line in block.lines() {
-            let line = line.trim_start();
-            if let Some(evt) = strip_sse_field(line, "event") {
-                event_name = evt.trim();
-            } else if let Some(d) = strip_sse_field(line, "data") {
-                data_lines.push(d);
-            }
-        }
-
-        if data_lines.is_empty() {
-            return Ok(());
-        }
-
-        let data_str = data_lines.join("\n");
+        let event_name = event.event_name();
+        let data_str = event.data.as_str();
         if data_str.trim() == "[DONE]" {
             return Ok(());
         }
 
-        let data: Value = match serde_json::from_str(&data_str) {
+        let data: Value = match serde_json::from_str(data_str) {
             Ok(v) => v,
             Err(_) if !strict => return Ok(()),
             Err(e) => {
@@ -1308,13 +1293,15 @@ fn responses_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
         Ok(())
     };
 
-    while let Some(block) = take_sse_block(&mut buffer) {
-        process_block(&block, true)?;
+    for event in &events {
+        process_event(event, true)?;
     }
     // 最后一个事件后可能没有空行分隔（错标 SSE 兜底/非规范上游常见）：
-    // 残余 buffer 当最后一块处理，否则尾部的 response.completed 会被丢掉。
+    // 残余尾块由 finish() 交出，否则尾部的 response.completed 会被丢掉。
     // 已完成时的跳过判定在闭包内（C8）。
-    process_block(&buffer, false)?;
+    if let Some(event) = decoder.finish() {
+        process_event(&event, false)?;
+    }
 
     let mut response = completed_response.ok_or_else(|| {
         ProxyError::TransformError("No response.completed event in upstream SSE".to_string())
@@ -1422,23 +1409,6 @@ fn body_snippet(body: &str, max_chars: usize) -> String {
     snippet
 }
 
-/// 解析单个 SSE 块的 event 名与 data 负载（多行 data 按规范以 \n 连接）。
-/// 行首允许前导空白后再匹配字段名——与 body_looks_like_sse 的 trim 宽容度对齐，
-/// 否则缩进的 `  data:` 行被嗅探接受却在此静默丢失（C4）。返回 None 表示无 data 行。
-fn sse_block_parts(block: &str) -> Option<(String, String)> {
-    let mut event_name = String::new();
-    let mut data_lines: Vec<&str> = Vec::new();
-    for line in block.lines() {
-        let line = line.trim_start();
-        if let Some(evt) = strip_sse_field(line, "event") {
-            event_name = evt.trim().to_string();
-        } else if let Some(d) = strip_sse_field(line, "data") {
-            data_lines.push(d);
-        }
-    }
-    (!data_lines.is_empty()).then(|| (event_name, data_lines.join("\n")))
-}
-
 /// 把 Chat Completions 流式 SSE 聚合为单个 chat.completion JSON（#2234 兜底）。
 ///
 /// 专供非流式分支使用：上游对 stream:false 返回了 SSE 体但 Content-Type 没标
@@ -1451,9 +1421,10 @@ fn sse_block_parts(block: &str) -> Option<(String, String)> {
 /// finish_reason 首个非 null 即锁定（kimi-k2.6 会在 tool_use 后再发带
 /// finish_reason 的尾块，见 streaming.rs）。
 fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
-    // 剥 BOM：嗅探器接受 BOM 开头，但 strip_sse_field 按行首精确匹配，
-    // 不剥会让首个 data 行静默丢失
-    let mut buffer = body.trim_start_matches('\u{feff}').to_string();
+    // SseDecoder 剥 BOM（嗅探器接受 BOM 开头），并容忍缩进的 `  data:` 行——
+    // 与 body_looks_like_sse 的 trim 宽容度对齐，否则被嗅探接受的行会在此静默丢失（C4）
+    let mut decoder = SseDecoder::new();
+    let events = decoder.feed_str(body);
 
     let mut id = Value::Null;
     let mut created = Value::Null;
@@ -1623,15 +1594,13 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
             Ok(())
         };
 
-    while let Some(block) = take_sse_block(&mut buffer) {
-        if let Some((event, data)) = sse_block_parts(&block) {
-            process_event(&event, &data, true)?;
-        }
+    for event in &events {
+        process_event(event.event_name(), &event.data, true)?;
     }
-    // 最后一个事件后可能没有空行分隔（半截流/非规范上游）：残余 buffer 当最后一块
-    // 处理，strict=false 容忍被掐断的尾块（C2）。
-    if let Some((event, data)) = sse_block_parts(&buffer) {
-        process_event(&event, &data, false)?;
+    // 最后一个事件后可能没有空行分隔（半截流/非规范上游）：finish() 交出的残余尾块
+    // 以 strict=false 处理，容忍被掐断的尾块（C2）。
+    if let Some(event) = decoder.finish() {
+        process_event(event.event_name(), &event.data, false)?;
     }
 
     if !saw_choice {
@@ -2516,8 +2485,27 @@ data: {"type":"response.completed","response":{"id":"resp_1","status":"completed
     }
 
     #[test]
+    fn sse_aggregators_handle_cr_only_and_mixed_line_endings() {
+        // 规范允许单独 \r 作行尾，且空行可以是 \r\n 跟在 \n 行之后（\n\r\n）；
+        // 旧的 take_sse_block 只认 \n\n / \r\n\r\n，这两种分帧下整个 body 会被当成
+        // 一个残余尾块而丢失全部事件。
+        let chat = "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\r\r\
+data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\r\n\
+data: [DONE]\r\r";
+        let response = chat_sse_to_response_value(chat).unwrap();
+        assert_eq!(response["choices"][0]["message"]["content"], "hi");
+        assert_eq!(response["choices"][0]["finish_reason"], "stop");
+
+        let responses = "event: response.completed\r\
+data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_cr\",\"status\":\"completed\",\"model\":\"gpt-5.4\",\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\r\
+\r";
+        let response = responses_sse_to_response_value(responses).unwrap();
+        assert_eq!(response["id"], "resp_cr");
+    }
+
+    #[test]
     fn responses_sse_to_response_value_handles_crlf_delimiters() {
-        // 真实 HTTP SSE 按规范使用 \r\n\r\n 分隔事件；take_sse_block 必须同时处理两种分隔符，
+        // 真实 HTTP SSE 按规范使用 \r\n\r\n 分隔事件；SSE 解码必须同时处理两种分隔符，
         // 否则此路径在任何标准上游（含 Codex OAuth HTTPS 后端）下都会 TransformError。
         let sse = "event: response.output_item.done\r\n\
 data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}}\r\n\

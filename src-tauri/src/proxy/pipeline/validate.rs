@@ -9,6 +9,7 @@ use crate::proxy::error::ProxyError;
 use crate::proxy::handler_context::DEFAULT_NON_STREAMING_BODY_TIMEOUT;
 use crate::proxy::hyper_client::ProxyResponse;
 use crate::proxy::protocol::ClaudeApiFormat;
+use crate::proxy::stream::{SseDecoder, SseEvent};
 use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::Value;
@@ -219,8 +220,13 @@ impl ResponseValidator {
         let headers = response.headers().clone();
         let mut stream = Box::pin(response.bytes_stream());
         let mut replay_chunks: Vec<Bytes> = Vec::new();
-        let mut parse_buffer = String::new();
+        // Some compatible gateways ignore `stream:true` and return a complete
+        // Responses JSON document without a JSON content-type. Until the first
+        // non-whitespace character rules that out, keep the raw text: pretty-printed
+        // JSON may itself contain blank lines and must not be framed as SSE.
+        let mut json_probe: Option<String> = Some(String::new());
         let mut utf8_remainder = Vec::new();
+        let mut decoder = SseDecoder::new();
 
         loop {
             let next = if self.streaming_first_byte_timeout.is_zero() {
@@ -237,13 +243,19 @@ impl ResponseValidator {
             };
 
             let Some(chunk) = next else {
-                if let Some(outcome) = inspect_responses_json_document(&parse_buffer) {
-                    outcome?;
-                    let replay = futures::stream::iter(replay_chunks.into_iter().map(Ok));
-                    return Ok(ProxyResponse::streamed(status, headers, replay));
+                let mut events = Vec::new();
+                if let Some(text) = json_probe.take() {
+                    if let Some(outcome) = inspect_responses_json_document(&text) {
+                        outcome?;
+                        let replay = futures::stream::iter(replay_chunks.into_iter().map(Ok));
+                        return Ok(ProxyResponse::streamed(status, headers, replay));
+                    }
+                    events = decoder.feed_str(&text);
+                    events.extend(decoder.feed(&utf8_remainder));
                 }
-                if !parse_buffer.trim().is_empty() {
-                    if let Some(outcome) = inspect_responses_start_event(parse_buffer.trim()) {
+                events.extend(decoder.finish());
+                for event in &events {
+                    if let Some(outcome) = inspect_responses_start_event(event) {
                         outcome?;
                         let replay = futures::stream::iter(replay_chunks.into_iter().map(Ok));
                         return Ok(ProxyResponse::streamed(status, headers, replay));
@@ -259,21 +271,42 @@ impl ResponseValidator {
                     "Failed while validating Responses stream start: {error}"
                 ))
             })?;
-            crate::proxy::sse::append_utf8_safe(&mut parse_buffer, &mut utf8_remainder, &chunk);
+
+            let events = match json_probe.as_mut() {
+                Some(text) => {
+                    crate::proxy::sse::append_utf8_safe(text, &mut utf8_remainder, &chunk);
+                    let first = text
+                        .trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}')
+                        .as_bytes()
+                        .first()
+                        .copied();
+                    match first {
+                        Some(b'{') | Some(b'[') => {
+                            if let Some(outcome) = inspect_responses_json_document(text) {
+                                outcome?;
+                                replay_chunks.push(chunk);
+                                let replay =
+                                    futures::stream::iter(replay_chunks.into_iter().map(Ok))
+                                        .chain(stream);
+                                return Ok(ProxyResponse::streamed(status, headers, replay));
+                            }
+                            Vec::new()
+                        }
+                        None => Vec::new(),
+                        Some(_) => {
+                            let text = json_probe.take().unwrap_or_default();
+                            let mut events = decoder.feed_str(&text);
+                            events.extend(decoder.feed(&std::mem::take(&mut utf8_remainder)));
+                            events
+                        }
+                    }
+                }
+                None => decoder.feed(&chunk),
+            };
             replay_chunks.push(chunk);
 
-            // Some compatible gateways ignore `stream:true` and return a complete
-            // Responses JSON document without a JSON content-type. Recognize that
-            // shape before looking for SSE delimiters; pretty-printed JSON may itself
-            // contain blank lines and must stay intact.
-            if let Some(outcome) = inspect_responses_json_document(&parse_buffer) {
-                outcome?;
-                let replay = futures::stream::iter(replay_chunks.into_iter().map(Ok)).chain(stream);
-                return Ok(ProxyResponse::streamed(status, headers, replay));
-            }
-
-            while let Some(block) = crate::proxy::sse::take_sse_block(&mut parse_buffer) {
-                if let Some(outcome) = inspect_responses_start_event(&block) {
+            for event in &events {
+                if let Some(outcome) = inspect_responses_start_event(event) {
                     outcome?;
                     let replay =
                         futures::stream::iter(replay_chunks.into_iter().map(Ok)).chain(stream);
@@ -397,29 +430,17 @@ fn inspect_responses_json_document(buffer: &str) -> Option<Result<(), ProxyError
     Some(Ok(()))
 }
 
-/// Inspect one complete Responses SSE block while the response is still inside
+/// Inspect one complete Responses SSE event while the response is still inside
 /// the retry loop. `None` means the event is lifecycle-only and priming should
 /// continue; `Some(Ok(()))` means it is safe to commit/replay the stream.
-fn inspect_responses_start_event(block: &str) -> Option<Result<(), ProxyError>> {
-    let mut named_event = None;
-    let mut data_lines = Vec::new();
-    for line in block.lines() {
-        if let Some(event) = crate::proxy::sse::strip_sse_field(line, "event") {
-            named_event = Some(event.trim().to_string());
-        } else if let Some(data) = crate::proxy::sse::strip_sse_field(line, "data") {
-            data_lines.push(data);
-        }
-    }
-    if data_lines.is_empty() {
-        return None;
-    }
-    let value: Value = match serde_json::from_str(&data_lines.join("\n")) {
+fn inspect_responses_start_event(sse_event: &SseEvent) -> Option<Result<(), ProxyError>> {
+    let value: Value = match serde_json::from_str(&sse_event.data) {
         Ok(value) => value,
         Err(_) => return None,
     };
-    let event = named_event
+    let event = sse_event
+        .event
         .as_deref()
-        .filter(|event| !event.is_empty())
         .or_else(|| value.get("type").and_then(Value::as_str))
         .unwrap_or("");
 
@@ -663,20 +684,91 @@ mod tests {
         .is_none());
     }
 
+    fn decode_event(block: &str) -> SseEvent {
+        let mut decoder = SseDecoder::new();
+        let mut events = decoder.feed_str(block);
+        events.extend(decoder.finish());
+        assert_eq!(events.len(), 1, "{block:?}");
+        events.remove(0)
+    }
+
+    fn chunked_response(chunks: Vec<&'static str>) -> ProxyResponse {
+        ProxyResponse::streamed(
+            StatusCode::OK,
+            HeaderMap::new(),
+            futures::stream::iter(
+                chunks
+                    .into_iter()
+                    .map(|chunk| Ok::<Bytes, std::io::Error>(Bytes::from_static(chunk.as_bytes())))
+                    .collect::<Vec<_>>(),
+            ),
+        )
+    }
+
+    #[tokio::test]
+    async fn responses_stream_start_keeps_pretty_json_split_at_blank_line() {
+        // The first chunk ends inside a pretty-printed JSON document right after a
+        // blank line; it must not be framed as an SSE block (which would drop the
+        // opening brace and hide the document from the JSON probe).
+        let validator = validator(Duration::from_secs(1), Duration::from_secs(1));
+        let prepared = validator
+            .validate_responses_stream_start(chunked_response(vec![
+                "{\n\n  \"status\": \"completed\",",
+                "\n  \"output\": []\n}",
+            ]))
+            .await
+            .expect("whole JSON document should be accepted");
+        assert_eq!(
+            prepared.bytes().await.unwrap(),
+            Bytes::from_static(b"{\n\n  \"status\": \"completed\",\n  \"output\": []\n}")
+        );
+
+        let err = validator
+            .validate_responses_stream_start(chunked_response(vec![
+                "{\n\n  \"status\": \"failed\",",
+                "\n  \"error\": {\"message\": \"backend unavailable\"}\n}",
+            ]))
+            .await
+            .err()
+            .expect("failed JSON document should be retryable");
+        assert!(
+            matches!(&err, ProxyError::TransformError(message) if message.contains("backend unavailable")),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_stream_start_decodes_cr_framed_events_across_chunks() {
+        let validator = validator(Duration::from_secs(1), Duration::from_secs(1));
+        let err = validator
+            .validate_responses_stream_start(chunked_response(vec![
+                "event: response.created\rdata: {\"type\":\"response.created\"}\r",
+                "\revent: response.failed\r",
+                "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"boom\"}}}\r",
+            ]))
+            .await
+            .err()
+            .expect("response.failed before output should be retryable");
+        assert!(
+            matches!(&err, ProxyError::TransformError(message) if message.contains("boom")),
+            "got {err:?}"
+        );
+    }
+
     #[test]
     fn responses_stream_start_semantic_failure_is_retryable() {
         let created = concat!(
             "event: response.created\n",
             "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}"
         );
-        assert!(inspect_responses_start_event(created).is_none());
+        assert!(inspect_responses_start_event(&decode_event(created)).is_none());
 
         let failed = concat!(
             "event: response.failed\n",
             "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"type\":\"server_error\",\"message\":\"boom\"}}}"
         );
         assert!(matches!(
-            inspect_responses_start_event(failed),
+            inspect_responses_start_event(&decode_event(failed)),
             Some(Err(ProxyError::TransformError(message))) if message.contains("boom")
         ));
 
@@ -684,7 +776,10 @@ mod tests {
             "event: response.output_text.delta\n",
             "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}"
         );
-        assert!(matches!(inspect_responses_start_event(delta), Some(Ok(()))));
+        assert!(matches!(
+            inspect_responses_start_event(&decode_event(delta)),
+            Some(Ok(()))
+        ));
     }
 
     #[test]

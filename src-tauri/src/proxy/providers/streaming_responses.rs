@@ -13,7 +13,7 @@ use super::transform_responses::{
     build_anthropic_usage_from_responses, map_responses_stop_reason, responses_to_anthropic,
     sanitize_anthropic_tool_use_input_json,
 };
-use crate::proxy::sse::{strip_sse_field, take_sse_block};
+use crate::proxy::stream::SseDecoder;
 use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
 use serde_json::{json, Value};
@@ -296,6 +296,8 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
     async_stream::stream! {
         let mut buffer = String::new();
         let mut utf8_remainder: Vec<u8> = Vec::new();
+        let mut decoder = SseDecoder::new();
+        let mut sniffing = true;
         let mut message_id: Option<String> = None;
         let mut current_model: Option<String> = None;
         let mut has_sent_message_start = false;
@@ -330,71 +332,59 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
         while let Some((chunk, is_eof)) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    crate::proxy::sse::append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
-
                     // A few compatible gateways ignore stream:true and return one
-                    // JSON document. Hold it intact until EOF, including any pretty-
-                    // printed blank lines that would otherwise look like SSE separators.
-                    let looks_like_json = matches!(
-                        buffer
+                    // JSON document. Until the first non-whitespace character shows
+                    // which it is, keep the raw text; a JSON body is held intact until
+                    // EOF, including any pretty-printed blank lines that would
+                    // otherwise look like SSE separators.
+                    let mut events = if sniffing {
+                        crate::proxy::sse::append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
+                        let first = buffer
                             .trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}')
                             .as_bytes()
-                            .first(),
-                        Some(b'{') | Some(b'[')
-                    );
-                    if looks_like_json && !is_eof {
-                        continue;
-                    }
-                    if looks_like_json && is_eof {
-                        match serde_json::from_str::<Value>(buffer.trim()) {
-                            Ok(body) => {
-                                for event in responses_json_to_anthropic_sse(body) {
-                                    yield Ok(event);
+                            .first()
+                            .copied();
+                        match first {
+                            Some(b'{') | Some(b'[') if !is_eof => continue,
+                            Some(b'{') | Some(b'[') => {
+                                match serde_json::from_str::<Value>(buffer.trim()) {
+                                    Ok(body) => {
+                                        for event in responses_json_to_anthropic_sse(body) {
+                                            yield Ok(event);
+                                        }
+                                        terminated = true;
+                                    }
+                                    Err(error) => {
+                                        yield Ok(anthropic_error_sse(
+                                            &format!("Invalid JSON response from Responses upstream: {error}"),
+                                            "response_parse_error",
+                                        ));
+                                        terminated = true;
+                                    }
                                 }
-                                terminated = true;
+                                buffer.clear();
+                                continue;
                             }
-                            Err(error) => {
-                                yield Ok(anthropic_error_sse(
-                                    &format!("Invalid JSON response from Responses upstream: {error}"),
-                                    "response_parse_error",
-                                ));
-                                terminated = true;
+                            None if !is_eof => continue,
+                            _ => {
+                                sniffing = false;
+                                let mut events = decoder.feed_str(&std::mem::take(&mut buffer));
+                                events.extend(decoder.feed(&std::mem::take(&mut utf8_remainder)));
+                                events
                             }
                         }
-                        buffer.clear();
-                        continue;
+                    } else {
+                        decoder.feed(&bytes)
+                    };
+                    // The EOF sentinel also flushes a final event that omitted its
+                    // trailing blank line.
+                    if is_eof {
+                        events.extend(decoder.finish());
                     }
 
-                    if is_eof && !buffer.trim().is_empty() {
-                        buffer.push_str("\n\n");
-                    }
-
-                    // SSE 事件由 \n\n 分隔
-                    while let Some(block) = take_sse_block(&mut buffer) {
-                        if block.trim().is_empty() {
-                            continue;
-                        }
-
-                        // 解析 SSE 块：提取 event: 和 data: 行
-                        let mut event_type: Option<String> = None;
-                        let mut data_parts: Vec<String> = Vec::new();
-
-                        for line in block.lines() {
-                            if let Some(evt) = strip_sse_field(line, "event") {
-                                event_type = Some(evt.trim().to_string());
-                            } else if let Some(d) = strip_sse_field(line, "data") {
-                                data_parts.push(d.to_string());
-                            }
-                        }
-
-                        if data_parts.is_empty() {
-                            continue;
-                        }
-
-                        let data_str = data_parts.join("\n");
-
+                    for sse_event in events {
                         // 解析 JSON 数据
-                        let data: Value = match serde_json::from_str(&data_str) {
+                        let data: Value = match serde_json::from_str(&sse_event.data) {
                             Ok(v) => v,
                             Err(_) => continue,
                         };
@@ -402,9 +392,9 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                         // Official streams use both a named SSE event and `type` in
                         // the JSON payload. Compatible gateways sometimes omit the
                         // `event:` line, so fall back to the payload type.
-                        let event_name = event_type
+                        let event_name = sse_event
+                            .event
                             .as_deref()
-                            .filter(|name| !name.is_empty())
                             .or_else(|| data.get("type").and_then(Value::as_str))
                             .unwrap_or("");
 
@@ -1538,6 +1528,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::sse::strip_sse_field;
     use futures::stream;
     use futures::StreamExt;
     use std::collections::HashMap;
@@ -2193,5 +2184,38 @@ mod tests {
             !merged.contains('\u{FFFD}'),
             "output must not contain U+FFFD replacement characters"
         );
+    }
+
+    #[tokio::test]
+    async fn test_streaming_responses_mixed_line_endings_split_byte_by_byte() {
+        // Blank lines written as "\r\n" after an LF line, and lone-CR line
+        // endings, are both valid SSE framing. Feeding one byte per chunk also
+        // splits every CRLF pair and multi-byte character.
+        let full = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_mix\",\"model\":\"gpt-4o\"}}\n\r\n",
+            ": keepalive\r\r",
+            "event: response.output_text.delta\r",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"你好\"}\r\r",
+            "event: response.completed\r\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}"
+        );
+        let upstream = stream::iter(
+            full.as_bytes()
+                .iter()
+                .map(|byte| Ok::<_, std::io::Error>(Bytes::from(vec![*byte])))
+                .collect::<Vec<_>>(),
+        );
+        let merged = create_anthropic_sse_stream_from_responses(upstream)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .map(|chunk| String::from_utf8_lossy(chunk.unwrap().as_ref()).to_string())
+            .collect::<String>();
+
+        assert!(merged.contains("\"id\":\"resp_mix\""), "{merged}");
+        assert!(merged.contains("你好"), "{merged}");
+        assert!(merged.contains("event: message_stop"), "{merged}");
+        assert_eq!(merged.matches("event: message_start").count(), 1);
     }
 }
