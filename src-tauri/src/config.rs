@@ -283,6 +283,12 @@ pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
 }
 
 /// 原子写入：写入临时文件后 rename 替换，避免半写状态
+///
+/// - 临时文件在 rename 前 `sync_all`，unix 上 rename 后再 fsync 父目录，
+///   保证断电后目标要么是旧内容、要么是完整的新内容；
+/// - 直接依赖 `fs::rename` 的替换语义（Windows 上为 `MoveFileExW` +
+///   `MOVEFILE_REPLACE_EXISTING`），不再预先删除目标文件；
+/// - 任一步骤失败都会清理临时文件（其中可能含有密钥）。
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
@@ -303,46 +309,170 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
         .as_nanos();
     tmp.push(format!("{file_name}.tmp.{ts}"));
 
-    {
-        let mut f = fs::File::create(&tmp).map_err(|e| AppError::io(&tmp, e))?;
-        f.write_all(data).map_err(|e| AppError::io(&tmp, e))?;
-        f.flush().map_err(|e| AppError::io(&tmp, e))?;
-    }
+    let f = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|e| AppError::io(&tmp, e))?;
+    // 从这里开始临时文件已存在：任何提前返回都由 guard 删除它
+    let mut guard = TempFileGuard::new(&tmp);
+    // 按值传入，返回时句柄即关闭（Windows 上 rename/删除前必须先关闭）
+    write_and_sync(f, &tmp, path, data)?;
+
+    rename_replace(&tmp, path).map_err(|e| AppError::IoContext {
+        context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
+        source: e,
+    })?;
+    guard.disarm();
+
+    #[cfg(unix)]
+    sync_dir(parent);
+
+    Ok(())
+}
+
+/// 写入临时文件，沿用目标文件的权限（unix），并在关闭前 `sync_all`
+fn write_and_sync(mut f: fs::File, tmp: &Path, target: &Path, data: &[u8]) -> Result<(), AppError> {
+    f.write_all(data).map_err(|e| AppError::io(tmp, e))?;
+    f.flush().map_err(|e| AppError::io(tmp, e))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(path) {
+        if let Ok(meta) = fs::metadata(target) {
             let perm = meta.permissions().mode();
-            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(perm));
+            let _ = f.set_permissions(fs::Permissions::from_mode(perm));
         }
     }
+    #[cfg(not(unix))]
+    let _ = target;
 
+    f.sync_all().map_err(|e| AppError::io(tmp, e))
+}
+
+/// 在离开作用域时删除临时文件，除非已调用 [`TempFileGuard::disarm`]
+struct TempFileGuard<'a> {
+    path: &'a Path,
+    armed: bool,
+}
+
+impl<'a> TempFileGuard<'a> {
+    fn new(path: &'a Path) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for TempFileGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(self.path);
+        }
+    }
+}
+
+/// 用 `from` 替换 `to`。Windows 上目标被其它进程（杀毒软件、索引器、编辑器）
+/// 短暂占用时会返回共享冲突，此时短暂重试。
+fn rename_replace(from: &Path, to: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
-        // Windows 上 rename 目标存在会失败，先移除再重命名（尽量接近原子性）
-        if path.exists() {
-            let _ = fs::remove_file(path);
+        // ERROR_ACCESS_DENIED / ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+        const RETRYABLE: [i32; 3] = [5, 32, 33];
+        const ATTEMPTS: u32 = 5;
+        let mut attempt = 1;
+        loop {
+            match fs::rename(from, to) {
+                Ok(()) => return Ok(()),
+                Err(e)
+                    if attempt < ATTEMPTS
+                        && e.raw_os_error().is_some_and(|c| RETRYABLE.contains(&c)) =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(20 * u64::from(attempt)));
+                    attempt += 1;
+                }
+                Err(e) => return Err(e),
+            }
         }
-        fs::rename(&tmp, path).map_err(|e| AppError::IoContext {
-            context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
-            source: e,
-        })?;
     }
 
     #[cfg(not(windows))]
     {
-        fs::rename(&tmp, path).map_err(|e| AppError::IoContext {
-            context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
-            source: e,
-        })?;
+        fs::rename(from, to)
     }
-    Ok(())
+}
+
+/// fsync 父目录以持久化 rename 产生的目录项。rename 已完成，因此失败只记录日志：
+/// 部分文件系统（如某些网络文件系统）不支持对目录 fsync。
+#[cfg(unix)]
+fn sync_dir(dir: &Path) {
+    if let Err(e) = fs::File::open(dir).and_then(|d| d.sync_all()) {
+        log::warn!("fsync 目录失败: {}: {e}", dir.display());
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn leftover_tmp_files(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|name| name.contains(".tmp."))
+            .collect()
+    }
+
+    #[test]
+    fn atomic_write_overwrites_and_creates_without_leftover_tmp() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let existing = dir.path().join("settings.json");
+        fs::write(&existing, b"old content that is longer").expect("seed");
+
+        atomic_write(&existing, b"new").expect("overwrite");
+        assert_eq!(fs::read(&existing).expect("read"), b"new");
+
+        let fresh = dir.path().join("nested").join("fresh.toml");
+        atomic_write(&fresh, b"fresh = true\n").expect("create");
+        assert_eq!(fs::read(&fresh).expect("read"), b"fresh = true\n");
+
+        assert!(leftover_tmp_files(dir.path()).is_empty());
+        assert!(leftover_tmp_files(&dir.path().join("nested")).is_empty());
+    }
+
+    #[test]
+    fn atomic_write_removes_tmp_when_rename_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // 目标是一个非空目录：rename 一定失败
+        let target = dir.path().join("config.json");
+        fs::create_dir(&target).expect("mkdir");
+        fs::write(target.join("keep"), b"x").expect("seed");
+
+        let err = atomic_write(&target, b"secret").expect_err("rename must fail");
+        assert!(matches!(err, AppError::IoContext { .. }), "{err:?}");
+
+        assert!(leftover_tmp_files(dir.path()).is_empty());
+        assert!(target.is_dir());
+        assert_eq!(fs::read(target.join("keep")).expect("read"), b"x");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("auth.json");
+        fs::write(&path, b"{}").expect("seed");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("chmod");
+
+        atomic_write(&path, b"{\"k\":1}").expect("write");
+        let mode = fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 
     #[test]
     fn derive_mcp_path_from_override_uses_config_dir_for_custom_path() {
