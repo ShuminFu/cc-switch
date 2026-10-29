@@ -46,6 +46,14 @@ export function useProviderActions(
   const deleteProviderMutation = useDeleteProviderMutation();
   const switchProviderMutation = useSwitchProviderMutation();
 
+  // 正在切换中的供应商 ID（取自 mutation variables，并按 appId 绑定：
+  // 切到其他应用后不会把本应用的 pending 状态带过去）
+  const switchingProviderId =
+    switchProviderMutation.isPending &&
+    switchProviderMutation.variables?.appId === activeApp
+      ? switchProviderMutation.variables.providerId
+      : undefined;
+
   // Claude 插件同步逻辑
   const syncClaudePlugin = useCallback(
     async (provider: Provider) => {
@@ -159,6 +167,9 @@ export function useProviderActions(
   // 切换供应商
   const switchProvider = useCallback(
     async (provider: Provider) => {
+      // 同一应用已有切换在途时忽略重复触发（UI 也会禁用其余按钮）
+      if (switchingProviderId !== undefined) return;
+
       const isCopilotProvider =
         activeApp === "claude" &&
         provider.meta?.providerType === "github_copilot";
@@ -280,6 +291,7 @@ export function useProviderActions(
     },
     [
       switchProviderMutation,
+      switchingProviderId,
       syncClaudePlugin,
       activeApp,
       isProxyRunning,
@@ -375,6 +387,7 @@ export function useProviderActions(
     deleteProvider,
     saveUsageScript,
     setAsDefaultModel,
+    switchingProviderId,
     isLoading:
       addProviderMutation.isPending ||
       updateProviderMutation.isPending ||

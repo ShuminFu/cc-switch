@@ -143,6 +143,7 @@ function App() {
     deleteProvider,
     saveUsageScript,
     setAsDefaultModel,
+    switchingProviderId,
   } = useProviderActions(
     activeApp,
     isProxyRunning,
@@ -182,6 +183,7 @@ function App() {
       isProxyTakeover={isProxyRunning && isCurrentAppTakeoverActive}
       activeProviderId={activeProviderId}
       onSwitch={switchProvider}
+      switchingProviderId={switchingProviderId}
       onSetAsDefaultModel={setAsDefaultModel}
       shellActions={shellActions}
       onEdit={setEditingProvider}

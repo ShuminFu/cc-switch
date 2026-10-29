@@ -15,6 +15,8 @@ export interface ProvidersHomeProps {
   isProxyTakeover: boolean;
   activeProviderId?: string;
   onSwitch: (provider: Provider) => void;
+  /** 正在切换中的供应商 ID（切换在途时其余卡片的切换按钮禁用） */
+  switchingProviderId?: string;
   /** OpenClaw：设为默认模型 */
   onSetAsDefaultModel: (provider: Provider) => void;
   shellActions: ReturnType<typeof useProviderShellActions>;

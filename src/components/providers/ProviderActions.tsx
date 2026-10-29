@@ -42,6 +42,10 @@ interface ProviderActionsProps {
   // OpenClaw: default model
   isDefaultModel?: boolean;
   onSetAsDefault?: () => void;
+  // 本卡片的切换请求在途（显示加载态）
+  isSwitching?: boolean;
+  // 任一卡片的切换请求在途（禁用会触发切换的按钮，避免并发切换）
+  isSwitchPending?: boolean;
 }
 
 // 主按钮的呈现状态。title 用于 disabled 态向用户解释为何不可点击；
@@ -80,6 +84,8 @@ export function ProviderActions({
   // OpenClaw: default model
   isDefaultModel = false,
   onSetAsDefault,
+  isSwitching = false,
+  isSwitchPending = false,
 }: ProviderActionsProps) {
   const { t } = useTranslation();
   const iconButtonClass = "h-8 w-8 p-1";
@@ -218,7 +224,32 @@ export function ProviderActions({
     };
   };
 
-  const buttonState = getMainButtonState();
+  // 主按钮当前点击是否会走 onSwitch（与 handleMainButtonClick 的分支保持一致）
+  const mainActionSwitches = isOmo
+    ? !isCurrent
+    : isAdditiveMode
+      ? !isInConfig
+      : !isFailoverMode;
+
+  const baseButtonState = getMainButtonState();
+  const buttonState: MainButtonState =
+    isSwitchPending && mainActionSwitches
+      ? {
+          ...baseButtonState,
+          disabled: true,
+          icon: isSwitching ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            baseButtonState.icon
+          ),
+        }
+      : baseButtonState;
+  const isMainButtonSwitching = isSwitching && mainActionSwitches;
+
+  // Hermes 的「启用」按钮（onSetAsDefault）同样走切换流程
+  const setAsDefaultSwitches = appId === "hermes";
+  const isSetAsDefaultSwitching = setAsDefaultSwitches && isSwitching;
+  const isSetAsDefaultBlocked = setAsDefaultSwitches && isSwitchPending;
 
   const canDelete =
     !isReadOnly && (isOmo || isAdditiveMode ? true : !isCurrent);
@@ -241,7 +272,8 @@ export function ProviderActions({
               size="sm"
               variant={isDefaultModel ? "secondary" : "default"}
               onClick={isDefaultModel ? undefined : onSetAsDefault}
-              disabled={isDefaultModel}
+              disabled={isDefaultModel || isSetAsDefaultBlocked}
+              aria-busy={isSetAsDefaultSwitching || undefined}
               className={cn(
                 "w-fit px-2.5",
                 isDefaultModel
@@ -249,7 +281,11 @@ export function ProviderActions({
                   : "bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700",
               )}
             >
-              <Zap className="h-4 w-4" />
+              {isSetAsDefaultSwitching ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
               {isDefaultModel ? activeLabel : inactiveLabel}
             </Button>
           );
@@ -270,6 +306,7 @@ export function ProviderActions({
           data-testid="provider-main-action"
           onClick={handleMainButtonClick}
           disabled={buttonState.disabled}
+          aria-busy={isMainButtonSwitching || undefined}
           className={cn("w-[4.5rem] px-2.5", buttonState.className)}
         >
           {buttonState.icon}

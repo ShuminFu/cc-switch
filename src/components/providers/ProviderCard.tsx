@@ -67,6 +67,8 @@ interface ProviderCardProps {
   // OpenClaw: default model
   isDefaultModel?: boolean;
   onSetAsDefault?: () => void;
+  isSwitching?: boolean; // 本卡片的切换请求在途
+  isSwitchPending?: boolean; // 任一卡片的切换请求在途（禁用其余切换按钮）
 }
 
 /** 判断是否为官方供应商（无自定义 base URL / API key，直连官方 API） */
@@ -166,6 +168,8 @@ export function ProviderCard({
   // OpenClaw: default model
   isDefaultModel,
   onSetAsDefault,
+  isSwitching = false,
+  isSwitchPending = false,
 }: ProviderCardProps) {
   const { t } = useTranslation();
 
@@ -585,6 +589,8 @@ export function ProviderCard({
               // OpenClaw: default model
               isDefaultModel={isDefaultModel}
               onSetAsDefault={onSetAsDefault}
+              isSwitching={isSwitching}
+              isSwitchPending={isSwitchPending}
             />
           </div>
         </div>
