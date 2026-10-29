@@ -7,6 +7,8 @@ use crate::config::get_app_config_dir;
 use crate::error::AppError;
 use chrono::{Local, Utc};
 use rusqlite::backup::Backup;
+use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+use rusqlite::limits::Limit;
 use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 use std::fs;
@@ -38,6 +40,9 @@ const SYNC_PRESERVE_TABLES: &[&str] = &[
 /// Settings rows that belong to this install only: never exported, and kept
 /// from the local database on SQL import, sync import and backup restore.
 const LOCAL_ONLY_SETTING_KEYS: &[&str] = &[crate::proxy::inbound_auth::INBOUND_TOKEN_SETTING_KEY];
+
+/// PRAGMAs that an imported SQL file may run; `dump_sql` only emits these.
+const SQL_IMPORT_ALLOWED_PRAGMAS: &[&str] = &["foreign_keys", "user_version"];
 
 /// A database backup entry for the UI
 #[derive(Debug, serde::Serialize)]
@@ -125,9 +130,13 @@ impl Database {
         let temp_conn =
             Connection::open(&temp_path).map_err(|e| AppError::Database(e.to_string()))?;
 
-        temp_conn
-            .execute_batch(sql_content)
-            .map_err(|e| AppError::Database(format!("执行 SQL 导入失败: {e}")))?;
+        // 导入文件内容不可信（头部可伪造，同步的 SHA256 也来自同一远端）：
+        // 禁止 ATTACH（含 VACUUM INTO 内部的 ATTACH），并只放行导出格式所需的语句
+        temp_conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0);
+        temp_conn.authorizer(Some(Self::authorize_sql_import));
+        let import_result = temp_conn.execute_batch(sql_content);
+        temp_conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        import_result.map_err(|e| AppError::Database(format!("执行 SQL 导入失败: {e}")))?;
 
         // 补齐缺失表/索引并进行基础校验
         Self::create_tables_on_conn(&temp_conn)?;
@@ -170,6 +179,36 @@ impl Database {
         }
 
         Ok(snapshot)
+    }
+
+    /// SQL 导入期间的授权回调：仅允许 `dump_sql` 产生的语句类型
+    /// （事务、CREATE TABLE/INDEX、INSERT 及白名单 PRAGMA；REINDEX 只重建已有索引），其余一律拒绝。
+    fn authorize_sql_import(ctx: AuthContext<'_>) -> Authorization {
+        match ctx.action {
+            AuthAction::Transaction { .. }
+            | AuthAction::CreateTable { .. }
+            | AuthAction::CreateIndex { .. }
+            | AuthAction::Insert { .. }
+            | AuthAction::Read { .. }
+            | AuthAction::Select
+            | AuthAction::Reindex { .. }
+            | AuthAction::Function { .. } => Authorization::Allow,
+            // CREATE TABLE/INDEX 内部更新 sqlite_master；用户语句直接改写它需要
+            // writable_schema，而该 PRAGMA 不在白名单内
+            AuthAction::Update { table_name, .. }
+                if table_name.eq_ignore_ascii_case("sqlite_master") =>
+            {
+                Authorization::Allow
+            }
+            AuthAction::Pragma { pragma_name, .. }
+                if SQL_IMPORT_ALLOWED_PRAGMAS
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(pragma_name)) =>
+            {
+                Authorization::Allow
+            }
+            _ => Authorization::Deny,
+        }
     }
 
     fn validate_cc_switch_sql_export(sql: &str) -> Result<(), AppError> {
@@ -1052,6 +1091,71 @@ mod tests {
             None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn sql_import_rejects_attach_vacuum_into_and_unsafe_statements() -> Result<(), AppError> {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let attach_target = dir.path().join("pwned.db");
+        let vacuum_target = dir.path().join("v.db");
+        let header = "-- CC Switch SQLite 导出\n";
+
+        let db = Database::memory()?;
+        db.set_setting("local_marker", "kept")?;
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta)
+                 VALUES ('p1', 'claude', 'Provider', '{}', '{}')",
+                [],
+            )?;
+        }
+
+        let attach_sql = format!(
+            "{header}ATTACH DATABASE '{}' AS x; CREATE TABLE x.t(a);",
+            attach_target.display()
+        );
+        let vacuum_sql = format!("{header}VACUUM INTO '{}';", vacuum_target.display());
+        let cases = [
+            attach_sql,
+            vacuum_sql,
+            format!("{header}CREATE TABLE t(a); CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END;"),
+            format!("{header}CREATE VIEW v AS SELECT 1;"),
+            format!("{header}PRAGMA writable_schema=ON;"),
+            format!("{header}CREATE TABLE t(a); DELETE FROM t;"),
+        ];
+
+        for sql in &cases {
+            assert!(
+                db.import_sql_string(sql).is_err(),
+                "import should reject: {sql}"
+            );
+            assert!(
+                db.import_sql_string_for_sync(sql).is_err(),
+                "sync import should reject: {sql}"
+            );
+        }
+
+        assert!(!attach_target.exists(), "ATTACH created {attach_target:?}");
+        assert!(
+            !vacuum_target.exists(),
+            "VACUUM INTO created {vacuum_target:?}"
+        );
+        assert_eq!(
+            db.get_setting("local_marker")?.as_deref(),
+            Some("kept"),
+            "rejected import must not touch the main database"
+        );
+
+        // A genuine export (PRAGMA, transaction, CREATE TABLE/INDEX, INSERT) still imports.
+        let export = db.export_sql_string()?;
+        let fresh_db = Database::memory()?;
+        fresh_db.import_sql_string(&export)?;
+        assert_eq!(
+            fresh_db.get_setting("local_marker")?.as_deref(),
+            Some("kept")
+        );
         Ok(())
     }
 }
