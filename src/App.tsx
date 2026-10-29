@@ -99,6 +99,7 @@ import HermesMemoryPanel from "@/components/hermes/HermesMemoryPanel";
 import { safeStorageGet, safeStorageSet } from "@/lib/storage";
 import { isAppId, useAppCaps } from "@/entities/app/registry";
 import { providerKeys } from "@/entities/provider/keys";
+import { invalidateProviderGraph } from "@/entities/provider/invalidate";
 
 type View =
   | "providers"
@@ -618,23 +619,8 @@ function App() {
       // Remove from live config only (for additive mode apps like OpenCode/OpenClaw)
       // Does NOT delete from database - provider remains in the list
       await providersApi.removeFromLiveConfig(provider.id, activeApp);
-      // Invalidate queries to refresh the isInConfig state
-      if (activeApp === "opencode") {
-        await queryClient.invalidateQueries({
-          queryKey: providerKeys.opencodeLiveIds,
-        });
-      } else if (activeApp === "openclaw") {
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.liveProviderIds,
-        });
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.health,
-        });
-      } else if (activeApp === "hermes") {
-        await queryClient.invalidateQueries({
-          queryKey: hermesKeys.liveProviderIds,
-        });
-      }
+      // Invalidate the provider graph (incl. live ids) to refresh the isInConfig state
+      await invalidateProviderGraph(queryClient, activeApp);
       toast.success(
         t("notifications.removeFromConfigSuccess", {
           defaultValue: "已从配置移除",

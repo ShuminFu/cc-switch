@@ -1,5 +1,7 @@
 import { Suspense, type ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { openclawKeys } from "@/hooks/useOpenClaw";
+import { providerKeys } from "@/entities/provider/keys";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { providersApi } from "@/lib/api/providers";
@@ -31,6 +33,7 @@ vi.mock("@/components/providers/ProviderList", () => ({
     onConfigureUsage,
     onOpenWebsite,
     onCreate,
+    onRemoveFromConfig,
   }: any) => (
     <div>
       <div data-testid="provider-list">{JSON.stringify(providers)}</div>
@@ -49,6 +52,11 @@ vi.mock("@/components/providers/ProviderList", () => ({
         open-website
       </button>
       <button onClick={() => onCreate?.()}>create</button>
+      <button
+        onClick={() => onRemoveFromConfig?.(providers[currentProviderId])}
+      >
+        remove-from-config
+      </button>
     </div>
   ),
 }));
@@ -303,6 +311,57 @@ describe("App integration with MSW", () => {
     expect(toastErrorMock).not.toHaveBeenCalledWith(
       expect.stringContaining("Provider key is required for openclaw"),
     );
+  });
+
+  it("refreshes the provider graph after removing an openclaw provider from live config", async () => {
+    setProviders("openclaw", {
+      deepseek: {
+        id: "deepseek",
+        name: "DeepSeek",
+        settingsConfig: {},
+        category: "custom",
+        sortIndex: 0,
+        createdAt: Date.now(),
+      },
+    });
+    setCurrentProviderId("openclaw", "deepseek");
+    setLiveProviderIds("openclaw", ["deepseek"]);
+    const removeSpy = vi
+      .spyOn(providersApi, "removeFromLiveConfig")
+      .mockResolvedValue(true);
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+
+    try {
+      const { default: App } = await import("@/App");
+      renderApp(App);
+
+      fireEvent.click(screen.getByText("switch-openclaw"));
+      await waitFor(() =>
+        expect(screen.getByTestId("current-provider").textContent).toBe(
+          "deepseek",
+        ),
+      );
+
+      invalidateSpy.mockClear();
+      fireEvent.click(screen.getByText("remove-from-config"));
+      fireEvent.click(await screen.findByText("confirm-delete"));
+
+      await waitFor(() =>
+        expect(removeSpy).toHaveBeenCalledWith("deepseek", "openclaw"),
+      );
+      await waitFor(() => {
+        const keys = invalidateSpy.mock.calls.map(
+          ([filters]) => filters?.queryKey,
+        );
+        expect(keys).toContainEqual(providerKeys.list("openclaw"));
+        expect(keys).toContainEqual(openclawKeys.liveProviderIds);
+        expect(keys).toContainEqual(openclawKeys.defaultModel);
+        expect(keys).toContainEqual(openclawKeys.health);
+      });
+    } finally {
+      removeSpy.mockRestore();
+      invalidateSpy.mockRestore();
+    }
   });
 
   it("shows toast when duplicate cannot load live provider ids", async () => {
