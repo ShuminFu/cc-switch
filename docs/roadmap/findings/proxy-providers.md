@@ -8,41 +8,41 @@ The provider/format layer is large (~36k lines in scope, ~600 unit tests) and ha
 
 ## Index
 
-| ID | Title | Type | Priority | Effort | Confidence |
-|---|---|---|---|---|---|
-| [PROV-01](#prov-01) | Claude←OpenAI-Chat stream converter silently swallows upstream error chunks and unparsable payloads | bug | P2 | S | high |
-| [PROV-02](#prov-02) | Streamed `tool_calls` without `index` are dropped (streaming.rs) or collapsed (streaming_codex_chat.rs) | bug | P2 | S | medium |
-| [PROV-04](#prov-04) | Claude→`openai_chat` ignores provider thinking parameters that the Codex→Chat path already models | feature | P2 | M | high |
-| [PROV-05](#prov-05) | `gpt-5*` models through Chat Completions receive `max_tokens` and raw `temperature` | bug | P2 | S | medium |
-| [PROV-06](#prov-06) | Gemini bridge never requests or surfaces thinking (no `thinkingConfig`, thought parts discarded) | feature | P2 | M | high |
-| [PROV-07](#prov-07) | `GeminiAdapter` sends an empty `Authorization: Bearer ` for refresh-only OAuth JSON | bug | P2 | S | high |
-| [PROV-08](#prov-08) | Gemini CLI OAuth refresh is not implemented (documented dead code) | feature | P2 | M | high |
-| [PROV-09](#prov-09) | Codex OAuth / Copilot refresh paths lack failure backoff and lose a freshly minted token on persist failure | bug | P2 | S | medium |
-| [PROV-10](#prov-10) | OAuth refresh tokens and GitHub tokens are persisted as plaintext JSON | security | P2 | M | high |
-| [PROV-11](#prov-11) | Gemini replay state (thought signatures, tool-call ids) lives only in a volatile in-memory shadow store | refactor | P2 | L | high |
-| [PROV-12](#prov-12) | Codex OAuth / Responses upstream never asks for reasoning summaries, so thinking shows as redacted | feature | P2 | S | medium |
-| [PROV-13](#prov-13) | Gemini schema conversion passes unsupported `format` values into the restricted `parameters` channel | bug | P2 | S | medium |
-| [PROV-14](#prov-14) | Non-streaming Chat→Anthropic conversion fabricates empty tool ids and silently replaces unparsable arguments | bug | P2 | S | high |
-| [PROV-15](#prov-15) | Media/tool-result block handling differs per bridge (URL images, documents, images-in-tool-results, `is_error`) | bug | P2 | M | high |
-| [PROV-17](#prov-17) | Usage "input includes cache" semantics are encoded by `app_type` string matching in three places plus implicit subtraction inside every transform | refactor | P2 | M | high |
-| [PROV-18](#prov-18) | Three SSE aggregators and two JSON-to-SSE expanders duplicate the streaming converters | refactor | P2 | L | high |
-| [PROV-19](#prov-19) | Introduce a canonical message/stream IR with per-protocol codecs (replace 13 pairwise converters) | refactor | P2 | XL | high |
-| [PROV-20](#prov-20) | Build a recorded golden-fixture corpus and round-trip/property tests for the conversion layer | test | P2 | L | high |
-| [PROV-21](#prov-21) | Replace string-dispatch `api_format` routing and the half-dead `ProviderAdapter` trait with a bridge registry | refactor | P2 | L | high |
-| [PROV-23](#prov-23) | Missing native provider support: Azure OpenAI, AWS Bedrock, Google Vertex, Ollama/local, Mistral | feature | P2 | XL | high |
-| [PROV-27](#prov-27) | Test-coverage holes in the Claude-side converters and Gemini bridge | test | P2 | M | high |
-| [PROV-28](#prov-28) | Auth managers have no HTTP-mocked or concurrency tests | test | P2 | M | high |
-| [PROV-32](#prov-32) | #5508 reasoning forward-attach is not mirrored in the Claude→Chat direction for text-only assistant turns | bug | P2 | S | medium |
-| [PROV-03](#prov-03) | Gemini streaming text uses an ambiguous prefix heuristic that can drop or duplicate text | bug | P3 | M | medium |
-| [PROV-16](#prov-16) | Chat-SSE converter emits empty thinking blocks and can reopen closed blocks after `finish_reason` | bug | P3 | S | medium |
-| [PROV-22](#prov-22) | `response_handler.rs` is dead code | tech-debt | P3 | S | high |
-| [PROV-24](#prov-24) | Stop-reason mapping is inconsistent across bridges (`content_filter`, safety blocks, malformed function calls) | bug | P3 | S | high |
-| [PROV-25](#prov-25) | #4706 `parameters.type` normalization and schema cleaning are incomplete/inconsistent across the three schema sanitizers | tech-debt | P3 | S | high |
-| [PROV-26](#prov-26) | `tool_choice` / parallel-tool mapping diverges between bridges | bug | P3 | S | high |
-| [PROV-29](#prov-29) | Provider-type detection and Codex TOML parsing are duplicated | tech-debt | P3 | S | high |
-| [PROV-30](#prov-30) | Shadow/history stores take write locks and clone on every read; prune is O(total calls) | performance | P3 | S | high |
-| [PROV-31](#prov-31) | Silent field drops across request transforms are undocumented | docs | P3 | S | high |
-| [PROV-33](#prov-33) | Text-only model registry is hard-coded in `model_capabilities.rs` | tech-debt | P3 | S | high |
+| ID | Title | Type | Priority | Effort | Confidence | Verdict |
+|---|---|---|---|---|---|---|
+| [PROV-01](#prov-01) | Claude←OpenAI-Chat stream converter silently swallows upstream error chunks and unparsable payloads | bug | P2 (first pass P1) | S | high | confirmed |
+| [PROV-02](#prov-02) | Streamed `tool_calls` without `index` are dropped (streaming.rs) or collapsed (streaming_codex_chat.rs) | bug | P2 (first pass P1) | S | medium | partially-confirmed |
+| [PROV-04](#prov-04) | Claude→`openai_chat` ignores provider thinking parameters that the Codex→Chat path already models | feature | P2 (first pass P1) | M | high | partially-confirmed |
+| [PROV-05](#prov-05) | `gpt-5*` models through Chat Completions receive `max_tokens` and raw `temperature` | bug | P2 (first pass P1) | S | medium | partially-confirmed |
+| [PROV-06](#prov-06) | Gemini bridge never requests or surfaces thinking (no `thinkingConfig`, thought parts discarded) | feature | P2 | M | high |  |
+| [PROV-07](#prov-07) | `GeminiAdapter` sends an empty `Authorization: Bearer ` for refresh-only OAuth JSON | bug | P2 | S | high |  |
+| [PROV-08](#prov-08) | Gemini CLI OAuth refresh is not implemented (documented dead code) | feature | P2 | M | high |  |
+| [PROV-09](#prov-09) | Codex OAuth / Copilot refresh paths lack failure backoff and lose a freshly minted token on persist failure | bug | P2 | S | medium |  |
+| [PROV-10](#prov-10) | OAuth refresh tokens and GitHub tokens are persisted as plaintext JSON | security | P2 | M | high |  |
+| [PROV-11](#prov-11) | Gemini replay state (thought signatures, tool-call ids) lives only in a volatile in-memory shadow store | refactor | P2 | L | high |  |
+| [PROV-12](#prov-12) | Codex OAuth / Responses upstream never asks for reasoning summaries, so thinking shows as redacted | feature | P2 | S | medium |  |
+| [PROV-13](#prov-13) | Gemini schema conversion passes unsupported `format` values into the restricted `parameters` channel | bug | P2 | S | medium |  |
+| [PROV-14](#prov-14) | Non-streaming Chat→Anthropic conversion fabricates empty tool ids and silently replaces unparsable arguments | bug | P2 | S | high |  |
+| [PROV-15](#prov-15) | Media/tool-result block handling differs per bridge (URL images, documents, images-in-tool-results, `is_error`) | bug | P2 | M | high |  |
+| [PROV-17](#prov-17) | Usage "input includes cache" semantics are encoded by `app_type` string matching in three places plus implicit subtraction inside every transform | refactor | P2 | M | high |  |
+| [PROV-18](#prov-18) | Three SSE aggregators and two JSON-to-SSE expanders duplicate the streaming converters | refactor | P2 | L | high |  |
+| [PROV-19](#prov-19) | Introduce a canonical message/stream IR with per-protocol codecs (replace 13 pairwise converters) | refactor | P2 (first pass P1) | XL | high | partially-confirmed |
+| [PROV-20](#prov-20) | Build a recorded golden-fixture corpus and round-trip/property tests for the conversion layer | test | P2 (first pass P1) | L | high | partially-confirmed |
+| [PROV-21](#prov-21) | Replace string-dispatch `api_format` routing and the half-dead `ProviderAdapter` trait with a bridge registry | refactor | P2 | L | high |  |
+| [PROV-23](#prov-23) | Missing native provider support: Azure OpenAI, AWS Bedrock, Google Vertex, Ollama/local, Mistral | feature | P2 | XL | high |  |
+| [PROV-27](#prov-27) | Test-coverage holes in the Claude-side converters and Gemini bridge | test | P2 | M | high |  |
+| [PROV-28](#prov-28) | Auth managers have no HTTP-mocked or concurrency tests | test | P2 | M | high |  |
+| [PROV-32](#prov-32) | #5508 reasoning forward-attach is not mirrored in the Claude→Chat direction for text-only assistant turns | bug | P2 | S | medium |  |
+| [PROV-03](#prov-03) | Gemini streaming text uses an ambiguous prefix heuristic that can drop or duplicate text | bug | P3 (first pass P1) | M | medium | partially-confirmed |
+| [PROV-16](#prov-16) | Chat-SSE converter emits empty thinking blocks and can reopen closed blocks after `finish_reason` | bug | P3 | S | medium |  |
+| [PROV-22](#prov-22) | `response_handler.rs` is dead code | tech-debt | P3 | S | high |  |
+| [PROV-24](#prov-24) | Stop-reason mapping is inconsistent across bridges (`content_filter`, safety blocks, malformed function calls) | bug | P3 | S | high |  |
+| [PROV-25](#prov-25) | #4706 `parameters.type` normalization and schema cleaning are incomplete/inconsistent across the three schema sanitizers | tech-debt | P3 | S | high |  |
+| [PROV-26](#prov-26) | `tool_choice` / parallel-tool mapping diverges between bridges | bug | P3 | S | high |  |
+| [PROV-29](#prov-29) | Provider-type detection and Codex TOML parsing are duplicated | tech-debt | P3 | S | high |  |
+| [PROV-30](#prov-30) | Shadow/history stores take write locks and clone on every read; prune is O(total calls) | performance | P3 | S | high |  |
+| [PROV-31](#prov-31) | Silent field drops across request transforms are undocumented | docs | P3 | S | high |  |
+| [PROV-33](#prov-33) | Text-only model registry is hard-coded in `model_capabilities.rs` | tech-debt | P3 | S | high |  |
 
 ## Findings
 

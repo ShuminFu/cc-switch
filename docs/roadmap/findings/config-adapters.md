@@ -8,45 +8,45 @@ The eight per-app adapters are functionally rich and the newest ones (OpenClaw w
 
 ## Index
 
-| ID | Title | Type | Priority | Effort | Confidence |
-|---|---|---|---|---|---|
-| [CFG-01](#cfg-01) | Usage-script JS runtime has no CPU/memory limits and blocks the async runtime | security | P2 | M | high |
-| [CFG-02](#cfg-02) | Gemini `settings.json` is silently replaced when it cannot be parsed | bug | P2 | S | high |
-| [CFG-03](#cfg-03) | Claude/Codex/Gemini live files are overwritten with no backup and backfill is silently skipped when live is unreadable | bug | P2 | M | high |
-| [CFG-04](#cfg-04) | `atomic_write` is not crash-safe and not atomic on Windows; secret files inherit umask permissions | bug | P2 | S | medium |
-| [CFG-05](#cfg-05) | MCP specs from the UI and deeplinks bypass `validate_server_spec`; Windows `cmd /c` wrapping re-interprets shell metacharacters | security | P2 | S | medium |
-| [CFG-06](#cfg-06) | Introduce an `AppAdapter` trait, a shared live-file layer, and a conformance test-suite (large refactor) | refactor | P2 | XL | high |
-| [CFG-07](#cfg-07) | OpenCode config is read as JSON5 but written through the key-sorting `serde_json` writer (comments and ordering lost) | bug | P2 | M | high |
-| [CFG-08](#cfg-08) | Hermes YAML section splicing drops comments and emits LF into CRLF files; `serde_yaml` 0.9 is an archived crate | bug | P2 | L | high |
-| [CFG-09](#cfg-09) | Build one format-preserving `LiveDoc` layer instead of five ad-hoc writers (large refactor) | refactor | P2 | L | high |
-| [CFG-10](#cfg-10) | Isolate `codex_history_migration.rs` behind a `Migration` registry with a retirement policy | refactor | P2 | L | high |
-| [CFG-11](#cfg-11) | `provider.rs` has become a grab-bag model (ProviderMeta with 30+ optional cross-concern fields) | tech-debt | P2 | M | high |
-| [CFG-12](#cfg-12) | Tool-native home overrides (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `OPENCODE_CONFIG`) are not honored, while `HERMES_HOME` is | bug | P2 | S | high |
-| [CFG-13](#cfg-13) | Gemini `.env` parser/serializer is lossy (quotes, comments, order, trailing newline) and chmods the user's `~/.gemini` directory | bug | P2 | M | high |
-| [CFG-14](#cfg-14) | No BOM/encoding/line-ending tolerance in the shared readers | bug | P2 | S | medium |
-| [CFG-15](#cfg-15) | Provider switch may spawn the `codex` CLI synchronously (no timeout, console flash, `.cmd` not resolved) | performance | P2 | M | high |
-| [CFG-16](#cfg-16) | MCP transport inference is lossy across adapters (streamable HTTP becomes SSE) | bug | P2 | S | high |
-| [CFG-17](#cfg-17) | MCP spec schema is unchecked; Codex/Grok projection silently drops non-string `args`/`env`/`headers` | bug | P2 | S | high |
-| [CFG-18](#cfg-18) | Hermes `set_provider` resurrects fields the user cleared in the UI | bug | P2 | S | medium |
-| [CFG-19](#cfg-19) | Vendor/model capability knowledge is hard-coded in five unrelated files | tech-debt | P2 | M | high |
-| [CFG-20](#cfg-20) | Secrets are projected in plaintext with default permissions and logged by the MCP converter | security | P2 | M | high |
-| [CFG-21](#cfg-21) | Test coverage is thin exactly where data loss happens; no cross-adapter conformance tests | test | P2 | L | high |
-| [CFG-22](#cfg-22) | Feature — diff/preview before any live write | feature | P2 | L | high |
-| [CFG-23](#cfg-23) | Feature — "Import from live config" for every app, repeatable | feature | P2 | M | high |
-| [CFG-24](#cfg-24) | Feature — schema validation with path-based, localized errors | feature | P2 | L | high |
-| [CFG-25](#cfg-25) | `UniversalProvider::to_codex_provider` builds TOML by string formatting without escaping | bug | P2 | S | high |
-| [CFG-26](#cfg-26) | No developer documentation of adapter contracts, ownership, backfill rules and backup locations | docs | P2 | M | high |
-| [CFG-27](#cfg-27) | Codex two-file "atomic" write is not atomic and reads a value it never uses | bug | P3 | S | high |
-| [CFG-28](#cfg-28) | `write_json_file` alphabetizes keys and omits the trailing newline, reordering user-visible files on every switch | bug | P3 | S | high |
-| [CFG-29](#cfg-29) | Usage-script template variables are substituted textually into JS source | bug | P3 | S | high |
-| [CFG-30](#cfg-30) | Gemini MCP sync injects `timeout` into every server and Windows `cmd /c` wrapping leaks back into the DB on import | bug | P3 | S | high |
-| [CFG-31](#cfg-31) | Dead code kept alive with `#[allow(dead_code)]` | tech-debt | P3 | S | high |
-| [CFG-32](#cfg-32) | `claude_plugin.rs` and `prompt_files.rs` bypass the shared home/atomic-write helpers | tech-debt | P3 | S | high |
-| [CFG-33](#cfg-33) | `apply_codex_official_proxy_route` reorders `config.toml` and rewrites inline tables | bug | P3 | S | high |
-| [CFG-34](#cfg-34) | Claude Desktop restore leaves cc-switch residue and the Windows directory pick is fuzzy | bug | P3 | S | medium |
-| [CFG-35](#cfg-35) | Feature — adapters for additional tools once `AppAdapter` exists | feature | P3 | XL | medium |
-| [CFG-36](#cfg-36) | Feature — editable Hermes v12+ `providers:` dict entries | feature | P3 | M | medium |
-| [CFG-37](#cfg-37) | OpenClaw section rewrite loses in-section comments and uses two different JSON5 parsers | bug | P3 | M | high |
+| ID | Title | Type | Priority | Effort | Confidence | Verdict |
+|---|---|---|---|---|---|---|
+| [CFG-01](#cfg-01) | Usage-script JS runtime has no CPU/memory limits and blocks the async runtime | security | P2 (first pass P1) | M | high | confirmed |
+| [CFG-02](#cfg-02) | Gemini `settings.json` is silently replaced when it cannot be parsed | bug | P2 (first pass P1) | S | high | partially-confirmed |
+| [CFG-03](#cfg-03) | Claude/Codex/Gemini live files are overwritten with no backup and backfill is silently skipped when live is unreadable | bug | P2 (first pass P1) | M | high | confirmed |
+| [CFG-04](#cfg-04) | `atomic_write` is not crash-safe and not atomic on Windows; secret files inherit umask permissions | bug | P2 (first pass P1) | S | medium | partially-confirmed |
+| [CFG-05](#cfg-05) | MCP specs from the UI and deeplinks bypass `validate_server_spec`; Windows `cmd /c` wrapping re-interprets shell metacharacters | security | P2 (first pass P1) | S | medium | partially-confirmed |
+| [CFG-06](#cfg-06) | Introduce an `AppAdapter` trait, a shared live-file layer, and a conformance test-suite (large refactor) | refactor | P2 (first pass P1) | XL | high | partially-confirmed |
+| [CFG-07](#cfg-07) | OpenCode config is read as JSON5 but written through the key-sorting `serde_json` writer (comments and ordering lost) | bug | P2 | M | high |  |
+| [CFG-08](#cfg-08) | Hermes YAML section splicing drops comments and emits LF into CRLF files; `serde_yaml` 0.9 is an archived crate | bug | P2 | L | high |  |
+| [CFG-09](#cfg-09) | Build one format-preserving `LiveDoc` layer instead of five ad-hoc writers (large refactor) | refactor | P2 | L | high |  |
+| [CFG-10](#cfg-10) | Isolate `codex_history_migration.rs` behind a `Migration` registry with a retirement policy | refactor | P2 | L | high |  |
+| [CFG-11](#cfg-11) | `provider.rs` has become a grab-bag model (ProviderMeta with 30+ optional cross-concern fields) | tech-debt | P2 | M | high |  |
+| [CFG-12](#cfg-12) | Tool-native home overrides (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `OPENCODE_CONFIG`) are not honored, while `HERMES_HOME` is | bug | P2 | S | high |  |
+| [CFG-13](#cfg-13) | Gemini `.env` parser/serializer is lossy (quotes, comments, order, trailing newline) and chmods the user's `~/.gemini` directory | bug | P2 | M | high |  |
+| [CFG-14](#cfg-14) | No BOM/encoding/line-ending tolerance in the shared readers | bug | P2 | S | medium |  |
+| [CFG-15](#cfg-15) | Provider switch may spawn the `codex` CLI synchronously (no timeout, console flash, `.cmd` not resolved) | performance | P2 | M | high |  |
+| [CFG-16](#cfg-16) | MCP transport inference is lossy across adapters (streamable HTTP becomes SSE) | bug | P2 | S | high |  |
+| [CFG-17](#cfg-17) | MCP spec schema is unchecked; Codex/Grok projection silently drops non-string `args`/`env`/`headers` | bug | P2 | S | high |  |
+| [CFG-18](#cfg-18) | Hermes `set_provider` resurrects fields the user cleared in the UI | bug | P2 | S | medium |  |
+| [CFG-19](#cfg-19) | Vendor/model capability knowledge is hard-coded in five unrelated files | tech-debt | P2 | M | high |  |
+| [CFG-20](#cfg-20) | Secrets are projected in plaintext with default permissions and logged by the MCP converter | security | P2 | M | high |  |
+| [CFG-21](#cfg-21) | Test coverage is thin exactly where data loss happens; no cross-adapter conformance tests | test | P2 | L | high |  |
+| [CFG-22](#cfg-22) | Feature — diff/preview before any live write | feature | P2 | L | high |  |
+| [CFG-23](#cfg-23) | Feature — "Import from live config" for every app, repeatable | feature | P2 | M | high |  |
+| [CFG-24](#cfg-24) | Feature — schema validation with path-based, localized errors | feature | P2 | L | high |  |
+| [CFG-25](#cfg-25) | `UniversalProvider::to_codex_provider` builds TOML by string formatting without escaping | bug | P2 | S | high |  |
+| [CFG-26](#cfg-26) | No developer documentation of adapter contracts, ownership, backfill rules and backup locations | docs | P2 | M | high |  |
+| [CFG-27](#cfg-27) | Codex two-file "atomic" write is not atomic and reads a value it never uses | bug | P3 | S | high |  |
+| [CFG-28](#cfg-28) | `write_json_file` alphabetizes keys and omits the trailing newline, reordering user-visible files on every switch | bug | P3 | S | high |  |
+| [CFG-29](#cfg-29) | Usage-script template variables are substituted textually into JS source | bug | P3 | S | high |  |
+| [CFG-30](#cfg-30) | Gemini MCP sync injects `timeout` into every server and Windows `cmd /c` wrapping leaks back into the DB on import | bug | P3 | S | high |  |
+| [CFG-31](#cfg-31) | Dead code kept alive with `#[allow(dead_code)]` | tech-debt | P3 | S | high |  |
+| [CFG-32](#cfg-32) | `claude_plugin.rs` and `prompt_files.rs` bypass the shared home/atomic-write helpers | tech-debt | P3 | S | high |  |
+| [CFG-33](#cfg-33) | `apply_codex_official_proxy_route` reorders `config.toml` and rewrites inline tables | bug | P3 | S | high |  |
+| [CFG-34](#cfg-34) | Claude Desktop restore leaves cc-switch residue and the Windows directory pick is fuzzy | bug | P3 | S | medium |  |
+| [CFG-35](#cfg-35) | Feature — adapters for additional tools once `AppAdapter` exists | feature | P3 | XL | medium |  |
+| [CFG-36](#cfg-36) | Feature — editable Hermes v12+ `providers:` dict entries | feature | P3 | M | medium |  |
+| [CFG-37](#cfg-37) | OpenClaw section rewrite loses in-section comments and uses two different JSON5 parsers | bug | P3 | M | high |  |
 
 ## Findings
 

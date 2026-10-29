@@ -1,6 +1,6 @@
 # Documentation & onboarding — findings (DOCS-xx)
 
-Part of the [next-phase proposals](../README.md). 23 findings. Priorities: P1 = 5, P2 = 12, P3 = 6.
+Part of the [next-phase proposals](../README.md). 23 findings. Priorities: P2 = 15, P3 = 8.
 
 ## Area summary
 
@@ -8,78 +8,63 @@ The four UI locales (`src/i18n/locales/{en,zh,zh-TW,ja}.json`) are structurally 
 
 ## Index
 
-| ID | Title | Type | Priority | Effort | Confidence |
-|---|---|---|---|---|---|
-| [DOCS-01](#docs-01) | The user manual is frozen at v3.16.0 and omits Grok Build, project profiles and S3 sync | docs | P1 | L | high |
-| [DOCS-02](#docs-02) | Release-notes/changelog hygiene: stale README link, no index, missing ja for 4 versions, 14 broken links, a missing 3.6.1 entry and a mis-dated 3.5.0 | docs | P1 | S | high |
-| [DOCS-03](#docs-03) | README screenshots show a three-app UI that predates most shipped features | docs | P1 | M | high |
-| [DOCS-04](#docs-04) | Deep-link protocol has no canonical spec; manual and generator lag the parser | docs | P1 | M | high |
-| [DOCS-13](#docs-13) | First-run experience is a single text modal — add a guided setup wizard | ux | P1 | L | high |
-| [DOCS-05](#docs-05) | Proxy / failover runtime semantics are undocumented beyond the UI walkthrough; proxy guide is Chinese-only | docs | P2 | M | medium |
-| [DOCS-06](#docs-06) | Cloud-sync (WebDAV/S3) conflict and scope semantics are not documented | docs | P2 | M | medium |
-| [DOCS-07](#docs-07) | Backup/restore procedure and the Backup Manager are undocumented | docs | P2 | S | high |
-| [DOCS-08](#docs-08) | No security-model document (what is stored where, in what form, and what the proxy exposes) | docs | P2 | M | medium |
-| [DOCS-09](#docs-09) | No contributor architecture documentation beyond a collapsed README section duplicated four times | docs | P2 | M | high |
-| [DOCS-10](#docs-10) | Guides, the session-manager PRD and the deep-link generator are not discoverable | docs | P2 | S | high |
-| [DOCS-11](#docs-11) | README front-loads 175 lines of sponsor banners before any product description | docs | P2 | M | medium |
-| [DOCS-14](#docs-14) | Import-from-existing-configs is silent and per-app; surface a cross-app import summary | feature | P2 | M | medium |
-| [DOCS-15](#docs-15) | Add a health checklist / diagnostics panel with "copy diagnostics" | feature | P2 | L | medium |
-| [DOCS-16](#docs-16) | No contextual help links from the app to the manual | feature | P2 | M | high |
-| [DOCS-17](#docs-17) | In-app "What's new" after updates | feature | P2 | M | high |
-| [DOCS-19](#docs-19) | Error presentation: raw backend strings in toasts, mixed languages, no "copy details" or next step | ux | P2 | M | high |
-| [DOCS-12](#docs-12) | Cross-README consistency nits (relative `../../releases` links, naming, DE manual link) | docs | P3 | S | high |
-| [DOCS-18](#docs-18) | Keyboard shortcuts exist but are undocumented and platform-unaware | ux | P3 | S | high |
-| [DOCS-20](#docs-20) | Per-OS troubleshooting is scattered and lacks log locations | docs | P3 | S | medium |
-| [DOCS-21](#docs-21) | Issue/PR templates do not reflect four UI locales or the German README | docs | P3 | S | high |
-| [DOCS-22](#docs-22) | GitHub release body is Chinese-only and hand-written in the workflow | docs | P3 | S | high |
-| [DOCS-23](#docs-23) | Package/store descriptions and in-app product copy still describe a three-tool product | docs | P3 | S | high |
+| ID | Title | Type | Priority | Effort | Confidence | Verdict |
+|---|---|---|---|---|---|---|
+| [DOCS-01](#docs-01) | The user manual is frozen at v3.16.0 and omits Grok Build, project profiles and S3 sync | docs | P2 (first pass P1) | L | high | partially-confirmed |
+| [DOCS-02](#docs-02) | Release-notes/changelog hygiene: stale README link, no index, missing ja for 4 versions, 14 broken links, a missing 3.6.1 entry and a mis-dated 3.5.0 | docs | P2 (first pass P1) | S | high | partially-confirmed |
+| [DOCS-04](#docs-04) | Deep-link protocol has no canonical spec; manual and generator lag the parser | docs | P2 (first pass P1) | M | high | partially-confirmed |
+| [DOCS-05](#docs-05) | Proxy / failover runtime semantics are undocumented beyond the UI walkthrough; proxy guide is Chinese-only | docs | P2 | M | medium |  |
+| [DOCS-06](#docs-06) | Cloud-sync (WebDAV/S3) conflict and scope semantics are not documented | docs | P2 | M | medium |  |
+| [DOCS-07](#docs-07) | Backup/restore procedure and the Backup Manager are undocumented | docs | P2 | S | high |  |
+| [DOCS-08](#docs-08) | No security-model document (what is stored where, in what form, and what the proxy exposes) | docs | P2 | M | medium |  |
+| [DOCS-09](#docs-09) | No contributor architecture documentation beyond a collapsed README section duplicated four times | docs | P2 | M | high |  |
+| [DOCS-10](#docs-10) | Guides, the session-manager PRD and the deep-link generator are not discoverable | docs | P2 | S | high |  |
+| [DOCS-11](#docs-11) | README front-loads 175 lines of sponsor banners before any product description | docs | P2 | M | medium |  |
+| [DOCS-14](#docs-14) | Import-from-existing-configs is silent and per-app; surface a cross-app import summary | feature | P2 | M | medium |  |
+| [DOCS-15](#docs-15) | Add a health checklist / diagnostics panel with "copy diagnostics" | feature | P2 | L | medium |  |
+| [DOCS-16](#docs-16) | No contextual help links from the app to the manual | feature | P2 | M | high |  |
+| [DOCS-17](#docs-17) | In-app "What's new" after updates | feature | P2 | M | high |  |
+| [DOCS-19](#docs-19) | Error presentation: raw backend strings in toasts, mixed languages, no "copy details" or next step | ux | P2 | M | high |  |
+| [DOCS-03](#docs-03) | README screenshots show a three-app UI that predates most shipped features | docs | P3 (first pass P1) | M | high | partially-confirmed |
+| [DOCS-12](#docs-12) | Cross-README consistency nits (relative `../../releases` links, naming, DE manual link) | docs | P3 | S | high |  |
+| [DOCS-13](#docs-13) | First-run experience is a single text modal — add a guided setup wizard | ux | P3 (first pass P1) | L | medium | partially-confirmed |
+| [DOCS-18](#docs-18) | Keyboard shortcuts exist but are undocumented and platform-unaware | ux | P3 | S | high |  |
+| [DOCS-20](#docs-20) | Per-OS troubleshooting is scattered and lacks log locations | docs | P3 | S | medium |  |
+| [DOCS-21](#docs-21) | Issue/PR templates do not reflect four UI locales or the German README | docs | P3 | S | high |  |
+| [DOCS-22](#docs-22) | GitHub release body is Chinese-only and hand-written in the workflow | docs | P3 | S | high |  |
+| [DOCS-23](#docs-23) | Package/store descriptions and in-app product copy still describe a three-tool product | docs | P3 | S | high |  |
 
 ## Findings
 
 ### DOCS-01: The user manual is frozen at v3.16.0 and omits Grok Build, project profiles and S3 sync
 
-**Type:** docs · **Priority:** P1 · **Effort:** L · **Confidence:** high
+**Type:** docs · **Priority:** P2 · **Effort:** L · **Confidence:** high
 
 - **Evidence:** `docs/user-manual/README.md:3` lists "Claude Code / Claude Desktop / Codex / Gemini CLI / OpenCode / OpenClaw / Hermes" (no Grok Build) and `:15-17` "Documentation version: v3.16.0 / Last updated: 2026-05-29"; `docs/user-manual/{en,zh,ja}/README.md:109-113` same stamp and "v3.16.0 Highlights"; `rg -il grok docs/user-manual` → 0 files in all three locales; `rg -il "project profile|named snapshot" docs/user-manual/en` → 0 while `CHANGELOG.md:8-10` makes profiles the 3.17.0 headline and `docs/release-notes/v3.17.0-en.md:9-11` points readers at the manual; `rg -il "\bS3\b" docs/user-manual/en` → 0 although `src/i18n/locales/en.json` has `settings.s3Sync.*` (presets AWS S3 / R2 / OSS / COS / OBS); `README.md:218` "[Release Notes](docs/release-notes/v3.16.1-en.md)" in all four READMEs; `package.json:3` version 3.17.0. Coverage is otherwise symmetric: 26 files per locale (en 191,616 B, zh 179,398 B, ja 248,023 B), 40 shared assets.
 - **Problem:** The manual is the only deep documentation and it lags one minor release plus the Grok Build client (commit 1c0ee0c); users of the headline 3.17 feature have nothing to read; the version stamp hand-maintained in 4 places is already wrong.
 - **Proposal:** Make "manual updated or explicitly N/A" a release checklist item in `.github/pull_request_template.md`; add `docs/user-manual/en/2-providers/2.7-grok-build.md` and `1-getting-started/1.6-projects.md` (+ zh/ja), extend 1.5-settings with S3 sync; derive the version stamp from `package.json` with a tiny script run in the release workflow; add a `docs` CI job that fails when `src/config/*Presets.ts` gains an app id not mentioned in the manual index.
 - **Acceptance:** Manual index lists 8 tools and stamps 3.17.0; `rg -il grok docs/user-manual/en | wc -l` ≥ 2; release PR template has the docs checkbox.
+- **Verification:** **partially-confirmed** — Every cited fact holds: docs/user-manual/README.md:3 lists seven tools without Grok Build and :15-17 stamps 'v3.16.0 / 2026-05-29', the same stamp sits at en/zh/ja README.md:109-111; `rg -il grok docs/user-manual` returns nothing although commit 1c0ee0c (2026-07-17) added Grok Build and src-tauri/src/app_config.rs:17 carries `grokbuild`; `rg -il 'project profile|named snapshot'` and case-sensitive `rg 'S3'` return nothing in the en manual while CHANGELOG.md:16 headlines project profiles, src/components/profiles/ exists and src-tauri/src/commands/s3_sync.rs plus en.json:565-578 ship S3 presets; README.md:218 (and ZH:219/JA:218/DE:218) still link v3.16.1 notes with package.json:3 at 3.17.0, and .github/pull_request_template.md:20-25 has no docs checkbox and no workflow in .github/workflows touches docs. The impact claim 'users of the headline 3.17 feature have nothing to read' is overstated: CHANGELOG.md:16 and docs/release-notes/v3.17.0-en.md:3 describe projects at length, and the release note's Usage Guides (v3.17.0-en.md:13-16) point at docs/guides files that exist. A one-release manual lag is a medium documentation gap, not high, so P2; the proposal is sound and unimplemented, but the CI guard should key off the AppType/VisibleApps definitions in src-tauri/src/settings.rs:27-49 rather than only src/config/*Presets.ts.
 
 ### DOCS-02: Release-notes/changelog hygiene: stale README link, no index, missing ja for 4 versions, 14 broken links, a missing 3.6.1 entry and a mis-dated 3.5.0
 
-**Type:** docs · **Priority:** P1 · **Effort:** S · **Confidence:** high
+**Type:** docs · **Priority:** P2 · **Effort:** S · **Confidence:** high
 
 - **Evidence:** `README.md:218`, `README_ZH.md:219`, `README_JA.md:218`, `README_DE.md:218` link `docs/release-notes/v3.16.1-*.md` (current 3.17.0); `ls docs/release-notes` = 68 files / 23 versions, `v3.6.0`, `v3.6.1`, `v3.7.0`, `v3.7.1` have en+zh only; no `docs/release-notes/README.md`; `linkcheck.py`: 14 broken relative links in `docs/release-notes/v3.7.0-{en,zh}.md:424-425`, `v3.7.1-{en,zh}.md:466-467`, `v3.8.0-{en,zh,ja}.md:354-355/300-301` (`../README.md`, `../CHANGELOG.md` should be `../../`); `CHANGELOG.md` has no `[3.6.1]` heading (`rg "3\.6\.1" CHANGELOG.md` → none) while `docs/release-notes/v3.6.1-*.md` exist; `CHANGELOG.md:2007` "## [3.5.0] - 2025-01-15" sits between 3.6.0 (2025-11-07, `:1894`) and 3.4.0 (2025-10-01, `:2060`); section headings use three vocabularies (28× "Fixed"/27× "Added"/22× "Changed" vs 5× "🐛 Bug Fixes"/5× "✨ New Features" vs "Feature Release"/"Patch Release"/"Beta Release"), 12 lines contain Chinese.
 - **Problem:** Readers following the README land on last-but-one notes; the changelog cannot be parsed by tooling (keep-a-changelog claims at `CHANGELOG.md:5`); the Japanese audience lacks four early release notes.
 - **Proposal:** Point the README link at a stable `docs/release-notes/README.md` index (auto-generated table: version × en/zh/ja); fix the 14 links; add the 3.6.1 entry and correct the 3.5.0 date (likely 2025-10-15); normalise headings to Added/Changed/Fixed/Removed/Docs; translate or mark the four missing ja notes; run `linkcheck.py` in CI for `docs/**` and `README*.md`.
 - **Acceptance:** `linkcheck.py` reports `broken_local=0`; `rg -c "^### " CHANGELOG.md` uses ≤ 6 distinct headings; README links resolve to the current version.
-
-### DOCS-03: README screenshots show a three-app UI that predates most shipped features
-
-**Type:** docs · **Priority:** P1 · **Effort:** M · **Confidence:** high
-
-- **Evidence:** `README.md:210-214` embeds `assets/screenshots/main-en.png` and `add-en.png` (zh/ja variants for the other READMEs; no DE set); `main-en.png` (viewed) shows only Claude/Codex/Gemini tabs, no Grok Build/OpenCode/OpenClaw/Hermes/Claude Desktop, and no proxy, usage, skills, sessions or profile controls that `README.md:216-250` advertises; `docs/user-manual/assets/image-2026010800*.png` (22 files, timestamps 2026-01-08 in the names) predate v3.11+ features.
-- **Problem:** The first visual impression under-sells the product and misleads users about the UI they will install; manual screenshots reference old layouts.
-- **Proposal:** Regenerate `main`/`add` for en/zh/ja (+ dark mode) at 3.17.0 and add one proxy/usage dashboard shot; script it (Tauri + a `--screenshot` dev flag or Playwright against `pnpm dev:renderer` with MSW fixtures from `tests/msw`) so refreshes are cheap at each minor release; replace the timestamp-named manual assets with descriptive names.
-- **Acceptance:** Screenshots show the 8-app switcher and the proxy/usage entry points; a `scripts/screenshots.*` command exists and is referenced in the release checklist.
+- **Verification:** **partially-confirmed** — Confirmed: README.md:218/README_ZH.md:219/README_JA.md:218/README_DE.md:218 link docs/release-notes/v3.16.1-*.md; docs/release-notes holds 68 files with v3.6.0, v3.6.1, v3.7.0 and v3.7.1 present only as en+zh and no README.md index; `rg '\]\(\.\./(README[_A-Z]*|CHANGELOG)\.md\)' docs/release-notes` yields exactly 14 hits (v3.7.0-en/zh:424-425, v3.7.1-en/zh:466-467, v3.8.0-en/zh:354-355, v3.8.0-ja:300-301) and docs/README.md / docs/CHANGELOG.md do not exist; `rg '3\.6\.1' CHANGELOG.md` is empty while docs/release-notes/v3.6.1-en.md:9 is dated 2025-11-10; CHANGELOG.md:2007 '## [3.5.0] - 2025-01-15' sits between :1894 (3.6.0, 2025-11-07) and :2060 (3.4.0, 2025-10-01); the `### ` heading tally is exactly 28 Fixed / 27 Added / 22 Changed / 5 each of the emoji variants / 4 Feature Release / 3 Patch / 3 Beta (47 distinct headings) and 12 lines contain Han characters. Details off: there are 24 versions, not 23; the true 3.5.0 date cannot be established (shallow 50-commit clone, no tags) so '2025-10-15' is a guess; `linkcheck.py` is the reviewer's own scratch script (scratchpad/i18n-tools/), not a repo tool, so the proposal should name a real checker; and nothing in .github/workflows, package.json or scripts/ parses CHANGELOG.md, so the 'tooling cannot parse it' harm is hypothetical. All of this is hygiene with S effort and no functional impact, so P2 rather than P1.
 
 ### DOCS-04: Deep-link protocol has no canonical spec; manual and generator lag the parser
 
-**Type:** docs · **Priority:** P1 · **Effort:** M · **Confidence:** high
+**Type:** docs · **Priority:** P2 · **Effort:** M · **Confidence:** high
 
 - **Evidence:** `src-tauri/src/deeplink/parser.rs:59-66` dispatches `provider|prompt|mcp|skill`; `:84,193` accept apps `claude|codex|gemini|grokbuild|opencode|openclaw|hermes`, `:268-272` also `grok`; `docs/user-manual/en/5-faq/5.3-deeplink.md:42` documents `claude / codex / gemini / opencode / openclaw` only (zh/ja identical); `deplink.html:693-695,910-912` offers `claude|codex|gemini` only, is `lang="zh-CN"` with a Chinese title (`:2,7`), lives at the repo root, is linked from no README and only from the manual via `farion1231.github.io/cc-switch/deplink.html` (`5.3-deeplink.md:16`); the parser's parameter list (`apiKey`, `haikuModel`, `configFormat`, `usage*`, `repo`, `directory`, `branch` …) is described only in prose tables, with no mention of URL-encoding rules, max length, or version negotiation beyond "V1".
 - **Problem:** Third parties (provider vendors publish "import into CC Switch" links) cannot rely on a spec; the generator cannot produce links for 4 of the 7 apps; non-Chinese vendors cannot use the generator at all.
 - **Proposal:** Write `docs/spec/deeplink-v1.md` (grammar, parameter table per resource generated from a Rust table that also drives `parser.rs` tests, encoding, error behaviour, security model) in en/zh/ja; update the generator to read the same table, add en/ja UI, move it to `docs/tools/` or the website; link both from README "Documentation".
 - **Acceptance:** Every app id accepted by `parser.rs:84` appears in the spec and the generator's `<select>`; a Rust test fails when a new resource/app is added without updating the spec table.
-
-### DOCS-13: First-run experience is a single text modal — add a guided setup wizard
-
-**Type:** ux · **Priority:** P1 · **Effort:** L · **Confidence:** high
-
-- **Evidence:** `src/components/FirstRunNoticeDialog.tsx:16-27` opens once when `firstRunNoticeConfirmed !== true` (backend decides at `src-tauri/src/lib.rs:560-561,673` only for a fresh install) and shows two paragraphs (`en.json:45-50`, naming only "Claude Code / Codex / Gemini CLI"); the main view then shows `ProviderEmptyState` per app (`src/components/providers/ProviderEmptyState.tsx:17-50`: Import current / Add provider); no wizard, checklist or tour component exists (`rg -i "wizard|onboarding|tour"` matches only the MCP wizard and the Claude `hasCompletedOnboarding` setting); visible apps default to all (`src-tauri/src/tray.rs:651`); existing building blocks: presets (`src/config/*Presets.ts`), endpoint test (`en.json` `endpointTest.*`), app visibility (`settings.appVisibility.*`), tool diagnostics (`settings.toolDiagnose*`).
-- **Problem:** A new user must discover on their own which of 8 tools they use, that existing configs were imported as "default", how to add a key, and that terminals must be restarted (`README.md:262-264`); the welcome text is already stale.
-- **Proposal:** A 4-step first-run wizard (skippable, re-openable from Settings): (1) pick tools you use → sets `visible_apps`; (2) detected existing configs with per-app import (reuse the backend auto-import, `src-tauri/src/app_config.rs:723-733`) and a clear "saved as default" message; (3) add first provider via preset + key with an inline endpoint test; (4) "what's next" cards (proxy/failover, MCP, usage, docs link). Replace `FirstRunNoticeDialog` with the wizard's intro step; keep the same `firstRunNoticeConfirmed` flag.
-- **Acceptance:** Fresh install → wizard; completing it leaves ≥1 provider for each chosen app and hides unchosen apps; wizard strings exist in all locales; FirstRunNoticeDialog removed or reduced to step 1.
+- **Verification:** **partially-confirmed** — Confirmed: src-tauri/src/deeplink/parser.rs:59-63 dispatches provider/prompt/mcp/skill, :84 and :193 accept `claude|codex|gemini|grokbuild|opencode|openclaw|hermes`, and :265-272 additionally accepts `grok` for the MCP apps list; docs/user-manual/{en,zh,ja}/5-faq/5.3-deeplink.md:42 lists only `claude / codex / gemini / opencode / openclaw` (missing grokbuild and hermes); deplink.html:2 is `lang="zh-CN"`, :7 has a Chinese title, its only app selectors at :693-695 and :910-912 offer claude/codex/gemini, it sits at the repo root, is referenced by no README and only by 5.3-deeplink.md:16, and docs/spec does not exist. Overstated: 'no canonical spec' ignores that 5.3-deeplink.md:27-50 already carries a grammar line and per-resource parameter tables (incomplete, not absent), and the parser is not untested — src-tauri/src/deeplink/tests.rs has 31 tests including grokbuild cases at :91, :537, :777 and :805, plus 2 in src-tauri/tests/deeplink_import.rs — so the proposed table-driven drift test is additive rather than filling a void. Manual and generator lagging the parser by 2 and 4 apps is a real but medium-impact doc gap for third-party link authors, so P2.
 
 ### DOCS-05: Proxy / failover runtime semantics are undocumented beyond the UI walkthrough; proxy guide is Chinese-only
 
@@ -189,6 +174,16 @@ The four UI locales (`src/i18n/locales/{en,zh,zh-TW,ja}.json`) are structurally 
 - **Proposal:** Introduce `showError({ code | message, detail, action? })` presenter: localized title from the code, detail collapsed, "Copy details" button, optional action (open settings, open docs via DOCS-16); route all `toast.error` through it (lint ban on `toast.error(String(`/`error.message)`); feed from structured codes as I18N-03 lands.
 - **Acceptance:** `rg "toast\.error\((String\(|error\.message|e\b)" src` → 0; error toasts show a localized title + copy button.
 
+### DOCS-03: README screenshots show a three-app UI that predates most shipped features
+
+**Type:** docs · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `README.md:210-214` embeds `assets/screenshots/main-en.png` and `add-en.png` (zh/ja variants for the other READMEs; no DE set); `main-en.png` (viewed) shows only Claude/Codex/Gemini tabs, no Grok Build/OpenCode/OpenClaw/Hermes/Claude Desktop, and no proxy, usage, skills, sessions or profile controls that `README.md:216-250` advertises; `docs/user-manual/assets/image-2026010800*.png` (22 files, timestamps 2026-01-08 in the names) predate v3.11+ features.
+- **Problem:** The first visual impression under-sells the product and misleads users about the UI they will install; manual screenshots reference old layouts.
+- **Proposal:** Regenerate `main`/`add` for en/zh/ja (+ dark mode) at 3.17.0 and add one proxy/usage dashboard shot; script it (Tauri + a `--screenshot` dev flag or Playwright against `pnpm dev:renderer` with MSW fixtures from `tests/msw`) so refreshes are cheap at each minor release; replace the timestamp-named manual assets with descriptive names.
+- **Acceptance:** Screenshots show the 8-app switcher and the proxy/usage entry points; a `scripts/screenshots.*` command exists and is referenced in the release checklist.
+- **Verification:** **partially-confirmed** — Confirmed: README.md:212-214 (not 210) embeds assets/screenshots/main-en.png and add-en.png, README_ZH.md:215 and README_JA.md:214 use zh/ja variants, README_DE.md:214 reuses the en pair; viewing main-en.png shows only Claude / Codex / Gemini tabs plus three toolbar icons and a provider list, with no project switcher, usage, proxy or Grok Build/OpenCode/OpenClaw/Hermes/Claude Desktop entries; docs/user-manual/assets holds 22 image-20260108*.png files whose timestamps fall between the 3.9.0 (2026-01-07) and 3.9.1 (2026-01-09) CHANGELOG dates, so they predate 3.10+. Mitigating detail: README.md:222 directly under the screenshot says '8 supported tools', so the mismatch is visible but self-correcting rather than misleading about functionality. The proposal to build a Tauri `--screenshot` flag or Playwright pipeline is over-engineered for refreshing six PNGs (though `dev:renderer` at package.json:10 and tests/msw do exist); stale marketing screenshots are a minor perception issue for a desktop app, so P3.
+
 ### DOCS-12: Cross-README consistency nits (relative `../../releases` links, naming, DE manual link)
 
 **Type:** docs · **Priority:** P3 · **Effort:** S · **Confidence:** high
@@ -197,6 +192,16 @@ The four UI locales (`src/i18n/locales/{en,zh,zh-TW,ja}.json`) are structurally 
 - **Problem:** Low-severity but visible inconsistencies, and a German reader is silently handed English docs with no note.
 - **Proposal:** Use absolute `https://github.com/farion1231/cc-switch/releases` links; settle on one product name per tool in a glossary used by docs and `apps.*` locale keys; add "(English)" to the DE manual link.
 - **Acceptance:** `linkcheck.py` treats `../../releases` as resolved (link absolute); glossary file exists and README headline matches FAQ naming.
+
+### DOCS-13: First-run experience is a single text modal — add a guided setup wizard
+
+**Type:** ux · **Priority:** P3 · **Effort:** L · **Confidence:** medium
+
+- **Evidence:** `src/components/FirstRunNoticeDialog.tsx:16-27` opens once when `firstRunNoticeConfirmed !== true` (backend decides at `src-tauri/src/lib.rs:560-561,673` only for a fresh install) and shows two paragraphs (`en.json:45-50`, naming only "Claude Code / Codex / Gemini CLI"); the main view then shows `ProviderEmptyState` per app (`src/components/providers/ProviderEmptyState.tsx:17-50`: Import current / Add provider); no wizard, checklist or tour component exists (`rg -i "wizard|onboarding|tour"` matches only the MCP wizard and the Claude `hasCompletedOnboarding` setting); visible apps default to all (`src-tauri/src/tray.rs:651`); existing building blocks: presets (`src/config/*Presets.ts`), endpoint test (`en.json` `endpointTest.*`), app visibility (`settings.appVisibility.*`), tool diagnostics (`settings.toolDiagnose*`).
+- **Problem:** A new user must discover on their own which of 8 tools they use, that existing configs were imported as "default", how to add a key, and that terminals must be restarted (`README.md:262-264`); the welcome text is already stale.
+- **Proposal:** A 4-step first-run wizard (skippable, re-openable from Settings): (1) pick tools you use → sets `visible_apps`; (2) detected existing configs with per-app import (reuse the backend auto-import, `src-tauri/src/app_config.rs:723-733`) and a clear "saved as default" message; (3) add first provider via preset + key with an inline endpoint test; (4) "what's next" cards (proxy/failover, MCP, usage, docs link). Replace `FirstRunNoticeDialog` with the wizard's intro step; keep the same `firstRunNoticeConfirmed` flag.
+- **Acceptance:** Fresh install → wizard; completing it leaves ≥1 provider for each chosen app and hides unchosen apps; wizard strings exist in all locales; FirstRunNoticeDialog removed or reduced to step 1.
+- **Verification:** **partially-confirmed** — Confirmed mechanics: src/components/FirstRunNoticeDialog.tsx:24 opens whenever `settings.firstRunNoticeConfirmed !== true`, src-tauri/src/lib.rs:560-564 and :673 gate that on a fresh install, en.json:47 names only 'Claude Code / Codex / Gemini CLI', src/components/providers/ProviderEmptyState.tsx:36-50 offers only Import/Add, and `rg -i 'wizard|onboarding|tour'` hits only McpWizardModal and the skipClaudeOnboarding setting. The problem statement is partly wrong: en.json:47-48 explicitly tells the user that existing config was saved as a provider named 'default' and that an 'Official' preset exists, so users do not have to discover that on their own; the cited src-tauri/src/app_config.rs:723-733 (`default_with_auto_import`) imports prompt files, not provider configs — the provider 'default' import is lib.rs:569-582 (`should_import_default_config_on_startup` / `import_default_config`); and visible apps do not default to all: src-tauri/src/settings.rs:51-62 sets every app true except `hermes: false`. The only concrete defect is the stale three-tool wording in the welcome text; the rest is an L-effort feature request for a wizard that the existing dialog + per-app empty state + backend auto-import already functionally cover, so P3 with medium confidence on the value of the proposal.
 
 ### DOCS-18: Keyboard shortcuts exist but are undocumented and platform-unaware
 

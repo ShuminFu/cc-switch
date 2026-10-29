@@ -6,7 +6,7 @@ _A consolidated backlog of bugs, security findings, refactors, performance work,
 
 CC Switch at v3.17.0 is a large, fast-moving codebase (about 148k lines of Rust and 81k lines of TypeScript, eight managed tools, 285 Tauri commands, four proxy protocol bridges) that ships weekly and whose users trust it with their API keys. Sixteen independent reviews read every area of it; their findings were then re-checked by adversarial verifiers and extended by completeness critics. The picture that emerges is consistent across areas: the product surface is far ahead of its foundations, and the same handful of structural gaps explain most of the individual bugs.
 
-**Five root causes account for the majority of high-priority findings.**
+**Five root causes account for the majority of the findings the reviewers rated highest.** (The verification pass re-rated most of those items from P1 to P2, judging them real but not emergencies; the structural picture is unchanged.)
 
 1. **The SSOT ↔ live-file invariant is not transactional.** Provider switches persist pointers before the live write succeeds, several adapters overwrite live files without a backup, `atomic_write` is neither crash-safe nor atomic on Windows, and form state in the provider dialogs can silently discard edits. One failed write can later backfill the wrong provider's credentials into the database.
 2. **Secrets are plaintext everywhere they rest or travel.** API keys live in SQLite, in `~/.cc-switch/backups`, in SQL exports and in the cloud-sync artifact; the sync importer executes arbitrary SQL from that artifact; the proxy can bind to all interfaces with no authentication; prompts, bodies and keys reach the on-disk log.
@@ -72,264 +72,319 @@ Each theme groups findings from several areas that share one root cause or one e
 
 Make the SSOT ↔ live-file invariant transactional: write live first, then persist pointers; back up before overwrite; crash-safe atomic writes; forms that never discard edits.
 
-Findings (P0 1, P1 8, P2 7, P3 1): SVC-01, SVC-06, SVC-07, SVC-08, CFG-02, CFG-03, CFG-04, CFG-07, CFG-08, CMD-06, DB-10, FE-PROV-01, FE-PROV-02, FE-PROV-04, FE-PROV-05, FE-UI-01, FE-UI-02
+Findings (P1 3, P2 12, P3 2): SVC-01, SVC-06, SVC-07, SVC-08, CFG-02, CFG-03, CFG-04, CFG-07, CFG-08, CMD-06, DB-10, FE-PROV-01, FE-PROV-02, FE-PROV-04, FE-PROV-05, FE-UI-01, FE-UI-02
 
 ### Secrets and exposure
 
 Keys out of plaintext and out of logs; no arbitrary SQL from sync artifacts; authenticate the proxy off loopback; stop handing bearer tokens to the webview; tighten CSP and capabilities.
 
-Findings (P0 4, P1 17, P2 11, P3 1): DB-01, DB-02, SVC-04, CMD-01, CMD-02, CMD-03, CMD-04, PROXY-03, PROXY-13, PROXY-33, SESS-05, SESS-06, CFG-01, CFG-05, SESS-01, SESS-02, SVC-03, PRODUCT-01, PRODUCT-02, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-10, SEC-11, SEC-12, SEC-13, SEC-16, SEC-17
+Findings (P1 11, P2 19, P3 3): DB-01, DB-02, SVC-04, CMD-01, CMD-02, CMD-03, CMD-04, PROXY-03, PROXY-13, PROXY-33, SESS-05, SESS-06, CFG-01, CFG-05, SESS-01, SESS-02, SVC-03, PRODUCT-01, PRODUCT-02, SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-10, SEC-11, SEC-12, SEC-13, SEC-16, SEC-17
 
 ### Cloud sync v2
 
 Replace last-writer-wins with preconditions and dirty detection, exclude device-level state, unify WebDAV and S3 behind one transport, encrypt bundles.
 
-Findings (P0 1, P1 4, P2 1, P3 1): SVC-02, SVC-19, SVC-24, DB-06, DB-08, SVC-04, SEC-06
+Findings (P1 1, P2 5, P3 1): SVC-02, SVC-19, SVC-24, DB-06, DB-08, SVC-04, SEC-06
 
 ### One adapter per app
 
 An AppAdapter trait over a format-preserving document layer, a conformance suite every tool must pass, and one capability registry shared by Rust and TypeScript, so the ninth tool costs a module instead of 112 files.
 
-Findings (P1 2, P2 7, P3 1): CFG-06, SVC-18, FE-ARCH-10, FE-UI-04, FE-PROV-17, FE-PROV-22, CMD-10, CFG-10, PRODUCT-64, CI-38
+Findings (P2 9, P3 1): CFG-06, SVC-18, FE-ARCH-10, FE-UI-04, FE-PROV-17, FE-PROV-22, CMD-10, CFG-10, PRODUCT-64, CI-38
 
 ### Proxy reliability
 
 RAII guards for breaker permits, one transport with pooling and one timeout policy, stream failures fed back to health, then a staged pipeline that can be tested without a Tauri handle.
 
-Findings (P0 2, P2 12): PROXY-01, PROXY-02, PROXY-05, PROXY-08, PROXY-09, PROXY-10, PROXY-07, PROXY-06, PERF-01, PROXY-22, PRODUCT-03, PROXY-14, SEC-14, SEC-15
+Findings (P1 1, P2 13): PROXY-01, PROXY-02, PROXY-05, PROXY-08, PROXY-09, PROXY-10, PROXY-07, PROXY-06, PERF-01, PROXY-22, PRODUCT-03, PROXY-14, SEC-14, SEC-15
 
 ### Format conversion
 
 A canonical message and stream IR with one codec per protocol, backed by recorded golden fixtures and round-trip property tests, so a fix lands once instead of in one of thirteen converters.
 
-Findings (P0 2, P1 1, P2 7, P3 1): PROV-01, PROV-02, PROV-03, PROV-04, PROV-05, PROV-06, PROV-19, PROV-20, TEST-01, TEST-02, PRODUCT-04
+Findings (P1 2, P2 8, P3 1): PROV-01, PROV-02, PROV-03, PROV-04, PROV-05, PROV-06, PROV-19, PROV-20, TEST-01, TEST-02, PRODUCT-04
 
 ### Database model
 
 WAL and busy_timeout today; a dedicated writer task with batched usage ingestion, read connections for the UI, spawn_blocking everywhere, and one migration ledger tomorrow.
 
-Findings (P0 1, P1 7, P2 3, P3 1): PERF-02, DB-03, DB-04, DB-05, DB-07, DB-08, DB-09, PERF-03, PERF-08, PERF-09, PERF-17, PROXY-04
+Findings (P1 1, P2 9, P3 2): PERF-02, DB-03, DB-04, DB-05, DB-07, DB-08, DB-09, PERF-03, PERF-08, PERF-09, PERF-17, PROXY-04
 
 ### App shell and IPC
 
 Generated bindings and a structured error enum across the Rust/TypeScript boundary, no block_on on command paths, async heavy commands, and a startup that shows the window before it imports.
 
-Findings (P1 13): CMD-07, CMD-08, CMD-09, CMD-12, CMD-13, SVC-05, FE-ARCH-01, FE-ARCH-03, TEST-05, I18N-03, PERF-11, PERF-12, PERF-16
+Findings (P1 1, P2 11, P3 1): CMD-07, CMD-08, CMD-09, CMD-12, CMD-13, SVC-05, FE-ARCH-01, FE-ARCH-03, TEST-05, I18N-03, PERF-11, PERF-12, PERF-16
 
 ### Frontend shell and forms
 
 A router instead of a 1,673-line App.tsx, per-app form adapters instead of a 2.6k-line ProviderFormFull, one managed-items panel, centralised query keys, events instead of polling, lazy routes.
 
-Findings (P1 8, P2 5): FE-ARCH-02, FE-ARCH-04, FE-ARCH-05, FE-ARCH-06, FE-ARCH-08, FE-UI-05, FE-UI-16, FE-UI-17, FE-UI-18, FE-PROV-14, PERF-13, PERF-14, PERF-15
+Findings (P2 13): FE-ARCH-02, FE-ARCH-04, FE-ARCH-05, FE-ARCH-06, FE-ARCH-08, FE-UI-05, FE-UI-16, FE-UI-17, FE-UI-18, FE-PROV-14, PERF-13, PERF-14, PERF-15
 
 ### Test pyramid and CI gates
 
 An in-process proxy harness, command-layer tests, MSW handlers generated from the registry, coverage gates, ESLint, vulnerability and license scanning, and a real bundle build on pull requests.
 
-Findings (P0 1, P1 13, P2 1): TEST-01, TEST-03, TEST-04, TEST-06, TEST-07, TEST-08, TEST-33, FE-UI-42, SVC-25, CMD-31, CI-08, CI-10, CI-11, FE-ARCH-07, I18N-05
+Findings (P1 1, P2 13, P3 1): TEST-01, TEST-03, TEST-04, TEST-06, TEST-07, TEST-08, TEST-33, FE-UI-42, SVC-25, CMD-31, CI-08, CI-10, CI-11, FE-ARCH-07, I18N-05
 
 ### Release integrity
 
 Sign Windows builds, make updater signatures mandatory and validated, keep secrets out of shell text, derive the version from one source, rehearse releases with a dry run.
 
-Findings (P1 10, P2 1): CI-01, CI-02, CI-03, CI-04, CI-05, CI-06, CI-07, CI-09, CI-37, PRODUCT-35, SEC-18
+Findings (P2 11): CI-01, CI-02, CI-03, CI-04, CI-05, CI-06, CI-07, CI-09, CI-37, PRODUCT-35, SEC-18
 
 ### Sessions and deep links
 
 A persistent session index with full-text search and a typed terminal launcher; a deep-link trust model with backend-held pending imports, full disclosure, a published spec and signed or batched links.
 
-Findings (P1 3, P2 4, P3 2): SESS-03, SESS-04, SESS-09, SESS-10, SESS-12, SESS-08, DOCS-04, SEC-21, SEC-24
+Findings (P2 7, P3 2): SESS-03, SESS-04, SESS-09, SESS-10, SESS-12, SESS-08, DOCS-04, SEC-21, SEC-24
 
 ### Proxy as a product
 
 Proactive health probing, tray and system notifications, routing strategies, a headless daemon and a ccs CLI over the same store, metrics and a request flight recorder.
 
-Findings (P1 4, P2 4): PRODUCT-61, PRODUCT-06, PRODUCT-10, PRODUCT-11, PROXY-19, PROXY-20, PROXY-21, PROXY-35
+Findings (P2 8): PRODUCT-61, PRODUCT-06, PRODUCT-10, PRODUCT-11, PROXY-19, PROXY-20, PROXY-21, PROXY-35
 
 ### Trust and governance
 
 A keychain vault, a signed remote preset and sponsor catalog, in-app affiliate disclosure, a public sponsor policy, and honest gating of terms-of-service-sensitive features.
 
-Findings (P0 1, P1 4): PRODUCT-62, PRODUCT-07, PRODUCT-08, PRODUCT-09, PRODUCT-54
+Findings (P1 1, P2 4): PRODUCT-62, PRODUCT-07, PRODUCT-08, PRODUCT-09, PRODUCT-54
 
 ### Projects everywhere
 
 Per-directory profile binding, all eight apps in profiles, tray, universal providers and takeover, budgets and alerts, usage attribution by project.
 
-Findings (P1 3): PRODUCT-63, PRODUCT-12, PRODUCT-05
+Findings (P1 1, P2 2): PRODUCT-63, PRODUCT-12, PRODUCT-05
 
 ### Onboarding, docs and i18n
 
 Fix Chinese fallbacks for non-CJK users and the ten missing keys, add a locale-parity check, refresh the manual and screenshots, publish the deep-link spec, add a guided setup wizard.
 
-Findings (P1 9, P3 1): I18N-01, I18N-02, I18N-04, I18N-06, DOCS-01, DOCS-02, DOCS-03, DOCS-13, FE-PROV-03, PROXY-31
+Findings (P2 6, P3 4): I18N-01, I18N-02, I18N-04, I18N-06, DOCS-01, DOCS-02, DOCS-03, DOCS-13, FE-PROV-03, PROXY-31
 
 ## Backlog at a glance
 
-**623 findings** across 17 areas. P0: 12 · P1: 111 · P2: 314 · P3: 186.
+**623 findings** across 17 areas. P0: 0 · P1: 24 · P2: 403 · P3: 196.
 
 | Area | File | Findings | P0 | P1 | P2 | P3 | Top types |
 |---|---|---|---|---|---|---|---|
-| Security & privacy | [security.md](findings/security.md) | 27 | 0 | 7 | 12 | 8 | security 22, privacy 3, bug 1 |
+| Security & privacy | [security.md](findings/security.md) | 27 | 0 | 4 | 15 | 8 | security 22, privacy 3, bug 1 |
 | Proxy core | [proxy-core.md](findings/proxy-core.md) | 36 | 0 | 1 | 22 | 13 | bug 14, performance 5, security 4 |
 | Proxy providers & format conversion | [proxy-providers.md](findings/proxy-providers.md) | 33 | 0 | 0 | 23 | 10 | bug 13, feature 5, refactor 5 |
-| Backend services | [backend-services.md](findings/backend-services.md) | 41 | 2 | 10 | 20 | 9 | bug 15, tech-debt 6, refactor 5 |
-| Commands / IPC / app shell | [commands-app-shell.md](findings/commands-app-shell.md) | 39 | 0 | 12 | 18 | 9 | bug 8, refactor 7, security 6 |
+| Backend services | [backend-services.md](findings/backend-services.md) | 41 | 0 | 3 | 28 | 10 | bug 15, tech-debt 6, refactor 5 |
+| Commands / IPC / app shell | [commands-app-shell.md](findings/commands-app-shell.md) | 39 | 0 | 0 | 28 | 11 | bug 8, refactor 7, security 6 |
 | Per-app config adapters & MCP sync | [config-adapters.md](findings/config-adapters.md) | 37 | 0 | 0 | 26 | 11 | bug 19, feature 5, tech-debt 4 |
-| Database / DAO / migrations | [database.md](findings/database.md) | 34 | 2 | 4 | 18 | 10 | bug 9, performance 7, tech-debt 7 |
-| Session manager, deep links & usage ingestion | [sessions-deeplinks.md](findings/sessions-deeplinks.md) | 34 | 0 | 5 | 14 | 15 | bug 11, security 7, feature 5 |
-| Frontend architecture | [frontend-architecture.md](findings/frontend-architecture.md) | 36 | 0 | 4 | 18 | 14 | tech-debt 11, refactor 7, feature 5 |
-| Provider management UI | [frontend-providers.md](findings/frontend-providers.md) | 40 | 0 | 5 | 21 | 14 | bug 17, ux 8, feature 5 |
-| Feature UI (settings, usage, proxy, skills, MCP) | [frontend-features.md](findings/frontend-features.md) | 47 | 0 | 4 | 19 | 24 | bug 14, ux 11, feature 8 |
-| Performance & resources | [performance.md](findings/performance.md) | 40 | 2 | 15 | 15 | 8 | performance 34, tech-debt 3, refactor 2 |
-| Testing & QA | [testing.md](findings/testing.md) | 33 | 1 | 8 | 16 | 8 | test 22, tech-debt 4, ci 3 |
-| CI/CD, build, release & dependencies | [ci-build-release.md](findings/ci-build-release.md) | 38 | 0 | 12 | 22 | 4 | tech-debt 7, security 6, ci 5 |
-| Internationalization | [i18n.md](findings/i18n.md) | 20 | 0 | 6 | 9 | 5 | bug 7, tech-debt 4, feature 3 |
-| Documentation & onboarding | [docs-onboarding.md](findings/docs-onboarding.md) | 23 | 0 | 5 | 12 | 6 | docs 16, feature 4, ux 3 |
-| Product strategy & feature roadmap | [product-roadmap.md](findings/product-roadmap.md) | 65 | 5 | 13 | 29 | 18 | feature 37, risk 9, ux 8 |
+| Database / DAO / migrations | [database.md](findings/database.md) | 34 | 0 | 2 | 22 | 10 | bug 9, performance 7, tech-debt 7 |
+| Session manager, deep links & usage ingestion | [sessions-deeplinks.md](findings/sessions-deeplinks.md) | 34 | 0 | 2 | 17 | 15 | bug 11, security 7, feature 5 |
+| Frontend architecture | [frontend-architecture.md](findings/frontend-architecture.md) | 36 | 0 | 0 | 22 | 14 | tech-debt 11, refactor 7, feature 5 |
+| Provider management UI | [frontend-providers.md](findings/frontend-providers.md) | 40 | 0 | 2 | 24 | 14 | bug 17, ux 8, feature 5 |
+| Feature UI (settings, usage, proxy, skills, MCP) | [frontend-features.md](findings/frontend-features.md) | 47 | 0 | 0 | 23 | 24 | bug 14, ux 11, feature 8 |
+| Performance & resources | [performance.md](findings/performance.md) | 40 | 0 | 2 | 27 | 11 | performance 34, tech-debt 3, refactor 2 |
+| Testing & QA | [testing.md](findings/testing.md) | 33 | 0 | 1 | 23 | 9 | test 22, tech-debt 4, ci 3 |
+| CI/CD, build, release & dependencies | [ci-build-release.md](findings/ci-build-release.md) | 38 | 0 | 0 | 34 | 4 | tech-debt 7, security 6, ci 5 |
+| Internationalization | [i18n.md](findings/i18n.md) | 20 | 0 | 1 | 13 | 6 | bug 7, tech-debt 4, feature 3 |
+| Documentation & onboarding | [docs-onboarding.md](findings/docs-onboarding.md) | 23 | 0 | 0 | 15 | 8 | docs 16, feature 4, ux 3 |
+| Product strategy & feature roadmap | [product-roadmap.md](findings/product-roadmap.md) | 65 | 0 | 6 | 41 | 18 | feature 37, risk 9, ux 8 |
 
 **By type:** bug 139 · feature 95 · performance 73 · tech-debt 68 · refactor 61 · security 56 · test 40 · docs 37 · ux 32 · ci 10 · risk 9 · privacy 3
 
 ## Verification pass
 
-Every finding that the first pass rated P0 or P1 (154 items) was handed to an independent verifier that re-read the cited code and tried to refute it. Verdicts so far: partially-confirmed 23 · confirmed 11. The verifiers lowered the priority of 31 findings and raised 0; the original rating is kept next to the corrected one in each area file. Priorities in the tables below are the corrected ones. A finding without a verdict was not re-verified (it was rated P2 or P3 by the first pass, or its verifier did not complete).
+Every finding that the first pass rated P0 or P1 (154 items) was handed to an independent verifier that re-read the cited code and tried to refute it. Verdicts: partially-confirmed 100 · confirmed 53 · refuted 1. The verifiers were asked to rate by realistic likelihood and impact rather than by importance to the roadmap, and they lowered 141 ratings and raised 0 (P0→P1: 11, P0→P2: 1, P1→P2: 115, P1→P3: 14). Both ratings are kept: the corrected one drives the tables below, the first-pass one is shown beside it, and the verifier's notes sit under **Verification** in each area file. Read a downgrade as 'real, but not an emergency', not as 'wrong': the verifiers confirmed the underlying observation in all but one case. Findings the first pass rated P2 or P3 were not re-verified.
 
-## P0 — critical (fix before anything else)
+## P1 — high priority after verification
 
-12 findings.
+24 findings.
 
-| ID | Area | Title | Type | Effort | Confidence |
+| ID | Area | Title | Type | Effort | Verdict |
 |---|---|---|---|---|---|
-| [SVC-01](findings/backend-services.md#svc-01) | Backend services | Provider switch persists "current" pointers before the live write, and a failed write poisons the next backfill | bug | M | medium |
-| [SVC-02](findings/backend-services.md#svc-02) | Backend services | Cloud sync is last-writer-wins: no remote precondition on upload and no local-dirty check on download | bug | L | high |
-| [DB-01](findings/database.md#db-01) | Database / DAO / migrations | Sync importer executes arbitrary SQL from the remote artifact after a header-only check | security | L | high |
-| [DB-02](findings/database.md#db-02) | Database / DAO / migrations | Provider API keys, backups and the cloud sync artifact are all plaintext | security | XL | high |
-| [PERF-01](findings/performance.md#perf-01) | Performance & resources | Header-case-preserving upstream path performs a full TCP + TLS handshake on every request (no connection reuse) | performance | L | high |
-| [PERF-02](findings/performance.md#perf-02) | Performance & resources | SQLite opened with default journal/sync settings behind one global std Mutex (no WAL, synchronous=FULL, no busy_timeout, no cache tuning) | performance | S | high |
-| [TEST-01](findings/testing.md#test-01) | Testing & QA | No in-process end-to-end test of the proxy request path | test | L | high |
-| [PRODUCT-01](findings/product-roadmap.md#product-01) | Product strategy & feature roadmap | Secrets vault: OS keychain for API keys/tokens and encrypted export & cloud-sync bundles | risk | L | high |
-| [PRODUCT-02](findings/product-roadmap.md#product-02) | Product strategy & feature roadmap | Authenticate the proxy listener when bound to a non-loopback address | risk | S | high |
-| [PRODUCT-03](findings/product-roadmap.md#product-03) | Product strategy & feature roadmap | Proactive provider health probing (documented but unimplemented) | bug | M | high |
-| [PRODUCT-04](findings/product-roadmap.md#product-04) | Product strategy & feature roadmap | Proxy bridge conformance suite (golden fixtures per protocol pair) | refactor | M | high |
-| [PRODUCT-62](findings/product-roadmap.md#product-62) | Product strategy & feature roadmap | THEME — "Trust & governance" (vault, listener auth, signed catalog, disclosure, policy, audit, signing) | risk | XL | high |
+| [SEC-01](findings/security.md#sec-01) | Security & privacy | Local proxy injects stored API keys for any unauthenticated client (local process, CSRF from web pages, LAN when bound to 0.0.0.0) | security | M | confirmed |
+| [SEC-02](findings/security.md#sec-02) | Security & privacy | Deep link `enabled=true` makes an attacker-supplied endpoint the *current* provider after one click; the flag is not shown in the confirmation dialog | security | S | confirmed |
+| [SEC-03](findings/security.md#sec-03) | Security & privacy | MCP deep link writes arbitrary stdio servers (command + args + env) into live tool configs; the dialog hides args/env and the "written immediately" warning is shown only when a parameter the backend ignores is set | security | S | confirmed |
+| [SEC-04](findings/security.md#sec-04) | Security & privacy | Raw deep-link URLs (including `apiKey`, `usageAccessToken`, `usageApiKey`) are written to the plaintext log file | security | S | partially-confirmed |
+| [PROXY-03](findings/proxy-core.md#proxy-03) | Proxy core | Proxy can be bound to all interfaces with no authentication on the main API routes | security | M | confirmed |
+| [SVC-01](findings/backend-services.md#svc-01) | Backend services | Provider switch persists "current" pointers before the live write, and a failed write poisons the next backfill | bug | M | partially-confirmed |
+| [SVC-02](findings/backend-services.md#svc-02) | Backend services | Cloud sync is last-writer-wins: no remote precondition on upload and no local-dirty check on download | bug | L | partially-confirmed |
+| [SVC-08](findings/backend-services.md#svc-08) | Backend services | Gemini `settings.json` merge swallows parse errors and overwrites the file with provider-only content | bug | S | confirmed |
+| [DB-01](findings/database.md#db-01) | Database / DAO / migrations | Sync importer executes arbitrary SQL from the remote artifact after a header-only check | security | L | confirmed |
+| [DB-02](findings/database.md#db-02) | Database / DAO / migrations | Provider API keys, backups and the cloud sync artifact are all plaintext | security | XL | partially-confirmed |
+| [SESS-02](findings/sessions-deeplinks.md#sess-02) | Session manager, deep links & usage ingestion | MCP deep links write arbitrary `command/args/env` into live tool configs; `enabled` is ignored and the confirmation hides args/env | security | M | confirmed |
+| [SESS-05](findings/sessions-deeplinks.md#sess-05) | Session manager, deep links & usage ingestion | Raw deep-link URL (including `apiKey`) is logged at info level and shipped in the `deeplink-error` payload | security | S | confirmed |
+| [FE-PROV-01](findings/frontend-providers.md#fe-prov-01) | Provider management UI | JSON-editor edits are silently overwritten by the next field edit (stale `getValues` snapshots) | bug | M | confirmed |
+| [FE-PROV-06](findings/frontend-providers.md#fe-prov-06) | Provider management UI | OMO custom agent/category rows vanish before a model is chosen | bug | S | confirmed |
+| [PERF-01](findings/performance.md#perf-01) | Performance & resources | Header-case-preserving upstream path performs a full TCP + TLS handshake on every request (no connection reuse) | performance | L | confirmed |
+| [PERF-02](findings/performance.md#perf-02) | Performance & resources | SQLite opened with default journal/sync settings behind one global std Mutex (no WAL, synchronous=FULL, no busy_timeout, no cache tuning) | performance | S | partially-confirmed |
+| [TEST-01](findings/testing.md#test-01) | Testing & QA | No in-process end-to-end test of the proxy request path | test | L | confirmed |
+| [I18N-03](findings/i18n.md#i18n-03) | Internationalization | Backend user-facing errors are Chinese-only strings matched by substring on the frontend | tech-debt | XL | confirmed |
+| [PRODUCT-01](findings/product-roadmap.md#product-01) | Product strategy & feature roadmap | Secrets vault: OS keychain for API keys/tokens and encrypted export & cloud-sync bundles | risk | L | partially-confirmed |
+| [PRODUCT-02](findings/product-roadmap.md#product-02) | Product strategy & feature roadmap | Authenticate the proxy listener when bound to a non-loopback address | risk | S | confirmed |
+| [PRODUCT-04](findings/product-roadmap.md#product-04) | Product strategy & feature roadmap | Proxy bridge conformance suite (golden fixtures per protocol pair) | refactor | M | partially-confirmed |
+| [PRODUCT-62](findings/product-roadmap.md#product-62) | Product strategy & feature roadmap | THEME — "Trust & governance" (vault, listener auth, signed catalog, disclosure, policy, audit, signing) | risk | XL | partially-confirmed |
+| [PRODUCT-63](findings/product-roadmap.md#product-63) | Product strategy & feature roadmap | THEME — "Projects everywhere" (per-directory binding, all apps in profiles/tray/universal/takeover, usage by project) | feature | XL | partially-confirmed |
+| [PRODUCT-65](findings/product-roadmap.md#product-65) | Product strategy & feature roadmap | THEME — "Reliability engineering" (bridge fixtures, e2e scenarios, beta ring, diagnostics) | refactor | L | partially-confirmed |
 
-## P1 — high priority
+## Everything the first pass rated P0 or P1, with the verifier's correction
 
-111 findings.
+154 findings. Sorted by corrected priority. The verifier's notes are in the area files under **Verification**.
 
-| ID | Area | Title | Type | Effort | Confidence |
-|---|---|---|---|---|---|
-| [SEC-01](findings/security.md#sec-01) | Security & privacy | Local proxy injects stored API keys for any unauthenticated client (local process, CSRF from web pages, LAN when bound to 0.0.0.0) | security | M | high |
-| [SEC-02](findings/security.md#sec-02) | Security & privacy | Deep link `enabled=true` makes an attacker-supplied endpoint the *current* provider after one click; the flag is not shown in the confirmation dialog | security | S | high |
-| [SEC-03](findings/security.md#sec-03) | Security & privacy | MCP deep link writes arbitrary stdio servers (command + args + env) into live tool configs; the dialog hides args/env and the "written immediately" warning is shown only when a parameter the backend ignores is set | security | S | high |
-| [SEC-04](findings/security.md#sec-04) | Security & privacy | Raw deep-link URLs (including `apiKey`, `usageAccessToken`, `usageApiKey`) are written to the plaintext log file | security | S | high |
-| [SEC-05](findings/security.md#sec-05) | Security & privacy | Secrets at rest are plaintext with default file permissions (SQLite DB, backups, exports, config dir); no Windows ACL hardening | security | M | high |
-| [SEC-06](findings/security.md#sec-06) | Security & privacy | WebDAV/S3 sync uploads a plaintext SQL dump of all provider keys; plain-HTTP endpoints allowed | security | M | high |
-| [SEC-07](findings/security.md#sec-07) | Security & privacy | Session "Resume" builds shell commands from transcript-controlled values and the Tauri command runs a free-form command string from the webview | security | S | high |
-| [PROXY-03](findings/proxy-core.md#proxy-03) | Proxy core | Proxy can be bound to all interfaces with no authentication on the main API routes | security | M | high |
-| [SVC-03](findings/backend-services.md#svc-03) | Backend services | GitHub skill archive extraction skips `enclosed_name()` and has no entry/size caps (zip-slip / zip-bomb) | security | S | medium |
-| [SVC-04](findings/backend-services.md#svc-04) | Backend services | Sync uploads the full providers table (API keys, OAuth tokens) in plaintext | security | L | high |
-| [SVC-05](findings/backend-services.md#svc-05) | Backend services | `futures::executor::block_on` inside synchronous Tauri commands blocks the main thread | bug | M | medium |
-| [SVC-06](findings/backend-services.md#svc-06) | Backend services | Best-effort takeover swallows live-write errors while the DB marks the app as taken over | bug | S | medium |
-| [SVC-07](findings/backend-services.md#svc-07) | Backend services | Skill install/update write directly into the SSOT path; a mid-way failure leaves orphan or deleted skills | bug | S | high |
-| [SVC-08](findings/backend-services.md#svc-08) | Backend services | Gemini `settings.json` merge swallows parse errors and overwrites the file with provider-only content | bug | S | high |
-| [SVC-18](findings/backend-services.md#svc-18) | Backend services | Introduce an `AppAdapter` trait and move per-app live/takeover/backfill logic out of the services | refactor | XL | high |
-| [SVC-19](findings/backend-services.md#svc-19) | Backend services | Unify WebDAV and S3 behind a `SyncTransport` trait and a single auto-sync worker | refactor | L | high |
-| [SVC-24](findings/backend-services.md#svc-24) | Backend services | No end-to-end tests for the sync protocol or auto-sync worker | test | M | high |
-| [SVC-25](findings/backend-services.md#svc-25) | Backend services | No failure-injection tests for provider mutations, and several services have zero tests | test | M | high |
-| [CMD-01](findings/commands-app-shell.md#cmd-01) | Commands / IPC / app shell | Deep-link URLs carrying API keys are logged in plaintext | security | S | high |
-| [CMD-02](findings/commands-app-shell.md#cmd-02) | Commands / IPC / app shell | `copilot_get_token` / `copilot_get_token_for_account` hand raw bearer tokens to the webview | security | S | high |
-| [CMD-03](findings/commands-app-shell.md#cmd-03) | Commands / IPC / app shell | Overly broad CSP and over-granted capabilities | security | S | high |
-| [CMD-04](findings/commands-app-shell.md#cmd-04) | Commands / IPC / app shell | Sync credentials (WebDAV password, S3 secret) persist in plaintext `settings.json` | security | M | high |
-| [CMD-06](findings/commands-app-shell.md#cmd-06) | Commands / IPC / app shell | `save_settings` is a lost-update race on the process-global settings | bug | M | medium |
-| [CMD-07](findings/commands-app-shell.md#cmd-07) | Commands / IPC / app shell | `futures::executor::block_on` on tokio locks reachable from async commands | bug | L | medium |
-| [CMD-08](findings/commands-app-shell.md#cmd-08) | Commands / IPC / app shell | ~97 sync commands do file I/O, SQLite aggregation and process spawning on Tauri's sync-command thread | performance | L | high |
-| [CMD-09](findings/commands-app-shell.md#cmd-09) | Commands / IPC / app shell | Startup does seconds of synchronous work before the window is shown | performance | L | high |
-| [CMD-10](findings/commands-app-shell.md#cmd-10) | Commands / IPC / app shell | ~3,500 lines of business logic live in the command layer (and the tray calls commands) | refactor | XL | high |
-| [CMD-12](findings/commands-app-shell.md#cmd-12) | Commands / IPC / app shell | Errors cross IPC as flattened strings; frontend substring-matches Chinese text | refactor | L | high |
-| [CMD-13](findings/commands-app-shell.md#cmd-13) | Commands / IPC / app shell | No typed IPC contract — 281 commands mirrored by hand in 24 TS files with inconsistent naming | refactor | XL | high |
-| [CMD-31](findings/commands-app-shell.md#cmd-31) | Commands / IPC / app shell | Command/shell test coverage is thin and the test harness is awkward | test | L | high |
-| [DB-03](findings/database.md#db-03) | Database / DAO / migrations | Single `Mutex<Connection>` without WAL/busy_timeout serialises the proxy write path, importers, UI reads and maintenance | refactor | XL | high |
-| [DB-04](findings/database.md#db-04) | Database / DAO / migrations | Usage log inserts are one-row autocommit statements with 8 index B-trees to maintain | performance | M | high |
-| [DB-09](findings/database.md#db-09) | Database / DAO / migrations | Maintenance and backfill hold the global lock for unbounded full-table work on every start | performance | M | high |
-| [DB-10](findings/database.md#db-10) | Database / DAO / migrations | Backup rotation, restore safety and pre-migration backups | bug | M | high |
-| [SESS-01](findings/sessions-deeplinks.md#sess-01) | Session manager, deep links & usage ingestion | Resume command / cwd are interpolated into shell strings without safe quoting; webview can run arbitrary commands | security | M | high |
-| [SESS-02](findings/sessions-deeplinks.md#sess-02) | Session manager, deep links & usage ingestion | MCP deep links write arbitrary `command/args/env` into live tool configs; `enabled` is ignored and the confirmation hides args/env | security | M | high |
-| [SESS-03](findings/sessions-deeplinks.md#sess-03) | Session manager, deep links & usage ingestion | Tail-window reader drops `last_active_at`/`summary` when the final JSONL line is ≥16 KB, misordering busy sessions | bug | S | high |
-| [SESS-04](findings/sessions-deeplinks.md#sess-04) | Session manager, deep links & usage ingestion | Cold-start deep links are lost (no `get_current()`/pending buffer) and macOS handles the same link twice | bug | S | medium |
-| [SESS-05](findings/sessions-deeplinks.md#sess-05) | Session manager, deep links & usage ingestion | Raw deep-link URL (including `apiKey`) is logged at info level and shipped in the `deeplink-error` payload | security | S | high |
-| [FE-ARCH-01](findings/frontend-architecture.md#fe-arch-01) | Frontend architecture | `autoSyncConfirmed` setting is silently dropped by the backend (type drift between TS `Settings` and Rust `AppSettings`) | bug | S | high |
-| [FE-ARCH-02](findings/frontend-architecture.md#fe-arch-02) | Frontend architecture | Replace the `App.tsx` god component with a router-driven shell and page-owned header actions | refactor | XL | high |
-| [FE-ARCH-03](findings/frontend-architecture.md#fe-arch-03) | Frontend architecture | Generate the Tauri command/event bindings from Rust (tauri-specta) instead of 291 hand-written `invoke` wrappers | refactor | L | high |
-| [FE-ARCH-04](findings/frontend-architecture.md#fe-arch-04) | Frontend architecture | Centralise TanStack Query keys and fix namespace collisions that over-invalidate third-party usage endpoints | refactor | M | high |
-| [FE-PROV-01](findings/frontend-providers.md#fe-prov-01) | Provider management UI | JSON-editor edits are silently overwritten by the next field edit (stale `getValues` snapshots) | bug | M | medium |
-| [FE-PROV-02](findings/frontend-providers.md#fe-prov-02) | Provider management UI | Edit dialog backfills live config after the form is already editable, resetting user input | bug | M | high |
-| [FE-PROV-03](findings/frontend-providers.md#fe-prov-03) | Provider management UI | Validation messages are hard-coded Chinese/English literals outside i18n | bug | S | high |
-| [FE-PROV-04](findings/frontend-providers.md#fe-prov-04) | Provider management UI | Switching to the "Universal" tab in Add Provider unmounts the form and loses all input | bug | S | high |
-| [FE-PROV-06](findings/frontend-providers.md#fe-prov-06) | Provider management UI | OMO custom agent/category rows vanish before a model is chosen | bug | S | high |
-| [FE-UI-05](findings/frontend-features.md#fe-ui-05) | Feature UI (settings, usage, proxy, skills, MCP) | Dead components hide unfinished features (request drill-down, session import, circuit-breaker panel, repo dialog, prompt modal, proxy-config hook, provider limits) | tech-debt | M | high |
-| [FE-UI-16](findings/frontend-features.md#fe-ui-16) | Feature UI (settings, usage, proxy, skills, MCP) | XL refactor — split `WebdavSyncSection` into a backend-agnostic cloud-sync panel | refactor | XL | high |
-| [FE-UI-17](findings/frontend-features.md#fe-ui-17) | Feature UI (settings, usage, proxy, skills, MCP) | L refactor — consolidate the settings save pipeline (`useSettings` / `useSettingsForm` / `useDirectorySettings`) | refactor | L | high |
-| [FE-UI-42](findings/frontend-features.md#fe-ui-42) | Feature UI (settings, usage, proxy, skills, MCP) | Test gaps — no component tests for proxy, usage charts/pricing, about, backups, log/rectifier, OpenClaw, workspace, prompts, Hermes; S3 branch untested | test | L | high |
-| [PERF-03](findings/performance.md#perf-03) | Performance & resources | Usage logging executes 5-6 synchronous SQL statements per request on Tokio worker threads, with no batching, no statement cache and no writer task | refactor | M | high |
-| [PERF-04](findings/performance.md#perf-04) | Performance & resources | Every request deep-clones the full JSON body 3-5 times and rebuilds the tree twice before serialization | performance | M | high |
-| [PERF-05](findings/performance.md#perf-05) | Performance & resources | 6-8 database/config lookups per request before the first upstream byte (per-app proxy config read twice, full providers table scanned and JSON-parsed) | performance | M | high |
-| [PERF-06](findings/performance.md#perf-06) | Performance & resources | SSE passthrough parser allocates per line and memmoves the buffer per event | performance | S | high |
-| [PERF-07](findings/performance.md#perf-07) | Performance & resources | Streaming usage collector retains every Gemini/OpenAI chunk as a parsed `serde_json::Value` for the whole stream | performance | S | high |
-| [PERF-08](findings/performance.md#perf-08) | Performance & resources | Cross-source dedup `NOT EXISTS` correlated subquery is re-evaluated inside every dashboard aggregate | performance | M | medium |
-| [PERF-09](findings/performance.md#perf-09) | Performance & resources | Provider limit checks wrap the indexed `created_at` column in `date()`/`strftime()` (non-sargable full scans) | performance | S | high |
-| [PERF-10](findings/performance.md#perf-10) | Performance & resources | Session-usage sync (every 60 s) issues one SELECT per JSONL file, one lock+INSERT per message with no transaction, and a fuzzy pricing lookup per message | performance | M | high |
-| [PERF-11](findings/performance.md#perf-11) | Performance & resources | Startup does all configuration imports, DB maintenance and the full tray build synchronously inside `setup` before the window is shown, with no timing | performance | M | high |
-| [PERF-12](findings/performance.md#perf-12) | Performance & resources | 100 of 291 Tauri commands are synchronous (`pub fn`), including all dashboard aggregates, provider listing and skill scanning, so they execute on the main thread | performance | S | medium |
-| [PERF-13](findings/performance.md#perf-13) | Performance & resources | Idle polling storm: five overlapping 2-5 s React Query pollers plus a 10 s providers refetch, each hitting the global DB mutex and reading proxy config four times | performance | M | high |
-| [PERF-14](findings/performance.md#perf-14) | Performance & resources | Usage dashboard refetches all six queries on every `usage-log-recorded` event (200 ms backend debounce only) in addition to 30 s polling | performance | S | high |
-| [PERF-15](findings/performance.md#perf-15) | Performance & resources | No code splitting: one monolithic bundle with every page, CodeMirror, recharts, flexsearch, 11k lines of presets and 135 KB of inline SVG strings | performance | M | high |
-| [PERF-16](findings/performance.md#perf-16) | Performance & resources | Tray menu is rebuilt from scratch on every provider/profile/failover change, re-reading every provider table, blocking on async DB calls and parsing live config files from disk | performance | M | high |
-| [PERF-17](findings/performance.md#perf-17) | Performance & resources | Single-connection design means long maintenance windows (rollup, backfill, session sync, backup) block the proxy logger and all UI commands | refactor | L | high |
-| [TEST-02](findings/testing.md#test-02) | Testing & QA | Proxy format conversion has no golden-file corpus or whole-object assertions | test | L | high |
-| [TEST-03](findings/testing.md#test-03) | Testing & QA | Tauri command layer (285 commands) is effectively untested | test | L | high |
-| [TEST-04](findings/testing.md#test-04) | Testing & QA | MSW handler set drifts from the real command registry (22% coverage, 5 phantom handlers) | test | M | high |
-| [TEST-05](findings/testing.md#test-05) | Testing & QA | No contract between TS API wrappers/types and Rust serde shapes | test | L | medium |
-| [TEST-06](findings/testing.md#test-06) | Testing & QA | No coverage measurement or gate on either side | ci | M | high |
-| [TEST-07](findings/testing.md#test-07) | Testing & QA | Zero tests for MCP sync services despite three recent MCP fixes | test | M | high |
-| [TEST-08](findings/testing.md#test-08) | Testing & QA | Integration tests share one process-wide HOME, a poisonable global mutex and a file-backed DB | tech-debt | M | high |
-| [TEST-33](findings/testing.md#test-33) | Testing & QA | Prioritized roadmap to a trustworthy pyramid | docs | XL | high |
-| [CI-01](findings/ci-build-release.md#ci-01) | CI/CD, build, release & dependencies | Windows installers and portable EXE are not code-signed | security | M | high |
-| [CI-02](findings/ci-build-release.md#ci-02) | CI/CD, build, release & dependencies | Updater endpoint points at `/releases/latest/` while every release is published as a prerelease | bug | S | high |
-| [CI-03](findings/ci-build-release.md#ci-03) | CI/CD, build, release & dependencies | Missing updater signatures only warn on Windows x64 and Linux, so a platform can silently drop out of `latest.json` | bug | S | high |
-| [CI-04](findings/ci-build-release.md#ci-04) | CI/CD, build, release & dependencies | No validation that the Tauri updater can actually consume what the release produced (`latest.json` + minisign verification) | test | S | high |
-| [CI-05](findings/ci-build-release.md#ci-05) | CI/CD, build, release & dependencies | Secrets are interpolated into shell text and the updater private key is exported to `GITHUB_ENV` for all later steps | security | S | high |
-| [CI-06](findings/ci-build-release.md#ci-06) | CI/CD, build, release & dependencies | Version is bumped by hand in four files plus CHANGELOG with no single source and no tag-vs-version guard | refactor | S | high |
-| [CI-07](findings/ci-build-release.md#ci-07) | CI/CD, build, release & dependencies | No release dry-run, and one platform failure blocks the whole release with no way to rehearse | ci | M | high |
-| [CI-08](findings/ci-build-release.md#ci-08) | CI/CD, build, release & dependencies | No vulnerability, license or unmaintained-crate scanning in CI | security | S | high |
-| [CI-09](findings/ci-build-release.md#ci-09) | CI/CD, build, release & dependencies | Toolchain pins disagree across rust-toolchain.toml, Cargo.toml, CI, docs and package.json (Rust and Node/pnpm) | tech-debt | S | high |
-| [CI-10](findings/ci-build-release.md#ci-10) | CI/CD, build, release & dependencies | CI never builds the frontend bundle or a Tauri bundle; the backend job runs against an empty `dist` placeholder | ci | M | high |
-| [CI-11](findings/ci-build-release.md#ci-11) | CI/CD, build, release & dependencies | CONTRIBUTING documents `pnpm lint`/ESLint that do not exist; there is no JavaScript/TypeScript linter at all | docs | M | high |
-| [CI-37](findings/ci-build-release.md#ci-37) | CI/CD, build, release & dependencies | Ambitious — end-to-end release-engineering overhaul (release-please/git-cliff driven, dry-run, signed/attested, multi-channel) | feature | XL | medium |
-| [I18N-01](findings/i18n.md#i18n-01) | Internationalization | Ten keys used in code are missing from every locale and leak Chinese fallbacks into non-Chinese UIs | bug | S | high |
-| [I18N-02](findings/i18n.md#i18n-02) | Internationalization | First-run language falls back to Simplified Chinese for every non-CJK, non-English OS locale (frontend, tray and backend) | bug | S | high |
-| [I18N-03](findings/i18n.md#i18n-03) | Internationalization | Backend user-facing errors are Chinese-only strings matched by substring on the frontend | tech-debt | XL | high |
-| [I18N-04](findings/i18n.md#i18n-04) | Internationalization | zh-TW is missing 30 keys (tool-lifecycle section) and carries 2 orphan keys | bug | S | high |
-| [I18N-05](findings/i18n.md#i18n-05) | Internationalization | No automated i18n integrity check in CI; the i18n PR label can never fire | ci | M | high |
-| [I18N-06](findings/i18n.md#i18n-06) | Internationalization | CONTRIBUTING.md i18n and tooling instructions are wrong | docs | S | high |
-| [DOCS-01](findings/docs-onboarding.md#docs-01) | Documentation & onboarding | The user manual is frozen at v3.16.0 and omits Grok Build, project profiles and S3 sync | docs | L | high |
-| [DOCS-02](findings/docs-onboarding.md#docs-02) | Documentation & onboarding | Release-notes/changelog hygiene: stale README link, no index, missing ja for 4 versions, 14 broken links, a missing 3.6.1 entry and a mis-dated 3.5.0 | docs | S | high |
-| [DOCS-03](findings/docs-onboarding.md#docs-03) | Documentation & onboarding | README screenshots show a three-app UI that predates most shipped features | docs | M | high |
-| [DOCS-04](findings/docs-onboarding.md#docs-04) | Documentation & onboarding | Deep-link protocol has no canonical spec; manual and generator lag the parser | docs | M | high |
-| [DOCS-13](findings/docs-onboarding.md#docs-13) | Documentation & onboarding | First-run experience is a single text modal — add a guided setup wizard | ux | L | high |
-| [PRODUCT-05](findings/product-roadmap.md#product-05) | Product strategy & feature roadmap | Finish budget limits & alerts (backend exists, UI/enforcement missing) | feature | M | high |
-| [PRODUCT-06](findings/product-roadmap.md#product-06) | Product strategy & feature roadmap | System/tray notifications for failover, circuit open, budget, quota exhaustion and sync errors | feature | M | high |
-| [PRODUCT-07](findings/product-roadmap.md#product-07) | Product strategy & feature roadmap | Remote, signed preset & sponsor catalog (decouple commercial changes from app releases) | feature | L | high |
-| [PRODUCT-08](findings/product-roadmap.md#product-08) | Product strategy & feature roadmap | In-app affiliate/sponsor disclosure and preset provenance | risk | S | high |
-| [PRODUCT-09](findings/product-roadmap.md#product-09) | Product strategy & feature roadmap | ToS-sensitive feature gate and README wording fix ("signature bypass") | risk | S | high |
-| [PRODUCT-10](findings/product-roadmap.md#product-10) | Product strategy & feature roadmap | Headless proxy daemon (proxy survives app quit / runs without window) | feature | L | high |
-| [PRODUCT-11](findings/product-roadmap.md#product-11) | Product strategy & feature roadmap | CLI companion (`ccs`) over the same SQLite store | feature | L | high |
-| [PRODUCT-12](findings/product-roadmap.md#product-12) | Product strategy & feature roadmap | Per-project (cwd / git repo) automatic profile binding | feature | L | high |
-| [PRODUCT-35](findings/product-roadmap.md#product-35) | Product strategy & feature roadmap | Windows Authenticode signing (SmartScreen) and SBOM/provenance for releases | risk | S | medium |
-| [PRODUCT-54](findings/product-roadmap.md#product-54) | Product strategy & feature roadmap | Sponsor preset governance policy (criteria, review cadence, removal, disclosure) as a public document | risk | S | high |
-| [PRODUCT-61](findings/product-roadmap.md#product-61) | Product strategy & feature roadmap | THEME — "Proxy as a product" (daemon + CLI + proactive health + notifications + smart routing + web dashboard) | feature | XL | high |
-| [PRODUCT-63](findings/product-roadmap.md#product-63) | Product strategy & feature roadmap | THEME — "Projects everywhere" (per-directory binding, all apps in profiles/tray/universal/takeover, usage by project) | feature | XL | high |
-| [PRODUCT-65](findings/product-roadmap.md#product-65) | Product strategy & feature roadmap | THEME — "Reliability engineering" (bridge fixtures, e2e scenarios, beta ring, diagnostics) | refactor | L | high |
+| ID | Area | Title | First pass | Verified | Verdict | Effort |
+|---|---|---|---|---|---|---|
+| [SEC-01](findings/security.md#sec-01) | Security & privacy | Local proxy injects stored API keys for any unauthenticated client (local process, CSRF from web pages, LAN when bound to 0.0.0.0) | P1 | P1 | confirmed | M |
+| [SEC-02](findings/security.md#sec-02) | Security & privacy | Deep link `enabled=true` makes an attacker-supplied endpoint the *current* provider after one click; the flag is not shown in the confirmation dialog | P1 | P1 | confirmed | S |
+| [SEC-03](findings/security.md#sec-03) | Security & privacy | MCP deep link writes arbitrary stdio servers (command + args + env) into live tool configs; the dialog hides args/env and the "written immediately" warning is shown only when a parameter the backend ignores is set | P1 | P1 | confirmed | S |
+| [SEC-04](findings/security.md#sec-04) | Security & privacy | Raw deep-link URLs (including `apiKey`, `usageAccessToken`, `usageApiKey`) are written to the plaintext log file | P1 | P1 | partially-confirmed | S |
+| [PROXY-03](findings/proxy-core.md#proxy-03) | Proxy core | Proxy can be bound to all interfaces with no authentication on the main API routes | P1 | P1 | confirmed | M |
+| [SVC-01](findings/backend-services.md#svc-01) | Backend services | Provider switch persists "current" pointers before the live write, and a failed write poisons the next backfill | P0 | P1 | partially-confirmed | M |
+| [SVC-02](findings/backend-services.md#svc-02) | Backend services | Cloud sync is last-writer-wins: no remote precondition on upload and no local-dirty check on download | P0 | P1 | partially-confirmed | L |
+| [SVC-08](findings/backend-services.md#svc-08) | Backend services | Gemini `settings.json` merge swallows parse errors and overwrites the file with provider-only content | P1 | P1 | confirmed | S |
+| [DB-01](findings/database.md#db-01) | Database / DAO / migrations | Sync importer executes arbitrary SQL from the remote artifact after a header-only check | P0 | P1 | confirmed | L |
+| [DB-02](findings/database.md#db-02) | Database / DAO / migrations | Provider API keys, backups and the cloud sync artifact are all plaintext | P0 | P1 | partially-confirmed | XL |
+| [SESS-02](findings/sessions-deeplinks.md#sess-02) | Session manager, deep links & usage ingestion | MCP deep links write arbitrary `command/args/env` into live tool configs; `enabled` is ignored and the confirmation hides args/env | P1 | P1 | confirmed | M |
+| [SESS-05](findings/sessions-deeplinks.md#sess-05) | Session manager, deep links & usage ingestion | Raw deep-link URL (including `apiKey`) is logged at info level and shipped in the `deeplink-error` payload | P1 | P1 | confirmed | S |
+| [FE-PROV-01](findings/frontend-providers.md#fe-prov-01) | Provider management UI | JSON-editor edits are silently overwritten by the next field edit (stale `getValues` snapshots) | P1 | P1 | confirmed | M |
+| [FE-PROV-06](findings/frontend-providers.md#fe-prov-06) | Provider management UI | OMO custom agent/category rows vanish before a model is chosen | P1 | P1 | confirmed | S |
+| [PERF-01](findings/performance.md#perf-01) | Performance & resources | Header-case-preserving upstream path performs a full TCP + TLS handshake on every request (no connection reuse) | P0 | P1 | confirmed | L |
+| [PERF-02](findings/performance.md#perf-02) | Performance & resources | SQLite opened with default journal/sync settings behind one global std Mutex (no WAL, synchronous=FULL, no busy_timeout, no cache tuning) | P0 | P1 | partially-confirmed | S |
+| [TEST-01](findings/testing.md#test-01) | Testing & QA | No in-process end-to-end test of the proxy request path | P0 | P1 | confirmed | L |
+| [I18N-03](findings/i18n.md#i18n-03) | Internationalization | Backend user-facing errors are Chinese-only strings matched by substring on the frontend | P1 | P1 | confirmed | XL |
+| [PRODUCT-01](findings/product-roadmap.md#product-01) | Product strategy & feature roadmap | Secrets vault: OS keychain for API keys/tokens and encrypted export & cloud-sync bundles | P0 | P1 | partially-confirmed | L |
+| [PRODUCT-02](findings/product-roadmap.md#product-02) | Product strategy & feature roadmap | Authenticate the proxy listener when bound to a non-loopback address | P0 | P1 | confirmed | S |
+| [PRODUCT-04](findings/product-roadmap.md#product-04) | Product strategy & feature roadmap | Proxy bridge conformance suite (golden fixtures per protocol pair) | P0 | P1 | partially-confirmed | M |
+| [PRODUCT-62](findings/product-roadmap.md#product-62) | Product strategy & feature roadmap | THEME — "Trust & governance" (vault, listener auth, signed catalog, disclosure, policy, audit, signing) | P0 | P1 | partially-confirmed | XL |
+| [PRODUCT-63](findings/product-roadmap.md#product-63) | Product strategy & feature roadmap | THEME — "Projects everywhere" (per-directory binding, all apps in profiles/tray/universal/takeover, usage by project) | P1 | P1 | partially-confirmed | XL |
+| [PRODUCT-65](findings/product-roadmap.md#product-65) | Product strategy & feature roadmap | THEME — "Reliability engineering" (bridge fixtures, e2e scenarios, beta ring, diagnostics) | P1 | P1 | partially-confirmed | L |
+| [SEC-05](findings/security.md#sec-05) | Security & privacy | Secrets at rest are plaintext with default file permissions (SQLite DB, backups, exports, config dir); no Windows ACL hardening | P1 | P2 | partially-confirmed | M |
+| [SEC-06](findings/security.md#sec-06) | Security & privacy | WebDAV/S3 sync uploads a plaintext SQL dump of all provider keys; plain-HTTP endpoints allowed | P1 | P2 | partially-confirmed | M |
+| [SEC-07](findings/security.md#sec-07) | Security & privacy | Session "Resume" builds shell commands from transcript-controlled values and the Tauri command runs a free-form command string from the webview | P1 | P2 | partially-confirmed | S |
+| [PROXY-01](findings/proxy-core.md#proxy-01) | Proxy core | Hyper raw-write fallback re-sends the request after it was already written to the upstream | P1 | P2 | confirmed | M |
+| [PROXY-02](findings/proxy-core.md#proxy-02) | Proxy core | HalfOpen probe permit leaks when the client disconnects mid-request, leaving the provider stuck in HalfOpen | P1 | P2 | partially-confirmed | M |
+| [PROXY-04](findings/proxy-core.md#proxy-04) | Proxy core | Blocking SQLite (std Mutex + sync I/O) on the async hot path, 6-10 times per request | P1 | P2 | partially-confirmed | L |
+| [PROXY-05](findings/proxy-core.md#proxy-05) | Proxy core | Native-Anthropic path opens a new TCP+TLS connection per request; the raw-write mechanism is likely redundant | P1 | P2 | partially-confirmed | M |
+| [PROXY-06](findings/proxy-core.md#proxy-06) | Proxy core | No end-to-end tests of the proxy against a mock upstream; `forward()` is untestable | P1 | P2 | partially-confirmed | L |
+| [PROXY-07](findings/proxy-core.md#proxy-07) | Proxy core | Decompose `forwarder.rs`/`handlers.rs` into a staged request pipeline with pluggable transport | P1 | P2 | partially-confirmed | XL |
+| [PROV-01](findings/proxy-providers.md#prov-01) | Proxy providers & format conversion | Claude←OpenAI-Chat stream converter silently swallows upstream error chunks and unparsable payloads | P1 | P2 | confirmed | S |
+| [PROV-02](findings/proxy-providers.md#prov-02) | Proxy providers & format conversion | Streamed `tool_calls` without `index` are dropped (streaming.rs) or collapsed (streaming_codex_chat.rs) | P1 | P2 | partially-confirmed | S |
+| [PROV-04](findings/proxy-providers.md#prov-04) | Proxy providers & format conversion | Claude→`openai_chat` ignores provider thinking parameters that the Codex→Chat path already models | P1 | P2 | partially-confirmed | M |
+| [PROV-05](findings/proxy-providers.md#prov-05) | Proxy providers & format conversion | `gpt-5*` models through Chat Completions receive `max_tokens` and raw `temperature` | P1 | P2 | partially-confirmed | S |
+| [PROV-19](findings/proxy-providers.md#prov-19) | Proxy providers & format conversion | Introduce a canonical message/stream IR with per-protocol codecs (replace 13 pairwise converters) | P1 | P2 | partially-confirmed | XL |
+| [PROV-20](findings/proxy-providers.md#prov-20) | Proxy providers & format conversion | Build a recorded golden-fixture corpus and round-trip/property tests for the conversion layer | P1 | P2 | partially-confirmed | L |
+| [SVC-03](findings/backend-services.md#svc-03) | Backend services | GitHub skill archive extraction skips `enclosed_name()` and has no entry/size caps (zip-slip / zip-bomb) | P1 | P2 | partially-confirmed | S |
+| [SVC-04](findings/backend-services.md#svc-04) | Backend services | Sync uploads the full providers table (API keys, OAuth tokens) in plaintext | P1 | P2 | partially-confirmed | L |
+| [SVC-05](findings/backend-services.md#svc-05) | Backend services | `futures::executor::block_on` inside synchronous Tauri commands blocks the main thread | P1 | P2 | partially-confirmed | M |
+| [SVC-07](findings/backend-services.md#svc-07) | Backend services | Skill install/update write directly into the SSOT path; a mid-way failure leaves orphan or deleted skills | P1 | P2 | partially-confirmed | S |
+| [SVC-18](findings/backend-services.md#svc-18) | Backend services | Introduce an `AppAdapter` trait and move per-app live/takeover/backfill logic out of the services | P1 | P2 | partially-confirmed | XL |
+| [SVC-19](findings/backend-services.md#svc-19) | Backend services | Unify WebDAV and S3 behind a `SyncTransport` trait and a single auto-sync worker | P1 | P2 | partially-confirmed | L |
+| [SVC-24](findings/backend-services.md#svc-24) | Backend services | No end-to-end tests for the sync protocol or auto-sync worker | P1 | P2 | partially-confirmed | M |
+| [SVC-25](findings/backend-services.md#svc-25) | Backend services | No failure-injection tests for provider mutations, and several services have zero tests | P1 | P2 | partially-confirmed | M |
+| [CMD-01](findings/commands-app-shell.md#cmd-01) | Commands / IPC / app shell | Deep-link URLs carrying API keys are logged in plaintext | P1 | P2 | confirmed | S |
+| [CMD-03](findings/commands-app-shell.md#cmd-03) | Commands / IPC / app shell | Overly broad CSP and over-granted capabilities | P1 | P2 | partially-confirmed | S |
+| [CMD-06](findings/commands-app-shell.md#cmd-06) | Commands / IPC / app shell | `save_settings` is a lost-update race on the process-global settings | P1 | P2 | partially-confirmed | M |
+| [CMD-07](findings/commands-app-shell.md#cmd-07) | Commands / IPC / app shell | `futures::executor::block_on` on tokio locks reachable from async commands | P1 | P2 | partially-confirmed | L |
+| [CMD-08](findings/commands-app-shell.md#cmd-08) | Commands / IPC / app shell | ~97 sync commands do file I/O, SQLite aggregation and process spawning on Tauri's sync-command thread | P1 | P2 | confirmed | L |
+| [CMD-09](findings/commands-app-shell.md#cmd-09) | Commands / IPC / app shell | Startup does seconds of synchronous work before the window is shown | P1 | P2 | confirmed | L |
+| [CMD-10](findings/commands-app-shell.md#cmd-10) | Commands / IPC / app shell | ~3,500 lines of business logic live in the command layer (and the tray calls commands) | P1 | P2 | partially-confirmed | XL |
+| [CMD-12](findings/commands-app-shell.md#cmd-12) | Commands / IPC / app shell | Errors cross IPC as flattened strings; frontend substring-matches Chinese text | P1 | P2 | confirmed | L |
+| [CMD-13](findings/commands-app-shell.md#cmd-13) | Commands / IPC / app shell | No typed IPC contract — 281 commands mirrored by hand in 24 TS files with inconsistent naming | P1 | P2 | partially-confirmed | XL |
+| [CMD-31](findings/commands-app-shell.md#cmd-31) | Commands / IPC / app shell | Command/shell test coverage is thin and the test harness is awkward | P1 | P2 | partially-confirmed | L |
+| [CFG-01](findings/config-adapters.md#cfg-01) | Per-app config adapters & MCP sync | Usage-script JS runtime has no CPU/memory limits and blocks the async runtime | P1 | P2 | confirmed | M |
+| [CFG-02](findings/config-adapters.md#cfg-02) | Per-app config adapters & MCP sync | Gemini `settings.json` is silently replaced when it cannot be parsed | P1 | P2 | partially-confirmed | S |
+| [CFG-03](findings/config-adapters.md#cfg-03) | Per-app config adapters & MCP sync | Claude/Codex/Gemini live files are overwritten with no backup and backfill is silently skipped when live is unreadable | P1 | P2 | confirmed | M |
+| [CFG-04](findings/config-adapters.md#cfg-04) | Per-app config adapters & MCP sync | `atomic_write` is not crash-safe and not atomic on Windows; secret files inherit umask permissions | P1 | P2 | partially-confirmed | S |
+| [CFG-05](findings/config-adapters.md#cfg-05) | Per-app config adapters & MCP sync | MCP specs from the UI and deeplinks bypass `validate_server_spec`; Windows `cmd /c` wrapping re-interprets shell metacharacters | P1 | P2 | partially-confirmed | S |
+| [CFG-06](findings/config-adapters.md#cfg-06) | Per-app config adapters & MCP sync | Introduce an `AppAdapter` trait, a shared live-file layer, and a conformance test-suite (large refactor) | P1 | P2 | partially-confirmed | XL |
+| [DB-03](findings/database.md#db-03) | Database / DAO / migrations | Single `Mutex<Connection>` without WAL/busy_timeout serialises the proxy write path, importers, UI reads and maintenance | P1 | P2 | partially-confirmed | XL |
+| [DB-04](findings/database.md#db-04) | Database / DAO / migrations | Usage log inserts are one-row autocommit statements with 8 index B-trees to maintain | P1 | P2 | partially-confirmed | M |
+| [DB-05](findings/database.md#db-05) | Database / DAO / migrations | Blocking SQLite work runs directly on tokio worker threads (no `spawn_blocking`) | P1 | P2 | confirmed | M |
+| [DB-06](findings/database.md#db-06) | Database / DAO / migrations | Device-level tables/keys are synced wholesale (proxy_config, settings flags, session_log_sync) | P1 | P2 | partially-confirmed | M |
+| [DB-07](findings/database.md#db-07) | Database / DAO / migrations | `create_tables_on_conn` is a second, untracked migration path with error-swallowing DDL and data fixups | P1 | P2 | partially-confirmed | L |
+| [DB-09](findings/database.md#db-09) | Database / DAO / migrations | Maintenance and backfill hold the global lock for unbounded full-table work on every start | P1 | P2 | partially-confirmed | M |
+| [DB-10](findings/database.md#db-10) | Database / DAO / migrations | Backup rotation, restore safety and pre-migration backups | P1 | P2 | partially-confirmed | M |
+| [SESS-01](findings/sessions-deeplinks.md#sess-01) | Session manager, deep links & usage ingestion | Resume command / cwd are interpolated into shell strings without safe quoting; webview can run arbitrary commands | P1 | P2 | partially-confirmed | M |
+| [SESS-03](findings/sessions-deeplinks.md#sess-03) | Session manager, deep links & usage ingestion | Tail-window reader drops `last_active_at`/`summary` when the final JSONL line is ≥16 KB, misordering busy sessions | P1 | P2 | partially-confirmed | S |
+| [SESS-04](findings/sessions-deeplinks.md#sess-04) | Session manager, deep links & usage ingestion | Cold-start deep links are lost (no `get_current()`/pending buffer) and macOS handles the same link twice | P1 | P2 | confirmed | S |
+| [SESS-06](findings/sessions-deeplinks.md#sess-06) | Session manager, deep links & usage ingestion | A real-looking Context7 API key is committed inside `deplink.html` examples | P1 | P2 | partially-confirmed | S |
+| [FE-ARCH-01](findings/frontend-architecture.md#fe-arch-01) | Frontend architecture | `autoSyncConfirmed` setting is silently dropped by the backend (type drift between TS `Settings` and Rust `AppSettings`) | P1 | P2 | confirmed | S |
+| [FE-ARCH-02](findings/frontend-architecture.md#fe-arch-02) | Frontend architecture | Replace the `App.tsx` god component with a router-driven shell and page-owned header actions | P1 | P2 | confirmed | XL |
+| [FE-ARCH-03](findings/frontend-architecture.md#fe-arch-03) | Frontend architecture | Generate the Tauri command/event bindings from Rust (tauri-specta) instead of 291 hand-written `invoke` wrappers | P1 | P2 | confirmed | L |
+| [FE-ARCH-04](findings/frontend-architecture.md#fe-arch-04) | Frontend architecture | Centralise TanStack Query keys and fix namespace collisions that over-invalidate third-party usage endpoints | P1 | P2 | partially-confirmed | M |
+| [FE-ARCH-07](findings/frontend-architecture.md#fe-arch-07) | Frontend architecture | Linting and repo tooling are missing (ESLint referenced in CONTRIBUTING but absent, no knip, no bundle analysis, no Storybook) | P1 | P2 | confirmed | M |
+| [FE-ARCH-10](findings/frontend-architecture.md#fe-arch-10) | Frontend architecture | App identity/capabilities are duplicated across 5+ hand-maintained lists and 45+ string comparisons; hardcoded label maps are already wrong for new apps | P1 | P2 | partially-confirmed | M |
+| [FE-PROV-02](findings/frontend-providers.md#fe-prov-02) | Provider management UI | Edit dialog backfills live config after the form is already editable, resetting user input | P1 | P2 | partially-confirmed | M |
+| [FE-PROV-03](findings/frontend-providers.md#fe-prov-03) | Provider management UI | Validation messages are hard-coded Chinese/English literals outside i18n | P1 | P2 | confirmed | S |
+| [FE-PROV-04](findings/frontend-providers.md#fe-prov-04) | Provider management UI | Switching to the "Universal" tab in Add Provider unmounts the form and loses all input | P1 | P2 | confirmed | S |
+| [FE-PROV-05](findings/frontend-providers.md#fe-prov-05) | Provider management UI | Hermes provider-key rename is accepted by the form but ignored on save | P1 | P2 | confirmed | S |
+| [FE-UI-01](findings/frontend-features.md#fe-ui-01) | Feature UI (settings, usage, proxy, skills, MCP) | General-tab autosave silently persists unsaved Advanced-tab directory overrides (and skips their side effects) | P1 | P2 | partially-confirmed | M |
+| [FE-UI-03](findings/frontend-features.md#fe-ui-03) | Feature UI (settings, usage, proxy, skills, MCP) | Directory override inputs trim on every keystroke, so paths containing spaces cannot be typed | P1 | P2 | confirmed | S |
+| [FE-UI-05](findings/frontend-features.md#fe-ui-05) | Feature UI (settings, usage, proxy, skills, MCP) | Dead components hide unfinished features (request drill-down, session import, circuit-breaker panel, repo dialog, prompt modal, proxy-config hook, provider limits) | P1 | P2 | partially-confirmed | M |
+| [FE-UI-16](findings/frontend-features.md#fe-ui-16) | Feature UI (settings, usage, proxy, skills, MCP) | XL refactor — split `WebdavSyncSection` into a backend-agnostic cloud-sync panel | P1 | P2 | partially-confirmed | XL |
+| [FE-UI-17](findings/frontend-features.md#fe-ui-17) | Feature UI (settings, usage, proxy, skills, MCP) | L refactor — consolidate the settings save pipeline (`useSettings` / `useSettingsForm` / `useDirectorySettings`) | P1 | P2 | partially-confirmed | L |
+| [FE-UI-42](findings/frontend-features.md#fe-ui-42) | Feature UI (settings, usage, proxy, skills, MCP) | Test gaps — no component tests for proxy, usage charts/pricing, about, backups, log/rectifier, OpenClaw, workspace, prompts, Hermes; S3 branch untested | P1 | P2 | partially-confirmed | L |
+| [PERF-03](findings/performance.md#perf-03) | Performance & resources | Usage logging executes 5-6 synchronous SQL statements per request on Tokio worker threads, with no batching, no statement cache and no writer task | P1 | P2 | partially-confirmed | M |
+| [PERF-04](findings/performance.md#perf-04) | Performance & resources | Every request deep-clones the full JSON body 3-5 times and rebuilds the tree twice before serialization | P1 | P2 | partially-confirmed | M |
+| [PERF-05](findings/performance.md#perf-05) | Performance & resources | 6-8 database/config lookups per request before the first upstream byte (per-app proxy config read twice, full providers table scanned and JSON-parsed) | P1 | P2 | confirmed | M |
+| [PERF-07](findings/performance.md#perf-07) | Performance & resources | Streaming usage collector retains every Gemini/OpenAI chunk as a parsed `serde_json::Value` for the whole stream | P1 | P2 | partially-confirmed | S |
+| [PERF-08](findings/performance.md#perf-08) | Performance & resources | Cross-source dedup `NOT EXISTS` correlated subquery is re-evaluated inside every dashboard aggregate | P1 | P2 | partially-confirmed | M |
+| [PERF-10](findings/performance.md#perf-10) | Performance & resources | Session-usage sync (every 60 s) issues one SELECT per JSONL file, one lock+INSERT per message with no transaction, and a fuzzy pricing lookup per message | P1 | P2 | confirmed | M |
+| [PERF-11](findings/performance.md#perf-11) | Performance & resources | Startup does all configuration imports, DB maintenance and the full tray build synchronously inside `setup` before the window is shown, with no timing | P1 | P2 | partially-confirmed | M |
+| [PERF-12](findings/performance.md#perf-12) | Performance & resources | 100 of 291 Tauri commands are synchronous (`pub fn`), including all dashboard aggregates, provider listing and skill scanning, so they execute on the main thread | P1 | P2 | confirmed | S |
+| [PERF-13](findings/performance.md#perf-13) | Performance & resources | Idle polling storm: five overlapping 2-5 s React Query pollers plus a 10 s providers refetch, each hitting the global DB mutex and reading proxy config four times | P1 | P2 | partially-confirmed | M |
+| [PERF-14](findings/performance.md#perf-14) | Performance & resources | Usage dashboard refetches all six queries on every `usage-log-recorded` event (200 ms backend debounce only) in addition to 30 s polling | P1 | P2 | confirmed | S |
+| [PERF-15](findings/performance.md#perf-15) | Performance & resources | No code splitting: one monolithic bundle with every page, CodeMirror, recharts, flexsearch, 11k lines of presets and 135 KB of inline SVG strings | P1 | P2 | partially-confirmed | M |
+| [PERF-17](findings/performance.md#perf-17) | Performance & resources | Single-connection design means long maintenance windows (rollup, backfill, session sync, backup) block the proxy logger and all UI commands | P1 | P2 | partially-confirmed | L |
+| [TEST-02](findings/testing.md#test-02) | Testing & QA | Proxy format conversion has no golden-file corpus or whole-object assertions | P1 | P2 | confirmed | L |
+| [TEST-03](findings/testing.md#test-03) | Testing & QA | Tauri command layer (285 commands) is effectively untested | P1 | P2 | confirmed | L |
+| [TEST-04](findings/testing.md#test-04) | Testing & QA | MSW handler set drifts from the real command registry (22% coverage, 5 phantom handlers) | P1 | P2 | confirmed | M |
+| [TEST-05](findings/testing.md#test-05) | Testing & QA | No contract between TS API wrappers/types and Rust serde shapes | P1 | P2 | partially-confirmed | L |
+| [TEST-06](findings/testing.md#test-06) | Testing & QA | No coverage measurement or gate on either side | P1 | P2 | confirmed | M |
+| [TEST-08](findings/testing.md#test-08) | Testing & QA | Integration tests share one process-wide HOME, a poisonable global mutex and a file-backed DB | P1 | P2 | partially-confirmed | M |
+| [TEST-33](findings/testing.md#test-33) | Testing & QA | Prioritized roadmap to a trustworthy pyramid | P1 | P2 | partially-confirmed | XL |
+| [CI-01](findings/ci-build-release.md#ci-01) | CI/CD, build, release & dependencies | Windows installers and portable EXE are not code-signed | P1 | P2 | confirmed | M |
+| [CI-02](findings/ci-build-release.md#ci-02) | CI/CD, build, release & dependencies | Updater endpoint points at `/releases/latest/` while every release is published as a prerelease | P1 | P2 | confirmed | S |
+| [CI-03](findings/ci-build-release.md#ci-03) | CI/CD, build, release & dependencies | Missing updater signatures only warn on Windows x64 and Linux, so a platform can silently drop out of `latest.json` | P1 | P2 | partially-confirmed | S |
+| [CI-04](findings/ci-build-release.md#ci-04) | CI/CD, build, release & dependencies | No validation that the Tauri updater can actually consume what the release produced (`latest.json` + minisign verification) | P1 | P2 | partially-confirmed | S |
+| [CI-05](findings/ci-build-release.md#ci-05) | CI/CD, build, release & dependencies | Secrets are interpolated into shell text and the updater private key is exported to `GITHUB_ENV` for all later steps | P1 | P2 | partially-confirmed | S |
+| [CI-06](findings/ci-build-release.md#ci-06) | CI/CD, build, release & dependencies | Version is bumped by hand in four files plus CHANGELOG with no single source and no tag-vs-version guard | P1 | P2 | confirmed | S |
+| [CI-07](findings/ci-build-release.md#ci-07) | CI/CD, build, release & dependencies | No release dry-run, and one platform failure blocks the whole release with no way to rehearse | P1 | P2 | partially-confirmed | M |
+| [CI-08](findings/ci-build-release.md#ci-08) | CI/CD, build, release & dependencies | No vulnerability, license or unmaintained-crate scanning in CI | P1 | P2 | partially-confirmed | S |
+| [CI-09](findings/ci-build-release.md#ci-09) | CI/CD, build, release & dependencies | Toolchain pins disagree across rust-toolchain.toml, Cargo.toml, CI, docs and package.json (Rust and Node/pnpm) | P1 | P2 | partially-confirmed | S |
+| [CI-10](findings/ci-build-release.md#ci-10) | CI/CD, build, release & dependencies | CI never builds the frontend bundle or a Tauri bundle; the backend job runs against an empty `dist` placeholder | P1 | P2 | confirmed | M |
+| [CI-11](findings/ci-build-release.md#ci-11) | CI/CD, build, release & dependencies | CONTRIBUTING documents `pnpm lint`/ESLint that do not exist; there is no JavaScript/TypeScript linter at all | P1 | P2 | partially-confirmed | M |
+| [CI-37](findings/ci-build-release.md#ci-37) | CI/CD, build, release & dependencies | Ambitious — end-to-end release-engineering overhaul (release-please/git-cliff driven, dry-run, signed/attested, multi-channel) | P1 | P2 | partially-confirmed | XL |
+| [I18N-01](findings/i18n.md#i18n-01) | Internationalization | Ten keys used in code are missing from every locale and leak Chinese fallbacks into non-Chinese UIs | P1 | P2 | confirmed | S |
+| [I18N-02](findings/i18n.md#i18n-02) | Internationalization | First-run language falls back to Simplified Chinese for every non-CJK, non-English OS locale (frontend, tray and backend) | P1 | P2 | partially-confirmed | S |
+| [I18N-04](findings/i18n.md#i18n-04) | Internationalization | zh-TW is missing 30 keys (tool-lifecycle section) and carries 2 orphan keys | P1 | P2 | confirmed | S |
+| [I18N-05](findings/i18n.md#i18n-05) | Internationalization | No automated i18n integrity check in CI; the i18n PR label can never fire | P1 | P2 | confirmed | M |
+| [DOCS-01](findings/docs-onboarding.md#docs-01) | Documentation & onboarding | The user manual is frozen at v3.16.0 and omits Grok Build, project profiles and S3 sync | P1 | P2 | partially-confirmed | L |
+| [DOCS-02](findings/docs-onboarding.md#docs-02) | Documentation & onboarding | Release-notes/changelog hygiene: stale README link, no index, missing ja for 4 versions, 14 broken links, a missing 3.6.1 entry and a mis-dated 3.5.0 | P1 | P2 | partially-confirmed | S |
+| [DOCS-04](findings/docs-onboarding.md#docs-04) | Documentation & onboarding | Deep-link protocol has no canonical spec; manual and generator lag the parser | P1 | P2 | partially-confirmed | M |
+| [PRODUCT-03](findings/product-roadmap.md#product-03) | Product strategy & feature roadmap | Proactive provider health probing (documented but unimplemented) | P0 | P2 | confirmed | M |
+| [PRODUCT-05](findings/product-roadmap.md#product-05) | Product strategy & feature roadmap | Finish budget limits & alerts (backend exists, UI/enforcement missing) | P1 | P2 | confirmed | M |
+| [PRODUCT-06](findings/product-roadmap.md#product-06) | Product strategy & feature roadmap | System/tray notifications for failover, circuit open, budget, quota exhaustion and sync errors | P1 | P2 | confirmed | M |
+| [PRODUCT-07](findings/product-roadmap.md#product-07) | Product strategy & feature roadmap | Remote, signed preset & sponsor catalog (decouple commercial changes from app releases) | P1 | P2 | partially-confirmed | L |
+| [PRODUCT-08](findings/product-roadmap.md#product-08) | Product strategy & feature roadmap | In-app affiliate/sponsor disclosure and preset provenance | P1 | P2 | partially-confirmed | S |
+| [PRODUCT-09](findings/product-roadmap.md#product-09) | Product strategy & feature roadmap | ToS-sensitive feature gate and README wording fix ("signature bypass") | P1 | P2 | partially-confirmed | S |
+| [PRODUCT-10](findings/product-roadmap.md#product-10) | Product strategy & feature roadmap | Headless proxy daemon (proxy survives app quit / runs without window) | P1 | P2 | partially-confirmed | L |
+| [PRODUCT-11](findings/product-roadmap.md#product-11) | Product strategy & feature roadmap | CLI companion (`ccs`) over the same SQLite store | P1 | P2 | partially-confirmed | L |
+| [PRODUCT-12](findings/product-roadmap.md#product-12) | Product strategy & feature roadmap | Per-project (cwd / git repo) automatic profile binding | P1 | P2 | partially-confirmed | L |
+| [PRODUCT-35](findings/product-roadmap.md#product-35) | Product strategy & feature roadmap | Windows Authenticode signing (SmartScreen) and SBOM/provenance for releases | P1 | P2 | confirmed | S |
+| [PRODUCT-54](findings/product-roadmap.md#product-54) | Product strategy & feature roadmap | Sponsor preset governance policy (criteria, review cadence, removal, disclosure) as a public document | P1 | P2 | confirmed | S |
+| [PRODUCT-61](findings/product-roadmap.md#product-61) | Product strategy & feature roadmap | THEME — "Proxy as a product" (daemon + CLI + proactive health + notifications + smart routing + web dashboard) | P1 | P2 | partially-confirmed | XL |
+| [PROV-03](findings/proxy-providers.md#prov-03) | Proxy providers & format conversion | Gemini streaming text uses an ambiguous prefix heuristic that can drop or duplicate text | P1 | P3 | partially-confirmed | M |
+| [SVC-06](findings/backend-services.md#svc-06) | Backend services | Best-effort takeover swallows live-write errors while the DB marks the app as taken over | P1 | P3 | partially-confirmed | S |
+| [CMD-02](findings/commands-app-shell.md#cmd-02) | Commands / IPC / app shell | `copilot_get_token` / `copilot_get_token_for_account` hand raw bearer tokens to the webview | P1 | P3 | partially-confirmed | S |
+| [CMD-04](findings/commands-app-shell.md#cmd-04) | Commands / IPC / app shell | Sync credentials (WebDAV password, S3 secret) persist in plaintext `settings.json` | P1 | P3 | partially-confirmed | M |
+| [DB-08](findings/database.md#db-08) | Database / DAO / migrations | No migration ledger/checksums; `SCHEMA_VERSION` and sync `DB_COMPAT_VERSION` are independent hand-bumped constants | P1 | P3 | partially-confirmed | L |
+| [FE-UI-02](findings/frontend-features.md#fe-ui-02) | Feature UI (settings, usage, proxy, skills, MCP) | `hermesConfigDir` is skipped by sanitisation, form normalisation and directory-change detection | P1 | P3 | partially-confirmed | S |
+| [FE-UI-04](findings/frontend-features.md#fe-ui-04) | Feature UI (settings, usage, proxy, skills, MCP) | Failover/takeover UI covers different app sets in different places; label maps diverge | P1 | P3 | partially-confirmed | M |
+| [PERF-06](findings/performance.md#perf-06) | Performance & resources | SSE passthrough parser allocates per line and memmoves the buffer per event | P1 | P3 | partially-confirmed | S |
+| [PERF-09](findings/performance.md#perf-09) | Performance & resources | Provider limit checks wrap the indexed `created_at` column in `date()`/`strftime()` (non-sargable full scans) | P1 | P3 | partially-confirmed | S |
+| [PERF-16](findings/performance.md#perf-16) | Performance & resources | Tray menu is rebuilt from scratch on every provider/profile/failover change, re-reading every provider table, blocking on async DB calls and parsing live config files from disk | P1 | P3 | partially-confirmed | M |
+| [TEST-07](findings/testing.md#test-07) | Testing & QA | Zero tests for MCP sync services despite three recent MCP fixes | P1 | P3 | refuted | M |
+| [I18N-06](findings/i18n.md#i18n-06) | Internationalization | CONTRIBUTING.md i18n and tooling instructions are wrong | P1 | P3 | confirmed | S |
+| [DOCS-03](findings/docs-onboarding.md#docs-03) | Documentation & onboarding | README screenshots show a three-app UI that predates most shipped features | P1 | P3 | partially-confirmed | M |
+| [DOCS-13](findings/docs-onboarding.md#docs-13) | Documentation & onboarding | First-run experience is a single text modal — add a guided setup wizard | P1 | P3 | partially-confirmed | L |
 
 ## Large refactors (L / XL)
 
@@ -337,94 +392,61 @@ Every finding that the first pass rated P0 or P1 (154 items) was handed to an in
 
 | ID | Area | Title | Priority | Effort |
 |---|---|---|---|---|
-| [CMD-12](findings/commands-app-shell.md#cmd-12) | Commands / IPC / app shell | Errors cross IPC as flattened strings; frontend substring-matches Chinese text | P1 | L |
-| [FE-ARCH-03](findings/frontend-architecture.md#fe-arch-03) | Frontend architecture | Generate the Tauri command/event bindings from Rust (tauri-specta) instead of 291 hand-written `invoke` wrappers | P1 | L |
-| [FE-UI-17](findings/frontend-features.md#fe-ui-17) | Feature UI (settings, usage, proxy, skills, MCP) | L refactor — consolidate the settings save pipeline (`useSettings` / `useSettingsForm` / `useDirectorySettings`) | P1 | L |
-| [PERF-17](findings/performance.md#perf-17) | Performance & resources | Single-connection design means long maintenance windows (rollup, backfill, session sync, backup) block the proxy logger and all UI commands | P1 | L |
 | [PRODUCT-65](findings/product-roadmap.md#product-65) | Product strategy & feature roadmap | THEME — "Reliability engineering" (bridge fixtures, e2e scenarios, beta ring, diagnostics) | P1 | L |
-| [SVC-19](findings/backend-services.md#svc-19) | Backend services | Unify WebDAV and S3 behind a `SyncTransport` trait and a single auto-sync worker | P1 | L |
-| [CMD-10](findings/commands-app-shell.md#cmd-10) | Commands / IPC / app shell | ~3,500 lines of business logic live in the command layer (and the tray calls commands) | P1 | XL |
-| [CMD-13](findings/commands-app-shell.md#cmd-13) | Commands / IPC / app shell | No typed IPC contract — 281 commands mirrored by hand in 24 TS files with inconsistent naming | P1 | XL |
-| [DB-03](findings/database.md#db-03) | Database / DAO / migrations | Single `Mutex<Connection>` without WAL/busy_timeout serialises the proxy write path, importers, UI reads and maintenance | P1 | XL |
-| [FE-ARCH-02](findings/frontend-architecture.md#fe-arch-02) | Frontend architecture | Replace the `App.tsx` god component with a router-driven shell and page-owned header actions | P1 | XL |
-| [FE-UI-16](findings/frontend-features.md#fe-ui-16) | Feature UI (settings, usage, proxy, skills, MCP) | XL refactor — split `WebdavSyncSection` into a backend-agnostic cloud-sync panel | P1 | XL |
-| [SVC-18](findings/backend-services.md#svc-18) | Backend services | Introduce an `AppAdapter` trait and move per-app live/takeover/backfill logic out of the services | P1 | XL |
 | [CFG-09](findings/config-adapters.md#cfg-09) | Per-app config adapters & MCP sync | Build one format-preserving `LiveDoc` layer instead of five ad-hoc writers (large refactor) | P2 | L |
 | [CFG-10](findings/config-adapters.md#cfg-10) | Per-app config adapters & MCP sync | Isolate `codex_history_migration.rs` behind a `Migration` registry with a retirement policy | P2 | L |
+| [CMD-12](findings/commands-app-shell.md#cmd-12) | Commands / IPC / app shell | Errors cross IPC as flattened strings; frontend substring-matches Chinese text | P2 | L |
 | [CMD-18](findings/commands-app-shell.md#cmd-18) | Commands / IPC / app shell | Per-app enumeration is hand-rolled in ~15 places; adding an app type touches all of them | P2 | L |
 | [DB-15](findings/database.md#db-15) | Database / DAO / migrations | Raw SQL and direct `conn` locking spread across commands/services (layering violation) | P2 | L |
 | [DB-17](findings/database.md#db-17) | Database / DAO / migrations | Column-per-app boolean flags force a schema migration per new app and already lag `AppType` | P2 | L |
 | [DB-19](findings/database.md#db-19) | Database / DAO / migrations | Model pricing lives as ~900 lines of Rust in `schema.rs` and needs a release per price change | P2 | L |
+| [FE-ARCH-03](findings/frontend-architecture.md#fe-arch-03) | Frontend architecture | Generate the Tauri command/event bindings from Rust (tauri-specta) instead of 291 hand-written `invoke` wrappers | P2 | L |
 | [FE-ARCH-11](findings/frontend-architecture.md#fe-arch-11) | Frontend architecture | Error handling uses three incompatible protocols (string substring matching, JSON codes, raw messages) and toasts fire from every layer | P2 | L |
 | [FE-ARCH-14](findings/frontend-architecture.md#fe-arch-14) | Frontend architecture | Forms use react-hook-form + zod in only 3 of ~20 forms, and the zod schema deliberately bypasses required-field validation | P2 | L |
 | [FE-PROV-18](findings/frontend-providers.md#fe-prov-18) | Provider management UI | Three near-identical common-config stacks (hooks, modals, dark-mode observers) | P2 | L |
 | [FE-PROV-22](findings/frontend-providers.md#fe-prov-22) | Provider management UI | Per-app config knowledge is scattered; `getApiKeyFromConfig` has a wrong Codex shape | P2 | L |
+| [FE-UI-17](findings/frontend-features.md#fe-ui-17) | Feature UI (settings, usage, proxy, skills, MCP) | L refactor — consolidate the settings save pipeline (`useSettings` / `useSettingsForm` / `useDirectorySettings`) | P2 | L |
 | [FE-UI-19](findings/frontend-features.md#fe-ui-19) | Feature UI (settings, usage, proxy, skills, MCP) | L refactor — decompose `AboutSection` (app update + tool lifecycle + WSL prefs + diagnostics + install commands) | P2 | L |
+| [PERF-17](findings/performance.md#perf-17) | Performance & resources | Single-connection design means long maintenance windows (rollup, backfill, session sync, backup) block the proxy logger and all UI commands | P2 | L |
 | [PRODUCT-44](findings/product-roadmap.md#product-44) | Product strategy & feature roadmap | Backend modularization: split `commands/misc.rs`, introduce `cc-switch-core` crate | P2 | L |
 | [PROV-11](findings/proxy-providers.md#prov-11) | Proxy providers & format conversion | Gemini replay state (thought signatures, tool-call ids) lives only in a volatile in-memory shadow store | P2 | L |
 | [PROV-18](findings/proxy-providers.md#prov-18) | Proxy providers & format conversion | Three SSE aggregators and two JSON-to-SSE expanders duplicate the streaming converters | P2 | L |
 | [PROV-21](findings/proxy-providers.md#prov-21) | Proxy providers & format conversion | Replace string-dispatch `api_format` routing and the half-dead `ProviderAdapter` trait with a bridge registry | P2 | L |
 | [SESS-10](findings/sessions-deeplinks.md#sess-10) | Session manager, deep links & usage ingestion | Architecture — deep-link v2 trust model: backend-held pending import, full-disclosure confirmation, signed/batch links, in-app share | P2 | L |
+| [SVC-19](findings/backend-services.md#svc-19) | Backend services | Unify WebDAV and S3 behind a `SyncTransport` trait and a single auto-sync worker | P2 | L |
 | [SVC-20](findings/backend-services.md#svc-20) | Backend services | Collapse the four session-usage importers into a `SessionSource` trait plus one `UsageIngest` writer | P2 | L |
 | [SVC-21](findings/backend-services.md#svc-21) | Backend services | Split `proxy.rs` (7.2k lines) into takeover submodules and convert its `Result<_, String>` API to `AppError` | P2 | L |
 | [TEST-09](findings/testing.md#test-09) | Testing & QA | Global mutable statics force 123 `#[serial]` tests and 130 env-var mutations | P2 | L |
 | [CFG-06](findings/config-adapters.md#cfg-06) | Per-app config adapters & MCP sync | Introduce an `AppAdapter` trait, a shared live-file layer, and a conformance test-suite (large refactor) | P2 | XL |
 | [CI-38](findings/ci-build-release.md#ci-38) | CI/CD, build, release & dependencies | Ambitious — split the 147k-LOC `cc-switch` crate into a Cargo workspace (core / proxy / cli / tauri shell) | P2 | XL |
+| [CMD-10](findings/commands-app-shell.md#cmd-10) | Commands / IPC / app shell | ~3,500 lines of business logic live in the command layer (and the tray calls commands) | P2 | XL |
+| [CMD-13](findings/commands-app-shell.md#cmd-13) | Commands / IPC / app shell | No typed IPC contract — 281 commands mirrored by hand in 24 TS files with inconsistent naming | P2 | XL |
+| [DB-03](findings/database.md#db-03) | Database / DAO / migrations | Single `Mutex<Connection>` without WAL/busy_timeout serialises the proxy write path, importers, UI reads and maintenance | P2 | XL |
 | [DB-20](findings/database.md#db-20) | Database / DAO / migrations | Whole-snapshot last-writer-wins sync with no row versioning or tombstones | P2 | XL |
+| [FE-ARCH-02](findings/frontend-architecture.md#fe-arch-02) | Frontend architecture | Replace the `App.tsx` god component with a router-driven shell and page-owned header actions | P2 | XL |
 | [FE-PROV-17](findings/frontend-providers.md#fe-prov-17) | Provider management UI | Split `ProviderFormFull` into a shell plus per-app form adapters | P2 | XL |
+| [FE-UI-16](findings/frontend-features.md#fe-ui-16) | Feature UI (settings, usage, proxy, skills, MCP) | XL refactor — split `WebdavSyncSection` into a backend-agnostic cloud-sync panel | P2 | XL |
 | [FE-UI-18](findings/frontend-features.md#fe-ui-18) | Feature UI (settings, usage, proxy, skills, MCP) | XL refactor — a shared `ManagedItemsPanel` for MCP, Skills and Prompts (and unify their data layer) | P2 | XL |
 | [PRODUCT-64](findings/product-roadmap.md#product-64) | Product strategy & feature roadmap | THEME — "Platform SDK" (adapter trait, plugin surface for adapters/usage templates, new-app wave) | P2 | XL |
 | [PROV-19](findings/proxy-providers.md#prov-19) | Proxy providers & format conversion | Introduce a canonical message/stream IR with per-protocol codecs (replace 13 pairwise converters) | P2 | XL |
 | [PROXY-07](findings/proxy-core.md#proxy-07) | Proxy core | Decompose `forwarder.rs`/`handlers.rs` into a staged request pipeline with pluggable transport | P2 | XL |
 | [SESS-09](findings/sessions-deeplinks.md#sess-09) | Session manager, deep links & usage ingestion | Architecture — backend-owned Session Index service (persistent index, incremental scan, file watching, typed sources) | P2 | XL |
+| [SVC-18](findings/backend-services.md#svc-18) | Backend services | Introduce an `AppAdapter` trait and move per-app live/takeover/backfill logic out of the services | P2 | XL |
 | [DB-08](findings/database.md#db-08) | Database / DAO / migrations | No migration ledger/checksums; `SCHEMA_VERSION` and sync `DB_COMPAT_VERSION` are independent hand-bumped constants | P3 | L |
 
 ## Quick wins (S effort, P0/P1)
 
-41 items that a contributor can finish in under a day each.
+8 items that a contributor can finish in under a day each.
 
 | ID | Area | Title | Priority | Type |
 |---|---|---|---|---|
-| [PERF-02](findings/performance.md#perf-02) | Performance & resources | SQLite opened with default journal/sync settings behind one global std Mutex (no WAL, synchronous=FULL, no busy_timeout, no cache tuning) | P0 | performance |
-| [PRODUCT-02](findings/product-roadmap.md#product-02) | Product strategy & feature roadmap | Authenticate the proxy listener when bound to a non-loopback address | P0 | risk |
-| [CI-02](findings/ci-build-release.md#ci-02) | CI/CD, build, release & dependencies | Updater endpoint points at `/releases/latest/` while every release is published as a prerelease | P1 | bug |
-| [CI-03](findings/ci-build-release.md#ci-03) | CI/CD, build, release & dependencies | Missing updater signatures only warn on Windows x64 and Linux, so a platform can silently drop out of `latest.json` | P1 | bug |
-| [CI-04](findings/ci-build-release.md#ci-04) | CI/CD, build, release & dependencies | No validation that the Tauri updater can actually consume what the release produced (`latest.json` + minisign verification) | P1 | test |
-| [CI-05](findings/ci-build-release.md#ci-05) | CI/CD, build, release & dependencies | Secrets are interpolated into shell text and the updater private key is exported to `GITHUB_ENV` for all later steps | P1 | security |
-| [CI-06](findings/ci-build-release.md#ci-06) | CI/CD, build, release & dependencies | Version is bumped by hand in four files plus CHANGELOG with no single source and no tag-vs-version guard | P1 | refactor |
-| [CI-08](findings/ci-build-release.md#ci-08) | CI/CD, build, release & dependencies | No vulnerability, license or unmaintained-crate scanning in CI | P1 | security |
-| [CI-09](findings/ci-build-release.md#ci-09) | CI/CD, build, release & dependencies | Toolchain pins disagree across rust-toolchain.toml, Cargo.toml, CI, docs and package.json (Rust and Node/pnpm) | P1 | tech-debt |
-| [CMD-01](findings/commands-app-shell.md#cmd-01) | Commands / IPC / app shell | Deep-link URLs carrying API keys are logged in plaintext | P1 | security |
-| [CMD-02](findings/commands-app-shell.md#cmd-02) | Commands / IPC / app shell | `copilot_get_token` / `copilot_get_token_for_account` hand raw bearer tokens to the webview | P1 | security |
-| [CMD-03](findings/commands-app-shell.md#cmd-03) | Commands / IPC / app shell | Overly broad CSP and over-granted capabilities | P1 | security |
-| [DOCS-02](findings/docs-onboarding.md#docs-02) | Documentation & onboarding | Release-notes/changelog hygiene: stale README link, no index, missing ja for 4 versions, 14 broken links, a missing 3.6.1 entry and a mis-dated 3.5.0 | P1 | docs |
-| [FE-ARCH-01](findings/frontend-architecture.md#fe-arch-01) | Frontend architecture | `autoSyncConfirmed` setting is silently dropped by the backend (type drift between TS `Settings` and Rust `AppSettings`) | P1 | bug |
-| [FE-PROV-03](findings/frontend-providers.md#fe-prov-03) | Provider management UI | Validation messages are hard-coded Chinese/English literals outside i18n | P1 | bug |
-| [FE-PROV-04](findings/frontend-providers.md#fe-prov-04) | Provider management UI | Switching to the "Universal" tab in Add Provider unmounts the form and loses all input | P1 | bug |
 | [FE-PROV-06](findings/frontend-providers.md#fe-prov-06) | Provider management UI | OMO custom agent/category rows vanish before a model is chosen | P1 | bug |
-| [I18N-01](findings/i18n.md#i18n-01) | Internationalization | Ten keys used in code are missing from every locale and leak Chinese fallbacks into non-Chinese UIs | P1 | bug |
-| [I18N-02](findings/i18n.md#i18n-02) | Internationalization | First-run language falls back to Simplified Chinese for every non-CJK, non-English OS locale (frontend, tray and backend) | P1 | bug |
-| [I18N-04](findings/i18n.md#i18n-04) | Internationalization | zh-TW is missing 30 keys (tool-lifecycle section) and carries 2 orphan keys | P1 | bug |
-| [I18N-06](findings/i18n.md#i18n-06) | Internationalization | CONTRIBUTING.md i18n and tooling instructions are wrong | P1 | docs |
-| [PERF-06](findings/performance.md#perf-06) | Performance & resources | SSE passthrough parser allocates per line and memmoves the buffer per event | P1 | performance |
-| [PERF-07](findings/performance.md#perf-07) | Performance & resources | Streaming usage collector retains every Gemini/OpenAI chunk as a parsed `serde_json::Value` for the whole stream | P1 | performance |
-| [PERF-09](findings/performance.md#perf-09) | Performance & resources | Provider limit checks wrap the indexed `created_at` column in `date()`/`strftime()` (non-sargable full scans) | P1 | performance |
-| [PERF-12](findings/performance.md#perf-12) | Performance & resources | 100 of 291 Tauri commands are synchronous (`pub fn`), including all dashboard aggregates, provider listing and skill scanning, so they execute on the main thread | P1 | performance |
-| [PERF-14](findings/performance.md#perf-14) | Performance & resources | Usage dashboard refetches all six queries on every `usage-log-recorded` event (200 ms backend debounce only) in addition to 30 s polling | P1 | performance |
-| [PRODUCT-08](findings/product-roadmap.md#product-08) | Product strategy & feature roadmap | In-app affiliate/sponsor disclosure and preset provenance | P1 | risk |
-| [PRODUCT-09](findings/product-roadmap.md#product-09) | Product strategy & feature roadmap | ToS-sensitive feature gate and README wording fix ("signature bypass") | P1 | risk |
-| [PRODUCT-35](findings/product-roadmap.md#product-35) | Product strategy & feature roadmap | Windows Authenticode signing (SmartScreen) and SBOM/provenance for releases | P1 | risk |
-| [PRODUCT-54](findings/product-roadmap.md#product-54) | Product strategy & feature roadmap | Sponsor preset governance policy (criteria, review cadence, removal, disclosure) as a public document | P1 | risk |
+| [PERF-02](findings/performance.md#perf-02) | Performance & resources | SQLite opened with default journal/sync settings behind one global std Mutex (no WAL, synchronous=FULL, no busy_timeout, no cache tuning) | P1 | performance |
+| [PRODUCT-02](findings/product-roadmap.md#product-02) | Product strategy & feature roadmap | Authenticate the proxy listener when bound to a non-loopback address | P1 | risk |
 | [SEC-02](findings/security.md#sec-02) | Security & privacy | Deep link `enabled=true` makes an attacker-supplied endpoint the *current* provider after one click; the flag is not shown in the confirmation dialog | P1 | security |
 | [SEC-03](findings/security.md#sec-03) | Security & privacy | MCP deep link writes arbitrary stdio servers (command + args + env) into live tool configs; the dialog hides args/env and the "written immediately" warning is shown only when a parameter the backend ignores is set | P1 | security |
 | [SEC-04](findings/security.md#sec-04) | Security & privacy | Raw deep-link URLs (including `apiKey`, `usageAccessToken`, `usageApiKey`) are written to the plaintext log file | P1 | security |
-| [SEC-07](findings/security.md#sec-07) | Security & privacy | Session "Resume" builds shell commands from transcript-controlled values and the Tauri command runs a free-form command string from the webview | P1 | security |
-| [SESS-03](findings/sessions-deeplinks.md#sess-03) | Session manager, deep links & usage ingestion | Tail-window reader drops `last_active_at`/`summary` when the final JSONL line is ≥16 KB, misordering busy sessions | P1 | bug |
-| [SESS-04](findings/sessions-deeplinks.md#sess-04) | Session manager, deep links & usage ingestion | Cold-start deep links are lost (no `get_current()`/pending buffer) and macOS handles the same link twice | P1 | bug |
 | [SESS-05](findings/sessions-deeplinks.md#sess-05) | Session manager, deep links & usage ingestion | Raw deep-link URL (including `apiKey`) is logged at info level and shipped in the `deeplink-error` payload | P1 | security |
-| [SVC-03](findings/backend-services.md#svc-03) | Backend services | GitHub skill archive extraction skips `enclosed_name()` and has no entry/size caps (zip-slip / zip-bomb) | P1 | security |
-| [SVC-06](findings/backend-services.md#svc-06) | Backend services | Best-effort takeover swallows live-write errors while the DB marks the app as taken over | P1 | bug |
-| [SVC-07](findings/backend-services.md#svc-07) | Backend services | Skill install/update write directly into the SSOT path; a mid-way failure leaves orphan or deleted skills | P1 | bug |
 | [SVC-08](findings/backend-services.md#svc-08) | Backend services | Gemini `settings.json` merge swallows parse errors and overwrites the file with provider-only content | P1 | bug |
 
 ## Area summaries

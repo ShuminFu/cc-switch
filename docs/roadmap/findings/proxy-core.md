@@ -8,44 +8,44 @@ The proxy core (server, forwarder, router, circuit breaker, response processor a
 
 ## Index
 
-| ID | Title | Type | Priority | Effort | Confidence |
-|---|---|---|---|---|---|
-| [PROXY-03](#proxy-03) | Proxy can be bound to all interfaces with no authentication on the main API routes | security | P1 | M | high |
-| [PROXY-01](#proxy-01) | Hyper raw-write fallback re-sends the request after it was already written to the upstream | bug | P2 | M | high |
-| [PROXY-02](#proxy-02) | HalfOpen probe permit leaks when the client disconnects mid-request, leaving the provider stuck in HalfOpen | bug | P2 | M | high |
-| [PROXY-04](#proxy-04) | Blocking SQLite (std Mutex + sync I/O) on the async hot path, 6-10 times per request | performance | P2 | L | medium |
-| [PROXY-05](#proxy-05) | Native-Anthropic path opens a new TCP+TLS connection per request; the raw-write mechanism is likely redundant | performance | P2 | M | medium |
-| [PROXY-06](#proxy-06) | No end-to-end tests of the proxy against a mock upstream; `forward()` is untestable | test | P2 | L | high |
-| [PROXY-07](#proxy-07) | Decompose `forwarder.rs`/`handlers.rs` into a staged request pipeline with pluggable transport | refactor | P2 | XL | high |
-| [PROXY-08](#proxy-08) | Timeout policy is split across three layers and the raw path has no connect timeout, so an unreachable provider stalls failover for the full non-streaming timeout | bug | P2 | M | high |
-| [PROXY-09](#proxy-09) | Streams that fail after the first chunk never feed back into the breaker/health, and idle timeouts just truncate the client stream | bug | P2 | M | medium |
-| [PROXY-10](#proxy-10) | Circuit breaker error-rate uses lifetime counters (no sliding window) and defaults disagree | bug | P2 | S | high |
-| [PROXY-11](#proxy-11) | A single-provider failover queue causes a 60 s total outage once the breaker opens | bug | P2 | S | medium |
-| [PROXY-12](#proxy-12) | Thinking-signature rectifier fires on any upstream error containing "invalid request" and strips all thinking context | bug | P2 | S | medium |
-| [PROXY-13](#proxy-13) | Full prompts, response bodies and all upstream headers are written to the persistent log file | security | P2 | S | high |
-| [PROXY-14](#proxy-14) | Server stop does not drain connections, `ProxyServer` has no `Drop`, and `StopTimeout` is treated as fatal by config updates | bug | P2 | M | high |
-| [PROXY-15](#proxy-15) | No per-connection timeouts or limits on the accept side; `peek` can block a task forever | security | P2 | S | medium |
-| [PROXY-16](#proxy-16) | `ProviderRouter` holds the breaker-map write lock across a blocking DB call | performance | P2 | S | high |
-| [PROXY-17](#proxy-17) | Every request body is fully buffered, parsed to `serde_json::Value`, cloned per attempt and re-serialized with canonical key order | performance | P2 | L | medium |
-| [PROXY-18](#proxy-18) | Usage logging is re-implemented six times with divergent rules | refactor | P2 | M | high |
-| [PROXY-19](#proxy-19) | Routing is a fixed priority list; no sticky sessions, load balancing, per-provider concurrency/rate limits, or retry budget | feature | P2 | L | high |
-| [PROXY-20](#proxy-20) | No metrics endpoint, tracing spans, or OpenTelemetry export | feature | P2 | L | high |
-| [PROXY-21](#proxy-21) | No request flight recorder, replay, or export for debugging failed requests | feature | P2 | M | high |
-| [PROXY-22](#proxy-22) | No active health probing; breaker recovery always burns a real user request (and `health.rs` is a stub) | feature | P2 | M | high |
-| [PROXY-35](#proxy-35) | No developer or user documentation of the proxy pipeline, failover semantics, timeout rules, or header policy | docs | P2 | M | high |
-| [PROXY-23](#proxy-23) | SSE usage collectors buffer every "usage"-matching event for the whole stream, and the passthrough SSE buffer is unbounded | performance | P3 | S | medium |
-| [PROXY-24](#proxy-24) | Rectified request body is discarded when failing over to the next provider, doubling calls on every subsequent provider | bug | P3 | S | high |
-| [PROXY-25](#proxy-25) | Request-side hop-by-hop headers (`connection`, `keep-alive`, `te`, `upgrade`, `expect`) are forwarded upstream | bug | P3 | S | high |
-| [PROXY-26](#proxy-26) | Malformed client JSON yields HTTP 500 and is not logged as a client error | bug | P3 | S | high |
-| [PROXY-27](#proxy-27) | `failover_count` counts "served provider != local current provider", not actual failovers, and switch tasks are spawned per request | bug | P3 | S | medium |
-| [PROXY-28](#proxy-28) | Dead/stub modules and duplicated error→status mapping | tech-debt | P3 | M | high |
-| [PROXY-29](#proxy-29) | `ProxyConfig` carries vestigial timeout/retry fields that the forwarder never reads | tech-debt | P3 | S | high |
-| [PROXY-30](#proxy-30) | Takeover status and the stop-guard ignore Claude Desktop and Hermes routes | bug | P3 | S | medium |
-| [PROXY-31](#proxy-31) | Error messages returned to API clients are Chinese and not machine-readable (outside the Codex path) | docs | P3 | S | high |
-| [PROXY-32](#proxy-32) | Budget rectifier rewrites `max_tokens` to a hard-coded 64000 and budget to 32000 regardless of model limits | bug | P3 | S | medium |
-| [PROXY-33](#proxy-33) | Upstream-proxy credentials are logged unmasked | security | P3 | S | high |
-| [PROXY-34](#proxy-34) | `ProxyStatus` counters mutated under an async RwLock in 13 places with `success_rate` recomputed by hand each time | tech-debt | P3 | M | high |
-| [PROXY-36](#proxy-36) | Circuit breaker and router unit tests miss error-rate, concurrency, hot-update and leak scenarios | test | P3 | S | high |
+| ID | Title | Type | Priority | Effort | Confidence | Verdict |
+|---|---|---|---|---|---|---|
+| [PROXY-03](#proxy-03) | Proxy can be bound to all interfaces with no authentication on the main API routes | security | P1 | M | high | confirmed |
+| [PROXY-01](#proxy-01) | Hyper raw-write fallback re-sends the request after it was already written to the upstream | bug | P2 (first pass P1) | M | high | confirmed |
+| [PROXY-02](#proxy-02) | HalfOpen probe permit leaks when the client disconnects mid-request, leaving the provider stuck in HalfOpen | bug | P2 (first pass P1) | M | high | partially-confirmed |
+| [PROXY-04](#proxy-04) | Blocking SQLite (std Mutex + sync I/O) on the async hot path, 6-10 times per request | performance | P2 (first pass P1) | L | medium | partially-confirmed |
+| [PROXY-05](#proxy-05) | Native-Anthropic path opens a new TCP+TLS connection per request; the raw-write mechanism is likely redundant | performance | P2 (first pass P1) | M | medium | partially-confirmed |
+| [PROXY-06](#proxy-06) | No end-to-end tests of the proxy against a mock upstream; `forward()` is untestable | test | P2 (first pass P1) | L | high | partially-confirmed |
+| [PROXY-07](#proxy-07) | Decompose `forwarder.rs`/`handlers.rs` into a staged request pipeline with pluggable transport | refactor | P2 (first pass P1) | XL | high | partially-confirmed |
+| [PROXY-08](#proxy-08) | Timeout policy is split across three layers and the raw path has no connect timeout, so an unreachable provider stalls failover for the full non-streaming timeout | bug | P2 | M | high |  |
+| [PROXY-09](#proxy-09) | Streams that fail after the first chunk never feed back into the breaker/health, and idle timeouts just truncate the client stream | bug | P2 | M | medium |  |
+| [PROXY-10](#proxy-10) | Circuit breaker error-rate uses lifetime counters (no sliding window) and defaults disagree | bug | P2 | S | high |  |
+| [PROXY-11](#proxy-11) | A single-provider failover queue causes a 60 s total outage once the breaker opens | bug | P2 | S | medium |  |
+| [PROXY-12](#proxy-12) | Thinking-signature rectifier fires on any upstream error containing "invalid request" and strips all thinking context | bug | P2 | S | medium |  |
+| [PROXY-13](#proxy-13) | Full prompts, response bodies and all upstream headers are written to the persistent log file | security | P2 | S | high |  |
+| [PROXY-14](#proxy-14) | Server stop does not drain connections, `ProxyServer` has no `Drop`, and `StopTimeout` is treated as fatal by config updates | bug | P2 | M | high |  |
+| [PROXY-15](#proxy-15) | No per-connection timeouts or limits on the accept side; `peek` can block a task forever | security | P2 | S | medium |  |
+| [PROXY-16](#proxy-16) | `ProviderRouter` holds the breaker-map write lock across a blocking DB call | performance | P2 | S | high |  |
+| [PROXY-17](#proxy-17) | Every request body is fully buffered, parsed to `serde_json::Value`, cloned per attempt and re-serialized with canonical key order | performance | P2 | L | medium |  |
+| [PROXY-18](#proxy-18) | Usage logging is re-implemented six times with divergent rules | refactor | P2 | M | high |  |
+| [PROXY-19](#proxy-19) | Routing is a fixed priority list; no sticky sessions, load balancing, per-provider concurrency/rate limits, or retry budget | feature | P2 | L | high |  |
+| [PROXY-20](#proxy-20) | No metrics endpoint, tracing spans, or OpenTelemetry export | feature | P2 | L | high |  |
+| [PROXY-21](#proxy-21) | No request flight recorder, replay, or export for debugging failed requests | feature | P2 | M | high |  |
+| [PROXY-22](#proxy-22) | No active health probing; breaker recovery always burns a real user request (and `health.rs` is a stub) | feature | P2 | M | high |  |
+| [PROXY-35](#proxy-35) | No developer or user documentation of the proxy pipeline, failover semantics, timeout rules, or header policy | docs | P2 | M | high |  |
+| [PROXY-23](#proxy-23) | SSE usage collectors buffer every "usage"-matching event for the whole stream, and the passthrough SSE buffer is unbounded | performance | P3 | S | medium |  |
+| [PROXY-24](#proxy-24) | Rectified request body is discarded when failing over to the next provider, doubling calls on every subsequent provider | bug | P3 | S | high |  |
+| [PROXY-25](#proxy-25) | Request-side hop-by-hop headers (`connection`, `keep-alive`, `te`, `upgrade`, `expect`) are forwarded upstream | bug | P3 | S | high |  |
+| [PROXY-26](#proxy-26) | Malformed client JSON yields HTTP 500 and is not logged as a client error | bug | P3 | S | high |  |
+| [PROXY-27](#proxy-27) | `failover_count` counts "served provider != local current provider", not actual failovers, and switch tasks are spawned per request | bug | P3 | S | medium |  |
+| [PROXY-28](#proxy-28) | Dead/stub modules and duplicated error→status mapping | tech-debt | P3 | M | high |  |
+| [PROXY-29](#proxy-29) | `ProxyConfig` carries vestigial timeout/retry fields that the forwarder never reads | tech-debt | P3 | S | high |  |
+| [PROXY-30](#proxy-30) | Takeover status and the stop-guard ignore Claude Desktop and Hermes routes | bug | P3 | S | medium |  |
+| [PROXY-31](#proxy-31) | Error messages returned to API clients are Chinese and not machine-readable (outside the Codex path) | docs | P3 | S | high |  |
+| [PROXY-32](#proxy-32) | Budget rectifier rewrites `max_tokens` to a hard-coded 64000 and budget to 32000 regardless of model limits | bug | P3 | S | medium |  |
+| [PROXY-33](#proxy-33) | Upstream-proxy credentials are logged unmasked | security | P3 | S | high |  |
+| [PROXY-34](#proxy-34) | `ProxyStatus` counters mutated under an async RwLock in 13 places with `success_rate` recomputed by hand each time | tech-debt | P3 | M | high |  |
+| [PROXY-36](#proxy-36) | Circuit breaker and router unit tests miss error-rate, concurrency, hot-update and leak scenarios | test | P3 | S | high |  |
 
 ## Findings
 

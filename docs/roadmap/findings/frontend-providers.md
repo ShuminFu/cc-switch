@@ -1,6 +1,6 @@
 # Provider management UI — findings (FE-PROV-xx)
 
-Part of the [next-phase proposals](../README.md). 40 findings. Priorities: P1 = 5, P2 = 21, P3 = 14.
+Part of the [next-phase proposals](../README.md). 40 findings. Priorities: P1 = 2, P2 = 24, P3 = 14.
 
 ## Area summary
 
@@ -8,86 +8,60 @@ The provider UI is feature-rich and clearly battle-hardened (sequence guards in 
 
 ## Index
 
-| ID | Title | Type | Priority | Effort | Confidence |
-|---|---|---|---|---|---|
-| [FE-PROV-01](#fe-prov-01) | JSON-editor edits are silently overwritten by the next field edit (stale `getValues` snapshots) | bug | P1 | M | medium |
-| [FE-PROV-02](#fe-prov-02) | Edit dialog backfills live config after the form is already editable, resetting user input | bug | P1 | M | high |
-| [FE-PROV-03](#fe-prov-03) | Validation messages are hard-coded Chinese/English literals outside i18n | bug | P1 | S | high |
-| [FE-PROV-04](#fe-prov-04) | Switching to the "Universal" tab in Add Provider unmounts the form and loses all input | bug | P1 | S | high |
-| [FE-PROV-06](#fe-prov-06) | OMO custom agent/category rows vanish before a model is chosen | bug | P1 | S | high |
-| [FE-PROV-05](#fe-prov-05) | Hermes provider-key rename is accepted by the form but ignored on save | bug | P2 | S | high |
-| [FE-PROV-07](#fe-prov-07) | Native `required` attribute short-circuits the app's soft-validation flow | bug | P2 | S | medium |
-| [FE-PROV-08](#fe-prov-08) | Invalid Codex/Gemini editor state is silently replaced by stale defaults on save | bug | P2 | S | high |
-| [FE-PROV-09](#fe-prov-09) | Cards for OpenCode/OpenClaw/Hermes/GrokBuild show "not configured" instead of their endpoint | bug | P2 | S | high |
-| [FE-PROV-10](#fe-prov-10) | Speed-test endpoint edits are persisted immediately in edit mode, bypassing Cancel | bug | P2 | M | high |
-| [FE-PROV-11](#fe-prov-11) | OpenClaw/Hermes model editors mis-track expanded rows after deletion and promise reordering that does not exist | bug | P2 | S | high |
-| [FE-PROV-12](#fe-prov-12) | Duplicate provider uses an English-only " copy" suffix and a colliding sortIndex | bug | P2 | S | high |
-| [FE-PROV-13](#fe-prov-13) | Drag reorder is not optimistic and every card polls health every 5 s | performance | P2 | S | high |
-| [FE-PROV-14](#fe-prov-14) | Full-screen panels lack dialog semantics and focus management; icon buttons lack names | ux | P2 | M | high |
-| [FE-PROV-15](#fe-prov-15) | i18n string concatenation and emoji-in-copy | bug | P2 | S | high |
-| [FE-PROV-16](#fe-prov-16) | TOML and .env editors use JavaScript syntax highlighting | ux | P2 | S | high |
-| [FE-PROV-17](#fe-prov-17) | Split `ProviderFormFull` into a shell plus per-app form adapters | refactor | P2 | XL | high |
-| [FE-PROV-18](#fe-prov-18) | Three near-identical common-config stacks (hooks, modals, dark-mode observers) | refactor | P2 | L | high |
-| [FE-PROV-19](#fe-prov-19) | Preset identity is array-index based and parsed in six places | refactor | P2 | M | high |
-| [FE-PROV-20](#fe-prov-20) | OpenCode model editor can persist draft keys and silently drops models on rename collision | bug | P2 | S | high |
-| [FE-PROV-21](#fe-prov-21) | Base-URL and API-key validation is inconsistent across apps | bug | P2 | M | high |
-| [FE-PROV-22](#fe-prov-22) | Per-app config knowledge is scattered; `getApiKeyFromConfig` has a wrong Codex shape | refactor | P2 | L | high |
-| [FE-PROV-23](#fe-prov-23) | Secrets are shown in plain text in editors/previews and may leak into error toasts | security | P2 | M | medium |
-| [FE-PROV-24](#fe-prov-24) | No unsaved-changes guard or "live config differs" view in the edit dialog | ux | P2 | M | high |
-| [FE-PROV-25](#fe-prov-25) | `SectionHeader` is declared inside `OmoFormFields` render (remount every render) | bug | P2 | S | high |
-| [FE-PROV-32](#fe-prov-32) | Test gaps: dialogs tested with the form mocked out; no real `ProviderForm` submit test; brittle source-string test | test | P2 | L | high |
-| [FE-PROV-26](#fe-prov-26) | Unguarded `JSON.parse` of form output in both dialogs | bug | P3 | S | high |
-| [FE-PROV-27](#fe-prov-27) | First-run "common config" notice fires inside every provider form for every app | ux | P3 | S | high |
-| [FE-PROV-28](#fe-prov-28) | OpenCode option values are JSON-parsed on every keystroke; keys starting with `option-` render blank | ux | P3 | S | high |
-| [FE-PROV-29](#fe-prov-29) | Hover-only action bars hide every action from keyboard/touch users | ux | P3 | S | high |
-| [FE-PROV-30](#fe-prov-30) | Inconsistent terminology across per-app forms and actions | ux | P3 | S | high |
-| [FE-PROV-31](#fe-prov-31) | GrokBuild re-serialises TOML on every keystroke and re-validates on every render | performance | P3 | S | high |
-| [FE-PROV-33](#fe-prov-33) | Provider list lacks filters, grouping, tags and bulk operations | feature | P3 | L | high |
-| [FE-PROV-34](#fe-prov-34) | Provider health dashboard and connectivity history (dead `HealthStatusIndicator`) | feature | P3 | L | high |
-| [FE-PROV-35](#fe-prov-35) | Quick-switch command palette | feature | P3 | M | high |
-| [FE-PROV-36](#fe-prov-36) | API-key hygiene: paste normalisation, expiry/rotation reminders, last-used | feature | P3 | M | medium |
-| [FE-PROV-37](#fe-prov-37) | Universal-provider model is confusing and duplicated; add provider templating instead | ux | P3 | L | medium |
-| [FE-PROV-38](#fe-prov-38) | Docs gap: no documentation of form architecture, `ProviderMeta` field semantics or per-app `settingsConfig` shapes | docs | P3 | S | high |
-| [FE-PROV-39](#fe-prov-39) | Dead code and duplicated computations in the form shell | tech-debt | P3 | S | high |
-| [FE-PROV-40](#fe-prov-40) | Per-project provider binding (profiles) does not cover most apps or expose which provider a profile will apply | feature | P3 | L | medium |
+| ID | Title | Type | Priority | Effort | Confidence | Verdict |
+|---|---|---|---|---|---|---|
+| [FE-PROV-01](#fe-prov-01) | JSON-editor edits are silently overwritten by the next field edit (stale `getValues` snapshots) | bug | P1 | M | high | confirmed |
+| [FE-PROV-06](#fe-prov-06) | OMO custom agent/category rows vanish before a model is chosen | bug | P1 | S | high | confirmed |
+| [FE-PROV-02](#fe-prov-02) | Edit dialog backfills live config after the form is already editable, resetting user input | bug | P2 (first pass P1) | M | high | partially-confirmed |
+| [FE-PROV-03](#fe-prov-03) | Validation messages are hard-coded Chinese/English literals outside i18n | bug | P2 (first pass P1) | S | high | confirmed |
+| [FE-PROV-04](#fe-prov-04) | Switching to the "Universal" tab in Add Provider unmounts the form and loses all input | bug | P2 (first pass P1) | S | high | confirmed |
+| [FE-PROV-05](#fe-prov-05) | Hermes provider-key rename is accepted by the form but ignored on save | bug | P2 (first pass P1) | S | high | confirmed |
+| [FE-PROV-07](#fe-prov-07) | Native `required` attribute short-circuits the app's soft-validation flow | bug | P2 | S | medium |  |
+| [FE-PROV-08](#fe-prov-08) | Invalid Codex/Gemini editor state is silently replaced by stale defaults on save | bug | P2 | S | high |  |
+| [FE-PROV-09](#fe-prov-09) | Cards for OpenCode/OpenClaw/Hermes/GrokBuild show "not configured" instead of their endpoint | bug | P2 | S | high |  |
+| [FE-PROV-10](#fe-prov-10) | Speed-test endpoint edits are persisted immediately in edit mode, bypassing Cancel | bug | P2 | M | high |  |
+| [FE-PROV-11](#fe-prov-11) | OpenClaw/Hermes model editors mis-track expanded rows after deletion and promise reordering that does not exist | bug | P2 | S | high |  |
+| [FE-PROV-12](#fe-prov-12) | Duplicate provider uses an English-only " copy" suffix and a colliding sortIndex | bug | P2 | S | high |  |
+| [FE-PROV-13](#fe-prov-13) | Drag reorder is not optimistic and every card polls health every 5 s | performance | P2 | S | high |  |
+| [FE-PROV-14](#fe-prov-14) | Full-screen panels lack dialog semantics and focus management; icon buttons lack names | ux | P2 | M | high |  |
+| [FE-PROV-15](#fe-prov-15) | i18n string concatenation and emoji-in-copy | bug | P2 | S | high |  |
+| [FE-PROV-16](#fe-prov-16) | TOML and .env editors use JavaScript syntax highlighting | ux | P2 | S | high |  |
+| [FE-PROV-17](#fe-prov-17) | Split `ProviderFormFull` into a shell plus per-app form adapters | refactor | P2 | XL | high |  |
+| [FE-PROV-18](#fe-prov-18) | Three near-identical common-config stacks (hooks, modals, dark-mode observers) | refactor | P2 | L | high |  |
+| [FE-PROV-19](#fe-prov-19) | Preset identity is array-index based and parsed in six places | refactor | P2 | M | high |  |
+| [FE-PROV-20](#fe-prov-20) | OpenCode model editor can persist draft keys and silently drops models on rename collision | bug | P2 | S | high |  |
+| [FE-PROV-21](#fe-prov-21) | Base-URL and API-key validation is inconsistent across apps | bug | P2 | M | high |  |
+| [FE-PROV-22](#fe-prov-22) | Per-app config knowledge is scattered; `getApiKeyFromConfig` has a wrong Codex shape | refactor | P2 | L | high |  |
+| [FE-PROV-23](#fe-prov-23) | Secrets are shown in plain text in editors/previews and may leak into error toasts | security | P2 | M | medium |  |
+| [FE-PROV-24](#fe-prov-24) | No unsaved-changes guard or "live config differs" view in the edit dialog | ux | P2 | M | high |  |
+| [FE-PROV-25](#fe-prov-25) | `SectionHeader` is declared inside `OmoFormFields` render (remount every render) | bug | P2 | S | high |  |
+| [FE-PROV-32](#fe-prov-32) | Test gaps: dialogs tested with the form mocked out; no real `ProviderForm` submit test; brittle source-string test | test | P2 | L | high |  |
+| [FE-PROV-26](#fe-prov-26) | Unguarded `JSON.parse` of form output in both dialogs | bug | P3 | S | high |  |
+| [FE-PROV-27](#fe-prov-27) | First-run "common config" notice fires inside every provider form for every app | ux | P3 | S | high |  |
+| [FE-PROV-28](#fe-prov-28) | OpenCode option values are JSON-parsed on every keystroke; keys starting with `option-` render blank | ux | P3 | S | high |  |
+| [FE-PROV-29](#fe-prov-29) | Hover-only action bars hide every action from keyboard/touch users | ux | P3 | S | high |  |
+| [FE-PROV-30](#fe-prov-30) | Inconsistent terminology across per-app forms and actions | ux | P3 | S | high |  |
+| [FE-PROV-31](#fe-prov-31) | GrokBuild re-serialises TOML on every keystroke and re-validates on every render | performance | P3 | S | high |  |
+| [FE-PROV-33](#fe-prov-33) | Provider list lacks filters, grouping, tags and bulk operations | feature | P3 | L | high |  |
+| [FE-PROV-34](#fe-prov-34) | Provider health dashboard and connectivity history (dead `HealthStatusIndicator`) | feature | P3 | L | high |  |
+| [FE-PROV-35](#fe-prov-35) | Quick-switch command palette | feature | P3 | M | high |  |
+| [FE-PROV-36](#fe-prov-36) | API-key hygiene: paste normalisation, expiry/rotation reminders, last-used | feature | P3 | M | medium |  |
+| [FE-PROV-37](#fe-prov-37) | Universal-provider model is confusing and duplicated; add provider templating instead | ux | P3 | L | medium |  |
+| [FE-PROV-38](#fe-prov-38) | Docs gap: no documentation of form architecture, `ProviderMeta` field semantics or per-app `settingsConfig` shapes | docs | P3 | S | high |  |
+| [FE-PROV-39](#fe-prov-39) | Dead code and duplicated computations in the form shell | tech-debt | P3 | S | high |  |
+| [FE-PROV-40](#fe-prov-40) | Per-project provider binding (profiles) does not cover most apps or expose which provider a profile will apply | feature | P3 | L | medium |  |
 
 ## Findings
 
 ### FE-PROV-01: JSON-editor edits are silently overwritten by the next field edit (stale `getValues` snapshots)
 
-**Type:** bug · **Priority:** P1 · **Effort:** M · **Confidence:** medium
+**Type:** bug · **Priority:** P1 · **Effort:** M · **Confidence:** high
 
 - **Evidence:** `src/components/providers/forms/ProviderForm.tsx:483-498` — `useApiKeyState({ initialConfig: form.getValues("settingsConfig") ... })` and `useBaseUrlState({ settingsConfig: form.getValues("settingsConfig") ... })`; `src/components/providers/forms/ProviderForm.tsx:508-510` — `useModelState({ settingsConfig: form.getValues("settingsConfig") })`; `src/components/providers/forms/ProviderForm.tsx:2413-2416` — Claude JSON editor writes with `form.setValue("settingsConfig", value)` and nothing in the file calls `form.watch("settingsConfig")`/`useWatch` (only `watch("name")` at 2356 and `watch("websiteUrl")` at 1522/1535/...); `src/components/providers/forms/CommonConfigEditor.tsx:56-62` — comment admits "parent uses form.getValues which doesn't trigger re-renders" and mirrors the value locally; `src/components/providers/forms/hooks/useApiKeyState.ts:55-84` — `handleApiKeyChange` rewrites the config from the render-time `initialConfig`; `src/components/providers/forms/hooks/useBaseUrlState.ts:87-108` — same with `settingsConfig`; `src/components/providers/forms/hooks/useModelState.ts:147-150,200-203` — `latestConfigRef.current = settingsConfig` is only refreshed on render.
 - **Problem:** `form.setValue` on an unwatched field does not re-render `ProviderFormFull` (react-hook-form 7.65, `package.json:87`), so after the user edits the Claude JSON editor (e.g. adds env vars or pastes a full config) the API-key/base-URL/model hooks still hold the pre-edit string. The next keystroke in the API Key, endpoint or model inputs calls `setApiKeyInConfig(staleConfig, key)` and pushes that back into the form, discarding the JSON edits; the editor then visibly reverts because `CommonConfigEditor` re-syncs from the prop. Soft validation (`ProviderForm.tsx:1157-1200`) also reads the stale `apiKey`/`baseUrl` state and can warn "API Key missing" when the JSON already contains it.
 - **Proposal:** Make the config draft the single reactive source: subscribe with `useWatch({ control, name: "settingsConfig" })` (or move `settingsConfig` out of RHF into a `useReducer` draft) and feed that value to the hooks; have the hooks mutate through an `onChange(updater: (current) => next)` that always reads the latest draft instead of a captured string. Add a regression test: edit JSON editor, then type in API Key, assert JSON edits survive.
 - **Acceptance:** RTL test "JSON edit followed by API-key keystroke keeps JSON changes" passes for Claude (and Gemini env/Codex TOML analogues); no `form.getValues("settingsConfig")` is passed as a hook input in `ProviderForm.tsx`.
-
-### FE-PROV-02: Edit dialog backfills live config after the form is already editable, resetting user input
-
-**Type:** bug · **Priority:** P1 · **Effort:** M · **Confidence:** high
-
-- **Evidence:** `src/components/providers/EditProviderDialog.tsx:45-132` — live settings are fetched asynchronously (`getCurrent` then `getLiveProviderSettings` / `openclawApi.getLiveProvider`) after open; `src/components/providers/EditProviderDialog.tsx:134-179` — `initialSettingsConfig` and `initialData` are recomputed when `liveSettings` arrives; `src/components/providers/forms/ProviderForm.tsx:368-389` — `defaultValues` memo depends on `initialData`; `src/components/providers/forms/ProviderForm.tsx:637-639` — `useEffect(() => form.reset(defaultValues), [defaultValues, form])`; `src/components/providers/forms/ProviderForm.tsx:335-365` — second effect resets ~10 state slices on `initialData` change; `src/components/providers/forms/hooks/useCodexConfigState.ts:51-129` — Codex auth/config/catalog re-initialised on `[initialData]`.
-- **Problem:** The form mounts immediately with DB data (`provider.settingsConfig`), the user can start typing, and when the live read resolves every RHF field and most per-app state is reset to the live values. On slow IPC (or when the app is current and two sequential calls run) this discards edits; it also causes a visible content swap. There is no loading gate (`hasLoadedLive` is only used to prevent re-reads).
-- **Proposal:** Gate rendering of `ProviderForm` on `hasLoadedLive` (show the existing skeleton/spinner), or key the form on a `loadedRevision` so it mounts once with final data; alternatively resolve live settings in `App.tsx` before opening the dialog. Keep `isProxyTakeover`/OpenCode short-circuits.
-- **Acceptance:** Test with a delayed `getLiveProviderSettings` mock: typing before resolution is preserved (or the form is not interactive until loaded); no `form.reset` fires after first user input.
-
-### FE-PROV-03: Validation messages are hard-coded Chinese/English literals outside i18n
-
-**Type:** bug · **Priority:** P1 · **Effort:** S · **Confidence:** high
-
-- **Evidence:** `src/lib/schemas/provider.ts:38-54` — zod messages `"请输入有效的网址"`, `"请填写配置内容"` and `parseJsonError` (lines 6-36) producing `"JSON 格式错误：…"`; `src/i18n/locales/en.json:1076` has `fillConfigContent` but the schema never uses it; `src/utils/providerConfigUtils.ts:73-89,103` — `validateJsonConfig` default field name `"配置"` and `"配置 JSON 解析失败…"`; `src/components/providers/forms/hooks/useCodexConfigState.ts:172-183` — `"Auth JSON must be an object"`, `"Invalid JSON format"`; `src/components/providers/forms/hooks/useGeminiConfigState.ts:122-133` — same English literals; `src/components/providers/forms/hooks/useCodexTomlValidation.ts:29-31` — `"TOML 格式错误"`; `src/utils/grokBuildConfig.ts:133-161` — English `"Missing api_key or env_key"` etc.; `src/components/providers/forms/hooks/useCommonConfigSnippet.ts:261,340` — `"通用配置片段"`, `"提取的配置"`.
-- **Problem:** Users see Chinese zod errors on an English UI (and English helper errors on a Chinese UI). Error strings are produced in utility modules with no access to `t`, so they cannot be localised at the call site either.
-- **Proposal:** Return error *codes* (e.g. `{ code: "invalidJson", position }`) from utilities and map to i18n keys at render; build the zod schema via `createProviderSchema(t)` (memoised in the form) or use `z.config({ customError })` with keys. Add `validation.*` keys to all four locales.
-- **Acceptance:** `rg "[\x{4e00}-\x{9fff}]" src/lib/schemas src/utils/providerConfigUtils.ts src/utils/grokBuildConfig.ts src/components/providers/forms/hooks` returns no user-facing literals; switching locale changes every validation message.
-
-### FE-PROV-04: Switching to the "Universal" tab in Add Provider unmounts the form and loses all input
-
-**Type:** bug · **Priority:** P1 · **Effort:** S · **Confidence:** high
-
-- **Evidence:** `src/components/providers/AddProviderDialog.tsx:364-391` — `ProviderForm` is rendered inside `<TabsContent value="app-specific">`; `src/components/ui/tabs.tsx:37-50` — thin wrapper over Radix `TabsPrimitive.Content` without `forceMount`, which unmounts inactive content; `src/components/providers/AddProviderDialog.tsx:313-353` — footer swaps between the two tabs' actions.
-- **Problem:** A user who fills the app-specific form, clicks "Universal" to look, and comes back finds an empty form (every `useState` in `ProviderFormFull` and RHF state is re-created). The two tabs also have unrelated semantics (a form vs. a management panel), which makes the accidental switch likely.
-- **Proposal:** Keep the form mounted (`forceMount` + `hidden` on inactive content), or move the Universal panel out of the Add dialog into its own entry point (Settings or a dedicated panel) and keep only a "Create from universal preset" shortcut inside the form. Warn on tab switch if the form is dirty.
-- **Acceptance:** Test: type a name, switch tab and back, name persists. No `ProviderForm` remount on tab change (spy on an effect).
+- **Verification:** **confirmed** — Behaviour verified, though the cited line numbers are offset: the hooks receive render-time snapshots at ProviderForm.tsx:448-455 (`useApiKeyState({ initialConfig: form.getValues("settingsConfig") ... })`), 457-464 (`useBaseUrlState({ settingsConfig: form.getValues("settingsConfig") ... })`) and 478-481 (`useModelState`), the Claude editor writes with a bare `onChange={(value) => form.setValue("settingsConfig", value)}` at 2465-2467, `handleSettingsConfigChange` (410-415) is also a bare `setValue`, only `isSubmitting` is subscribed from `formState` (408) and the only `watch` calls are `name`/`websiteUrl` (1582-1649, 2342). Installed react-hook-form 7.65.0 (`node_modules/react-hook-form/dist/index.esm.mjs:1676-1707`) emits only `{name, values}` for an unwatched `setValue`, which fails every branch of `shouldRenderFormState` (1052-1059), so `ProviderFormFull` does not re-render after a JSON edit; `useApiKeyState.ts:55-84` then rewrites from the stale `initialConfig`, `useBaseUrlState.ts:87-109` from the stale `settingsConfig`, and `useModelState.ts:147-150,200-203` from a ref refreshed only on render, while `CommonConfigEditor.tsx:56-62` re-syncs `localValue` from the prop on the next render, producing the visible revert. `ApiKeyInput.tsx:47` and `EndpointField.tsx:99` fire per keystroke, soft validation at ProviderForm.tsx:1197-1210 reads the hook state `apiKey`/`baseUrl`, and `onSubmit={form.handleSubmit(handleSubmit)}` (1861) captures the render-time closure, so the spurious 'API Key required' warning is also real. No test covers this (tests/components/CommonConfigEditor.test.tsx tests toggles in isolation; the dialog tests mock ProviderForm), and nothing in the codebase implements the proposal; one detail: Codex config lives in React state in useCodexConfigState and `useBaseUrlState` is given `codexConfig: ""` (461-463), so the 'Codex TOML analogue' in the acceptance is probably not needed. P1 is proportionate because the discard is deterministic and sits in the main Claude add/edit flow (API key field is shown whenever a preset is selected or in edit mode for non-official categories).
 
 ### FE-PROV-06: OMO custom agent/category rows vanish before a model is chosen
 
@@ -98,6 +72,36 @@ The provider UI is feature-rich and clearly battle-hardened (sequence guards in 
 - **Proposal:** Keep custom rows as explicit local draft state with a `draftId`, merge the store-derived rows with drafts instead of replacing (`useEffect` should only add/remove rows whose keys appeared/disappeared in the store), and persist a keyed row even when the model is empty (or show an inline "select a model" hint).
 - **Acceptance:** Test: click Custom, change a builtin model, custom row still rendered; after choosing a model the entry is in `agents`.
 - **Verification:** **confirmed** — Confirmed, and the impact is broader than described: src/components/providers/forms/OmoFormFields.tsx:351-357 re-derives `customAgents`/`customCategories` from the store via `collectCustomModels` (236-251, which only yields keys present in the store) on every `agents`/`categories` identity change, `addCustomModel` at 1151-1165 adds `{ key: "", model: "", sourceKey: "" }` to local state only, and a builtin model change at 516-535 calls `setter({ ...store, [key]: nextEntry })` (i.e. `onAgentsChange`, wired to `omoDraft.setOmoAgents` at ProviderForm.tsx:2279), so the unkeyed row is dropped exactly as claimed. Worse, `updateCustom` at 993-998 always calls `syncCustoms(next)`, and `mergeCustomModelsIntoStore` (258-302) skips `!targetKey` rows (272) and deletes keyed rows with no model and no other fields (293-300), so the resulting new store object triggers the same effect and the row vanishes on its own first key blur (`DeferredKeyInput` 92-121) or first model select, meaning a new custom row cannot be completed through the UI in either order. The local-file import case (852-861) also replaces rows but is by design (toast says `replaced`). No test covers OmoFormFields (no *.test.tsx under src/components/providers). The draft-merging part of the proposal is sound; the alternative of persisting a keyed row with an empty model would write `{}` agent entries into the OMO profile that `mergeCustomModelsIntoStore` deliberately drops, so keeping drafts local until key and model are both set is preferable. P1 stands (feature effectively unusable for new rows, no persisted-data loss).
+
+### FE-PROV-02: Edit dialog backfills live config after the form is already editable, resetting user input
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src/components/providers/EditProviderDialog.tsx:45-132` — live settings are fetched asynchronously (`getCurrent` then `getLiveProviderSettings` / `openclawApi.getLiveProvider`) after open; `src/components/providers/EditProviderDialog.tsx:134-179` — `initialSettingsConfig` and `initialData` are recomputed when `liveSettings` arrives; `src/components/providers/forms/ProviderForm.tsx:368-389` — `defaultValues` memo depends on `initialData`; `src/components/providers/forms/ProviderForm.tsx:637-639` — `useEffect(() => form.reset(defaultValues), [defaultValues, form])`; `src/components/providers/forms/ProviderForm.tsx:335-365` — second effect resets ~10 state slices on `initialData` change; `src/components/providers/forms/hooks/useCodexConfigState.ts:51-129` — Codex auth/config/catalog re-initialised on `[initialData]`.
+- **Problem:** The form mounts immediately with DB data (`provider.settingsConfig`), the user can start typing, and when the live read resolves every RHF field and most per-app state is reset to the live values. On slow IPC (or when the app is current and two sequential calls run) this discards edits; it also causes a visible content swap. There is no loading gate (`hasLoadedLive` is only used to prevent re-reads).
+- **Proposal:** Gate rendering of `ProviderForm` on `hasLoadedLive` (show the existing skeleton/spinner), or key the form on a `loadedRevision` so it mounts once with final data; alternatively resolve live settings in `App.tsx` before opening the dialog. Keep `isProxyTakeover`/OpenCode short-circuits.
+- **Acceptance:** Test with a delayed `getLiveProviderSettings` mock: typing before resolution is preserved (or the form is not interactive until loaded); no `form.reset` fires after first user input.
+- **Verification:** **partially-confirmed** — Core observation holds: EditProviderDialog.tsx:241 renders `ProviderForm` immediately with `initialData` built from `provider.settingsConfig` (134-179), the live read resolves later in the effect at 100-117, `hasLoadedLive` is only consulted inside the effect (line 55) and never gates rendering, App.tsx:994-996 opens the dialog with a bare `setEditingProvider(provider)`, and when `liveSettings` arrives the new `initialData` triggers `form.reset(defaultValues)` (ProviderForm.tsx:649-651), the ten-slice state reset (340-376) and the Codex re-init on `[initialData]` (useCodexConfigState.ts:51-129), all unconditionally. The detail that is off: the backfill only fires for the app's current provider (`provider.id === currentId`, line 102) or any OpenClaw provider (80-98); for every other provider `liveSettings` stays null and no reset occurs, and the edit-discard requires typing within the window of two sequential Tauri invokes, which is tens of milliseconds on a desktop app. The realistic, reproducible symptom is the visible content swap (and a reset even when live deep-equals DB, since `initialSettingsConfig` is a new object), so P2 rather than P1. The proposal (gate on `hasLoadedLive` or key the form on a load revision) is sound and not implemented; tests/components/EditProviderDialog.test.tsx mocks ProviderForm entirely so it cannot catch this.
+
+### FE-PROV-03: Validation messages are hard-coded Chinese/English literals outside i18n
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/lib/schemas/provider.ts:38-54` — zod messages `"请输入有效的网址"`, `"请填写配置内容"` and `parseJsonError` (lines 6-36) producing `"JSON 格式错误：…"`; `src/i18n/locales/en.json:1076` has `fillConfigContent` but the schema never uses it; `src/utils/providerConfigUtils.ts:73-89,103` — `validateJsonConfig` default field name `"配置"` and `"配置 JSON 解析失败…"`; `src/components/providers/forms/hooks/useCodexConfigState.ts:172-183` — `"Auth JSON must be an object"`, `"Invalid JSON format"`; `src/components/providers/forms/hooks/useGeminiConfigState.ts:122-133` — same English literals; `src/components/providers/forms/hooks/useCodexTomlValidation.ts:29-31` — `"TOML 格式错误"`; `src/utils/grokBuildConfig.ts:133-161` — English `"Missing api_key or env_key"` etc.; `src/components/providers/forms/hooks/useCommonConfigSnippet.ts:261,340` — `"通用配置片段"`, `"提取的配置"`.
+- **Problem:** Users see Chinese zod errors on an English UI (and English helper errors on a Chinese UI). Error strings are produced in utility modules with no access to `t`, so they cannot be localised at the call site either.
+- **Proposal:** Return error *codes* (e.g. `{ code: "invalidJson", position }`) from utilities and map to i18n keys at render; build the zod schema via `createProviderSchema(t)` (memoised in the form) or use `z.config({ customError })` with keys. Add `validation.*` keys to all four locales.
+- **Acceptance:** `rg "[\x{4e00}-\x{9fff}]" src/lib/schemas src/utils/providerConfigUtils.ts src/utils/grokBuildConfig.ts src/components/providers/forms/hooks` returns no user-facing literals; switching locale changes every validation message.
+- **Verification:** **confirmed** — Every cited literal is present: src/lib/schemas/provider.ts:8,17,25,35 (`JSON 格式错误：...`), :40 (`.url("请输入有效的网址")`), :44 (`.min(1, "请填写配置内容")`); providerConfigUtils.ts:72-89 (`fieldName = "配置"`, `${fieldName}JSON格式错误，请检查语法`) and :101-103; useCodexConfigState.ts:176,180 and useGeminiConfigState.ts:128,130 (English literals); useCodexTomlValidation.ts:29-31; grokBuildConfig.ts:133-161; useCommonConfigSnippet.ts:261,340 (which passes `"通用配置片段"`/`"提取的配置"` even though `t` is in scope there). No mitigation exists: `fillConfigContent` appears only in the four locale files and nowhere in code, there is no `setErrorMap`/`z.config`/schema factory under src/lib/schemas or src/utils, `FormMessage` (src/components/ui/form.tsx:136-137) renders `error.message` raw, and `CommonConfigEditor.tsx:192-194,344-346` prints `commonConfigError` verbatim. One nuance: GrokBuildProviderForm.tsx:328-333 wraps the Grok error in `t("grokBuild.invalidToml", { error })`, so only the inner message is untranslated there. The proposal is sound and not implemented (zod 4.1.12 is installed, so `z.config({ customError })` is available; `grokBuildConfig.test.ts:86-100` asserts the literal strings and would need updating), but this is an i18n/UX defect with no data or security impact, so P2.
+
+### FE-PROV-04: Switching to the "Universal" tab in Add Provider unmounts the form and loses all input
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/providers/AddProviderDialog.tsx:364-391` — `ProviderForm` is rendered inside `<TabsContent value="app-specific">`; `src/components/ui/tabs.tsx:37-50` — thin wrapper over Radix `TabsPrimitive.Content` without `forceMount`, which unmounts inactive content; `src/components/providers/AddProviderDialog.tsx:313-353` — footer swaps between the two tabs' actions.
+- **Problem:** A user who fills the app-specific form, clicks "Universal" to look, and comes back finds an empty form (every `useState` in `ProviderFormFull` and RHF state is re-created). The two tabs also have unrelated semantics (a form vs. a management panel), which makes the accidental switch likely.
+- **Proposal:** Keep the form mounted (`forceMount` + `hidden` on inactive content), or move the Universal panel out of the Add dialog into its own entry point (Settings or a dedicated panel) and keep only a "Create from universal preset" shortcut inside the form. Warn on tab switch if the form is dirty.
+- **Acceptance:** Test: type a name, switch tab and back, name persists. No `ProviderForm` remount on tab change (spy on an effect).
+- **Verification:** **confirmed** — Verified: AddProviderDialog.tsx:363-391 renders `ProviderForm` inside `<TabsContent value="app-specific">` and `UniversalProviderPanel` inside `<TabsContent value="universal">`, with the footer swapping at 313-353; src/components/ui/tabs.tsx:37-50 forwards props to `TabsPrimitive.Content` without `forceMount`, and `forceMount` appears nowhere in src. Installed @radix-ui/react-tabs 1.1.13 (`dist/index.mjs:157-175`) renders `Presence present={forceMount || isSelected}` with `children: present && children`, so the inactive tab's subtree unmounts and all `useState`/RHF state in `ProviderFormFull` is recreated on return. The tab is shown for claude, codex, gemini and other apps except opencode/openclaw/hermes/grokbuild/claude-desktop (48-53); tests/components/AddProviderDialog.test.tsx mocks ProviderForm and never switches tabs. The proposal is accurate (with `forceMount` Radix sets `hidden: !present` which is false, so an explicit `hidden` on the inactive content is indeed required). Priority lowered to P2: it loses only unsaved form input on a deliberate tab click and is recoverable by retyping, with no persisted-data or security impact.
 
 ### FE-PROV-05: Hermes provider-key rename is accepted by the form but ignored on save
 

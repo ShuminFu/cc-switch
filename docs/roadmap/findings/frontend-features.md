@@ -1,6 +1,6 @@
 # Feature UI (settings, usage, proxy, skills, MCP) — findings (FE-UI-xx)
 
-Part of the [next-phase proposals](../README.md). 47 findings. Priorities: P1 = 4, P2 = 19, P3 = 24.
+Part of the [next-phase proposals](../README.md). 47 findings. Priorities: P2 = 23, P3 = 24.
 
 ## Area summary
 
@@ -8,93 +8,57 @@ The non-provider feature UI is broad and mostly functional, with some genuinely 
 
 ## Index
 
-| ID | Title | Type | Priority | Effort | Confidence |
-|---|---|---|---|---|---|
-| [FE-UI-05](#fe-ui-05) | Dead components hide unfinished features (request drill-down, session import, circuit-breaker panel, repo dialog, prompt modal, proxy-config hook, provider limits) | tech-debt | P1 | M | high |
-| [FE-UI-16](#fe-ui-16) | XL refactor — split `WebdavSyncSection` into a backend-agnostic cloud-sync panel | refactor | P1 | XL | high |
-| [FE-UI-17](#fe-ui-17) | L refactor — consolidate the settings save pipeline (`useSettings` / `useSettingsForm` / `useDirectorySettings`) | refactor | P1 | L | high |
-| [FE-UI-42](#fe-ui-42) | Test gaps — no component tests for proxy, usage charts/pricing, about, backups, log/rectifier, OpenClaw, workspace, prompts, Hermes; S3 branch untested | test | P1 | L | high |
-| [FE-UI-01](#fe-ui-01) | General-tab autosave silently persists unsaved Advanced-tab directory overrides (and skips their side effects) | bug | P2 | M | high |
-| [FE-UI-03](#fe-ui-03) | Directory override inputs trim on every keystroke, so paths containing spaces cannot be typed | bug | P2 | S | high |
-| [FE-UI-06](#fe-ui-06) | zh-TW locale is missing 30 keys (tool lifecycle strings fall back to English) | bug | P2 | S | high |
-| [FE-UI-07](#fe-ui-07) | Advanced-tab "Save" has no dirty tracking and no unsaved-changes guard | ux | P2 | M | high |
-| [FE-UI-10](#fe-ui-10) | Config panels that fetch with ad-hoc `useEffect` show defaults on fetch failure and may write them back | bug | P2 | M | medium |
-| [FE-UI-11](#fe-ui-11) | Hover-only action bars and nested interactive elements are not keyboard reachable | ux | P2 | S | high |
-| [FE-UI-12](#fe-ui-12) | Hand-rolled modals/panels lack dialog semantics and focus management | ux | P2 | M | high |
-| [FE-UI-15](#fe-ui-15) | i18n misuse — hard-coded strings, concatenated translations, inline Chinese defaults, unlocalised number/date formatting | tech-debt | P2 | M | high |
-| [FE-UI-18](#fe-ui-18) | XL refactor — a shared `ManagedItemsPanel` for MCP, Skills and Prompts (and unify their data layer) | refactor | P2 | XL | high |
-| [FE-UI-19](#fe-ui-19) | L refactor — decompose `AboutSection` (app update + tool lifecycle + WSL prefs + diagnostics + install commands) | refactor | P2 | L | high |
-| [FE-UI-20](#fe-ui-20) | Numeric config panels hand-roll validation with duplicated range tables; adopt zod + react-hook-form | refactor | P2 | M | high |
-| [FE-UI-24](#fe-ui-24) | Failover queue manager lacks reorder, health, test and reason-for-switch feedback | feature | P2 | M | high |
-| [FE-UI-25](#fe-ui-25) | Usage dashboard has no export (CSV/JSON) of logs or aggregates | feature | P2 | M | high |
-| [FE-UI-26](#fe-ui-26) | Usage budgets/alerts — backend limit types exist but no UI | feature | P2 | L | medium |
-| [FE-UI-29](#fe-ui-29) | `PricingConfigPanel` omits OpenCode, fires 8 unguarded writes, and refetches on language change | bug | P2 | S | high |
-| [FE-UI-30](#fe-ui-30) | Manual pricing entry is not normalised like the models.dev import, so manual IDs may never match usage rows | bug | P2 | S | medium |
-| [FE-UI-32](#fe-ui-32) | MCP wizard/form gaps — no `cwd`, plain-text env secrets, silent line drops, no connection test, macOS-only shortcut, OpenClaw toggle missing in form | feature | P2 | M | high |
-| [FE-UI-33](#fe-ui-33) | Skills UX — discovery "Uninstall" only toasts, no install progress, sequential update-all without progress, conflict/symlink explanation missing | feature | P2 | M | high |
-| [FE-UI-34](#fe-ui-34) | OpenClaw/workspace editors reset local edits on refetch and have no unsaved-changes guard | bug | P2 | S | medium |
-| [FE-UI-02](#fe-ui-02) | `hermesConfigDir` is skipped by sanitisation, form normalisation and directory-change detection | bug | P3 | S | high |
-| [FE-UI-04](#fe-ui-04) | Failover/takeover UI covers different app sets in different places; label maps diverge | bug | P3 | M | high |
-| [FE-UI-08](#fe-ui-08) | Cancelling the export file dialog shows an error toast (and the test enshrines it) | ux | P3 | S | high |
-| [FE-UI-09](#fe-ui-09) | Autosave failure shows two error toasts | bug | P3 | S | high |
-| [FE-UI-13](#fe-ui-13) | No reduced-motion handling; light-only skeleton and status colours in dark mode | ux | P3 | S | high |
-| [FE-UI-14](#fe-ui-14) | Dark-mode `MutationObserver` boilerplate duplicated in six in-scope files although `useDarkMode` exists | tech-debt | P3 | S | high |
-| [FE-UI-21](#fe-ui-21) | Segmented-control pattern copy-pasted five times in Settings | refactor | P3 | S | high |
-| [FE-UI-22](#fe-ui-22) | Proxy status polling is duplicated across two hook modules with different cadences | tech-debt | P3 | S | high |
-| [FE-UI-23](#fe-ui-23) | ProxyPanel UX gaps — hidden config while running, misleading stat colouring, unlocalised uptime, unawaited clipboard | ux | P3 | S | high |
-| [FE-UI-27](#fe-ui-27) | Usage range/timezone edge cases — local-day presets vs string bucket dates, unenforced 30-day hint, Sunday-first calendar | bug | P3 | S | medium |
-| [FE-UI-28](#fe-ui-28) | `UsageTrendChart` performance/typing — inline tooltip component, un-memoised data, `any` types, naive tick formatting | performance | P3 | S | high |
-| [FE-UI-31](#fe-ui-31) | Usage dashboard filters/tab are lost on every Settings tab switch | ux | P3 | S | high |
-| [FE-UI-35](#fe-ui-35) | Workspace paths are hard-coded and file existence is checked by reading full contents | bug | P3 | S | high |
-| [FE-UI-36](#fe-ui-36) | `AgentsDefaultsPanel` can persist an empty primary model and numeric fields lack validation | bug | P3 | S | medium |
-| [FE-UI-37](#fe-ui-37) | `BackupListSection` duplicates confirm dialogs, uses a misleading icon and offers no reveal/export | ux | P3 | S | high |
-| [FE-UI-38](#fe-ui-38) | Settings search and a keyboard-shortcuts reference are missing | feature | P3 | M | high |
-| [FE-UI-39](#fe-ui-39) | Proxy request inspector/replay is absent despite logging being a first-class toggle | feature | P3 | L | medium |
-| [FE-UI-40](#fe-ui-40) | `ToggleRow` label text is not associated with (or clickable for) its switch | ux | P3 | S | high |
-| [FE-UI-41](#fe-ui-41) | Settings tab bar enforces a 720 px minimum and overflows at narrow widths | ux | P3 | S | medium |
-| [FE-UI-43](#fe-ui-43) | `GlobalProxySettings` round-trips URLs with an added trailing slash and has unlabelled credential inputs | bug | P3 | S | medium |
-| [FE-UI-44](#fe-ui-44) | `ModelsDevPickerDialog` rows are `role="button"` divs without keyboard support, and the fetch bypasses the app's proxy settings | ux | P3 | S | medium |
-| [FE-UI-45](#fe-ui-45) | Install-command snippets execute remote scripts (incl. `-ExecutionPolicy Bypass`) without surfacing the source URL or a warning | docs | P3 | S | medium |
-| [FE-UI-46](#fe-ui-46) | Prompt management lacks versioning/history and diff against the live file | feature | P3 | M | medium |
-| [FE-UI-47](#fe-ui-47) | `DialogContent`/`DialogOverlay` duplicate the z-index map and most feature dialogs pick ad-hoc `zIndex` values | tech-debt | P3 | S | high |
+| ID | Title | Type | Priority | Effort | Confidence | Verdict |
+|---|---|---|---|---|---|---|
+| [FE-UI-01](#fe-ui-01) | General-tab autosave silently persists unsaved Advanced-tab directory overrides (and skips their side effects) | bug | P2 (first pass P1) | M | high | partially-confirmed |
+| [FE-UI-03](#fe-ui-03) | Directory override inputs trim on every keystroke, so paths containing spaces cannot be typed | bug | P2 (first pass P1) | S | high | confirmed |
+| [FE-UI-05](#fe-ui-05) | Dead components hide unfinished features (request drill-down, session import, circuit-breaker panel, repo dialog, prompt modal, proxy-config hook, provider limits) | tech-debt | P2 (first pass P1) | M | high | partially-confirmed |
+| [FE-UI-06](#fe-ui-06) | zh-TW locale is missing 30 keys (tool lifecycle strings fall back to English) | bug | P2 | S | high |  |
+| [FE-UI-07](#fe-ui-07) | Advanced-tab "Save" has no dirty tracking and no unsaved-changes guard | ux | P2 | M | high |  |
+| [FE-UI-10](#fe-ui-10) | Config panels that fetch with ad-hoc `useEffect` show defaults on fetch failure and may write them back | bug | P2 | M | medium |  |
+| [FE-UI-11](#fe-ui-11) | Hover-only action bars and nested interactive elements are not keyboard reachable | ux | P2 | S | high |  |
+| [FE-UI-12](#fe-ui-12) | Hand-rolled modals/panels lack dialog semantics and focus management | ux | P2 | M | high |  |
+| [FE-UI-15](#fe-ui-15) | i18n misuse — hard-coded strings, concatenated translations, inline Chinese defaults, unlocalised number/date formatting | tech-debt | P2 | M | high |  |
+| [FE-UI-16](#fe-ui-16) | XL refactor — split `WebdavSyncSection` into a backend-agnostic cloud-sync panel | refactor | P2 (first pass P1) | XL | high | partially-confirmed |
+| [FE-UI-17](#fe-ui-17) | L refactor — consolidate the settings save pipeline (`useSettings` / `useSettingsForm` / `useDirectorySettings`) | refactor | P2 (first pass P1) | L | high | partially-confirmed |
+| [FE-UI-18](#fe-ui-18) | XL refactor — a shared `ManagedItemsPanel` for MCP, Skills and Prompts (and unify their data layer) | refactor | P2 | XL | high |  |
+| [FE-UI-19](#fe-ui-19) | L refactor — decompose `AboutSection` (app update + tool lifecycle + WSL prefs + diagnostics + install commands) | refactor | P2 | L | high |  |
+| [FE-UI-20](#fe-ui-20) | Numeric config panels hand-roll validation with duplicated range tables; adopt zod + react-hook-form | refactor | P2 | M | high |  |
+| [FE-UI-24](#fe-ui-24) | Failover queue manager lacks reorder, health, test and reason-for-switch feedback | feature | P2 | M | high |  |
+| [FE-UI-25](#fe-ui-25) | Usage dashboard has no export (CSV/JSON) of logs or aggregates | feature | P2 | M | high |  |
+| [FE-UI-26](#fe-ui-26) | Usage budgets/alerts — backend limit types exist but no UI | feature | P2 | L | medium |  |
+| [FE-UI-29](#fe-ui-29) | `PricingConfigPanel` omits OpenCode, fires 8 unguarded writes, and refetches on language change | bug | P2 | S | high |  |
+| [FE-UI-30](#fe-ui-30) | Manual pricing entry is not normalised like the models.dev import, so manual IDs may never match usage rows | bug | P2 | S | medium |  |
+| [FE-UI-32](#fe-ui-32) | MCP wizard/form gaps — no `cwd`, plain-text env secrets, silent line drops, no connection test, macOS-only shortcut, OpenClaw toggle missing in form | feature | P2 | M | high |  |
+| [FE-UI-33](#fe-ui-33) | Skills UX — discovery "Uninstall" only toasts, no install progress, sequential update-all without progress, conflict/symlink explanation missing | feature | P2 | M | high |  |
+| [FE-UI-34](#fe-ui-34) | OpenClaw/workspace editors reset local edits on refetch and have no unsaved-changes guard | bug | P2 | S | medium |  |
+| [FE-UI-42](#fe-ui-42) | Test gaps — no component tests for proxy, usage charts/pricing, about, backups, log/rectifier, OpenClaw, workspace, prompts, Hermes; S3 branch untested | test | P2 (first pass P1) | L | high | partially-confirmed |
+| [FE-UI-02](#fe-ui-02) | `hermesConfigDir` is skipped by sanitisation, form normalisation and directory-change detection | bug | P3 (first pass P1) | S | high | partially-confirmed |
+| [FE-UI-04](#fe-ui-04) | Failover/takeover UI covers different app sets in different places; label maps diverge | bug | P3 (first pass P1) | M | high | partially-confirmed |
+| [FE-UI-08](#fe-ui-08) | Cancelling the export file dialog shows an error toast (and the test enshrines it) | ux | P3 | S | high |  |
+| [FE-UI-09](#fe-ui-09) | Autosave failure shows two error toasts | bug | P3 | S | high |  |
+| [FE-UI-13](#fe-ui-13) | No reduced-motion handling; light-only skeleton and status colours in dark mode | ux | P3 | S | high |  |
+| [FE-UI-14](#fe-ui-14) | Dark-mode `MutationObserver` boilerplate duplicated in six in-scope files although `useDarkMode` exists | tech-debt | P3 | S | high |  |
+| [FE-UI-21](#fe-ui-21) | Segmented-control pattern copy-pasted five times in Settings | refactor | P3 | S | high |  |
+| [FE-UI-22](#fe-ui-22) | Proxy status polling is duplicated across two hook modules with different cadences | tech-debt | P3 | S | high |  |
+| [FE-UI-23](#fe-ui-23) | ProxyPanel UX gaps — hidden config while running, misleading stat colouring, unlocalised uptime, unawaited clipboard | ux | P3 | S | high |  |
+| [FE-UI-27](#fe-ui-27) | Usage range/timezone edge cases — local-day presets vs string bucket dates, unenforced 30-day hint, Sunday-first calendar | bug | P3 | S | medium |  |
+| [FE-UI-28](#fe-ui-28) | `UsageTrendChart` performance/typing — inline tooltip component, un-memoised data, `any` types, naive tick formatting | performance | P3 | S | high |  |
+| [FE-UI-31](#fe-ui-31) | Usage dashboard filters/tab are lost on every Settings tab switch | ux | P3 | S | high |  |
+| [FE-UI-35](#fe-ui-35) | Workspace paths are hard-coded and file existence is checked by reading full contents | bug | P3 | S | high |  |
+| [FE-UI-36](#fe-ui-36) | `AgentsDefaultsPanel` can persist an empty primary model and numeric fields lack validation | bug | P3 | S | medium |  |
+| [FE-UI-37](#fe-ui-37) | `BackupListSection` duplicates confirm dialogs, uses a misleading icon and offers no reveal/export | ux | P3 | S | high |  |
+| [FE-UI-38](#fe-ui-38) | Settings search and a keyboard-shortcuts reference are missing | feature | P3 | M | high |  |
+| [FE-UI-39](#fe-ui-39) | Proxy request inspector/replay is absent despite logging being a first-class toggle | feature | P3 | L | medium |  |
+| [FE-UI-40](#fe-ui-40) | `ToggleRow` label text is not associated with (or clickable for) its switch | ux | P3 | S | high |  |
+| [FE-UI-41](#fe-ui-41) | Settings tab bar enforces a 720 px minimum and overflows at narrow widths | ux | P3 | S | medium |  |
+| [FE-UI-43](#fe-ui-43) | `GlobalProxySettings` round-trips URLs with an added trailing slash and has unlabelled credential inputs | bug | P3 | S | medium |  |
+| [FE-UI-44](#fe-ui-44) | `ModelsDevPickerDialog` rows are `role="button"` divs without keyboard support, and the fetch bypasses the app's proxy settings | ux | P3 | S | medium |  |
+| [FE-UI-45](#fe-ui-45) | Install-command snippets execute remote scripts (incl. `-ExecutionPolicy Bypass`) without surfacing the source URL or a warning | docs | P3 | S | medium |  |
+| [FE-UI-46](#fe-ui-46) | Prompt management lacks versioning/history and diff against the live file | feature | P3 | M | medium |  |
+| [FE-UI-47](#fe-ui-47) | `DialogContent`/`DialogOverlay` duplicate the z-index map and most feature dialogs pick ad-hoc `zIndex` values | tech-debt | P3 | S | high |  |
 
 ## Findings
-
-### FE-UI-05: Dead components hide unfinished features (request drill-down, session import, circuit-breaker panel, repo dialog, prompt modal, proxy-config hook, provider limits)
-
-**Type:** tech-debt · **Priority:** P1 · **Effort:** M · **Confidence:** high
-
-- **Evidence:** `rg` finds no importers for `src/components/usage/RequestDetailPanel.tsx` (324 lines), `src/components/usage/DataSourceBar.tsx` (125 lines, contains the only "Import Sessions / Sync" button), `src/components/proxy/CircuitBreakerConfigPanel.tsx` (356 lines), `src/components/skills/RepoManager.tsx` (202 lines, Dialog twin of `RepoManagerPanel.tsx`), `src/components/prompts/PromptFormModal.tsx` (164 lines, twin of `PromptFormPanel.tsx`), `src/hooks/useProxyConfig.ts` (duplicate of `src/lib/query/proxy.ts:137-166`), and `useProviderLimits`/`ProviderLimitStatus` (`src/lib/query/usage.ts:349`, `src/types/usage.ts:220-228`). `src/components/usage/RequestLogTable.tsx:197-316` rows have no click handler, so the detail panel is unreachable.
-- **Problem:** ~1,300 lines of unreachable UI bit-rot (e.g. `RequestDetailPanel` still uses a hand-rolled locale map at `:22-29` and light-only colours), users cannot open request details or trigger session import, and reviewers cannot tell which twin is canonical.
-- **Proposal:** Decide per component: wire (`RequestDetailPanel` ← row click; `DataSourceBar` ← dashboard header; `useProviderLimits` ← budgets, FE-UI-28) or delete (`CircuitBreakerConfigPanel`, `RepoManager`, `PromptFormModal`, `hooks/useProxyConfig`). Add `knip`/`ts-prune` to CI to prevent recurrence.
-- **Acceptance:** `knip` reports zero unused exports/files under `src/components` and `src/hooks`; clicking a request-log row opens the detail dialog.
-
-### FE-UI-16: XL refactor — split `WebdavSyncSection` into a backend-agnostic cloud-sync panel
-
-**Type:** refactor · **Priority:** P1 · **Effort:** XL · **Confidence:** high
-
-- **Evidence:** `src/components/settings/WebdavSyncSection.tsx` is 1,867 lines with ~25 `useState` hooks (`:242-316`); every handler is mirrored for S3 — `handleTest/handleSave/handleUploadClick/handleUploadConfirm/handleDownloadClick/handleDownloadConfirm` (`:472-649`) vs `handleS3Test/…/handleS3DownloadConfirm` (`:697-861`); the two forms (`:995-1227` WebDAV, `:1230-1539` S3) and four confirmation dialogs (`:1542-1853`) are copy-pasted; the remote path `…/v2/db-v6/…` is hard-coded in the UI (`:944-945`); `queryClient.invalidateQueries()` with no key (invalidate *everything*) is called after every save/upload/download (`:517,580,640,736,796,851,909`); Synology preset detection matches any URL containing `:5005` (`:70-75`).
-- **Problem:** Every behaviour fix must be applied twice (the S3 branch already lacks the password-preservation logic and the legacy-layout notices the WebDAV branch has), tests only cover WebDAV (`tests/components/WebdavSyncSection.test.tsx` has zero `s3` references), and adding a third backend (e.g. GitHub Gist, local folder) means a third copy.
-- **Proposal:** Target structure: `src/components/settings/cloudSync/` with `useCloudSyncForm(adapter)` (dirty/touched/justSaved/actionState machine), `CloudSyncBackendAdapter` interface (`test`, `save`, `fetchRemoteInfo`, `upload`, `download`, `buildRemotePath`) implemented by `webdavAdapter.ts`/`s3Adapter.ts`, presentational `SyncFormFields` driven by a field schema, `RemoteSnapshotDialog` (upload/download modes), and `SyncTypeSelector` with mutual-exclusion logic. Backend returns the remote path string. Invalidate only `["settings"]` and sync-related keys.
-- **Acceptance:** File ≤ 400 lines per module; parity test suite runs the same behavioural tests against both adapters; S3 gains the password-preservation and incompatible-version handling automatically.
-
-### FE-UI-17: L refactor — consolidate the settings save pipeline (`useSettings` / `useSettingsForm` / `useDirectorySettings`)
-
-**Type:** refactor · **Priority:** P1 · **Effort:** L · **Confidence:** high
-
-- **Evidence:** `src/hooks/useSettings.ts:182-308` (`autoSaveSettings`) and `:312-492` (`saveSettings`) duplicate ~120 lines (sanitisation, auto-launch, onboarding skip, plugin sync, language persistence, tray refresh); `sanitizeDir` is defined three times (`useSettings.ts:49-53`, `useSettingsForm.ts:48-52`, `useDirectorySettings.ts:57-61`); the normalisation block is duplicated in `useSettingsForm.ts:110-129` and `:177-196`; `initialLanguage: initialLanguageRef.current` is read from a ref during render (`useSettingsForm.ts:207`); `DirectorySettings.tsx:310-385` repeats seven near-identical `DirectoryInput` blocks and `SettingsPage.tsx:346-362` passes 14 directory props.
-- **Problem:** The bugs in FE-UI-01/02/09 are direct consequences of this duplication; adding a setting with a side effect requires editing two 100-line functions.
-- **Proposal:** `settingsPayload.ts` (`normalizeSettings(data)`, `buildSettingsPayload(form)` table-driven over `APP_DIRECTORY_META`), `settingsSideEffects.ts` (`runSideEffects(prev, next, { scope: "auto" | "full" })` with one entry per setting: launchOnStartup, skipClaudeOnboarding, enableClaudePluginIntegration, dir changes, appConfigDir), and a single `useSaveSettings()` that both paths call with a scope flag; `DirectorySettings` iterates `DirectoryAppId[]`.
-- **Acceptance:** `useSettings.ts` < 200 lines; existing `tests/hooks/useSettings.test.tsx` (10 cases) and `useSettingsForm.test.tsx` pass unchanged; one new table-driven test covers every `*ConfigDir`.
-
-### FE-UI-42: Test gaps — no component tests for proxy, usage charts/pricing, about, backups, log/rectifier, OpenClaw, workspace, prompts, Hermes; S3 branch untested
-
-**Type:** test · **Priority:** P1 · **Effort:** L · **Confidence:** high
-
-- **Evidence:** `rg -l "ProxyPanel|FailoverQueueManager|AutoFailoverConfigPanel|AgentsDefaultsPanel|DailyMemoryPanel|WorkspaceFilesPanel|PromptPanel|HermesMemoryPanel|BackupListSection|AboutSection|LogConfigPanel|RectifierConfigPanel|TerminalSettings|UsageTrendChart|UsageHero|PricingConfigPanel|UsageDateRangePicker" tests` matches only MSW handlers and the SettingsDialog tests (which mock children); `tests/components/WebdavSyncSection.test.tsx` (558 lines) has zero `s3` references; `tests/components/UnifiedSkillsPanel.test.tsx` has one case (`:99`); `tests/hooks/useProxyStatus.test.tsx` one case; `tests/components/UsageDashboard.test.tsx` covers only the refresh interval; `useImportExport.test.tsx:214` locks in the cancel-as-error behaviour (FE-UI-08).
-- **Problem:** The highest-risk interactive surfaces (failover, pricing, cloud sync S3, editors with dirty state) can regress silently; several bugs above (FE-UI-01/02/03) have no failing test today.
-- **Proposal:** Add RTL tests per panel for load/error/empty/save paths; parametrise the Webdav suite over both adapters (after FE-UI-16); add `vitest-axe` smoke tests for every panel; add the locale-parity test (FE-UI-06) and a `knip` check (FE-UI-05).
-- **Acceptance:** Coverage report shows ≥ 70 % statements for `src/components/{proxy,usage,openclaw,workspace,prompts,hermes}` and `src/components/settings/{BackupListSection,AboutSection,Log*,Rectifier*}`.
 
 ### FE-UI-01: General-tab autosave silently persists unsaved Advanced-tab directory overrides (and skips their side effects)
 
@@ -115,6 +79,16 @@ The non-provider feature UI is broad and mostly functional, with some genuinely 
 - **Proposal:** Keep raw text in local component state (or in the form) and sanitise on blur/save only; show the resolved default as placeholder rather than as value when the override is empty; add an explicit "override active" affordance.
 - **Acceptance:** RTL test typing `"a b"` into the Claude directory input results in `claudeConfigDir === "a b"`; clearing shows placeholder and `undefined` override.
 - **Verification:** **confirmed** — Cited lines 427-432 do not exist (DirectorySettings.tsx is 242 lines), but the code is at DirectorySettings.tsx:201-204 (`displayValue = value ?? resolvedValue ?? ""`) and :215-220 (controlled Input whose onChange forwards raw text), and useDirectorySettings.ts:247-253 runs sanitizeDir (trim, empty -> undefined) before storing, with :256-262 snapping resolvedDirs back to the default on clear; the app-config input at DirectorySettings.tsx:60-65 -> useDirectorySettings.ts:267-272 has the same defect. Because React restores a controlled input to its prop value after each change, a trailing space is dropped before the next character arrives, so sequentially typing 'John Doe' yields 'JohnDoe' and clearing the field displays the resolved default instead of an empty override, as described. The finding understates the workarounds: pasting a full path, the Browse dialog (settingsApi.selectConfigDirectory, useDirectorySettings.ts:289), and inserting a space mid-string all work, and no data is affected, so this is a P2 UX defect rather than P1. No tests cover these components; the proposal (raw local text, sanitise on blur/save, placeholder for the default) is sound and not implemented.
+
+### FE-UI-05: Dead components hide unfinished features (request drill-down, session import, circuit-breaker panel, repo dialog, prompt modal, proxy-config hook, provider limits)
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `rg` finds no importers for `src/components/usage/RequestDetailPanel.tsx` (324 lines), `src/components/usage/DataSourceBar.tsx` (125 lines, contains the only "Import Sessions / Sync" button), `src/components/proxy/CircuitBreakerConfigPanel.tsx` (356 lines), `src/components/skills/RepoManager.tsx` (202 lines, Dialog twin of `RepoManagerPanel.tsx`), `src/components/prompts/PromptFormModal.tsx` (164 lines, twin of `PromptFormPanel.tsx`), `src/hooks/useProxyConfig.ts` (duplicate of `src/lib/query/proxy.ts:137-166`), and `useProviderLimits`/`ProviderLimitStatus` (`src/lib/query/usage.ts:349`, `src/types/usage.ts:220-228`). `src/components/usage/RequestLogTable.tsx:197-316` rows have no click handler, so the detail panel is unreachable.
+- **Problem:** ~1,300 lines of unreachable UI bit-rot (e.g. `RequestDetailPanel` still uses a hand-rolled locale map at `:22-29` and light-only colours), users cannot open request details or trigger session import, and reviewers cannot tell which twin is canonical.
+- **Proposal:** Decide per component: wire (`RequestDetailPanel` ← row click; `DataSourceBar` ← dashboard header; `useProviderLimits` ← budgets, FE-UI-28) or delete (`CircuitBreakerConfigPanel`, `RepoManager`, `PromptFormModal`, `hooks/useProxyConfig`). Add `knip`/`ts-prune` to CI to prevent recurrence.
+- **Acceptance:** `knip` reports zero unused exports/files under `src/components` and `src/hooks`; clicking a request-log row opens the detail dialog.
+- **Verification:** **partially-confirmed** — Dead code confirmed: rg finds zero importers for src/components/usage/RequestDetailPanel.tsx (324 lines), usage/DataSourceBar.tsx (125), proxy/CircuitBreakerConfigPanel.tsx (356; src/components/proxy/index.ts exports only ProxyPanel), skills/RepoManager.tsx (202; SkillsPage.tsx:27 imports RepoManagerPanel instead), prompts/PromptFormModal.tsx (164; PromptPanel.tsx:8 imports PromptFormPanel), src/hooks/useProxyConfig.ts (48) and useProviderLimits (src/lib/query/usage.ts:349); RequestLogTable.tsx:197-316 rows carry no onClick, RequestDetailPanel.tsx:22-29 hand-rolls the locale map and uses light-only bg-gray-100/bg-green-100/bg-red-50 classes (:35, :145-146, :313), and package.json has no knip/ts-prune. Details off: both useProxyConfig copies are dead (src/lib/query/proxy.ts:137 has no callers either), ProviderLimitStatus lives at src/types/usage.ts:139-148 not :220-228, and the impact is overstated because session-log import already runs automatically at startup and on a timer in src-tauri/src/lib.rs:1105-1148 (DataSourceBar would only add a manual trigger) while circuit-breaker settings are reachable through AutoFailoverConfigPanel.tsx:386-480. Unreachable code with no user-facing breakage is maintenance debt, so P2 rather than P1; the wire-or-delete proposal plus a knip check is sound and not implemented.
 
 ### FE-UI-06: zh-TW locale is missing 30 keys (tool lifecycle strings fall back to English)
 
@@ -169,6 +143,26 @@ The non-provider feature UI is broad and mostly functional, with some genuinely 
 - **Problem:** RTL/plural/ordering issues in non-English locales, untranslatable error strings, and the app language is ignored for numbers/dates (a zh-TW user on an en-US OS sees en-US dates).
 - **Proposal:** ESLint `i18next/no-literal-string` + a rule banning the two-arg `t` form in components; central `formatNumber/formatDate` helpers taking the i18n locale; pass error as interpolation (`t("x.failed", { error })`).
 - **Acceptance:** Lint passes with the new rules; no `toLocaleString()` without locale in `src/components`.
+
+### FE-UI-16: XL refactor — split `WebdavSyncSection` into a backend-agnostic cloud-sync panel
+
+**Type:** refactor · **Priority:** P2 · **Effort:** XL · **Confidence:** high
+
+- **Evidence:** `src/components/settings/WebdavSyncSection.tsx` is 1,867 lines with ~25 `useState` hooks (`:242-316`); every handler is mirrored for S3 — `handleTest/handleSave/handleUploadClick/handleUploadConfirm/handleDownloadClick/handleDownloadConfirm` (`:472-649`) vs `handleS3Test/…/handleS3DownloadConfirm` (`:697-861`); the two forms (`:995-1227` WebDAV, `:1230-1539` S3) and four confirmation dialogs (`:1542-1853`) are copy-pasted; the remote path `…/v2/db-v6/…` is hard-coded in the UI (`:944-945`); `queryClient.invalidateQueries()` with no key (invalidate *everything*) is called after every save/upload/download (`:517,580,640,736,796,851,909`); Synology preset detection matches any URL containing `:5005` (`:70-75`).
+- **Problem:** Every behaviour fix must be applied twice (the S3 branch already lacks the password-preservation logic and the legacy-layout notices the WebDAV branch has), tests only cover WebDAV (`tests/components/WebdavSyncSection.test.tsx` has zero `s3` references), and adding a third backend (e.g. GitHub Gist, local folder) means a third copy.
+- **Proposal:** Target structure: `src/components/settings/cloudSync/` with `useCloudSyncForm(adapter)` (dirty/touched/justSaved/actionState machine), `CloudSyncBackendAdapter` interface (`test`, `save`, `fetchRemoteInfo`, `upload`, `download`, `buildRemotePath`) implemented by `webdavAdapter.ts`/`s3Adapter.ts`, presentational `SyncFormFields` driven by a field schema, `RemoteSnapshotDialog` (upload/download modes), and `SyncTypeSelector` with mutual-exclusion logic. Backend returns the remote path string. Invalidate only `["settings"]` and sync-related keys.
+- **Acceptance:** File ≤ 400 lines per module; parity test suite runs the same behavioural tests against both adapters; S3 gains the password-preservation and incompatible-version handling automatically.
+- **Verification:** **partially-confirmed** — Confirmed: src/components/settings/WebdavSyncSection.tsx is 1,867 lines with 27 useState calls in :242-316; the WebDAV handlers sit at :472/:493/:546/:570/:593/:630 and their S3 mirrors at :697-:861 exactly as cited; queryClient.invalidateQueries() with no filter appears at :517, :580, :640, :736, :796, :851 and :909; the /v2/db-v6/ path is hard-coded at :944-945; and the Synology preset uses matchPattern ':5005' (:70-75) through url.includes in detectPreset (:85-92). tests/components/WebdavSyncSection.test.tsx (558 lines, 18 cases) has zero 's3' matches, and the S3 dialogs at :1700-1853 lack the legacyNotice/dbCompat blocks the WebDAV dialogs render at :1595-1614 and :1667-1683. Detail overstated: the S3 branch does implement secret preservation via s3SecretTouched (:726 passes it to settingsApi.s3SyncSaveSettings) and the backend refills an empty secret from the stored one (src-tauri/src/commands/s3_sync.rs:44-48, src-tauri/src/commands/settings.rs:32-42); what S3 lacks is only the UI-side pendingPasswordPreservationRef carry-over (:352-358, :500-507). No cloudSync/ adapter module exists so the proposal is not implemented, but a pure refactor with no user-facing defect is P2, not P1.
+
+### FE-UI-17: L refactor — consolidate the settings save pipeline (`useSettings` / `useSettingsForm` / `useDirectorySettings`)
+
+**Type:** refactor · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** `src/hooks/useSettings.ts:182-308` (`autoSaveSettings`) and `:312-492` (`saveSettings`) duplicate ~120 lines (sanitisation, auto-launch, onboarding skip, plugin sync, language persistence, tray refresh); `sanitizeDir` is defined three times (`useSettings.ts:49-53`, `useSettingsForm.ts:48-52`, `useDirectorySettings.ts:57-61`); the normalisation block is duplicated in `useSettingsForm.ts:110-129` and `:177-196`; `initialLanguage: initialLanguageRef.current` is read from a ref during render (`useSettingsForm.ts:207`); `DirectorySettings.tsx:310-385` repeats seven near-identical `DirectoryInput` blocks and `SettingsPage.tsx:346-362` passes 14 directory props.
+- **Problem:** The bugs in FE-UI-01/02/09 are direct consequences of this duplication; adding a setting with a side effect requires editing two 100-line functions.
+- **Proposal:** `settingsPayload.ts` (`normalizeSettings(data)`, `buildSettingsPayload(form)` table-driven over `APP_DIRECTORY_META`), `settingsSideEffects.ts` (`runSideEffects(prev, next, { scope: "auto" | "full" })` with one entry per setting: launchOnStartup, skipClaudeOnboarding, enableClaudePluginIntegration, dir changes, appConfigDir), and a single `useSaveSettings()` that both paths call with a scope flag; `DirectorySettings` iterates `DirectoryAppId[]`.
+- **Acceptance:** `useSettings.ts` < 200 lines; existing `tests/hooks/useSettings.test.tsx` (10 cases) and `useSettingsForm.test.tsx` pass unchanged; one new table-driven test covers every `*ConfigDir`.
+- **Verification:** **partially-confirmed** — Confirmed: sanitizeDir is defined three times at src/hooks/useSettings.ts:49, useSettingsForm.ts:48 and useDirectorySettings.ts:57; autoSaveSettings (useSettings.ts:182-308) and saveSettings (:312-492) both run setAutoLaunch (:230/:371), the skipClaudeOnboarding toggle (:243-261/:383-399), enableClaudePluginIntegration sync (:272/:410) and updateTrayMenu (:290/:426); the normalisation block is duplicated at useSettingsForm.ts:110-129 and :177-196; and initialLanguageRef.current is read during render at :207. Citation slips: src/components/settings/DirectorySettings.tsx is 242 lines and its seven DirectoryInput blocks are at :98-164, not :310-385; SettingsPage.tsx:346-362 passes 15 props; tests/hooks/useSettings.test.tsx has 9 it() cases, not 10. APP_DIRECTORY_META and DirectoryAppId already exist in useDirectorySettings.ts:8-31 so the table-driven proposal can build on them, and no settingsPayload/settingsSideEffects/useSaveSettings module exists. This is a refactor whose linked bugs (FE-UI-01/02) were themselves verified at P2/P3, so P2.
 
 ### FE-UI-18: XL refactor — a shared `ManagedItemsPanel` for MCP, Skills and Prompts (and unify their data layer)
 
@@ -268,6 +262,16 @@ The non-provider feature UI is broad and mostly functional, with some genuinely 
 - **Problem:** If `openclaw.json` changes on disk (external edit, or the backend normalising on save) while the user is editing, the editor content is replaced without warning; leaving an editor with unsaved Markdown loses it silently.
 - **Proposal:** Hydrate once (`loaded` flag) and show a "file changed on disk — reload?" banner when `data` differs from the hydrated baseline; add dirty tracking + ConfirmDialog on close/back for all editors; share a `useEditableBuffer(data)` hook.
 - **Acceptance:** Simulated refetch with different data while dirty shows the banner instead of replacing text; closing dirty editor prompts.
+
+### FE-UI-42: Test gaps — no component tests for proxy, usage charts/pricing, about, backups, log/rectifier, OpenClaw, workspace, prompts, Hermes; S3 branch untested
+
+**Type:** test · **Priority:** P2 · **Effort:** L · **Confidence:** high
+
+- **Evidence:** `rg -l "ProxyPanel|FailoverQueueManager|AutoFailoverConfigPanel|AgentsDefaultsPanel|DailyMemoryPanel|WorkspaceFilesPanel|PromptPanel|HermesMemoryPanel|BackupListSection|AboutSection|LogConfigPanel|RectifierConfigPanel|TerminalSettings|UsageTrendChart|UsageHero|PricingConfigPanel|UsageDateRangePicker" tests` matches only MSW handlers and the SettingsDialog tests (which mock children); `tests/components/WebdavSyncSection.test.tsx` (558 lines) has zero `s3` references; `tests/components/UnifiedSkillsPanel.test.tsx` has one case (`:99`); `tests/hooks/useProxyStatus.test.tsx` one case; `tests/components/UsageDashboard.test.tsx` covers only the refresh interval; `useImportExport.test.tsx:214` locks in the cancel-as-error behaviour (FE-UI-08).
+- **Problem:** The highest-risk interactive surfaces (failover, pricing, cloud sync S3, editors with dirty state) can regress silently; several bugs above (FE-UI-01/02/03) have no failing test today.
+- **Proposal:** Add RTL tests per panel for load/error/empty/save paths; parametrise the Webdav suite over both adapters (after FE-UI-16); add `vitest-axe` smoke tests for every panel; add the locale-parity test (FE-UI-06) and a `knip` check (FE-UI-05).
+- **Acceptance:** Coverage report shows ≥ 70 % statements for `src/components/{proxy,usage,openclaw,workspace,prompts,hermes}` and `src/components/settings/{BackupListSection,AboutSection,Log*,Rectifier*}`.
+- **Verification:** **partially-confirmed** — Confirmed: the evidence rg -l matches only tests/msw/handlers.ts, tests/components/SettingsDialog.test.tsx, tests/integration/SettingsDialog.test.tsx and tests/components/UsageDashboard.test.tsx, and the latter three mock the named children (SettingsDialog.test.tsx:236-240, UsageDashboard.test.tsx:48-72); WebdavSyncSection.test.tsx has 0 's3' hits, UnifiedSkillsPanel.test.tsx has a single it() at :99, useProxyStatus.test.tsx one case, UsageDashboard.test.tsx three cases all about the refresh interval (:116-138), and useImportExport.test.tsx:214-224 asserts toast.error fires once when the save dialog is cancelled. vitest.config.ts:16-18 configures coverage reporters only with no thresholds, and package.json has neither vitest-axe nor knip. Detail off: usage is not wholly untested because tests/components/PricingEditModal.test.tsx, RequestLogTable.test.tsx, ModelsDevPickerDialog.test.ts and usageFormat.test.ts exist; the real gap is UsageTrendChart/UsageHero/PricingConfigPanel/UsageDateRangePicker plus all of src/components/{proxy,openclaw,workspace,prompts,hermes,agents}. A coverage gap is not a defect, so P2; the 70% target is reasonable but arbitrary.
 
 ### FE-UI-02: `hermesConfigDir` is skipped by sanitisation, form normalisation and directory-change detection
 
