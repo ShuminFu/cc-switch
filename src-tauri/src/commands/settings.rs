@@ -57,6 +57,20 @@ pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
     Ok(crate::settings::get_settings_for_frontend())
 }
 
+/// 获取 settings.json 的加载失败记录（解析失败时含备份路径）
+#[tauri::command]
+pub async fn get_settings_load_failure(
+) -> Result<Option<crate::settings::SettingsLoadFailure>, String> {
+    Ok(crate::settings::get_settings_load_failure())
+}
+
+/// 用户确认后清除 settings.json 加载失败记录，允许以当前设置覆盖该文件
+#[tauri::command]
+pub async fn acknowledge_settings_load_failure() -> Result<bool, String> {
+    crate::settings::acknowledge_settings_load_failure();
+    Ok(true)
+}
+
 /// 保存设置
 #[tauri::command]
 pub async fn save_settings(

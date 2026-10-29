@@ -13,8 +13,6 @@ use std::path::{Path, PathBuf};
 const OPEN_OPTIONS_ALLOWLIST: &[&str] = &[
     // atomic_write / atomic_write_secret (create_new temp file with 0600)
     "src/config.rs",
-    // settings.json save; moves to atomic_write in CCS-084
-    "src/settings.rs",
     // append-only crash log
     "src/panic_hook.rs",
 ];

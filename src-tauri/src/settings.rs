@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::fs;
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::app_config::AppType;
@@ -634,84 +634,182 @@ impl AppSettings {
         }
     }
 
-    fn load_from_file() -> Self {
+    /// 从 settings.json 加载设置
+    ///
+    /// 文件不存在时返回默认值；文件存在但无法读取或解析时同样返回默认值，
+    /// 并附带 [`SettingsLoadFailure`]：解析失败会先把原始字节备份到
+    /// `settings.json.corrupt-<ts>`，避免下一次保存静默覆盖 WebDAV/S3 凭据、
+    /// 当前供应商和 `local_migrations` 标记。
+    fn load_from_file() -> (Self, Option<SettingsLoadFailure>) {
         let Some(path) = Self::settings_path() else {
-            return Self::default();
+            return (Self::default(), None);
         };
-        if let Ok(content) = fs::read_to_string(&path) {
-            match serde_json::from_str::<AppSettings>(&content) {
-                Ok(mut settings) => {
-                    settings.normalize_paths();
-                    settings
-                }
-                Err(err) => {
-                    log::warn!(
-                        "解析设置文件失败，将使用默认设置。路径: {}, 错误: {}",
-                        path.display(),
-                        err
-                    );
-                    Self::default()
-                }
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return (Self::default(), None);
             }
-        } else {
-            Self::default()
+            Err(err) => {
+                log::error!(
+                    "读取设置文件失败，将使用默认设置且禁止覆盖该文件。路径: {}, 错误: {}",
+                    path.display(),
+                    err
+                );
+                let failure = SettingsLoadFailure {
+                    path,
+                    error: err.to_string(),
+                    backup_path: None,
+                };
+                return (Self::default(), Some(failure));
+            }
+        };
+        match serde_json::from_slice::<AppSettings>(&bytes) {
+            Ok(mut settings) => {
+                settings.normalize_paths();
+                (settings, None)
+            }
+            Err(err) => {
+                let backup_path = match backup_corrupt_settings(&path, &bytes) {
+                    Ok(backup) => {
+                        log::warn!(
+                            "解析设置文件失败，将使用默认设置；原文件已备份。路径: {}, 备份: {}, 错误: {}",
+                            path.display(),
+                            backup.display(),
+                            err
+                        );
+                        Some(backup)
+                    }
+                    Err(backup_err) => {
+                        log::error!(
+                            "解析设置文件失败且备份失败，将使用默认设置并禁止覆盖该文件。路径: {}, 错误: {}, 备份错误: {}",
+                            path.display(),
+                            err,
+                            backup_err
+                        );
+                        None
+                    }
+                };
+                let failure = SettingsLoadFailure {
+                    path,
+                    error: err.to_string(),
+                    backup_path,
+                };
+                (Self::default(), Some(failure))
+            }
         }
     }
 }
 
-fn save_settings_file(settings: &AppSettings) -> Result<(), AppError> {
+/// settings.json 加载失败的记录（供前端提示用户）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsLoadFailure {
+    /// 加载失败的 settings.json 路径
+    pub path: PathBuf,
+    /// 读取或解析错误信息
+    pub error: String,
+    /// 原始内容的备份路径；为 `None` 时表示未能备份，保存会被拒绝直到用户确认
+    pub backup_path: Option<PathBuf>,
+}
+
+impl SettingsLoadFailure {
+    /// 原文件未备份时禁止覆盖，以免丢失其中的凭据与迁移标记
+    fn blocks_save(&self) -> bool {
+        self.backup_path.is_none()
+    }
+}
+
+/// 把无法解析的 settings.json 原样备份到 `settings.json.corrupt-<ts>`（仅属主可读写）
+fn backup_corrupt_settings(path: &Path, bytes: &[u8]) -> Result<PathBuf, AppError> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| AppError::Config("无效的文件名".to_string()))?
+        .to_string_lossy()
+        .to_string();
+    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let base = path.with_file_name(format!("{file_name}.corrupt-{ts}"));
+    let mut backup = base.clone();
+    let mut n = 1;
+    while fs::symlink_metadata(&backup).is_ok() {
+        backup = PathBuf::from(format!("{}-{n}", base.display()));
+        n += 1;
+    }
+    crate::config::atomic_write_secret(&backup, bytes)?;
+    Ok(backup)
+}
+
+fn save_settings_file(store: &SettingsStore, settings: &AppSettings) -> Result<(), AppError> {
+    if let Some(failure) = store
+        .load_failure()
+        .filter(SettingsLoadFailure::blocks_save)
+    {
+        return Err(AppError::Config(format!(
+            "设置文件 {} 加载失败且未能备份（{}），为避免覆盖其中的数据已拒绝保存；请修复该文件或确认重置后重试",
+            failure.path.display(),
+            failure.error
+        )));
+    }
+
     let mut normalized = settings.clone();
     normalized.normalize_paths();
     let Some(path) = AppSettings::settings_path() else {
         return Err(AppError::Config("无法获取用户主目录".to_string()));
     };
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
-    }
-
     let json = serde_json::to_string_pretty(&normalized)
         .map_err(|e| AppError::JsonSerialize { source: e })?;
-    #[cfg(unix)]
-    {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|e| AppError::io(&path, e))?;
-        file.write_all(json.as_bytes())
-            .map_err(|e| AppError::io(&path, e))?;
-    }
-
-    // 非 unix 平台的原子保存由 CCS-084（p1-settings-atomic-save）处理
-    #[cfg(not(unix))]
-    #[allow(clippy::disallowed_methods)]
-    {
-        fs::write(&path, json).map_err(|e| AppError::io(&path, e))?;
-    }
-
-    Ok(())
+    // 设置中包含 WebDAV/S3 凭据：原子写入并强制仅属主可访问（unix 0600）
+    crate::config::atomic_write_secret(&path, json.as_bytes())
 }
 
-static SETTINGS_STORE: OnceLock<Arc<RwLock<AppSettings>>> = OnceLock::new();
+/// 进程级设置缓存及其加载状态
+struct SettingsStore {
+    settings: RwLock<AppSettings>,
+    load_failure: RwLock<Option<SettingsLoadFailure>>,
+}
+
+impl SettingsStore {
+    fn load() -> Self {
+        let (settings, load_failure) = AppSettings::load_from_file();
+        Self {
+            settings: RwLock::new(settings),
+            load_failure: RwLock::new(load_failure),
+        }
+    }
+
+    fn load_failure(&self) -> Option<SettingsLoadFailure> {
+        self.load_failure
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn set_load_failure(&self, failure: Option<SettingsLoadFailure>) {
+        *self.load_failure.write().unwrap_or_else(|e| e.into_inner()) = failure;
+    }
+}
+
+impl std::ops::Deref for SettingsStore {
+    type Target = RwLock<AppSettings>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.settings
+    }
+}
+
+static SETTINGS_STORE: OnceLock<Arc<SettingsStore>> = OnceLock::new();
 
 thread_local! {
-    static SCOPED_SETTINGS_STORE: RefCell<Option<Arc<RwLock<AppSettings>>>> =
+    static SCOPED_SETTINGS_STORE: RefCell<Option<Arc<SettingsStore>>> =
         const { RefCell::new(None) };
 }
 
-fn settings_store() -> Arc<RwLock<AppSettings>> {
+fn settings_store() -> Arc<SettingsStore> {
     if let Some(store) = SCOPED_SETTINGS_STORE.with(|scoped| scoped.borrow().clone()) {
         return store;
     }
     SETTINGS_STORE
-        .get_or_init(|| Arc::new(RwLock::new(AppSettings::load_from_file())))
+        .get_or_init(|| Arc::new(SettingsStore::load()))
         .clone()
 }
 
@@ -719,7 +817,7 @@ fn settings_store() -> Arc<RwLock<AppSettings>> {
 /// guard 释放时恢复之前的缓存。仅用于测试隔离：配合 [`crate::paths::scoped`] 使用，
 /// 避免并行测试共享进程级设置缓存。
 pub fn scoped_settings_store() -> ScopedSettingsStore {
-    let store = Arc::new(RwLock::new(AppSettings::load_from_file()));
+    let store = Arc::new(SettingsStore::load());
     let previous = SCOPED_SETTINGS_STORE.with(|scoped| scoped.borrow_mut().replace(store));
     ScopedSettingsStore {
         previous,
@@ -730,7 +828,7 @@ pub fn scoped_settings_store() -> ScopedSettingsStore {
 /// [`scoped_settings_store`] 返回的 guard
 #[must_use = "dropping the guard immediately restores the previous settings store"]
 pub struct ScopedSettingsStore {
-    previous: Option<Arc<RwLock<AppSettings>>>,
+    previous: Option<Arc<SettingsStore>>,
     _not_send: PhantomData<*const ()>,
 }
 
@@ -784,9 +882,8 @@ pub fn get_settings_for_frontend() -> AppSettings {
 
 pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
     new_settings.normalize_paths();
-    save_settings_file(&new_settings)?;
-
     let store = settings_store();
+    save_settings_file(&store, &new_settings)?;
 
     let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
@@ -808,7 +905,7 @@ where
     let mut next = guard.clone();
     mutator(&mut next);
     next.normalize_paths();
-    save_settings_file(&next)?;
+    save_settings_file(&store, &next)?;
     *guard = next;
     Ok(())
 }
@@ -908,14 +1005,25 @@ pub fn clear_codex_unify_migrate_existing() -> Result<(), AppError> {
 /// 从文件重新加载设置到内存缓存
 /// 用于导入配置等场景，确保内存缓存与文件同步
 pub fn reload_settings() -> Result<(), AppError> {
-    let fresh_settings = AppSettings::load_from_file();
+    let (fresh_settings, load_failure) = AppSettings::load_from_file();
     let store = settings_store();
+    store.set_load_failure(load_failure);
     let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
     });
     *guard = fresh_settings;
     Ok(())
+}
+
+/// 启动（或最近一次重新加载）时 settings.json 的加载失败记录，供前端提示用户
+pub fn get_settings_load_failure() -> Option<SettingsLoadFailure> {
+    settings_store().load_failure()
+}
+
+/// 用户确认后清除加载失败记录：之后的保存将以当前（默认）设置覆盖 settings.json
+pub fn acknowledge_settings_load_failure() {
+    settings_store().set_load_failure(None);
 }
 
 pub fn get_claude_override_dir() -> Option<PathBuf> {
@@ -1226,5 +1334,131 @@ mod tests {
         .expect("visible apps");
 
         assert!(!visible.is_visible(&AppType::ClaudeDesktop));
+    }
+
+    mod persistence {
+        use super::super::*;
+        use crate::paths::{self, Paths};
+
+        struct Env {
+            _settings: ScopedSettingsStore,
+            _paths: paths::ScopedPaths,
+            _temp: tempfile::TempDir,
+            path: PathBuf,
+        }
+
+        /// 隔离 home 目录，可选预先写入 settings.json，再加载线程内设置缓存
+        fn env_with(initial: Option<&[u8]>) -> Env {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let paths_guard = paths::scoped(Paths::with_home(temp.path()));
+            let path = paths::current().settings_path();
+            if let Some(bytes) = initial {
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                crate::config::atomic_write(&path, bytes).unwrap();
+            }
+            Env {
+                _settings: scoped_settings_store(),
+                _paths: paths_guard,
+                _temp: temp,
+                path,
+            }
+        }
+
+        fn dir_entries(dir: &Path) -> Vec<String> {
+            let mut names: Vec<String> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+                .collect();
+            names.sort();
+            names
+        }
+
+        #[cfg(unix)]
+        fn mode(path: &Path) -> u32 {
+            use std::os::unix::fs::PermissionsExt;
+            fs::metadata(path).unwrap().permissions().mode() & 0o777
+        }
+
+        #[test]
+        fn invalid_json_is_backed_up_before_save_overwrites_it() {
+            let original: &[u8] = b"{\"webdavSync\": {\"password\": \"secret\"},, broken";
+            let env = env_with(Some(original));
+
+            let failure = get_settings_load_failure().expect("load failure recorded");
+            let backup = failure.backup_path.clone().expect("backup created");
+            assert_eq!(fs::read(&backup).unwrap(), original);
+            assert!(backup
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("settings.json.corrupt-"));
+
+            update_settings(AppSettings::default()).expect("save allowed once backed up");
+
+            assert_eq!(fs::read(&backup).unwrap(), original);
+            let saved: AppSettings =
+                serde_json::from_slice(&fs::read(&env.path).unwrap()).expect("saved valid json");
+            assert!(saved.webdav_sync.is_none());
+            #[cfg(unix)]
+            assert_eq!(mode(&backup), 0o600);
+        }
+
+        #[test]
+        fn invalid_utf8_is_treated_as_corrupt_and_backed_up() {
+            let original: &[u8] = &[b'{', 0xff, 0xfe, b'}'];
+            let _env = env_with(Some(original));
+
+            let failure = get_settings_load_failure().expect("load failure recorded");
+            assert_eq!(fs::read(failure.backup_path.unwrap()).unwrap(), original);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn save_is_refused_when_unreadable_file_cannot_be_backed_up() {
+            // 以目录占位 settings.json：读取失败（非 NotFound），无法备份
+            let temp = tempfile::tempdir().expect("tempdir");
+            let _paths = paths::scoped(Paths::with_home(temp.path()));
+            let path = paths::current().settings_path();
+            fs::create_dir_all(&path).unwrap();
+            let _settings = scoped_settings_store();
+
+            let failure = get_settings_load_failure().expect("load failure recorded");
+            assert!(failure.backup_path.is_none());
+
+            let err = update_settings(AppSettings::default()).expect_err("save refused");
+            assert!(err.to_string().contains("拒绝保存"), "{err}");
+            assert!(mutate_settings(|s| s.show_in_tray = false).is_err());
+            assert!(path.is_dir(), "unreadable settings must not be replaced");
+
+            acknowledge_settings_load_failure();
+            assert!(get_settings_load_failure().is_none());
+        }
+
+        #[test]
+        fn missing_or_valid_file_records_no_failure() {
+            let _env = env_with(None);
+            assert!(get_settings_load_failure().is_none());
+            update_settings(AppSettings::default()).expect("save");
+            reload_settings().expect("reload");
+            assert!(get_settings_load_failure().is_none());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn save_is_atomic_owner_only_and_leaves_no_tmp_files() {
+            use std::os::unix::fs::PermissionsExt;
+
+            let env = env_with(None);
+            let dir = env.path.parent().unwrap().to_path_buf();
+
+            update_settings(AppSettings::default()).expect("create");
+            assert_eq!(mode(&env.path), 0o600);
+
+            fs::set_permissions(&env.path, fs::Permissions::from_mode(0o644)).unwrap();
+            mutate_settings(|s| s.show_in_tray = false).expect("rewrite");
+            assert_eq!(mode(&env.path), 0o600);
+
+            assert_eq!(dir_entries(&dir), vec!["settings.json".to_string()]);
+        }
     }
 }
