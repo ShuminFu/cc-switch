@@ -288,6 +288,14 @@ function ProviderFormFull({
     throw new Error("ProviderFormFull should not receive claude-desktop");
   }
 
+  // 每个应用只比较一次 appId；表单内的分支读取这些布尔值。
+  const isClaudeApp = appId === "claude";
+  const isCodexApp = appId === "codex";
+  const isGeminiApp = appId === "gemini";
+  const isOpenCodeApp = appId === "opencode";
+  const isOpenClawApp = appId === "openclaw";
+  const isHermesApp = appId === "hermes";
+
   const { t } = useTranslation();
   const isEditMode = Boolean(initialData);
   const queryClient = useQueryClient();
@@ -331,7 +339,7 @@ function ProviderFormFull({
   const [endpointAutoSelect, setEndpointAutoSelect] = useState<boolean>(
     () => initialData?.meta?.endpointAutoSelect ?? true,
   );
-  const supportsFullUrl = appId === "claude" || appId === "codex";
+  const supportsFullUrl = isClaudeApp || isCodexApp;
   const [localIsFullUrl, setLocalIsFullUrl] = useState<boolean>(() => {
     if (!supportsFullUrl) return false;
     return initialData?.meta?.isFullUrl ?? false;
@@ -357,8 +365,8 @@ function ProviderFormFull({
     isEditMode,
     initialCategory: initialData?.category,
   });
-  const isOmoCategory = appId === "opencode" && category === "omo";
-  const isOmoSlimCategory = appId === "opencode" && category === "omo-slim";
+  const isOmoCategory = isOpenCodeApp && category === "omo";
+  const isOmoSlimCategory = isOpenCodeApp && category === "omo-slim";
   const isAnyOmoCategory = isOmoCategory || isOmoSlimCategory;
 
   useEffect(() => {
@@ -403,21 +411,28 @@ function ProviderFormFull({
       notes: initialData?.notes ?? "",
       settingsConfig: initialData?.settingsConfig
         ? JSON.stringify(initialData.settingsConfig, null, 2)
-        : appId === "codex"
+        : isCodexApp
           ? CODEX_DEFAULT_CONFIG
-          : appId === "gemini"
+          : isGeminiApp
             ? GEMINI_DEFAULT_CONFIG
-            : appId === "opencode"
+            : isOpenCodeApp
               ? OPENCODE_DEFAULT_CONFIG
-              : appId === "openclaw"
+              : isOpenClawApp
                 ? OPENCLAW_DEFAULT_CONFIG
-                : appId === "hermes"
+                : isHermesApp
                   ? HERMES_DEFAULT_CONFIG
                   : CLAUDE_DEFAULT_CONFIG,
       icon: initialData?.icon ?? "",
       iconColor: initialData?.iconColor ?? "",
     }),
-    [initialData, appId],
+    [
+      initialData,
+      isCodexApp,
+      isGeminiApp,
+      isHermesApp,
+      isOpenClawApp,
+      isOpenCodeApp,
+    ],
   );
 
   const form = useForm<ProviderFormData>({
@@ -436,7 +451,7 @@ function ProviderFormFull({
 
   const [localApiKeyField, setLocalApiKeyField] = useState<ClaudeApiKeyField>(
     () => {
-      if (appId !== "claude") return "ANTHROPIC_AUTH_TOKEN";
+      if (!isClaudeApp) return "ANTHROPIC_AUTH_TOKEN";
       if (initialData?.meta?.apiKeyField) return initialData.meta.apiKeyField;
       // Infer from existing config env
       const env = (initialData?.settingsConfig as Record<string, unknown>)
@@ -471,7 +486,7 @@ function ProviderFormFull({
     selectedPresetId,
     category,
     appType: appId,
-    apiKeyField: appId === "claude" ? localApiKeyField : undefined,
+    apiKeyField: isClaudeApp ? localApiKeyField : undefined,
   });
 
   const { baseUrl, handleClaudeBaseUrlChange } = useBaseUrlState({
@@ -501,7 +516,7 @@ function ProviderFormFull({
   });
 
   const [localApiFormat, setLocalApiFormat] = useState<ClaudeApiFormat>(() => {
-    if (appId !== "claude") return "anthropic";
+    if (!isClaudeApp) return "anthropic";
     return initialData?.meta?.apiFormat ?? "anthropic";
   });
 
@@ -661,13 +676,13 @@ function ProviderFormFull({
   );
 
   useEffect(() => {
-    if (appId === "codex" && !initialData && selectedPresetId === "custom") {
+    if (isCodexApp && !initialData && selectedPresetId === "custom") {
       const template = getCodexCustomTemplate();
       resetCodexConfig(template.auth, template.config);
       setCodexChatReasoning({});
       setPromptCacheRouting("auto");
     }
-  }, [appId, initialData, selectedPresetId, resetCodexConfig]);
+  }, [isCodexApp, initialData, selectedPresetId, resetCodexConfig]);
 
   useEffect(() => {
     form.reset(defaultValues);
@@ -693,27 +708,27 @@ function ProviderFormFull({
   );
 
   const presetEntries = useMemo(() => {
-    if (appId === "codex") {
+    if (isCodexApp) {
       return codexProviderPresets.map<PresetEntry>((preset, index) => ({
         id: `codex-${index}`,
         preset,
       }));
-    } else if (appId === "gemini") {
+    } else if (isGeminiApp) {
       return geminiProviderPresets.map<PresetEntry>((preset, index) => ({
         id: `gemini-${index}`,
         preset,
       }));
-    } else if (appId === "opencode") {
+    } else if (isOpenCodeApp) {
       return opencodeProviderPresets.map<PresetEntry>((preset, index) => ({
         id: `opencode-${index}`,
         preset,
       }));
-    } else if (appId === "openclaw") {
+    } else if (isOpenClawApp) {
       return openclawProviderPresets.map<PresetEntry>((preset, index) => ({
         id: `openclaw-${index}`,
         preset,
       }));
-    } else if (appId === "hermes") {
+    } else if (isHermesApp) {
       return hermesProviderPresets.map<PresetEntry>((preset, index) => ({
         id: `hermes-${index}`,
         preset,
@@ -725,7 +740,7 @@ function ProviderFormFull({
         id: `claude-${index}`,
         preset,
       }));
-  }, [appId]);
+  }, [isCodexApp, isGeminiApp, isHermesApp, isOpenClawApp, isOpenCodeApp]);
 
   const {
     templateValues,
@@ -734,8 +749,8 @@ function ProviderFormFull({
     handleTemplateValueChange,
     validateTemplateValues,
   } = useTemplateValues({
-    selectedPresetId: appId === "claude" ? selectedPresetId : null,
-    presetEntries: appId === "claude" ? presetEntries : [],
+    selectedPresetId: isClaudeApp ? selectedPresetId : null,
+    presetEntries: isClaudeApp ? presetEntries : [],
     settingsConfig: form.getValues("settingsConfig"),
     onConfigChange: handleSettingsConfigChange,
   });
@@ -751,11 +766,12 @@ function ProviderFormFull({
   } = useCommonConfigSnippet({
     settingsConfig: form.getValues("settingsConfig"),
     onConfigChange: handleSettingsConfigChange,
-    initialData: appId === "claude" ? initialData : undefined,
-    initialEnabled:
-      appId === "claude" ? initialData?.meta?.commonConfigEnabled : undefined,
+    initialData: isClaudeApp ? initialData : undefined,
+    initialEnabled: isClaudeApp
+      ? initialData?.meta?.commonConfigEnabled
+      : undefined,
     selectedPresetId: selectedPresetId ?? undefined,
-    enabled: appId === "claude",
+    enabled: isClaudeApp,
   });
 
   const {
@@ -770,9 +786,10 @@ function ProviderFormFull({
   } = useCodexCommonConfig({
     codexConfig,
     onConfigChange: handleCodexConfigChange,
-    initialData: appId === "codex" ? initialData : undefined,
-    initialEnabled:
-      appId === "codex" ? initialData?.meta?.commonConfigEnabled : undefined,
+    initialData: isCodexApp ? initialData : undefined,
+    initialEnabled: isCodexApp
+      ? initialData?.meta?.commonConfigEnabled
+      : undefined,
     selectedPresetId: selectedPresetId ?? undefined,
   });
 
@@ -793,7 +810,7 @@ function ProviderFormFull({
     envStringToObj,
     envObjToString,
   } = useGeminiConfigState({
-    initialData: appId === "gemini" ? initialData : undefined,
+    initialData: isGeminiApp ? initialData : undefined,
   });
 
   const updateGeminiEnvField = useCallback(
@@ -856,9 +873,10 @@ function ProviderFormFull({
     onEnvChange: handleGeminiEnvChange,
     envStringToObj,
     envObjToString,
-    initialData: appId === "gemini" ? initialData : undefined,
-    initialEnabled:
-      appId === "gemini" ? initialData?.meta?.commonConfigEnabled : undefined,
+    initialData: isGeminiApp ? initialData : undefined,
+    initialEnabled: isGeminiApp
+      ? initialData?.meta?.commonConfigEnabled
+      : undefined,
     selectedPresetId: selectedPresetId ?? undefined,
   });
 
@@ -877,7 +895,7 @@ function ProviderFormFull({
   } = useQuery({
     queryKey: ["opencodeLiveProviderIds"],
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-    enabled: appId === "opencode" && !isAnyOmoCategory,
+    enabled: isOpenCodeApp && !isAnyOmoCategory,
   });
 
   const opencodeForm = useOpencodeFormState({
@@ -889,7 +907,7 @@ function ProviderFormFull({
   });
 
   const initialOmoSettings =
-    appId === "opencode" &&
+    isOpenCodeApp &&
     (initialData?.category === "omo" || initialData?.category === "omo-slim")
       ? (initialData.settingsConfig as Record<string, unknown> | undefined)
       : undefined;
@@ -911,7 +929,7 @@ function ProviderFormFull({
   const {
     data: openclawLiveProviderIds = [],
     isLoading: isOpenclawLiveProviderIdsLoading,
-  } = useOpenClawLiveProviderIds(appId === "openclaw");
+  } = useOpenClawLiveProviderIds(isOpenClawApp);
 
   const hermesForm = useHermesFormState({
     initialData,
@@ -923,10 +941,10 @@ function ProviderFormFull({
   const {
     data: hermesLiveProviderIds = [],
     isLoading: isHermesLiveProviderIdsLoading,
-  } = useHermesLiveProviderIds(appId === "hermes");
+  } = useHermesLiveProviderIds(isHermesApp);
 
   const additiveExistingProviderKeys = useMemo(() => {
-    if (appId === "opencode" && !isAnyOmoCategory) {
+    if (isOpenCodeApp && !isAnyOmoCategory) {
       return Array.from(
         new Set(
           [...existingOpencodeKeys, ...opencodeLiveProviderIds].filter(
@@ -936,7 +954,7 @@ function ProviderFormFull({
       );
     }
 
-    if (appId === "openclaw") {
+    if (isOpenClawApp) {
       return Array.from(
         new Set(
           [
@@ -947,7 +965,7 @@ function ProviderFormFull({
       );
     }
 
-    if (appId === "hermes") {
+    if (isHermesApp) {
       return Array.from(
         new Set(
           [...hermesForm.existingHermesKeys, ...hermesLiveProviderIds].filter(
@@ -959,11 +977,13 @@ function ProviderFormFull({
 
     return [];
   }, [
-    appId,
     existingOpencodeKeys,
     hermesForm.existingHermesKeys,
     hermesLiveProviderIds,
     isAnyOmoCategory,
+    isHermesApp,
+    isOpenClawApp,
+    isOpenCodeApp,
     openclawForm.existingOpenclawKeys,
     openclawLiveProviderIds,
     opencodeLiveProviderIds,
@@ -972,42 +992,46 @@ function ProviderFormFull({
 
   const isProviderKeyLockStateLoading = useMemo(() => {
     if (!isEditMode) return false;
-    if (appId === "opencode" && !isAnyOmoCategory) {
+    if (isOpenCodeApp && !isAnyOmoCategory) {
       return isOpencodeLiveProviderIdsLoading;
     }
-    if (appId === "openclaw") {
+    if (isOpenClawApp) {
       return isOpenclawLiveProviderIdsLoading;
     }
-    if (appId === "hermes") {
+    if (isHermesApp) {
       return isHermesLiveProviderIdsLoading;
     }
     return false;
   }, [
-    appId,
     isAnyOmoCategory,
     isEditMode,
+    isHermesApp,
     isHermesLiveProviderIdsLoading,
+    isOpenClawApp,
+    isOpenCodeApp,
     isOpenclawLiveProviderIdsLoading,
     isOpencodeLiveProviderIdsLoading,
   ]);
 
   const isProviderKeyLocked = useMemo(() => {
     if (!isEditMode || !providerId) return false;
-    if (appId === "opencode" && !isAnyOmoCategory) {
+    if (isOpenCodeApp && !isAnyOmoCategory) {
       return opencodeLiveProviderIds.includes(providerId);
     }
-    if (appId === "openclaw") {
+    if (isOpenClawApp) {
       return openclawLiveProviderIds.includes(providerId);
     }
-    if (appId === "hermes") {
+    if (isHermesApp) {
       return hermesLiveProviderIds.includes(providerId);
     }
     return false;
   }, [
-    appId,
     hermesLiveProviderIds,
     isAnyOmoCategory,
     isEditMode,
+    isHermesApp,
+    isOpenClawApp,
+    isOpenCodeApp,
     openclawLiveProviderIds,
     opencodeLiveProviderIds,
     providerId,
@@ -1016,7 +1040,7 @@ function ProviderFormFull({
   const [isCommonConfigModalOpen, setIsCommonConfigModalOpen] = useState(false);
 
   const shouldApplyLocalProxyRequestOverrides =
-    (appId === "claude" || appId === "codex") && category !== "official";
+    (isClaudeApp || isCodexApp) && category !== "official";
 
   const handleSubmit = async (values: ProviderFormData) => {
     const overridesResult = shouldApplyLocalProxyRequestOverrides
@@ -1039,7 +1063,7 @@ function ProviderFormFull({
     const issues: string[] = [];
 
     // 模板变量未填：A 类（空值）
-    if (appId === "claude" && templateValueEntries.length > 0) {
+    if (isClaudeApp && templateValueEntries.length > 0) {
       const validation = validateTemplateValues();
       if (!validation.isValid && validation.missingField) {
         issues.push(
@@ -1078,7 +1102,7 @@ function ProviderFormFull({
     // A 类（空）归到 issues；B 类（正则不合法 / 重复 / 状态加载中）仍硬拒绝
     const keyPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-    if (appId === "opencode" && !isAnyOmoCategory) {
+    if (isOpenCodeApp && !isAnyOmoCategory) {
       // providerKey 是 opencode / openclaw / hermes 的主键 ID，空或格式不合法
       // 都属于完整性约束，保留硬拒绝（mutations 层也会 throw，软化只会让错误更晦涩）
       if (!opencodeForm.opencodeProviderKey.trim()) {
@@ -1109,7 +1133,7 @@ function ProviderFormFull({
       }
     }
 
-    if (appId === "openclaw") {
+    if (isOpenClawApp) {
       if (!openclawForm.openclawProviderKey.trim()) {
         toast.error(t("openclaw.providerKeyRequired"));
         return;
@@ -1135,7 +1159,7 @@ function ProviderFormFull({
       }
     }
 
-    if (appId === "hermes") {
+    if (isHermesApp) {
       if (!hermesForm.hermesProviderKey.trim()) {
         toast.error(t("hermes.form.providerKeyRequired"));
         return;
@@ -1188,7 +1212,7 @@ function ProviderFormFull({
 
     // Codex auth.json / config.toml、Gemini config JSON：B 类
     // 解析失败时必须阻止保存，否则只能回退到初始配置，用户的编辑会被静默丢弃
-    if (appId === "codex") {
+    if (isCodexApp) {
       if (parseJsonObjectForSave(codexAuth) === null) {
         toast.error(
           t("providerForm.codexAuthInvalid", {
@@ -1208,7 +1232,7 @@ function ProviderFormFull({
       }
     }
 
-    if (appId === "gemini" && parseJsonObjectForSave(geminiConfig) === null) {
+    if (isGeminiApp && parseJsonObjectForSave(geminiConfig) === null) {
       toast.error(
         t("providerForm.geminiConfigInvalid", {
           defaultValue: "Gemini 配置格式错误（必须是 JSON 对象），无法保存",
@@ -1219,7 +1243,7 @@ function ProviderFormFull({
 
     // OMO Other Fields JSON：B 类（格式错了保存下去数据就坏了）
     if (
-      appId === "opencode" &&
+      isOpenCodeApp &&
       isAnyOmoCategory &&
       omoDraft.omoOtherFieldsStr.trim()
     ) {
@@ -1251,7 +1275,7 @@ function ProviderFormFull({
     // 非官方供应商端点 / API Key 空：A 类
     // cloud_provider（如 Bedrock）通过模板变量处理认证，跳过通用校验
     if (category !== "official" && category !== "cloud_provider") {
-      if (appId === "claude") {
+      if (isClaudeApp) {
         if (!isCodexOauthProvider && !baseUrl.trim()) {
           issues.push(
             t("providerForm.endpointRequired", {
@@ -1266,7 +1290,7 @@ function ProviderFormFull({
             }),
           );
         }
-      } else if (appId === "codex") {
+      } else if (isCodexApp) {
         if (!codexBaseUrl.trim()) {
           issues.push(
             t("providerForm.endpointRequired", {
@@ -1281,7 +1305,7 @@ function ProviderFormFull({
             }),
           );
         }
-      } else if (appId === "gemini") {
+      } else if (isGeminiApp) {
         if (!geminiBaseUrl.trim()) {
           issues.push(
             t("providerForm.endpointRequired", {
@@ -1335,7 +1359,7 @@ function ProviderFormFull({
 
     let settingsConfig: string;
 
-    if (appId === "codex") {
+    if (isCodexApp) {
       // 格式已在 handleSubmit 前置校验中验证过；这里仍不回退到初始配置
       const authJson = parseJsonObjectForSave(codexAuth);
       if (authJson === null) {
@@ -1381,7 +1405,7 @@ function ProviderFormFull({
         configObj.modelCatalog = { models: normalizedCatalogModels };
       }
       settingsConfig = JSON.stringify(configObj);
-    } else if (appId === "gemini") {
+    } else if (isGeminiApp) {
       const configObj = parseJsonObjectForSave(geminiConfig);
       if (configObj === null) {
         toast.error(
@@ -1397,7 +1421,7 @@ function ProviderFormFull({
       };
       settingsConfig = JSON.stringify(combined);
     } else if (
-      appId === "opencode" &&
+      isOpenCodeApp &&
       (category === "omo" || category === "omo-slim")
     ) {
       const omoConfig: Record<string, unknown> = {};
@@ -1431,7 +1455,7 @@ function ProviderFormFull({
       settingsConfig,
     };
 
-    if (appId === "opencode") {
+    if (isOpenCodeApp) {
       if (isAnyOmoCategory) {
         if (!isEditMode) {
           const prefix = category === "omo" ? "omo" : "omo-slim";
@@ -1440,9 +1464,9 @@ function ProviderFormFull({
       } else {
         payload.providerKey = opencodeForm.opencodeProviderKey;
       }
-    } else if (appId === "openclaw") {
+    } else if (isOpenClawApp) {
       payload.providerKey = openclawForm.openclawProviderKey;
-    } else if (appId === "hermes") {
+    } else if (isHermesApp) {
       payload.providerKey = hermesForm.hermesProviderKey;
     }
 
@@ -1461,7 +1485,7 @@ function ProviderFormFull({
       // OpenClaw: align preset model refs with the actual submitted provider key.
       if (activePreset.suggestedDefaults) {
         payload.suggestedDefaults =
-          appId === "openclaw" && payload.providerKey
+          isOpenClawApp && payload.providerKey
             ? rebaseOpenClawSuggestedDefaults(
                 activePreset.suggestedDefaults,
                 payload.providerKey,
@@ -1521,14 +1545,13 @@ function ProviderFormFull({
 
     const nextMeta: ProviderMeta = {
       ...(baseMeta ?? {}),
-      commonConfigEnabled:
-        appId === "claude"
-          ? useCommonConfig
-          : appId === "codex"
-            ? useCodexCommonConfigFlag
-            : appId === "gemini"
-              ? useGeminiCommonConfigFlag
-              : undefined,
+      commonConfigEnabled: isClaudeApp
+        ? useCommonConfig
+        : isCodexApp
+          ? useCodexCommonConfigFlag
+          : isGeminiApp
+            ? useGeminiCommonConfigFlag
+            : undefined,
       endpointAutoSelect,
       claudeDesktopMode: undefined,
       // 保存 providerType（用于识别 Copilot / Codex OAuth 等特殊供应商）
@@ -1553,20 +1576,20 @@ function ProviderFormFull({
           : undefined,
       codexFastMode: isCodexOauthProvider ? codexFastMode : undefined,
       codexChatReasoning:
-        appId === "codex" &&
+        isCodexApp &&
         category !== "official" &&
         localCodexApiFormat === "openai_chat"
           ? normalizeCodexChatReasoningForSave(codexChatReasoning)
           : undefined,
       promptCacheRouting:
-        appId === "codex" &&
+        isCodexApp &&
         category !== "official" &&
         localCodexApiFormat === "openai_chat" &&
         promptCacheRouting !== "auto"
           ? promptCacheRouting
           : undefined,
       customUserAgent:
-        (appId === "claude" || appId === "codex") && category !== "official"
+        (isClaudeApp || isCodexApp) && category !== "official"
           ? customUserAgent.trim() || undefined
           : undefined,
       localProxyRequestOverrides: shouldApplyLocalProxyRequestOverrides
@@ -1580,17 +1603,17 @@ function ProviderFormFull({
           ? pricingConfig.pricingModelSource
           : undefined,
       apiFormat:
-        appId === "claude" && category !== "official"
+        isClaudeApp && category !== "official"
           ? localApiFormat
-          : appId === "codex" && category !== "official"
+          : isCodexApp && category !== "official"
             ? localCodexApiFormat
             : undefined,
       apiKeyField:
-        appId === "claude" &&
+        isClaudeApp &&
         category !== "official" &&
         localApiKeyField !== "ANTHROPIC_AUTH_TOKEN"
           ? localApiKeyField
-          : appId === "codex" &&
+          : isCodexApp &&
               category !== "official" &&
               localCodexApiFormat === "anthropic" &&
               localCodexAnthropicAuthField !== "ANTHROPIC_AUTH_TOKEN"
@@ -1598,7 +1621,7 @@ function ProviderFormFull({
             : undefined,
       // Off by default; persist true only for codex+anthropic when the user explicitly enables it
       impersonateClaudeCode:
-        appId === "codex" &&
+        isCodexApp &&
         category !== "official" &&
         localCodexApiFormat === "anthropic" &&
         localCodexImpersonateClaudeCode
@@ -1606,7 +1629,7 @@ function ProviderFormFull({
           : undefined,
       // Persist only for codex+anthropic when a positive value was entered
       maxOutputTokens:
-        appId === "codex" &&
+        isCodexApp &&
         category !== "official" &&
         localCodexApiFormat === "anthropic" &&
         localCodexMaxOutputTokens.trim() !== "" &&
@@ -1727,7 +1750,7 @@ function ProviderFormFull({
       setActivePreset(null);
       form.reset(defaultValues);
 
-      if (appId === "codex") {
+      if (isCodexApp) {
         const template = getCodexCustomTemplate();
         resetCodexConfig(template.auth, template.config);
         setCodexChatReasoning({});
@@ -1737,18 +1760,18 @@ function ProviderFormFull({
             "openai_responses",
         );
       }
-      if (appId === "gemini") {
+      if (isGeminiApp) {
         resetGeminiConfig({}, {});
       }
-      if (appId === "opencode") {
+      if (isOpenCodeApp) {
         opencodeForm.resetOpencodeState();
         omoDraft.resetOmoDraftState();
       }
       // OpenClaw 自定义模式：重置为空配置
-      if (appId === "openclaw") {
+      if (isOpenClawApp) {
         openclawForm.resetOpenclawState();
       }
-      if (appId === "hermes") {
+      if (isHermesApp) {
         hermesForm.resetHermesState();
       }
       return;
@@ -1766,7 +1789,7 @@ function ProviderFormFull({
       partnerPromotionKey: entry.preset.partnerPromotionKey,
     });
 
-    if (appId === "codex") {
+    if (isCodexApp) {
       const preset = entry.preset as CodexProviderPreset;
       const auth = preset.auth ?? {};
       const config = preset.config ?? "";
@@ -1790,7 +1813,7 @@ function ProviderFormFull({
       return;
     }
 
-    if (appId === "gemini") {
+    if (isGeminiApp) {
       const preset = entry.preset as GeminiProviderPreset;
       const env = (preset.settingsConfig as any)?.env ?? {};
       const config = (preset.settingsConfig as any)?.config ?? {};
@@ -1807,7 +1830,7 @@ function ProviderFormFull({
       return;
     }
 
-    if (appId === "opencode") {
+    if (isOpenCodeApp) {
       const preset = entry.preset as OpenCodeProviderPreset;
       const config = preset.settingsConfig;
 
@@ -1836,7 +1859,7 @@ function ProviderFormFull({
     }
 
     // OpenClaw preset handling
-    if (appId === "openclaw") {
+    if (isOpenClawApp) {
       const preset = entry.preset as OpenClawProviderPreset;
       const config = preset.settingsConfig;
 
@@ -1863,7 +1886,7 @@ function ProviderFormFull({
     }
 
     // Hermes preset handling
-    if (appId === "hermes") {
+    if (isHermesApp) {
       const preset = entry.preset as HermesProviderPreset;
       const config = preset.settingsConfig;
 
@@ -1938,7 +1961,7 @@ function ProviderFormFull({
           <BasicFormFields
             form={form}
             beforeNameSlot={
-              appId === "opencode" && !isAnyOmoCategory ? (
+              isOpenCodeApp && !isAnyOmoCategory ? (
                 <div className="space-y-2">
                   <Label htmlFor="opencode-key">
                     {t("opencode.providerKey")}
@@ -2004,7 +2027,7 @@ function ProviderFormFull({
                       </p>
                     )}
                 </div>
-              ) : appId === "openclaw" ? (
+              ) : isOpenClawApp ? (
                 <div className="space-y-2">
                   <Label htmlFor="openclaw-key">
                     {t("openclaw.providerKey")}
@@ -2070,7 +2093,7 @@ function ProviderFormFull({
                       </p>
                     )}
                 </div>
-              ) : appId === "hermes" ? (
+              ) : isHermesApp ? (
                 <div className="space-y-2">
                   <Label htmlFor="hermes-key">
                     {t("hermes.form.providerKey", {
@@ -2147,7 +2170,7 @@ function ProviderFormFull({
             }
           />
 
-          {appId === "claude" && (
+          {isClaudeApp && (
             <ClaudeFormFields
               providerId={providerId}
               shouldShowApiKey={
@@ -2230,7 +2253,7 @@ function ProviderFormFull({
             />
           )}
 
-          {appId === "codex" && (
+          {isCodexApp && (
             <CodexFormFields
               providerId={providerId}
               codexApiKey={codexApiKey}
@@ -2278,7 +2301,7 @@ function ProviderFormFull({
             />
           )}
 
-          {appId === "gemini" && (
+          {isGeminiApp && (
             <GeminiFormFields
               providerId={providerId}
               shouldShowApiKey={shouldShowApiKey(
@@ -2307,7 +2330,7 @@ function ProviderFormFull({
             />
           )}
 
-          {appId === "opencode" && !isAnyOmoCategory && (
+          {isOpenCodeApp && !isAnyOmoCategory && (
             <OpenCodeFormFields
               npm={opencodeForm.opencodeNpm}
               onNpmChange={opencodeForm.handleOpencodeNpmChange}
@@ -2331,28 +2354,27 @@ function ProviderFormFull({
             />
           )}
 
-          {appId === "opencode" &&
-            (category === "omo" || category === "omo-slim") && (
-              <OmoFormFields
-                modelOptions={omoModelOptions}
-                modelVariantsMap={omoModelVariantsMap}
-                presetMetaMap={omoPresetMetaMap}
-                agents={omoDraft.omoAgents}
-                onAgentsChange={omoDraft.setOmoAgents}
-                categories={
-                  category === "omo" ? omoDraft.omoCategories : undefined
-                }
-                onCategoriesChange={
-                  category === "omo" ? omoDraft.setOmoCategories : undefined
-                }
-                otherFieldsStr={omoDraft.omoOtherFieldsStr}
-                onOtherFieldsStrChange={omoDraft.setOmoOtherFieldsStr}
-                isSlim={category === "omo-slim"}
-              />
-            )}
+          {isOpenCodeApp && (category === "omo" || category === "omo-slim") && (
+            <OmoFormFields
+              modelOptions={omoModelOptions}
+              modelVariantsMap={omoModelVariantsMap}
+              presetMetaMap={omoPresetMetaMap}
+              agents={omoDraft.omoAgents}
+              onAgentsChange={omoDraft.setOmoAgents}
+              categories={
+                category === "omo" ? omoDraft.omoCategories : undefined
+              }
+              onCategoriesChange={
+                category === "omo" ? omoDraft.setOmoCategories : undefined
+              }
+              otherFieldsStr={omoDraft.omoOtherFieldsStr}
+              onOtherFieldsStrChange={omoDraft.setOmoOtherFieldsStr}
+              isSlim={category === "omo-slim"}
+            />
+          )}
 
           {/* OpenClaw 专属字段 */}
-          {appId === "openclaw" && (
+          {isOpenClawApp && (
             <OpenClawFormFields
               baseUrl={openclawForm.openclawBaseUrl}
               onBaseUrlChange={openclawForm.handleOpenclawBaseUrlChange}
@@ -2373,7 +2395,7 @@ function ProviderFormFull({
           )}
 
           {/* Hermes 专属字段 */}
-          {appId === "hermes" && (
+          {isHermesApp && (
             <HermesFormFields
               baseUrl={hermesForm.hermesBaseUrl}
               onBaseUrlChange={hermesForm.handleHermesBaseUrlChange}
@@ -2396,7 +2418,7 @@ function ProviderFormFull({
           )}
 
           {/* 配置编辑器：Codex、Claude、Gemini 分别使用不同的编辑器 */}
-          {appId === "codex" ? (
+          {isCodexApp ? (
             <>
               <CodexConfigEditor
                 authValue={codexAuth}
@@ -2421,7 +2443,7 @@ function ProviderFormFull({
               />
               {settingsConfigErrorField}
             </>
-          ) : appId === "gemini" ? (
+          ) : isGeminiApp ? (
             <>
               <GeminiConfigEditor
                 envValue={geminiEnv}
@@ -2443,7 +2465,7 @@ function ProviderFormFull({
               />
               {settingsConfigErrorField}
             </>
-          ) : appId === "opencode" &&
+          ) : isOpenCodeApp &&
             (category === "omo" || category === "omo-slim") ? (
             <div className="space-y-2">
               <Label>{t("provider.configJson")}</Label>
@@ -2456,9 +2478,7 @@ function ProviderFormFull({
                 darkMode={isDarkMode}
               />
             </div>
-          ) : appId === "opencode" &&
-            category !== "omo" &&
-            category !== "omo-slim" ? (
+          ) : isOpenCodeApp && category !== "omo" && category !== "omo-slim" ? (
             <>
               <div className="space-y-2">
                 <Label htmlFor="settingsConfig">
@@ -2483,7 +2503,7 @@ function ProviderFormFull({
               </div>
               {settingsConfigErrorField}
             </>
-          ) : appId === "openclaw" || appId === "hermes" ? (
+          ) : isOpenClawApp || isHermesApp ? (
             <>
               <div className="space-y-2">
                 <Label htmlFor="settingsConfig">
@@ -2493,7 +2513,7 @@ function ProviderFormFull({
                   value={form.getValues("settingsConfig")}
                   onChange={(config) => form.setValue("settingsConfig", config)}
                   placeholder={
-                    appId === "hermes"
+                    isHermesApp
                       ? `{
   "name": "my-provider",
   "base_url": "https://api.example.com/v1",
@@ -2543,9 +2563,9 @@ function ProviderFormFull({
           )}
 
           {!isAnyOmoCategory &&
-            appId !== "opencode" &&
-            appId !== "openclaw" &&
-            appId !== "hermes" && (
+            !isOpenCodeApp &&
+            !isOpenClawApp &&
+            !isHermesApp && (
               <ProviderAdvancedConfig
                 pricingConfig={pricingConfig}
                 onPricingConfigChange={setPricingConfig}

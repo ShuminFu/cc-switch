@@ -3,8 +3,24 @@
     "@typescript-eslint/no-explicit-any": {
       "count": 12
     },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 21
+    },
+    "no-restricted-imports": {
+      "count": 1
+    },
     "react-hooks/exhaustive-deps": {
       "count": 1
+    }
+  },
+  "src/components/DatabaseUpgrade.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "src/components/DeepLinkImportDialog.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 7
     }
   },
   "src/components/JsonEditor.tsx": {
@@ -17,9 +33,17 @@
       "count": 1
     }
   },
+  "src/components/UsageFooter.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
+    }
+  },
   "src/components/UsageScriptModal.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 15
+    },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 11
     }
   },
   "src/components/agents/AgentsPanel.tsx": {
@@ -50,19 +74,43 @@
   "src/components/providers/AddProviderDialog.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
+    },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 20
     }
   },
   "src/components/providers/EditProviderDialog.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 5
+    },
     "react-hooks/exhaustive-deps": {
       "count": 2
+    }
+  },
+  "src/components/providers/ProviderActions.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 7
     }
   },
   "src/components/providers/ProviderCard.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 13
+    },
     "react-hooks/exhaustive-deps": {
       "count": 2
+    }
+  },
+  "src/components/providers/ProviderEmptyState.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 4
+    }
+  },
+  "src/components/providers/ProviderList.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 21
     }
   },
   "src/components/providers/forms/OmoFormFields.tsx": {
@@ -74,13 +122,31 @@
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 9
+    },
     "no-empty": {
+      "count": 1
+    }
+  },
+  "src/components/providers/forms/ProviderPresetSelector.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 3
+    }
+  },
+  "src/components/providers/forms/hooks/useApiKeyLink.ts": {
+    "cc-switch/no-app-literal-comparison": {
       "count": 1
     }
   },
   "src/components/providers/forms/hooks/useApiKeyState.ts": {
     "react-hooks/exhaustive-deps": {
       "count": 1
+    }
+  },
+  "src/components/providers/forms/hooks/useBaseUrlState.ts": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 4
     }
   },
   "src/components/providers/forms/hooks/useCodexConfigState.ts": {
@@ -99,11 +165,19 @@
   "src/components/providers/forms/hooks/useCustomEndpoints.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
+    },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
     }
   },
   "src/components/providers/forms/hooks/useGeminiConfigState.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
+    }
+  },
+  "src/components/providers/forms/hooks/useHermesFormState.ts": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
     }
   },
   "src/components/providers/forms/hooks/useManagedAuth.ts": {
@@ -114,14 +188,30 @@
   "src/components/providers/forms/hooks/useOpenclawFormState.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
+    },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
     }
   },
   "src/components/providers/forms/hooks/useOpencodeFormState.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
+    },
     "no-empty": {
       "count": 1
+    }
+  },
+  "src/components/providers/forms/hooks/useProviderCategory.ts": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 6
+    }
+  },
+  "src/components/providers/forms/hooks/useSpeedTestEndpoints.ts": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 4
     }
   },
   "src/components/providers/forms/hooks/useTemplateValues.ts": {
@@ -129,9 +219,32 @@
       "count": 6
     }
   },
+  "src/components/proxy/FailoverToggle.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 3
+    }
+  },
+  "src/components/proxy/ProxyPanel.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
+    }
+  },
   "src/components/sessions/SessionManagerPage.tsx": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
+    },
     "react-hooks/exhaustive-deps": {
       "count": 3
+    }
+  },
+  "src/components/sessions/utils.ts": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 5
+    }
+  },
+  "src/components/theme-provider.tsx": {
+    "no-restricted-imports": {
+      "count": 1
     }
   },
   "src/components/usage/UsageTrendChart.tsx": {
@@ -152,6 +265,9 @@
   "src/config/codingPlanProviders.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
+    },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
     }
   },
   "src/hooks/useAutoCompact.ts": {
@@ -162,6 +278,19 @@
   "src/hooks/useProviderActions.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
+    },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 18
+    }
+  },
+  "src/hooks/useProxyConfig.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "src/hooks/useProxyStatus.ts": {
+    "no-restricted-imports": {
+      "count": 1
     }
   },
   "src/lib/api/mcp.ts": {
@@ -169,9 +298,27 @@
       "count": 1
     }
   },
+  "src/lib/api/skills.ts": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 3
+    }
+  },
+  "src/lib/clipboard.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "src/lib/query/failover.ts": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 3
+    }
+  },
   "src/lib/query/mutations.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
+    },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 14
     }
   },
   "src/lib/query/queries.ts": {
@@ -192,6 +339,11 @@
   "src/lib/updater.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
+    }
+  },
+  "src/main.tsx": {
+    "no-restricted-imports": {
+      "count": 1
     }
   },
   "src/types.ts": {
@@ -219,11 +371,24 @@
       "count": 3
     }
   },
+  "src/utils/providerCapabilities.ts": {
+    "cc-switch/no-app-literal-comparison": {
+      "count": 1
+    }
+  },
   "src/utils/providerConfigUtils.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 22
     },
+    "cc-switch/no-app-literal-comparison": {
+      "count": 6
+    },
     "no-control-regex": {
+      "count": 1
+    }
+  },
+  "src/utils/providerIcon.ts": {
+    "cc-switch/no-app-literal-comparison": {
       "count": 1
     }
   },

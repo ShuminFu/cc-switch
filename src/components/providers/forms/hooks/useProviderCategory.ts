@@ -51,38 +51,40 @@ export function useProviderCategory({
     if (!match) return;
 
     const [, type, indexStr] = match;
+    // 预设前缀必须与当前应用一致
+    if (type !== appId) return;
     const index = parseInt(indexStr, 10);
 
-    if (type === "codex" && appId === "codex") {
+    if (appId === "codex") {
       const preset = codexProviderPresets[index];
       if (preset) {
         setCategory(
           preset.category || (preset.isOfficial ? "official" : undefined),
         );
       }
-    } else if (type === "claude" && appId === "claude") {
+    } else if (appId === "claude") {
       const preset = providerPresets[index];
       if (preset) {
         setCategory(
           preset.category || (preset.isOfficial ? "official" : undefined),
         );
       }
-    } else if (type === "gemini" && appId === "gemini") {
+    } else if (appId === "gemini") {
       const preset = geminiProviderPresets[index];
       if (preset) {
         setCategory(preset.category || undefined);
       }
-    } else if (type === "opencode" && appId === "opencode") {
+    } else if (appId === "opencode") {
       const preset = opencodeProviderPresets[index];
       if (preset) {
         setCategory(preset.category || undefined);
       }
-    } else if (type === "openclaw" && appId === "openclaw") {
+    } else if (appId === "openclaw") {
       const preset = openclawProviderPresets[index];
       if (preset) {
         setCategory(preset.category || undefined);
       }
-    } else if (type === "hermes" && appId === "hermes") {
+    } else if (appId === "hermes") {
       const preset = hermesProviderPresets[index];
       if (preset) {
         setCategory(preset.category || undefined);

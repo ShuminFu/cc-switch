@@ -58,6 +58,7 @@ export function useOpenclawFormState({
   onSettingsConfigChange,
   getSettingsConfig,
 }: UseOpenclawFormStateParams): OpenclawFormState {
+  const isOpenClawApp = appId === "openclaw";
   // Query existing providers for duplicate key checking
   const { data: openclawProvidersData } = useProvidersQuery("openclaw");
   const existingOpenclawKeys = useMemo(() => {
@@ -68,32 +69,32 @@ export function useOpenclawFormState({
   }, [openclawProvidersData?.providers, providerId]);
 
   const [openclawProviderKey, setOpenclawProviderKey] = useState<string>(() => {
-    if (appId !== "openclaw") return "";
+    if (!isOpenClawApp) return "";
     return providerId || "";
   });
 
   const [openclawBaseUrl, setOpenclawBaseUrl] = useState<string>(() => {
-    if (appId !== "openclaw") return "";
+    if (!isOpenClawApp) return "";
     return parseOpenclawField(initialData, "baseUrl", "");
   });
 
   const [openclawApiKey, setOpenclawApiKey] = useState<string>(() => {
-    if (appId !== "openclaw") return "";
+    if (!isOpenClawApp) return "";
     return parseOpenclawField(initialData, "apiKey", "");
   });
 
   const [openclawApi, setOpenclawApi] = useState<string>(() => {
-    if (appId !== "openclaw") return "openai-completions";
+    if (!isOpenClawApp) return "openai-completions";
     return parseOpenclawField(initialData, "api", "openai-completions");
   });
 
   const [openclawModels, setOpenclawModels] = useState<OpenClawModel[]>(() => {
-    if (appId !== "openclaw") return [];
+    if (!isOpenClawApp) return [];
     return parseOpenclawField<OpenClawModel[]>(initialData, "models", []);
   });
 
   const [openclawUserAgent, setOpenclawUserAgent] = useState<boolean>(() => {
-    if (appId !== "openclaw") return true;
+    if (!isOpenClawApp) return true;
     const headers = parseOpenclawField<Record<string, string>>(
       initialData,
       "headers",

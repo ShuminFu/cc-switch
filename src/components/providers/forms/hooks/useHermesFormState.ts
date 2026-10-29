@@ -78,6 +78,7 @@ export function useHermesFormState({
   onSettingsConfigChange,
   getSettingsConfig,
 }: UseHermesFormStateParams): HermesFormState {
+  const isHermesApp = appId === "hermes";
   const { data: hermesProvidersData } = useProvidersQuery("hermes");
   const existingHermesKeys = useMemo(() => {
     if (!hermesProvidersData?.providers) return [];
@@ -87,22 +88,22 @@ export function useHermesFormState({
   }, [hermesProvidersData?.providers, providerId]);
 
   const [hermesProviderKey, setHermesProviderKey] = useState<string>(() => {
-    if (appId !== "hermes") return "";
+    if (!isHermesApp) return "";
     return providerId || "";
   });
 
   const [hermesBaseUrl, setHermesBaseUrl] = useState<string>(() => {
-    if (appId !== "hermes") return "";
+    if (!isHermesApp) return "";
     return parseHermesField(initialData, "base_url", "");
   });
 
   const [hermesApiKey, setHermesApiKey] = useState<string>(() => {
-    if (appId !== "hermes") return "";
+    if (!isHermesApp) return "";
     return parseHermesField(initialData, "api_key", "");
   });
 
   const [hermesApiMode, setHermesApiMode] = useState<HermesApiMode>(() => {
-    if (appId !== "hermes") return HERMES_DEFAULT_API_MODE;
+    if (!isHermesApp) return HERMES_DEFAULT_API_MODE;
     const stored = parseHermesField<HermesApiMode | "">(
       initialData,
       "api_mode",
@@ -112,14 +113,14 @@ export function useHermesFormState({
   });
 
   const [hermesModels, setHermesModels] = useState<HermesModel[]>(() => {
-    if (appId !== "hermes") return [];
+    if (!isHermesApp) return [];
     return parseHermesField<HermesModel[]>(initialData, "models", []);
   });
 
   const [hermesRateLimitDelay, setHermesRateLimitDelay] = useState<
     number | undefined
   >(() => {
-    if (appId !== "hermes") return undefined;
+    if (!isHermesApp) return undefined;
     return parseRateLimitDelay(initialData?.settingsConfig?.rate_limit_delay);
   });
 

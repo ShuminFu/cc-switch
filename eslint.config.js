@@ -11,6 +11,7 @@ import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import pluginQuery from "@tanstack/eslint-plugin-query";
 import globals from "globals";
+import ccSwitch from "./eslint-rules/index.js";
 
 export default tseslint.config(
   {
@@ -51,6 +52,39 @@ export default tseslint.config(
       "@tanstack/query/no-rest-destructuring": "error",
       // TypeScript (noUnusedLocals/noUnusedParameters) already reports these.
       "@typescript-eslint/no-unused-vars": "off",
+    },
+  },
+  {
+    // Ratchets for the app code: the existing violations live in the baseline,
+    // new ones fail `pnpm lint`. tests/lint/eslintConfig.test.ts caps the baseline.
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: {
+      "cc-switch": ccSwitch,
+    },
+    rules: {
+      // Branch on registry capabilities, not on app-id literals.
+      "cc-switch/no-app-literal-comparison": "error",
+      // Backend calls go through the typed API layer, not raw invoke().
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@tauri-apps/api/core",
+              importNames: ["invoke"],
+              message:
+                "Call the backend through src/lib/api (or src/shared/bindings.ts) instead of importing invoke directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The bindings layer is the one place allowed to call invoke().
+    files: ["src/lib/api/**/*.{ts,tsx}", "src/shared/bindings.ts"],
+    rules: {
+      "no-restricted-imports": "off",
     },
   },
   {

@@ -80,16 +80,7 @@ export function useApiKeyLink({
   }, [currentPresetEntry]);
 
   return {
-    shouldShowApiKeyLink:
-      appId === "claude" ||
-      appId === "claude-desktop" ||
-      appId === "codex" ||
-      appId === "gemini" ||
-      appId === "opencode" ||
-      appId === "openclaw" ||
-      appId === "hermes"
-        ? shouldShowApiKeyLink
-        : false,
+    shouldShowApiKeyLink: appId !== "grokbuild" ? shouldShowApiKeyLink : false,
     websiteUrl: getWebsiteUrl,
     isPartner,
     partnerPromotionKey,

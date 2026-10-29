@@ -45,30 +45,30 @@ export function useOpencodeFormState({
   onSettingsConfigChange,
   getSettingsConfig,
 }: UseOpencodeFormStateParams): OpencodeFormState {
-  const initialOpencodeConfig =
-    appId === "opencode"
-      ? parseOpencodeConfig(initialData?.settingsConfig)
-      : null;
+  const isOpenCodeApp = appId === "opencode";
+  const initialOpencodeConfig = isOpenCodeApp
+    ? parseOpencodeConfig(initialData?.settingsConfig)
+    : null;
   const initialOpencodeOptions = initialOpencodeConfig?.options || {};
 
   const [opencodeProviderKey, setOpencodeProviderKey] = useState<string>(() => {
-    if (appId !== "opencode") return "";
+    if (!isOpenCodeApp) return "";
     return providerId || "";
   });
 
   const [opencodeNpm, setOpencodeNpm] = useState<string>(() => {
-    if (appId !== "opencode") return OPENCODE_DEFAULT_NPM;
+    if (!isOpenCodeApp) return OPENCODE_DEFAULT_NPM;
     return initialOpencodeConfig?.npm || OPENCODE_DEFAULT_NPM;
   });
 
   const [opencodeApiKey, setOpencodeApiKey] = useState<string>(() => {
-    if (appId !== "opencode") return "";
+    if (!isOpenCodeApp) return "";
     const value = initialOpencodeOptions.apiKey;
     return typeof value === "string" ? value : "";
   });
 
   const [opencodeBaseUrl, setOpencodeBaseUrl] = useState<string>(() => {
-    if (appId !== "opencode") return "";
+    if (!isOpenCodeApp) return "";
     const value = initialOpencodeOptions.baseURL;
     return typeof value === "string" ? value : "";
   });
@@ -76,7 +76,7 @@ export function useOpencodeFormState({
   const [opencodeHeaders, setOpencodeHeaders] = useState<
     Record<string, string>
   >(() => {
-    if (appId !== "opencode") return {};
+    if (!isOpenCodeApp) return {};
     const headers = initialOpencodeOptions.headers;
     return headers && typeof headers === "object"
       ? (headers as Record<string, string>)
@@ -86,14 +86,14 @@ export function useOpencodeFormState({
   const [opencodeModels, setOpencodeModels] = useState<
     Record<string, OpenCodeModel>
   >(() => {
-    if (appId !== "opencode") return {};
+    if (!isOpenCodeApp) return {};
     return initialOpencodeConfig?.models || {};
   });
 
   const [opencodeExtraOptions, setOpencodeExtraOptions] = useState<
     Record<string, string>
   >(() => {
-    if (appId !== "opencode") return {};
+    if (!isOpenCodeApp) return {};
     return toOpencodeExtraOptions(initialOpencodeOptions);
   });
 
