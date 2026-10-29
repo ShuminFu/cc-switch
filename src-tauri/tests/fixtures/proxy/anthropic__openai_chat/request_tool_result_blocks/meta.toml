@@ -1,2 +1,2 @@
 intent = "Array tool_result content: text blocks are joined as plain text, images become an [image attached] placeholder plus a following user image_url part, documents become a placeholder, and is_error prefixes [ERROR]."
-source_commit = "6330783"
+source_commit = "36b8359"
