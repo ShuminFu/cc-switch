@@ -114,6 +114,10 @@ impl McpService {
     }
 
     fn sync_server_to_app_no_config(server: &McpServer, app: &AppType) -> Result<(), AppError> {
+        if let Some(projector) = crate::apps::adapter(app).and_then(|adapter| adapter.mcp()) {
+            return projector.upsert(&server.id, &server.server);
+        }
+
         match app {
             AppType::Claude => {
                 mcp::sync_single_server_to_claude(&Default::default(), &server.id, &server.server)?;
@@ -124,16 +128,6 @@ impl McpService {
             AppType::Codex => {
                 // Codex uses TOML format, must use the correct function
                 mcp::sync_single_server_to_codex(&Default::default(), &server.id, &server.server)?;
-            }
-            AppType::Gemini => {
-                mcp::sync_single_server_to_gemini(&Default::default(), &server.id, &server.server)?;
-            }
-            AppType::GrokBuild => {
-                mcp::sync_single_server_to_grokbuild(
-                    &Default::default(),
-                    &server.id,
-                    &server.server,
-                )?;
             }
             AppType::OpenCode => {
                 mcp::sync_single_server_to_opencode(
@@ -150,6 +144,8 @@ impl McpService {
             AppType::Hermes => {
                 mcp::sync_single_server_to_hermes(&Default::default(), &server.id, &server.server)?;
             }
+            // 已迁移到 AppAdapter 的应用在上方分派
+            _ => {}
         }
         Ok(())
     }
@@ -168,14 +164,16 @@ impl McpService {
     }
 
     fn remove_server_from_app(_state: &AppState, id: &str, app: &AppType) -> Result<(), AppError> {
+        if let Some(projector) = crate::apps::adapter(app).and_then(|adapter| adapter.mcp()) {
+            return projector.remove(id);
+        }
+
         match app {
             AppType::Claude => mcp::remove_server_from_claude(id)?,
             AppType::ClaudeDesktop => {
                 log::debug!("Claude Desktop 3P profiles do not use CC Switch MCP sync, skipping");
             }
             AppType::Codex => mcp::remove_server_from_codex(id)?,
-            AppType::Gemini => mcp::remove_server_from_gemini(id)?,
-            AppType::GrokBuild => mcp::remove_server_from_grokbuild(id)?,
             AppType::OpenCode => {
                 mcp::remove_server_from_opencode(id)?;
             }
@@ -186,6 +184,8 @@ impl McpService {
             AppType::Hermes => {
                 mcp::remove_server_from_hermes(id)?;
             }
+            // 已迁移到 AppAdapter 的应用在上方分派
+            _ => {}
         }
         Ok(())
     }

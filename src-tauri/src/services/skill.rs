@@ -502,6 +502,10 @@ impl SkillService {
     ///
     /// Claude Desktop 没有 skills 目录，返回 `Ok(None)`。
     pub fn get_app_skills_dir(app: &AppType) -> Result<Option<PathBuf>> {
+        if let Some(adapter) = crate::apps::adapter(app) {
+            return Ok(Some(adapter.skills_dir()));
+        }
+
         // 目录覆盖：优先使用用户在 settings.json 中配置的 override 目录
         match app {
             AppType::Claude => {
@@ -512,16 +516,6 @@ impl SkillService {
             AppType::ClaudeDesktop => return Ok(None),
             AppType::Codex => {
                 if let Some(custom) = crate::settings::get_codex_override_dir() {
-                    return Ok(Some(custom.join("skills")));
-                }
-            }
-            AppType::Gemini => {
-                if let Some(custom) = crate::settings::get_gemini_override_dir() {
-                    return Ok(Some(custom.join("skills")));
-                }
-            }
-            AppType::GrokBuild => {
-                if let Some(custom) = crate::settings::get_grok_override_dir() {
                     return Ok(Some(custom.join("skills")));
                 }
             }
@@ -540,6 +534,8 @@ impl SkillService {
                     return Ok(Some(custom.join("skills")));
                 }
             }
+            // 已迁移到 AppAdapter 的应用在上方分派
+            _ => {}
         }
 
         // 默认路径：回退到用户主目录下的标准位置。
@@ -551,11 +547,11 @@ impl SkillService {
             AppType::Claude => home.join(".claude").join("skills"),
             AppType::ClaudeDesktop => return Ok(None),
             AppType::Codex => home.join(".codex").join("skills"),
-            AppType::Gemini => home.join(".gemini").join("skills"),
-            AppType::GrokBuild => home.join(".grok").join("skills"),
             AppType::OpenCode => home.join(".config").join("opencode").join("skills"),
             AppType::OpenClaw => home.join(".openclaw").join("skills"),
             AppType::Hermes => crate::hermes_config::get_hermes_dir().join("skills"),
+            // 已迁移到 AppAdapter 的应用在上方分派
+            _ => return Ok(None),
         }))
     }
 

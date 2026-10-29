@@ -3,7 +3,6 @@
 //! Handles provider CRUD operations, switching, and configuration management.
 
 mod endpoints;
-mod gemini_auth;
 mod live;
 mod usage;
 
@@ -39,7 +38,7 @@ pub(crate) use live::{
 // Internal re-exports
 use live::{
     remove_hermes_provider_from_live, remove_openclaw_provider_from_live,
-    remove_opencode_provider_from_live, write_gemini_live,
+    remove_opencode_provider_from_live,
 };
 use usage::validate_usage_script;
 
@@ -2639,7 +2638,11 @@ impl ProviderService {
                     AppType::OpenCode => remove_opencode_provider_from_live(id)?,
                     AppType::OpenClaw => remove_openclaw_provider_from_live(id)?,
                     AppType::Hermes => remove_hermes_provider_from_live(id)?,
-                    _ => {}
+                    _ => {
+                        if let Some(adapter) = crate::apps::adapter(&app_type) {
+                            adapter.remove_provider(id)?;
+                        }
+                    }
                 }
             }
             state.db.delete_provider(app_type.as_str(), id)?;
@@ -3217,16 +3220,7 @@ impl ProviderService {
             .get(&current_id)
             .ok_or_else(|| AppError::Message(format!("Provider {current_id} not found")))?;
 
-        match app_type {
-            AppType::Claude => Self::extract_claude_common_config(&provider.settings_config),
-            AppType::ClaudeDesktop => Ok(String::new()),
-            AppType::Codex => Self::extract_codex_common_config(&provider.settings_config),
-            AppType::Gemini => Self::extract_gemini_common_config(&provider.settings_config),
-            AppType::GrokBuild => Ok(String::new()),
-            AppType::OpenCode => Self::extract_opencode_common_config(&provider.settings_config),
-            AppType::OpenClaw => Self::extract_openclaw_common_config(&provider.settings_config),
-            AppType::Hermes => Ok(String::new()), // Hermes doesn't use common config snippets
-        }
+        Self::extract_common_config_snippet_from_settings(app_type, &provider.settings_config)
     }
 
     /// Extract common config snippet from a config value (e.g. editor content).
@@ -3234,15 +3228,21 @@ impl ProviderService {
         app_type: AppType,
         settings_config: &Value,
     ) -> Result<String, AppError> {
+        if let Some(adapter) = crate::apps::adapter(&app_type) {
+            return match adapter.common_snippet() {
+                Some(common) => common.extract(settings_config),
+                None => Ok(String::new()),
+            };
+        }
+
         match app_type {
             AppType::Claude => Self::extract_claude_common_config(settings_config),
             AppType::ClaudeDesktop => Ok(String::new()),
             AppType::Codex => Self::extract_codex_common_config(settings_config),
-            AppType::Gemini => Self::extract_gemini_common_config(settings_config),
-            AppType::GrokBuild => Ok(String::new()),
             AppType::OpenCode => Self::extract_opencode_common_config(settings_config),
             AppType::OpenClaw => Self::extract_openclaw_common_config(settings_config),
-            AppType::Hermes => Ok(String::new()), // Hermes doesn't use common config snippets
+            // Hermes doesn't use common config snippets; adapter-backed apps are handled above
+            _ => Ok(String::new()),
         }
     }
 
@@ -3458,38 +3458,6 @@ impl ProviderService {
         Ok(cleaned.trim().to_string())
     }
 
-    /// Extract common config for Gemini (JSON format)
-    ///
-    /// Extracts `.env` values while excluding provider-specific credentials:
-    /// - GOOGLE_GEMINI_BASE_URL
-    /// - GEMINI_API_KEY
-    fn extract_gemini_common_config(settings: &Value) -> Result<String, AppError> {
-        let env = settings.get("env").and_then(|v| v.as_object());
-
-        let mut snippet = serde_json::Map::new();
-        if let Some(env) = env {
-            for (key, value) in env {
-                if key == "GOOGLE_GEMINI_BASE_URL" || key == "GEMINI_API_KEY" {
-                    continue;
-                }
-                let Value::String(v) = value else {
-                    continue;
-                };
-                let trimmed = v.trim();
-                if !trimmed.is_empty() {
-                    snippet.insert(key.to_string(), Value::String(trimmed.to_string()));
-                }
-            }
-        }
-
-        if snippet.is_empty() {
-            return Ok("{}".to_string());
-        }
-
-        serde_json::to_string_pretty(&Value::Object(snippet))
-            .map_err(|e| AppError::Message(format!("Serialization failed: {e}")))
-    }
-
     /// Extract common config for OpenCode (JSON format)
     fn extract_opencode_common_config(settings: &Value) -> Result<String, AppError> {
         // OpenCode uses a different config structure with npm, options, models
@@ -3649,118 +3617,100 @@ impl ProviderService {
     }
 
     pub(crate) fn write_gemini_live(provider: &Provider) -> Result<(), AppError> {
-        write_gemini_live(provider)
+        crate::apps::gemini::write_live(provider)
     }
 
     fn validate_provider_settings(app_type: &AppType, provider: &Provider) -> Result<(), AppError> {
-        match app_type {
-            AppType::Claude => {
-                if !provider.settings_config.is_object() {
-                    return Err(AppError::localized(
-                        "provider.claude.settings.not_object",
-                        "Claude 配置必须是 JSON 对象",
-                        "Claude configuration must be a JSON object",
-                    ));
-                }
-            }
-            AppType::ClaudeDesktop => {
-                crate::claude_desktop_config::validate_provider(provider)?;
-            }
-            AppType::Codex => {
-                let settings = provider.settings_config.as_object().ok_or_else(|| {
-                    AppError::localized(
-                        "provider.codex.settings.not_object",
-                        "Codex 配置必须是 JSON 对象",
-                        "Codex configuration must be a JSON object",
-                    )
-                })?;
-
-                let auth = settings.get("auth").ok_or_else(|| {
-                    AppError::localized(
-                        "provider.codex.auth.missing",
-                        format!("供应商 {} 缺少 auth 配置", provider.id),
-                        format!("Provider {} is missing auth configuration", provider.id),
-                    )
-                })?;
-                if !auth.is_object() {
-                    return Err(AppError::localized(
-                        "provider.codex.auth.not_object",
-                        format!("供应商 {} 的 auth 配置必须是 JSON 对象", provider.id),
-                        format!(
-                            "Provider {} auth configuration must be a JSON object",
-                            provider.id
-                        ),
-                    ));
-                }
-
-                if let Some(config_value) = settings.get("config") {
-                    if !(config_value.is_string() || config_value.is_null()) {
+        if let Some(adapter) = crate::apps::adapter(app_type) {
+            adapter.validate_provider(provider)?;
+        } else {
+            match app_type {
+                AppType::Claude => {
+                    if !provider.settings_config.is_object() {
                         return Err(AppError::localized(
-                            "provider.codex.config.invalid_type",
-                            "Codex config 字段必须是字符串",
-                            "Codex config field must be a string",
+                            "provider.claude.settings.not_object",
+                            "Claude 配置必须是 JSON 对象",
+                            "Claude configuration must be a JSON object",
                         ));
                     }
-                    if let Some(cfg_text) = config_value.as_str() {
-                        crate::codex_config::validate_config_toml(cfg_text)?;
-                    }
                 }
-            }
-            AppType::Gemini => {
-                use crate::gemini_config::validate_gemini_settings;
-                validate_gemini_settings(&provider.settings_config)?
-            }
-            AppType::GrokBuild => {
-                let settings = provider.settings_config.as_object().ok_or_else(|| {
-                    AppError::localized(
-                        "provider.grokbuild.settings.not_object",
-                        "Grok Build 配置必须是 JSON 对象",
-                        "Grok Build configuration must be a JSON object",
-                    )
-                })?;
-                let config = settings
-                    .get("config")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
+                AppType::ClaudeDesktop => {
+                    crate::claude_desktop_config::validate_provider(provider)?;
+                }
+                AppType::Codex => {
+                    let settings = provider.settings_config.as_object().ok_or_else(|| {
                         AppError::localized(
-                            "provider.grokbuild.config.missing",
-                            "Grok Build 配置缺少 config 字段",
-                            "Grok Build configuration is missing the config field",
+                            "provider.codex.settings.not_object",
+                            "Codex 配置必须是 JSON 对象",
+                            "Codex configuration must be a JSON object",
                         )
                     })?;
-                crate::grok_config::validate_config_toml(config)?;
-            }
-            AppType::OpenCode => {
-                // OpenCode uses a different config structure: { npm, options, models }
-                // Basic validation - must be an object
-                if !provider.settings_config.is_object() {
-                    return Err(AppError::localized(
-                        "provider.opencode.settings.not_object",
-                        "OpenCode 配置必须是 JSON 对象",
-                        "OpenCode configuration must be a JSON object",
-                    ));
+
+                    let auth = settings.get("auth").ok_or_else(|| {
+                        AppError::localized(
+                            "provider.codex.auth.missing",
+                            format!("供应商 {} 缺少 auth 配置", provider.id),
+                            format!("Provider {} is missing auth configuration", provider.id),
+                        )
+                    })?;
+                    if !auth.is_object() {
+                        return Err(AppError::localized(
+                            "provider.codex.auth.not_object",
+                            format!("供应商 {} 的 auth 配置必须是 JSON 对象", provider.id),
+                            format!(
+                                "Provider {} auth configuration must be a JSON object",
+                                provider.id
+                            ),
+                        ));
+                    }
+
+                    if let Some(config_value) = settings.get("config") {
+                        if !(config_value.is_string() || config_value.is_null()) {
+                            return Err(AppError::localized(
+                                "provider.codex.config.invalid_type",
+                                "Codex config 字段必须是字符串",
+                                "Codex config field must be a string",
+                            ));
+                        }
+                        if let Some(cfg_text) = config_value.as_str() {
+                            crate::codex_config::validate_config_toml(cfg_text)?;
+                        }
+                    }
                 }
-            }
-            AppType::OpenClaw => {
-                // OpenClaw uses config structure: { baseUrl, apiKey, api, models }
-                // Basic validation - must be an object
-                if !provider.settings_config.is_object() {
-                    return Err(AppError::localized(
-                        "provider.openclaw.settings.not_object",
-                        "OpenClaw 配置必须是 JSON 对象",
-                        "OpenClaw configuration must be a JSON object",
-                    ));
+                AppType::OpenCode => {
+                    // OpenCode uses a different config structure: { npm, options, models }
+                    // Basic validation - must be an object
+                    if !provider.settings_config.is_object() {
+                        return Err(AppError::localized(
+                            "provider.opencode.settings.not_object",
+                            "OpenCode 配置必须是 JSON 对象",
+                            "OpenCode configuration must be a JSON object",
+                        ));
+                    }
                 }
-            }
-            AppType::Hermes => {
-                // Hermes: accept any JSON object for now
-                if !provider.settings_config.is_object() {
-                    return Err(AppError::localized(
-                        "provider.hermes.settings.not_object",
-                        "Hermes 配置必须是 JSON 对象",
-                        "Hermes configuration must be a JSON object",
-                    ));
+                AppType::OpenClaw => {
+                    // OpenClaw uses config structure: { baseUrl, apiKey, api, models }
+                    // Basic validation - must be an object
+                    if !provider.settings_config.is_object() {
+                        return Err(AppError::localized(
+                            "provider.openclaw.settings.not_object",
+                            "OpenClaw 配置必须是 JSON 对象",
+                            "OpenClaw configuration must be a JSON object",
+                        ));
+                    }
                 }
+                AppType::Hermes => {
+                    // Hermes: accept any JSON object for now
+                    if !provider.settings_config.is_object() {
+                        return Err(AppError::localized(
+                            "provider.hermes.settings.not_object",
+                            "Hermes 配置必须是 JSON 对象",
+                            "Hermes configuration must be a JSON object",
+                        ));
+                    }
+                }
+                // 已迁移到 AppAdapter 的应用在上方分派
+                other => return Err(AppError::unsupported(other, "validate_provider_settings")),
             }
         }
 
@@ -3785,6 +3735,11 @@ impl ProviderService {
         provider: &Provider,
         app_type: &AppType,
     ) -> Result<(String, String), AppError> {
+        if let Some(adapter) = crate::apps::adapter(app_type) {
+            let credentials = adapter.credentials(provider)?;
+            return Ok((credentials.api_key, credentials.base_url));
+        }
+
         match app_type {
             AppType::Claude => {
                 let env = provider
@@ -3824,28 +3779,6 @@ impl ProviderService {
                     })?
                     .to_string();
 
-                Ok((api_key, base_url))
-            }
-            AppType::GrokBuild => {
-                let config_toml = provider
-                    .settings_config
-                    .get("config")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.grokbuild.config.missing",
-                            "Grok Build 配置缺少 config 字段",
-                            "Grok Build configuration is missing the config field",
-                        )
-                    })?;
-                let (base_url, api_key) = crate::grok_config::extract_credentials(config_toml)
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.grokbuild.credentials.missing",
-                            "Grok Build 配置缺少 Base URL 或 API Key",
-                            "Grok Build configuration is missing the base URL or API key",
-                        )
-                    })?;
                 Ok((api_key, base_url))
             }
             AppType::ClaudeDesktop => {
@@ -3912,26 +3845,6 @@ impl ProviderService {
 
                 Ok((api_key, base_url))
             }
-            AppType::Gemini => {
-                use crate::gemini_config::json_to_env;
-
-                let env_map = json_to_env(&provider.settings_config)?;
-
-                let api_key = env_map.get("GEMINI_API_KEY").cloned().ok_or_else(|| {
-                    AppError::localized(
-                        "gemini.missing_api_key",
-                        "缺少 GEMINI_API_KEY",
-                        "Missing GEMINI_API_KEY",
-                    )
-                })?;
-
-                let base_url = env_map
-                    .get("GOOGLE_GEMINI_BASE_URL")
-                    .cloned()
-                    .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string());
-
-                Ok((api_key, base_url))
-            }
             AppType::OpenCode => {
                 // OpenCode uses options.apiKey and options.baseURL
                 let options = provider
@@ -3990,6 +3903,8 @@ impl ProviderService {
 
                 Ok((api_key, base_url))
             }
+            // 已迁移到 AppAdapter 的应用在上方分派
+            other => Err(AppError::unsupported(other, "credentials")),
         }
     }
 }

@@ -4,6 +4,8 @@ pub mod terminal;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::app_config::AppType;
+
 use providers::{claude, codex, gemini, grokbuild, hermes, openclaw, opencode};
 
 #[derive(Debug, Clone, Serialize)]
@@ -371,13 +373,22 @@ fn delete_session_sqlite_with_db(
 }
 
 fn provider_roots(provider_id: &str) -> Result<Vec<PathBuf>, String> {
+    if let Some(source) = provider_id
+        .parse::<AppType>()
+        .ok()
+        // 只认规范 slug，别名不是会话来源标识
+        .filter(|app| app.as_str() == provider_id)
+        .and_then(|app| crate::apps::adapter(&app))
+        .and_then(|adapter| adapter.session_source())
+    {
+        return Ok(source.session_roots());
+    }
+
     let roots = match provider_id {
         "codex" => codex::session_roots(),
         "claude" => vec![crate::config::get_claude_config_dir().join("projects")],
         "opencode" => vec![opencode::get_opencode_data_dir()],
         "openclaw" => vec![crate::openclaw_config::get_openclaw_dir().join("agents")],
-        "gemini" => vec![crate::gemini_config::get_gemini_dir().join("tmp")],
-        "grokbuild" => grokbuild::session_roots(),
         "hermes" => vec![crate::hermes_config::get_hermes_dir().join("sessions")],
         _ => return Err(format!("Unsupported provider: {provider_id}")),
     };

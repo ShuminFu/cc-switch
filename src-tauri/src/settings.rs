@@ -1094,6 +1094,25 @@ pub fn acknowledge_settings_load_failure() {
     settings_store().set_load_failure(None);
 }
 
+/// 返回用户在 settings.json 中为该应用配置的配置目录覆盖（已解析 `~`）。
+///
+/// 没有覆盖、或应用不支持目录覆盖（Claude Desktop）时返回 `None`。
+pub fn override_dir(app: &AppType) -> Option<PathBuf> {
+    let store = settings_store();
+    let settings = store.read().ok()?;
+    let raw = match app {
+        AppType::Claude => settings.claude_config_dir.as_ref(),
+        AppType::ClaudeDesktop => None,
+        AppType::Codex => settings.codex_config_dir.as_ref(),
+        AppType::Gemini => settings.gemini_config_dir.as_ref(),
+        AppType::GrokBuild => settings.grok_config_dir.as_ref(),
+        AppType::OpenCode => settings.opencode_config_dir.as_ref(),
+        AppType::OpenClaw => settings.openclaw_config_dir.as_ref(),
+        AppType::Hermes => settings.hermes_config_dir.as_ref(),
+    };
+    raw.map(|p| resolve_override_path(p))
+}
+
 pub fn get_claude_override_dir() -> Option<PathBuf> {
     let store = settings_store();
     let settings = store.read().ok()?;
@@ -1108,24 +1127,6 @@ pub fn get_codex_override_dir() -> Option<PathBuf> {
     let settings = store.read().ok()?;
     settings
         .codex_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_gemini_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .gemini_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_grok_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .grok_config_dir
         .as_ref()
         .map(|p| resolve_override_path(p))
 }

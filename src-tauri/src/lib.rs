@@ -18,9 +18,7 @@ mod config;
 mod database;
 mod deeplink;
 mod error;
-mod gemini_config;
 mod gemini_mcp;
-mod grok_config;
 pub mod hermes_config;
 mod init_status;
 mod lightweight;
@@ -53,6 +51,10 @@ mod store;
 mod tray;
 mod usage_events;
 mod usage_script;
+
+// 配置读写代码已迁入 apps/<app>/config.rs；保留旧路径别名，调用方无需改动
+use apps::gemini::config as gemini_config;
+use apps::grok::config as grok_config;
 
 pub use app_config::{AppType, InstalledSkill, McpApps, McpServer, MultiAppConfig, SkillApps};
 pub use codex_config::{get_codex_auth_path, get_codex_config_path, write_codex_live_atomic};

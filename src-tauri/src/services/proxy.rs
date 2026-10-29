@@ -2320,20 +2320,18 @@ impl ProxyService {
     }
 
     fn is_gemini_live_taken_over(config: &Value) -> bool {
-        let env = match config.get("env").and_then(|v| v.as_object()) {
-            Some(env) => env,
-            None => return false,
-        };
-        env.get("GEMINI_API_KEY")
-            .and_then(|v| v.as_str())
-            .is_some_and(is_proxy_token)
+        Self::adapter_live_has_placeholder(&AppType::Gemini, config)
     }
 
     fn is_grok_live_taken_over(config: &Value) -> bool {
-        config
-            .get("config")
-            .and_then(Value::as_str)
-            .is_some_and(crate::grok_config::has_proxy_token)
+        Self::adapter_live_has_placeholder(&AppType::GrokBuild, config)
+    }
+
+    /// 占位符判定已迁移到 `AppAdapter::takeover()` 的应用
+    fn adapter_live_has_placeholder(app_type: &AppType, config: &Value) -> bool {
+        crate::apps::adapter(app_type)
+            .and_then(|adapter| adapter.takeover())
+            .is_some_and(|takeover| takeover.has_placeholder(config))
     }
 
     /// 判断给定的 Live/备份配置是否已被代理接管（包含占位符）
