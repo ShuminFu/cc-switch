@@ -28,19 +28,21 @@ const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 pub struct GeminiAdapter;
 
 impl AppAdapter for GeminiAdapter {
-    fn config_dir(&self) -> PathBuf {
-        get_gemini_dir()
+    fn config_dir(&self) -> Result<PathBuf, AppError> {
+        Ok(get_gemini_dir())
     }
 
-    fn prompt_file(&self) -> PathBuf {
-        self.config_dir().join("GEMINI.md")
+    fn prompt_file(&self) -> Option<PathBuf> {
+        Some(get_gemini_dir().join("GEMINI.md"))
     }
 
-    fn skills_dir(&self) -> PathBuf {
+    fn skills_dir(&self) -> Option<PathBuf> {
         // 默认路径必须走 get_home_dir()（可被 CC_SWITCH_TEST_HOME 覆盖）
-        crate::settings::override_dir(&AppType::Gemini)
-            .unwrap_or_else(|| get_home_dir().join(".gemini"))
-            .join("skills")
+        Some(
+            crate::settings::override_dir(&AppType::Gemini)
+                .unwrap_or_else(|| get_home_dir().join(".gemini"))
+                .join("skills"),
+        )
     }
 
     fn read_live(&self) -> Result<Value, AppError> {
@@ -199,7 +201,7 @@ impl ProxyTakeover for GeminiAdapter {
 
 impl SessionSource for GeminiAdapter {
     fn session_roots(&self) -> Vec<PathBuf> {
-        vec![self.config_dir().join("tmp")]
+        vec![get_gemini_dir().join("tmp")]
     }
 }
 

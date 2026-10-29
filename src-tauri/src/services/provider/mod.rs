@@ -28,11 +28,12 @@ pub use live::{
 };
 
 // Internal re-exports (pub(crate))
-pub(crate) use live::sanitize_claude_settings_for_live;
+pub(crate) use crate::apps::claude::sanitize_settings_for_live as sanitize_claude_settings_for_live;
 pub(crate) use live::{
     build_effective_settings_with_common_config, normalize_provider_common_config_for_storage,
     provider_exists_in_live_config, strip_common_config_from_live_settings,
-    sync_current_provider_for_app_to_live, write_live_with_common_config,
+    sync_current_provider_for_app_to_live, takeover_uses_live_backup,
+    write_live_with_common_config,
 };
 
 // Internal re-exports
@@ -733,8 +734,8 @@ mod tests {
             "includeCoAuthoredBy": false
         });
 
-        let snippet = ProviderService::extract_claude_common_config(&settings)
-            .expect("extract should succeed");
+        let snippet =
+            crate::apps::claude::extract_common_config(&settings).expect("extract should succeed");
         let value: Value = serde_json::from_str(&snippet).expect("snippet is valid JSON");
 
         // 所有凭据都不得出现在共享片段里
@@ -810,8 +811,8 @@ mod tests {
             "theme": "dark"
         });
 
-        let snippet = ProviderService::extract_claude_common_config(&settings)
-            .expect("extract should succeed");
+        let snippet =
+            crate::apps::claude::extract_common_config(&settings).expect("extract should succeed");
         let value: Value = serde_json::from_str(&snippet).expect("snippet is valid JSON");
         let env = value.get("env");
 
@@ -2175,10 +2176,10 @@ requires_openai_auth = true
 }
 
 impl ProviderService {
-    fn normalize_provider_if_claude(app_type: &AppType, provider: &mut Provider) {
-        if matches!(app_type, AppType::Claude) {
+    fn normalize_provider_settings(app_type: &AppType, provider: &mut Provider) {
+        if let Some(adapter) = crate::apps::adapter(app_type) {
             let mut v = provider.settings_config.clone();
-            if normalize_claude_models_in_value(&mut v) {
+            if adapter.normalize_settings(&mut v) {
                 provider.settings_config = v;
             }
         }
@@ -2324,7 +2325,7 @@ impl ProviderService {
     ) -> Result<bool, AppError> {
         let mut provider = provider;
         // Normalize Claude model keys
-        Self::normalize_provider_if_claude(&app_type, &mut provider);
+        Self::normalize_provider_settings(&app_type, &mut provider);
         Self::validate_provider_settings(&app_type, &provider)?;
         normalize_provider_common_config_for_storage(state.db.as_ref(), &app_type, &mut provider)?;
         Self::normalize_usage_script_credential_overrides(&app_type, &mut provider);
@@ -2379,7 +2380,7 @@ impl ProviderService {
             .db
             .get_provider_by_id(&original_id, app_type.as_str())?;
         // Normalize Claude model keys
-        Self::normalize_provider_if_claude(&app_type, &mut provider);
+        Self::normalize_provider_settings(&app_type, &mut provider);
         Self::validate_provider_settings(&app_type, &provider)?;
         normalize_provider_common_config_for_storage(state.db.as_ref(), &app_type, &mut provider)?;
         Self::normalize_usage_script_credential_overrides(&app_type, &mut provider);
@@ -2540,7 +2541,7 @@ impl ProviderService {
             let should_sync_via_proxy = has_live_backup || live_taken_over;
 
             if should_sync_via_proxy {
-                if matches!(app_type, AppType::ClaudeDesktop) {
+                if !takeover_uses_live_backup(&app_type) {
                     write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
                 } else {
                     futures::executor::block_on(
@@ -2552,27 +2553,13 @@ impl ProviderService {
                 }
 
                 if futures::executor::block_on(state.proxy_service.is_running()) {
-                    if matches!(app_type, AppType::Claude) {
-                        futures::executor::block_on(
-                            state
-                                .proxy_service
-                                .sync_claude_live_from_provider_while_proxy_active(&provider),
-                        )
-                        .map_err(|e| {
-                            AppError::Message(format!("同步 Claude Live 配置失败: {e}"))
-                        })?;
-                    } else if live_taken_over && matches!(app_type, AppType::Codex) {
-                        // Codex model mappings are projected into a generated
-                        // model_catalog_json file. Refresh takeover-owned Live
-                        // immediately so adding/removing mappings cannot leave
-                        // the previous catalog pointer and capabilities active.
-                        futures::executor::block_on(
-                            state
-                                .proxy_service
-                                .sync_codex_live_from_provider_while_proxy_active(&provider),
-                        )
-                        .map_err(|e| AppError::Message(format!("同步 Codex Live 配置失败: {e}")))?;
-                    }
+                    futures::executor::block_on(
+                        state.proxy_service.refresh_live_after_provider_save(
+                            &app_type,
+                            &provider,
+                            live_taken_over,
+                        ),
+                    )?;
                 }
             } else {
                 write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
@@ -2764,7 +2751,8 @@ impl ProviderService {
             return Self::switch_normal(state, app_type, id, &providers);
         }
 
-        if matches!(app_type, AppType::ClaudeDesktop) {
+        // 不经过接管备份的应用（Claude Desktop）始终走普通切换
+        if !takeover_uses_live_backup(&app_type) {
             return Self::switch_normal(state, app_type, id, &providers);
         }
 
@@ -3014,7 +3002,7 @@ impl ProviderService {
         // See the save path above: backup/placeholders are the ownership signal
         // here, not just proxy_config.enabled.
         if has_live_backup || live_taken_over {
-            if matches!(app_type, AppType::ClaudeDesktop) {
+            if !takeover_uses_live_backup(&app_type) {
                 write_live_with_common_config(state.db.as_ref(), &app_type, provider)?;
                 return Ok(());
             }
@@ -3136,7 +3124,13 @@ impl ProviderService {
         result: &mut SwitchResult,
     ) {
         // 作用域限定 Claude + Codex（见函数文档）。
-        if !matches!(app_type, AppType::Claude | AppType::Codex) {
+        let in_scope = match crate::apps::adapter(app_type) {
+            Some(adapter) => adapter
+                .common_snippet()
+                .is_some_and(|common| common.sync_from_live()),
+            None => matches!(app_type, AppType::Codex),
+        };
+        if !in_scope {
             return;
         }
 
@@ -3236,143 +3230,12 @@ impl ProviderService {
         }
 
         match app_type {
-            AppType::Claude => Self::extract_claude_common_config(settings_config),
-            AppType::ClaudeDesktop => Ok(String::new()),
             AppType::Codex => Self::extract_codex_common_config(settings_config),
             AppType::OpenCode => Self::extract_opencode_common_config(settings_config),
             AppType::OpenClaw => Self::extract_openclaw_common_config(settings_config),
             // Hermes doesn't use common config snippets; adapter-backed apps are handled above
             _ => Ok(String::new()),
         }
-    }
-
-    /// 判断一个 env / 顶层配置键名是否为凭据/机密：凡命中一律不得写入共享的
-    /// 通用配置片段。**故意从严**——多剥一个非机密键只是它不被共享（可恢复的小
-    /// 不便），漏剥一个凭据则会把密钥注入到每个供应商（不可恢复的泄漏）。因此用
-    /// 模式匹配覆盖整类，而非枚举具体名字（枚举永远会漏掉下一个 `*_API_KEY`）。
-    ///
-    /// 覆盖：Anthropic / OpenRouter / Google / OpenAI / Gemini 等 `*_API_KEY`
-    /// （Claude provider 的凭据见 `Provider::resolve_usage_credentials`，确实支持
-    /// `OPENROUTER_API_KEY` / `GOOGLE_API_KEY` 等回退）、各类 `*_AUTH_TOKEN` /
-    /// 单数 `*_TOKEN`、AWS Bedrock / Vertex 凭据、以及通用 secret / password /
-    /// 私钥命名。
-    fn is_sensitive_config_key(name: &str) -> bool {
-        let upper = name.to_ascii_uppercase();
-
-        // 单数 `_TOKEN` 命中 AWS_SESSION_TOKEN 等，但**不**误伤复数 `_TOKENS`
-        // （CLAUDE_CODE_MAX_OUTPUT_TOKENS / MAX_THINKING_TOKENS 是正常可共享配置）。
-        const SENSITIVE_SUFFIXES: &[&str] = &[
-            "_API_KEY",
-            "_APIKEY",
-            "_AUTH_TOKEN",
-            "_TOKEN",
-            "_ACCESS_KEY",
-            "_ACCESS_KEY_ID",
-            "_KEY_ID",
-            "_PRIVATE_KEY",
-        ];
-        const SENSITIVE_EXACT: &[&str] = &[
-            "APIKEY",
-            "API_KEY",
-            "TOKEN",
-            "SECRET",
-            "PASSWORD",
-            "CREDENTIALS",
-        ];
-        // contains：覆盖 AWS_SECRET_ACCESS_KEY / *_CLIENT_SECRET /
-        // GOOGLE_APPLICATION_CREDENTIALS / AWS_BEARER_TOKEN_BEDROCK 等变体。
-        const SENSITIVE_CONTAINS: &[&str] = &[
-            "SECRET",
-            "PASSWORD",
-            "PASSWD",
-            "CREDENTIAL",
-            "PRIVATE_KEY",
-            "BEARER_TOKEN",
-        ];
-
-        SENSITIVE_EXACT.contains(&upper.as_str())
-            || SENSITIVE_SUFFIXES.iter().any(|s| upper.ends_with(s))
-            || SENSITIVE_CONTAINS.iter().any(|c| upper.contains(c))
-    }
-
-    /// Extract common config for Claude (JSON format)
-    fn extract_claude_common_config(settings: &Value) -> Result<String, AppError> {
-        let mut config = settings.clone();
-
-        // 供应商专属的**非机密**字段（模型 + 端点），不应共享。凭据/机密不在此列举，
-        // 改由 `is_sensitive_config_key`（模式匹配）统一剥离，新供应商的 `*_API_KEY`
-        // 等无需再手工补名单即可被覆盖。
-        const ENV_PROVIDER_SPECIFIC_EXCLUDES: &[&str] = &[
-            "ANTHROPIC_MODEL",
-            "ANTHROPIC_REASONING_MODEL", // legacy: 已废弃，但旧配置可能残留
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
-            "ANTHROPIC_DEFAULT_OPUS_MODEL",
-            "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
-            "ANTHROPIC_DEFAULT_SONNET_MODEL",
-            "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
-            // Fable 是 v3.16.3 新增的第四档模型映射，与 haiku/sonnet/opus 同属供应商专属，
-            // 不得进入通用配置片段，否则会污染其它供应商（issue #4272）。
-            "ANTHROPIC_DEFAULT_FABLE_MODEL",
-            "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
-            "CLAUDE_CODE_SUBAGENT_MODEL",
-            // Context limits follow the actual upstream model. Sharing these
-            // across providers can cap GPT/Kimi to the wrong window and make
-            // Claude Code compact too early or miss the upstream limit.
-            "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-            "ANTHROPIC_BASE_URL",
-        ];
-
-        const TOP_LEVEL_EXCLUDES: &[&str] = &[
-            "apiBaseUrl",
-            // Legacy model fields
-            "primaryModel",
-            "smallFastModel",
-        ];
-
-        // Remove env fields: provider-specific (models/endpoint) + 任何凭据键。
-        if let Some(env) = config.get_mut("env").and_then(|v| v.as_object_mut()) {
-            let sensitive: Vec<String> = env
-                .keys()
-                .filter(|k| Self::is_sensitive_config_key(k))
-                .cloned()
-                .collect();
-            for key in ENV_PROVIDER_SPECIFIC_EXCLUDES {
-                env.remove(*key);
-            }
-            for key in &sensitive {
-                env.remove(key);
-            }
-            // If env is empty after removal, remove the env object itself
-            if env.is_empty() {
-                config.as_object_mut().map(|obj| obj.remove("env"));
-            }
-        }
-
-        // Remove top-level fields: legacy model fields + 任何凭据键
-        // （例如非标准的顶层 apiKey / api_key / *_TOKEN）。
-        if let Some(obj) = config.as_object_mut() {
-            let sensitive: Vec<String> = obj
-                .keys()
-                .filter(|k| Self::is_sensitive_config_key(k))
-                .cloned()
-                .collect();
-            for key in TOP_LEVEL_EXCLUDES {
-                obj.remove(*key);
-            }
-            for key in &sensitive {
-                obj.remove(key);
-            }
-        }
-
-        // Check if result is empty
-        if config.as_object().is_none_or(|obj| obj.is_empty()) {
-            return Ok("{}".to_string());
-        }
-
-        serde_json::to_string_pretty(&config)
-            .map_err(|e| AppError::Message(format!("Serialization failed: {e}")))
     }
 
     /// Extract common config for Codex (TOML format)
@@ -3625,18 +3488,6 @@ impl ProviderService {
             adapter.validate_provider(provider)?;
         } else {
             match app_type {
-                AppType::Claude => {
-                    if !provider.settings_config.is_object() {
-                        return Err(AppError::localized(
-                            "provider.claude.settings.not_object",
-                            "Claude 配置必须是 JSON 对象",
-                            "Claude configuration must be a JSON object",
-                        ));
-                    }
-                }
-                AppType::ClaudeDesktop => {
-                    crate::claude_desktop_config::validate_provider(provider)?;
-                }
                 AppType::Codex => {
                     let settings = provider.settings_config.as_object().ok_or_else(|| {
                         AppError::localized(
@@ -3741,51 +3592,6 @@ impl ProviderService {
         }
 
         match app_type {
-            AppType::Claude => {
-                let env = provider
-                    .settings_config
-                    .get("env")
-                    .and_then(|v| v.as_object())
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.claude.env.missing",
-                            "配置格式错误: 缺少 env",
-                            "Invalid configuration: missing env section",
-                        )
-                    })?;
-
-                let api_key = env
-                    .get("ANTHROPIC_AUTH_TOKEN")
-                    .or_else(|| env.get("ANTHROPIC_API_KEY"))
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.claude.api_key.missing",
-                            "缺少 API Key",
-                            "API key is missing",
-                        )
-                    })?
-                    .to_string();
-
-                let base_url = env
-                    .get("ANTHROPIC_BASE_URL")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.claude.base_url.missing",
-                            "缺少 ANTHROPIC_BASE_URL 配置",
-                            "Missing ANTHROPIC_BASE_URL configuration",
-                        )
-                    })?
-                    .to_string();
-
-                Ok((api_key, base_url))
-            }
-            AppType::ClaudeDesktop => {
-                let credentials =
-                    crate::claude_desktop_config::direct_gateway_credentials(provider)?;
-                Ok((credentials.api_key, credentials.base_url))
-            }
             AppType::Codex => {
                 let _auth = provider
                     .settings_config
@@ -3907,80 +3713,6 @@ impl ProviderService {
             other => Err(AppError::unsupported(other, "credentials")),
         }
     }
-}
-
-/// Normalize Claude model keys in a JSON value
-///
-/// Reads old key (ANTHROPIC_SMALL_FAST_MODEL), writes new keys (DEFAULT_*), and deletes old key.
-pub(crate) fn normalize_claude_models_in_value(settings: &mut Value) -> bool {
-    let mut changed = false;
-    let env = match settings.get_mut("env").and_then(|v| v.as_object_mut()) {
-        Some(obj) => obj,
-        None => return changed,
-    };
-
-    let model = env
-        .get("ANTHROPIC_MODEL")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let small_fast = env
-        .get("ANTHROPIC_SMALL_FAST_MODEL")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    let current_haiku = env
-        .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let current_sonnet = env
-        .get("ANTHROPIC_DEFAULT_SONNET_MODEL")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let current_opus = env
-        .get("ANTHROPIC_DEFAULT_OPUS_MODEL")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    let target_haiku = current_haiku
-        .or_else(|| small_fast.clone())
-        .or_else(|| model.clone());
-    let target_sonnet = current_sonnet
-        .or_else(|| model.clone())
-        .or_else(|| small_fast.clone());
-    let target_opus = current_opus
-        .or_else(|| model.clone())
-        .or_else(|| small_fast.clone());
-
-    if env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").is_none() {
-        if let Some(v) = target_haiku {
-            env.insert(
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(),
-                Value::String(v),
-            );
-            changed = true;
-        }
-    }
-    if env.get("ANTHROPIC_DEFAULT_SONNET_MODEL").is_none() {
-        if let Some(v) = target_sonnet {
-            env.insert(
-                "ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(),
-                Value::String(v),
-            );
-            changed = true;
-        }
-    }
-    if env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").is_none() {
-        if let Some(v) = target_opus {
-            env.insert("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), Value::String(v));
-            changed = true;
-        }
-    }
-
-    if env.remove("ANTHROPIC_SMALL_FAST_MODEL").is_some() {
-        changed = true;
-    }
-
-    changed
 }
 
 #[derive(Debug, Clone, Deserialize)]

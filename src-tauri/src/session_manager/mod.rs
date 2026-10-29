@@ -386,7 +386,6 @@ fn provider_roots(provider_id: &str) -> Result<Vec<PathBuf>, String> {
 
     let roots = match provider_id {
         "codex" => codex::session_roots(),
-        "claude" => vec![crate::config::get_claude_config_dir().join("projects")],
         "opencode" => vec![opencode::get_opencode_data_dir()],
         "openclaw" => vec![crate::openclaw_config::get_openclaw_dir().join("agents")],
         "hermes" => vec![crate::hermes_config::get_hermes_dir().join("sessions")],

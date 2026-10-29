@@ -114,17 +114,17 @@ impl McpService {
     }
 
     fn sync_server_to_app_no_config(server: &McpServer, app: &AppType) -> Result<(), AppError> {
-        if let Some(projector) = crate::apps::adapter(app).and_then(|adapter| adapter.mcp()) {
-            return projector.upsert(&server.id, &server.server);
+        if let Some(adapter) = crate::apps::adapter(app) {
+            return match adapter.mcp() {
+                Some(projector) => projector.upsert(&server.id, &server.server),
+                None => {
+                    log::debug!("{app:?} does not use CC Switch MCP sync, skipping");
+                    Ok(())
+                }
+            };
         }
 
         match app {
-            AppType::Claude => {
-                mcp::sync_single_server_to_claude(&Default::default(), &server.id, &server.server)?;
-            }
-            AppType::ClaudeDesktop => {
-                log::debug!("Claude Desktop 3P profiles do not use CC Switch MCP sync, skipping");
-            }
             AppType::Codex => {
                 // Codex uses TOML format, must use the correct function
                 mcp::sync_single_server_to_codex(&Default::default(), &server.id, &server.server)?;
@@ -164,15 +164,17 @@ impl McpService {
     }
 
     fn remove_server_from_app(_state: &AppState, id: &str, app: &AppType) -> Result<(), AppError> {
-        if let Some(projector) = crate::apps::adapter(app).and_then(|adapter| adapter.mcp()) {
-            return projector.remove(id);
+        if let Some(adapter) = crate::apps::adapter(app) {
+            return match adapter.mcp() {
+                Some(projector) => projector.remove(id),
+                None => {
+                    log::debug!("{app:?} does not use CC Switch MCP sync, skipping");
+                    Ok(())
+                }
+            };
         }
 
         match app {
-            AppType::Claude => mcp::remove_server_from_claude(id)?,
-            AppType::ClaudeDesktop => {
-                log::debug!("Claude Desktop 3P profiles do not use CC Switch MCP sync, skipping");
-            }
             AppType::Codex => mcp::remove_server_from_codex(id)?,
             AppType::OpenCode => {
                 mcp::remove_server_from_opencode(id)?;

@@ -2554,7 +2554,7 @@ pub async fn probe_tool_installations(
 #[cfg(target_os = "windows")]
 fn wsl_distro_for_tool(tool: &str) -> Option<String> {
     let override_dir = match tool {
-        "claude" => crate::settings::get_claude_override_dir(),
+        "claude" => crate::settings::override_dir(&crate::app_config::AppType::Claude),
         "codex" => crate::settings::get_codex_override_dir(),
         "gemini" => crate::settings::override_dir(&crate::app_config::AppType::Gemini),
         "grok" => crate::settings::override_dir(&crate::app_config::AppType::GrokBuild),

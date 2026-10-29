@@ -367,6 +367,33 @@ impl ProxyService {
         Ok(())
     }
 
+    /// 代理运行期间保存当前供应商后，刷新被接管的 Live。
+    ///
+    /// Claude 总是刷新；Codex 只在 Live 已被接管时刷新（模型映射投影在生成的
+    /// model_catalog_json 中，不刷新会让旧的目录指针与能力继续生效）。
+    pub async fn refresh_live_after_provider_save(
+        &self,
+        app_type: &AppType,
+        provider: &Provider,
+        live_taken_over: bool,
+    ) -> Result<(), crate::error::AppError> {
+        match app_type {
+            AppType::Claude => self
+                .sync_claude_live_from_provider_while_proxy_active(provider)
+                .await
+                .map_err(|e| {
+                    crate::error::AppError::Message(format!("同步 Claude Live 配置失败: {e}"))
+                }),
+            AppType::Codex if live_taken_over => self
+                .sync_codex_live_from_provider_while_proxy_active(provider)
+                .await
+                .map_err(|e| {
+                    crate::error::AppError::Message(format!("同步 Codex Live 配置失败: {e}"))
+                }),
+            _ => Ok(()),
+        }
+    }
+
     pub async fn sync_codex_live_from_provider_while_proxy_active(
         &self,
         provider: &Provider,
@@ -2270,27 +2297,7 @@ impl ProxyService {
     }
 
     fn is_claude_live_taken_over(config: &Value) -> bool {
-        let env = match config.get("env").and_then(|v| v.as_object()) {
-            Some(env) => env,
-            None => return false,
-        };
-
-        for key in [
-            "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_API_KEY",
-            "OPENROUTER_API_KEY",
-            "OPENAI_API_KEY",
-        ] {
-            if env
-                .get(key)
-                .and_then(|v| v.as_str())
-                .is_some_and(is_proxy_token)
-            {
-                return true;
-            }
-        }
-
-        false
+        Self::adapter_live_has_placeholder(&AppType::Claude, config)
     }
 
     fn codex_live_has_proxy_placeholder(config: &Value) -> bool {

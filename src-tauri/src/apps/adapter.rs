@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 
@@ -26,13 +27,13 @@ pub struct Credentials {
 /// 单个应用的 live 配置适配器
 pub trait AppAdapter: Debug + Sync {
     /// 应用配置目录（已考虑 settings.json 中的目录覆盖）
-    fn config_dir(&self) -> PathBuf;
+    fn config_dir(&self) -> Result<PathBuf, AppError>;
 
-    /// 提示词文件路径
-    fn prompt_file(&self) -> PathBuf;
+    /// 提示词文件路径；没有提示词文件的应用返回 `None`
+    fn prompt_file(&self) -> Option<PathBuf>;
 
-    /// Skills 目录
-    fn skills_dir(&self) -> PathBuf;
+    /// Skills 目录；没有 skills 目录的应用返回 `None`
+    fn skills_dir(&self) -> Option<PathBuf>;
 
     /// 读取当前 live 配置，转换为供应商 `settings_config` 结构
     fn read_live(&self) -> Result<Value, AppError>;
@@ -42,6 +43,28 @@ pub trait AppAdapter: Debug + Sync {
 
     /// 把供应商配置写入 live 文件
     fn write_provider(&self, provider: &Provider) -> Result<(), AppError>;
+
+    /// 写入已合并通用配置的有效供应商配置。
+    ///
+    /// 需要数据库上下文的应用（Claude Desktop 的网关令牌）覆盖此方法，其余应用
+    /// 直接写 live。
+    fn write_effective_provider(
+        &self,
+        _db: &Database,
+        provider: &Provider,
+    ) -> Result<(), AppError> {
+        self.write_provider(provider)
+    }
+
+    /// 在有效配置上补齐只属于 live 的应用默认值（写 live 前调用）。
+    ///
+    /// 注入的内容必须由 [`AppAdapter::backfill_live_settings`] 对称剥掉。
+    fn apply_live_defaults(&self, _provider: &Provider, _settings: &mut Value) {}
+
+    /// 把旧版字段迁移为当前结构；返回是否有改动
+    fn normalize_settings(&self, _settings: &mut Value) -> bool {
+        false
+    }
 
     /// 从 live 配置中移除供应商。
     ///
@@ -56,6 +79,14 @@ pub trait AppAdapter: Debug + Sync {
     /// 切走时把 live 配置回填到供应商之前，剥掉只属于 live 的投影内容
     fn backfill_live_settings(&self, _provider: &Provider, live_settings: Value) -> Value {
         live_settings
+    }
+
+    /// 代理接管期间 live 是否由接管备份托管。
+    ///
+    /// 为 `true` 时，接管期间保存 / 切换供应商只更新备份；为 `false` 的应用
+    ///（Claude Desktop 的 3P 配置）不经过接管备份，始终直接写入。
+    fn takeover_uses_live_backup(&self) -> bool {
+        true
     }
 
     /// 从供应商配置中提取直连凭据
@@ -97,6 +128,11 @@ pub trait CommonSnippet {
 
     /// 从 `settings` 中剥掉片段
     fn remove(&self, settings: &Value, snippet: &str) -> Result<Value, AppError>;
+
+    /// 切走供应商时是否从 live 重新提取片段，捕获用户在应用里直接做的改动
+    fn sync_from_live(&self) -> bool {
+        false
+    }
 }
 
 /// 把 CC Switch 的 MCP 服务器写入 / 移出应用自己的配置

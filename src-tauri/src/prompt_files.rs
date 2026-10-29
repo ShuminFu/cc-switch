@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use crate::app_config::AppType;
 use crate::apps::AppCaps;
 use crate::codex_config::get_codex_auth_path;
-use crate::config::get_claude_settings_path;
 use crate::error::AppError;
 use crate::openclaw_config::get_openclaw_dir;
 use crate::opencode_config::get_opencode_dir;
@@ -18,14 +17,12 @@ pub fn prompt_file_path(app: &AppType) -> Result<PathBuf, AppError> {
     }
 
     if let Some(adapter) = crate::apps::adapter(app) {
-        return Ok(adapter.prompt_file());
+        return adapter
+            .prompt_file()
+            .ok_or_else(|| AppError::unsupported(app, "Prompts"));
     }
 
     let (base_dir, filename): (PathBuf, &str) = match app {
-        AppType::Claude => (
-            get_base_dir_with_fallback(get_claude_settings_path(), ".claude")?,
-            "CLAUDE.md",
-        ),
         AppType::Codex => (
             get_base_dir_with_fallback(get_codex_auth_path(), ".codex")?,
             "AGENTS.md",
@@ -33,7 +30,7 @@ pub fn prompt_file_path(app: &AppType) -> Result<PathBuf, AppError> {
         AppType::OpenCode => (get_opencode_dir(), "AGENTS.md"),
         AppType::OpenClaw => (get_openclaw_dir(), "AGENTS.md"),
         AppType::Hermes => (crate::hermes_config::get_hermes_dir(), "AGENTS.md"),
-        // Claude Desktop 无提示词文件；已迁移到 AppAdapter 的应用在上方分派
+        // 已迁移到 AppAdapter 的应用在上方分派
         _ => return Err(AppError::unsupported(app, "Prompts")),
     };
 

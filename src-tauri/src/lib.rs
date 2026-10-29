@@ -7,9 +7,6 @@ mod apps;
 mod auto_launch;
 #[cfg(test)]
 mod bindings;
-mod claude_desktop_config;
-mod claude_mcp;
-mod claude_plugin;
 mod codex_config;
 mod codex_history_migration;
 mod codex_state_db;
@@ -52,7 +49,10 @@ mod tray;
 mod usage_events;
 mod usage_script;
 
-// 配置读写代码已迁入 apps/<app>/config.rs；保留旧路径别名，调用方无需改动
+// 配置读写代码已迁入 apps/<app>/；保留旧路径别名，调用方无需改动
+use apps::claude::claude_json as claude_mcp;
+use apps::claude::plugin as claude_plugin;
+use apps::claude_desktop::config as claude_desktop_config;
 use apps::gemini::config as gemini_config;
 use apps::grok::config as grok_config;
 

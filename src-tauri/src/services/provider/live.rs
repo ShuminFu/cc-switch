@@ -2,174 +2,17 @@
 //!
 //! Handles reading and writing live configuration files for Claude, Codex, and Gemini.
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use toml_edit::{DocumentMut, Item, TableLike};
 
 use crate::app_config::AppType;
-use crate::apps::{json_deep_merge, json_deep_remove, json_is_subset};
 use crate::codex_config::{get_codex_auth_path, get_codex_config_path};
-use crate::config::{delete_file, get_claude_settings_path, read_json_file, write_json_file};
+use crate::config::{delete_file, write_json_file};
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 use crate::services::mcp::McpService;
 use crate::store::AppState;
-
-use super::normalize_claude_models_in_value;
-
-/// ChatGPT Codex catalogs gpt-5.6 at a 372K context window with a ~353K
-/// effective budget (openai/codex#31860), far below the 1.05M API spec.
-/// Declare the catalog window for both knobs: Claude Code's built-in output
-/// reserve and compact buffer already keep the actual compact trigger
-/// (~278K-339K) below the effective budget, so anything lower only wastes
-/// usable context.
-const CODEX_OAUTH_CLAUDE_MAX_CONTEXT_TOKENS: &str = "372000";
-const CODEX_OAUTH_CLAUDE_AUTO_COMPACT_WINDOW: &str = "372000";
-const KIMI_FOR_CODING_CONTEXT_TOKENS: &str = "262144";
-
-/// Model env keys Claude Code may route requests through. The defaults above
-/// are calibrated against gpt-5.6's Codex catalog, so every configured model
-/// must belong to that family before they are injected — gpt-5.5's upstream
-/// catalog oscillates between 272K and 372K and must not inherit them.
-const CODEX_OAUTH_MODEL_ENV_KEYS: [&str; 6] = [
-    "ANTHROPIC_MODEL",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL",
-    "CLAUDE_CODE_SUBAGENT_MODEL",
-];
-
-fn provider_env_targets_gpt56(provider_env: Option<&serde_json::Map<String, Value>>) -> bool {
-    let Some(env) = provider_env else {
-        return false;
-    };
-    let mut saw_model = false;
-    for key in CODEX_OAUTH_MODEL_ENV_KEYS {
-        let Some(value) = env.get(key) else {
-            continue;
-        };
-        let Some(model) = value.as_str() else {
-            return false;
-        };
-        let model = model.trim();
-        if model.is_empty() {
-            continue;
-        }
-        saw_model = true;
-        if !model.to_ascii_lowercase().starts_with("gpt-5.6") {
-            return false;
-        }
-    }
-    saw_model
-}
-
-fn is_kimi_for_coding_provider(provider: &Provider) -> bool {
-    provider
-        .settings_config
-        .pointer("/env/ANTHROPIC_BASE_URL")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .map(|url| url.trim_end_matches('/'))
-        == Some("https://api.kimi.com/coding")
-}
-
-/// Claude Code assigns unknown non-Claude model ids a 200K context window.
-/// Codex OAuth deliberately exposes GPT ids through Claude Code, so enrich the
-/// effective live settings for both newly-created and already-saved providers.
-/// Explicit user values always win; the defaults are only injected when every
-/// configured model targets gpt-5.6.
-fn apply_codex_oauth_claude_context_defaults(settings: &mut Value, provider: &Provider) {
-    if !provider.is_codex_oauth() {
-        return;
-    }
-
-    // Read provider-owned values before mutably borrowing the effective
-    // settings. This also deliberately prevents a legacy common-config
-    // snippet from overriding model-specific context limits.
-    let provider_env = provider
-        .settings_config
-        .get("env")
-        .and_then(Value::as_object);
-    let Some(root) = settings.as_object_mut() else {
-        return;
-    };
-    let env = root.entry("env".to_string()).or_insert_with(|| json!({}));
-    let Some(env) = env.as_object_mut() else {
-        log::warn!(
-            "Cannot apply Codex OAuth Claude context defaults for '{}': env is not an object",
-            provider.id
-        );
-        return;
-    };
-
-    let inject_defaults = provider_env_targets_gpt56(provider_env);
-    for (key, default_value) in [
-        (
-            "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-            CODEX_OAUTH_CLAUDE_MAX_CONTEXT_TOKENS,
-        ),
-        (
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-            CODEX_OAUTH_CLAUDE_AUTO_COMPACT_WINDOW,
-        ),
-    ] {
-        match provider_env.and_then(|provider_env| provider_env.get(key)) {
-            Some(value) => {
-                env.insert(key.to_string(), value.clone());
-            }
-            None if inject_defaults => {
-                env.insert(key.to_string(), Value::String(default_value.to_string()));
-            }
-            // 老模型不注入默认值，同时剥掉遗留共享片段可能带进来的值
-            None => {
-                env.remove(key);
-            }
-        }
-    }
-}
-
-/// Kimi For Coding serves a 256K window, but Claude Code caps unknown models at
-/// 200K unless `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is set — and that env is ignored
-/// for `claude-`-prefixed ids, so these defaults only bite when the provider also
-/// routes the endpoint's `kimi-for-coding` alias (the preset does). Keep the
-/// defaults provider-owned so an old shared snippet cannot override them.
-fn apply_kimi_for_coding_context_defaults(settings: &mut Value, provider: &Provider) {
-    if !is_kimi_for_coding_provider(provider) {
-        return;
-    }
-
-    let provider_env = provider
-        .settings_config
-        .get("env")
-        .and_then(Value::as_object);
-    let Some(env) = settings.get_mut("env").and_then(Value::as_object_mut) else {
-        return;
-    };
-
-    for key in [
-        "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-        "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-    ] {
-        let value = provider_env
-            .and_then(|provider_env| provider_env.get(key))
-            .cloned()
-            .unwrap_or_else(|| Value::String(KIMI_FOR_CODING_CONTEXT_TOKENS.to_string()));
-        env.insert(key.to_string(), value);
-    }
-}
-
-pub(crate) fn sanitize_claude_settings_for_live(settings: &Value) -> Value {
-    let mut v = settings.clone();
-    if let Some(obj) = v.as_object_mut() {
-        // Internal-only fields - never write to Claude Code settings.json
-        obj.remove("api_format");
-        obj.remove("apiFormat");
-        obj.remove("openrouter_compat_mode");
-        obj.remove("openrouterCompatMode");
-    }
-    v
-}
 
 pub(crate) fn provider_exists_in_live_config(
     app_type: &AppType,
@@ -397,10 +240,6 @@ fn settings_contain_common_config(app_type: &AppType, settings: &Value, snippet:
     }
 
     match app_type {
-        AppType::Claude => match serde_json::from_str::<Value>(trimmed) {
-            Ok(source) if source.is_object() => json_is_subset(settings, &source),
-            _ => false,
-        },
         AppType::Codex => {
             let config_toml = settings.get("config").and_then(Value::as_str).unwrap_or("");
             if config_toml.trim().is_empty() {
@@ -458,13 +297,6 @@ pub(crate) fn remove_common_config_from_settings(
     }
 
     match app_type {
-        AppType::Claude => {
-            let source = serde_json::from_str::<Value>(trimmed)
-                .map_err(|e| AppError::Message(format!("Invalid Claude common config: {e}")))?;
-            let mut result = settings.clone();
-            json_deep_remove(&mut result, &source);
-            Ok(result)
-        }
         AppType::Codex => {
             let mut result = settings.clone();
             let config_toml = settings.get("config").and_then(Value::as_str).unwrap_or("");
@@ -510,13 +342,6 @@ fn apply_common_config_to_settings(
     }
 
     match app_type {
-        AppType::Claude => {
-            let source = serde_json::from_str::<Value>(trimmed)
-                .map_err(|e| AppError::Message(format!("Invalid Claude common config: {e}")))?;
-            let mut result = settings.clone();
-            json_deep_merge(&mut result, &source);
-            Ok(result)
-        }
         AppType::Codex => {
             let mut result = settings.clone();
             let config_toml = settings.get("config").and_then(Value::as_str).unwrap_or("");
@@ -567,9 +392,8 @@ pub(crate) fn build_effective_settings_with_common_config(
         }
     }
 
-    if matches!(app_type, AppType::Claude) {
-        apply_codex_oauth_claude_context_defaults(&mut effective_settings, provider);
-        apply_kimi_for_coding_context_defaults(&mut effective_settings, provider);
+    if let Some(adapter) = crate::apps::adapter(app_type) {
+        adapter.apply_live_defaults(provider, &mut effective_settings);
     }
 
     Ok(effective_settings)
@@ -584,17 +408,16 @@ pub(crate) fn write_live_with_common_config(
     effective_provider.settings_config =
         build_effective_settings_with_common_config(db, app_type, provider)?;
 
-    if matches!(app_type, AppType::ClaudeDesktop) {
-        crate::claude_desktop_config::apply_provider(db, &effective_provider)?;
-        log::info!(
-            "Claude Desktop 3P profile '{}' written for provider '{}'",
-            crate::claude_desktop_config::PROFILE_ID,
-            effective_provider.id
-        );
-        return Ok(());
+    if let Some(adapter) = crate::apps::adapter(app_type) {
+        return adapter.write_effective_provider(db, &effective_provider);
     }
 
     write_live_snapshot(app_type, &effective_provider)
+}
+
+/// 代理接管期间该应用的 live 是否由接管备份托管（见 [`crate::apps::AppAdapter::takeover_uses_live_backup`]）
+pub(crate) fn takeover_uses_live_backup(app_type: &AppType) -> bool {
+    crate::apps::adapter(app_type).is_none_or(|adapter| adapter.takeover_uses_live_backup())
 }
 
 pub(crate) fn strip_common_config_from_live_settings(
@@ -639,80 +462,11 @@ pub(crate) fn strip_common_config_from_live_settings(
     restore_live_settings_for_provider_backfill(app_type, provider, backfill_settings)
 }
 
-/// 与 `apply_codex_oauth_claude_context_defaults` 严格对称：注入产物只活在
-/// live，切走回填时必须剥掉，否则程序默认值会固化成供应商的"用户显式值"，
-/// 之后调整默认值或更换模型时旧值永远压住新默认。仅当"注入会发生且注入的
-/// 就是这个值、且存储配置本来没有显式值"时才剥；用户显式存储的值和手改
-/// live 成其他数字的值都保留。
-fn strip_injected_codex_oauth_context_defaults(settings: &mut Value, provider: &Provider) {
-    if !provider.is_codex_oauth() {
-        return;
-    }
-    let provider_env = provider
-        .settings_config
-        .get("env")
-        .and_then(Value::as_object);
-    if !provider_env_targets_gpt56(provider_env) {
-        return;
-    }
-    let Some(env) = settings.get_mut("env").and_then(Value::as_object_mut) else {
-        return;
-    };
-    for (key, default_value) in [
-        (
-            "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-            CODEX_OAUTH_CLAUDE_MAX_CONTEXT_TOKENS,
-        ),
-        (
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-            CODEX_OAUTH_CLAUDE_AUTO_COMPACT_WINDOW,
-        ),
-    ] {
-        let stored_explicit = provider_env.is_some_and(|e| e.contains_key(key));
-        if stored_explicit {
-            continue;
-        }
-        if env.get(key).and_then(Value::as_str) == Some(default_value) {
-            env.remove(key);
-        }
-    }
-}
-
-fn strip_injected_kimi_for_coding_context_defaults(settings: &mut Value, provider: &Provider) {
-    if !is_kimi_for_coding_provider(provider) {
-        return;
-    }
-    let provider_env = provider
-        .settings_config
-        .get("env")
-        .and_then(Value::as_object);
-    let Some(env) = settings.get_mut("env").and_then(Value::as_object_mut) else {
-        return;
-    };
-    for key in [
-        "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
-        "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
-    ] {
-        if provider_env.is_some_and(|provider_env| provider_env.contains_key(key)) {
-            continue;
-        }
-        if env.get(key).and_then(Value::as_str) == Some(KIMI_FOR_CODING_CONTEXT_TOKENS) {
-            env.remove(key);
-        }
-    }
-}
-
 fn restore_live_settings_for_provider_backfill(
     app_type: &AppType,
     provider: &Provider,
     live_settings: Value,
 ) -> Value {
-    if matches!(app_type, AppType::Claude) {
-        let mut settings = live_settings;
-        strip_injected_codex_oauth_context_defaults(&mut settings, provider);
-        strip_injected_kimi_for_coding_context_defaults(&mut settings, provider);
-        return settings;
-    }
     if let Some(adapter) = crate::apps::adapter(app_type) {
         return adapter.backfill_live_settings(provider, live_settings);
     }
@@ -816,9 +570,6 @@ pub(crate) fn normalize_provider_common_config_for_storage(
 #[derive(Clone)]
 #[allow(dead_code)]
 pub(crate) enum LiveSnapshot {
-    Claude {
-        settings: Option<Value>,
-    },
     Codex {
         auth: Option<Value>,
         config: Option<String>,
@@ -829,14 +580,6 @@ impl LiveSnapshot {
     #[allow(dead_code)]
     pub(crate) fn restore(&self) -> Result<(), AppError> {
         match self {
-            LiveSnapshot::Claude { settings } => {
-                let path = get_claude_settings_path();
-                if let Some(value) = settings {
-                    write_json_file(&path, value)?;
-                } else if path.exists() {
-                    delete_file(&path)?;
-                }
-            }
             LiveSnapshot::Codex { auth, config } => {
                 let auth_path = get_codex_auth_path();
                 let config_path = get_codex_config_path();
@@ -864,18 +607,6 @@ pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Re
     }
 
     match app_type {
-        AppType::Claude => {
-            let path = get_claude_settings_path();
-            let settings = sanitize_claude_settings_for_live(&provider.settings_config);
-            write_json_file(&path, &settings)?;
-        }
-        AppType::ClaudeDesktop => {
-            return Err(AppError::localized(
-                "claude_desktop.live.requires_db_context",
-                "Claude Desktop 配置写入需要通过供应商切换流程执行",
-                "Claude Desktop configuration must be written through the provider switch flow",
-            ));
-        }
         AppType::Codex => {
             let obj = provider
                 .settings_config
@@ -1096,7 +827,7 @@ fn sync_current_provider_for_app_respecting_takeover(
     // activation window, backup/live placeholders are the authoritative signal
     // that normal provider sync must not rewrite the managed live file.
     if has_live_backup || live_taken_over {
-        if matches!(app_type, AppType::ClaudeDesktop) {
+        if !takeover_uses_live_backup(app_type) {
             write_live_with_common_config(state.db.as_ref(), app_type, provider)?;
         } else {
             futures::executor::block_on(
@@ -1172,22 +903,6 @@ pub fn read_live_settings(app_type: AppType) -> Result<Value, AppError> {
             }
             Ok(result)
         }
-        AppType::Claude => {
-            let path = get_claude_settings_path();
-            if !path.exists() {
-                return Err(AppError::localized(
-                    "claude.live.missing",
-                    "Claude Code 配置文件不存在",
-                    "Claude settings file is missing",
-                ));
-            }
-            read_json_file(&path)
-        }
-        AppType::ClaudeDesktop => Err(AppError::localized(
-            "claude_desktop.live.read_unsupported",
-            "Claude Desktop 3P 配置不支持作为通用 live 配置导入，请使用“从 Claude 导入兼容供应商”。",
-            "Claude Desktop 3P configuration cannot be imported as a generic live config. Use 'Import compatible providers from Claude' instead.",
-        )),
         AppType::OpenCode => {
             use crate::opencode_config::{get_opencode_config_path, read_opencode_config};
 
@@ -1276,26 +991,6 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
     } else {
         match app_type {
             AppType::Codex => crate::codex_config::read_codex_live_settings()?,
-            AppType::Claude => {
-                let settings_path = get_claude_settings_path();
-                if !settings_path.exists() {
-                    return Err(AppError::localized(
-                        "claude.live.missing",
-                        "Claude Code 配置文件不存在",
-                        "Claude settings file is missing",
-                    ));
-                }
-                let mut v = read_json_file::<Value>(&settings_path)?;
-                let _ = normalize_claude_models_in_value(&mut v);
-                v
-            }
-            AppType::ClaudeDesktop => {
-                return Err(AppError::localized(
-                "claude_desktop.import_unsupported",
-                "Claude Desktop 3P 配置不能通过通用导入读取，请使用“从 Claude 导入兼容供应商”。",
-                "Claude Desktop 3P config cannot be imported through the generic import flow. Use 'Import compatible providers from Claude' instead.",
-            ));
-            }
             // OpenCode, OpenClaw and Hermes use additive mode and are handled by early return above
             AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => {
                 unreachable!("additive mode apps are handled by early return")

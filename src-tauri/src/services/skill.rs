@@ -503,17 +503,11 @@ impl SkillService {
     /// Claude Desktop 没有 skills 目录，返回 `Ok(None)`。
     pub fn get_app_skills_dir(app: &AppType) -> Result<Option<PathBuf>> {
         if let Some(adapter) = crate::apps::adapter(app) {
-            return Ok(Some(adapter.skills_dir()));
+            return Ok(adapter.skills_dir());
         }
 
         // 目录覆盖：优先使用用户在 settings.json 中配置的 override 目录
         match app {
-            AppType::Claude => {
-                if let Some(custom) = crate::settings::get_claude_override_dir() {
-                    return Ok(Some(custom.join("skills")));
-                }
-            }
-            AppType::ClaudeDesktop => return Ok(None),
             AppType::Codex => {
                 if let Some(custom) = crate::settings::get_codex_override_dir() {
                     return Ok(Some(custom.join("skills")));
@@ -544,8 +538,6 @@ impl SkillService {
         let home = crate::config::get_home_dir();
 
         Ok(Some(match app {
-            AppType::Claude => home.join(".claude").join("skills"),
-            AppType::ClaudeDesktop => return Ok(None),
             AppType::Codex => home.join(".codex").join("skills"),
             AppType::OpenCode => home.join(".config").join("opencode").join("skills"),
             AppType::OpenClaw => home.join(".openclaw").join("skills"),

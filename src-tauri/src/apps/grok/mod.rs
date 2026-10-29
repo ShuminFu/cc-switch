@@ -20,19 +20,21 @@ use crate::provider::Provider;
 pub struct GrokAdapter;
 
 impl AppAdapter for GrokAdapter {
-    fn config_dir(&self) -> PathBuf {
-        get_grok_config_dir()
+    fn config_dir(&self) -> Result<PathBuf, AppError> {
+        Ok(get_grok_config_dir())
     }
 
-    fn prompt_file(&self) -> PathBuf {
-        self.config_dir().join("AGENTS.md")
+    fn prompt_file(&self) -> Option<PathBuf> {
+        Some(get_grok_config_dir().join("AGENTS.md"))
     }
 
-    fn skills_dir(&self) -> PathBuf {
+    fn skills_dir(&self) -> Option<PathBuf> {
         // 默认路径必须走 get_home_dir()（可被 CC_SWITCH_TEST_HOME 覆盖）
-        crate::settings::override_dir(&AppType::GrokBuild)
-            .unwrap_or_else(|| get_home_dir().join(".grok"))
-            .join("skills")
+        Some(
+            crate::settings::override_dir(&AppType::GrokBuild)
+                .unwrap_or_else(|| get_home_dir().join(".grok"))
+                .join("skills"),
+        )
     }
 
     fn read_live(&self) -> Result<Value, AppError> {

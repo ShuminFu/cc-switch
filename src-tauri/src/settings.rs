@@ -1113,15 +1113,6 @@ pub fn override_dir(app: &AppType) -> Option<PathBuf> {
     raw.map(|p| resolve_override_path(p))
 }
 
-pub fn get_claude_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .claude_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
 pub fn get_codex_override_dir() -> Option<PathBuf> {
     let store = settings_store();
     let settings = store.read().ok()?;
