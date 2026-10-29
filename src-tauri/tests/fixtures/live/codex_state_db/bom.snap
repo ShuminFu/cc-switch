@@ -2,10 +2,10 @@
 source: tests/config_writers.rs
 description: "codex_state_db writer, bom input"
 ---
-migrate: ok source_provider_ids=["aihubmix"] migrated_jsonl_files=0 migrated_state_rows=1 skipped_reason=None
+migrate: ok source_provider_ids=["aihubmix", "ccswitch"] migrated_jsonl_files=0 migrated_state_rows=2 skipped_reason=None
 === threads (target id "custom") ===
 t1-aihubmix | custom | migrated
-t2-ccswitch | ccswitch | migrated (legacy id)
+t2-ccswitch | custom | migrated (legacy id)
 t3-openai | openai | official, untouched
 t4-private | my-private-relay | unknown id, untouched
 t5-custom | custom | already custom
@@ -19,10 +19,11 @@ t5-custom | custom | already custom
     "completedAt": "<redacted>",
     "targetProviderId": "custom",
     "sourceProviderIds": [
-      "aihubmix"
+      "aihubmix",
+      "ccswitch"
     ],
     "migratedJsonlFiles": 0,
-    "migratedStateRows": 1,
+    "migratedStateRows": 2,
     "scannedHistoryFiles": true
   }
 }

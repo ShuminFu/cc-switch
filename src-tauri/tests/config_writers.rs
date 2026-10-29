@@ -608,12 +608,17 @@ fn codex_state_db_provider_bucket_migration() {
             &provider("aihubmix", "AIHubMix", fixture_json(W, "provider.json")),
         )
         .expect("save provider");
+        // A provider still on the legacy `ccswitch` bucket; the id is only
+        // trusted when the config also defines `[model_providers.ccswitch]`.
         db.save_provider(
             "codex",
             &provider(
                 "legacy",
                 "Legacy",
-                serde_json::json!({"auth": {}, "config": "model_provider = \"ccswitch\"\n"}),
+                serde_json::json!({
+                    "auth": {},
+                    "config": "model_provider = \"ccswitch\"\n\n[model_providers.ccswitch]\nname = \"CC Switch\"\nbase_url = \"https://legacy.example.com/v1\"\n"
+                }),
             ),
         )
         .expect("save legacy provider");

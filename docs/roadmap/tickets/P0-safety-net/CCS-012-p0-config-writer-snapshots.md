@@ -121,3 +121,16 @@ these notes.
   modes appear only in the Unix-only snapshot, MCP fixtures avoid the
   commands that get the Windows `cmd /c` wrapper). Still, the first Windows
   and macOS CI run should be watched.
+
+**Review.** All acceptance criteria were checked against the code. Every
+writer goes through its production entry point, the token stores go through
+their 0600 `OpenOptions` writers, and the testkit adds no behaviour. One gap
+was fixed: the Codex state DB fixture's legacy provider had no
+`[model_providers.ccswitch]` table, so the migration never trusted the legacy
+`ccswitch` id. The `t2-ccswitch` row, titled "migrated (legacy id)", stayed
+on `ccswitch`, and the legacy-bucket path was not covered. The fixture
+provider now defines that table, and the snapshots pin both `aihubmix` and
+`ccswitch` being rewritten to `custom` (`migratedStateRows: 2`). The
+re-verification passed: `--test config_writers` 3× with `CI=true` (16 passed,
+no `.snap.new`), `--lib` (2078 passed), and `cargo fmt` and `cargo clippy`
+(plain and `--all-targets`, `-D warnings`) were clean.
