@@ -14,7 +14,7 @@ use super::utils::{
 
 const PROVIDER_ID: &str = "hermes";
 
-fn get_hermes_db_path() -> PathBuf {
+pub(crate) fn get_hermes_db_path() -> PathBuf {
     get_hermes_dir().join("state.db")
 }
 
@@ -184,13 +184,16 @@ fn row_to_json(row: &rusqlite::Row, columns: &[String]) -> Value {
     Value::Object(map)
 }
 
-/// Load messages from the Hermes SQLite database.
-pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String> {
-    let (db_path, session_id) = parse_sqlite_source(source)
-        .ok_or_else(|| format!("Invalid SQLite source reference: {source}"))?;
-
+/// Load messages of one session from the Hermes SQLite database.
+///
+/// `db_path` must already be validated against the known Hermes database
+/// location by the caller (see `session_manager::load_messages`).
+pub fn load_messages_sqlite(
+    db_path: &Path,
+    session_id: &str,
+) -> Result<Vec<SessionMessage>, String> {
     let conn = Connection::open_with_flags(
-        &db_path,
+        db_path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(|e| format!("Failed to open Hermes database: {e}"))?;
@@ -204,7 +207,7 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
         .map_err(|e| format!("Failed to prepare messages query: {e}"))?;
 
     let rows = stmt
-        .query_map([session_id.as_str()], |row| {
+        .query_map([session_id], |row| {
             let role: String = row.get(0)?;
             let content: String = row.get(1)?;
             let ts: Option<i64> = row.get(2).ok();
@@ -230,27 +233,12 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
 }
 
 /// Delete a session from the Hermes SQLite database.
-pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, String> {
-    let (db_path, ref_session_id) = parse_sqlite_source(source)
-        .ok_or_else(|| format!("Invalid SQLite source reference: {source}"))?;
-    let db_path = db_path
-        .canonicalize()
-        .map_err(|e| format!("Failed to canonicalize Hermes database path: {e}"))?;
-    let expected_db_path = get_hermes_db_path()
-        .canonicalize()
-        .map_err(|e| format!("Failed to canonicalize expected Hermes database path: {e}"))?;
-
-    if ref_session_id != session_id {
-        return Err(format!(
-            "Hermes SQLite session ID mismatch: expected {session_id}, found {ref_session_id}"
-        ));
-    }
-    if db_path != expected_db_path {
-        return Err("SQLite path does not match expected Hermes database".to_string());
-    }
-
+///
+/// `db_path` must already be validated against the known Hermes database
+/// location by the caller (see `session_manager::delete_session`).
+pub fn delete_session_sqlite(db_path: &Path, session_id: &str) -> Result<bool, String> {
     let conn =
-        Connection::open(&db_path).map_err(|e| format!("Failed to open Hermes database: {e}"))?;
+        Connection::open(db_path).map_err(|e| format!("Failed to open Hermes database: {e}"))?;
 
     let tx = conn
         .unchecked_transaction()
@@ -269,7 +257,7 @@ pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, Str
     Ok(deleted > 0)
 }
 
-fn parse_sqlite_source(source: &str) -> Option<(PathBuf, String)> {
+pub(crate) fn parse_sqlite_source(source: &str) -> Option<(PathBuf, String)> {
     let rest = source.strip_prefix("sqlite:")?;
     let hash_pos = rest.rfind('#')?;
     let db_path = PathBuf::from(&rest[..hash_pos]);

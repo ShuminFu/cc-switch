@@ -191,25 +191,12 @@ fn resume_target_from_sessions(
 }
 
 pub fn load_messages(provider_id: &str, source_path: &str) -> Result<Vec<SessionMessage>, String> {
-    // SQLite sessions use a "sqlite:" prefixed source_path
-    if provider_id == "opencode" && source_path.starts_with("sqlite:") {
-        return opencode::load_messages_sqlite(source_path);
-    }
-    if provider_id == "hermes" && source_path.starts_with("sqlite:") {
-        return hermes::load_messages_sqlite(source_path);
+    if let Some(expected_db) = sqlite_db_path(provider_id, source_path) {
+        return load_messages_sqlite_with_db(provider_id, source_path, &expected_db);
     }
 
-    let path = Path::new(source_path);
-    match provider_id {
-        "codex" => codex::load_messages(path),
-        "claude" => claude::load_messages(path),
-        "opencode" => opencode::load_messages(path),
-        "openclaw" => openclaw::load_messages(path),
-        "gemini" => gemini::load_messages(path),
-        "grokbuild" => grokbuild::load_messages(path),
-        "hermes" => hermes::load_messages(path),
-        _ => Err(format!("Unsupported provider: {provider_id}")),
-    }
+    let roots = provider_roots(provider_id)?;
+    load_messages_with_roots(provider_id, Path::new(source_path), &roots)
 }
 
 pub fn delete_session(
@@ -217,12 +204,8 @@ pub fn delete_session(
     session_id: &str,
     source_path: &str,
 ) -> Result<bool, String> {
-    // SQLite sessions bypass the file-based deletion path
-    if provider_id == "opencode" && source_path.starts_with("sqlite:") {
-        return opencode::delete_session_sqlite(session_id, source_path);
-    }
-    if provider_id == "hermes" && source_path.starts_with("sqlite:") {
-        return hermes::delete_session_sqlite(session_id, source_path);
+    if let Some(expected_db) = sqlite_db_path(provider_id, source_path) {
+        return delete_session_sqlite_with_db(provider_id, session_id, source_path, &expected_db);
     }
 
     let roots = provider_roots(provider_id)?;
@@ -239,12 +222,52 @@ pub fn delete_sessions(requests: &[DeleteSessionRequest]) -> Vec<DeleteSessionOu
     })
 }
 
+fn load_messages_with_roots(
+    provider_id: &str,
+    source_path: &Path,
+    roots: &[PathBuf],
+) -> Result<Vec<SessionMessage>, String> {
+    let (_, validated_source) = validate_source_in_roots(provider_id, source_path, roots)?;
+    let path = validated_source.as_path();
+    match provider_id {
+        "codex" => codex::load_messages(path),
+        "claude" => claude::load_messages(path),
+        "opencode" => opencode::load_messages(path),
+        "openclaw" => openclaw::load_messages(path),
+        "gemini" => gemini::load_messages(path),
+        "grokbuild" => grokbuild::load_messages(path),
+        "hermes" => hermes::load_messages(path),
+        _ => Err(format!("Unsupported provider: {provider_id}")),
+    }
+}
+
 fn delete_session_with_roots(
     provider_id: &str,
     session_id: &str,
     source_path: &Path,
     roots: &[PathBuf],
 ) -> Result<bool, String> {
+    let (validated_root, validated_source) =
+        validate_source_in_roots(provider_id, source_path, roots)?;
+    match provider_id {
+        "codex" => codex::delete_session(&validated_root, &validated_source, session_id),
+        "claude" => claude::delete_session(&validated_root, &validated_source, session_id),
+        "opencode" => opencode::delete_session(&validated_root, &validated_source, session_id),
+        "openclaw" => openclaw::delete_session(&validated_root, &validated_source, session_id),
+        "gemini" => gemini::delete_session(&validated_root, &validated_source, session_id),
+        "grokbuild" => grokbuild::delete_session(&validated_root, &validated_source, session_id),
+        "hermes" => hermes::delete_session(&validated_root, &validated_source, session_id),
+        _ => Err(format!("Unsupported provider: {provider_id}")),
+    }
+}
+
+/// 校验来自 webview 的会话源路径必须位于该 provider 的某个会话根目录之下。
+/// 返回规范化后的 `(root, source)`，调用方只应使用规范化路径继续读写。
+fn validate_source_in_roots(
+    provider_id: &str,
+    source_path: &Path,
+    roots: &[PathBuf],
+) -> Result<(PathBuf, PathBuf), String> {
     let validated_source = canonicalize_existing_path(source_path, "session source")?;
 
     let mut saw_existing_root = false;
@@ -256,22 +279,7 @@ fn delete_session_with_roots(
         saw_existing_root = true;
         let validated_root = canonicalize_existing_path(root, "session root")?;
         if validated_source.starts_with(&validated_root) {
-            return match provider_id {
-                "codex" => codex::delete_session(&validated_root, &validated_source, session_id),
-                "claude" => claude::delete_session(&validated_root, &validated_source, session_id),
-                "opencode" => {
-                    opencode::delete_session(&validated_root, &validated_source, session_id)
-                }
-                "openclaw" => {
-                    openclaw::delete_session(&validated_root, &validated_source, session_id)
-                }
-                "gemini" => gemini::delete_session(&validated_root, &validated_source, session_id),
-                "grokbuild" => {
-                    grokbuild::delete_session(&validated_root, &validated_source, session_id)
-                }
-                "hermes" => hermes::delete_session(&validated_root, &validated_source, session_id),
-                _ => Err(format!("Unsupported provider: {provider_id}")),
-            };
+            return Ok((validated_root, validated_source));
         }
     }
 
@@ -289,6 +297,77 @@ fn delete_session_with_roots(
         "Session source path is outside provider roots: {}",
         source_path.display()
     ))
+}
+
+/// `sqlite:` 来源只对使用数据库存储的 provider 有效，返回其已知的数据库路径。
+fn sqlite_db_path(provider_id: &str, source_path: &str) -> Option<PathBuf> {
+    if !source_path.starts_with("sqlite:") {
+        return None;
+    }
+    match provider_id {
+        "opencode" => Some(opencode::get_opencode_db_path()),
+        "hermes" => Some(hermes::get_hermes_db_path()),
+        _ => None,
+    }
+}
+
+/// 解析 `sqlite:` 来源并要求其中的数据库就是该 provider 的已知数据库，
+/// 返回规范化的数据库路径与会话 id。
+fn validate_sqlite_source(
+    provider_id: &str,
+    source_path: &str,
+    expected_db: &Path,
+) -> Result<(PathBuf, String), String> {
+    let parsed = match provider_id {
+        "opencode" => opencode::parse_sqlite_source(source_path),
+        "hermes" => hermes::parse_sqlite_source(source_path),
+        _ => return Err(format!("Unsupported provider: {provider_id}")),
+    };
+    let (db_path, session_id) =
+        parsed.ok_or_else(|| format!("Invalid SQLite source reference: {source_path}"))?;
+
+    let validated_db = canonicalize_existing_path(&db_path, "SQLite database")?;
+    let validated_expected = canonicalize_existing_path(expected_db, "expected SQLite database")?;
+    if validated_db != validated_expected {
+        return Err(format!(
+            "SQLite source is outside the known {provider_id} database: {}",
+            db_path.display()
+        ));
+    }
+
+    Ok((validated_db, session_id))
+}
+
+fn load_messages_sqlite_with_db(
+    provider_id: &str,
+    source_path: &str,
+    expected_db: &Path,
+) -> Result<Vec<SessionMessage>, String> {
+    let (db_path, session_id) = validate_sqlite_source(provider_id, source_path, expected_db)?;
+    match provider_id {
+        "opencode" => opencode::load_messages_sqlite(&db_path, &session_id),
+        "hermes" => hermes::load_messages_sqlite(&db_path, &session_id),
+        _ => Err(format!("Unsupported provider: {provider_id}")),
+    }
+}
+
+fn delete_session_sqlite_with_db(
+    provider_id: &str,
+    session_id: &str,
+    source_path: &str,
+    expected_db: &Path,
+) -> Result<bool, String> {
+    let (db_path, ref_session_id) = validate_sqlite_source(provider_id, source_path, expected_db)?;
+    if ref_session_id != session_id {
+        return Err(format!(
+            "SQLite session ID mismatch: expected {session_id}, found {ref_session_id}"
+        ));
+    }
+    match provider_id {
+        "opencode" => opencode::delete_session_sqlite(&db_path, session_id),
+        "hermes" => hermes::delete_session_sqlite(&db_path, session_id),
+        _ => Err(format!("Unsupported provider: {provider_id}")),
+    }
 }
 
 fn provider_roots(provider_id: &str) -> Result<Vec<PathBuf>, String> {
@@ -412,6 +491,172 @@ mod tests {
                 .expect_err("expected missing source path to fail");
 
         assert!(err.contains("session source not found"));
+    }
+
+    #[test]
+    fn load_messages_rejects_jsonl_outside_provider_roots() {
+        let root = tempdir().expect("root");
+        let outside = tempdir().expect("outside");
+        let source = outside.path().join("session.jsonl");
+        write_codex_session(&source, "outside-session");
+
+        let err = load_messages_with_roots("codex", &source, &[root.path().to_path_buf()])
+            .expect_err("expected outside-root path to be rejected");
+
+        assert!(err.contains("outside provider roots"), "{err}");
+    }
+
+    #[test]
+    fn load_messages_reads_jsonl_inside_provider_root() {
+        let root = tempdir().expect("root");
+        let source = root.path().join("session.jsonl");
+        write_codex_session(&source, "inside-session");
+
+        let messages = load_messages_with_roots("codex", &source, &[root.path().to_path_buf()])
+            .expect("load session inside root");
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "hello");
+    }
+
+    #[test]
+    fn load_messages_rejects_parent_traversal_out_of_root() {
+        let base = tempdir().expect("base");
+        let root = base.path().join("sessions");
+        std::fs::create_dir_all(&root).expect("create root");
+        let source = base.path().join("secret.jsonl");
+        write_codex_session(&source, "secret");
+
+        let traversal = root.join("..").join("secret.jsonl");
+        let err = load_messages_with_roots("codex", &traversal, &[root])
+            .expect_err("expected traversal to be rejected");
+
+        assert!(err.contains("outside provider roots"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_messages_rejects_symlink_escaping_root() {
+        let root = tempdir().expect("root");
+        let outside = tempdir().expect("outside");
+        let target = outside.path().join("session.jsonl");
+        write_codex_session(&target, "linked");
+        let link = root.path().join("link.jsonl");
+        std::os::unix::fs::symlink(&target, &link).expect("create symlink");
+
+        let err = load_messages_with_roots("codex", &link, &[root.path().to_path_buf()])
+            .expect_err("expected symlink escaping root to be rejected");
+
+        assert!(err.contains("outside provider roots"), "{err}");
+    }
+
+    fn create_hermes_db(path: &Path, session_id: &str) {
+        let conn = rusqlite::Connection::open(path).expect("open sqlite db");
+        conn.execute_batch(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY);
+             CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, created_at INTEGER);",
+        )
+        .expect("create schema");
+        conn.execute("INSERT INTO sessions (id) VALUES (?1)", [session_id])
+            .expect("insert session");
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content, created_at) VALUES (?1, 'user', 'hi', 1000)",
+            [session_id],
+        )
+        .expect("insert message");
+    }
+
+    #[test]
+    fn sqlite_load_reads_known_database() {
+        let known = tempdir().expect("known");
+        let db = known.path().join("state.db");
+        create_hermes_db(&db, "s1");
+
+        let source = format!("sqlite:{}#s1", db.display());
+        let messages =
+            load_messages_sqlite_with_db("hermes", &source, &db).expect("load known database");
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "hi");
+    }
+
+    #[test]
+    fn sqlite_load_rejects_database_outside_known_location() {
+        let known = tempdir().expect("known");
+        let outside = tempdir().expect("outside");
+        let expected = known.path().join("state.db");
+        create_hermes_db(&expected, "s1");
+        let foreign = outside.path().join("state.db");
+        create_hermes_db(&foreign, "s1");
+
+        let source = format!("sqlite:{}#s1", foreign.display());
+        let err = load_messages_sqlite_with_db("hermes", &source, &expected)
+            .expect_err("expected foreign database to be rejected");
+        assert!(err.contains("outside the known hermes database"), "{err}");
+
+        let opencode_source = format!("sqlite:{}:ses_1", foreign.display());
+        let err = load_messages_sqlite_with_db("opencode", &opencode_source, &expected)
+            .expect_err("expected foreign opencode database to be rejected");
+        assert!(err.contains("outside the known opencode database"), "{err}");
+    }
+
+    #[test]
+    fn sqlite_load_rejects_missing_database() {
+        let known = tempdir().expect("known");
+        let expected = known.path().join("state.db");
+        create_hermes_db(&expected, "s1");
+        let missing = known.path().join("missing.db");
+
+        let source = format!("sqlite:{}#s1", missing.display());
+        let err = load_messages_sqlite_with_db("hermes", &source, &expected)
+            .expect_err("expected missing database to be rejected");
+        assert!(err.contains("SQLite database not found"), "{err}");
+    }
+
+    #[test]
+    fn sqlite_delete_rejects_database_outside_known_location() {
+        let known = tempdir().expect("known");
+        let outside = tempdir().expect("outside");
+        let expected = known.path().join("state.db");
+        create_hermes_db(&expected, "s1");
+        let foreign = outside.path().join("state.db");
+        create_hermes_db(&foreign, "s1");
+
+        let source = format!("sqlite:{}#s1", foreign.display());
+        let err = delete_session_sqlite_with_db("hermes", "s1", &source, &expected)
+            .expect_err("expected foreign database to be rejected");
+        assert!(err.contains("outside the known hermes database"), "{err}");
+
+        let conn = rusqlite::Connection::open(&foreign).expect("reopen foreign db");
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .expect("count sessions");
+        assert_eq!(remaining, 1);
+    }
+
+    #[test]
+    fn sqlite_delete_removes_session_from_known_database() {
+        let known = tempdir().expect("known");
+        let db = known.path().join("state.db");
+        create_hermes_db(&db, "s1");
+
+        let source = format!("sqlite:{}#s1", db.display());
+        let err = delete_session_sqlite_with_db("hermes", "s2", &source, &db)
+            .expect_err("expected session id mismatch to be rejected");
+        assert!(err.contains("mismatch"), "{err}");
+
+        let deleted =
+            delete_session_sqlite_with_db("hermes", "s1", &source, &db).expect("delete session");
+        assert!(deleted);
+    }
+
+    #[test]
+    fn sqlite_prefix_is_not_a_database_source_for_file_providers() {
+        assert!(sqlite_db_path("codex", "sqlite:/tmp/x.db#s1").is_none());
+        assert!(sqlite_db_path("hermes", "/tmp/x.jsonl").is_none());
+        assert!(sqlite_db_path("hermes", "sqlite:/tmp/x.db#s1").is_some());
+        assert!(sqlite_db_path("opencode", "sqlite:/tmp/x.db:ses_1").is_some());
     }
 
     #[test]
