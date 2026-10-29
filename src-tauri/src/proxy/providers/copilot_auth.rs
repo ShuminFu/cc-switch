@@ -773,14 +773,24 @@ impl CopilotAuthManager {
         };
 
         // 刷新 Copilot token
-        self.fetch_copilot_token_with_github_token(&github_token, account_id, &domain)
+        let copilot_token = self
+            .request_copilot_token(&github_token, account_id, &domain)
             .await?;
 
-        // 返回新 token
-        let tokens = self.copilot_tokens.read().await;
-        tokens.get(account_id).map(|t| t.token.clone()).ok_or(
-            CopilotAuthError::CopilotTokenFetchFailed("刷新后仍无令牌".to_string()),
-        )
+        // 刷新期间不再持有外层 guard，UI 可能已移除该账号或登出；
+        // 此时不能回填缓存，否则代理会继续使用已注销账号的 token。
+        // 持有 accounts 读锁写入缓存，保证与 remove_account / clear_auth 的清理有序。
+        let accounts = self.accounts.read().await;
+        if accounts.get(account_id).map(|a| a.github_token.as_str()) != Some(github_token.as_str())
+        {
+            return Err(CopilotAuthError::AccountNotFound(account_id.to_string()));
+        }
+        let token = copilot_token.token.clone();
+        self.copilot_tokens
+            .write()
+            .await
+            .insert(account_id.to_string(), copilot_token);
+        Ok(token)
     }
 
     /// 获取有效的 Copilot Token（向后兼容：使用第一个账号）
@@ -1335,13 +1345,30 @@ impl CopilotAuthManager {
         Ok(user)
     }
 
-    /// 使用 GitHub token 获取 Copilot Token
+    /// 使用 GitHub token 获取 Copilot Token 并写入缓存
     async fn fetch_copilot_token_with_github_token(
         &self,
         github_token: &str,
         account_id: &str,
         domain: &str,
     ) -> Result<(), CopilotAuthError> {
+        let copilot_token = self
+            .request_copilot_token(github_token, account_id, domain)
+            .await?;
+
+        let mut tokens = self.copilot_tokens.write().await;
+        tokens.insert(account_id.to_string(), copilot_token);
+
+        Ok(())
+    }
+
+    /// 使用 GitHub token 向 GitHub 换取 Copilot Token（不写入缓存）
+    async fn request_copilot_token(
+        &self,
+        github_token: &str,
+        account_id: &str,
+        domain: &str,
+    ) -> Result<CopilotToken, CopilotAuthError> {
         log::debug!("[CopilotAuth] 获取账号 {account_id} 的 Copilot Token (domain: {domain})");
 
         #[cfg(test)]
@@ -1388,15 +1415,10 @@ impl CopilotAuthManager {
             token_response.expires_at
         );
 
-        let copilot_token = CopilotToken {
+        Ok(CopilotToken {
             token: token_response.token,
             expires_at: token_response.expires_at,
-        };
-
-        let mut tokens = self.copilot_tokens.write().await;
-        tokens.insert(account_id.to_string(), copilot_token);
-
-        Ok(())
+        })
     }
 
     // ==================== 存储和迁移 ====================
@@ -2207,5 +2229,53 @@ mod tests {
         drop(write_guard);
         assert!(!refresh.is_finished(), "refresh should still be in flight");
         assert_eq!(refresh.await.unwrap().unwrap(), "tok_2");
+    }
+
+    /// 回归测试：刷新进行中移除账号，刷新结果不得回填缓存（否则代理会继续使用已移除账号的 token）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_remove_account_during_refresh_does_not_repopulate_cache() {
+        use crate::commands::CopilotAuthState;
+        use std::time::Duration;
+
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let base = spawn_delayed_token_mock(Duration::from_millis(500), notify.clone()).await;
+
+        let temp_dir = tempdir().unwrap();
+        let mut manager = CopilotAuthManager::new(temp_dir.path().to_path_buf());
+        manager.api_base_override = Some(base);
+        manager.accounts.write().await.insert(
+            "1".to_string(),
+            GitHubAccountData {
+                github_token: "gho_test".to_string(),
+                user: GitHubUser {
+                    login: "tester".to_string(),
+                    id: 1,
+                    avatar_url: None,
+                },
+                authenticated_at: 1700000000,
+                github_domain: DEFAULT_GITHUB_DOMAIN.to_string(),
+            },
+        );
+        let tokens = manager.copilot_tokens.clone();
+        let state = Arc::new(CopilotAuthState(Arc::new(RwLock::new(manager))));
+
+        let refresh = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let manager = state.manager().await;
+                manager.get_valid_token_for_account("1").await
+            })
+        };
+        notify.notified().await;
+        state.0.read().await.remove_account("1").await.unwrap();
+
+        assert!(matches!(
+            refresh.await.unwrap(),
+            Err(CopilotAuthError::AccountNotFound(_))
+        ));
+        assert!(
+            !tokens.read().await.contains_key("1"),
+            "removed account's token must not be cached"
+        );
     }
 }

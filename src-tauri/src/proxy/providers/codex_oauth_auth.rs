@@ -553,6 +553,13 @@ impl CodexOAuthManager {
         let expires_at_ms = compute_expires_at_ms(new_tokens.expires_in);
 
         {
+            // 刷新期间不再持有外层 guard，UI 可能已移除该账号或登出；
+            // 此时不能回填缓存，否则代理会继续使用已注销账号的 token。
+            // 持有 accounts 读锁写入缓存，保证与 remove_account / clear_auth 的清理有序。
+            let accounts = self.accounts.read().await;
+            if !accounts.contains_key(account_id) {
+                return Err(CodexOAuthError::AccountNotFound(account_id.to_string()));
+            }
             let mut tokens = self.access_tokens.write().await;
             tokens.insert(
                 account_id.to_string(),
