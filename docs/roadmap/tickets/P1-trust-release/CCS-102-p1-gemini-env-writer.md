@@ -48,3 +48,9 @@ p0-config-writer-snapshots
 - `INSTA_UPDATE=always cargo test --test config_writers`: 17 passed; snapshot diff reviewed.
 - `cargo fmt`: clean. `cargo clippy --all-targets -- -D warnings`: clean.
 - `cargo test --no-fail-fast` (full suite): 2454 passed, 0 failed (lib: 2288 passed, 2 ignored).
+
+**Review**
+- Keeping unknown keys on write leaked variables across providers: before a switch the live `.env` is backfilled into the current provider, so every valid key already lives in a provider config. A key kept by the writer then went into the next provider's `.env`, and the next backfill saved it into that provider in the DB (this could include another provider's secret). It also meant a custom variable deleted in the editor never left `.env`, and a rollback snapshot could not remove keys added by the failed write. The writer now treats the map as the full set of variables. Keys in the map are updated in place or appended. Every other valid key is removed. Comments, blank lines, unparseable lines and lines with invalid key names are kept. `MANAGED_ENV_KEYS` is gone. The P0 snapshots no longer keep `FUTURE_GEMINI_VAR`, but the user comment still survives.
+- Configs saved by the old parser can hold values with their quotes (`"sk-abc"`). The new quoting wrote these as `'"sk-abc"'`, so Gemini CLI would read the key with the quotes and fail to authenticate. A value fully wrapped in one pair of matching quotes is now written as-is, and it reads back unquoted.
+- New and changed tests: `test_merge_env_file_keeps_comments_and_drops_stale_keys`, `test_env_value_legacy_quoted_written_verbatim`, and `test_env_value_quoting_round_trips` (literal fully-quoted values replaced with unbalanced ones).
+- Re-verified: `cargo fmt` and `cargo clippy --all-targets -- -D warnings` are clean. `cargo test --test config_writers` gives 17 passed. Full `cargo test --no-fail-fast` gives 2455 passed, 0 failed (lib: 2289 passed, 2 ignored).

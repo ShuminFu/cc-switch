@@ -21,18 +21,6 @@ pub fn get_gemini_env_path() -> PathBuf {
     get_gemini_dir().join(".env")
 }
 
-/// cc-switch 自己管理的 Gemini 环境变量
-///
-/// 写入时这些键完全由传入的 map 决定：不在 map 中的会从 `.env` 中删除。
-/// 其他键（用户手写的变量）在 map 未提及时原样保留。
-const MANAGED_ENV_KEYS: &[&str] = &[
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GOOGLE_GEMINI_BASE_URL",
-    "GEMINI_BASE_URL",
-    "GEMINI_MODEL",
-];
-
 /// 环境变量名是否合法：`[A-Za-z_][A-Za-z0-9_]*`
 fn is_valid_env_key(key: &str) -> bool {
     let mut chars = key.chars();
@@ -165,6 +153,8 @@ pub fn parse_env_file_strict(content: &str) -> Result<HashMap<String, String>, A
 ///
 /// 拒绝非法 key 以及包含 `\r`、`\n`、`\0` 的值（否则可注入额外的行）。
 /// 首尾有空白、含 `#` 或以引号开头的值会加引号，保证读回时与原值一致。
+/// 已被一对匹配引号包裹的值（旧版解析器会把引号存进配置）原样写出，
+/// 避免再套一层引号导致 Gemini CLI 读到带引号的密钥。
 fn encode_env_entry(key: &str, value: &str) -> Result<String, AppError> {
     if !is_valid_env_key(key) {
         return Err(AppError::localized(
@@ -179,6 +169,10 @@ fn encode_env_entry(key: &str, value: &str) -> Result<String, AppError> {
             format!("Gemini 环境变量 {key} 的值不能包含换行符或 NUL 字符"),
             format!("Gemini env variable {key} must not contain line breaks or NUL characters"),
         ));
+    }
+
+    if is_legacy_quoted_value(value) {
+        return Ok(format!("{key}={value}"));
     }
 
     let needs_quotes =
@@ -199,11 +193,27 @@ fn encode_env_entry(key: &str, value: &str) -> Result<String, AppError> {
     ))
 }
 
+/// 值是否已被一对匹配引号完整包裹，且原样写出后读回为去引号的内容
+fn is_legacy_quoted_value(value: &str) -> bool {
+    let inner = unquote_env_value(value);
+    if inner.len() == value.len() {
+        return false;
+    }
+    if value.starts_with('"') {
+        !inner.contains(['"', '\\'])
+    } else {
+        !inner.contains('\'')
+    }
+}
+
 /// 将键值对合并进现有 .env 内容
 ///
 /// - 注释、空行和无法解析的行原样保留
 /// - map 中的键就地更新（同名重复行只保留第一处）
-/// - 不在 map 中的 cc-switch 管理键（见 `MANAGED_ENV_KEYS`）被删除，其余键保留
+/// - 不在 map 中的合法键被删除：读取 live 时所有合法键都会进入供应商配置
+///   （切换前会回填），map 即完整的变量集合；保留它们会把上一个供应商的
+///   自定义变量带入下一个供应商，并让编辑器里删除的变量无法生效
+/// - 键名不合法的行（解析器不会读取）原样保留
 /// - map 中的新键按键名排序追加到末尾
 ///
 /// 任何非法的键或值都会返回错误，不会产生部分写入的内容。
@@ -225,7 +235,7 @@ pub fn merge_env_file(existing: &str, map: &HashMap<String, String>) -> Result<S
             if written.insert(key.to_string()) {
                 lines.push(entry.clone());
             }
-        } else if !MANAGED_ENV_KEYS.contains(&key) {
+        } else if !is_valid_env_key(key) {
             lines.push(line.to_string());
         }
     }
@@ -570,17 +580,21 @@ GEMINI_MODEL=gemini-3.5-flash
     }
 
     #[test]
-    fn test_merge_env_file_keeps_comments_and_unknown_keys() {
+    fn test_merge_env_file_keeps_comments_and_drops_stale_keys() {
         let existing = "\u{feff}# written by hand\n\
                         GEMINI_API_KEY=old-key\n\
                         \n\
                         export CUSTOM_VAR=\"keep me\"\n\
+                        PREV_PROVIDER_VAR=secret\n\
                         GEMINI_MODEL=old-model\n\
                         GOOGLE_GEMINI_BASE_URL=https://old.example.com\n\
+                        BAD-KEY=untouched\n\
                         not a valid line";
 
+        // map 是完整的变量集合（切换前 live 已回填进供应商配置）
         let mut map = HashMap::new();
         map.insert("GEMINI_API_KEY".to_string(), "new-key".to_string());
+        map.insert("CUSTOM_VAR".to_string(), "keep me".to_string());
         map.insert(
             "GOOGLE_GEMINI_BASE_URL".to_string(),
             "https://new.example.com".to_string(),
@@ -593,21 +607,39 @@ GEMINI_MODEL=gemini-3.5-flash
             "# written by hand\n\
              GEMINI_API_KEY=new-key\n\
              \n\
-             export CUSTOM_VAR=\"keep me\"\n\
+             CUSTOM_VAR=keep me\n\
              GOOGLE_GEMINI_BASE_URL=https://new.example.com\n\
+             BAD-KEY=untouched\n\
              not a valid line\n\
              ZZ_NEW='value # with hash'"
         );
 
-        // 读回：map 中的值原样还原，用户变量保留，未提及的管理键（GEMINI_MODEL）被删除
+        // 读回：map 中的值原样还原，不在 map 中的键（上一个供应商的变量）被删除
         let parsed = parse_env_file(&merged);
         assert_eq!(parsed["GEMINI_API_KEY"], "new-key");
         assert_eq!(parsed["ZZ_NEW"], "value # with hash");
         assert_eq!(parsed["CUSTOM_VAR"], "keep me");
         assert!(!parsed.contains_key("GEMINI_MODEL"));
+        assert!(!parsed.contains_key("PREV_PROVIDER_VAR"));
 
         // 再次写入同一 map 结果不变
         assert_eq!(merge_env_file(&merged, &map).unwrap(), merged);
+    }
+
+    #[test]
+    fn test_env_value_legacy_quoted_written_verbatim() {
+        // 旧版解析器会把引号存进配置；原样写出，读回为去引号的值
+        for (stored, expected) in [
+            ("\"sk-abc\"", "sk-abc"),
+            ("'sk-abc'", "sk-abc"),
+            ("\"a # b\"", "a # b"),
+        ] {
+            let mut map = HashMap::new();
+            map.insert("GEMINI_API_KEY".to_string(), stored.to_string());
+            let content = serialize_env_file(&map).unwrap();
+            assert_eq!(content, format!("GEMINI_API_KEY={stored}"));
+            assert_eq!(parse_env_file(&content)["GEMINI_API_KEY"], expected);
+        }
     }
 
     #[test]
@@ -616,8 +648,8 @@ GEMINI_MODEL=gemini-3.5-flash
             "plain",
             " leading",
             "trailing ",
-            "\"quoted\"",
-            "'single'",
+            "\"unbalanced",
+            "'x",
             "it's # here",
             "a=b=c",
             "",

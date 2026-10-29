@@ -7,7 +7,6 @@ write: ok
 # Gemini env written by the user
 GEMINI_API_KEY=sk-provider-new
 GOOGLE_GEMINI_BASE_URL=https://relay.example.com
-FUTURE_GEMINI_VAR="quoted value"
 GEMINI_MODEL=gemini-2.5-pro
 <no newline at end of file>
 === .gemini/settings.json ===
