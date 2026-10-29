@@ -77,3 +77,13 @@ changes cascade through one invalidation helper.
 - `pnpm test:unit`: 111 files / 1192 tests pass. Before the change it was
   110 / 1183; the difference is the new providerKeys suite.
 - No files under `src-tauri/` were touched, so the Rust suite is unaffected.
+
+**Review.** An independent check confirmed both acceptance criteria. The grep
+matches only `keys.ts`, and `pnpm typecheck`, `pnpm lint`, `pnpm format:check`
+and `pnpm test:unit` (111 files / 1192 tests) all pass. It also confirmed that
+every removed invalidation block maps to an entry in `invalidateProviderGraph`.
+One gap came from the new `STALE_TIME.short` on the provider list. The
+`provider-switched` listener in `App.tsx` only refetched the active app, so a
+tray switch on another app no longer marked that app's cached list stale.
+Opening it again within 10 s could then show the old current provider. The
+listener now invalidates `providerKeys.list(event.appType)` for non-active apps.

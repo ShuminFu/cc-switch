@@ -338,6 +338,11 @@ function App() {
           async (event: ProviderSwitchEvent) => {
             if (event.appType === activeApp) {
               await refetch();
+            } else {
+              // 供应商列表带 staleTime，非当前应用（如托盘切换）需显式标记过期
+              await queryClient.invalidateQueries({
+                queryKey: providerKeys.list(event.appType),
+              });
             }
           },
         );
@@ -356,7 +361,7 @@ function App() {
       active = false;
       unsubscribe?.();
     };
-  }, [activeApp, refetch]);
+  }, [activeApp, refetch, queryClient]);
 
   useTauriEvent("universal-provider-synced", async () => {
     await queryClient.invalidateQueries({ queryKey: providerKeys.all });
