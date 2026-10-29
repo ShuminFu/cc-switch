@@ -130,3 +130,33 @@ fn deeplink_import_with_unlisted_env_keys_does_not_auto_switch() {
         first_id
     );
 }
+
+#[test]
+fn deeplink_import_with_unlisted_env_keys_does_not_become_first_current_provider() {
+    let _test_env = TestEnv::new();
+
+    let db = Arc::new(Database::memory().expect("create memory db"));
+    let state = AppState::new(db.clone());
+
+    // No current provider yet: the import must not take the "first provider
+    // becomes current" path and write the unlisted key to the live config.
+    let request = parse_deeplink_url(&claude_deeplink_with_env(
+        "Flagged",
+        r#"{"SOME_OTHER_VAR":"1"}"#,
+    ))
+    .expect("parse deeplink url");
+    let id = import_provider_from_deeplink(&state, request).expect("import flagged provider");
+
+    assert!(db
+        .get_all_providers("claude")
+        .expect("get providers")
+        .contains_key(&id));
+    assert_eq!(
+        ProviderService::current(&state, AppType::Claude).unwrap(),
+        ""
+    );
+    assert!(
+        !cc_switch_lib::get_claude_settings_path().exists(),
+        "live Claude settings must not be written"
+    );
+}

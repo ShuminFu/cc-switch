@@ -109,8 +109,19 @@ pub fn import_provider_from_deeplink(
 
     let provider_id = provider.id.clone();
 
+    // Env keys outside the allow-list block every implicit activation: neither
+    // enabled=true nor "first provider becomes current" may write them to the
+    // live config before the user has switched to the provider explicitly.
+    let unreviewed_keys = unlisted_claude_env_keys(&app_type, &merged_request);
+
     // Use ProviderService to add the provider
-    ProviderService::add(state, app_type.clone(), provider, true)?;
+    ProviderService::add_with_activation(
+        state,
+        app_type.clone(),
+        provider,
+        true,
+        unreviewed_keys.is_empty(),
+    )?;
 
     // Add extra endpoints as custom endpoints (skip first one as it's the primary)
     for ep in all_endpoints.iter().skip(1) {
@@ -132,7 +143,6 @@ pub fn import_provider_from_deeplink(
     // automatically: those keys reach hooks and child processes, so the user
     // has to enable the provider explicitly after reviewing them.
     if merged_request.enabled.unwrap_or(false) {
-        let unreviewed_keys = unlisted_claude_env_keys(&app_type, &merged_request);
         if unreviewed_keys.is_empty() {
             ProviderService::switch(state, app_type.clone(), &provider_id)?;
             log::info!("Provider '{provider_id}' set as current for {app_type:?}");

@@ -2095,6 +2095,19 @@ impl ProviderService {
         provider: Provider,
         add_to_live: bool,
     ) -> Result<bool, AppError> {
+        Self::add_with_activation(state, app_type, provider, add_to_live, true)
+    }
+
+    /// Add a new provider. With `activate_if_none = false`, a switch-mode app
+    /// without a current provider is left without one instead of making the
+    /// new provider current and writing it to the live config.
+    pub fn add_with_activation(
+        state: &AppState,
+        app_type: AppType,
+        provider: Provider,
+        add_to_live: bool,
+        activate_if_none: bool,
+    ) -> Result<bool, AppError> {
         let mut provider = provider;
         // Normalize Claude model keys
         Self::normalize_provider_if_claude(&app_type, &mut provider);
@@ -2127,7 +2140,7 @@ impl ProviderService {
 
         // For other apps: Check if sync is needed (if this is current provider, or no current provider)
         let current = state.db.get_current_provider(app_type.as_str())?;
-        if current.is_none() {
+        if current.is_none() && activate_if_none {
             // No current provider, set as current and sync
             state
                 .db

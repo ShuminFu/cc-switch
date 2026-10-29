@@ -28,7 +28,9 @@ const ALLOWED_ENV_KEYS = new Set([
 const ALLOWED_ENV_PREFIXES = ["ANTHROPIC_", "CLAUDE_CODE_", "DISABLE_"];
 
 export function classifyClaudeEnvKey(key: string): ClaudeEnvKeyClass {
-  const upper = key.trim().toUpperCase();
+  // ASCII-only upper-casing, like Rust's `to_ascii_uppercase`: `toUpperCase`
+  // folds e.g. "ſ" to "S", which would hide a key the backend keeps as unlisted.
+  const upper = key.trim().replace(/[a-z]/g, (c) => c.toUpperCase());
   if (
     DENIED_ENV_KEYS.has(upper) ||
     DENIED_ENV_PREFIXES.some((p) => upper.startsWith(p))
