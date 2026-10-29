@@ -75,7 +75,24 @@ export default tseslint.config(
               message:
                 "Call the backend through src/lib/api (or src/shared/bindings.ts) instead of importing invoke directly.",
             },
+            {
+              // The package root re-exports core, so `core.invoke` is the same call.
+              name: "@tauri-apps/api",
+              importNames: ["core"],
+              message:
+                "Call the backend through src/lib/api (or src/shared/bindings.ts) instead of importing invoke directly.",
+            },
           ],
+        },
+      ],
+      // no-restricted-imports does not see dynamic import().
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "ImportExpression[source.value=/^@tauri-apps\\/api(\\/core)?$/]",
+          message:
+            "Call the backend through src/lib/api (or src/shared/bindings.ts) instead of importing invoke directly.",
         },
       ],
     },
@@ -85,6 +102,7 @@ export default tseslint.config(
     files: ["src/lib/api/**/*.{ts,tsx}", "src/shared/bindings.ts"],
     rules: {
       "no-restricted-imports": "off",
+      "no-restricted-syntax": "off",
     },
   },
   {

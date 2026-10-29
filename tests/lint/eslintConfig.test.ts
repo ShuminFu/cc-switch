@@ -138,6 +138,30 @@ describe("eslint config", { timeout: 30_000 }, () => {
     );
   });
 
+  it("reports invoke reached through the package root or a dynamic import", async () => {
+    const result = await lint(
+      [
+        'import { core } from "@tauri-apps/api";',
+        'export const a = () => core.invoke("get_settings");',
+        "export const b = async () =>",
+        '  (await import("@tauri-apps/api/core")).invoke("get_settings");',
+        "",
+      ].join("\n"),
+      "src/hooks/__lintFixture__.ts",
+    );
+
+    const errors = result.messages.filter(
+      (m) =>
+        m.ruleId === "no-restricted-imports" ||
+        m.ruleId === "no-restricted-syntax",
+    );
+    expect(errors.map((m) => m.ruleId).sort()).toEqual([
+      "no-restricted-imports",
+      "no-restricted-syntax",
+    ]);
+    expect(errors.every((m) => m.severity === 2)).toBe(true);
+  });
+
   it("allows invoke inside the API layer and other core imports elsewhere", async () => {
     const apiLayer = await lint(
       [
@@ -219,7 +243,10 @@ describe("eslint config", { timeout: 30_000 }, () => {
 
   it("never adds files to the raw invoke baseline", () => {
     const files = Object.entries(readSuppressions())
-      .filter(([, rules]) => "no-restricted-imports" in rules)
+      .filter(
+        ([, rules]) =>
+          "no-restricted-imports" in rules || "no-restricted-syntax" in rules,
+      )
       .map(([file]) => file);
     for (const file of files) {
       expect(RAW_INVOKE_BASELINE, `${file} newly imports invoke`).toContain(
