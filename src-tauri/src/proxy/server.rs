@@ -249,15 +249,17 @@ impl ProxyServer {
     }
 
     pub async fn stop(&self) -> Result<(), ProxyError> {
-        // 1. 发送关闭信号
-        if let Some(tx) = self.shutdown_tx.write().await.take() {
+        // 1. 发送关闭信号（单独语句取出，锁不跨越后续等待）
+        let shutdown_tx = self.shutdown_tx.write().await.take();
+        if let Some(tx) = shutdown_tx {
             let _ = tx.send(());
         } else {
             return Err(ProxyError::NotRunning);
         }
 
         // 2. 等待服务器任务结束（带 5 秒超时保护）
-        if let Some(handle) = self.server_handle.write().await.take() {
+        let server_handle = self.server_handle.write().await.take();
+        if let Some(handle) = server_handle {
             match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
                 Ok(Ok(())) => {
                     log::info!("[{}] 代理服务器已完全停止", log_srv::STOPPED);

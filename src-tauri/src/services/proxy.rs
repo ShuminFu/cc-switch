@@ -61,9 +61,15 @@ enum ClaudeTakeoverAuthPolicy {
 pub struct ProxyService {
     db: Arc<Database>,
     server: Arc<RwLock<Option<ProxyServer>>>,
+    /// 串行化 start/stop/重启等生命周期操作，避免并发启动绑定多个端口；
+    /// `server` 读写锁只在取放实例时短暂持有，不跨越 stop() 等待。
+    lifecycle: Arc<tokio::sync::Mutex<()>>,
     /// AppHandle，用于传递给 ProxyServer 以支持故障转移时的 UI 更新
     app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
     switch_locks: SwitchLockManager,
+    /// 测试用：stop() 停止服务器后额外等待的毫秒数，用于模拟慢速停止
+    #[cfg(test)]
+    stop_delay_ms_for_test: Arc<std::sync::atomic::AtomicU64>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -76,8 +82,11 @@ impl ProxyService {
         Self {
             db,
             server: Arc::new(RwLock::new(None)),
+            lifecycle: Arc::new(tokio::sync::Mutex::new(())),
             app_handle: Arc::new(RwLock::new(None)),
             switch_locks: SwitchLockManager::new(),
+            #[cfg(test)]
+            stop_delay_ms_for_test: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -519,6 +528,12 @@ impl ProxyService {
 
     /// 启动代理服务器
     pub async fn start(&self) -> Result<ProxyServerInfo, String> {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.start_locked().await
+    }
+
+    /// 启动代理服务器（调用方须已持有 `lifecycle` 锁）
+    async fn start_locked(&self) -> Result<ProxyServerInfo, String> {
         // 1. 启动时自动设置 proxy_enabled = true
         let mut global_config = self
             .db
@@ -551,6 +566,10 @@ impl ProxyService {
                 started_at: chrono::Utc::now().to_rfc3339(),
             });
         }
+
+        // 测试用：在"未运行"检查与绑定之间让出调度，使并发启动的竞态稳定复现
+        #[cfg(test)]
+        tokio::task::yield_now().await;
 
         // 4. 创建并启动服务器
         let app_handle = self.app_handle.read().await.clone();
@@ -1294,11 +1313,30 @@ impl ProxyService {
 
     /// 停止代理服务器
     pub async fn stop(&self) -> Result<(), String> {
-        if let Some(server) = self.server.write().await.take() {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.stop_locked().await
+    }
+
+    /// 停止代理服务器（调用方须已持有 `lifecycle` 锁）
+    async fn stop_locked(&self) -> Result<(), String> {
+        // 单独语句取出实例：写锁在此处释放，不跨越 stop() 的等待与数据库写入，
+        // 避免阻塞 is_running / get_status 轮询。
+        let server = self.server.write().await.take();
+        if let Some(server) = server {
             server
                 .stop()
                 .await
                 .map_err(|e| format!("停止代理服务器失败: {e}"))?;
+
+            #[cfg(test)]
+            {
+                let delay_ms = self
+                    .stop_delay_ms_for_test
+                    .load(std::sync::atomic::Ordering::SeqCst);
+                if delay_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                }
+            }
 
             // 停止时设置 proxy_enabled = false
             let mut global_config = self
@@ -1325,8 +1363,10 @@ impl ProxyService {
     ///
     /// 会清除 settings 表中的代理状态，下次启动不会自动恢复。
     pub async fn stop_with_restore(&self) -> Result<(), String> {
+        let _lifecycle = self.lifecycle.lock().await;
+
         // 1. 停止代理服务器（即使未运行也继续执行恢复逻辑）
-        if let Err(e) = self.stop().await {
+        if let Err(e) = self.stop_locked().await {
             log::warn!("停止代理服务器失败（将继续恢复 Live 配置）: {e}");
         }
 
@@ -1372,8 +1412,10 @@ impl ProxyService {
     ///
     /// 用于程序正常退出时，保留代理状态以便下次启动时自动恢复
     pub async fn stop_with_restore_keep_state(&self) -> Result<(), String> {
+        let _lifecycle = self.lifecycle.lock().await;
+
         // 1. 停止代理服务器（即使未运行也继续执行恢复逻辑）
-        if let Err(e) = self.stop().await {
+        if let Err(e) = self.stop_locked().await {
             log::warn!("停止代理服务器失败（将继续恢复 Live 配置）: {e}");
         }
 
@@ -3101,6 +3143,8 @@ impl ProxyService {
 
     /// 更新代理配置
     pub async fn update_config(&self, config: &ProxyConfig) -> Result<(), String> {
+        let _lifecycle = self.lifecycle.lock().await;
+
         // 记录旧配置用于判定是否需要重启
         let previous = self
             .db
@@ -3118,8 +3162,7 @@ impl ProxyService {
             .map_err(|e| format!("保存代理配置失败: {e}"))?;
 
         // 检查服务器当前状态
-        let mut server_guard = self.server.write().await;
-        if server_guard.is_none() {
+        if !self.is_running().await {
             return Ok(());
         }
 
@@ -3128,7 +3171,9 @@ impl ProxyService {
             || new_config.listen_port != previous.listen_port;
 
         if require_restart {
-            if let Some(server) = server_guard.take() {
+            // 单独语句取出实例，避免写锁跨越 stop() 的等待
+            let old_server = self.server.write().await.take();
+            if let Some(server) = old_server {
                 server
                     .stop()
                     .await
@@ -3149,11 +3194,10 @@ impl ProxyService {
                 return Err(e);
             }
 
-            *server_guard = Some(new_server);
+            *self.server.write().await = Some(new_server);
             log::info!("代理配置已更新，服务器已自动重启应用最新配置");
 
             // 如果当前存在任意 app 的 Live 接管，需要同步更新 Live 中的代理地址（否则客户端仍指向旧端口）
-            drop(server_guard);
             if let Ok(takeover) = self.get_takeover_status().await {
                 let mut updated_any = false;
 
@@ -3184,7 +3228,7 @@ impl ProxyService {
             }
 
             return Ok(());
-        } else if let Some(server) = server_guard.as_ref() {
+        } else if let Some(server) = self.server.read().await.as_ref() {
             server.apply_runtime_config(&new_config).await;
             log::info!("代理配置已实时应用，无需重启代理服务器");
         }
@@ -3739,6 +3783,72 @@ mod tests {
                 .is_none(),
             "non-managed providers should retain the legacy fallback behavior"
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn concurrent_start_with_ephemeral_port_binds_a_single_server() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        use_ephemeral_proxy_port(&db).await;
+        let service = ProxyService::new(db.clone());
+
+        // start() 在"未运行"检查后会 yield_now，两次启动在无锁时都会通过检查并各自绑定端口
+        let (first, second) = tokio::join!(service.start(), service.start());
+        let first = first.expect("first start");
+        let second = second.expect("second start");
+
+        assert_eq!(
+            first.port, second.port,
+            "both starts must report one server"
+        );
+        assert_ne!(first.port, 0);
+        let persisted = db.get_proxy_config().await.expect("get proxy config");
+        assert_eq!(persisted.listen_port, first.port);
+        let status = service.get_status().await.expect("get status");
+        assert_eq!(status.port, first.port);
+        tokio::net::TcpStream::connect(("127.0.0.1", first.port))
+            .await
+            .expect("reported port must accept connections");
+
+        service.stop().await.expect("stop proxy");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn is_running_is_not_blocked_by_slow_stop() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        use_ephemeral_proxy_port(&db).await;
+        let service = ProxyService::new(db.clone());
+        service.start().await.expect("start proxy");
+
+        service
+            .stop_delay_ms_for_test
+            .store(1_000, std::sync::atomic::Ordering::SeqCst);
+        let stopping = {
+            let service = service.clone();
+            tokio::spawn(async move { service.stop().await })
+        };
+        // 等待 stop() 进入慢速阶段
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!stopping.is_finished(), "stop should still be in progress");
+
+        let running =
+            tokio::time::timeout(std::time::Duration::from_millis(100), service.is_running())
+                .await
+                .expect("is_running must not wait for stop() to finish");
+        assert!(!running);
+        tokio::time::timeout(std::time::Duration::from_millis(100), service.get_status())
+            .await
+            .expect("get_status must not wait for stop() to finish")
+            .expect("get status");
+
+        stopping.await.expect("join stop task").expect("stop proxy");
     }
 
     #[tokio::test]
