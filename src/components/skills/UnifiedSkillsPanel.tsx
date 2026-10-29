@@ -785,15 +785,22 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
   };
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-background rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl max-h-[80vh] flex flex-col">
-          <h2 className="text-lg font-semibold mb-2">{t("skills.import")}</h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            {t("skills.importDescription")}
-          </p>
+    <Dialog
+      open
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && !isImporting) onClose();
+      }}
+    >
+      <DialogContent className="max-w-lg max-h-[80vh]" zIndex="alert">
+        <TooltipProvider delayDuration={300}>
+          <DialogHeader>
+            <DialogTitle>{t("skills.import")}</DialogTitle>
+            <DialogDescription>
+              {t("skills.importDescription")}
+            </DialogDescription>
+          </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto space-y-2 mb-4">
+          <div className="flex-1 overflow-y-auto space-y-2 px-6 py-4">
             {skills.map((skill) => (
               <div
                 key={skill.directory}
@@ -856,7 +863,7 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
             ))}
           </div>
 
-          <div className="flex justify-end gap-3">
+          <DialogFooter>
             <Button variant="outline" onClick={onClose} disabled={isImporting}>
               {t("common.cancel")}
             </Button>
@@ -866,10 +873,10 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
             >
               {t("skills.importSelected", { count: selected.size })}
             </Button>
-          </div>
-        </div>
-      </div>
-    </TooltipProvider>
+          </DialogFooter>
+        </TooltipProvider>
+      </DialogContent>
+    </Dialog>
   );
 };
 

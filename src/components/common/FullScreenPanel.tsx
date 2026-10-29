@@ -1,5 +1,5 @@
 import React from "react";
-import { createPortal } from "react-dom";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
@@ -52,119 +52,121 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
     };
   }, [isOpen]);
 
-  // ESC 键关闭面板
-  const onCloseRef = React.useRef(onClose);
+  // ESC 由 Radix Dialog 处理：仅最上层的 Radix 层（Select/Dropdown/嵌套 Dialog）
+  // 会响应 ESC，并在关闭时 preventDefault，避免触发 App.tsx 的全局返回监听。
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    if (isTextEditableTarget(event.target)) {
+      // 让输入框自己处理 ESC（比如清空、失焦等）
+      event.preventDefault();
+    }
+  };
 
-  React.useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  React.useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        // 子组件（例如 Radix 的 Select/Dialog/Dropdown）如果已经消费了 ESC，就不要再关闭整个面板
-        if (event.defaultPrevented) {
-          return;
-        }
-
-        if (isTextEditableTarget(event.target)) {
-          return; // 让输入框自己处理 ESC（比如清空、失焦等）
-        }
-
-        event.stopPropagation(); // 阻止事件继续冒泡到 window，避免触发 App.tsx 的全局监听
-        onCloseRef.current();
-      }
-    };
-
-    // 使用冒泡阶段监听，让子组件（如 Radix UI）优先处理 ESC
-    window.addEventListener("keydown", handleKeyDown, false);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, false);
-    };
-  }, [isOpen]);
-
-  return createPortal(
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-[60] flex flex-col"
-          style={{ backgroundColor: "hsl(var(--background))" }}
-        >
-          {/* Drag region - match App.tsx. Linux 上 DRAG_BAR_HEIGHT=0，
-              直接跳过整个元素；macOS 保留 28px 拖拽占位。 */}
-          {DRAG_BAR_HEIGHT > 0 && (
-            <div
-              data-tauri-drag-region
-              style={
-                {
-                  WebkitAppRegion: "drag",
-                  height: DRAG_BAR_HEIGHT,
-                } as React.CSSProperties
-              }
-            />
-          )}
-
-          {/* Header - match App.tsx */}
-          <div
-            className="flex-shrink-0 flex items-center"
-            {...DRAG_REGION_ATTR}
-            style={
-              {
-                ...DRAG_REGION_STYLE,
-                backgroundColor: "hsl(var(--background))",
-                height: HEADER_HEIGHT,
-              } as React.CSSProperties
-            }
-          >
-            <div
-              className="px-6 w-full flex items-center gap-4"
-              {...DRAG_REGION_ATTR}
-              style={{ ...DRAG_REGION_STYLE } as React.CSSProperties}
+  return (
+    <DialogPrimitive.Root
+      open={isOpen}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+    >
+      <AnimatePresence>
+        {isOpen && (
+          <DialogPrimitive.Portal forceMount>
+            <DialogPrimitive.Content
+              forceMount
+              asChild
+              aria-describedby={undefined}
+              onEscapeKeyDown={handleEscapeKeyDown}
+              onInteractOutside={(event) => {
+                // 全屏面板没有“外部”区域；忽略 toast 等外部层的点击
+                event.preventDefault();
+              }}
             >
-              <Button
-                aria-label={t("common.back")}
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={onClose}
-                className="rounded-lg select-none"
-                style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="fixed inset-0 z-[60] flex flex-col focus:outline-none"
+                style={{ backgroundColor: "hsl(var(--background))" }}
               >
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-              <h2 className="text-lg font-semibold text-foreground select-none">
-                {title}
-              </h2>
-            </div>
-          </div>
+                {/* Drag region - match App.tsx. Linux 上 DRAG_BAR_HEIGHT=0，
+              直接跳过整个元素；macOS 保留 28px 拖拽占位。 */}
+                {DRAG_BAR_HEIGHT > 0 && (
+                  <div
+                    data-tauri-drag-region
+                    style={
+                      {
+                        WebkitAppRegion: "drag",
+                        height: DRAG_BAR_HEIGHT,
+                      } as React.CSSProperties
+                    }
+                  />
+                )}
 
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto scroll-overlay">
-            <div className={cn("px-6 py-6 space-y-6 w-full", contentClassName)}>
-              {children}
-            </div>
-          </div>
+                {/* Header - match App.tsx */}
+                <div
+                  className="flex-shrink-0 flex items-center"
+                  {...DRAG_REGION_ATTR}
+                  style={
+                    {
+                      ...DRAG_REGION_STYLE,
+                      backgroundColor: "hsl(var(--background))",
+                      height: HEADER_HEIGHT,
+                    } as React.CSSProperties
+                  }
+                >
+                  <div
+                    className="px-6 w-full flex items-center gap-4"
+                    {...DRAG_REGION_ATTR}
+                    style={{ ...DRAG_REGION_STYLE } as React.CSSProperties}
+                  >
+                    <Button
+                      aria-label={t("common.back")}
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={onClose}
+                      className="rounded-lg select-none"
+                      style={
+                        { WebkitAppRegion: "no-drag" } as React.CSSProperties
+                      }
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <DialogPrimitive.Title className="text-lg font-semibold text-foreground select-none">
+                      {title}
+                    </DialogPrimitive.Title>
+                  </div>
+                </div>
 
-          {/* Footer */}
-          {footer && (
-            <div
-              className="flex-shrink-0 py-4 border-t border-border-default"
-              style={{ backgroundColor: "hsl(var(--background))" }}
-            >
-              <div className="px-6 flex items-center justify-end gap-3">
-                {footer}
-              </div>
-            </div>
-          )}
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body,
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto scroll-overlay">
+                  <div
+                    className={cn(
+                      "px-6 py-6 space-y-6 w-full",
+                      contentClassName,
+                    )}
+                  >
+                    {children}
+                  </div>
+                </div>
+
+                {/* Footer */}
+                {footer && (
+                  <div
+                    className="flex-shrink-0 py-4 border-t border-border-default"
+                    style={{ backgroundColor: "hsl(var(--background))" }}
+                  >
+                    <div className="px-6 flex items-center justify-end gap-3">
+                      {footer}
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            </DialogPrimitive.Content>
+          </DialogPrimitive.Portal>
+        )}
+      </AnimatePresence>
+    </DialogPrimitive.Root>
   );
 };

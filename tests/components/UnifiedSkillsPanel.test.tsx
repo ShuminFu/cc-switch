@@ -1,5 +1,11 @@
 import { createRef } from "react";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  act,
+  fireEvent,
+} from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import UnifiedSkillsPanel, {
@@ -129,5 +135,31 @@ describe("UnifiedSkillsPanel", () => {
         },
       ]);
     });
+  });
+
+  it("renders the import dialog as a Radix dialog that closes on Escape", async () => {
+    const ref = createRef<UnifiedSkillsPanelHandle>();
+
+    render(
+      <UnifiedSkillsPanel
+        ref={ref}
+        onOpenDiscovery={() => {}}
+        currentApp="claude"
+      />,
+    );
+
+    await act(async () => {
+      await ref.current?.openImport();
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "skills.import" });
+    expect(dialog).toHaveAccessibleDescription("skills.importDescription");
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(importSkillsMock).not.toHaveBeenCalled();
   });
 });
