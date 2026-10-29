@@ -1,0 +1,70 @@
+{
+  "version": 2,
+  "claude": {
+    "providers": {
+      "claude-a": {
+        "id": "claude-a",
+        "name": "Claude A",
+        "settingsConfig": {
+          "env": { "ANTHROPIC_BASE_URL": "https://a.example.com" }
+        },
+        "createdAt": 1717200000000
+      },
+      "claude-b": {
+        "id": "claude-b",
+        "name": "Claude B",
+        "settingsConfig": {
+          "env": { "ANTHROPIC_BASE_URL": "https://b.example.com" }
+        },
+        "createdAt": 1717200001000
+      }
+    },
+    "current": "claude-b"
+  },
+  "codex": {
+    "providers": {
+      "codex-a": {
+        "id": "codex-a",
+        "name": "Codex A",
+        "settingsConfig": {
+          "auth": { "OPENAI_API_KEY": "sk-codex-a" },
+          "config": ""
+        }
+      }
+    },
+    "current": "codex-a"
+  },
+  "mcp": {
+    "claude": {
+      "servers": {
+        "shared": {
+          "id": "shared",
+          "name": "Shared",
+          "enabled": true,
+          "server": { "type": "stdio", "command": "npx", "args": ["shared-mcp"] }
+        },
+        "claude-only": {
+          "id": "claude-only",
+          "enabled": true,
+          "server": { "type": "http", "url": "https://mcp.example.com/claude" }
+        }
+      }
+    },
+    "codex": {
+      "servers": {
+        "shared": {
+          "id": "shared",
+          "name": "Shared",
+          "enabled": true,
+          "server": { "type": "stdio", "command": "npx", "args": ["shared-mcp"] }
+        },
+        "codex-only": {
+          "id": "codex-only",
+          "enabled": true,
+          "server": { "type": "stdio", "command": "codex-mcp" }
+        }
+      }
+    }
+  },
+  "claude_common_config_snippet": "{\"permissions\":{\"allow\":[\"Bash\"]}}"
+}

@@ -1,0 +1,143 @@
+{
+  "version": 2,
+  "claude": {
+    "providers": {
+      "claude-official": {
+        "id": "claude-official",
+        "name": "Claude Official",
+        "settingsConfig": { "env": {} },
+        "websiteUrl": "https://www.anthropic.com/claude-code",
+        "category": "official",
+        "createdAt": 1735689600000,
+        "sortIndex": 0
+      },
+      "claude-relay": {
+        "id": "claude-relay",
+        "name": "Claude Relay",
+        "settingsConfig": {
+          "env": {
+            "ANTHROPIC_BASE_URL": "https://relay.example.com",
+            "ANTHROPIC_AUTH_TOKEN": "sk-claude-fixture"
+          }
+        },
+        "websiteUrl": "https://relay.example.com",
+        "category": "third_party",
+        "createdAt": 1735689601000,
+        "sortIndex": 1,
+        "notes": "legacy fixture",
+        "meta": {
+          "custom_endpoints": {
+            "https://relay-2.example.com": {
+              "url": "https://relay-2.example.com",
+              "addedAt": 1735689602000
+            },
+            "https://relay-3.example.com": {
+              "url": "https://relay-3.example.com",
+              "addedAt": 1735689603000,
+              "lastUsed": 1735689604000
+            }
+          }
+        }
+      }
+    },
+    "current": "claude-relay"
+  },
+  "codex": {
+    "providers": {
+      "codex-relay": {
+        "id": "codex-relay",
+        "name": "Codex Relay",
+        "settingsConfig": {
+          "auth": { "OPENAI_API_KEY": "sk-codex-fixture" },
+          "config": "model_provider = \"relay\"\n\n[model_providers.relay]\nbase_url = \"https://codex.example.com/v1\"\n"
+        },
+        "category": "third_party",
+        "createdAt": 1735689605000
+      }
+    },
+    "current": "codex-relay"
+  },
+  "gemini": {
+    "providers": {
+      "gemini-main": {
+        "id": "gemini-main",
+        "name": "Gemini Main",
+        "settingsConfig": { "env": { "GEMINI_API_KEY": "gm-fixture" } }
+      }
+    },
+    "current": "gemini-main"
+  },
+  "mcp": {
+    "servers": {
+      "fetch": {
+        "id": "fetch",
+        "name": "fetch",
+        "server": {
+          "type": "stdio",
+          "command": "uvx",
+          "args": ["mcp-server-fetch"]
+        },
+        "apps": { "claude": true, "codex": true, "gemini": false },
+        "description": "Fetch MCP",
+        "homepage": "https://example.com/fetch",
+        "tags": ["web"]
+      },
+      "filesystem": {
+        "id": "filesystem",
+        "name": "Filesystem",
+        "server": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+        },
+        "apps": { "claude": true, "codex": false, "gemini": true }
+      }
+    }
+  },
+  "prompts": {
+    "claude": {
+      "prompts": {
+        "rules": {
+          "id": "rules",
+          "name": "House rules",
+          "content": "# Rules\nBe concise.",
+          "enabled": true,
+          "createdAt": 1735689600000,
+          "updatedAt": 1735689600000
+        }
+      }
+    },
+    "codex": {
+      "prompts": {
+        "codex-rules": {
+          "id": "codex-rules",
+          "name": "Codex rules",
+          "content": "Prefer small diffs.",
+          "description": "disabled prompt",
+          "enabled": false
+        }
+      }
+    },
+    "gemini": { "prompts": {} }
+  },
+  "skills": {
+    "skills": {
+      "claude:fixture-skill": {
+        "installed": true,
+        "installedAt": "2025-01-01T00:00:00Z"
+      }
+    },
+    "repos": [
+      {
+        "owner": "fixture-org",
+        "name": "fixture-skills",
+        "branch": "dev",
+        "enabled": false
+      }
+    ]
+  },
+  "common_config_snippets": {
+    "claude": "{\"includeCoAuthoredBy\":false}",
+    "codex": "model_reasoning_effort = \"high\""
+  }
+}
