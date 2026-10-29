@@ -3,13 +3,13 @@
 //! 提供使用量数据的聚合查询功能
 
 use crate::app_config::InputSemantics;
-use crate::database::{lock_conn, Database};
+use crate::database::{local_midnight_timestamp, lock_conn, Database};
 use crate::error::AppError;
 use crate::proxy::usage::calculator::ModelPricing;
 use crate::services::sql_helpers::{
     fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL,
 };
-use chrono::{Local, NaiveDate, TimeZone, Timelike};
+use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -508,6 +508,20 @@ fn local_day_start_rfc3339(day: NaiveDate) -> String {
 
     local_midnight.to_rfc3339()
 }
+
+/// 额度检查的窗口用量：明细按 `created_at` 时间戳 `[?3, ?4)`，
+/// 汇总按本地日期字符串 `[?5, ?6)`。
+const PROVIDER_LIMIT_WINDOW_SQL: &str = "SELECT COALESCE(SUM(cost), 0) FROM (
+    SELECT CAST(total_cost_usd AS REAL) as cost
+    FROM proxy_request_logs
+    WHERE provider_id = ?1 AND app_type = ?2
+      AND created_at >= ?3 AND created_at < ?4
+    UNION ALL
+    SELECT CAST(total_cost_usd AS REAL)
+    FROM usage_daily_rollups
+    WHERE provider_id = ?1 AND app_type = ?2
+      AND date >= ?5 AND date < ?6
+)";
 
 impl Database {
     /// 获取使用量汇总
@@ -1604,19 +1618,49 @@ impl Database {
         provider_id: &str,
         app_type: &str,
     ) -> Result<ProviderLimitStatus, AppError> {
+        self.check_provider_limits_at(provider_id, app_type, Local::now())
+    }
+
+    /// 以 `now` 所在的本地日 / 本地月为窗口检查限额。
+    ///
+    /// 窗口在 Rust 中按本地午夜计算为半开区间 `[start, end)`，SQL 只做
+    /// `created_at` 范围比较，可走 `idx_request_logs_provider_created_at` 索引；
+    /// 任何数据库错误都会向上返回，而不是被当作 $0 用量。
+    pub(crate) fn check_provider_limits_at(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        now: chrono::DateTime<Local>,
+    ) -> Result<ProviderLimitStatus, AppError> {
+        let today = now.date_naive();
+        let tomorrow = today
+            .succ_opt()
+            .ok_or_else(|| AppError::Database("限额日窗口溢出".to_string()))?;
+        let month_start = today
+            .with_day(1)
+            .ok_or_else(|| AppError::Database("限额月窗口计算失败".to_string()))?;
+        let next_month_start = month_start
+            .checked_add_months(chrono::Months::new(1))
+            .ok_or_else(|| AppError::Database("限额月窗口溢出".to_string()))?;
+
+        let day_start_ts = local_midnight_timestamp(today)?;
+        let day_end_ts = local_midnight_timestamp(tomorrow)?;
+        let month_start_ts = local_midnight_timestamp(month_start)?;
+        let month_end_ts = local_midnight_timestamp(next_month_start)?;
+
         let conn = lock_conn!(self.conn);
 
-        // 获取 provider 的限额设置
-        let (limit_daily, limit_monthly) = conn
+        // 获取 provider 的限额设置（provider 不存在视为未设置限额；meta 解析失败同样视为未设置）
+        let meta_str: Option<String> = conn
             .query_row(
                 "SELECT meta FROM providers WHERE id = ? AND app_type = ?",
                 params![provider_id, app_type],
-                |row| {
-                    let meta_str: String = row.get(0)?;
-                    Ok(meta_str)
-                },
+                |row| row.get::<_, Option<String>>(0),
             )
-            .ok()
+            .optional()
+            .map_err(|e| AppError::Database(format!("读取 provider 限额设置失败: {e}")))?
+            .flatten();
+        let (limit_daily, limit_monthly) = meta_str
             .and_then(|meta_str| serde_json::from_str::<serde_json::Value>(&meta_str).ok())
             .map(|meta| {
                 let daily = meta
@@ -1631,43 +1675,32 @@ impl Database {
             })
             .unwrap_or((None, None));
 
-        // 计算今日使用量 (detail logs + rollup)
-        let daily_usage: f64 = conn
-            .query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM (
-                    SELECT CAST(total_cost_usd AS REAL) as cost
-                    FROM proxy_request_logs
-                    WHERE provider_id = ? AND app_type = ?
-                      AND date(datetime(created_at, 'unixepoch', 'localtime')) = date('now', 'localtime')
-                    UNION ALL
-                    SELECT CAST(total_cost_usd AS REAL)
-                    FROM usage_daily_rollups
-                    WHERE provider_id = ? AND app_type = ?
-                      AND date = date('now', 'localtime')
-                )",
-                params![provider_id, app_type, provider_id, app_type],
+        // 明细 [start_ts, end_ts) + 汇总 [start_date, end_date)
+        let sum_window = |start_ts: i64,
+                          end_ts: i64,
+                          start_date: NaiveDate,
+                          end_date: NaiveDate|
+         -> Result<f64, AppError> {
+            conn.query_row(
+                PROVIDER_LIMIT_WINDOW_SQL,
+                params![
+                    provider_id,
+                    app_type,
+                    start_ts,
+                    end_ts,
+                    start_date.format("%Y-%m-%d").to_string(),
+                    end_date.format("%Y-%m-%d").to_string()
+                ],
                 |row| row.get(0),
             )
-            .unwrap_or(0.0);
+            .map_err(|e| AppError::Database(format!("统计 provider 限额用量失败: {e}")))
+        };
 
+        // 计算今日使用量 (detail logs + rollup)
+        let daily_usage = sum_window(day_start_ts, day_end_ts, today, tomorrow)?;
         // 计算本月使用量 (detail logs + rollup)
-        let monthly_usage: f64 = conn
-            .query_row(
-                "SELECT COALESCE(SUM(cost), 0) FROM (
-                    SELECT CAST(total_cost_usd AS REAL) as cost
-                    FROM proxy_request_logs
-                    WHERE provider_id = ? AND app_type = ?
-                      AND strftime('%Y-%m', datetime(created_at, 'unixepoch', 'localtime')) = strftime('%Y-%m', 'now', 'localtime')
-                    UNION ALL
-                    SELECT CAST(total_cost_usd AS REAL)
-                    FROM usage_daily_rollups
-                    WHERE provider_id = ? AND app_type = ?
-                      AND strftime('%Y-%m', date) = strftime('%Y-%m', 'now', 'localtime')
-                )",
-                params![provider_id, app_type, provider_id, app_type],
-                |row| row.get(0),
-            )
-            .unwrap_or(0.0);
+        let monthly_usage =
+            sum_window(month_start_ts, month_end_ts, month_start, next_month_start)?;
 
         let daily_exceeded = limit_daily
             .map(|limit| daily_usage >= limit)
@@ -4152,6 +4185,165 @@ mod tests {
         let result = find_model_pricing_row(&conn, "unknown-model-123")?;
         assert!(result.is_none(), "不应该匹配不存在的模型");
 
+        Ok(())
+    }
+
+    fn local_dt(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> chrono::DateTime<Local> {
+        Local
+            .timestamp_opt(local_ts(year, month, day, hour, minute, second), 0)
+            .single()
+            .expect("valid local timestamp")
+    }
+
+    fn insert_limit_rollup(
+        conn: &Connection,
+        date: &str,
+        provider_id: &str,
+        model: &str,
+        total_cost_usd: &str,
+    ) -> Result<(), AppError> {
+        conn.execute(
+            "INSERT INTO usage_daily_rollups (
+                date, app_type, provider_id, model,
+                request_count, success_count, input_tokens, output_tokens,
+                cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
+            ) VALUES (?, 'claude', ?, ?, 1, 1, 0, 0, 0, 0, ?, 100)",
+            params![date, provider_id, model, total_cost_usd],
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_provider_limits_midnight_boundaries() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta) VALUES
+                 ('p1', 'claude', 'Limited', '{}',
+                  '{\"limitDailyUsd\":\"1.50\",\"limitMonthlyUsd\":\"100\"}')",
+                [],
+            )?;
+            let rows = [
+                // 今日本地午夜整点：属于今天
+                ("today-midnight", local_ts(2026, 3, 15, 0, 0, 0), "1.0"),
+                // 前一秒：属于昨天（但仍在本月）
+                ("yesterday-last", local_ts(2026, 3, 14, 23, 59, 59), "2.0"),
+                // 明日午夜：日窗口为半开区间，排除
+                ("tomorrow-midnight", local_ts(2026, 3, 16, 0, 0, 0), "4.0"),
+                // 本月第一秒：属于本月
+                ("month-first", local_ts(2026, 3, 1, 0, 0, 0), "8.0"),
+                // 上月最后一秒：不属于本月
+                ("prev-month-last", local_ts(2026, 2, 28, 23, 59, 59), "16.0"),
+                // 下月第一秒：不属于本月
+                ("next-month-first", local_ts(2026, 4, 1, 0, 0, 0), "32.0"),
+            ];
+            for (id, ts, cost) in rows {
+                insert_usage_log(
+                    &conn, id, "claude", "p1", "claude-3", "proxy", ts, 1, 1, 0, 0, 200, cost,
+                )?;
+            }
+            // 其他 provider 不计入
+            insert_usage_log(
+                &conn,
+                "other",
+                "claude",
+                "p2",
+                "claude-3",
+                "proxy",
+                local_ts(2026, 3, 15, 12, 0, 0),
+                1,
+                1,
+                0,
+                0,
+                200,
+                "64.0",
+            )?;
+            insert_limit_rollup(&conn, "2026-03-15", "p1", "rollup-today", "0.5")?;
+            insert_limit_rollup(&conn, "2026-03-01", "p1", "rollup-month", "0.125")?;
+            insert_limit_rollup(&conn, "2026-02-28", "p1", "rollup-prev", "0.25")?;
+            insert_limit_rollup(&conn, "2026-04-01", "p1", "rollup-next", "0.0625")?;
+        }
+
+        let status =
+            db.check_provider_limits_at("p1", "claude", local_dt(2026, 3, 15, 12, 0, 0))?;
+        assert_eq!(status.daily_usage, "1.500000");
+        assert!(status.daily_exceeded, "1.5 >= 1.50 应判定超额");
+        assert_eq!(status.monthly_usage, "15.625000");
+        assert!(!status.monthly_exceeded);
+
+        // 同一组数据，换到 3 月 14 日最后一秒：午夜行不再属于“今天”
+        let status =
+            db.check_provider_limits_at("p1", "claude", local_dt(2026, 3, 14, 23, 59, 59))?;
+        assert_eq!(status.daily_usage, "2.000000");
+        assert_eq!(status.monthly_usage, "15.625000");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_provider_limits_propagates_db_errors() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            insert_usage_log(
+                &conn,
+                "r1",
+                "claude",
+                "p1",
+                "claude-3",
+                "proxy",
+                Local::now().timestamp(),
+                1,
+                1,
+                0,
+                0,
+                200,
+                "1.0",
+            )?;
+            conn.execute("DROP TABLE usage_daily_rollups", [])?;
+        }
+
+        let result = db.check_provider_limits("p1", "claude");
+        assert!(
+            matches!(result, Err(AppError::Database(_))),
+            "数据库错误应返回 Err 而不是 $0 用量: {result:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_provider_limits_query_uses_provider_created_at_index() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let conn = lock_conn!(db.conn);
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {PROVIDER_LIMIT_WINDOW_SQL}"))?;
+        let plan: Vec<String> = stmt
+            .query_map(
+                params!["p1", "claude", 0_i64, 1_i64, "2026-01-01", "2026-01-02"],
+                |row| row.get::<_, String>(3),
+            )?
+            .collect::<Result<_, _>>()?;
+        let plan_text = plan.join("\n");
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("proxy_request_logs")
+                    && detail.contains("idx_request_logs_provider_created_at")
+                    && detail.contains("created_at>? AND created_at<?")),
+            "明细查询应按 (provider_id, app_type, created_at) 索引 seek:\n{plan_text}"
+        );
+        assert!(
+            !plan
+                .iter()
+                .any(|detail| detail.starts_with("SCAN proxy_request_logs")),
+            "明细查询不应全表扫描:\n{plan_text}"
+        );
         Ok(())
     }
 }

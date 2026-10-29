@@ -6,7 +6,7 @@ use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::services::sql_helpers::{fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH};
 use crate::services::usage_stats::effective_usage_log_filter;
-use chrono::{Duration, Local, TimeZone};
+use chrono::{Duration, Local, NaiveDate, TimeZone};
 
 /// Compute the rollup/prune cutoff aligned to a local-day boundary.
 ///
@@ -30,9 +30,17 @@ fn compute_local_midnight_cutoff(
     let next_day = target_day
         .succ_opt()
         .ok_or_else(|| AppError::Database("rollup cutoff next-day overflow".to_string()))?;
-    let naive_midnight = next_day
+    local_midnight_timestamp(next_day)
+}
+
+/// Unix timestamp of local midnight at the start of `day`.
+///
+/// DST: an ambiguous midnight resolves to the earlier instant; a midnight that
+/// falls into a DST gap moves one hour later, which always exists.
+pub(crate) fn local_midnight_timestamp(day: NaiveDate) -> Result<i64, AppError> {
+    let naive_midnight = day
         .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| AppError::Database("rollup cutoff midnight overflow".to_string()))?;
+        .ok_or_else(|| AppError::Database("local midnight overflow".to_string()))?;
 
     let local_dt = match Local.from_local_datetime(&naive_midnight) {
         chrono::LocalResult::Single(dt) => dt,
@@ -45,7 +53,7 @@ fn compute_local_midnight_cutoff(
                 chrono::LocalResult::Ambiguous(earliest, _) => earliest,
                 chrono::LocalResult::None => {
                     return Err(AppError::Database(
-                        "rollup cutoff fell into DST gap".to_string(),
+                        "local midnight fell into DST gap".to_string(),
                     ))
                 }
             }

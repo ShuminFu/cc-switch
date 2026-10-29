@@ -224,6 +224,14 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON proxy_request_logs(created_at)", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
+        // 额度检查按 provider 查 [start, end) 时间窗：三列索引让 created_at 范围走索引 seek。
+        // 纯增量索引（create_tables 每次启动都会执行），按兼容策略无需升级 SCHEMA_VERSION。
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_logs_provider_created_at
+             ON proxy_request_logs(provider_id, app_type, created_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_request_logs_model ON proxy_request_logs(model)",
             [],
