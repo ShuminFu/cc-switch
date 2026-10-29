@@ -12,7 +12,7 @@ use rusqlite::limits::Limit;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tempfile::NamedTempFile;
 
 const CC_SWITCH_SQL_EXPORT_HEADER: &str = "-- CC Switch SQLite 导出";
@@ -650,15 +650,7 @@ impl Database {
     /// Restore database from a backup file. Returns the safety backup ID.
     pub fn restore_from_backup(&self, filename: &str) -> Result<String, AppError> {
         // Security: validate filename to prevent path traversal
-        if filename.contains("..")
-            || filename.contains('/')
-            || filename.contains('\\')
-            || !filename.ends_with(".db")
-        {
-            return Err(AppError::InvalidInput(
-                "Invalid backup filename".to_string(),
-            ));
-        }
+        validate_backup_filename(filename)?;
 
         let backup_dir = get_app_config_dir().join("backups");
         let backup_path = backup_dir.join(filename);
@@ -751,15 +743,7 @@ impl Database {
     /// Rename a backup file. Returns the new filename.
     pub fn rename_backup(old_filename: &str, new_name: &str) -> Result<String, AppError> {
         // Validate old filename (path traversal + .db suffix)
-        if old_filename.contains("..")
-            || old_filename.contains('/')
-            || old_filename.contains('\\')
-            || !old_filename.ends_with(".db")
-        {
-            return Err(AppError::InvalidInput(
-                "Invalid backup filename".to_string(),
-            ));
-        }
+        validate_backup_filename(old_filename)?;
 
         // Clean new name
         let trimmed = new_name.trim();
@@ -789,6 +773,11 @@ impl Database {
         }
 
         let new_filename = format!("{name_part}.db");
+        if validate_backup_filename(&new_filename).is_err() {
+            return Err(AppError::InvalidInput(
+                "Invalid characters in new name".to_string(),
+            ));
+        }
 
         let backup_dir = get_app_config_dir().join("backups");
         let old_path = backup_dir.join(old_filename);
@@ -814,15 +803,7 @@ impl Database {
     /// Delete a backup file permanently.
     pub fn delete_backup(filename: &str) -> Result<(), AppError> {
         // Validate filename (path traversal + .db suffix)
-        if filename.contains("..")
-            || filename.contains('/')
-            || filename.contains('\\')
-            || !filename.ends_with(".db")
-        {
-            return Err(AppError::InvalidInput(
-                "Invalid backup filename".to_string(),
-            ));
-        }
+        validate_backup_filename(filename)?;
 
         let backup_path = get_app_config_dir().join("backups").join(filename);
         if !backup_path.exists() {
@@ -834,6 +815,30 @@ impl Database {
         fs::remove_file(&backup_path).map_err(|e| AppError::io(&backup_path, e))?;
         log::info!("Deleted backup: {filename}");
         Ok(())
+    }
+}
+
+/// 校验备份文件名只能指向 backups 目录下的单个 `.db` 文件。
+///
+/// 除了 `..` 和路径分隔符外，还拒绝 `:`（Windows 盘符相对路径如 `C:x.db`
+/// 会让 `backup_dir.join()` 丢弃 backups 目录）和 NUL；允许非 ASCII 名称（如中文）。
+fn validate_backup_filename(filename: &str) -> Result<(), AppError> {
+    let invalid = || AppError::InvalidInput("Invalid backup filename".to_string());
+
+    if filename.contains("..")
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.contains(':')
+        || filename.contains('\0')
+        || !filename.ends_with(".db")
+    {
+        return Err(invalid());
+    }
+
+    let mut components = Path::new(filename).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(name)), None) if name == std::ffi::OsStr::new(filename) => Ok(()),
+        _ => Err(invalid()),
     }
 }
 
@@ -1202,5 +1207,86 @@ mod tests {
             Some("kept")
         );
         Ok(())
+    }
+
+    fn assert_invalid_filename(result: Result<impl std::fmt::Debug, AppError>) {
+        match result {
+            Err(AppError::InvalidInput(msg)) => {
+                assert!(
+                    msg.starts_with("Invalid"),
+                    "expected filename validation error, got: {msg}"
+                )
+            }
+            other => panic!("expected InvalidInput, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backup_filename_rejects_drive_relative_and_nul_names() {
+        for name in ["C:x.db", "C:..x.db", "foo:bar.db", "\0.db", "a\0b.db"] {
+            assert_invalid_filename(super::validate_backup_filename(name));
+        }
+        for name in [
+            "../x.db", "a/b.db", "a\\b.db", "/abs.db", "x.sql", ".db.bak", "",
+        ] {
+            assert_invalid_filename(super::validate_backup_filename(name));
+        }
+        for name in ["db_backup_20260101_000000.db", "我的备份.db", "a b.db"] {
+            super::validate_backup_filename(name).expect(name);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn backup_commands_reject_colon_filenames_without_touching_files() -> Result<(), AppError> {
+        let home = tempfile::tempdir().expect("tempdir");
+        let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+        let backup_dir = crate::config::get_app_config_dir().join("backups");
+        std::fs::create_dir_all(&backup_dir).expect("create backups dir");
+        let ok_path = backup_dir.join("ok.db");
+        std::fs::write(&ok_path, b"x").expect("write ok backup");
+
+        let db = Database::memory()?;
+        for name in ["C:x.db", "C:..x.db", "foo:bar.db", "\0.db"] {
+            assert_invalid_filename(db.restore_from_backup(name));
+            assert_invalid_filename(Database::delete_backup(name));
+            assert_invalid_filename(Database::rename_backup(name, "renamed"));
+            assert_invalid_filename(Database::rename_backup("ok.db", name));
+        }
+        assert_invalid_filename(Database::rename_backup("ok.db", "C:evil"));
+
+        // On Unix a ':' is a legal filename character, so this file really exists;
+        // it must still be rejected instead of being deleted.
+        #[cfg(unix)]
+        {
+            let colon_path = backup_dir.join("foo:bar.db");
+            std::fs::write(&colon_path, b"x").expect("write colon backup");
+            assert_invalid_filename(Database::delete_backup("foo:bar.db"));
+            assert!(colon_path.exists(), "colon-named file must not be deleted");
+        }
+
+        // Non-ASCII names stay supported.
+        assert_eq!(Database::rename_backup("ok.db", "我的备份")?, "我的备份.db");
+        assert!(backup_dir.join("我的备份.db").exists());
+        Database::delete_backup("我的备份.db")?;
+        assert!(!backup_dir.join("我的备份.db").exists());
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn drive_relative_names_are_not_single_normal_components_on_windows() {
+        use std::path::{Component, Path};
+
+        for name in ["C:x.db", "C:..x.db"] {
+            let first = Path::new(name).components().next();
+            assert!(
+                matches!(first, Some(Component::Prefix(_))),
+                "{name} should parse as a drive prefix"
+            );
+            let joined = Path::new(r"D:\backups").join(name);
+            assert!(!joined.starts_with(r"D:\backups"));
+            assert_invalid_filename(super::validate_backup_filename(name));
+        }
     }
 }
