@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::collections::HashMap;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 use std::time::Duration;
 
 use crate::config;
@@ -128,7 +128,7 @@ async fn read_keychain_secret(args: &[&str]) -> Option<String> {
 /// 阻塞到用户响应为止，同步等待会占住一个 tokio worker（current_thread 运行时
 /// 下则冻结整个运行时）。超时后 future 被丢弃，`kill_on_drop` 负责终止子进程。
 /// 命令失败、超时或输出为空均返回 `None`，由调用方回退到凭据文件。
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 async fn run_secret_command(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args)
