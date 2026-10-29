@@ -99,7 +99,7 @@ pub fn read_opencode_config() -> Result<Value, AppError> {
     }
 
     let content = std::fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
-    json_five::from_str(&content).map_err(|e| {
+    crate::openclaw_config::parse_json5_value(&content).map_err(|e| {
         AppError::Config(format!(
             "Failed to parse OpenCode config: {}: {e}",
             path.display()

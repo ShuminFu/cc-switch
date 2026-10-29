@@ -47,3 +47,8 @@ p0-config-writer-snapshots
 - `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: clean.
 - `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast`: 2384 passed, 0 failed (includes `config_writers` 16/16).
 - `cargo tree -i serde_yaml` / `cargo tree -i json5`: "did not match any packages"; `cargo tree -i once_cell -e normal --depth 1`: `cc-switch` no longer listed (still pulled transitively by tauri/gtk crates).
+
+**Review**
+- Confirmed all `serde_yaml`/`json5`/`once_cell` uses are gone, only `serde_norway` 0.9.42 and `json-five` remain in `Cargo.lock` as direct deps, and Hermes snapshots plus OpenClaw written contents are unchanged.
+- Re-ran the side-by-side comparison: the escape divergences are real and user-visible. Unknown escapes made `json_five::from_str` reject configs the old parser (and OpenClaw's own npm `json5`) accepted, e.g. a hand-written Windows path `'C:\Users\me'` turned the whole OpenClaw config into a read error / `config_parse_failed` warning. Fixed by routing all five read call sites through `openclaw_config::parse_json5_value`, which first normalizes string-literal escapes to the JSON5 spec (unknown `\c` and `\a` -> `c`, line continuation -> empty; comments and non-string text untouched, input without backslashes borrowed as-is). New test `json5_string_escapes_follow_previous_parser` pins these against values captured from `json5` 0.4.1. Remaining accepted divergence: `1e400` parses to `null` instead of erroring.
+- Verification: `cargo fmt --check`, `cargo clippy --all-targets -D warnings` clean; `cargo test --no-fail-fast` 2385 passed, 0 failed.

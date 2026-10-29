@@ -205,8 +205,99 @@ pub fn read_openclaw_config() -> Result<Value, AppError> {
     }
 
     let content = fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
-    json_five::from_str(&content)
+    parse_json5_value(&content)
         .map_err(|e| AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}")))
+}
+
+/// 将 JSON5 文本解析为 `Value`。
+///
+/// `json_five::from_str` 在字符串转义上与 JSON5 规范（以及此前使用的 `json5` crate、
+/// OpenClaw 自身使用的 npm `json5`）不一致：未知转义（如 Windows 路径里的 `\U`）直接报错、
+/// `\a` 被解析为 BEL、行续接（`\` + 换行）保留换行。这里先把这些转义规范化，
+/// 保持读取结果与规范一致；不含此类转义的文本原样解析。
+pub(crate) fn parse_json5_value(source: &str) -> Result<Value, json_five::de::SerdeJSON5Error> {
+    json_five::from_str(&normalize_json5_string_escapes(source))
+}
+
+/// 仅改写字符串字面量内部的转义：未知转义 `\c` -> `c`，行续接 -> 空。
+/// 注释和字符串之外的内容保持不变。
+fn normalize_json5_string_escapes(source: &str) -> std::borrow::Cow<'_, str> {
+    if !source.contains('\\') {
+        return std::borrow::Cow::Borrowed(source);
+    }
+
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    while let Some(ch) = chars.next() {
+        out.push(ch);
+        match ch {
+            '/' if chars.peek() == Some(&'/') => {
+                for c in chars.by_ref() {
+                    out.push(c);
+                    if matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                out.push(chars.next().unwrap_or('*'));
+                let mut prev = '\0';
+                for c in chars.by_ref() {
+                    out.push(c);
+                    if prev == '*' && c == '/' {
+                        break;
+                    }
+                    prev = c;
+                }
+            }
+            '"' | '\'' => {
+                let quote = ch;
+                while let Some(c) = chars.next() {
+                    if c == quote {
+                        out.push(c);
+                        break;
+                    }
+                    if c != '\\' {
+                        out.push(c);
+                        continue;
+                    }
+                    match chars.next() {
+                        // json_five 已按规范处理的转义（数字转义在两边都非法），保持原样
+                        Some(
+                            esc @ ('n'
+                            | 'r'
+                            | 't'
+                            | 'b'
+                            | 'f'
+                            | 'v'
+                            | '0'..='9'
+                            | '\\'
+                            | '\''
+                            | '"'
+                            | '/'
+                            | 'x'
+                            | 'u'),
+                        ) => {
+                            out.push('\\');
+                            out.push(esc);
+                        }
+                        // 行续接：反斜杠与行终止符一起去掉
+                        Some('\r') => {
+                            if chars.peek() == Some(&'\n') {
+                                chars.next();
+                            }
+                        }
+                        Some('\n' | '\u{2028}' | '\u{2029}') => {}
+                        // 未知转义（含 `\a`）表示字符本身
+                        Some(other) => out.push(other),
+                        None => out.push('\\'),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 /// 对现有 OpenClaw 配置做健康检查。
@@ -219,7 +310,7 @@ pub fn scan_openclaw_config_health() -> Result<Vec<OpenClawHealthWarning>, AppEr
     }
 
     let content = fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
-    match json_five::from_str::<Value>(&content) {
+    match parse_json5_value(&content) {
         Ok(config) => Ok(scan_openclaw_health_from_value(&config)),
         Err(err) => Ok(vec![OpenClawHealthWarning {
             code: "config_parse_failed".to_string(),
@@ -340,13 +431,12 @@ impl OpenClawConfigDocument {
 
         let next_source = self.text.to_string();
         if current_source.as_deref() == Some(next_source.as_str()) {
-            let warnings = scan_openclaw_health_from_value(
-                &json_five::from_str::<Value>(&next_source).map_err(|e| {
+            let warnings =
+                scan_openclaw_health_from_value(&parse_json5_value(&next_source).map_err(|e| {
                     AppError::Config(format!(
                         "Failed to parse unchanged OpenClaw config as JSON5: {e}"
                     ))
-                })?,
-            );
+                })?);
 
             return Ok(OpenClawWriteOutcome {
                 backup_path: None,
@@ -362,13 +452,12 @@ impl OpenClawConfigDocument {
 
         atomic_write(&self.path, next_source.as_bytes())?;
 
-        let warnings = scan_openclaw_health_from_value(
-            &json_five::from_str::<Value>(&next_source).map_err(|e| {
+        let warnings =
+            scan_openclaw_health_from_value(&parse_json5_value(&next_source).map_err(|e| {
                 AppError::Config(format!(
                     "Failed to parse newly written OpenClaw config as JSON5: {e}"
                 ))
-            })?,
-        );
+            })?);
 
         log::debug!("OpenClaw config written to {:?}", self.path);
         Ok(OpenClawWriteOutcome {
@@ -1131,7 +1220,7 @@ mod tests {
             ),
         ];
         for (source, expected) in cases {
-            let parsed: Value = json_five::from_str(source)
+            let parsed = parse_json5_value(source)
                 .unwrap_or_else(|e| panic!("failed to parse {source:?}: {e}"));
             assert_eq!(&parsed, expected, "fixture {source:?}");
         }
@@ -1146,10 +1235,47 @@ mod tests {
             "{neg: -9223372036854775809}",
         ] {
             assert!(
-                json_five::from_str::<Value>(invalid).is_err(),
+                parse_json5_value(invalid).is_err(),
                 "expected parse error for {invalid:?}"
             );
         }
+    }
+
+    /// Escapes where bare `json_five::from_str` diverges from the JSON5 spec
+    /// (and from the previous `json5` 0.4 crate); expected values were
+    /// captured from `json5` 0.4.1.
+    #[test]
+    fn json5_string_escapes_follow_previous_parser() {
+        let cases: &[(&str, Value)] = &[
+            (r"{p: 'C:\Users\me'}", json!({ "p": "C:Usersme" })),
+            (r"{p: 'C:\\Users\\me'}", json!({ "p": "C:\\Users\\me" })),
+            (
+                r"{a: '\q', b: '\a', c: 'it\'s \q'}",
+                json!({ "a": "q", "b": "a", "c": "it's q" }),
+            ),
+            (
+                "{a: 'x\\\ny', b: \"x\\\r\ny\"}",
+                json!({ "a": "xy", "b": "xy" }),
+            ),
+            (
+                "{\n  // C:\\q in a comment\n  /* \\q */ a: '// \\q /*', b: \"'\\q\"\n}",
+                json!({ "a": "// q /*", "b": "'q" }),
+            ),
+            (r#"{"\q": 1}"#, json!({ "q": 1 })),
+        ];
+        for (source, expected) in cases {
+            let parsed = parse_json5_value(source)
+                .unwrap_or_else(|e| panic!("failed to parse {source:?}: {e}"));
+            assert_eq!(&parsed, expected, "fixture {source:?}");
+        }
+
+        // Digit escapes stay invalid, as before.
+        assert!(parse_json5_value(r"{a: '\8'}").is_err());
+        // Text without backslashes is passed through untouched.
+        assert!(matches!(
+            normalize_json5_string_escapes("{a: 1}"),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     #[test]
