@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
+import { geminiEnvToString } from "@/features/providers/forms/gemini/fromProvider";
+import { geminiEnvToObject } from "@/features/providers/forms/gemini/toSettingsConfig";
 
 interface UseGeminiConfigStateProps {
   initialData?: {
@@ -21,57 +23,9 @@ export function useGeminiConfigState({
   const [envError, setEnvError] = useState("");
   const [configError, setConfigError] = useState("");
 
-  // 将 JSON env 对象转换为 .env 格式字符串
-  // 保留所有环境变量，已知 key 优先显示
-  const envObjToString = useCallback(
-    (envObj: Record<string, unknown>): string => {
-      const priorityKeys = [
-        "GOOGLE_GEMINI_BASE_URL",
-        "GEMINI_API_KEY",
-        "GEMINI_MODEL",
-      ];
-      const lines: string[] = [];
-      const addedKeys = new Set<string>();
-
-      // 先添加已知 key（按顺序）
-      for (const key of priorityKeys) {
-        if (typeof envObj[key] === "string" && envObj[key]) {
-          lines.push(`${key}=${envObj[key]}`);
-          addedKeys.add(key);
-        }
-      }
-
-      // 再添加其他自定义 key（保留用户添加的环境变量）
-      for (const [key, value] of Object.entries(envObj)) {
-        if (!addedKeys.has(key) && typeof value === "string") {
-          lines.push(`${key}=${value}`);
-        }
-      }
-
-      return lines.join("\n");
-    },
-    [],
-  );
-
-  // 将 .env 格式字符串转换为 JSON env 对象
-  const envStringToObj = useCallback(
-    (envString: string): Record<string, string> => {
-      const env: Record<string, string> = {};
-      const lines = envString.split("\n");
-      lines.forEach((line) => {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) return;
-        const equalIndex = trimmed.indexOf("=");
-        if (equalIndex > 0) {
-          const key = trimmed.substring(0, equalIndex).trim();
-          const value = trimmed.substring(equalIndex + 1).trim();
-          env[key] = value;
-        }
-      });
-      return env;
-    },
-    [],
-  );
+  // env 对象与 .env 文本互转（已知 key 优先显示，保留自定义变量）
+  const envObjToString = geminiEnvToString;
+  const envStringToObj = geminiEnvToObject;
 
   // 初始化 Gemini 配置（编辑模式）
   useEffect(() => {

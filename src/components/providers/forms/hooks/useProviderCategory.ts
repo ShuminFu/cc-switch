@@ -1,18 +1,17 @@
 import { useState, useEffect } from "react";
 import type { ProviderCategory } from "@/types";
 import type { AppId } from "@/lib/api";
-import { providerPresets } from "@/config/claudeProviderPresets";
-import { codexProviderPresets } from "@/config/codexProviderPresets";
-import { geminiProviderPresets } from "@/config/geminiProviderPresets";
-import { opencodeProviderPresets } from "@/config/opencodeProviderPresets";
-import { openclawProviderPresets } from "@/config/openclawProviderPresets";
-import { hermesProviderPresets } from "@/config/hermesProviderPresets";
+import type { BasePreset } from "@/features/providers/forms/basePreset";
 
 interface UseProviderCategoryProps {
   appId: AppId;
   selectedPresetId: string | null;
   isEditMode: boolean;
   initialCategory?: ProviderCategory;
+  /** 当前应用的完整预设表（按预设 id 中的序号查找）；未加载完时为 undefined */
+  presets?: readonly BasePreset[];
+  /** 预设未写 category 时，isOfficial 是否视为 official（Claude / Codex） */
+  officialFallback?: boolean;
 }
 
 /**
@@ -24,6 +23,8 @@ export function useProviderCategory({
   selectedPresetId,
   isEditMode,
   initialCategory,
+  presets,
+  officialFallback = false,
 }: UseProviderCategoryProps) {
   const [category, setCategory] = useState<ProviderCategory | undefined>(
     // 编辑模式：使用 initialCategory
@@ -55,42 +56,21 @@ export function useProviderCategory({
     if (type !== appId) return;
     const index = parseInt(indexStr, 10);
 
-    if (appId === "codex") {
-      const preset = codexProviderPresets[index];
-      if (preset) {
-        setCategory(
-          preset.category || (preset.isOfficial ? "official" : undefined),
-        );
-      }
-    } else if (appId === "claude") {
-      const preset = providerPresets[index];
-      if (preset) {
-        setCategory(
-          preset.category || (preset.isOfficial ? "official" : undefined),
-        );
-      }
-    } else if (appId === "gemini") {
-      const preset = geminiProviderPresets[index];
-      if (preset) {
-        setCategory(preset.category || undefined);
-      }
-    } else if (appId === "opencode") {
-      const preset = opencodeProviderPresets[index];
-      if (preset) {
-        setCategory(preset.category || undefined);
-      }
-    } else if (appId === "openclaw") {
-      const preset = openclawProviderPresets[index];
-      if (preset) {
-        setCategory(preset.category || undefined);
-      }
-    } else if (appId === "hermes") {
-      const preset = hermesProviderPresets[index];
-      if (preset) {
-        setCategory(preset.category || undefined);
-      }
+    const preset = presets?.[index];
+    if (preset) {
+      setCategory(
+        preset.category ||
+          (officialFallback && preset.isOfficial ? "official" : undefined),
+      );
     }
-  }, [appId, selectedPresetId, isEditMode, initialCategory]);
+  }, [
+    appId,
+    selectedPresetId,
+    isEditMode,
+    initialCategory,
+    presets,
+    officialFallback,
+  ]);
 
   return { category, setCategory };
 }

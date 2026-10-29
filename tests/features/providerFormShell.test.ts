@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { TFunction } from "i18next";
@@ -125,5 +125,43 @@ describe("ProviderForm shell (CCS-190)", () => {
     expect(
       lineCount("src/features/providers/forms/ProviderFormShell.tsx"),
     ).toBeLessThanOrEqual(300);
+  });
+});
+
+describe("per-app form modules (CCS-191)", () => {
+  it("gives Claude, Claude Desktop, Codex, Gemini and Grok Build their own module", () => {
+    for (const app of [
+      "claude",
+      "claude-desktop",
+      "codex",
+      "gemini",
+      "grokbuild",
+    ]) {
+      for (const file of [
+        "schema.ts",
+        "fromProvider.ts",
+        "toSettingsConfig.ts",
+        "Fields.tsx",
+        "presets.ts",
+      ]) {
+        expect(
+          existsSync(
+            path.join(ROOT, "src/features/providers/forms", app, file),
+          ),
+          `${app}/${file}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("uses each module's schema as its union branch", async () => {
+    const { claudeProviderFormSchema } = await import(
+      "@/features/providers/forms/claude/schema"
+    );
+    const { codexProviderFormSchema } = await import(
+      "@/features/providers/forms/codex/schema"
+    );
+    expect(providerFormSchemas.claude).toBe(claudeProviderFormSchema);
+    expect(providerFormSchemas.codex).toBe(codexProviderFormSchema);
   });
 });

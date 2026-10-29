@@ -31,7 +31,8 @@ describe("GrokBuildProviderForm", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /PatewayAI/ }));
+    // 预设表按需加载，加载完成后才出现在选择器中
+    await user.click(await screen.findByRole("button", { name: /PatewayAI/ }));
 
     const baseUrlInput =
       container.querySelector<HTMLInputElement>("#codexBaseUrl");

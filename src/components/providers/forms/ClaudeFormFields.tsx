@@ -60,10 +60,8 @@ import {
   stripClaudeOneMMarker,
   type ClaudeModelEnvField,
 } from "./hooks/useModelState";
-import {
-  providerPresets,
-  type TemplateValueConfig,
-} from "@/config/claudeProviderPresets";
+import type { TemplateValueConfig } from "@/config/claudeProviderPresets";
+import { claudePresetLoader } from "@/features/providers/forms/claude/presets";
 
 interface EndpointCandidate {
   url: string;
@@ -274,7 +272,8 @@ export function ClaudeFormFields({
     }
     // 当 baseURL 仍是某预设的默认值时，优先使用预设上的 modelsUrl 覆写
     // 避免多走一次失败的候选请求（如 DeepSeek 把 /models 挂在根，而不是 /anthropic 子路径下）
-    const matchedPreset = providerPresets.find((p) => {
+    // 预设表由 Claude 编辑器按需加载，表单打开后即已缓存
+    const matchedPreset = (claudePresetLoader.peek() ?? []).find((p) => {
       const env = (p.settingsConfig as { env?: Record<string, string> })?.env;
       return env?.ANTHROPIC_BASE_URL === baseUrl;
     });

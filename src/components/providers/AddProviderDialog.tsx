@@ -14,10 +14,10 @@ import {
 } from "@/components/providers/forms/ProviderForm";
 import { UniversalProviderFormModal } from "@/components/universal/UniversalProviderFormModal";
 import { UniversalProviderPanel } from "@/components/universal";
-import { providerPresets } from "@/config/claudeProviderPresets";
-import { codexProviderPresets } from "@/config/codexProviderPresets";
-import { geminiProviderPresets } from "@/config/geminiProviderPresets";
-import { claudeDesktopProviderPresets } from "@/config/claudeDesktopProviderPresets";
+import { claudePresetLoader } from "@/features/providers/forms/claude/presets";
+import { codexPresetLoader } from "@/features/providers/forms/codex/presets";
+import { geminiPresetLoader } from "@/features/providers/forms/gemini/presets";
+import { claudeDesktopPresetLoader } from "@/features/providers/forms/claude-desktop/presets";
 import { extractCodexBaseUrl } from "@/utils/providerConfigUtils";
 import { extractGrokBuildBaseUrl } from "@/utils/grokBuildConfig";
 import { appCaps } from "@/entities/app/registry";
@@ -124,7 +124,7 @@ export function AddProviderDialog({
         const presetIndex = parseInt(
           values.presetId.replace("claude-desktop-", ""),
         );
-        const preset = claudeDesktopProviderPresets[presetIndex];
+        const preset = (await claudeDesktopPresetLoader.load())[presetIndex];
         providerData.ensureClaudeDesktopOfficialSeed =
           values.presetCategory === "official" &&
           preset?.category === "official";
@@ -132,7 +132,7 @@ export function AddProviderDialog({
 
       if (appId === "codex" && values.presetId) {
         const presetIndex = parseInt(values.presetId.replace("codex-", ""));
-        const preset = codexProviderPresets[presetIndex];
+        const preset = (await codexPresetLoader.load())[presetIndex];
         providerData.ensureCodexOfficialSeed =
           values.presetCategory === "official" &&
           preset?.category === "official";
@@ -159,7 +159,7 @@ export function AddProviderDialog({
 
         if (values.presetId) {
           if (appId === "claude") {
-            const presets = providerPresets;
+            const presets = await claudePresetLoader.load();
             const presetIndex = parseInt(
               values.presetId.replace("claude-", ""),
             );
@@ -174,7 +174,7 @@ export function AddProviderDialog({
               }
             }
           } else if (appId === "codex") {
-            const presets = codexProviderPresets;
+            const presets = await codexPresetLoader.load();
             const presetIndex = parseInt(values.presetId.replace("codex-", ""));
             if (
               !isNaN(presetIndex) &&
@@ -187,7 +187,7 @@ export function AddProviderDialog({
               }
             }
           } else if (appId === "gemini") {
-            const presets = geminiProviderPresets;
+            const presets = await geminiPresetLoader.load();
             const presetIndex = parseInt(
               values.presetId.replace("gemini-", ""),
             );
@@ -202,7 +202,7 @@ export function AddProviderDialog({
               }
             }
           } else if (appId === "claude-desktop") {
-            const presets = claudeDesktopProviderPresets;
+            const presets = await claudeDesktopPresetLoader.load();
             const presetIndex = parseInt(
               values.presetId.replace("claude-desktop-", ""),
             );
