@@ -19,9 +19,8 @@ pub(crate) fn get_opencode_base_dir() -> PathBuf {
             return PathBuf::from(xdg).join("opencode");
         }
     }
-    dirs::home_dir()
-        .map(|h| h.join(".local/share/opencode"))
-        .unwrap_or_else(|| PathBuf::from(".local/share/opencode"))
+    // 走 get_home_dir()（可被 CC_SWITCH_TEST_HOME / 测试注入的 Paths 覆盖）
+    crate::config::get_home_dir().join(".local/share/opencode")
 }
 
 /// Return the OpenCode JSON storage directory (legacy flat-file layout).

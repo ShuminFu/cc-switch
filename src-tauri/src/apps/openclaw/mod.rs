@@ -150,8 +150,8 @@ impl SessionSource for OpenClawAdapter {
     }
 }
 
-/// OpenClaw / Hermes 的直连凭据：对象顶层的 `apiKey` 与 `baseUrl`
-pub(super) fn flat_credentials(provider: &Provider) -> Result<Credentials, AppError> {
+/// OpenClaw 的直连凭据：对象顶层的 `apiKey` 与 `baseUrl`
+fn flat_credentials(provider: &Provider) -> Result<Credentials, AppError> {
     let api_key = provider
         .settings_config
         .get("apiKey")

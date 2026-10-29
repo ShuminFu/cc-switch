@@ -97,8 +97,25 @@ impl AppAdapter for HermesAdapter {
         )
     }
 
+    /// 与 [`Self::usage_credentials`] 一致读 snake_case；旧版 DeepLink 导入的
+    /// camelCase 记录（写 live 时才会被 `sanitize_hermes_provider_keys` 改名）兜底
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {
-        super::openclaw::flat_credentials(provider)
+        let settings = &provider.settings_config;
+        let field = |snake: &str, camel: &str| {
+            [snake, camel]
+                .iter()
+                .find_map(|key| settings.get(*key).and_then(Value::as_str))
+                .map(str::to_string)
+        };
+        let api_key = field("api_key", "apiKey").ok_or_else(|| {
+            AppError::localized(
+                "provider.hermes.api_key.missing",
+                "缺少 API Key",
+                "API key is missing",
+            )
+        })?;
+        let base_url = field("base_url", "baseUrl").unwrap_or_default();
+        Ok(Credentials { api_key, base_url })
     }
 
     // Hermes doesn't use common config snippets
@@ -134,17 +151,36 @@ mod tests {
 
     use super::*;
 
+    fn provider(settings: Value) -> Provider {
+        Provider::with_id("p".to_string(), "P".to_string(), settings, None)
+    }
+
+    /// config.yaml 的字段是 snake_case；旧版 camelCase 记录仍可读
     #[test]
-    fn credentials_share_the_openclaw_shape() {
-        let provider = Provider::with_id(
-            "p".to_string(),
-            "P".to_string(),
-            json!({ "apiKey": "sk-test", "baseUrl": "https://example.com/v1" }),
-            None,
-        );
-        let credentials = HermesAdapter.credentials(&provider).unwrap();
+    fn credentials_read_snake_case_with_camel_case_fallback() {
+        let credentials = HermesAdapter
+            .credentials(&provider(
+                json!({ "api_key": "sk-test", "base_url": "https://example.com/v1" }),
+            ))
+            .unwrap();
         assert_eq!(credentials.api_key, "sk-test");
         assert_eq!(credentials.base_url, "https://example.com/v1");
+
+        let legacy = HermesAdapter
+            .credentials(&provider(
+                json!({ "apiKey": "sk-legacy", "baseUrl": "https://legacy.example.com" }),
+            ))
+            .unwrap();
+        assert_eq!(legacy.api_key, "sk-legacy");
+        assert_eq!(legacy.base_url, "https://legacy.example.com");
+
+        let both = HermesAdapter
+            .credentials(&provider(
+                json!({ "api_key": "sk-new", "apiKey": "sk-old" }),
+            ))
+            .unwrap();
+        assert_eq!(both.api_key, "sk-new");
+        assert!(HermesAdapter.credentials(&provider(json!({}))).is_err());
     }
 
     #[test]
