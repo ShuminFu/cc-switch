@@ -149,6 +149,23 @@ describe("provider panel unsaved changes guard", () => {
     expect(screen.queryByText(confirmTitle)).not.toBeInTheDocument();
   });
 
+  it("does not treat searching presets as an unsaved change", async () => {
+    const { onOpenChange } = renderAddPanel();
+    await getNameInput();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "providerPreset.searchAriaLabel" }),
+    );
+    const searchInput = screen.getByRole("textbox", {
+      name: "providerPreset.searchAriaLabel",
+    });
+    fireEvent.change(searchInput, { target: { value: "relay" } });
+    fireEvent.click(screen.getByRole("button", { name: "common.back" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(screen.queryByText(confirmTitle)).not.toBeInTheDocument();
+  });
+
   it("closes the edit panel without asking when nothing was edited", async () => {
     const onOpenChange = vi.fn();
     renderCodexEditPanel(onOpenChange);

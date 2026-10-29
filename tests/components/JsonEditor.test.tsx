@@ -42,4 +42,34 @@ describe("JsonEditor", () => {
     expect(onChangeB).toHaveBeenCalledWith('{"a":1}');
     expect(onChangeA).not.toHaveBeenCalled();
   });
+
+  it("用户编辑时派发冒泡的 input 事件，外部同步 value 时不派发", () => {
+    const onInput = vi.fn();
+    const { container, rerender } = render(
+      <div onInput={onInput}>
+        <JsonEditor value="{}" onChange={vi.fn()} />
+      </div>,
+    );
+    const view = EditorView.findFromDOM(
+      container.querySelector(".cm-editor") as HTMLElement,
+    );
+    if (!view) throw new Error("EditorView not found");
+
+    // 外部传入新 value（无 userEvent）不算用户编辑
+    rerender(
+      <div onInput={onInput}>
+        <JsonEditor value='{"a":1}' onChange={vi.fn()} />
+      </div>,
+    );
+    expect(onInput).not.toHaveBeenCalled();
+
+    // 粘贴由 CodeMirror 处理，不会产生原生 input 事件
+    act(() => {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: '{"b":2}' },
+        userEvent: "input.paste",
+      });
+    });
+    expect(onInput).toHaveBeenCalledTimes(1);
+  });
 });

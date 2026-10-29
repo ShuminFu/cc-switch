@@ -305,6 +305,8 @@ export function ProviderPresetSelector({
               aria-label={t("providerPreset.searchAriaLabel")}
               className="w-60 h-8"
               autoFocus
+              // 搜索预设不算对供应商的修改（见 ProviderFormShell 的未保存修改判断）
+              data-unsaved-changes-ignore=""
             />
           )}
           <Button

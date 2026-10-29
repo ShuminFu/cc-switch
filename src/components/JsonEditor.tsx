@@ -3,13 +3,18 @@ import { EditorView, basicSetup } from "codemirror";
 import { json } from "@codemirror/lang-json";
 import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Transaction } from "@codemirror/state";
 import { placeholder } from "@codemirror/view";
 import { linter, Diagnostic } from "@codemirror/lint";
 import { useTranslation } from "react-i18next";
 import { Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { formatJSON } from "@/utils/formatters";
+
+/** 在编辑器根节点上派发冒泡的 input 事件，表示用户编辑了内容 */
+const notifyUserEdit = (dom: HTMLElement) => {
+  dom.dispatchEvent(new Event("input", { bubbles: true }));
+};
 
 interface JsonEditorProps {
   id?: string;
@@ -149,6 +154,15 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
         if (update.docChanged) {
           const newValue = update.state.doc.toString();
           onChangeRef.current(newValue);
+          // 粘贴、删除、回车、撤销等由 CodeMirror 自行处理，不会产生原生 input 事件；
+          // 用户编辑时补发冒泡的 input 事件，供外层表单感知未保存修改
+          if (
+            update.transactions.some(
+              (tr) => tr.annotation(Transaction.userEvent) !== undefined,
+            )
+          ) {
+            notifyUserEdit(update.view.dom);
+          }
         }
       }),
     ];
@@ -237,6 +251,9 @@ const JsonEditor: React.FC<JsonEditorProps> = ({
     try {
       const formatted = formatJSON(currentValue);
       onChange(formatted);
+      if (formatted !== currentValue) {
+        notifyUserEdit(viewRef.current.dom);
+      }
       toast.success(t("common.formatSuccess"), {
         closeButton: true,
       });

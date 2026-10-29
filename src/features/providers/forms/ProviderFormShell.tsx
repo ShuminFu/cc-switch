@@ -28,6 +28,9 @@ import { ProviderFormErrorSummary } from "./ProviderFormErrorSummary";
 /** 对话框底部的保存按钮通过 form="provider-form" 关联到表单 */
 export const PROVIDER_FORM_ID = "provider-form";
 
+/** 带此属性的元素（如预设搜索框）内的输入不代表配置修改，不计入未保存修改 */
+export const UNSAVED_CHANGES_IGNORE_ATTR = "data-unsaved-changes-ignore";
+
 /**
  * 由 ProviderForm 分发器注入的"未保存修改"回调（来自 ProviderFormProps.onDirtyChange），
  * 外壳统一上报，各应用编辑器无需逐个透传。
@@ -85,7 +88,11 @@ export function ProviderFormShell({
   const formRef = useRef<HTMLFormElement>(null);
   const [hasEditorEdits, setHasEditorEdits] = useState(false);
   const markEditorEdited = (event: SyntheticEvent) => {
-    if (formRef.current?.contains(event.target as Node)) {
+    const target = event.target as Element;
+    if (
+      formRef.current?.contains(target) &&
+      !target.closest?.(`[${UNSAVED_CHANGES_IGNORE_ATTR}]`)
+    ) {
       setHasEditorEdits(true);
     }
   };
