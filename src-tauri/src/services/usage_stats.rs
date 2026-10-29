@@ -2,6 +2,7 @@
 //!
 //! 提供使用量数据的聚合查询功能
 
+use crate::app_config::InputSemantics;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::proxy::usage::calculator::ModelPricing;
@@ -373,6 +374,8 @@ pub(crate) fn has_matching_proxy_usage_log(
     conn: &Connection,
     key: &DedupKey,
 ) -> Result<bool, AppError> {
+    // 这里描述的是哪些会话日志来源可能不上报 cache_creation，用于去重匹配，
+    // 与 input 语义（AppType::input_semantics）无关，因此不复用该判定。
     let allow_missing_cache_creation =
         matches!(key.app_type, "codex" | "gemini" | "opencode") && key.cache_creation_tokens == 0;
 
@@ -1813,11 +1816,12 @@ impl Database {
 
         let million = rust_decimal::Decimal::from(1_000_000u64);
 
-        // 与 CostCalculator::calculate_for_app 保持一致的计算逻辑：
-        // 1. 历史 Codex/Gemini 行只包含 cache read；新 total 行还包含 cache write。
+        // 与 CostCalculator::calculate_for_app 保持一致的计算逻辑（语义来自 AppType::input_semantics）：
+        // 1. 历史 Codex/Gemini/Grok Build 行只包含 cache read；新 total 行还包含 cache write。
         // 2. Claude/Anthropic 的 input_tokens 已经是 fresh input，不能再次扣减
         // 3. 各项成本是基础成本（不含倍率），倍率只作用于最终总价
-        let cache_inclusive_app = matches!(log.app_type.as_str(), "codex" | "gemini");
+        let cache_inclusive_app =
+            InputSemantics::for_app_type_str(&log.app_type).is_cache_inclusive();
         let billable_input_tokens =
             if !cache_inclusive_app || log.input_token_semantics == INPUT_TOKEN_SEMANTICS_FRESH {
                 log.input_tokens as u64
@@ -3326,7 +3330,7 @@ mod tests {
         let summary = db.get_usage_summary(None, None, None, None, None)?;
         assert_eq!(summary.total_requests, 4);
         // codex-proxy contributes 100-10=90; gemini-proxy contributes 200-30=170
-        // (both cache-inclusive providers). claude-proxy=300, codex-session-only=50.
+        // (input includes cache for both providers). claude-proxy=300, codex-session-only=50.
         // 90 + 170 + 300 + 50 = 610.
         assert_eq!(summary.total_input_tokens, 610);
         assert_eq!(summary.total_output_tokens, 125);

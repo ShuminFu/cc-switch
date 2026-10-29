@@ -2,6 +2,7 @@
 
 use super::calculator::{CostBreakdown, CostCalculator, ModelPricing};
 use super::parser::TokenUsage;
+use crate::app_config::InputSemantics;
 use crate::database::{Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 use crate::error::AppError;
 use crate::services::sql_helpers::{INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL};
@@ -72,7 +73,7 @@ impl<'a> UsageLogger<'a> {
 
         let created_at = chrono::Utc::now().timestamp();
         let input_token_semantics =
-            if matches!(log.app_type.as_str(), "codex" | "gemini" | "grokbuild") {
+            if InputSemantics::for_app_type_str(&log.app_type).is_cache_inclusive() {
                 INPUT_TOKEN_SEMANTICS_TOTAL
             } else {
                 INPUT_TOKEN_SEMANTICS_FRESH

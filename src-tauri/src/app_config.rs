@@ -408,6 +408,21 @@ impl AppType {
         )
     }
 
+    /// 该应用上游上报的 `input_tokens` 是否包含 cache 部分。
+    ///
+    /// 这是 ingest 计价、logger 落库语义、聚合 SQL 与历史回填共用的唯一来源。
+    /// 穷举 match：新增 AppType 时必须在这里表态。
+    pub fn input_semantics(&self) -> InputSemantics {
+        match self {
+            AppType::Codex | AppType::Gemini | AppType::GrokBuild => InputSemantics::CacheInclusive,
+            AppType::Claude
+            | AppType::ClaudeDesktop
+            | AppType::OpenCode
+            | AppType::OpenClaw
+            | AppType::Hermes => InputSemantics::CacheExclusive,
+        }
+    }
+
     /// Return an iterator over all app types
     pub fn all() -> impl Iterator<Item = AppType> {
         [
@@ -421,6 +436,30 @@ impl AppType {
             AppType::Hermes,
         ]
         .into_iter()
+    }
+}
+
+/// `input_tokens` 与 cache token 的关系，见 [`AppType::input_semantics`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputSemantics {
+    /// cache-inclusive：input 包含 cache read/write（OpenAI Responses、Gemini 风格），
+    /// 计费前需要扣除 cache 部分。
+    CacheInclusive,
+    /// input 已经是 fresh input（Anthropic 风格），不能再次扣减。
+    CacheExclusive,
+}
+
+impl InputSemantics {
+    /// 按落库的 `app_type` 字符串取语义；无法识别的值按 [`InputSemantics::CacheExclusive`]
+    /// 处理，避免对未知来源的行误扣 cache。
+    pub fn for_app_type_str(app_type: &str) -> Self {
+        AppType::from_str(app_type)
+            .map(|app| app.input_semantics())
+            .unwrap_or(InputSemantics::CacheExclusive)
+    }
+
+    pub fn is_cache_inclusive(self) -> bool {
+        self == InputSemantics::CacheInclusive
     }
 }
 

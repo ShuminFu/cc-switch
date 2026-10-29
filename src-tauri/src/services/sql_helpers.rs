@@ -6,17 +6,19 @@
 //! summing `input_tokens` across providers must route through
 //! [`fresh_input_sql`] to recover a consistent semantics.
 
-/// Set of `app_type` values whose stored `input_tokens` already includes
-/// `cache_read_tokens`. Aggregations subtract cache reads from these rows
-/// to recover the fresh-input semantics used by Claude.
-///
-/// Why list providers explicitly: new providers default to the
-/// Claude-style "input excludes cache" semantics, which is safer if the
-/// caller forgets to update this list. The wrong direction (a new OpenAI-
-/// style provider not added here) shows up loudly as a too-low cache hit
-/// rate, which is easier to catch than the silent over-deduction that
-/// would happen with the opposite default.
-const CACHE_INCLUSIVE_APP_TYPES: &[&str] = &["codex", "gemini", "grokbuild"];
+use crate::app_config::AppType;
+
+/// Quoted, comma-separated list of `app_type` values whose stored
+/// `input_tokens` already includes the cache portion, derived from
+/// [`AppType::input_semantics`] so the SQL CASE can never drift from the
+/// Rust-side cost paths.
+fn input_includes_cache_app_type_list() -> String {
+    AppType::all()
+        .filter(|app| app.input_semantics().is_cache_inclusive())
+        .map(|app| format!("'{}'", app.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 pub(crate) const INPUT_TOKEN_SEMANTICS_LEGACY: i64 = 0;
 pub(crate) const INPUT_TOKEN_SEMANTICS_TOTAL: i64 = 1;
@@ -37,11 +39,7 @@ pub fn fresh_input_sql(alias: &str) -> String {
     } else {
         format!("{alias}.")
     };
-    let app_type_list = CACHE_INCLUSIVE_APP_TYPES
-        .iter()
-        .map(|t| format!("'{t}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let app_type_list = input_includes_cache_app_type_list();
     format!(
         "CASE \
               WHEN {prefix}input_token_semantics = {INPUT_TOKEN_SEMANTICS_FRESH} THEN {prefix}input_tokens \
@@ -77,6 +75,20 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn fresh_input_app_list_matches_app_type_input_semantics() {
+        let sql = fresh_input_sql("");
+        for app in AppType::all() {
+            let quoted = format!("'{}'", app.as_str());
+            assert_eq!(
+                sql.contains(&quoted),
+                app.input_semantics().is_cache_inclusive(),
+                "{} must be listed iff its input includes cache",
+                app.as_str()
+            );
+        }
     }
 
     #[test]

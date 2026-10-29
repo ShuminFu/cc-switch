@@ -10,9 +10,8 @@
 //! ingest/logger 只会写出 app_type 对应的那一种语义，因此它们只跑语义匹配的行；
 //! 聚合与回填会读到历史行，三种语义全部要跑。
 //!
-//! 已知分歧：回填没有把 grokbuild 视为 cache-inclusive，grokbuild 的 LEGACY/TOTAL
-//! 行在回填路径上多计了 cache 部分的输入。这些行被单独放进 #[ignore] 测试，
-//! 修复见 docs/roadmap/tickets/P1-trust-release/CCS-092-p1-usage-input-semantics.md。
+//! 四条路径都从 `AppType::input_semantics` 取 input 语义（CCS-092）；下面的
+//! `ingest_semantics` 是独立写出的期望值，用来防止单一来源本身写错。
 
 use super::calculator::{CostCalculator, ModelPricing};
 use super::logger::UsageLogger;
@@ -29,9 +28,9 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Semantics {
-    /// v12 及更早：cache-inclusive app 的 input 只包含 cache read
+    /// v12 及更早：input 含 cache 的 app 只包含 cache read
     Legacy,
-    /// cache-inclusive：input 同时包含 cache read 与 cache write
+    /// input 含 cache：同时包含 cache read 与 cache write
     Total,
     /// cache-exclusive：input 已经是 fresh input
     Fresh,
@@ -156,11 +155,6 @@ impl GoldenRow {
 
     fn is_ingest_row(&self) -> bool {
         ingest_semantics(&self.app) == self.semantics
-    }
-
-    /// 回填路径的已知分歧（CCS-092）。
-    fn is_known_backfill_divergence(&self) -> bool {
-        self.app == AppType::GrokBuild && self.semantics != Semantics::Fresh
     }
 }
 
@@ -408,10 +402,25 @@ fn cost_golden_aggregation_path() -> Result<(), AppError> {
 #[test]
 fn cost_golden_backfill_path() -> Result<(), AppError> {
     let rows = golden_rows();
+    let all: Vec<&GoldenRow> = rows.iter().collect();
+    let mut failures = Vec::new();
+    for (row, cost) in all.iter().zip(backfill_costs(&all)?) {
+        check(&mut failures, "backfill", row, cost);
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    Ok(())
+}
+
+/// CCS-092 回归：grokbuild 的 LEGACY/TOTAL 历史行在回填时曾被当作 fresh input，
+/// 多计了 cache 部分的输入成本。
+#[test]
+fn cost_golden_backfill_path_grokbuild_cache_rows() -> Result<(), AppError> {
+    let rows = golden_rows();
     let selected: Vec<&GoldenRow> = rows
         .iter()
-        .filter(|r| !r.is_known_backfill_divergence())
+        .filter(|r| r.app == AppType::GrokBuild && r.semantics != Semantics::Fresh)
         .collect();
+    assert_eq!(selected.len(), 2 * SCENARIOS.len());
     let mut failures = Vec::new();
     for (row, cost) in selected.iter().zip(backfill_costs(&selected)?) {
         check(&mut failures, "backfill", row, cost);
@@ -421,19 +430,13 @@ fn cost_golden_backfill_path() -> Result<(), AppError> {
 }
 
 #[test]
-#[ignore = "known grokbuild backfill divergence, fixed by CCS-092: \
-            docs/roadmap/tickets/P1-trust-release/CCS-092-p1-usage-input-semantics.md"]
-fn cost_golden_backfill_path_grokbuild_known_divergence() -> Result<(), AppError> {
-    let rows = golden_rows();
-    let selected: Vec<&GoldenRow> = rows
-        .iter()
-        .filter(|r| r.is_known_backfill_divergence())
-        .collect();
-    assert_eq!(selected.len(), 2 * SCENARIOS.len());
-    let mut failures = Vec::new();
-    for (row, cost) in selected.iter().zip(backfill_costs(&selected)?) {
-        check(&mut failures, "backfill", row, cost);
+fn cost_golden_expected_semantics_match_app_type_input_semantics() {
+    for app in AppType::all() {
+        assert_eq!(
+            ingest_semantics(&app) == Semantics::Total,
+            app.input_semantics().is_cache_inclusive(),
+            "{}",
+            app.as_str()
+        );
     }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-    Ok(())
 }

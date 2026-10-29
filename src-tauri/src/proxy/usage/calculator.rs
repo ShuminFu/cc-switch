@@ -3,6 +3,7 @@
 //! 使用高精度 Decimal 类型避免浮点数精度问题
 
 use super::parser::TokenUsage;
+use crate::app_config::InputSemantics;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
@@ -51,7 +52,8 @@ impl CostCalculator {
 
     /// 按 app_type 选择输入 token 语义后计算成本。
     ///
-    /// Codex/OpenAI Responses 与 Gemini 的输入 token 字段包含 cache read 部分；
+    /// 语义由 [`crate::app_config::AppType::input_semantics`] 决定：
+    /// Codex/OpenAI Responses、Gemini、Grok Build 的输入 token 字段包含 cache 部分；
     /// Claude/Anthropic 的 input_tokens 已经是 fresh input。
     pub fn calculate_for_app(
         app_type: &str,
@@ -59,7 +61,8 @@ impl CostCalculator {
         pricing: &ModelPricing,
         cost_multiplier: Decimal,
     ) -> CostBreakdown {
-        let input_includes_cache_read = matches!(app_type, "codex" | "gemini" | "grokbuild");
+        let input_includes_cache_read =
+            InputSemantics::for_app_type_str(app_type).is_cache_inclusive();
         Self::calculate_with_cache_semantics(
             usage,
             pricing,
