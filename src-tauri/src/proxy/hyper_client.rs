@@ -550,18 +550,21 @@ async fn connect_via_proxy(
         .await
         .map_err(|e| ProxyError::ForwardFailed(format!("CONNECT read failed: {e}")))?;
 
-    // Expect "HTTP/1.1 200 ..." or "HTTP/1.0 200 ..."
-    if !status_line.contains(" 200 ") {
-        if status_line.contains(" 407 ") {
+    // Expect "HTTP/1.x 2xx ..."; the reason phrase is optional.
+    match parse_connect_status(&status_line) {
+        Some(code) if (200..300).contains(&code) => {}
+        Some(407) => {
             return Err(ProxyError::AuthError(format!(
                 "Proxy authentication required (407): {}",
                 status_line.trim()
             )));
         }
-        return Err(ProxyError::ForwardFailed(format!(
-            "Proxy CONNECT rejected: {}",
-            status_line.trim()
-        )));
+        _ => {
+            return Err(ProxyError::ForwardFailed(format!(
+                "Proxy CONNECT rejected: {}",
+                status_line.trim()
+            )));
+        }
     }
 
     // Drain remaining response headers (until empty line)
@@ -585,6 +588,24 @@ async fn connect_via_proxy(
     );
 
     Ok(stream)
+}
+
+/// Parse the status code from a CONNECT response status line.
+///
+/// Requires an `HTTP/` version prefix and a 3-digit status code as the
+/// second token; the reason phrase is optional. Returns `None` for anything
+/// that is not a well-formed status line.
+fn parse_connect_status(line: &str) -> Option<u16> {
+    let mut parts = line.trim_end_matches(['\r', '\n']).splitn(3, ' ');
+    let version = parts.next()?;
+    if !version.starts_with("HTTP/") {
+        return None;
+    }
+    let code = parts.next()?;
+    if code.len() != 3 || !code.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    code.parse().ok()
 }
 
 /// Lazily-initialized TLS connector for raw connections.
@@ -930,6 +951,81 @@ mod tests {
             }
             Err(e) => panic!("expected fallback ForwardFailed, got: {e}"),
             Ok(_) => panic!("expected connection error"),
+        }
+    }
+
+    #[test]
+    fn parse_connect_status_reads_second_token() {
+        for line in [
+            "HTTP/1.1 200 Connection established\r\n",
+            "HTTP/1.0 200 OK\r\n",
+            "HTTP/1.1 200\r\n",
+            "HTTP/1.1 200 \r\n",
+        ] {
+            assert_eq!(parse_connect_status(line), Some(200), "line: {line:?}");
+        }
+        assert_eq!(
+            parse_connect_status("HTTP/1.1 407 Proxy Authentication Required\r\n"),
+            Some(407)
+        );
+        assert_eq!(parse_connect_status("HTTP/1.1 407\r\n"), Some(407));
+        assert_eq!(
+            parse_connect_status("HTTP/1.1 502 Upstream 200 failed\r\n"),
+            Some(502)
+        );
+    }
+
+    #[test]
+    fn parse_connect_status_rejects_malformed_lines() {
+        assert_eq!(parse_connect_status(""), None);
+        assert_eq!(parse_connect_status("\r\n"), None);
+        assert_eq!(parse_connect_status("garbage 200 ok\r\n"), None);
+        assert_eq!(parse_connect_status("HTTP/1.1\r\n"), None);
+        assert_eq!(parse_connect_status("HTTP/1.1 20 short\r\n"), None);
+        assert_eq!(parse_connect_status("HTTP/1.1 abc\r\n"), None);
+    }
+
+    /// Spawn a fake CONNECT proxy that answers with `response` and return its URL.
+    async fn fake_connect_proxy(response: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let _ = sock.write_all(response.as_bytes()).await;
+            let _ = sock.flush().await;
+            // Keep the socket open until the client is done.
+            let _ = sock.read(&mut buf).await;
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn connect_via_proxy_accepts_status_without_reason_phrase() {
+        let proxy = fake_connect_proxy("HTTP/1.1 200\r\n\r\n").await;
+        let result = connect_via_proxy(&proxy, "example.com", 443).await;
+        assert!(result.is_ok(), "bare 200 must establish the tunnel");
+    }
+
+    #[tokio::test]
+    async fn connect_via_proxy_rejects_502_mentioning_200() {
+        let proxy = fake_connect_proxy("HTTP/1.1 502 Upstream 200 failed\r\n\r\n").await;
+        match connect_via_proxy(&proxy, "example.com", 443).await {
+            Err(ProxyError::ForwardFailed(msg)) => assert!(msg.contains("502"), "got: {msg}"),
+            Err(e) => panic!("expected ForwardFailed, got: {e}"),
+            Ok(_) => panic!("502 must not establish the tunnel"),
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_via_proxy_maps_bare_407_to_auth_error() {
+        let proxy = fake_connect_proxy("HTTP/1.1 407\r\n\r\n").await;
+        match connect_via_proxy(&proxy, "example.com", 443).await {
+            Err(ProxyError::AuthError(_)) => {}
+            Err(e) => panic!("expected AuthError, got: {e}"),
+            Ok(_) => panic!("407 must not establish the tunnel"),
         }
     }
 }
