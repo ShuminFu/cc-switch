@@ -130,10 +130,14 @@ fn parse_provider_deeplink(
     let enabled = params.get("enabled").and_then(|v| v.parse::<bool>().ok());
 
     // Extract usage script fields (v3.9+)
-    let usage_enabled = params
-        .get("usageEnabled")
-        .and_then(|v| v.parse::<bool>().ok());
     let usage_script = params.get("usageScript").cloned();
+    // A link cannot enable its own usage script; the imported script is stored
+    // disabled, so report it as disabled to the confirmation dialog as well.
+    let usage_enabled = if usage_script.is_some() || params.contains_key("usageEnabled") {
+        Some(false)
+    } else {
+        None
+    };
     let usage_api_key = params.get("usageApiKey").cloned();
     let usage_base_url = params.get("usageBaseUrl").cloned();
     let usage_access_token = params.get("usageAccessToken").cloned();

@@ -251,8 +251,11 @@ fn build_provider_meta(request: &DeepLinkImportRequest) -> Result<Option<Provide
         String::new()
     };
 
-    // Determine enabled state: explicit param > has code > false
-    let enabled = request.usage_enabled.unwrap_or(!code.is_empty());
+    // A deeplink-delivered script always starts disabled, even when the link
+    // says `usageEnabled=true`: the script can send the provider's credentials
+    // to any host, so it only runs after the user reviews the code and enables
+    // it through the usage script settings.
+    let enabled = false;
 
     let usage_script = UsageScript {
         enabled,

