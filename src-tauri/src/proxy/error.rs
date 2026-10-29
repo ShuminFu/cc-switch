@@ -59,6 +59,10 @@ pub enum ProxyError {
     #[error("无效的请求: {0}")]
     InvalidRequest(String),
 
+    /// 入站请求体超过本地代理的大小上限
+    #[error("请求体过大: 超过 {0} 字节上限")]
+    PayloadTooLarge(usize),
+
     #[error("超时: {0}")]
     Timeout(String),
 
@@ -148,6 +152,9 @@ impl IntoResponse for ProxyError {
                         (StatusCode::UNPROCESSABLE_ENTITY, self.to_string())
                     }
                     ProxyError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+                    ProxyError::PayloadTooLarge(_) => {
+                        (StatusCode::PAYLOAD_TOO_LARGE, self.to_string())
+                    }
                     ProxyError::Timeout(_) => (StatusCode::GATEWAY_TIMEOUT, self.to_string()),
                     ProxyError::StreamIdleTimeout(_) => {
                         (StatusCode::GATEWAY_TIMEOUT, self.to_string())

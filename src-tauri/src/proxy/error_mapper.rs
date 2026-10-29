@@ -14,6 +14,7 @@ use super::ProxyError;
 /// - 重试耗尽：503 Service Unavailable
 /// - 认证错误：401 Unauthorized
 /// - 配置/请求错误：400 Bad Request
+/// - 请求体过大：413 Payload Too Large
 /// - 转换错误：422 Unprocessable Entity
 /// - 其他错误：500 Internal Server Error
 pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
@@ -48,6 +49,9 @@ pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
 
         // 配置错误/无效请求：400 Bad Request
         ProxyError::ConfigError(_) | ProxyError::InvalidRequest(_) => 400,
+
+        // 请求体过大：413 Payload Too Large
+        ProxyError::PayloadTooLarge(_) => 413,
 
         // 认证错误：401 Unauthorized
         ProxyError::AuthError(_) => 401,

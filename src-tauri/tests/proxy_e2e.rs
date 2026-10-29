@@ -663,6 +663,44 @@ async fn router_rejects_untrusted_requests_before_the_forwarder() {
 }
 
 #[tokio::test]
+async fn router_returns_400_for_malformed_json_on_every_body_reading_route() {
+    use tower::ServiceExt;
+
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::message("leaked", 10, 5)).await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+    let host = format!("127.0.0.1:{}", harness.port());
+    let token = harness.token().to_string();
+
+    for uri in [
+        "/v1/messages",
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/responses/compact",
+        "/v1beta/models/gemini-pro:generateContent",
+    ] {
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("host", &host)
+            .header("content-type", "application/json")
+            .header("x-api-key", &token)
+            .header("x-goog-api-key", &token)
+            .body(axum::body::Body::from("{not json"))
+            .expect("build router request");
+        let response = harness
+            .router()
+            .oneshot(request)
+            .await
+            .expect("router response");
+        assert_eq!(response.status().as_u16(), 400, "{uri}");
+    }
+    assert_eq!(upstream.hits(), 0, "malformed bodies never reach upstream");
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
 async fn foreign_host_text_plain_post_is_rejected_on_the_wire() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

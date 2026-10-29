@@ -36,7 +36,7 @@ use super::{
         strip_entity_headers_for_rebuilt_body, strip_hop_by_hop_response_headers,
         usage_logging_enabled, SseUsageCollector,
     },
-    server::ProxyState,
+    server::{ProxyState, MAX_REQUEST_BODY_BYTES},
     sse::{strip_sse_field, take_sse_block},
     types::*,
     usage::parser::TokenUsage,
@@ -46,8 +46,49 @@ use crate::app_config::AppType;
 use crate::database::PRICING_SOURCE_REQUEST;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use bytes::Bytes;
-use http_body_util::BodyExt;
 use serde_json::{json, Value};
+
+// ============================================================================
+// 请求体读取
+// ============================================================================
+
+/// 以 [`MAX_REQUEST_BODY_BYTES`] 为上限读取入站请求体
+///
+/// handler 直接接收 `axum::extract::Request`，路由层的 `DefaultBodyLimit` 对其不生效，
+/// 因此必须在这里自行限流：超限返回 413，读取失败（如客户端中途断开）返回 400。
+async fn read_request_body(body: axum::body::Body) -> Result<Bytes, ProxyError> {
+    read_request_body_with_limit(body, MAX_REQUEST_BODY_BYTES).await
+}
+
+async fn read_request_body_with_limit(
+    body: axum::body::Body,
+    limit: usize,
+) -> Result<Bytes, ProxyError> {
+    axum::body::to_bytes(body, limit).await.map_err(|e| {
+        if is_length_limit_error(&e) {
+            ProxyError::PayloadTooLarge(limit)
+        } else {
+            ProxyError::InvalidRequest(format!("Failed to read request body: {e}"))
+        }
+    })
+}
+
+fn is_length_limit_error(error: &axum::Error) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(err) = source {
+        if err.is::<http_body_util::LengthLimitError>() {
+            return true;
+        }
+        source = err.source();
+    }
+    false
+}
+
+/// 把请求体解析为 JSON；格式错误属于客户端问题，返回 400 而不是 500
+fn parse_request_json(body_bytes: &[u8]) -> Result<Value, ProxyError> {
+    serde_json::from_slice(body_bytes)
+        .map_err(|e| ProxyError::InvalidRequest(format!("Failed to parse request body: {e}")))
+}
 
 // ============================================================================
 // 健康检查和状态查询（简单端点）
@@ -166,13 +207,8 @@ async fn handle_messages_for_app(
     let uri = parts.uri;
     let headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body_bytes = read_request_body(body).await?;
+    let body: Value = parse_request_json(&body_bytes)?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -698,14 +734,9 @@ pub async fn handle_chat_completions(
     let uri = parts.uri;
     let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value = parse_request_json(&body_bytes)?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, AppType::Codex, "Codex", "codex").await?;
@@ -788,14 +819,9 @@ async fn handle_responses_for_app(
     let uri = parts.uri;
     let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value = parse_request_json(&body_bytes)?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -903,14 +929,9 @@ async fn handle_responses_compact_for_app(
     let uri = parts.uri;
     let mut headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value = parse_request_json(&body_bytes)?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -1688,6 +1709,7 @@ fn codex_proxy_error_code(error: &ProxyError) -> &'static str {
         ProxyError::ConfigError(_) => "cc_switch_config_error",
         ProxyError::TransformError(_) => "cc_switch_transform_error",
         ProxyError::InvalidRequest(_) => "cc_switch_invalid_request",
+        ProxyError::PayloadTooLarge(_) => "cc_switch_payload_too_large",
         ProxyError::AuthError(_) => "cc_switch_auth_error",
         ProxyError::UpstreamError { .. } => "cc_switch_upstream_error",
         ProxyError::DatabaseError(_) => "cc_switch_database_error",
@@ -1729,18 +1751,13 @@ pub async fn handle_gemini(
     let method = parts.method.clone();
     let headers = parts.headers;
     let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
+    let body_bytes = read_request_body(req_body).await?;
     // GET 类只读端点（/v1beta/models、/v1beta/models/<model> 等）没有请求体，
     // 不能强制 parse 为 JSON —— 否则空 body 会被拒绝。
     let body: Value = if body_bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&body_bytes)
-            .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?
+        parse_request_json(&body_bytes)?
     };
 
     // Gemini 的模型名称在 URI 中
@@ -2438,10 +2455,80 @@ async fn log_usage(
 mod tests {
     use super::{
         body_looks_like_sse, body_snippet, chat_sse_to_response_value, codex_proxy_error_json,
-        responses_sse_to_response_value, should_use_claude_transform_streaming, transform,
-        upstream_body_parse_error,
+        parse_request_json, read_request_body_with_limit, responses_sse_to_response_value,
+        should_use_claude_transform_streaming, transform, upstream_body_parse_error,
     };
     use crate::proxy::ProxyError;
+
+    /// 与生产 handler 同样接收原始 Request、走 read_request_body + parse_request_json，
+    /// 但上限可以设得很小，便于在测试里触发 413。
+    fn body_limit_router(limit: usize) -> axum::Router {
+        axum::Router::new().route(
+            "/echo",
+            axum::routing::post(move |request: axum::extract::Request| async move {
+                let bytes = read_request_body_with_limit(request.into_body(), limit).await?;
+                let body = parse_request_json(&bytes)?;
+                Ok::<_, ProxyError>(axum::Json(body))
+            }),
+        )
+    }
+
+    async fn post_echo(limit: usize, body: impl Into<axum::body::Body>) -> axum::http::StatusCode {
+        use tower::ServiceExt;
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/echo")
+            .header("content-type", "application/json")
+            .body(body.into())
+            .unwrap();
+        body_limit_router(limit)
+            .oneshot(request)
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn request_body_over_limit_returns_413() {
+        let oversized = format!("{{\"pad\":\"{}\"}}", "x".repeat(64));
+        assert_eq!(
+            post_echo(16, oversized).await,
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE
+        );
+    }
+
+    #[tokio::test]
+    async fn request_body_over_limit_returns_413_for_chunked_stream() {
+        // 没有 Content-Length 的流式请求体也必须在累计超限时被截断
+        let chunks: Vec<Result<bytes::Bytes, std::io::Error>> = (0..8)
+            .map(|_| Ok(bytes::Bytes::from_static(b"0123456789")))
+            .collect();
+        let body = axum::body::Body::from_stream(futures::stream::iter(chunks));
+        assert_eq!(
+            post_echo(32, body).await,
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE
+        );
+    }
+
+    #[tokio::test]
+    async fn request_body_within_limit_is_parsed() {
+        assert_eq!(
+            post_echo(64, r#"{"model":"m"}"#).await,
+            axum::http::StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_json_request_body_returns_400() {
+        assert_eq!(
+            post_echo(1024, "{not json").await,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+        assert!(matches!(
+            parse_request_json(b"{not json"),
+            Err(ProxyError::InvalidRequest(_))
+        ));
+    }
 
     #[test]
     fn body_looks_like_sse_detects_unlabeled_sse_prefixes() {

@@ -30,6 +30,9 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
 
+/// 入站请求体大小上限（200MB）
+pub(crate) const MAX_REQUEST_BODY_BYTES: usize = 200 * 1024 * 1024;
+
 /// 代理服务器状态（共享）
 #[derive(Clone)]
 pub struct ProxyState {
@@ -401,8 +404,10 @@ impl ProxyServer {
             .route("/gemini/v1beta/*path", any(handlers::handle_gemini))
             // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
-            // 提高默认请求体大小限制（避免 413 Payload Too Large）
-            .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
+            // 提高默认请求体大小限制（避免 413 Payload Too Large）。
+            // 注意：DefaultBodyLimit 只对 axum 提取器生效，接收原始 Request 的 handler
+            // 通过 `handlers::read_request_body` 以同一上限 MAX_REQUEST_BODY_BYTES 自行限流。
+            .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
             // 入站鉴权：Host / Origin / Content-Type / token，失败时不会进入 handler 与转发器
             .layer(axum::middleware::from_fn_with_state(
                 guard,
