@@ -235,6 +235,11 @@ impl ProxyResponse {
 /// 2. Fallback: hyper-util Client with `title_case_headers(true)` when raw write
 ///    isn't feasible (e.g., missing original cases).
 ///
+/// The fallback only runs when the raw path failed before any request bytes
+/// were written (see [`RawSendError`]); once the request may have reached the
+/// upstream, the error is returned as-is so the request is never sent twice.
+/// Both attempts share a single `timeout` deadline.
+///
 /// The caller is expected to include `Host` in the supplied `headers` at the
 /// correct position.
 ///
@@ -265,13 +270,16 @@ pub async fn send_request(
         proxy_url,
     );
 
+    // One deadline shared by the raw attempt and the fallback.
+    let deadline = tokio::time::Instant::now() + timeout;
+
     if let Some(original_cases) = original_cases
         .as_ref()
         .filter(|cases| !cases.cases.is_empty())
     {
         // Primary path: use raw write + hyper handshake for exact header casing
-        let result = tokio::time::timeout(
-            timeout,
+        let result = tokio::time::timeout_at(
+            deadline,
             send_raw_request(&uri, &method, &headers, original_cases, &body, proxy_url),
         )
         .await
@@ -279,7 +287,12 @@ pub async fn send_request(
 
         match result {
             Ok(resp) => return Ok(resp),
-            Err(e) => {
+            Err(RawSendError::PostWrite(e)) => {
+                // The request may already have reached the upstream; resending it
+                // could bill the same LLM call twice. Let the forwarder decide.
+                return Err(e);
+            }
+            Err(RawSendError::PreWrite(e)) => {
                 if proxy_url.is_some() {
                     // Don't bypass configured proxy with direct connect fallback
                     return Err(e);
@@ -301,7 +314,7 @@ pub async fn send_request(
     *req.extensions_mut() = original_extensions;
 
     let client = global_hyper_client();
-    let resp = tokio::time::timeout(timeout, client.request(req))
+    let resp = tokio::time::timeout_at(deadline, client.request(req))
         .await
         .map_err(|_| ProxyError::Timeout(format!("请求超时: {}s", timeout.as_secs())))?
         .map_err(|e| ProxyError::ForwardFailed(format!("上游请求失败: {e}")))?;
@@ -365,6 +378,17 @@ impl tokio::io::AsyncWrite for ProxyStream {
     }
 }
 
+/// Failure of the raw header-case path, split by whether any request bytes
+/// may have been written to the upstream.
+#[derive(Debug)]
+enum RawSendError {
+    /// Nothing was sent (URI/host, connect, server name, TLS handshake); a
+    /// fallback attempt cannot duplicate the request.
+    PreWrite(ProxyError),
+    /// The request may have been (partially) sent; it must not be resent here.
+    PostWrite(ProxyError),
+}
+
 /// Send request via raw TCP/TLS with exact original header casing.
 ///
 /// When `proxy_url` is provided, establishes an HTTP CONNECT tunnel through
@@ -377,13 +401,14 @@ async fn send_raw_request(
     original_cases: &OriginalHeaderCases,
     body: &[u8],
     proxy_url: Option<&str>,
-) -> Result<ProxyResponse, ProxyError> {
+) -> Result<ProxyResponse, RawSendError> {
     use tokio::io::AsyncWriteExt;
 
+    let pre = |msg: String| RawSendError::PreWrite(ProxyError::ForwardFailed(msg));
+    let post = |msg: String| RawSendError::PostWrite(ProxyError::ForwardFailed(msg));
+
     let scheme = uri.scheme_str().unwrap_or("https");
-    let host = uri
-        .host()
-        .ok_or_else(|| ProxyError::ForwardFailed("URI has no host".into()))?;
+    let host = uri.host().ok_or_else(|| pre("URI has no host".into()))?;
     let port = uri
         .port_u16()
         .unwrap_or(if scheme == "https" { 443 } else { 80 });
@@ -394,48 +419,54 @@ async fn send_raw_request(
 
     // Establish TCP connection — either direct or through HTTP CONNECT proxy
     let stream = if let Some(proxy) = proxy_url {
-        connect_via_proxy(proxy, host, port).await?
+        connect_via_proxy(proxy, host, port)
+            .await
+            .map_err(RawSendError::PreWrite)?
     } else {
         ProxyStream::Tcp(
             tokio::net::TcpStream::connect((host, port))
                 .await
-                .map_err(|e| ProxyError::ForwardFailed(format!("TCP connect failed: {e}")))?,
+                .map_err(|e| pre(format!("TCP connect failed: {e}")))?,
         )
     };
 
     if scheme == "https" {
         let tls_connector = global_tls_connector();
         let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
-            .map_err(|e| ProxyError::ForwardFailed(format!("Invalid server name: {e}")))?;
+            .map_err(|e| pre(format!("Invalid server name: {e}")))?;
         let mut tls_stream = tls_connector
             .connect(server_name, stream)
             .await
-            .map_err(|e| ProxyError::ForwardFailed(format!("TLS handshake failed: {e}")))?;
+            .map_err(|e| pre(format!("TLS handshake failed: {e}")))?;
 
         tls_stream
             .write_all(&raw)
             .await
-            .map_err(|e| ProxyError::ForwardFailed(format!("Write failed: {e}")))?;
+            .map_err(|e| post(format!("Write failed: {e}")))?;
         tls_stream
             .flush()
             .await
-            .map_err(|e| ProxyError::ForwardFailed(format!("Flush failed: {e}")))?;
+            .map_err(|e| post(format!("Flush failed: {e}")))?;
 
         let filtered = WriteFilter::new(tls_stream);
-        do_hyper_response(filtered, method.clone()).await
+        do_hyper_response(filtered, method.clone())
+            .await
+            .map_err(RawSendError::PostWrite)
     } else {
         let mut stream = stream;
         stream
             .write_all(&raw)
             .await
-            .map_err(|e| ProxyError::ForwardFailed(format!("Write failed: {e}")))?;
+            .map_err(|e| post(format!("Write failed: {e}")))?;
         stream
             .flush()
             .await
-            .map_err(|e| ProxyError::ForwardFailed(format!("Flush failed: {e}")))?;
+            .map_err(|e| post(format!("Flush failed: {e}")))?;
 
         let filtered = WriteFilter::new(stream);
-        do_hyper_response(filtered, method.clone()).await
+        do_hyper_response(filtered, method.clone())
+            .await
+            .map_err(RawSendError::PostWrite)
     }
 }
 
@@ -774,5 +805,131 @@ mod tests {
         assert!(buffered_with_content_type(Some("application/problem+json")).is_json());
         assert!(!buffered_with_content_type(Some("text/event-stream")).is_json());
         assert!(!buffered_with_content_type(None).is_json());
+    }
+
+    fn extensions_with_cases() -> http::Extensions {
+        // The hyper-util fallback client needs a process-level rustls provider.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut ext = http::Extensions::new();
+        ext.insert(OriginalHeaderCases::from_raw_bytes(
+            b"POST /v1/messages HTTP/1.1\r\nHost: x\r\nX-Custom-Case: 1\r\n\r\n",
+        ));
+        ext
+    }
+
+    fn request_headers(port: u16) -> http::HeaderMap {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::HOST,
+            http::HeaderValue::from_str(&format!("127.0.0.1:{port}")).unwrap(),
+        );
+        headers.insert("x-custom-case", http::HeaderValue::from_static("1"));
+        headers
+    }
+
+    /// Read one full HTTP/1.1 request (headers + Content-Length body).
+    async fn read_full_request(stream: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let n = stream.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&buf[..pos]).to_ascii_lowercase();
+                let len = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if buf.len() >= pos + 4 + len {
+                    return;
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn raw_path_does_not_resend_after_request_was_written() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let counter = connections.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    read_full_request(&mut stream).await;
+                    let _ = stream.write_all(b"this is not http\r\n\r\n").await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+
+        let uri: http::Uri = format!("http://127.0.0.1:{port}/v1/messages")
+            .parse()
+            .unwrap();
+        let result = send_request(
+            uri,
+            http::Method::POST,
+            request_headers(port),
+            extensions_with_cases(),
+            b"{\"model\":\"m\"}".to_vec(),
+            std::time::Duration::from_secs(10),
+            None,
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(ProxyError::ForwardFailed(_))),
+            "garbage response must surface as ForwardFailed"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(
+            connections.load(Ordering::SeqCst),
+            1,
+            "request must not be resent after it was written"
+        );
+    }
+
+    #[tokio::test]
+    async fn raw_path_connect_refused_still_falls_back() {
+        // Reserve a port, then free it so connecting is refused.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let uri: http::Uri = format!("http://127.0.0.1:{port}/v1/messages")
+            .parse()
+            .unwrap();
+        let result = send_request(
+            uri,
+            http::Method::POST,
+            request_headers(port),
+            extensions_with_cases(),
+            Vec::new(),
+            std::time::Duration::from_secs(10),
+            None,
+        )
+        .await;
+
+        match result {
+            // The hyper-util fallback reports its own error prefix.
+            Err(ProxyError::ForwardFailed(msg)) => {
+                assert!(
+                    msg.contains("上游请求失败"),
+                    "expected fallback error, got: {msg}"
+                )
+            }
+            Err(e) => panic!("expected fallback ForwardFailed, got: {e}"),
+            Ok(_) => panic!("expected connection error"),
+        }
     }
 }
