@@ -2,10 +2,9 @@
 
 use super::calculator::{CostBreakdown, CostCalculator, ModelPricing};
 use super::parser::TokenUsage;
-use crate::app_config::InputSemantics;
 use crate::database::{Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 use crate::error::AppError;
-use crate::services::sql_helpers::{INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL};
+use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{find_model_pricing_row, is_placeholder_pricing_model};
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -72,12 +71,7 @@ impl<'a> UsageLogger<'a> {
             };
 
         let created_at = chrono::Utc::now().timestamp();
-        let input_token_semantics =
-            if InputSemantics::for_app_type_str(&log.app_type).is_cache_inclusive() {
-                INPUT_TOKEN_SEMANTICS_TOTAL
-            } else {
-                INPUT_TOKEN_SEMANTICS_FRESH
-            };
+        let input_token_semantics = input_token_semantics_for_app_type(&log.app_type);
 
         conn.execute(
             "INSERT OR REPLACE INTO proxy_request_logs (
@@ -375,6 +369,7 @@ impl<'a> UsageLogger<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_TOTAL;
 
     #[test]
     fn test_log_request() -> Result<(), AppError> {

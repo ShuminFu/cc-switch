@@ -21,7 +21,8 @@ use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
     get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
 };
-use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
+use crate::services::sql_helpers::input_token_semantics_for_app_type;
+use crate::services::usage_stats::{find_model_pricing, has_matching_proxy_usage_log, DedupKey};
 use rust_decimal::Decimal;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -260,7 +261,10 @@ fn insert_gemini_session_entry(
         cache_creation_tokens: 0,
         created_at,
     };
-    if should_skip_session_insert(&conn, request_id, &dedup_key)? {
+    // 只按代理日志去重，不能用 should_skip_session_insert：它在 request_id 已存在时
+    // 直接跳过，导致下方 UPSERT 的 DO UPDATE 分支永远走不到，重读文件拿到的新值被丢弃。
+    // 自身的会话行由 ON CONFLICT(request_id) 处理（值相同则不变，值变化则更新）。
+    if has_matching_proxy_usage_log(&conn, &dedup_key)? {
         return Ok(false);
     }
 
@@ -304,8 +308,9 @@ fn insert_gemini_session_entry(
             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
             input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
             latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
+            provider_type, is_streaming, cost_multiplier, created_at, data_source,
+            pricing_model, input_token_semantics
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
         ON CONFLICT(request_id) DO UPDATE SET
             model = excluded.model,
             input_tokens = excluded.input_tokens,
@@ -315,11 +320,15 @@ fn insert_gemini_session_entry(
             output_cost_usd = excluded.output_cost_usd,
             cache_read_cost_usd = excluded.cache_read_cost_usd,
             cache_creation_cost_usd = excluded.cache_creation_cost_usd,
-            total_cost_usd = excluded.total_cost_usd
+            total_cost_usd = excluded.total_cost_usd,
+            pricing_model = excluded.pricing_model,
+            input_token_semantics = excluded.input_token_semantics
         WHERE input_tokens != excluded.input_tokens
            OR output_tokens != excluded.output_tokens
            OR cache_read_tokens != excluded.cache_read_tokens
-           OR model != excluded.model",
+           OR model != excluded.model
+           OR pricing_model IS NOT excluded.pricing_model
+           OR input_token_semantics != excluded.input_token_semantics",
         rusqlite::params![
             request_id,
             "_gemini_session",   // provider_id
@@ -345,6 +354,8 @@ fn insert_gemini_session_entry(
             "1.0",               // cost_multiplier
             created_at,
             "gemini_session",    // data_source
+            model,               // pricing_model
+            input_token_semantics_for_app_type("gemini"),
         ],
     )
     .map_err(|e| AppError::Database(format!("插入 Gemini 会话日志失败: {e}")))?;
@@ -494,5 +505,147 @@ mod tests {
         let should_skip =
             tokens.input == 0 && tokens.output == 0 && tokens.thoughts == 0 && tokens.cached == 0;
         assert!(!should_skip, "纯缓存命中记录不应被跳过");
+    }
+
+    #[test]
+    fn test_insert_gemini_session_persists_semantics_and_pricing_model() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tokens = GeminiTokens {
+            input: 1000,
+            output: 20,
+            cached: 300,
+            thoughts: 5,
+        };
+        assert!(insert_gemini_session_entry(
+            &db,
+            "gemini_session:s1:m1",
+            &tokens,
+            "gemini-2.5-pro",
+            Some("s1"),
+            Some("1970-01-01T00:16:45Z"),
+        )?);
+
+        let conn = lock_conn!(db.conn);
+        let (pricing_model, semantics): (Option<String>, i64) = conn.query_row(
+            "SELECT pricing_model, input_token_semantics FROM proxy_request_logs
+             WHERE request_id = 'gemini_session:s1:m1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(pricing_model.as_deref(), Some("gemini-2.5-pro"));
+        assert_eq!(
+            semantics,
+            crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_TOTAL
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_gemini_reimport_updates_existing_row_instead_of_duplicating() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let request_id = "gemini_session:s1:m1";
+        let first = GeminiTokens {
+            input: 1000,
+            output: 20,
+            cached: 300,
+            thoughts: 0,
+        };
+        assert!(insert_gemini_session_entry(
+            &db,
+            request_id,
+            &first,
+            "gemini-2.5-pro",
+            Some("s1"),
+            Some("1970-01-01T00:16:45Z"),
+        )?);
+
+        // 相同值重读：不产生变更
+        assert!(!insert_gemini_session_entry(
+            &db,
+            request_id,
+            &first,
+            "gemini-2.5-pro",
+            Some("s1"),
+            Some("1970-01-01T00:16:45Z"),
+        )?);
+
+        // 文件重写后同一消息携带更新后的 token：必须原地更新
+        let updated = GeminiTokens {
+            input: 1500,
+            output: 80,
+            cached: 400,
+            thoughts: 10,
+        };
+        assert!(insert_gemini_session_entry(
+            &db,
+            request_id,
+            &updated,
+            "gemini-2.5-pro",
+            Some("s1"),
+            Some("1970-01-01T00:16:45Z"),
+        )?);
+
+        let conn = lock_conn!(db.conn);
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM proxy_request_logs WHERE request_id = ?1",
+            [request_id],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 1);
+        let (input, output, cached): (i64, i64, i64) = conn.query_row(
+            "SELECT input_tokens, output_tokens, cache_read_tokens
+             FROM proxy_request_logs WHERE request_id = ?1",
+            [request_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!((input, output, cached), (1500, 90, 400));
+        Ok(())
+    }
+
+    #[test]
+    fn test_gemini_reimport_upgrades_legacy_row_semantics() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let request_id = "gemini_session:s1:legacy";
+        {
+            // 修复前导入的行：pricing_model 为 NULL、语义为 LEGACY
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO proxy_request_logs (
+                    request_id, provider_id, app_type, model, request_model,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                    total_cost_usd, latency_ms, status_code, created_at, data_source
+                ) VALUES (?1, '_gemini_session', 'gemini', 'gemini-2.5-pro', 'gemini-2.5-pro',
+                          1000, 20, 300, 0, '0', 0, 200, 1005, 'gemini_session')",
+                [request_id],
+            )?;
+        }
+        let tokens = GeminiTokens {
+            input: 1000,
+            output: 20,
+            cached: 300,
+            thoughts: 0,
+        };
+        assert!(insert_gemini_session_entry(
+            &db,
+            request_id,
+            &tokens,
+            "gemini-2.5-pro",
+            Some("s1"),
+            Some("1970-01-01T00:16:45Z"),
+        )?);
+
+        let conn = lock_conn!(db.conn);
+        let (pricing_model, semantics): (Option<String>, i64) = conn.query_row(
+            "SELECT pricing_model, input_token_semantics FROM proxy_request_logs
+             WHERE request_id = ?1",
+            [request_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(pricing_model.as_deref(), Some("gemini-2.5-pro"));
+        assert_eq!(
+            semantics,
+            crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_TOTAL
+        );
+        Ok(())
     }
 }

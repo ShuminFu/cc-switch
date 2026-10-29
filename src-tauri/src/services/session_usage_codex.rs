@@ -16,11 +16,12 @@
 use crate::codex_config::get_codex_config_dir;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
-use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
+use crate::proxy::usage::calculator::CostCalculator;
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
     get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
 };
+use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
 use std::fs;
@@ -638,7 +639,9 @@ fn insert_codex_session_entry(
         message_id: None,
     };
 
-    let pricing = find_codex_pricing(&conn, model);
+    // 计价基准为归一化后的模型名，落库供回填/重算使用
+    let pricing_model = normalize_codex_model(model);
+    let pricing = find_model_pricing(&conn, &pricing_model);
     let multiplier = Decimal::from(1);
     let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) = match pricing
     {
@@ -668,8 +671,9 @@ fn insert_codex_session_entry(
             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
             input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
             latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+            provider_type, is_streaming, cost_multiplier, created_at, data_source,
+            pricing_model, input_token_semantics
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
             rusqlite::params![
                 request_id,
                 "_codex_session",    // provider_id
@@ -695,6 +699,8 @@ fn insert_codex_session_entry(
                 "1.0",               // cost_multiplier
                 created_at,
                 "codex_session",     // data_source
+                pricing_model,
+                input_token_semantics_for_app_type("codex"),
             ],
         )
         .map_err(|e| AppError::Database(format!("插入 Codex 会话日志失败: {e}")))?;
@@ -704,11 +710,6 @@ fn insert_codex_session_entry(
     }
 
     Ok(true)
-}
-
-/// 查找 Codex 模型定价（带归一化）
-fn find_codex_pricing(conn: &rusqlite::Connection, model_id: &str) -> Option<ModelPricing> {
-    find_model_pricing(conn, &normalize_codex_model(model_id))
 }
 
 #[cfg(test)]
@@ -1157,5 +1158,41 @@ mod tests {
         // 实际钳制在调用侧：delta.cached_input.min(delta.input)
         let clamped = delta.cached_input.min(delta.input);
         assert_eq!(clamped, 10);
+    }
+
+    #[test]
+    fn test_insert_codex_session_persists_semantics_and_pricing_model() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let delta = DeltaTokens {
+            input: 1000,
+            cached_input: 300,
+            output: 50,
+        };
+        assert!(insert_codex_session_entry(
+            &db,
+            "codex-session-sem",
+            &delta,
+            "openai/GPT-5.4",
+            Some("session-1"),
+            Some("1970-01-01T00:16:45Z"),
+        )?);
+
+        let conn = lock_conn!(db.conn);
+        let (pricing_model, semantics): (Option<String>, i64) = conn.query_row(
+            "SELECT pricing_model, input_token_semantics FROM proxy_request_logs
+             WHERE request_id = 'codex-session-sem'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        // 计价基准是归一化后的模型名
+        assert_eq!(
+            pricing_model.as_deref(),
+            Some(normalize_codex_model("openai/GPT-5.4").as_str())
+        );
+        assert_eq!(
+            semantics,
+            crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_TOTAL
+        );
+        Ok(())
     }
 }

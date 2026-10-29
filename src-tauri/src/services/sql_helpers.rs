@@ -6,7 +6,7 @@
 //! summing `input_tokens` across providers must route through
 //! [`fresh_input_sql`] to recover a consistent semantics.
 
-use crate::app_config::AppType;
+use crate::app_config::{AppType, InputSemantics};
 
 /// Quoted, comma-separated list of `app_type` values whose stored
 /// `input_tokens` already includes the cache portion, derived from
@@ -23,6 +23,18 @@ fn input_includes_cache_app_type_list() -> String {
 pub(crate) const INPUT_TOKEN_SEMANTICS_LEGACY: i64 = 0;
 pub(crate) const INPUT_TOKEN_SEMANTICS_TOTAL: i64 = 1;
 pub(crate) const INPUT_TOKEN_SEMANTICS_FRESH: i64 = 2;
+
+/// `input_token_semantics` value to stamp on a newly written
+/// `proxy_request_logs` row for `app_type`, derived from
+/// [`AppType::input_semantics`]. Shared by the proxy logger and the
+/// session-log importers so new rows never fall back to LEGACY.
+pub(crate) fn input_token_semantics_for_app_type(app_type: &str) -> i64 {
+    if InputSemantics::for_app_type_str(app_type).is_cache_inclusive() {
+        INPUT_TOKEN_SEMANTICS_TOTAL
+    } else {
+        INPUT_TOKEN_SEMANTICS_FRESH
+    }
+}
 
 /// Build an SQL expression that returns the cache-normalized `input_tokens`
 /// for a single row in `proxy_request_logs` or `usage_daily_rollups`.

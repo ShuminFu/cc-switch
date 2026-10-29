@@ -19,6 +19,7 @@ use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
     get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
 };
+use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
 use std::fs;
@@ -398,8 +399,9 @@ fn insert_opencode_message(
             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
             input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
             latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+            provider_type, is_streaming, cost_multiplier, created_at, data_source,
+            pricing_model, input_token_semantics
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         rusqlite::params![
             request_id,
             "_opencode_session",   // provider_id
@@ -425,6 +427,8 @@ fn insert_opencode_message(
             "1.0",                 // cost_multiplier
             created_at,
             "opencode_session",    // data_source
+            msg.model_id,          // pricing_model
+            input_token_semantics_for_app_type("opencode"),
         ],
     )
     .map_err(|e| AppError::Database(format!("插入 OpenCode 会话日志失败: {e}")))?;
@@ -570,5 +574,35 @@ mod tests {
 
         let sessions = query_sessions(&conn).unwrap();
         assert_eq!(sessions, vec![("s1".to_string(), 200)]);
+    }
+
+    #[test]
+    fn test_insert_opencode_message_persists_semantics_and_pricing_model() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let msg = OpenCodeMessageData {
+            input_tokens: 100,
+            output_tokens: 20,
+            reasoning_tokens: 5,
+            cache_read_tokens: 10,
+            cache_write_tokens: 3,
+            cost: 0.0,
+            model_id: "claude-sonnet-4-5".to_string(),
+            timestamp_ms: 1_000_000,
+        };
+        assert!(insert_opencode_message(&db, "opencode-sem", &msg, "s1")?);
+
+        let conn = lock_conn!(db.conn);
+        let (pricing_model, semantics): (Option<String>, i64) = conn.query_row(
+            "SELECT pricing_model, input_token_semantics FROM proxy_request_logs
+             WHERE request_id = 'opencode-sem'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(pricing_model.as_deref(), Some("claude-sonnet-4-5"));
+        assert_eq!(
+            semantics,
+            crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_FRESH
+        );
+        Ok(())
     }
 }
