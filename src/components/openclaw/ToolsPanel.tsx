@@ -59,18 +59,10 @@ const ToolsPanel: React.FC = () => {
 
   const profileLabels = useMemo<Record<OpenClawToolsProfile, string>>(
     () => ({
-      minimal: t("openclaw.tools.profileMinimal", {
-        defaultValue: "Minimal",
-      }),
-      coding: t("openclaw.tools.profileCoding", {
-        defaultValue: "Coding",
-      }),
-      messaging: t("openclaw.tools.profileMessaging", {
-        defaultValue: "Messaging",
-      }),
-      full: t("openclaw.tools.profileFull", {
-        defaultValue: "Full",
-      }),
+      minimal: t("openclaw.tools.profileMinimal"),
+      coding: t("openclaw.tools.profileCoding"),
+      messaging: t("openclaw.tools.profileMessaging"),
+      full: t("openclaw.tools.profileFull"),
     }),
     [t],
   );
@@ -131,16 +123,10 @@ const ToolsPanel: React.FC = () => {
       {unsupportedProfile && (
         <Alert className="mb-6 border-amber-500/30 bg-amber-500/5">
           <TriangleAlert className="h-4 w-4" />
-          <AlertTitle>
-            {t("openclaw.tools.unsupportedProfileTitle", {
-              defaultValue: "Unsupported tools profile",
-            })}
-          </AlertTitle>
+          <AlertTitle>{t("openclaw.tools.unsupportedProfileTitle")}</AlertTitle>
           <AlertDescription>
             {t("openclaw.tools.unsupportedProfileDescription", {
               value: unsupportedProfile,
-              defaultValue:
-                "The current tools.profile value '{{value}}' is not in the supported OpenClaw list. It will be preserved until you choose a new value.",
             })}
           </AlertDescription>
         </Alert>
@@ -164,9 +150,7 @@ const ToolsPanel: React.FC = () => {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={OPENCLAW_UNSET_PROFILE}>
-              {t("openclaw.tools.profileUnset", {
-                defaultValue: "Not set",
-              })}
+              {t("openclaw.tools.profileUnset")}
             </SelectItem>
             {unsupportedProfile && (
               <SelectItem
@@ -174,9 +158,6 @@ const ToolsPanel: React.FC = () => {
                 disabled={true}
               >{`${unsupportedProfile} (${t(
                 "openclaw.tools.unsupportedProfileLabel",
-                {
-                  defaultValue: "unsupported",
-                },
               )})`}</SelectItem>
             )}
             {OPENCLAW_TOOL_PROFILES.map((profile) => (

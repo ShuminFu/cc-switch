@@ -13,22 +13,19 @@ const statusConfig = {
   operational: {
     color: "bg-emerald-500",
     labelKey: "health.operational",
-    labelFallback: "正常",
     textColor: "text-emerald-600 dark:text-emerald-400",
   },
   degraded: {
     color: "bg-yellow-500",
     labelKey: "health.degraded",
-    labelFallback: "降级",
     textColor: "text-yellow-600 dark:text-yellow-400",
   },
   failed: {
     color: "bg-red-500",
     labelKey: "health.failed",
-    labelFallback: "失败",
     textColor: "text-red-600 dark:text-red-400",
   },
-};
+} as const;
 
 export const HealthStatusIndicator: React.FC<HealthStatusIndicatorProps> = ({
   status,
@@ -37,7 +34,7 @@ export const HealthStatusIndicator: React.FC<HealthStatusIndicatorProps> = ({
 }) => {
   const { t } = useTranslation();
   const config = statusConfig[status];
-  const label = t(config.labelKey, { defaultValue: config.labelFallback });
+  const label = t(config.labelKey);
 
   return (
     <div className={cn("flex items-center gap-2", className)}>

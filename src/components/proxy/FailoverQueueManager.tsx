@@ -76,14 +76,9 @@ export function FailoverQueueManager({
         providerId: selectedProviderId,
       });
       setSelectedProviderId("");
-      toast.success(
-        t("proxy.failoverQueue.addSuccess", "已添加到故障转移队列"),
-        { closeButton: true },
-      );
+      toast.success(t("proxy.failoverQueue.addSuccess"), { closeButton: true });
     } catch (error) {
-      toast.error(
-        t("proxy.failoverQueue.addFailed", "添加失败") + ": " + String(error),
-      );
+      toast.error(t("proxy.failoverQueue.addFailed") + ": " + String(error));
     }
   };
 
@@ -91,16 +86,11 @@ export function FailoverQueueManager({
   const handleRemoveProvider = async (providerId: string) => {
     try {
       await removeFromQueue.mutateAsync({ appType, providerId });
-      toast.success(
-        t("proxy.failoverQueue.removeSuccess", "已从故障转移队列移除"),
-        { closeButton: true },
-      );
+      toast.success(t("proxy.failoverQueue.removeSuccess"), {
+        closeButton: true,
+      });
     } catch (error) {
-      toast.error(
-        t("proxy.failoverQueue.removeFailed", "移除失败") +
-          ": " +
-          String(error),
-      );
+      toast.error(t("proxy.failoverQueue.removeFailed") + ": " + String(error));
     }
   };
 
@@ -128,21 +118,16 @@ export function FailoverQueueManager({
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">
-              {t("proxy.failover.autoSwitch", {
-                defaultValue: "自动故障转移",
-              })}
+              {t("proxy.failover.autoSwitch")}
             </span>
             {isFailoverEnabled && (
               <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
-                {t("common.enabled", { defaultValue: "已开启" })}
+                {t("common.enabled")}
               </span>
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            {t("proxy.failover.autoSwitchDescription", {
-              defaultValue:
-                "开启后将立即切换到队列 P1，并在请求失败时自动切换到队列中的下一个供应商",
-            })}
+            {t("proxy.failover.autoSwitchDescription")}
           </p>
         </div>
         <Switch
@@ -156,10 +141,7 @@ export function FailoverQueueManager({
       <Alert className="border-blue-500/40 bg-blue-500/10">
         <Info className="h-4 w-4" />
         <AlertDescription className="text-sm">
-          {t(
-            "proxy.failoverQueue.info",
-            "队列顺序与首页供应商列表顺序一致。当请求失败时，系统会按顺序依次尝试队列中的供应商。",
-          )}
+          {t("proxy.failoverQueue.info")}
         </AlertDescription>
       </Alert>
 
@@ -172,10 +154,7 @@ export function FailoverQueueManager({
         >
           <SelectTrigger className="flex-1">
             <SelectValue
-              placeholder={t(
-                "proxy.failoverQueue.selectProvider",
-                "选择供应商添加到队列",
-              )}
+              placeholder={t("proxy.failoverQueue.selectProvider")}
             />
           </SelectTrigger>
           <SelectContent>
@@ -191,10 +170,7 @@ export function FailoverQueueManager({
             ))}
             {(!availableProviders || availableProviders.length === 0) && (
               <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-                {t(
-                  "proxy.failoverQueue.noAvailableProviders",
-                  "没有可添加的供应商",
-                )}
+                {t("proxy.failoverQueue.noAvailableProviders")}
               </div>
             )}
           </SelectContent>
@@ -218,10 +194,7 @@ export function FailoverQueueManager({
       {!queue || queue.length === 0 ? (
         <div className="rounded-lg border border-dashed border-muted-foreground/40 p-8 text-center">
           <p className="text-sm text-muted-foreground">
-            {t(
-              "proxy.failoverQueue.empty",
-              "故障转移队列为空。添加供应商以启用自动故障转移。",
-            )}
+            {t("proxy.failoverQueue.empty")}
           </p>
         </div>
       ) : (
@@ -242,10 +215,7 @@ export function FailoverQueueManager({
       {/* 队列说明 */}
       {queue && queue.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          {t(
-            "proxy.failoverQueue.orderHint",
-            "队列顺序与首页供应商列表顺序一致，可在首页拖拽调整顺序。",
-          )}
+          {t("proxy.failoverQueue.orderHint")}
         </p>
       )}
     </div>
@@ -299,7 +269,7 @@ function QueueItem({
         className="h-8 w-8 text-muted-foreground hover:text-destructive"
         onClick={() => onRemove(item.providerId)}
         disabled={disabled || isRemoving}
-        aria-label={t("common.delete", "删除")}
+        aria-label={t("common.delete")}
       >
         {isRemoving ? (
           <Loader2 className="h-4 w-4 animate-spin" />

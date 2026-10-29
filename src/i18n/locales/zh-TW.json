@@ -846,7 +846,7 @@
     "installCommandsCopied": "安裝命令已複製",
     "installCommandsCopyFailed": "複製失敗，請手動複製。",
     "importFailedError": "匯入設定失敗：{{message}}",
-    "exportFailedError": "匯出設定失敗：",
+    "exportFailedError": "匯出設定失敗：{{message}}",
     "restartRequired": "需要重新啟動應用程式",
     "restartRequiredMessage": "修改 CC Switch 設定目錄後需要重新啟動應用程式才能生效，是否立即重新啟動？",
     "restartNow": "立即重新啟動",
@@ -1490,7 +1490,8 @@
       "claude": "Claude Code",
       "codex": "Codex",
       "gemini": "Gemini",
-      "opencode": "OpenCode"
+      "opencode": "OpenCode",
+      "grokbuild": "Grok Build"
     },
     "rawInputLabel": "原始",
     "dataSources": "資料來源",

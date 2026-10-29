@@ -230,7 +230,6 @@ export function ModelsDevPickerDialog({
       toast.success(
         t("usage.modelsDevImported", {
           name: selected.modelName,
-          defaultValue: "已导入 {{name}} 的定价",
         }),
         { closeButton: true },
       );
@@ -242,11 +241,11 @@ export function ModelsDevPickerDialog({
 
   const priceColumns = (entry: ModelsDevEntry) =>
     [
-      { label: t("usage.inputCost", "输入成本"), value: entry.input },
-      { label: t("usage.outputCost", "输出成本"), value: entry.output },
-      { label: t("usage.cacheReadCost", "缓存命中"), value: entry.cacheRead },
+      { label: t("usage.inputCost"), value: entry.input },
+      { label: t("usage.outputCost"), value: entry.output },
+      { label: t("usage.cacheReadCost"), value: entry.cacheRead },
       {
-        label: t("usage.cacheWriteCost", "缓存创建"),
+        label: t("usage.cacheWriteCost"),
         value: entry.cacheWrite,
       },
     ] as const;
@@ -271,14 +270,9 @@ export function ModelsDevPickerDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>
-            {t("usage.modelsDevPickerTitle", "从 models.dev 导入定价")}
-          </DialogTitle>
+          <DialogTitle>{t("usage.modelsDevPickerTitle")}</DialogTitle>
           <DialogDescription>
-            {t(
-              "usage.modelsDevPickerDesc",
-              "选择要导入的模型（价格单位：USD / 百万 tokens），每次导入一个",
-            )}
+            {t("usage.modelsDevPickerDesc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -291,7 +285,7 @@ export function ModelsDevPickerDialog({
             <Alert variant="destructive">
               <AlertDescription className="flex items-center justify-between gap-3">
                 <span>
-                  {t("usage.modelsDevLoadError", "加载 models.dev 数据失败")}:{" "}
+                  {t("usage.modelsDevLoadError")}:{" "}
                   {error instanceof Error ? error.message : String(error)}
                 </span>
                 <Button
@@ -300,7 +294,7 @@ export function ModelsDevPickerDialog({
                   onClick={() => refetch()}
                   className="shrink-0"
                 >
-                  {t("usage.modelsDevRetry", "重试")}
+                  {t("usage.modelsDevRetry")}
                 </Button>
               </AlertDescription>
             </Alert>
@@ -316,7 +310,7 @@ export function ModelsDevPickerDialog({
                   </SelectTrigger>
                   <SelectContent className="z-[120] max-h-[min(24rem,var(--radix-select-content-available-height))]">
                     <SelectItem value="all">
-                      {t("usage.modelsDevAllProviders", "全部供应商")}
+                      {t("usage.modelsDevAllProviders")}
                     </SelectItem>
                     {providers.map((provider) => (
                       <SelectItem key={provider.id} value={provider.id}>
@@ -330,10 +324,7 @@ export function ModelsDevPickerDialog({
                   <Input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder={t(
-                      "usage.modelsDevSearchPlaceholder",
-                      "搜索模型或供应商（全量搜索）...",
-                    )}
+                    placeholder={t("usage.modelsDevSearchPlaceholder")}
                     className="pl-8"
                   />
                 </div>
@@ -342,7 +333,7 @@ export function ModelsDevPickerDialog({
               <div className="flex-1 min-h-0 overflow-y-auto rounded-md border border-border/50">
                 {filtered.length === 0 ? (
                   <div className="flex h-full items-center justify-center py-8 text-sm text-muted-foreground">
-                    {t("usage.modelsDevNoResults", "没有匹配的模型")}
+                    {t("usage.modelsDevNoResults")}
                   </div>
                 ) : (
                   <div className="divide-y divide-border/30">
@@ -406,14 +397,10 @@ export function ModelsDevPickerDialog({
                           ? t("usage.modelsDevTruncated", {
                               shown: visible.length,
                               total: filtered.length,
-                              defaultValue:
-                                "仅显示前 {{shown}} 条，共 {{total}} 条结果，请缩小搜索范围",
                             })
                           : t("usage.modelsDevDefaultHint", {
                               shown: visible.length,
                               total: filtered.length,
-                              defaultValue:
-                                "默认展示最新发布的 {{shown}} 个模型（共 {{total}} 个），输入关键字可全量搜索",
                             })}
                       </div>
                     )}
@@ -430,7 +417,7 @@ export function ModelsDevPickerDialog({
             onClick={onClose}
             disabled={updatePricing.isPending}
           >
-            {t("common.cancel", "取消")}
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={handleImport}
@@ -439,10 +426,10 @@ export function ModelsDevPickerDialog({
             {updatePricing.isPending ? (
               <>
                 <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                {t("usage.modelsDevImporting", "导入中...")}
+                {t("usage.modelsDevImporting")}
               </>
             ) : (
-              t("usage.modelsDevImportButton", "导入")
+              t("usage.modelsDevImportButton")
             )}
           </Button>
         </DialogFooter>

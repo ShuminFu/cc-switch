@@ -45,16 +45,13 @@ export function FailoverToggle({ className, activeApp }: FailoverToggleProps) {
   const tooltipText = !takeoverEnabled
     ? t("failover.tooltip.takeoverRequired", {
         app: appLabel,
-        defaultValue: `请先接管 ${appLabel}，再启用故障转移`,
       })
     : isEnabled
       ? t("failover.tooltip.enabled", {
           app: appLabel,
-          defaultValue: `${appLabel} 故障转移已启用\n按队列优先级（P1→P2→...）选择供应商`,
         })
       : t("failover.tooltip.disabled", {
           app: appLabel,
-          defaultValue: `启用 ${appLabel} 故障转移\n将立即切换到队列 P1，并在失败时自动切换到下一个`,
         });
 
   return (

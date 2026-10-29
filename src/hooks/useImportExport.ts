@@ -57,21 +57,13 @@ export function useImportExport(
       }
     } catch (error) {
       console.error("[useImportExport] Failed to open file dialog", error);
-      toast.error(
-        t("settings.selectFileFailed", {
-          defaultValue: "选择文件失败",
-        }),
-      );
+      toast.error(t("settings.selectFileFailed"));
     }
   }, [t]);
 
   const importConfig = useCallback(async () => {
     if (!selectedFile) {
-      toast.error(
-        t("settings.selectFileFailed", {
-          defaultValue: "请选择有效的 SQL 备份文件",
-        }),
-      );
+      toast.error(t("settings.selectFileFailed"));
       return;
     }
 
@@ -85,11 +77,7 @@ export function useImportExport(
       const result = await settingsApi.importConfigFromFile(selectedFile);
       if (!result.success) {
         setStatus("error");
-        const message =
-          result.message ||
-          t("settings.configCorrupted", {
-            defaultValue: "SQL 文件已损坏或格式不正确",
-          });
+        const message = result.message || t("settings.configCorrupted");
         setErrorMessage(message);
         toast.error(message);
         return;
@@ -104,24 +92,14 @@ export function useImportExport(
       const syncResult = await syncCurrentProvidersLiveSafe();
       if (syncResult.ok) {
         setStatus("success");
-        toast.success(
-          t("settings.importSuccess", {
-            defaultValue: "配置导入成功",
-          }),
-          { closeButton: true },
-        );
+        toast.success(t("settings.importSuccess"), { closeButton: true });
       } else {
         console.error(
           "[useImportExport] Failed to sync live config",
           syncResult.error,
         );
         setStatus("partial-success");
-        toast.warning(
-          t("settings.importPartialSuccess", {
-            defaultValue:
-              "配置已导入，但同步到当前供应商失败。请手动重新选择一次供应商。",
-          }),
-        );
+        toast.warning(t("settings.importPartialSuccess"));
       }
     } catch (error) {
       console.error("[useImportExport] Failed to import config", error);
@@ -131,7 +109,6 @@ export function useImportExport(
       setErrorMessage(message);
       toast.error(
         t("settings.importFailedError", {
-          defaultValue: "导入配置失败: {{message}}",
           message,
         }),
       );
@@ -147,35 +124,26 @@ export function useImportExport(
       const defaultName = `cc-switch-export-${stamp}.sql`;
       const destination = await settingsApi.saveFileDialog(defaultName);
       if (!destination) {
-        toast.error(
-          t("settings.selectFileFailed", {
-            defaultValue: "请选择 SQL 备份保存路径",
-          }),
-        );
+        toast.error(t("settings.selectFileFailed"));
         return;
       }
 
       const result = await settingsApi.exportConfigToFile(destination);
       if (result.success) {
         const displayPath = result.filePath ?? destination;
-        toast.success(
-          t("settings.configExported", {
-            defaultValue: "配置已导出",
-          }) + `\n${displayPath}`,
-          { closeButton: true },
-        );
+        toast.success(t("settings.configExported") + `\n${displayPath}`, {
+          closeButton: true,
+        });
       } else {
         toast.error(
-          t("settings.exportFailed", {
-            defaultValue: "导出配置失败",
-          }) + (result.message ? `: ${result.message}` : ""),
+          t("settings.exportFailed") +
+            (result.message ? `: ${result.message}` : ""),
         );
       }
     } catch (error) {
       console.error("[useImportExport] Failed to export config", error);
       toast.error(
         t("settings.exportFailedError", {
-          defaultValue: "导出配置失败: {{message}}",
           message: error instanceof Error ? error.message : String(error ?? ""),
         }),
       );

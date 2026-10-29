@@ -44,21 +44,15 @@ export function ProviderStatsTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{t("usage.provider", "Provider")}</TableHead>
+            <TableHead>{t("usage.provider")}</TableHead>
+            <TableHead className="text-right">{t("usage.requests")}</TableHead>
+            <TableHead className="text-right">{t("usage.tokens")}</TableHead>
+            <TableHead className="text-right">{t("usage.cost")}</TableHead>
             <TableHead className="text-right">
-              {t("usage.requests", "请求数")}
+              {t("usage.successRate")}
             </TableHead>
             <TableHead className="text-right">
-              {t("usage.tokens", "Tokens")}
-            </TableHead>
-            <TableHead className="text-right">
-              {t("usage.cost", "成本")}
-            </TableHead>
-            <TableHead className="text-right">
-              {t("usage.successRate", "成功率")}
-            </TableHead>
-            <TableHead className="text-right">
-              {t("usage.avgLatency", "平均延迟")}
+              {t("usage.avgLatency")}
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -69,7 +63,7 @@ export function ProviderStatsTable({
                 colSpan={6}
                 className="text-center text-muted-foreground"
               >
-                {t("usage.noData", "暂无数据")}
+                {t("usage.noData")}
               </TableCell>
             </TableRow>
           ) : (

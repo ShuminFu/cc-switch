@@ -36,11 +36,7 @@ export function CustomUserAgentField({
 
   return (
     <div className="space-y-2">
-      <FormLabel htmlFor={id}>
-        {t("providerForm.customUserAgent", {
-          defaultValue: "自定义 User-Agent",
-        })}
-      </FormLabel>
+      <FormLabel htmlFor={id}>{t("providerForm.customUserAgent")}</FormLabel>
       <div className="flex items-center gap-2">
         <Input
           id={id}
@@ -54,9 +50,7 @@ export function CustomUserAgentField({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="outline" className="shrink-0 gap-1">
-              {t("providerForm.customUserAgentPresets", {
-                defaultValue: "预设",
-              })}
+              {t("providerForm.customUserAgentPresets")}
               <ChevronDown className="h-3.5 w-3.5 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
@@ -78,17 +72,11 @@ export function CustomUserAgentField({
       </div>
       {valid ? (
         <p className="text-xs text-muted-foreground">
-          {t("providerForm.customUserAgentHint", {
-            defaultValue:
-              "仅在开启本地路由/代理接管后生效，会替换转发到供应商 API 请求中的 User-Agent。",
-          })}
+          {t("providerForm.customUserAgentHint")}
         </p>
       ) : (
         <p className="text-xs text-destructive">
-          {t("providerForm.customUserAgentInvalid", {
-            defaultValue:
-              "User-Agent 不能包含控制字符（如换行符），否则将被忽略。",
-          })}
+          {t("providerForm.customUserAgentInvalid")}
         </p>
       )}
     </div>

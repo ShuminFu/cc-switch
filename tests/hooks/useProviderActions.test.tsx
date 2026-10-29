@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useProviderActions } from "@/hooks/useProviderActions";
 import type { Provider, UsageScript } from "@/types";
+import { loadZhTranslations } from "../utils/zhTranslations";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -135,6 +136,8 @@ beforeEach(() => {
 });
 
 describe("useProviderActions", () => {
+  loadZhTranslations();
+
   it("should trigger mutation when calling addProvider", async () => {
     addProviderMutateAsync.mockResolvedValueOnce(undefined);
     const { wrapper } = createWrapper();

@@ -5,6 +5,7 @@ import type { TFunction } from "i18next";
 import { useForm } from "react-hook-form";
 import { Form } from "@/components/ui/form";
 import type { ProviderCategory } from "@/types";
+import type { TranslationKey } from "@/i18n/keys";
 import {
   ProviderPresetSelector,
   filterPresetEntries,
@@ -56,7 +57,7 @@ type TestPresetEntry = {
   id: string;
   preset: {
     name: string;
-    nameKey?: string;
+    nameKey?: TranslationKey;
     websiteUrl: string;
     settingsConfig: Record<string, never>;
     category: ProviderCategory;
@@ -69,7 +70,7 @@ const presetEntries: TestPresetEntry[] = [
     id: "gamma",
     preset: {
       name: "Gamma Raw",
-      nameKey: "preset.gamma",
+      nameKey: "preset.gamma" as TranslationKey,
       websiteUrl: "https://gamma.example.com",
       settingsConfig: {},
       category: "aggregator",
@@ -79,7 +80,7 @@ const presetEntries: TestPresetEntry[] = [
     id: "alpha",
     preset: {
       name: "Alpha Raw",
-      nameKey: "preset.alpha",
+      nameKey: "preset.alpha" as TranslationKey,
       websiteUrl: "https://alpha.example.com/v1",
       settingsConfig: {},
       category: "official",
@@ -381,7 +382,7 @@ describe("ProviderPresetSelector", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        /providerPreset\.(empty|noResults)|没有匹配|无结果|no matching presets/i,
+        /providerPreset\.(empty|noResults|noSearchResults)|没有匹配|无结果|no matching presets/i,
       ),
     ).toBeInTheDocument();
   });

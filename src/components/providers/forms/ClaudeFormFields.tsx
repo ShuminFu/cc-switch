@@ -295,11 +295,7 @@ export function ClaudeFormFields({
 
   const handleFetchCopilotModels = useCallback(() => {
     if (!isCopilotAuthenticated) {
-      toast.error(
-        t("copilot.loginRequired", {
-          defaultValue: "请先登录 GitHub Copilot",
-        }),
-      );
+      toast.error(t("copilot.loginRequired"));
       return;
     }
 
@@ -319,11 +315,7 @@ export function ClaudeFormFields({
       .catch((err) => {
         if (copilotModelsRequestRef.current !== requestId) return;
         console.warn("[Copilot] Failed to fetch models:", err);
-        toast.error(
-          t("copilot.loadModelsFailed", {
-            defaultValue: "加载 Copilot 模型列表失败",
-          }),
-        );
+        toast.error(t("copilot.loadModelsFailed"));
       })
       .finally(() => {
         if (copilotModelsRequestRef.current === requestId) {
@@ -339,11 +331,7 @@ export function ClaudeFormFields({
 
   const handleFetchCodexOauthModels = useCallback(() => {
     if (!isCodexOauthAuthenticated) {
-      toast.error(
-        t("codexOauth.loginRequired", {
-          defaultValue: "请先登录 ChatGPT 账号",
-        }),
-      );
+      toast.error(t("codexOauth.loginRequired"));
       return;
     }
 
@@ -541,7 +529,7 @@ export function ClaudeFormFields({
   const modelRoleRows: ModelRoleRow[] = [
     {
       role: "sonnet",
-      label: t("providerForm.modelRoleSonnet", { defaultValue: "Sonnet" }),
+      label: t("providerForm.modelRoleSonnet"),
       model: defaultSonnetModel,
       displayName: defaultSonnetModelName,
       modelField: "ANTHROPIC_DEFAULT_SONNET_MODEL",
@@ -551,7 +539,7 @@ export function ClaudeFormFields({
     },
     {
       role: "opus",
-      label: t("providerForm.modelRoleOpus", { defaultValue: "Opus" }),
+      label: t("providerForm.modelRoleOpus"),
       model: defaultOpusModel,
       displayName: defaultOpusModelName,
       modelField: "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -561,7 +549,7 @@ export function ClaudeFormFields({
     },
     {
       role: "fable",
-      label: t("providerForm.modelRoleFable", { defaultValue: "Fable" }),
+      label: t("providerForm.modelRoleFable"),
       model: defaultFableModel,
       displayName: defaultFableModelName,
       modelField: "ANTHROPIC_DEFAULT_FABLE_MODEL",
@@ -571,7 +559,7 @@ export function ClaudeFormFields({
     },
     {
       role: "haiku",
-      label: t("providerForm.modelRoleHaiku", { defaultValue: "Haiku" }),
+      label: t("providerForm.modelRoleHaiku"),
       model: defaultHaikuModel,
       displayName: defaultHaikuModelName,
       modelField: "ANTHROPIC_DEFAULT_HAIKU_MODEL",
@@ -581,9 +569,7 @@ export function ClaudeFormFields({
     },
     {
       role: "subagent",
-      label: t("providerForm.modelRoleSubagent", {
-        defaultValue: "Subagent",
-      }),
+      label: t("providerForm.modelRoleSubagent"),
       model: subagentModel,
       modelField: "CLAUDE_CODE_SUBAGENT_MODEL",
       inputId: "claudeCodeSubagentModel",
@@ -649,7 +635,6 @@ export function ClaudeFormFields({
           <FormLabel>
             {t("providerForm.parameterConfig", {
               name: templatePresetName,
-              defaultValue: `${templatePresetName} 参数配置`,
             })}
           </FormLabel>
           <div className="space-y-4">
@@ -753,7 +738,7 @@ export function ClaudeFormFields({
             {category !== "cloud_provider" && (
               <div className="space-y-2">
                 <FormLabel htmlFor="apiFormat">
-                  {t("providerForm.apiFormat", { defaultValue: "API 格式" })}
+                  {t("providerForm.apiFormat")}
                 </FormLabel>
                 <Select value={apiFormat} onValueChange={onApiFormatChange}>
                   <SelectTrigger id="apiFormat" className="w-full">
@@ -761,40 +746,28 @@ export function ClaudeFormFields({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="anthropic">
-                      {t("providerForm.apiFormatAnthropic", {
-                        defaultValue: "Anthropic Messages (原生)",
-                      })}
+                      {t("providerForm.apiFormatAnthropic")}
                     </SelectItem>
                     <SelectItem value="openai_chat">
-                      {t("providerForm.apiFormatOpenAIChat", {
-                        defaultValue: "OpenAI Chat Completions (需转换)",
-                      })}
+                      {t("providerForm.apiFormatOpenAIChat")}
                     </SelectItem>
                     <SelectItem value="openai_responses">
-                      {t("providerForm.apiFormatOpenAIResponses", {
-                        defaultValue: "OpenAI Responses API (需转换)",
-                      })}
+                      {t("providerForm.apiFormatOpenAIResponses")}
                     </SelectItem>
                     <SelectItem value="gemini_native">
-                      {t("providerForm.apiFormatGeminiNative", {
-                        defaultValue: "Gemini Native generateContent (需转换)",
-                      })}
+                      {t("providerForm.apiFormatGeminiNative")}
                     </SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {t("providerForm.apiFormatHint", {
-                    defaultValue: "选择供应商 API 的输入格式",
-                  })}
+                  {t("providerForm.apiFormatHint")}
                 </p>
               </div>
             )}
 
             {/* 认证字段选择器 */}
             <div className="space-y-2">
-              <FormLabel>
-                {t("providerForm.authField", { defaultValue: "认证字段" })}
-              </FormLabel>
+              <FormLabel>{t("providerForm.authField")}</FormLabel>
               <Select
                 value={apiKeyField}
                 onValueChange={(v) =>
@@ -806,21 +779,15 @@ export function ClaudeFormFields({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ANTHROPIC_AUTH_TOKEN">
-                    {t("providerForm.authFieldAuthToken", {
-                      defaultValue: "ANTHROPIC_AUTH_TOKEN（默认）",
-                    })}
+                    {t("providerForm.authFieldAuthToken")}
                   </SelectItem>
                   <SelectItem value="ANTHROPIC_API_KEY">
-                    {t("providerForm.authFieldApiKey", {
-                      defaultValue: "ANTHROPIC_API_KEY",
-                    })}
+                    {t("providerForm.authFieldApiKey")}
                   </SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                {t("providerForm.authFieldHint", {
-                  defaultValue: "选择写入配置的认证环境变量名",
-                })}
+                {t("providerForm.authFieldHint")}
               </p>
             </div>
 
@@ -855,11 +822,7 @@ export function ClaudeFormFields({
                             );
                           }
                         }
-                        toast.success(
-                          t("providerForm.quickSetSuccess", {
-                            defaultValue: "已将模型名称应用到所有角色",
-                          }),
-                        );
+                        toast.success(t("providerForm.quickSetSuccess"));
                       }
                     }}
                     disabled={
@@ -873,9 +836,7 @@ export function ClaudeFormFields({
                     className="h-7 gap-1"
                   >
                     <Wand2 className="h-3.5 w-3.5" />
-                    {t("providerForm.quickSetModels", {
-                      defaultValue: "一键设置",
-                    })}
+                    {t("providerForm.quickSetModels")}
                   </Button>
                   <Button
                     type="button"
@@ -901,26 +862,10 @@ export function ClaudeFormFields({
 
             <div className="space-y-3">
               <div className="hidden grid-cols-[120px_1fr_minmax(0,1fr)_104px] gap-2 px-1 text-xs font-medium text-muted-foreground md:grid">
-                <span>
-                  {t("providerForm.modelRoleLabel", {
-                    defaultValue: "模型角色",
-                  })}
-                </span>
-                <span>
-                  {t("providerForm.modelDisplayNameLabel", {
-                    defaultValue: "显示名称",
-                  })}
-                </span>
-                <span>
-                  {t("providerForm.requestModelLabel", {
-                    defaultValue: "实际请求模型",
-                  })}
-                </span>
-                <span>
-                  {t("providerForm.modelOneMHeader", {
-                    defaultValue: "声明支持 1M",
-                  })}
-                </span>
+                <span>{t("providerForm.modelRoleLabel")}</span>
+                <span>{t("providerForm.modelDisplayNameLabel")}</span>
+                <span>{t("providerForm.requestModelLabel")}</span>
+                <span>{t("providerForm.modelOneMHeader")}</span>
               </div>
 
               {modelRoleRows.map((row) => {
@@ -947,24 +892,20 @@ export function ClaudeFormFields({
                         }
                         placeholder={
                           modelBase ||
-                          t("providerForm.modelDisplayNamePlaceholder", {
-                            defaultValue: "例如 DeepSeek V4 Pro",
-                          })
+                          t("providerForm.modelDisplayNamePlaceholder")
                         }
                         autoComplete="off"
                       />
                     ) : (
                       <div className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground">
-                        {t("providerForm.modelNoDisplayName", {
-                          defaultValue: "不显示在 /model 菜单",
-                        })}
+                        {t("providerForm.modelNoDisplayName")}
                       </div>
                     )}
                     {renderModelInput(
                       row.inputId,
                       modelBase,
                       row.modelField,
-                      t("providerForm.modelPlaceholder", { defaultValue: "" }),
+                      t("providerForm.modelPlaceholder"),
                       (value) =>
                         handleRoleModelChange(
                           row,
@@ -981,9 +922,7 @@ export function ClaudeFormFields({
                             handleRoleOneMChange(row, checked === true)
                           }
                         />
-                        {t("providerForm.modelOneMLabel", {
-                          defaultValue: "1M",
-                        })}
+                        {t("providerForm.modelOneMLabel")}
                       </label>
                     )}
                   </div>
@@ -993,16 +932,14 @@ export function ClaudeFormFields({
 
             <div className="space-y-2 border-t pt-4">
               <FormLabel htmlFor="claudeModel">
-                {t("providerForm.fallbackModelLabel", {
-                  defaultValue: "默认兜底模型",
-                })}
+                {t("providerForm.fallbackModelLabel")}
               </FormLabel>
               <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_minmax(0,104px)]">
                 {renderModelInput(
                   "claudeModel",
                   stripClaudeOneMMarker(claudeModel),
                   "ANTHROPIC_MODEL",
-                  t("providerForm.modelPlaceholder", { defaultValue: "" }),
+                  t("providerForm.modelPlaceholder"),
                   (value) =>
                     onModelChange(
                       "ANTHROPIC_MODEL",
@@ -1021,16 +958,11 @@ export function ClaudeFormFields({
                       );
                     }}
                   />
-                  {t("providerForm.modelOneMLabel", {
-                    defaultValue: "1M",
-                  })}
+                  {t("providerForm.modelOneMLabel")}
                 </label>
               </div>
               <p className="text-xs text-muted-foreground">
-                {t("providerForm.fallbackModelHint", {
-                  defaultValue:
-                    "用于未明确落到 Sonnet、Opus、Fable、Haiku 角色的请求。使用第三方/中转端点时建议填写：否则这些请求（含 Haiku 后台子任务）会以原始 Claude 模型名透传给上游，可能因上游无此模型而报错。官方端点可留空。",
-                })}
+                {t("providerForm.fallbackModelHint")}
               </p>
             </div>
 

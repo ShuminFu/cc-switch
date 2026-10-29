@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type { UsageRangePreset, UsageRangeSelection } from "@/types/usage";
 
 const DAY_SECONDS = 24 * 60 * 60;
@@ -62,20 +63,20 @@ export function resolveUsageRange(
 
 export function getUsageRangePresetLabel(
   preset: UsageRangePreset,
-  t: (key: string, options?: { defaultValue?: string }) => string,
+  t: TFunction,
 ): string {
   switch (preset) {
     case "today":
-      return t("usage.presetToday", { defaultValue: "当天" });
+      return t("usage.presetToday");
     case "1d":
-      return t("usage.preset1d", { defaultValue: "1d" });
+      return t("usage.preset1d");
     case "7d":
-      return t("usage.preset7d", { defaultValue: "7d" });
+      return t("usage.preset7d");
     case "14d":
-      return t("usage.preset14d", { defaultValue: "14d" });
+      return t("usage.preset14d");
     case "30d":
-      return t("usage.preset30d", { defaultValue: "30d" });
+      return t("usage.preset30d");
     case "custom":
-      return t("usage.customRange", { defaultValue: "日历筛选" });
+      return t("usage.customRange");
   }
 }

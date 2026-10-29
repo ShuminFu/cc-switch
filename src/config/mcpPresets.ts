@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+import type { TranslationKey } from "@/i18n/keys";
 import { McpServer, McpServerSpec } from "../types";
 import { isWindows } from "@/lib/platform";
 
@@ -92,12 +94,12 @@ export const mcpPresets: McpPreset[] = [
 // 获取带国际化描述的预设
 export const getMcpPresetWithDescription = (
   preset: McpPreset,
-  t: (key: string) => string,
+  t: TFunction,
 ): McpServer => {
   const descriptionKey = `mcp.presets.${preset.id}.description`;
   return {
     ...preset,
-    description: t(descriptionKey),
+    description: t(descriptionKey as TranslationKey),
   } as McpServer;
 };
 

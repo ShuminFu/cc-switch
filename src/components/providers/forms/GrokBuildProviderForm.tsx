@@ -183,16 +183,10 @@ export function GrokBuildProviderForm({
 
   const presetCategoryLabels = useMemo(
     () => ({
-      official: t("providerForm.categoryOfficial", { defaultValue: "官方" }),
-      cn_official: t("providerForm.categoryCnOfficial", {
-        defaultValue: "国内官方",
-      }),
-      aggregator: t("providerForm.categoryAggregation", {
-        defaultValue: "聚合服务",
-      }),
-      third_party: t("providerForm.categoryThirdParty", {
-        defaultValue: "第三方",
-      }),
+      official: t("providerForm.categoryOfficial"),
+      cn_official: t("providerForm.categoryCnOfficial"),
+      aggregator: t("providerForm.categoryAggregation"),
+      third_party: t("providerForm.categoryThirdParty"),
     }),
     [t],
   );
@@ -302,19 +296,11 @@ export function GrokBuildProviderForm({
       (!apiKey.trim() && !envKey) ||
       !profile.trim()
     ) {
-      toast.error(
-        t("providerForm.requiredFields", {
-          defaultValue: "请填写供应商名称、API 地址、API Key 和模型",
-        }),
-      );
+      toast.error(t("providerForm.requiredFields"));
       return;
     }
     if (!Number.isInteger(parsedContextWindow) || parsedContextWindow <= 0) {
-      toast.error(
-        t("grokBuild.contextWindowInvalid", {
-          defaultValue: "上下文窗口必须是正整数",
-        }),
-      );
+      toast.error(t("grokBuild.contextWindowInvalid"));
       return;
     }
 
@@ -332,7 +318,6 @@ export function GrokBuildProviderForm({
       toast.error(
         t("grokBuild.invalidToml", {
           error: configError,
-          defaultValue: `config.toml 格式错误: ${configError}`,
         }),
       );
       return;
@@ -416,7 +401,7 @@ export function GrokBuildProviderForm({
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <FormItem>
             <FormLabel htmlFor="grokbuild-profile">
-              {t("grokBuild.profile", { defaultValue: "客户端模型档位" })}
+              {t("grokBuild.profile")}
             </FormLabel>
             <Input
               id="grokbuild-profile"
@@ -433,7 +418,7 @@ export function GrokBuildProviderForm({
 
           <FormItem>
             <FormLabel htmlFor="grokbuild-api-backend">
-              {t("grokBuild.apiBackend", { defaultValue: "API Backend" })}
+              {t("grokBuild.apiBackend")}
             </FormLabel>
             <Input
               id="grokbuild-api-backend"
@@ -450,7 +435,7 @@ export function GrokBuildProviderForm({
 
           <FormItem>
             <FormLabel htmlFor="grokbuild-context-window">
-              {t("grokBuild.contextWindow", { defaultValue: "上下文窗口" })}
+              {t("grokBuild.contextWindow")}
             </FormLabel>
             <Input
               id="grokbuild-context-window"
@@ -528,7 +513,7 @@ export function GrokBuildProviderForm({
 
         <div className="space-y-2">
           <FormLabel htmlFor="grokbuild-config-toml">
-            {t("grokBuild.rawConfig", { defaultValue: "config.toml" })}
+            {t("grokBuild.rawConfig")}
           </FormLabel>
           <JsonEditor
             value={rawConfig}
@@ -543,7 +528,6 @@ export function GrokBuildProviderForm({
             <p className="text-xs text-destructive">
               {t("grokBuild.invalidToml", {
                 error: rawConfigError,
-                defaultValue: `Invalid config.toml: ${rawConfigError}`,
               })}
             </p>
           )}

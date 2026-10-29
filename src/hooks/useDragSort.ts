@@ -94,19 +94,10 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
           // 托盘菜单更新失败不影响排序成功
         }
 
-        toast.success(
-          t("provider.sortUpdated", {
-            defaultValue: "排序已更新",
-          }),
-          { closeButton: true },
-        );
+        toast.success(t("provider.sortUpdated"), { closeButton: true });
       } catch (error) {
         console.error("Failed to update provider sort order", error);
-        toast.error(
-          t("provider.sortUpdateFailed", {
-            defaultValue: "排序更新失败",
-          }),
-        );
+        toast.error(t("provider.sortUpdateFailed"));
       }
     },
     [sortedProviders, appId, queryClient, t],

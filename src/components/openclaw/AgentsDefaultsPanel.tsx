@@ -76,7 +76,6 @@ const AgentsDefaultsPanel: React.FC = () => {
         value: primaryModel,
         label: t("openclaw.agents.notInList", {
           value: primaryModel,
-          defaultValue: "{{value}} (not configured)",
         }),
       });
     }
@@ -103,7 +102,6 @@ const AgentsDefaultsPanel: React.FC = () => {
         value: currentValue,
         label: t("openclaw.agents.notInList", {
           value: currentValue,
-          defaultValue: "{{value}} (not configured)",
         }),
       });
     }
@@ -205,16 +203,9 @@ const AgentsDefaultsPanel: React.FC = () => {
       {hasLegacyTimeout && (
         <Alert className="mb-4 border-amber-500/30 bg-amber-500/5">
           <TriangleAlert className="h-4 w-4" />
-          <AlertTitle>
-            {t("openclaw.agents.legacyTimeoutTitle", {
-              defaultValue: "Legacy timeout detected",
-            })}
-          </AlertTitle>
+          <AlertTitle>{t("openclaw.agents.legacyTimeoutTitle")}</AlertTitle>
           <AlertDescription>
-            {t("openclaw.agents.legacyTimeoutDescription", {
-              defaultValue:
-                "This config still uses agents.defaults.timeout. Saving here will migrate it to timeoutSeconds.",
-            })}
+            {t("openclaw.agents.legacyTimeoutDescription")}
           </AlertDescription>
         </Alert>
       )}
@@ -233,10 +224,7 @@ const AgentsDefaultsPanel: React.FC = () => {
             </Label>
             {noModels ? (
               <p className="text-xs text-muted-foreground italic">
-                {t("openclaw.agents.noModels", {
-                  defaultValue:
-                    "No configured provider models. Please add an OpenClaw provider first.",
-                })}
+                {t("openclaw.agents.noModels")}
               </p>
             ) : (
               <Select
@@ -327,9 +315,7 @@ const AgentsDefaultsPanel: React.FC = () => {
                 onClick={handleAddFallback}
               >
                 <Plus className="w-4 h-4 mr-1" />
-                {t("openclaw.agents.addFallback", {
-                  defaultValue: "Add fallback model",
-                })}
+                {t("openclaw.agents.addFallback")}
               </Button>
             )}
           </div>

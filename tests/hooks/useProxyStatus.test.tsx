@@ -27,8 +27,8 @@ vi.mock("react-i18next", () => ({
         return `代理服务已启动 - ${options?.address}:${options?.port}`;
       }
 
-      if (typeof options?.defaultValue === "string") {
-        return options.defaultValue;
+      if (key === "proxy.takeover.enabled") {
+        return `${options?.app} 路由已启用`;
       }
 
       return key;
@@ -134,9 +134,8 @@ describe("useProxyStatus", () => {
       await result.current.setTakeoverForApp({ appType, enabled: true });
     });
 
-    expect(toastSuccessMock).toHaveBeenCalledWith(
-      `已接管 ${label} 配置（请求将走本地代理）`,
-      { closeButton: true },
-    );
+    expect(toastSuccessMock).toHaveBeenCalledWith(`${label} 路由已启用`, {
+      closeButton: true,
+    });
   });
 });

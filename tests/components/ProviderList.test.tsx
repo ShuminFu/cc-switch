@@ -289,7 +289,7 @@ describe("ProviderList Component", () => {
 
     fireEvent.keyDown(window, { key: "f", metaKey: true });
     const searchInput = screen.getByPlaceholderText(
-      "Search name, notes, or URL...",
+      "provider.searchPlaceholder",
     );
     // Initially both providers are rendered
     expect(screen.getByTestId("provider-card-alpha")).toBeInTheDocument();
@@ -302,8 +302,6 @@ describe("ProviderList Component", () => {
     fireEvent.change(searchInput, { target: { value: "gamma" } });
     expect(screen.queryByTestId("provider-card-alpha")).not.toBeInTheDocument();
     expect(screen.queryByTestId("provider-card-beta")).not.toBeInTheDocument();
-    expect(
-      screen.getByText("No providers match your search."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("provider.noSearchResults")).toBeInTheDocument();
   });
 });

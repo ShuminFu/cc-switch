@@ -8,6 +8,7 @@ import type {
   OpenClawDefaultModel,
 } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
+import type { TranslationKey } from "@/i18n/keys";
 
 /** Suggested default model configuration for a preset */
 export interface OpenClawSuggestedDefaults {
@@ -19,7 +20,7 @@ export interface OpenClawSuggestedDefaults {
 
 export interface OpenClawProviderPreset {
   name: string;
-  nameKey?: string; // i18n key for localized display name
+  nameKey?: TranslationKey; // i18n key for localized display name
   websiteUrl: string;
   apiKeyUrl?: string;
   /** OpenClaw settings_config structure */

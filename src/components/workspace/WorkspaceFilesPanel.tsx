@@ -20,11 +20,12 @@ import type { LucideIcon } from "lucide-react";
 import { workspaceApi } from "@/lib/api/workspace";
 import WorkspaceFileEditor from "./WorkspaceFileEditor";
 import DailyMemoryPanel from "./DailyMemoryPanel";
+import type { TranslationKey } from "@/i18n/keys";
 
 interface WorkspaceFile {
   filename: string;
   icon: LucideIcon;
-  descKey: string;
+  descKey: TranslationKey;
 }
 
 const WORKSPACE_FILES: WorkspaceFile[] = [

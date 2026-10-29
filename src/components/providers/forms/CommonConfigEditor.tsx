@@ -170,11 +170,7 @@ export function CommonConfigEditor({
                 onChange={(e) => onCommonConfigToggle(e.target.checked)}
                 className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
               />
-              <span>
-                {t("claudeConfig.writeCommonConfig", {
-                  defaultValue: "应用通用配置",
-                })}
-              </span>
+              <span>{t("claudeConfig.writeCommonConfig")}</span>
             </label>
           </div>
         </div>
@@ -184,9 +180,7 @@ export function CommonConfigEditor({
             onClick={onEditClick}
             className="text-xs text-blue-400 dark:text-blue-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
           >
-            {t("claudeConfig.editCommonConfig", {
-              defaultValue: "编辑通用配置",
-            })}
+            {t("claudeConfig.editCommonConfig")}
           </button>
         </div>
         {commonConfigError && !isModalOpen && (
@@ -265,9 +259,7 @@ export function CommonConfigEditor({
 
       <FullScreenPanel
         isOpen={isModalOpen}
-        title={t("claudeConfig.editCommonConfigTitle", {
-          defaultValue: "编辑通用配置片段",
-        })}
+        title={t("claudeConfig.editCommonConfigTitle")}
         onClose={onModalClose}
         footer={
           <>
@@ -284,9 +276,7 @@ export function CommonConfigEditor({
                 ) : (
                   <Download className="w-4 h-4" />
                 )}
-                {t("claudeConfig.extractFromCurrent", {
-                  defaultValue: "从编辑内容提取",
-                })}
+                {t("claudeConfig.extractFromCurrent")}
               </Button>
             )}
             <Button type="button" variant="outline" onClick={onModalClose}>

@@ -237,9 +237,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     () =>
       groupSessionsByProviderAndDirectory(
         filteredSessions,
-        t("sessionManager.unknownDirectory", {
-          defaultValue: "未知目录",
-        }),
+        t("sessionManager.unknownDirectory"),
       ),
     [filteredSessions, t],
   );
@@ -307,12 +305,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
 
   const listViewModeLabel =
     listViewMode === "grouped"
-      ? t("sessionManager.viewModeGrouped", {
-          defaultValue: "分类",
-        })
-      : t("sessionManager.viewModeFlat", {
-          defaultValue: "列表",
-        });
+      ? t("sessionManager.viewModeGrouped")
+      : t("sessionManager.viewModeFlat");
 
   const { data: messages = [], isLoading: isLoadingMessages } =
     useSessionMessagesQuery(
@@ -390,10 +384,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         await navigator.clipboard.writeText(text);
         toast.success(successMessage);
       } catch (error) {
-        toast.error(
-          extractErrorMessage(error) ||
-            t("common.error", { defaultValue: "Copy failed" }),
-        );
+        toast.error(extractErrorMessage(error) || t("common.error"));
       }
     },
     [t],
@@ -401,10 +392,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
 
   const handleMessageCopy = useCallback(
     (content: string) => {
-      void handleCopy(
-        content,
-        t("sessionManager.messageCopied", { defaultValue: "已复制消息内容" }),
-      );
+      void handleCopy(content, t("sessionManager.messageCopied"));
     },
     [handleCopy, t],
   );
@@ -509,7 +497,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
       if (deletedKeys.length > 0) {
         toast.success(
           t("sessionManager.batchDeleteSuccess", {
-            defaultValue: "已删除 {{count}} 个会话",
             count: deletedKeys.length,
           }),
         );
@@ -518,7 +505,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
       if (failedErrors.length > 0) {
         toast.error(
           t("sessionManager.batchDeleteFailed", {
-            defaultValue: "{{failed}} 个会话删除失败",
             failed: failedErrors.length,
           }),
           {
@@ -529,9 +515,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     } catch (error) {
       toast.error(
         extractErrorMessage(error) ||
-          t("sessionManager.batchDeleteRequestFailed", {
-            defaultValue: "批量删除失败，请稍后重试",
-          }),
+          t("sessionManager.batchDeleteRequestFailed"),
       );
     } finally {
       setIsBatchDeleting(false);
@@ -716,7 +700,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         checked={selectionState.checked}
         disabled={selectionState.selectableCount === 0}
         aria-label={t("sessionManager.selectProviderGroupForBatch", {
-          defaultValue: "选择 {{provider}} 供应商分组内会话",
           provider: providerLabel,
         })}
         onClick={(event) => event.stopPropagation()}
@@ -741,7 +724,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         checked={selectionState.checked}
         disabled={selectionState.selectableCount === 0}
         aria-label={t("sessionManager.selectDirectoryGroupForBatch", {
-          defaultValue: "选择 {{directory}} 目录分组内会话",
           directory: directoryGroup.label,
         })}
         onClick={(event) => event.stopPropagation()}
@@ -838,9 +820,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             className="size-7 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/60"
                             aria-label={t(
                               "sessionManager.exitBatchModeTooltip",
-                              {
-                                defaultValue: "退出批量管理",
-                              },
                             )}
                             onClick={exitSelectionMode}
                           >
@@ -848,9 +827,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>
-                          {t("sessionManager.exitBatchModeTooltip", {
-                            defaultValue: "退出批量管理",
-                          })}
+                          {t("sessionManager.exitBatchModeTooltip")}
                         </TooltipContent>
                       </Tooltip>
                     )}
@@ -881,12 +858,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                 }
                                 aria-label={
                                   selectionMode
-                                    ? t("sessionManager.exitBatchModeTooltip", {
-                                        defaultValue: "退出批量管理",
-                                      })
-                                    : t("sessionManager.manageBatchTooltip", {
-                                        defaultValue: "批量管理",
-                                      })
+                                    ? t("sessionManager.exitBatchModeTooltip")
+                                    : t("sessionManager.manageBatchTooltip")
                                 }
                                 onClick={() => {
                                   if (selectionMode) {
@@ -901,12 +874,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             </TooltipTrigger>
                             <TooltipContent>
                               {selectionMode
-                                ? t("sessionManager.exitBatchModeTooltip", {
-                                    defaultValue: "退出批量管理",
-                                  })
-                                : t("sessionManager.manageBatchTooltip", {
-                                    defaultValue: "批量管理",
-                                  })}
+                                ? t("sessionManager.exitBatchModeTooltip")
+                                : t("sessionManager.manageBatchTooltip")}
                             </TooltipContent>
                           </Tooltip>
                         )}
@@ -920,17 +889,10 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             <TooltipTrigger asChild>
                               <SelectTrigger
                                 className="size-7 p-0 justify-center border-0 bg-transparent hover:bg-muted"
-                                aria-label={t(
-                                  "sessionManager.viewModeTooltip",
-                                  {
-                                    defaultValue: "查看方式",
-                                  },
-                                )}
+                                aria-label={t("sessionManager.viewModeTooltip")}
                               >
                                 <span className="sr-only">
-                                  {t("sessionManager.viewModeTooltip", {
-                                    defaultValue: "查看方式",
-                                  })}
+                                  {t("sessionManager.viewModeTooltip")}
                                 </span>
                                 {listViewMode === "grouped" ? (
                                   <ListTree className="size-3.5" />
@@ -945,20 +907,14 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             <SelectItem value="flat">
                               <div className="flex items-center gap-2">
                                 <List className="size-3.5" />
-                                <span>
-                                  {t("sessionManager.viewModeFlat", {
-                                    defaultValue: "列表",
-                                  })}
-                                </span>
+                                <span>{t("sessionManager.viewModeFlat")}</span>
                               </div>
                             </SelectItem>
                             <SelectItem value="grouped">
                               <div className="flex items-center gap-2">
                                 <ListTree className="size-3.5" />
                                 <span>
-                                  {t("sessionManager.viewModeGrouped", {
-                                    defaultValue: "分类",
-                                  })}
+                                  {t("sessionManager.viewModeGrouped")}
                                 </span>
                               </div>
                             </SelectItem>
@@ -973,9 +929,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                 className="size-7"
                                 aria-label={t(
                                   "sessionManager.collapseAllGroups",
-                                  {
-                                    defaultValue: "全部收起",
-                                  },
                                 )}
                                 onClick={handleCollapseAllGroups}
                               >
@@ -983,9 +936,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              {t("sessionManager.collapseAllGroups", {
-                                defaultValue: "全部收起",
-                              })}
+                              {t("sessionManager.collapseAllGroups")}
                             </TooltipContent>
                           </Tooltip>
                         )}
@@ -1024,15 +975,10 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                 className="size-7 p-0 justify-center border-0 bg-transparent hover:bg-muted"
                                 aria-label={t(
                                   "sessionManager.providerFilterTooltip",
-                                  {
-                                    defaultValue: "供应商筛选",
-                                  },
                                 )}
                               >
                                 <span className="sr-only">
-                                  {t("sessionManager.providerFilterTooltip", {
-                                    defaultValue: "供应商筛选",
-                                  })}
+                                  {t("sessionManager.providerFilterTooltip")}
                                 </span>
                                 <ProviderIcon
                                   icon={
@@ -1148,14 +1094,11 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <Badge variant="outline" className="text-xs">
                             {t("sessionManager.selectedCount", {
-                              defaultValue: "已选 {{count}} 项",
                               count: selectedDeletableSessions.length,
                             })}
                           </Badge>
                           <span className="truncate">
-                            {t("sessionManager.batchModeHint", {
-                              defaultValue: "勾选要删除的会话",
-                            })}
+                            {t("sessionManager.batchModeHint")}
                           </span>
                         </div>
                         <div className="grid gap-3 min-[520px]:grid-cols-[minmax(0,1fr)_auto] min-[520px]:items-center">
@@ -1168,12 +1111,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                 onClick={handleToggleSelectAll}
                               >
                                 {allFilteredSelected
-                                  ? t("sessionManager.clearFilteredSelection", {
-                                      defaultValue: "取消全选",
-                                    })
-                                  : t("sessionManager.selectAllFiltered", {
-                                      defaultValue: "全选当前",
-                                    })}
+                                  ? t("sessionManager.clearFilteredSelection")
+                                  : t("sessionManager.selectAllFiltered")}
                               </Button>
                             )}
                             <Button
@@ -1182,9 +1121,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               className="h-7 px-2.5 text-xs whitespace-nowrap"
                               onClick={() => setSelectedSessionKeys(new Set())}
                             >
-                              {t("sessionManager.clearSelection", {
-                                defaultValue: "清空已选",
-                              })}
+                              {t("sessionManager.clearSelection")}
                             </Button>
                           </div>
                           <Button
@@ -1200,12 +1137,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             <Trash2 className="size-3.5" />
                             <span className="text-xs">
                               {isBatchDeleting
-                                ? t("sessionManager.batchDeleting", {
-                                    defaultValue: "删除中...",
-                                  })
-                                : t("sessionManager.deleteSelected", {
-                                    defaultValue: "批量删除",
-                                  })}
+                                ? t("sessionManager.batchDeleting")
+                                : t("sessionManager.deleteSelected")}
                             </span>
                           </Button>
                         </div>
@@ -1263,8 +1196,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                     aria-label={t(
                                       "sessionManager.toggleProviderGroup",
                                       {
-                                        defaultValue:
-                                          "展开或折叠 {{provider}} 供应商分组",
                                         provider: providerLabel,
                                       },
                                     )}
@@ -1326,8 +1257,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                               aria-label={t(
                                                 "sessionManager.toggleDirectoryGroup",
                                                 {
-                                                  defaultValue:
-                                                    "展开或折叠 {{directory}} 目录分组",
                                                   directory:
                                                     directoryGroup.label,
                                                 },
@@ -1353,10 +1282,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                                     {directoryGroup.projectDir ??
                                                       t(
                                                         "sessionManager.unknownDirectory",
-                                                        {
-                                                          defaultValue:
-                                                            "未知目录",
-                                                        },
                                                       )}
                                                   </p>
                                                 </TooltipContent>
@@ -1526,20 +1451,14 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               >
                                 <Play className="size-3.5" />
                                 <span className="hidden sm:inline">
-                                  {t("sessionManager.resume", {
-                                    defaultValue: "恢复会话",
-                                  })}
+                                  {t("sessionManager.resume")}
                                 </span>
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
                               {selectedSession.resumeCommand
-                                ? t("sessionManager.resumeTooltip", {
-                                    defaultValue: "在终端中恢复此会话",
-                                  })
-                                : t("sessionManager.noResumeCommand", {
-                                    defaultValue: "此会话无法恢复",
-                                  })}
+                                ? t("sessionManager.resumeTooltip")
+                                : t("sessionManager.noResumeCommand")}
                             </TooltipContent>
                           </Tooltip>
                         )}
@@ -1559,19 +1478,13 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               <Trash2 className="size-3.5" />
                               <span className="hidden sm:inline">
                                 {isDeleting
-                                  ? t("sessionManager.deleting", {
-                                      defaultValue: "删除中...",
-                                    })
-                                  : t("sessionManager.delete", {
-                                      defaultValue: "删除会话",
-                                    })}
+                                  ? t("sessionManager.deleting")
+                                  : t("sessionManager.delete")}
                               </span>
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {t("sessionManager.deleteTooltip", {
-                              defaultValue: "永久删除此本地会话记录",
-                            })}
+                            {t("sessionManager.deleteTooltip")}
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -1586,9 +1499,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
-                              aria-label={t("sessionManager.copyCommand", {
-                                defaultValue: "复制命令",
-                              })}
+                              aria-label={t("sessionManager.copyCommand")}
                               variant="ghost"
                               size="icon"
                               className="size-7 shrink-0"
@@ -1603,9 +1514,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {t("sessionManager.copyCommand", {
-                              defaultValue: "复制命令",
-                            })}
+                            {t("sessionManager.copyCommand")}
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -1621,9 +1530,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                           <div className="flex items-center gap-2">
                             <MessageSquare className="size-4 text-muted-foreground" />
                             <span className="text-sm font-medium">
-                              {t("sessionManager.conversationHistory", {
-                                defaultValue: "对话记录",
-                              })}
+                              {t("sessionManager.conversationHistory")}
                             </span>
                             <Badge variant="secondary" className="text-xs">
                               {messages.length}
@@ -1707,24 +1614,16 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         isOpen={Boolean(deleteTargets)}
         title={
           deleteTargets && deleteTargets.length > 1
-            ? t("sessionManager.batchDeleteConfirmTitle", {
-                defaultValue: "批量删除会话",
-              })
-            : t("sessionManager.deleteConfirmTitle", {
-                defaultValue: "删除会话",
-              })
+            ? t("sessionManager.batchDeleteConfirmTitle")
+            : t("sessionManager.deleteConfirmTitle")
         }
         message={
           deleteTargets && deleteTargets.length > 1
             ? t("sessionManager.batchDeleteConfirmMessage", {
-                defaultValue:
-                  "将永久删除已选中的 {{count}} 个本地会话记录。\n\n此操作不可恢复。",
                 count: deleteTargets.length,
               })
             : deleteTargets?.[0]
               ? t("sessionManager.deleteConfirmMessage", {
-                  defaultValue:
-                    "将永久删除本地会话“{{title}}”\nSession ID: {{sessionId}}\n\n此操作不可恢复。",
                   title: formatSessionTitle(deleteTargets[0]),
                   sessionId: deleteTargets[0].sessionId,
                 })
@@ -1732,14 +1631,10 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         }
         confirmText={
           deleteTargets && deleteTargets.length > 1
-            ? t("sessionManager.batchDeleteConfirmAction", {
-                defaultValue: "删除所选会话",
-              })
-            : t("sessionManager.deleteConfirmAction", {
-                defaultValue: "删除会话",
-              })
+            ? t("sessionManager.batchDeleteConfirmAction")
+            : t("sessionManager.deleteConfirmAction")
         }
-        cancelText={t("common.cancel", { defaultValue: "取消" })}
+        cancelText={t("common.cancel")}
         variant="destructive"
         onConfirm={() => void handleDeleteConfirm()}
         onCancel={() => {

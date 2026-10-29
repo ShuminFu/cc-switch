@@ -1,3 +1,5 @@
+import type { TranslationKey } from "@/i18n/keys";
+
 export interface OmoLocalFileData {
   agents?: Record<string, Record<string, unknown>>;
   categories?: Record<string, Record<string, unknown>>;
@@ -9,8 +11,8 @@ export interface OmoLocalFileData {
 export interface OmoAgentDef {
   key: string;
   display: string;
-  descKey: string;
-  tooltipKey: string;
+  descKey: TranslationKey;
+  tooltipKey: TranslationKey;
   recommended?: string;
   group: "main" | "sub";
 }
@@ -18,8 +20,8 @@ export interface OmoAgentDef {
 export interface OmoCategoryDef {
   key: string;
   display: string;
-  descKey: string;
-  tooltipKey: string;
+  descKey: TranslationKey;
+  tooltipKey: TranslationKey;
   recommended?: string;
 }
 

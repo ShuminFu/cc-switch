@@ -1,6 +1,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useImportExport } from "@/hooks/useImportExport";
+import { loadZhTranslations } from "../utils/zhTranslations";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -48,6 +49,8 @@ afterEach(() => {
 });
 
 describe("useImportExport Hook", () => {
+  loadZhTranslations();
+
   it("should update state after successfully selecting file", async () => {
     openFileDialogMock.mockResolvedValue("/path/config.json");
     const { result } = renderHook(() => useImportExport());
@@ -153,7 +156,7 @@ describe("useImportExport Hook", () => {
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe("Import failed");
     expect(toastErrorMock).toHaveBeenCalledWith(
-      expect.stringContaining("导入配置失败:"),
+      expect.stringContaining("导入配置失败"),
     );
   });
 

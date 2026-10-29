@@ -90,7 +90,7 @@ describe("app shell view map", () => {
     expect(VIEW_TITLES.settings(t, ctx)).toBe("settings.title");
     expect(VIEW_TITLES.skillsDiscovery(t, ctx)).toBe("skills.title");
     expect(VIEW_TITLES.hermesMemory(t, ctx)).toBe("hermes.memory.title");
-    expect(VIEW_TITLES.universal(t, ctx)).toBe("统一供应商");
+    expect(VIEW_TITLES.universal(t, ctx)).toBe("universalProvider.title");
     expect(VIEW_TITLES.prompts(t, ctx)).toBe("prompts.title");
   });
 
@@ -212,7 +212,7 @@ describe("AppHeader", () => {
     expect(props.onOpenSettings).toHaveBeenCalledWith("general");
     fireEvent.click(screen.getByText("update-badge"));
     expect(props.onOpenSettings).toHaveBeenCalledWith("about");
-    fireEvent.click(screen.getByTitle("使用统计"));
+    fireEvent.click(screen.getByTitle("usage.title"));
     expect(props.onOpenSettings).toHaveBeenCalledWith("usage");
     fireEvent.click(screen.getByTestId("add-provider"));
     expect(props.onAddProvider).toHaveBeenCalledTimes(1);

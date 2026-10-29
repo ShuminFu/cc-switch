@@ -228,7 +228,7 @@ export function UsageDateRangePicker({
   const handleApply = () => {
     setError(null);
     if (draftStart > draftEnd) {
-      setError(t("usage.invalidTimeRangeOrder", "开始时间不能晚于结束时间"));
+      setError(t("usage.invalidTimeRangeOrder"));
       return;
     }
     onApply({
@@ -250,10 +250,7 @@ export function UsageDateRangePicker({
     const isEndLive = field === "end" && draftLiveEnd;
     const ts = field === "start" ? draftStart : draftEnd;
     const setTs = field === "start" ? setDraftStart : setDraftEnd;
-    const label =
-      field === "start"
-        ? t("usage.startTime", "开始时间")
-        : t("usage.endTime", "结束时间");
+    const label = field === "start" ? t("usage.startTime") : t("usage.endTime");
 
     return (
       <div
@@ -357,7 +354,7 @@ export function UsageDateRangePicker({
           {/* Left: date fields */}
           <div className="usage-range-fields space-y-2">
             <p className="text-xs text-muted-foreground">
-              {t("usage.customRangeHint", "支持日期与时间，最长 30 天")}
+              {t("usage.customRangeHint")}
             </p>
             {renderField("start")}
             {renderField("end")}
@@ -375,7 +372,7 @@ export function UsageDateRangePicker({
                 }}
               />
               <span className="text-xs text-muted-foreground">
-                {t("usage.liveEndTime", "结束时间跟随当前时刻")}
+                {t("usage.liveEndTime")}
               </span>
             </label>
 
@@ -428,7 +425,7 @@ export function UsageDateRangePicker({
                 type="button"
                 className="text-sm font-medium hover:text-primary transition-colors"
                 onClick={goToToday}
-                title={t("usage.presetToday", { defaultValue: "当天" })}
+                title={t("usage.presetToday")}
               >
                 {displayMonth.toLocaleDateString(locale, {
                   year: "numeric",

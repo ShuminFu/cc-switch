@@ -61,9 +61,7 @@ export const GeminiCommonConfigModal: React.FC<
   return (
     <FullScreenPanel
       isOpen={isOpen}
-      title={t("geminiConfig.editCommonConfigTitle", {
-        defaultValue: "编辑 Gemini 通用配置片段",
-      })}
+      title={t("geminiConfig.editCommonConfigTitle")}
       onClose={handleClose}
       footer={
         <>
@@ -80,9 +78,7 @@ export const GeminiCommonConfigModal: React.FC<
               ) : (
                 <Download className="w-4 h-4" />
               )}
-              {t("geminiConfig.extractFromCurrent", {
-                defaultValue: "从编辑内容提取",
-              })}
+              {t("geminiConfig.extractFromCurrent")}
             </Button>
           )}
           <Button type="button" variant="outline" onClick={handleClose}>
@@ -114,10 +110,7 @@ export const GeminiCommonConfigModal: React.FC<
           </p>
         </div>
         <p className="text-xs text-amber-600 dark:text-amber-400">
-          {t("geminiConfig.commonConfigHint", {
-            defaultValue:
-              "该片段会写入 Gemini 的 .env（不允许包含 GOOGLE_GEMINI_BASE_URL、GEMINI_API_KEY）",
-          })}
+          {t("geminiConfig.commonConfigHint")}
         </p>
         {(!draftValue ||
           draftValue.trim() === "" ||

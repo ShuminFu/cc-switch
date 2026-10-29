@@ -292,11 +292,7 @@ export function useDirectorySettings({
         updateDirectoryState(key, sanitized);
       } catch (error) {
         console.error("[useDirectorySettings] Failed to pick directory", error);
-        toast.error(
-          t("settings.selectFileFailed", {
-            defaultValue: "选择目录失败",
-          }),
-        );
+        toast.error(t("settings.selectFileFailed"));
       }
     },
     [settings, resolvedDirs, t, updateDirectoryState],
@@ -314,11 +310,7 @@ export function useDirectorySettings({
         "[useDirectorySettings] Failed to pick app config directory",
         error,
       );
-      toast.error(
-        t("settings.selectFileFailed", {
-          defaultValue: "选择目录失败",
-        }),
-      );
+      toast.error(t("settings.selectFileFailed"));
     }
   }, [appConfigDir, resolvedDirs.appConfig, t, updateDirectoryState]);
 

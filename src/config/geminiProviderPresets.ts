@@ -1,4 +1,5 @@
 import type { ProviderCategory } from "@/types";
+import type { TranslationKey } from "@/i18n/keys";
 
 /**
  * Gemini 预设供应商的视觉主题配置
@@ -14,7 +15,7 @@ export interface GeminiPresetTheme {
 
 export interface GeminiProviderPreset {
   name: string;
-  nameKey?: string; // i18n key for localized display name
+  nameKey?: TranslationKey; // i18n key for localized display name
   websiteUrl: string;
   apiKeyUrl?: string;
   settingsConfig: object;

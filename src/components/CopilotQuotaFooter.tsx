@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import React from "react";
 import { RefreshCw, AlertCircle, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -21,7 +22,7 @@ interface CopilotQuotaFooterProps {
 function formatRelativeTime(
   timestamp: number,
   now: number,
-  t: (key: string, options?: { count?: number }) => string,
+  t: TFunction,
 ): string {
   const diff = Math.floor((now - timestamp) / 1000);
   if (diff < 60) return t("usage.justNow");
@@ -97,7 +98,7 @@ const CopilotQuotaFooter: React.FC<CopilotQuotaFooterProps> = ({
             <Clock size={10} />
             {quota.queriedAt
               ? formatRelativeTime(quota.queriedAt, now, t)
-              : t("usage.never", { defaultValue: "Never" })}
+              : t("usage.never")}
           </span>
           <button
             onClick={(e) => {
@@ -148,9 +149,7 @@ const CopilotQuotaFooter: React.FC<CopilotQuotaFooterProps> = ({
 
       <div className="flex flex-col gap-2">
         {tiers.map((tier) => {
-          const label = t("subscription.copilotPremium", {
-            defaultValue: "Premium",
-          });
+          const label = t("subscription.copilotPremium");
           return (
             <div key={tier.name} className="flex items-center gap-3 text-xs">
               <span

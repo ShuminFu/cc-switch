@@ -38,12 +38,9 @@ export function useProviderConfirm(
       await providersApi.removeFromLiveConfig(provider.id, activeApp);
       // Invalidate the provider graph (incl. live ids) to refresh the isInConfig state
       await invalidateProviderGraph(queryClient, activeApp);
-      toast.success(
-        t("notifications.removeFromConfigSuccess", {
-          defaultValue: "已从配置移除",
-        }),
-        { closeButton: true },
-      );
+      toast.success(t("notifications.removeFromConfigSuccess"), {
+        closeButton: true,
+      });
     } else {
       await deleteProvider(provider.id);
     }

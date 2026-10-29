@@ -691,18 +691,10 @@ function ProviderFormFull({
 
   const presetCategoryLabels: Record<string, string> = useMemo(
     () => ({
-      official: t("providerForm.categoryOfficial", {
-        defaultValue: "官方",
-      }),
-      cn_official: t("providerForm.categoryCnOfficial", {
-        defaultValue: "国内官方",
-      }),
-      aggregator: t("providerForm.categoryAggregation", {
-        defaultValue: "聚合服务",
-      }),
-      third_party: t("providerForm.categoryThirdParty", {
-        defaultValue: "第三方",
-      }),
+      official: t("providerForm.categoryOfficial"),
+      cn_official: t("providerForm.categoryCnOfficial"),
+      aggregator: t("providerForm.categoryAggregation"),
+      third_party: t("providerForm.categoryThirdParty"),
       omo: "OMO",
     }),
     [t],
@@ -1055,7 +1047,6 @@ function ProviderFormFull({
     if (overridesResult.error) {
       toast.error(
         t("providerForm.localProxyRequestOverridesInvalid", {
-          defaultValue: `本地代理请求覆盖格式错误：${overridesResult.error}`,
           error: overridesResult.error,
         }),
       );
@@ -1072,7 +1063,6 @@ function ProviderFormFull({
         issues.push(
           t("providerForm.fillParameter", {
             label: validation.missingField.label,
-            defaultValue: `请填写 ${validation.missingField.label}`,
           }),
         );
       }
@@ -1080,11 +1070,7 @@ function ProviderFormFull({
 
     // 供应商名空：A 类
     if (!values.name.trim()) {
-      issues.push(
-        t("providerForm.fillSupplierName", {
-          defaultValue: "请填写供应商名称",
-        }),
-      );
+      issues.push(t("providerForm.fillSupplierName"));
     }
 
     const costMultiplier = pricingConfig.costMultiplier?.trim();
@@ -1093,11 +1079,7 @@ function ProviderFormFull({
       costMultiplier &&
       !isNonNegativeDecimalString(costMultiplier)
     ) {
-      toast.error(
-        t("settings.globalProxy.defaultCostMultiplierInvalid", {
-          defaultValue: "成本倍率必须为非负数",
-        }),
-      );
+      toast.error(t("settings.globalProxy.defaultCostMultiplierInvalid"));
       return;
     }
 
@@ -1117,11 +1099,7 @@ function ProviderFormFull({
         return;
       }
       if (isProviderKeyLockStateLoading) {
-        toast.error(
-          t("providerForm.providerKeyStatusLoading", {
-            defaultValue: "正在加载供应商标识状态，请稍后再试",
-          }),
-        );
+        toast.error(t("providerForm.providerKeyStatusLoading"));
         return;
       }
       if (
@@ -1146,11 +1124,7 @@ function ProviderFormFull({
         return;
       }
       if (isProviderKeyLockStateLoading) {
-        toast.error(
-          t("providerForm.providerKeyStatusLoading", {
-            defaultValue: "正在加载供应商标识状态，请稍后再试",
-          }),
-        );
+        toast.error(t("providerForm.providerKeyStatusLoading"));
         return;
       }
       if (
@@ -1172,11 +1146,7 @@ function ProviderFormFull({
         return;
       }
       if (isProviderKeyLockStateLoading) {
-        toast.error(
-          t("providerForm.providerKeyStatusLoading", {
-            defaultValue: "正在加载供应商标识状态，请稍后再试",
-          }),
-        );
+        toast.error(t("providerForm.providerKeyStatusLoading"));
         return;
       }
       if (
@@ -1197,19 +1167,11 @@ function ProviderFormFull({
       templatePreset?.providerType === "codex_oauth" ||
       initialData?.meta?.providerType === "codex_oauth";
     if (isCopilotProvider && !isCopilotAuthenticated) {
-      toast.error(
-        t("copilot.loginRequired", {
-          defaultValue: "请先登录 GitHub Copilot",
-        }),
-      );
+      toast.error(t("copilot.loginRequired"));
       return;
     }
     if (isCodexOauthProvider && !isCodexOauthAuthenticated) {
-      toast.error(
-        t("codexOauth.loginRequired", {
-          defaultValue: "请先登录 ChatGPT 账号",
-        }),
-      );
+      toast.error(t("codexOauth.loginRequired"));
       return;
     }
 
@@ -1217,30 +1179,18 @@ function ProviderFormFull({
     // 解析失败时必须阻止保存，否则只能回退到初始配置，用户的编辑会被静默丢弃
     if (isCodexApp) {
       if (parseJsonObjectForSave(codexAuth) === null) {
-        toast.error(
-          t("providerForm.codexAuthInvalid", {
-            defaultValue: "auth.json 格式错误（必须是 JSON 对象），无法保存",
-          }),
-        );
+        toast.error(t("providerForm.codexAuthInvalid"));
         return;
       }
       // configError 由 debounce 校验产生，提交时同步重新校验，避免读到过期状态
       if (!validateCodexToml(codexConfig ?? "")) {
-        toast.error(
-          t("providerForm.codexConfigInvalid", {
-            defaultValue: "config.toml 格式错误，无法保存",
-          }),
-        );
+        toast.error(t("providerForm.codexConfigInvalid"));
         return;
       }
     }
 
     if (isGeminiApp && parseJsonObjectForSave(geminiConfig) === null) {
-      toast.error(
-        t("providerForm.geminiConfigInvalid", {
-          defaultValue: "Gemini 配置格式错误（必须是 JSON 对象），无法保存",
-        }),
-      );
+      toast.error(t("providerForm.geminiConfigInvalid"));
       return;
     }
 
@@ -1257,20 +1207,13 @@ function ProviderFormFull({
         if (!otherFields) {
           toast.error(
             t("omo.jsonMustBeObject", {
-              field: t("omo.otherFields", {
-                defaultValue: "Other Config",
-              }),
-              defaultValue: "{{field}} must be a JSON object",
+              field: t("omo.otherFields"),
             }),
           );
           return;
         }
       } catch {
-        toast.error(
-          t("omo.invalidJson", {
-            defaultValue: "Other Fields contains invalid JSON",
-          }),
-        );
+        toast.error(t("omo.invalidJson"));
         return;
       }
     }
@@ -1280,48 +1223,24 @@ function ProviderFormFull({
     if (category !== "official" && category !== "cloud_provider") {
       if (isClaudeApp) {
         if (!isCodexOauthProvider && !baseUrl.trim()) {
-          issues.push(
-            t("providerForm.endpointRequired", {
-              defaultValue: "非官方供应商请填写 API 端点",
-            }),
-          );
+          issues.push(t("providerForm.endpointRequired"));
         }
         if (!isCopilotProvider && !isCodexOauthProvider && !apiKey.trim()) {
-          issues.push(
-            t("providerForm.apiKeyRequired", {
-              defaultValue: "非官方供应商请填写 API Key",
-            }),
-          );
+          issues.push(t("providerForm.apiKeyRequired"));
         }
       } else if (isCodexApp) {
         if (!codexBaseUrl.trim()) {
-          issues.push(
-            t("providerForm.endpointRequired", {
-              defaultValue: "非官方供应商请填写 API 端点",
-            }),
-          );
+          issues.push(t("providerForm.endpointRequired"));
         }
         if (!codexApiKey.trim()) {
-          issues.push(
-            t("providerForm.apiKeyRequired", {
-              defaultValue: "非官方供应商请填写 API Key",
-            }),
-          );
+          issues.push(t("providerForm.apiKeyRequired"));
         }
       } else if (isGeminiApp) {
         if (!geminiBaseUrl.trim()) {
-          issues.push(
-            t("providerForm.endpointRequired", {
-              defaultValue: "非官方供应商请填写 API 端点",
-            }),
-          );
+          issues.push(t("providerForm.endpointRequired"));
         }
         if (!geminiApiKey.trim()) {
-          issues.push(
-            t("providerForm.apiKeyRequired", {
-              defaultValue: "非官方供应商请填写 API Key",
-            }),
-          );
+          issues.push(t("providerForm.apiKeyRequired"));
         }
       }
     }
@@ -1344,7 +1263,6 @@ function ProviderFormFull({
     if (overridesResult.error) {
       toast.error(
         t("providerForm.localProxyRequestOverridesInvalid", {
-          defaultValue: `本地代理请求覆盖格式错误：${overridesResult.error}`,
           error: overridesResult.error,
         }),
       );
@@ -1366,11 +1284,7 @@ function ProviderFormFull({
       // 格式已在 handleSubmit 前置校验中验证过；这里仍不回退到初始配置
       const authJson = parseJsonObjectForSave(codexAuth);
       if (authJson === null) {
-        toast.error(
-          t("providerForm.codexAuthInvalid", {
-            defaultValue: "auth.json 格式错误（必须是 JSON 对象），无法保存",
-          }),
-        );
+        toast.error(t("providerForm.codexAuthInvalid"));
         return;
       }
       let normalizedCodexConfig =
@@ -1411,11 +1325,7 @@ function ProviderFormFull({
     } else if (isGeminiApp) {
       const configObj = parseJsonObjectForSave(geminiConfig);
       if (configObj === null) {
-        toast.error(
-          t("providerForm.geminiConfigInvalid", {
-            defaultValue: "Gemini 配置格式错误（必须是 JSON 对象），无法保存",
-          }),
-        );
+        toast.error(t("providerForm.geminiConfigInvalid"));
         return;
       }
       const combined = {
@@ -2022,10 +1932,7 @@ function ProviderFormFull({
                       )) && (
                       <p className="text-xs text-muted-foreground">
                         {isProviderKeyLocked
-                          ? t("opencode.providerKeyLockedHint", {
-                              defaultValue:
-                                "该供应商已添加到应用配置中，供应商标识不可修改",
-                            })
+                          ? t("opencode.providerKeyLockedHint")
                           : t("opencode.providerKeyHint")}
                       </p>
                     )}
@@ -2088,10 +1995,7 @@ function ProviderFormFull({
                       )) && (
                       <p className="text-xs text-muted-foreground">
                         {isProviderKeyLocked
-                          ? t("openclaw.providerKeyLockedHint", {
-                              defaultValue:
-                                "该供应商已添加到应用配置中，供应商标识不可修改",
-                            })
+                          ? t("openclaw.providerKeyLockedHint")
                           : t("openclaw.providerKeyHint")}
                       </p>
                     )}
@@ -2099,9 +2003,7 @@ function ProviderFormFull({
               ) : isHermesApp ? (
                 <div className="space-y-2">
                   <Label htmlFor="hermes-key">
-                    {t("hermes.form.providerKey", {
-                      defaultValue: "Provider Key",
-                    })}
+                    {t("hermes.form.providerKey")}
                     <span className="text-destructive ml-1">*</span>
                   </Label>
                   <Input
@@ -2112,9 +2014,7 @@ function ProviderFormFull({
                         e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""),
                       )
                     }
-                    placeholder={t("hermes.form.providerKeyPlaceholder", {
-                      defaultValue: "my-provider",
-                    })}
+                    placeholder={t("hermes.form.providerKeyPlaceholder")}
                     disabled={
                       isProviderKeyLocked || isProviderKeyLockStateLoading
                     }
@@ -2158,14 +2058,8 @@ function ProviderFormFull({
                       )) && (
                       <p className="text-xs text-muted-foreground">
                         {isProviderKeyLocked
-                          ? t("hermes.form.providerKeyLockedHint", {
-                              defaultValue:
-                                "This provider is in Hermes config; key is locked.",
-                            })
-                          : t("hermes.form.providerKeyHint", {
-                              defaultValue:
-                                "Lowercase letters, numbers, and hyphens only. Used as the provider name in config.yaml.",
-                            })}
+                          ? t("hermes.form.providerKeyLockedHint")
+                          : t("hermes.form.providerKeyHint")}
                       </p>
                     )}
                 </div>
@@ -2604,20 +2498,13 @@ function ProviderFormFull({
       <ConfirmDialog
         isOpen={softIssues !== null && softIssues.length > 0}
         variant="info"
-        title={t("providerForm.softValidation.title", {
-          defaultValue: "配置存在以下问题",
-        })}
+        title={t("providerForm.softValidation.title")}
         message={
           (softIssues ?? []).map((issue) => `• ${issue}`).join("\n") +
           "\n\n" +
-          t("providerForm.softValidation.hint", {
-            defaultValue:
-              "仍要保存吗？保存后切换此供应商时可能失败，可以之后再补全。",
-          })
+          t("providerForm.softValidation.hint")
         }
-        confirmText={t("providerForm.softValidation.saveAnyway", {
-          defaultValue: "仍要保存",
-        })}
+        confirmText={t("providerForm.softValidation.saveAnyway")}
         cancelText={t("common.cancel")}
         onConfirm={async () => {
           if (isConfirmSubmitting) return;

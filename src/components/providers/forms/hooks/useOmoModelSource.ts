@@ -251,18 +251,11 @@ export function useOmoModelSource({
       toast.warning(
         t("omo.modelSourcePartialWarning", {
           count: failed.length,
-          defaultValue:
-            "Some provider model configs are invalid and were skipped.",
         }),
       );
     }
     if (fallback) {
-      toast.warning(
-        t("omo.modelSourceFallbackWarning", {
-          defaultValue:
-            "Failed to load live provider state. Falling back to configured providers.",
-        }),
-      );
+      toast.warning(t("omo.modelSourceFallbackWarning"));
     }
   }, [
     isOmoCategory,

@@ -176,9 +176,7 @@ export function ProviderCard({
 
   const { data: health } = useProviderHealth(provider.id, appId);
 
-  const fallbackUrlText = t("provider.notConfigured", {
-    defaultValue: "未配置接口地址",
-  });
+  const fallbackUrlText = t("provider.notConfigured");
 
   const displayUrl = useMemo(() => {
     return extractApiUrl(provider, fallbackUrlText);
@@ -384,9 +382,7 @@ export function ProviderCard({
                 provider.category !== "official" &&
                 provider.meta?.claudeDesktopMode === "proxy" && (
                   <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                    {t("claudeDesktop.modeProxy", {
-                      defaultValue: "需要路由",
-                    })}
+                    {t("claudeDesktop.modeProxy")}
                   </span>
                 )}
 
@@ -395,37 +391,27 @@ export function ProviderCard({
                 provider.meta?.apiFormat &&
                 provider.meta.apiFormat !== "anthropic" && (
                   <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                    {t("claudeCode.needsRouting", {
-                      defaultValue: "需要路由",
-                    })}
+                    {t("claudeCode.needsRouting")}
                   </span>
                 )}
 
               {codexNeedsRouting && (
                 <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                  {t("codex.needsRouting", {
-                    defaultValue: "需要路由",
-                  })}
+                  {t("codex.needsRouting")}
                 </span>
               )}
 
               {appId === "claude" && provider.category === "official" && (
                 <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
-                  {t("claudeCode.noRoutingSupport", {
-                    defaultValue: "不支持路由",
-                  })}
+                  {t("claudeCode.noRoutingSupport")}
                 </span>
               )}
 
               {appId === "codex" && supportsOfficialRouting && (
                 <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
                   {isProxyTakeover
-                    ? t("codex.officialRouting", {
-                        defaultValue: "官方账号路由",
-                      })
-                    : t("codex.nativeLogin", {
-                        defaultValue: "Codex 登录",
-                      })}
+                    ? t("codex.officialRouting")
+                    : t("codex.nativeLogin")}
                 </span>
               )}
 
@@ -433,9 +419,7 @@ export function ProviderCard({
                 provider.category === "official" &&
                 !supportsOfficialRouting && (
                   <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
-                    {t("codex.noRoutingSupport", {
-                      defaultValue: "不支持路由",
-                    })}
+                    {t("codex.noRoutingSupport")}
                   </span>
                 )}
 
@@ -456,9 +440,7 @@ export function ProviderCard({
                 provider.meta?.isPartner && (
                   <span
                     className="text-yellow-500 dark:text-yellow-400"
-                    title={t("provider.officialPartner", {
-                      defaultValue: "官方合作伙伴",
-                    })}
+                    title={t("provider.officialPartner")}
                   >
                     ⭐
                   </span>
@@ -467,13 +449,9 @@ export function ProviderCard({
               {isHermesReadOnly && (
                 <span
                   className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200"
-                  title={t("provider.managedByHermesHint", {
-                    defaultValue: "由 Hermes 管理，请在 Hermes Web UI 中编辑",
-                  })}
+                  title={t("provider.managedByHermesHint")}
                 >
-                  {t("provider.managedByHermes", {
-                    defaultValue: "Hermes Managed",
-                  })}
+                  {t("provider.managedByHermes")}
                 </span>
               )}
             </div>
@@ -528,7 +506,6 @@ export function ProviderCard({
                   <span className="font-medium">
                     {t("usage.multiplePlans", {
                       count: usage?.data?.length || 0,
-                      defaultValue: `${usage?.data?.length || 0} 个套餐`,
                     })}
                   </span>
                 </div>
@@ -550,11 +527,7 @@ export function ProviderCard({
                     setIsExpanded(!isExpanded);
                   }}
                   className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400 flex-shrink-0"
-                  title={
-                    isExpanded
-                      ? t("usage.collapse", { defaultValue: "收起" })
-                      : t("usage.expand", { defaultValue: "展开" })
-                  }
+                  title={isExpanded ? t("usage.collapse") : t("usage.expand")}
                 >
                   {isExpanded ? (
                     <ChevronUp size={14} />

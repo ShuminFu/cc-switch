@@ -123,9 +123,7 @@ function BrandBar({
           variant="ghost"
           size="icon"
           onClick={() => onOpenSettings("usage")}
-          title={t("usage.title", {
-            defaultValue: "使用统计",
-          })}
+          title={t("usage.title")}
           className="hover:bg-black/5 dark:hover:bg-white/5"
         >
           <BarChart2 className="w-4 h-4" />

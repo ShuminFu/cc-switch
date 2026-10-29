@@ -50,9 +50,7 @@ export function ProviderAdvancedConfig({
           <div className="flex items-center gap-3">
             <Coins className="h-4 w-4 text-muted-foreground" />
             <span className="font-medium">
-              {t("providerAdvanced.pricingConfig", {
-                defaultValue: "计费配置",
-              })}
+              {t("providerAdvanced.pricingConfig")}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -64,9 +62,7 @@ export function ProviderAdvancedConfig({
                 htmlFor="pricing-config-enabled"
                 className="text-sm text-muted-foreground"
               >
-                {t("providerAdvanced.useCustomPricing", {
-                  defaultValue: "使用单独配置",
-                })}
+                {t("providerAdvanced.useCustomPricing")}
               </Label>
               <Switch
                 id="pricing-config-enabled"
@@ -94,17 +90,12 @@ export function ProviderAdvancedConfig({
         >
           <div className="border-t border-border/50 p-4 space-y-4">
             <p className="text-sm text-muted-foreground">
-              {t("providerAdvanced.pricingConfigDesc", {
-                defaultValue:
-                  "为此供应商配置单独的计费参数，不启用时使用全局默认配置。",
-              })}
+              {t("providerAdvanced.pricingConfigDesc")}
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="cost-multiplier">
-                  {t("providerAdvanced.costMultiplier", {
-                    defaultValue: "成本倍率",
-                  })}
+                  {t("providerAdvanced.costMultiplier")}
                 </Label>
                 <Input
                   id="cost-multiplier"
@@ -119,22 +110,16 @@ export function ProviderAdvancedConfig({
                       costMultiplier: e.target.value || undefined,
                     })
                   }
-                  placeholder={t("providerAdvanced.costMultiplierPlaceholder", {
-                    defaultValue: "留空使用全局默认（1）",
-                  })}
+                  placeholder={t("providerAdvanced.costMultiplierPlaceholder")}
                   disabled={!pricingConfig.enabled}
                 />
                 <p className="text-xs text-muted-foreground">
-                  {t("providerAdvanced.costMultiplierHint", {
-                    defaultValue: "实际成本 = 基础成本 × 倍率，支持小数如 1.5",
-                  })}
+                  {t("providerAdvanced.costMultiplierHint")}
                 </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="pricing-model-source">
-                  {t("providerAdvanced.pricingModelSourceLabel", {
-                    defaultValue: "计费模式",
-                  })}
+                  {t("providerAdvanced.pricingModelSourceLabel")}
                 </Label>
                 <Select
                   value={pricingConfig.pricingModelSource}
@@ -151,26 +136,18 @@ export function ProviderAdvancedConfig({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="inherit">
-                      {t("providerAdvanced.pricingModelSourceInherit", {
-                        defaultValue: "继承全局默认",
-                      })}
+                      {t("providerAdvanced.pricingModelSourceInherit")}
                     </SelectItem>
                     <SelectItem value="request">
-                      {t("providerAdvanced.pricingModelSourceRequest", {
-                        defaultValue: "请求模型",
-                      })}
+                      {t("providerAdvanced.pricingModelSourceRequest")}
                     </SelectItem>
                     <SelectItem value="response">
-                      {t("providerAdvanced.pricingModelSourceResponse", {
-                        defaultValue: "返回模型",
-                      })}
+                      {t("providerAdvanced.pricingModelSourceResponse")}
                     </SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {t("providerAdvanced.pricingModelSourceHint", {
-                    defaultValue: "选择按请求模型还是返回模型进行定价匹配",
-                  })}
+                  {t("providerAdvanced.pricingModelSourceHint")}
                 </p>
               </div>
             </div>

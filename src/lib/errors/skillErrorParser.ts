@@ -1,4 +1,5 @@
 import { TFunction } from "i18next";
+import type { TranslationKey } from "@/i18n/keys";
 
 /**
  * 结构化错误对象
@@ -26,29 +27,37 @@ export function parseSkillError(errorString: string): SkillError | null {
 }
 
 /**
+ * 错误码 -> i18n key
+ */
+const SKILL_ERROR_KEYS = {
+  SKILL_NOT_FOUND: "skills.error.skillNotFound",
+  MISSING_REPO_INFO: "skills.error.missingRepoInfo",
+  DOWNLOAD_TIMEOUT: "skills.error.downloadTimeout",
+  DOWNLOAD_FAILED: "skills.error.downloadFailed",
+  SKILL_DIR_NOT_FOUND: "skills.error.skillDirNotFound",
+  SKILL_DIRECTORY_CONFLICT: "skills.error.directoryConflict",
+  EMPTY_ARCHIVE: "skills.error.emptyArchive",
+  GET_HOME_DIR_FAILED: "skills.error.getHomeDirFailed",
+  NO_SKILLS_IN_ZIP: "skills.error.noSkillsInZip",
+} as const satisfies Record<string, TranslationKey>;
+
+type SkillErrorKey =
+  | (typeof SKILL_ERROR_KEYS)[keyof typeof SKILL_ERROR_KEYS]
+  | "skills.error.unknownError";
+
+/**
  * 将错误码映射到 i18n key
  */
-function getErrorI18nKey(code: string): string {
-  const mapping: Record<string, string> = {
-    SKILL_NOT_FOUND: "skills.error.skillNotFound",
-    MISSING_REPO_INFO: "skills.error.missingRepoInfo",
-    DOWNLOAD_TIMEOUT: "skills.error.downloadTimeout",
-    DOWNLOAD_FAILED: "skills.error.downloadFailed",
-    SKILL_DIR_NOT_FOUND: "skills.error.skillDirNotFound",
-    SKILL_DIRECTORY_CONFLICT: "skills.error.directoryConflict",
-    EMPTY_ARCHIVE: "skills.error.emptyArchive",
-    GET_HOME_DIR_FAILED: "skills.error.getHomeDirFailed",
-    NO_SKILLS_IN_ZIP: "skills.error.noSkillsInZip",
-  };
-
+function getErrorI18nKey(code: string): SkillErrorKey {
+  const mapping: Record<string, SkillErrorKey> = SKILL_ERROR_KEYS;
   return mapping[code] || "skills.error.unknownError";
 }
 
 /**
  * 将建议码映射到 i18n key
  */
-function getSuggestionI18nKey(suggestion: string): string {
-  const mapping: Record<string, string> = {
+function getSuggestionI18nKey(suggestion: string): TranslationKey {
+  const mapping: Record<string, TranslationKey> = {
     checkNetwork: "skills.error.suggestion.checkNetwork",
     checkProxy: "skills.error.suggestion.checkProxy",
     retryLater: "skills.error.suggestion.retryLater",
@@ -61,7 +70,8 @@ function getSuggestionI18nKey(suggestion: string): string {
     http429: "skills.error.http429",
   };
 
-  return mapping[suggestion] || suggestion;
+  // 未登记的建议码原样作为 key 传给 t()，缺失时 i18next 会直接返回原文
+  return mapping[suggestion] || (suggestion as TranslationKey);
 }
 
 /**
@@ -74,7 +84,7 @@ function getSuggestionI18nKey(suggestion: string): string {
 export function formatSkillError(
   errorString: string,
   t: TFunction,
-  defaultTitle: string = "skills.installFailed",
+  defaultTitle: TranslationKey = "skills.installFailed",
 ): { title: string; description: string } {
   const parsedError = parseSkillError(errorString);
 
@@ -92,7 +102,11 @@ export function formatSkillError(
   const errorKey = getErrorI18nKey(code);
 
   // 构建描述（错误消息 + 建议）
-  let description = t(errorKey, context);
+  // context 是插值变量表；声明为不含 i18next 的 context 选项，避免类型推导去匹配 key_<context> 变体
+  let description = t(
+    errorKey,
+    context as Record<string, string> & { context?: undefined },
+  );
 
   // 如果有建议，追加到描述中
   if (suggestion) {

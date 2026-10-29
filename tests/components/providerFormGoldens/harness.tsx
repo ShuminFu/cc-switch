@@ -14,6 +14,7 @@ import {
   type PresetEntry,
 } from "@/components/providers/forms/ProviderPresetSelector";
 import type { AppId } from "@/lib/api";
+import type { TranslationKey } from "@/i18n/keys";
 import { server } from "../../msw/server";
 import { setSettings } from "../../msw/state";
 import { createTestQueryClient } from "../../utils/testQueryClient";
@@ -36,7 +37,7 @@ import { toastErrorMock } from "./mocks";
 
 export const GOLDEN_API_KEY = "sk-golden-test-key";
 const SUBMIT_LABEL = "Save";
-const SAVE_ANYWAY_LABEL = "仍要保存";
+const SAVE_ANYWAY_LABEL = "providerForm.softValidation.saveAnyway";
 const TAURI_ENDPOINT = "http://tauri.local";
 
 type SubmittedValues = Parameters<ProviderFormProps["onSubmit"]>[0];
@@ -50,7 +51,7 @@ export type GoldenOutcome = {
   | { submitted: false; errors: unknown[] }
 );
 
-const t = (key: string) => i18n.t(key);
+const t = (key: string) => i18n.t(key as TranslationKey);
 
 /**
  * Answer the commands the form calls on mount that the shared MSW handlers

@@ -88,12 +88,7 @@ export function ConnectivityCheckConfigPanel() {
       {/* 连通检测语义说明：可达 ≠ 配置正确 */}
       <Alert>
         <Info className="h-4 w-4" />
-        <AlertDescription>
-          {t("streamCheck.connectivityNote", {
-            defaultValue:
-              "连通检测仅探测供应商地址是否可达，不发送真实模型请求。收到任意响应即视为“可达”——这不代表鉴权或模型配置一定正确。",
-          })}
-        </AlertDescription>
+        <AlertDescription>{t("streamCheck.connectivityNote")}</AlertDescription>
       </Alert>
 
       {/* 检查参数配置 */}

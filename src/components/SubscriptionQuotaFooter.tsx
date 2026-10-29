@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+import type { TranslationKey } from "@/i18n/keys";
 import React from "react";
 import { RefreshCw, AlertCircle, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -22,7 +24,7 @@ interface SubscriptionQuotaViewProps {
 }
 
 /** 已知 tier 名称的显示映射（官方订阅 + Token Plan 共用） */
-export const TIER_I18N_KEYS: Record<string, string> = {
+export const TIER_I18N_KEYS: Record<string, TranslationKey> = {
   five_hour: "subscription.fiveHour",
   seven_day: "subscription.sevenDay",
   seven_day_opus: "subscription.sevenDayOpus",
@@ -66,10 +68,7 @@ export function countdownStr(resetsAt: string | null): string | null {
 }
 
 /** 格式化重置时间为倒计时文本（带 i18n 模板） */
-function formatResetTime(
-  resetsAt: string | null,
-  t: (key: string, options?: Record<string, string>) => string,
-): string | null {
+function formatResetTime(resetsAt: string | null, t: TFunction): string | null {
   const time = countdownStr(resetsAt);
   if (!time) return null;
   return t("subscription.resetsIn", { time });
@@ -82,7 +81,7 @@ const HIDDEN_INLINE_TIERS = new Set(["seven_day_sonnet"]);
 function formatRelativeTime(
   timestamp: number,
   now: number,
-  t: (key: string, options?: { count?: number }) => string,
+  t: TFunction,
 ): string {
   const diff = Math.floor((now - timestamp) / 1000);
   if (diff < 60) return t("usage.justNow");
@@ -225,7 +224,7 @@ export const SubscriptionQuotaView: React.FC<SubscriptionQuotaViewProps> = ({
             <Clock size={10} />
             {quota.queriedAt
               ? formatRelativeTime(quota.queriedAt, now, t)
-              : t("usage.never", { defaultValue: "从未更新" })}
+              : t("usage.never")}
           </span>
           <button
             onClick={(e) => {
@@ -257,7 +256,7 @@ export const SubscriptionQuotaView: React.FC<SubscriptionQuotaViewProps> = ({
     <div className="mt-3 rounded-xl border border-border-default bg-card px-4 py-3 shadow-sm">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-          {t("subscription.title", { defaultValue: "Subscription Quota" })}
+          {t("subscription.title")}
         </span>
         <div className="flex items-center gap-2">
           {quota.queriedAt && (
@@ -307,7 +306,7 @@ export const SubscriptionQuotaView: React.FC<SubscriptionQuotaViewProps> = ({
 /** inline 模式下的单个 tier 显示 */
 export const TierBadge: React.FC<{
   tier: QuotaTier;
-  t: (key: string, options?: Record<string, unknown>) => string;
+  t: TFunction;
 }> = ({ tier, t }) => {
   const label = TIER_I18N_KEYS[tier.name]
     ? t(TIER_I18N_KEYS[tier.name])
@@ -342,7 +341,7 @@ export const TierBadge: React.FC<{
 /** 展开模式下的单个 tier 进度条 */
 const TierBar: React.FC<{
   tier: QuotaTier;
-  t: (key: string, options?: Record<string, unknown>) => string;
+  t: TFunction;
 }> = ({ tier, t }) => {
   const label = TIER_I18N_KEYS[tier.name]
     ? t(TIER_I18N_KEYS[tier.name])

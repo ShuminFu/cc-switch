@@ -143,21 +143,15 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
             <AccentIcon className="h-6 w-6" />
           </div>
           <div className="space-y-1">
-            <h1 className="text-lg font-semibold">
-              {t("dbUpgrade.title", "数据库版本过新")}
-            </h1>
+            <h1 className="text-lg font-semibold">{t("dbUpgrade.title")}</h1>
             <p className="text-sm text-muted-foreground">
-              {t(
-                "dbUpgrade.description",
-                "当前数据库由更新版本的 CC Switch 创建，需要升级应用后才能继续使用。升级不会删除你的数据。",
-              )}
+              {t("dbUpgrade.description")}
             </p>
             {dbVersion != null && supportedVersion != null && (
               <p className="pt-0.5 text-xs text-muted-foreground tabular-nums">
                 {t("dbUpgrade.versionInfo", {
                   db: dbVersion,
                   supported: supportedVersion,
-                  defaultValue: "数据库版本 v{{db}} · 应用支持 v{{supported}}",
                 })}
               </p>
             )}
@@ -171,7 +165,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
           )}
           {payload.path && (
             <p className="break-all">
-              {t("dbUpgrade.dbPath", "数据库文件")}：{payload.path}
+              {t("dbUpgrade.dbPath")}：{payload.path}
             </p>
           )}
         </div>
@@ -179,7 +173,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
         {phase === "checking" && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            {t("dbUpgrade.checking", "正在检查可用更新…")}
+            {t("dbUpgrade.checking")}
           </p>
         )}
 
@@ -187,22 +181,17 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
           <p className="text-sm text-muted-foreground">
             {t("dbUpgrade.updateAvailable", {
               version: availableVersion,
-              defaultValue: "发现新版本 v{{version}}，升级后即可继续使用。",
             })}
           </p>
         )}
 
         {phase === "incompatible" && (
           <div className="space-y-2 rounded-lg border border-red-300/60 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-300">
-            <p className="font-medium">
-              {t("dbUpgrade.incompatibleTitle", "升级也无法解决")}
-            </p>
+            <p className="font-medium">{t("dbUpgrade.incompatibleTitle")}</p>
             <p className="leading-relaxed">
               {t("dbUpgrade.incompatibleDescription", {
                 db: dbVersion,
                 supported: supportedVersion,
-                defaultValue:
-                  "你已是最新版本，但数据库版本（v{{db}}）仍高于本应用支持的版本（v{{supported}}）。该数据库可能由第三方客户端或更高版本创建，升级当前官方应用也无法兼容。",
               })}
             </p>
           </div>
@@ -214,8 +203,8 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
               <span className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {percent === null
-                  ? t("dbUpgrade.preparing", "正在准备更新…")
-                  : t("dbUpgrade.downloading", "正在下载更新…")}
+                  ? t("dbUpgrade.preparing")
+                  : t("dbUpgrade.downloading")}
               </span>
               {percent !== null && (
                 <span className="tabular-nums text-muted-foreground">
@@ -258,8 +247,8 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
                 <Download className="h-4 w-4" />
               )}
               {phase === "error"
-                ? t("dbUpgrade.retry", "重试升级")
-                : t("dbUpgrade.upgradeNow", "升级应用")}
+                ? t("dbUpgrade.retry")
+                : t("dbUpgrade.upgradeNow")}
             </Button>
           )}
 
@@ -272,7 +261,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
               }
             >
               <ExternalLink className="h-4 w-4" />
-              {t("dbUpgrade.openReleases", "打开发布页")}
+              {t("dbUpgrade.openReleases")}
             </Button>
           )}
 
@@ -283,7 +272,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
             disabled={phase === "updating"}
           >
             <FolderOpen className="h-4 w-4" />
-            {t("dbUpgrade.openConfigDir", "打开配置目录")}
+            {t("dbUpgrade.openConfigDir")}
           </Button>
 
           <Button
@@ -292,7 +281,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
             onClick={() => void exit(0)}
             disabled={phase === "updating"}
           >
-            {t("dbUpgrade.quit", "退出")}
+            {t("dbUpgrade.quit")}
           </Button>
         </div>
       </div>

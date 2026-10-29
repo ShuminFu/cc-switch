@@ -18,13 +18,14 @@ import { McpIcon } from "@/components/BrandIcons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { View } from "./views";
+import type { TranslationKey } from "@/i18n/keys";
 
 /** 导航项目标：切换到某个视图，或打开 Hermes Web UI */
 export type FeatureNavTarget = View | "hermesWebUI";
 
 export interface FeatureNavItem {
   target: FeatureNavTarget;
-  titleKey: string;
+  titleKey: TranslationKey;
   Icon: ComponentType<{ className?: string }>;
   /** 当前应用缺少该能力时折叠隐藏（带过渡动画） */
   requiresCap?: keyof Pick<AppCaps, "skills" | "sessions">;

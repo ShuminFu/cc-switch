@@ -547,18 +547,10 @@ export function OpenCodeFormFields({
     <>
       {/* NPM Package Selector */}
       <div className="space-y-2">
-        <FormLabel htmlFor="opencode-npm">
-          {t("opencode.npmPackage", {
-            defaultValue: "接口格式",
-          })}
-        </FormLabel>
+        <FormLabel htmlFor="opencode-npm">{t("opencode.npmPackage")}</FormLabel>
         <Select value={npm} onValueChange={onNpmChange}>
           <SelectTrigger id="opencode-npm">
-            <SelectValue
-              placeholder={t("opencode.selectPackage", {
-                defaultValue: "Select a package",
-              })}
-            />
+            <SelectValue placeholder={t("opencode.selectPackage")} />
           </SelectTrigger>
           <SelectContent>
             {opencodeNpmPackages.map((pkg) => (
@@ -569,10 +561,7 @@ export function OpenCodeFormFields({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          {t("opencode.npmPackageHint", {
-            defaultValue:
-              "Select the AI SDK package that matches your provider.",
-          })}
+          {t("opencode.npmPackageHint")}
         </p>
       </div>
 
@@ -590,7 +579,7 @@ export function OpenCodeFormFields({
       {/* Base URL */}
       <div className="space-y-2">
         <FormLabel htmlFor="opencode-baseurl">
-          {t("opencode.baseUrl", { defaultValue: "Base URL" })}
+          {t("opencode.baseUrl")}
         </FormLabel>
         <Input
           id="opencode-baseurl"
@@ -599,10 +588,7 @@ export function OpenCodeFormFields({
           placeholder="https://api.example.com/v1"
         />
         <p className="text-xs text-muted-foreground">
-          {t("opencode.baseUrlHint", {
-            defaultValue:
-              "The base URL for the API endpoint. Leave empty to use the default endpoint for official SDKs.",
-          })}
+          {t("opencode.baseUrlHint")}
         </p>
       </div>
 
@@ -610,14 +596,9 @@ export function OpenCodeFormFields({
       <div className="space-y-2 border-l border-border-default pl-3">
         <div className="flex items-start justify-between gap-3">
           <div className="max-w-3xl space-y-1">
-            <FormLabel>
-              {t("opencode.headers", { defaultValue: "Headers" })}
-            </FormLabel>
+            <FormLabel>{t("opencode.headers")}</FormLabel>
             <p className="text-xs text-muted-foreground">
-              {t("opencode.headersHint", {
-                defaultValue:
-                  "Optional HTTP headers sent with provider requests, such as HTTP-Referer or X-Title.",
-              })}
+              {t("opencode.headersHint")}
             </p>
           </div>
           <Button
@@ -625,30 +606,24 @@ export function OpenCodeFormFields({
             variant="outline"
             size="sm"
             onClick={handleAddHeader}
-            aria-label={t("opencode.addHeader", { defaultValue: "Add header" })}
+            aria-label={t("opencode.addHeader")}
             className="h-7 gap-1"
           >
             <Plus className="h-3.5 w-3.5" />
-            {t("opencode.addHeader", { defaultValue: "Add" })}
+            {t("opencode.addHeader")}
           </Button>
         </div>
 
         <div className="max-w-3xl">
           {Object.keys(headers).length === 0 ? (
             <p className="text-sm text-muted-foreground py-1">
-              {t("opencode.noHeaders", {
-                defaultValue: "No custom headers configured",
-              })}
+              {t("opencode.noHeaders")}
             </p>
           ) : (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-muted-foreground px-1 mb-1">
-                <span className="flex-1">
-                  {t("opencode.headerName", { defaultValue: "Header" })}
-                </span>
-                <span className="flex-1">
-                  {t("opencode.headerValue", { defaultValue: "Value" })}
-                </span>
+                <span className="flex-1">{t("opencode.headerName")}</span>
+                <span className="flex-1">{t("opencode.headerValue")}</span>
                 <span className="w-9" />
               </div>
               {Object.entries(headers).map(([key, value]) => (
@@ -656,9 +631,7 @@ export function OpenCodeFormFields({
                   <ExtraOptionKeyInput
                     optionKey={key}
                     onChange={(newKey) => handleHeaderKeyChange(key, newKey)}
-                    placeholder={t("opencode.headerNamePlaceholder", {
-                      defaultValue: "X-Title",
-                    })}
+                    placeholder={t("opencode.headerNamePlaceholder")}
                     placeholderPrefixes={[OPENCODE_HEADER_DRAFT_PREFIX]}
                   />
                   <Input
@@ -666,9 +639,7 @@ export function OpenCodeFormFields({
                     onChange={(e) =>
                       handleHeaderValueChange(key, e.target.value)
                     }
-                    placeholder={t("opencode.headerValuePlaceholder", {
-                      defaultValue: "CC Switch",
-                    })}
+                    placeholder={t("opencode.headerValuePlaceholder")}
                     className="flex-1"
                   />
                   <Button
@@ -676,9 +647,7 @@ export function OpenCodeFormFields({
                     variant="ghost"
                     size="icon"
                     onClick={() => handleRemoveHeader(key)}
-                    aria-label={t("opencode.removeHeader", {
-                      defaultValue: "Remove header",
-                    })}
+                    aria-label={t("opencode.removeHeader")}
                     className="h-9 w-9 text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -710,15 +679,10 @@ export function OpenCodeFormFields({
               />
               <span className="space-y-1">
                 <span className="block text-sm font-medium text-foreground">
-                  {t("opencode.extraOptions", {
-                    defaultValue: "Extra SDK Options",
-                  })}
+                  {t("opencode.extraOptions")}
                 </span>
                 <span className="block text-xs text-muted-foreground">
-                  {t("opencode.extraOptionsHint", {
-                    defaultValue:
-                      "Advanced SDK options not exposed by the structured fields.",
-                  })}
+                  {t("opencode.extraOptionsHint")}
                 </span>
               </span>
             </button>
@@ -734,26 +698,20 @@ export function OpenCodeFormFields({
             className="h-7 gap-1"
           >
             <Plus className="h-3.5 w-3.5" />
-            {t("opencode.addExtraOption", { defaultValue: "Add" })}
+            {t("opencode.addExtraOption")}
           </Button>
         </div>
 
         <CollapsibleContent className="max-w-3xl space-y-2">
           {Object.keys(extraOptions).length === 0 ? (
             <p className="text-sm text-muted-foreground py-1">
-              {t("opencode.noExtraOptions", {
-                defaultValue: "No extra SDK options configured",
-              })}
+              {t("opencode.noExtraOptions")}
             </p>
           ) : (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-muted-foreground px-1 mb-1">
-                <span className="flex-1">
-                  {t("opencode.extraOptionKey", { defaultValue: "Key" })}
-                </span>
-                <span className="flex-1">
-                  {t("opencode.extraOptionValue", { defaultValue: "Value" })}
-                </span>
+                <span className="flex-1">{t("opencode.extraOptionKey")}</span>
+                <span className="flex-1">{t("opencode.extraOptionValue")}</span>
                 <span className="w-9" />
               </div>
               {Object.entries(extraOptions).map(([key, value]) => (
@@ -763,18 +721,14 @@ export function OpenCodeFormFields({
                     onChange={(newKey) =>
                       handleExtraOptionKeyChange(key, newKey)
                     }
-                    placeholder={t("opencode.extraOptionKeyPlaceholder", {
-                      defaultValue: "timeout",
-                    })}
+                    placeholder={t("opencode.extraOptionKeyPlaceholder")}
                   />
                   <Input
                     value={value}
                     onChange={(e) =>
                       handleExtraOptionValueChange(key, e.target.value)
                     }
-                    placeholder={t("opencode.extraOptionValuePlaceholder", {
-                      defaultValue: "600000",
-                    })}
+                    placeholder={t("opencode.extraOptionValuePlaceholder")}
                     className="flex-1"
                   />
                   <Button
@@ -797,9 +751,7 @@ export function OpenCodeFormFields({
       {/* Models Editor */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <FormLabel>
-            {t("opencode.models", { defaultValue: "Models" })}
-          </FormLabel>
+          <FormLabel>{t("opencode.models")}</FormLabel>
           <div className="flex gap-1">
             <Button
               type="button"
@@ -824,27 +776,21 @@ export function OpenCodeFormFields({
               className="h-7 gap-1"
             >
               <Plus className="h-3.5 w-3.5" />
-              {t("opencode.addModel", { defaultValue: "Add" })}
+              {t("opencode.addModel")}
             </Button>
           </div>
         </div>
 
         {Object.keys(models).length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">
-            {t("opencode.noModels", {
-              defaultValue: "No models configured. Click Add to add a model.",
-            })}
+            {t("opencode.noModels")}
           </p>
         ) : (
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-xs text-muted-foreground px-1 mb-1">
               <span className="w-9" />
-              <span className="flex-1">
-                {t("opencode.modelId", { defaultValue: "模型 ID" })}
-              </span>
-              <span className="flex-1">
-                {t("opencode.modelName", { defaultValue: "显示名称" })}
-              </span>
+              <span className="flex-1">{t("opencode.modelId")}</span>
+              <span className="flex-1">{t("opencode.modelName")}</span>
               <span className="w-9" />
             </div>
             {Object.entries(models).map(([key, model]) => (
@@ -856,9 +802,7 @@ export function OpenCodeFormFields({
                     variant="ghost"
                     size="icon"
                     onClick={() => toggleModelExpand(key)}
-                    aria-label={t("opencode.toggleModelDetails", {
-                      defaultValue: "Toggle model details",
-                    })}
+                    aria-label={t("opencode.toggleModelDetails")}
                     className="h-9 w-9 shrink-0"
                   >
                     <ChevronRight
@@ -872,9 +816,7 @@ export function OpenCodeFormFields({
                     <ModelIdInput
                       modelId={key}
                       onChange={(newId) => handleModelIdChange(key, newId)}
-                      placeholder={t("opencode.modelId", {
-                        defaultValue: "Model ID",
-                      })}
+                      placeholder={t("opencode.modelId")}
                     />
                     {fetchedModels.length > 0 && (
                       <ModelDropdown
@@ -886,9 +828,7 @@ export function OpenCodeFormFields({
                   <Input
                     value={model.name}
                     onChange={(e) => handleModelNameChange(key, e.target.value)}
-                    placeholder={t("opencode.modelName", {
-                      defaultValue: "Display Name",
-                    })}
+                    placeholder={t("opencode.modelName")}
                     className="flex-1"
                   />
                   <Button
@@ -909,9 +849,7 @@ export function OpenCodeFormFields({
                     {/* Token limits (model.limit) */}
                     <div className="space-y-2">
                       <span className="text-xs font-medium text-muted-foreground">
-                        {t("opencode.modelLimits", {
-                          defaultValue: "Token Limits",
-                        })}
+                        {t("opencode.modelLimits")}
                       </span>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div className="space-y-1">
@@ -919,9 +857,7 @@ export function OpenCodeFormFields({
                             htmlFor={`opencode-${key}-limit-context`}
                             className="text-xs text-muted-foreground"
                           >
-                            {t("opencode.limitContext", {
-                              defaultValue: "Context",
-                            })}
+                            {t("opencode.limitContext")}
                           </FormLabel>
                           <Input
                             id={`opencode-${key}-limit-context`}
@@ -944,9 +880,7 @@ export function OpenCodeFormFields({
                             htmlFor={`opencode-${key}-limit-output`}
                             className="text-xs text-muted-foreground"
                           >
-                            {t("opencode.limitOutput", {
-                              defaultValue: "Output",
-                            })}
+                            {t("opencode.limitOutput")}
                           </FormLabel>
                           <Input
                             id={`opencode-${key}-limit-output`}
@@ -971,9 +905,7 @@ export function OpenCodeFormFields({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-muted-foreground">
-                          {t("opencode.modelExtraFields", {
-                            defaultValue: "模型属性",
-                          })}
+                          {t("opencode.modelExtraFields")}
                         </span>
                         <Button
                           aria-label={t("common.add")}
@@ -988,10 +920,7 @@ export function OpenCodeFormFields({
                       </div>
                       {Object.keys(getModelExtraFields(model)).length === 0 ? (
                         <p className="text-xs text-muted-foreground py-1">
-                          {t("opencode.noModelExtraFields", {
-                            defaultValue:
-                              "模型属性 (variants, cost 等)，点击 + 添加",
-                          })}
+                          {t("opencode.noModelExtraFields")}
                         </p>
                       ) : (
                         Object.entries(getModelExtraFields(model)).map(
@@ -1008,9 +937,6 @@ export function OpenCodeFormFields({
                                 }
                                 placeholder={t(
                                   "opencode.modelExtraFieldKeyPlaceholder",
-                                  {
-                                    defaultValue: "variants",
-                                  },
                                 )}
                               />
                               <Input
@@ -1024,9 +950,6 @@ export function OpenCodeFormFields({
                                 }
                                 placeholder={t(
                                   "opencode.modelOptionValuePlaceholder",
-                                  {
-                                    defaultValue: '{"order": ["baseten"]}',
-                                  },
                                 )}
                                 className="flex-1"
                               />
@@ -1052,9 +975,7 @@ export function OpenCodeFormFields({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-muted-foreground">
-                          {t("opencode.sdkOptions", {
-                            defaultValue: "SDK 选项",
-                          })}
+                          {t("opencode.sdkOptions")}
                         </span>
                         <Button
                           aria-label={t("common.add")}
@@ -1069,9 +990,7 @@ export function OpenCodeFormFields({
                       </div>
                       {Object.keys(model.options || {}).length === 0 ? (
                         <p className="text-xs text-muted-foreground py-1">
-                          {t("opencode.noModelOptions", {
-                            defaultValue: "模型选项，点击 + 添加",
-                          })}
+                          {t("opencode.noModelOptions")}
                         </p>
                       ) : (
                         Object.entries(model.options || {}).map(
@@ -1091,9 +1010,6 @@ export function OpenCodeFormFields({
                                 }
                                 placeholder={t(
                                   "opencode.modelOptionKeyPlaceholder",
-                                  {
-                                    defaultValue: "provider",
-                                  },
                                 )}
                               />
                               <Input
@@ -1111,9 +1027,6 @@ export function OpenCodeFormFields({
                                 }
                                 placeholder={t(
                                   "opencode.modelOptionValuePlaceholder",
-                                  {
-                                    defaultValue: '{"order": ["baseten"]}',
-                                  },
                                 )}
                                 className="flex-1"
                               />
@@ -1142,10 +1055,7 @@ export function OpenCodeFormFields({
         )}
 
         <p className="text-xs text-muted-foreground">
-          {t("opencode.modelsHint", {
-            defaultValue:
-              "Configure available models. Model ID is the API identifier, Display Name is shown in the UI.",
-          })}
+          {t("opencode.modelsHint")}
         </p>
       </div>
     </>

@@ -124,7 +124,6 @@ export function useAppShellEvents(
       toast.warning(
         t("notifications.proxyOfficialWarning", {
           name: payload.providerName,
-          defaultValue: `当前供应商 ${payload.providerName} 是官方供应商，建议切换到第三方供应商后再使用代理接管`,
         }),
         { duration: 8000 },
       );
@@ -136,10 +135,7 @@ export function useAppShellEvents(
       try {
         const migrated = await settingsApi.getMigrationResult();
         if (migrated) {
-          toast.success(
-            t("migration.success", { defaultValue: "配置迁移成功" }),
-            { closeButton: true },
-          );
+          toast.success(t("migration.success"), { closeButton: true });
         }
       } catch (error) {
         console.error("[App] Failed to check migration result:", error);

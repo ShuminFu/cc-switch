@@ -4,6 +4,7 @@
  */
 import type { ProviderCategory } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
+import type { TranslationKey } from "@/i18n/keys";
 
 // 来源标记与只读判断拆到轻量模块，首页供应商卡片无需加载整份预设
 export {
@@ -67,7 +68,7 @@ export const HERMES_DEFAULT_API_MODE: HermesApiMode = "chat_completions";
 /** Dropdown options for the API Mode selector. `labelKey` is looked up in i18n. */
 export const hermesApiModes: Array<{
   value: HermesApiMode;
-  labelKey: string;
+  labelKey: TranslationKey;
 }> = [
   { value: "chat_completions", labelKey: "hermes.form.apiModeChatCompletions" },
   {
@@ -83,7 +84,7 @@ export const hermesApiModes: Array<{
 
 export interface HermesProviderPreset {
   name: string;
-  nameKey?: string;
+  nameKey?: TranslationKey;
   websiteUrl: string;
   apiKeyUrl?: string;
   settingsConfig: HermesProviderSettingsConfig;

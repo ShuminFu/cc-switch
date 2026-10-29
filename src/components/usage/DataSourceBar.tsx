@@ -6,6 +6,7 @@ import { Database, FileText, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { toast } from "sonner";
+import type { TranslationKey } from "@/i18n/keys";
 
 interface DataSourceBarProps {
   refreshIntervalMs: number;
@@ -18,6 +19,15 @@ const DATA_SOURCE_ICONS: Record<string, React.ReactNode> = {
   codex_session: <FileText className="h-3.5 w-3.5" />,
   gemini_session: <FileText className="h-3.5 w-3.5" />,
   opencode_session: <FileText className="h-3.5 w-3.5" />,
+};
+
+const DATA_SOURCE_LABEL_KEYS: Record<string, TranslationKey> = {
+  proxy: "usage.dataSource.proxy",
+  session_log: "usage.dataSource.session_log",
+  codex_db: "usage.dataSource.codex_db",
+  codex_session: "usage.dataSource.codex_session",
+  gemini_session: "usage.dataSource.gemini_session",
+  opencode_session: "usage.dataSource.opencode_session",
 };
 
 export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
@@ -40,24 +50,15 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
         toast.success(
           t("usage.sessionSync.imported", {
             count: result.imported,
-            defaultValue: "Imported {{count}} records from session logs",
           }),
         );
         // Refresh all usage data
         queryClient.invalidateQueries({ queryKey: usageKeys.all });
       } else {
-        toast.info(
-          t("usage.sessionSync.upToDate", {
-            defaultValue: "Session logs are up to date",
-          }),
-        );
+        toast.info(t("usage.sessionSync.upToDate"));
       }
     } catch {
-      toast.error(
-        t("usage.sessionSync.failed", {
-          defaultValue: "Session sync failed",
-        }),
-      );
+      toast.error(t("usage.sessionSync.failed"));
     } finally {
       setSyncing(false);
     }
@@ -72,7 +73,7 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
   return (
     <div className="flex items-center gap-3 text-xs text-muted-foreground bg-muted/30 rounded-lg px-4 py-2">
       <span className="font-medium text-foreground/70">
-        {t("usage.dataSources", { defaultValue: "Data Sources" })}:
+        {t("usage.dataSources")}:
       </span>
       <div className="flex items-center gap-3 flex-wrap">
         {sources.map((source) => (
@@ -84,9 +85,9 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
               <Database className="h-3.5 w-3.5" />
             )}
             <span>
-              {t(`usage.dataSource.${source.dataSource}`, {
-                defaultValue: source.dataSource,
-              })}
+              {source.dataSource in DATA_SOURCE_LABEL_KEYS
+                ? t(DATA_SOURCE_LABEL_KEYS[source.dataSource])
+                : source.dataSource}
             </span>
             <span className="font-mono font-medium text-foreground/80">
               {source.requestCount.toLocaleString()}
@@ -102,9 +103,7 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
           className="h-7 px-2 text-xs"
           onClick={handleSync}
           disabled={syncing}
-          title={t("usage.sessionSync.trigger", {
-            defaultValue: "Sync session logs",
-          })}
+          title={t("usage.sessionSync.trigger")}
         >
           {syncing ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -113,10 +112,8 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
           )}
           <span className="ml-1">
             {hasNonProxy
-              ? t("usage.sessionSync.resync", { defaultValue: "Sync" })
-              : t("usage.sessionSync.import", {
-                  defaultValue: "Import Sessions",
-                })}
+              ? t("usage.sessionSync.resync")
+              : t("usage.sessionSync.import")}
           </span>
         </Button>
       </div>

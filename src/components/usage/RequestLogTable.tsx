@@ -179,7 +179,7 @@ export function RequestLogTable({
                     {t("usage.status")}
                   </TableHead>
                   <TableHead className="text-center whitespace-nowrap">
-                    {t("usage.source", { defaultValue: "Source" })}
+                    {t("usage.source")}
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -277,7 +277,7 @@ export function RequestLogTable({
                             }`}
                           >
                             {unpriced
-                              ? t("usage.unpriced", "未定价")
+                              ? t("usage.unpriced")
                               : fmtUsd(log.totalCostUsd, 4)}
                           </div>
                           {parseFiniteNumber(log.costMultiplier) != null &&

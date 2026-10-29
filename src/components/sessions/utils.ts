@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+import type { TranslationKey } from "@/i18n/keys";
 import type { ReactNode } from "react";
 import { createElement } from "react";
 import { SessionMeta } from "@/types";
@@ -91,10 +93,7 @@ export const formatTimestamp = (value?: number) => {
   return new Date(value).toLocaleString();
 };
 
-export const formatRelativeTime = (
-  value: number | undefined,
-  t: (key: string, options?: Record<string, unknown>) => string,
-) => {
+export const formatRelativeTime = (value: number | undefined, t: TFunction) => {
   if (!value) return "";
   const now = Date.now();
   const diff = now - value;
@@ -109,12 +108,9 @@ export const formatRelativeTime = (
   return new Date(value).toLocaleDateString();
 };
 
-export const getProviderLabel = (
-  providerId: string,
-  t: (key: string) => string,
-) => {
+export const getProviderLabel = (providerId: string, t: TFunction) => {
   const key = `apps.${providerId}`;
-  const translated = t(key);
+  const translated = t(key as TranslationKey);
   return translated === key ? providerId : translated;
 };
 
@@ -137,7 +133,7 @@ export const getRoleTone = (role: string) => {
   return "text-muted-foreground";
 };
 
-export const getRoleLabel = (role: string, t: (key: string) => string) => {
+export const getRoleLabel = (role: string, t: TFunction) => {
   const normalized = role.toLowerCase();
   if (normalized === "assistant") return "AI";
   if (normalized === "user") return t("sessionManager.roleUser");

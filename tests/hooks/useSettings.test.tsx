@@ -2,6 +2,7 @@ import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSettings } from "@/hooks/useSettings";
 import type { Settings } from "@/types";
+import { loadZhTranslations } from "../utils/zhTranslations";
 
 const mutateAsyncMock = vi.fn();
 const useSettingsQueryMock = vi.fn();
@@ -136,6 +137,8 @@ const createMetadataMock = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("useSettings hook", () => {
+  loadZhTranslations();
+
   beforeEach(() => {
     mutateAsyncMock.mockReset();
     useSettingsQueryMock.mockReset();

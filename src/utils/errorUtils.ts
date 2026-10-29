@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 /**
  * 从各种错误对象中提取错误信息
  * @param error 错误对象
@@ -44,7 +46,7 @@ export const extractErrorMessage = (error: unknown): string => {
  */
 export const translateMcpBackendError = (
   message: string,
-  t: (key: string, opts?: any) => string,
+  t: TFunction,
 ): string => {
   if (!message) return "";
   const msg = String(message).trim();

@@ -62,7 +62,7 @@ describe("PricingEditModal", () => {
 
     for (const { id } of PRICE_FIELDS) {
       const input = screen.getByLabelText(
-        /每百万 tokens/ as unknown as string,
+        /CostPerMillion/ as unknown as string,
         {
           selector: `#${id}`,
         },

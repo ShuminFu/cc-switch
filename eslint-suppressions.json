@@ -362,11 +362,6 @@
       "count": 1
     }
   },
-  "src/utils/errorUtils.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
   "src/utils/formatters.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1

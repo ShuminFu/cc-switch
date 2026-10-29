@@ -41,13 +41,9 @@ export function ClaudeDesktopRouteToggle({
       }
 
       if (otherTakeoverActive) {
-        toast.warning(
-          t("claudeDesktop.route.stopBlockedByTakeover", {
-            defaultValue:
-              "其它应用正在使用代理接管。请先在设置中关闭对应应用接管，再停止本地路由。",
-          }),
-          { duration: 5000 },
-        );
+        toast.warning(t("claudeDesktop.route.stopBlockedByTakeover"), {
+          duration: 5000,
+        });
         return;
       }
 
@@ -61,12 +57,10 @@ export function ClaudeDesktopRouteToggle({
     ? t("claudeDesktop.route.tooltip.active", {
         address: routeAddress,
         port: routePort,
-        defaultValue: `Claude Desktop 本地路由已开启 - ${routeAddress}:${routePort}`,
       })
     : t("claudeDesktop.route.tooltip.inactive", {
         address: routeAddress,
         port: routePort,
-        defaultValue: `开启 Claude Desktop 本地路由，用于需要模型映射或格式转换的供应商。当前配置地址：${routeAddress}:${routePort}`,
       });
 
   return (

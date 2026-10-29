@@ -24,6 +24,7 @@ import { parseSmartMcpJson } from "@/utils/formatters";
 import { useMcpValidation } from "./useMcpValidation";
 import { useUpsertMcpServer } from "@/hooks/useMcp";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
+import type { TranslationKey } from "@/i18n/keys";
 
 interface McpFormModalProps {
   editingId?: string;
@@ -473,7 +474,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
                             ? "bg-emerald-500 text-white dark:bg-emerald-600"
                             : "bg-accent text-muted-foreground hover:bg-accent/80"
                         }`}
-                        title={t(descriptionKey)}
+                        title={t(descriptionKey as TranslationKey)}
                       >
                         {preset.id}
                       </button>

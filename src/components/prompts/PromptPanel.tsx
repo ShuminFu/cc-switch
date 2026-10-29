@@ -7,6 +7,7 @@ import { useTauriEvent } from "@/hooks/useTauriEvent";
 import PromptListItem from "./PromptListItem";
 import PromptFormPanel from "./PromptFormPanel";
 import { ConfirmDialog } from "../ConfirmDialog";
+import type { TranslationKey } from "@/i18n/keys";
 
 interface PromptPanelProps {
   open: boolean;
@@ -25,8 +26,8 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
     const [editingId, setEditingId] = useState<string | null>(null);
     const [confirmDialog, setConfirmDialog] = useState<{
       isOpen: boolean;
-      titleKey: string;
-      messageKey: string;
+      titleKey: TranslationKey;
+      messageKey: TranslationKey;
       messageParams?: Record<string, unknown>;
       onConfirm: () => void;
     } | null>(null);

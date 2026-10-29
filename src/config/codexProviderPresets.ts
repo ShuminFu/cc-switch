@@ -9,10 +9,11 @@ import type {
   PromptCacheRoutingMode,
 } from "../types";
 import type { PresetTheme } from "./claudeProviderPresets";
+import type { TranslationKey } from "@/i18n/keys";
 
 export interface CodexProviderPreset {
   name: string;
-  nameKey?: string; // i18n key for localized display name
+  nameKey?: TranslationKey; // i18n key for localized display name
   websiteUrl: string;
   // 第三方供应商可提供单独的获取 API Key 链接
   apiKeyUrl?: string;

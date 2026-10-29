@@ -1,9 +1,10 @@
 import type { ProviderCategory, OpenCodeProviderConfig } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
+import type { TranslationKey } from "@/i18n/keys";
 
 export interface OpenCodeProviderPreset {
   name: string;
-  nameKey?: string; // i18n key for localized display name
+  nameKey?: TranslationKey; // i18n key for localized display name
   websiteUrl: string;
   apiKeyUrl?: string;
   settingsConfig: OpenCodeProviderConfig;

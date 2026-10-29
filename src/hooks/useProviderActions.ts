@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import type { TranslationKey } from "@/i18n/keys";
 import { providersApi, settingsApi, openclawApi, type AppId } from "@/lib/api";
 import type {
   Provider,
@@ -63,9 +64,7 @@ export function useProviderActions(
       } catch (error) {
         const detail =
           extractErrorMessage(error) ||
-          t("notifications.syncClaudePluginFailed", {
-            defaultValue: "同步 Claude 插件失败",
-          });
+          t("notifications.syncClaudePluginFailed");
         toast.error(detail, { duration: 4200 });
       }
     },
@@ -119,12 +118,9 @@ export function useProviderActions(
 
           // Show success toast if models were registered
           if (modelsRegistered) {
-            toast.success(
-              t("notifications.openclawModelsRegistered", {
-                defaultValue: "模型已注册到 /model 列表",
-              }),
-              { closeButton: true },
-            );
+            toast.success(t("notifications.openclawModelsRegistered"), {
+              closeButton: true,
+            });
           }
         } catch (error) {
           // Log warning but don't block main flow - provider config is already saved
@@ -191,50 +187,33 @@ export function useProviderActions(
       let proxyRequiredReason: string | null = null;
       if (!isProxyRunning && provider.category !== "official") {
         if (isCopilotProvider) {
-          proxyRequiredReason = t("notifications.proxyReasonCopilot", {
-            defaultValue: "使用 GitHub Copilot 作为 Claude 供应商",
-          });
+          proxyRequiredReason = t("notifications.proxyReasonCopilot");
         } else if (
           provider.meta?.apiFormat === "openai_chat" &&
           activeApp === "claude"
         ) {
-          proxyRequiredReason = t("notifications.proxyReasonOpenAIChat", {
-            defaultValue: "使用 OpenAI Chat 接口格式",
-          });
+          proxyRequiredReason = t("notifications.proxyReasonOpenAIChat");
         } else if (
           provider.meta?.apiFormat === "openai_responses" &&
           activeApp === "claude"
         ) {
-          proxyRequiredReason = t("notifications.proxyReasonOpenAIResponses", {
-            defaultValue: "使用 OpenAI Responses 接口格式",
-          });
+          proxyRequiredReason = t("notifications.proxyReasonOpenAIResponses");
         } else if (isCodexChatFormat) {
-          proxyRequiredReason = t("notifications.proxyReasonOpenAIChat", {
-            defaultValue: "使用 OpenAI Chat 接口格式",
-          });
+          proxyRequiredReason = t("notifications.proxyReasonOpenAIChat");
         } else if (isCodexAnthropicFormat) {
-          proxyRequiredReason = t(
-            "notifications.proxyReasonAnthropicMessages",
-            {
-              defaultValue: "使用 Anthropic Messages 接口格式",
-            },
-          );
+          proxyRequiredReason = t("notifications.proxyReasonAnthropicMessages");
         } else if (
           activeApp === "claude-desktop" &&
           provider.meta?.claudeDesktopMode === "proxy"
         ) {
-          proxyRequiredReason = t("notifications.proxyReasonClaudeDesktop", {
-            defaultValue: "使用 Claude Desktop 本地路由模式",
-          });
+          proxyRequiredReason = t("notifications.proxyReasonClaudeDesktop");
         } else if (
           provider.meta?.isFullUrl &&
           (activeApp === "claude" ||
             activeApp === "codex" ||
             activeApp === "grokbuild")
         ) {
-          proxyRequiredReason = t("notifications.proxyReasonFullUrl", {
-            defaultValue: "开启了完整 URL 连接模式",
-          });
+          proxyRequiredReason = t("notifications.proxyReasonFullUrl");
         }
       }
 
@@ -242,8 +221,6 @@ export function useProviderActions(
         toast.warning(
           t("notifications.proxyRequiredForSwitch", {
             reason: proxyRequiredReason,
-            defaultValue:
-              "此供应商{{reason}}，需要代理服务才能正常使用，请先启动代理",
           }),
         );
       }
@@ -259,13 +236,9 @@ export function useProviderActions(
         provider.category === "official" &&
         !officialSupportsTakeover
       ) {
-        toast.error(
-          t("notifications.officialBlockedByProxy", {
-            defaultValue:
-              "代理接管模式下不能切换到官方供应商，使用代理访问官方 API 可能导致账号被封禁",
-          }),
-          { duration: 6000 },
-        );
+        toast.error(t("notifications.officialBlockedByProxy"), {
+          duration: 6000,
+        });
         return;
       }
 
@@ -278,39 +251,26 @@ export function useProviderActions(
 
         // Show backfill warning if present
         if (result?.warnings?.length) {
-          toast.warning(
-            t("notifications.backfillWarning", {
-              defaultValue:
-                "切换成功，但旧供应商配置回填失败，您手动修改的配置可能未保存",
-            }),
-            { duration: 5000 },
-          );
+          toast.warning(t("notifications.backfillWarning"), { duration: 5000 });
         }
 
         // 若已弹过 proxyRequired 警告则不再弹 success
         if (!proxyRequiredReason) {
-          let messageKey = "notifications.switchSuccess";
-          let defaultMessage = "切换成功！";
+          let messageKey: TranslationKey = "notifications.switchSuccess";
           if (activeApp === "codex") {
             messageKey = "notifications.codexRestartRequired";
-            defaultMessage = "切换成功，请重启客户端以生效";
           } else if (activeApp === "grokbuild") {
             messageKey = "notifications.grokBuildRestartRequired";
-            defaultMessage = "切换成功，请重启 Grok Build 以生效";
           } else if (activeApp === "claude-desktop") {
             if (provider.meta?.claudeDesktopMode === "proxy") {
               messageKey = "notifications.claudeDesktopProxyRestartRequired";
-              defaultMessage =
-                "切换成功，请保持 CC Switch 运行，并重启 Claude Desktop 后生效";
             } else {
               messageKey = "notifications.claudeDesktopRestartRequired";
-              defaultMessage = "切换成功，重启 Claude Desktop 后生效";
             }
           } else if (activeApp === "opencode" || activeApp === "openclaw") {
             messageKey = "notifications.addToConfigSuccess";
-            defaultMessage = "已添加到配置";
           }
-          toast.success(t(messageKey, { defaultValue: defaultMessage }), {
+          toast.success(t(messageKey), {
             closeButton: true,
           });
         }
@@ -363,18 +323,10 @@ export function useProviderActions(
         await queryClient.invalidateQueries({
           queryKey: ["subscription", "quota", activeApp],
         });
-        toast.success(
-          t("provider.usageSaved", {
-            defaultValue: "用量查询配置已保存",
-          }),
-          { closeButton: true },
-        );
+        toast.success(t("provider.usageSaved"), { closeButton: true });
       } catch (error) {
         const detail =
-          extractErrorMessage(error) ||
-          t("provider.usageSaveFailed", {
-            defaultValue: "用量查询配置保存失败",
-          });
+          extractErrorMessage(error) || t("provider.usageSaveFailed");
         toast.error(detail);
       }
     },
@@ -386,11 +338,7 @@ export function useProviderActions(
     async (provider: Provider) => {
       const config = provider.settingsConfig as OpenClawProviderConfig;
       if (!config.models || config.models.length === 0) {
-        toast.error(
-          t("notifications.openclawNoModels", {
-            defaultValue: "该供应商没有配置模型",
-          }),
-        );
+        toast.error(t("notifications.openclawNoModels"));
         return;
       }
 
@@ -407,18 +355,13 @@ export function useProviderActions(
         await queryClient.invalidateQueries({
           queryKey: openclawKeys.health,
         });
-        toast.success(
-          t("notifications.openclawDefaultModelSet", {
-            defaultValue: "已设为默认模型",
-          }),
-          { closeButton: true },
-        );
+        toast.success(t("notifications.openclawDefaultModelSet"), {
+          closeButton: true,
+        });
       } catch (error) {
         const detail =
           extractErrorMessage(error) ||
-          t("notifications.openclawDefaultModelSetFailed", {
-            defaultValue: "设置默认模型失败",
-          });
+          t("notifications.openclawDefaultModelSetFailed");
         toast.error(detail);
       }
     },

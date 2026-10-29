@@ -46,20 +46,16 @@ export function useProxyStatus() {
         t("proxy.server.started", {
           address: info.address,
           port: info.port,
-          defaultValue: `代理服务已启动 - ${info.address}:${info.port}`,
         }),
         { closeButton: true },
       );
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: Error) => {
-      const detail =
-        extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+      const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("proxy.server.startFailed", {
           detail,
-          defaultValue: `启动代理服务失败: ${detail}`,
         }),
       );
     },
@@ -69,22 +65,14 @@ export function useProxyStatus() {
   const stopProxyServerMutation = useMutation({
     mutationFn: () => invoke("stop_proxy_server"),
     onSuccess: () => {
-      toast.success(
-        t("proxy.server.stopped", {
-          defaultValue: "代理服务已停止",
-        }),
-        { closeButton: true },
-      );
+      toast.success(t("proxy.server.stopped"), { closeButton: true });
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: Error) => {
-      const detail =
-        extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+      const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("proxy.server.stopFailed", {
           detail,
-          defaultValue: `停止代理服务失败: ${detail}`,
         }),
       );
     },
@@ -94,12 +82,7 @@ export function useProxyStatus() {
   const stopWithRestoreMutation = useMutation({
     mutationFn: () => invoke("stop_proxy_with_restore"),
     onSuccess: () => {
-      toast.success(
-        t("proxy.stoppedWithRestore", {
-          defaultValue: "代理服务已关闭，已恢复所有接管配置",
-        }),
-        { closeButton: true },
-      );
+      toast.success(t("proxy.stoppedWithRestore"), { closeButton: true });
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
       queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
       // 彻底删除所有供应商健康状态缓存（后端已清空数据库记录）
@@ -109,13 +92,10 @@ export function useProxyStatus() {
       // 注意：故障转移队列和开关状态会保留，不需要刷新
     },
     onError: (error: Error) => {
-      const detail =
-        extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+      const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("proxy.stopWithRestoreFailed", {
           detail,
-          defaultValue: `停止失败: ${detail}`,
         }),
       );
     },
@@ -132,11 +112,9 @@ export function useProxyStatus() {
         variables.enabled
           ? t("proxy.takeover.enabled", {
               app: appLabel,
-              defaultValue: `已接管 ${appLabel} 配置（请求将走本地代理）`,
             })
           : t("proxy.takeover.disabled", {
               app: appLabel,
-              defaultValue: `已恢复 ${appLabel} 配置`,
             }),
         { closeButton: true },
       );
@@ -145,13 +123,10 @@ export function useProxyStatus() {
       queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
     },
     onError: (error: Error) => {
-      const detail =
-        extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+      const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("proxy.takeover.failed", {
           detail,
-          defaultValue: `操作失败: ${detail}`,
         }),
       );
     },
@@ -170,13 +145,10 @@ export function useProxyStatus() {
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     },
     onError: (error: Error) => {
-      const detail =
-        extractErrorMessage(error) ||
-        t("common.unknown", { defaultValue: "未知错误" });
+      const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("proxy.switchFailed", {
           error: detail,
-          defaultValue: `切换失败: ${detail}`,
         }),
       );
     },

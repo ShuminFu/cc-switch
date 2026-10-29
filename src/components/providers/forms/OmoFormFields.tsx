@@ -144,11 +144,9 @@ function ModelCombobox({
 
   const selectedLabel = options.find((o) => o.value === value)?.label;
 
-  const selectModelText = t("omo.selectModel", {
-    defaultValue: "Select configured model",
-  });
+  const selectModelText = t("omo.selectModel");
   const placeholderText = recommended
-    ? `${selectModelText} (${t("omo.recommendedHint", { model: recommended, defaultValue: "Recommended: {{model}}" })})`
+    ? `${selectModelText} (${t("omo.recommendedHint", { model: recommended })})`
     : selectModelText;
 
   return (
@@ -186,17 +184,9 @@ function ModelCombobox({
         className="z-[1000] w-[var(--radix-popover-trigger-width)] p-0 border-border-default"
       >
         <Command>
-          <CommandInput
-            placeholder={t("omo.searchModel", {
-              defaultValue: "Search model...",
-            })}
-          />
+          <CommandInput placeholder={t("omo.searchModel")} />
           <CommandList>
-            <CommandEmpty>
-              {t("omo.noEnabledModels", {
-                defaultValue: "No configured models",
-              })}
-            </CommandEmpty>
+            <CommandEmpty>{t("omo.noEnabledModels")}</CommandEmpty>
             <CommandGroup>
               {options.map((option) => (
                 <CommandItem
@@ -400,7 +390,6 @@ export function OmoFormFields({
           value: currentModel,
           label: t("omo.currentValueNotEnabled", {
             value: currentModel,
-            defaultValue: "{{value}} (current value, not enabled)",
           }),
         },
         ...modelOptions,
@@ -474,14 +463,11 @@ export function OmoFormFields({
     const firstIsUnavailable =
       Boolean(currentVariant) &&
       !(modelVariantsMap[currentModel] || []).includes(currentVariant);
-    const defaultVariantLabel = t("omo.defaultWrapped", {
-      defaultValue: "(Default)",
-    });
+    const defaultVariantLabel = t("omo.defaultWrapped");
     const getVariantLabel = (variant: string, index: number) =>
       firstIsUnavailable && index === 0
         ? t("omo.currentValueUnavailable", {
             value: variant,
-            defaultValue: "{{value}} (current value, unavailable)",
           })
         : variant;
     const selectedVariantLabel = currentVariant
@@ -702,11 +688,7 @@ export function OmoFormFields({
         onChange={(e) => setAdvancedDraft(scope, draftKey, e.target.value)}
         onBlur={(e) => {
           if (!handleAdvancedChange(configKey, e.target.value, store, setter)) {
-            toast.error(
-              t("omo.advancedJsonInvalid", {
-                defaultValue: "Advanced JSON is invalid",
-              }),
-            );
+            toast.error(t("omo.advancedJsonInvalid"));
           }
         }}
         placeholder={ADVANCED_PLACEHOLDER}
@@ -714,10 +696,7 @@ export function OmoFormFields({
       />
       {showHint && (
         <p className="text-[10px] text-muted-foreground mt-1">
-          {t("omo.advancedJsonHint", {
-            defaultValue:
-              "temperature, top_p, budgetTokens, prompt_append, permission, etc. Leave empty for defaults",
-          })}
+          {t("omo.advancedJsonHint")}
         </p>
       )}
     </div>
@@ -725,12 +704,7 @@ export function OmoFormFields({
 
   const handleFillAllRecommended = () => {
     if (modelOptions.length === 0) {
-      toast.warning(
-        t("omo.noEnabledModelsWarning", {
-          defaultValue:
-            "No configured models available. Configure OpenCode models first.",
-        }),
-      );
+      toast.warning(t("omo.noEnabledModelsWarning"));
       return;
     }
 
@@ -791,15 +765,12 @@ export function OmoFormFields({
     if (filledCount > 0 && unmatchedCount === 0) {
       toast.success(
         t("omo.fillRecommendedSuccess", {
-          defaultValue: "Filled {{count}} recommended models",
           count: filledCount,
         }),
       );
     } else if (filledCount > unmatchedCount) {
       toast.success(
         t("omo.fillRecommendedPartial", {
-          defaultValue:
-            "Filled {{filled}} recommended models, {{unmatched}} unmatched",
           filled: filledCount,
           unmatched: unmatchedCount,
         }),
@@ -807,24 +778,16 @@ export function OmoFormFields({
     } else if (filledCount > 0) {
       toast.warning(
         t("omo.fillRecommendedMostlyUnmatched", {
-          defaultValue:
-            "Filled only {{filled}}, {{unmatched}} unmatched (e.g. {{examples}}). Configure providers offering these models or pick a substitute.",
           filled: filledCount,
           unmatched: unmatchedCount,
           examples,
         }),
       );
     } else if (alreadySetCount > 0 && unmatchedCount === 0) {
-      toast.info(
-        t("omo.fillRecommendedAllSet", {
-          defaultValue: "All slots already have models configured",
-        }),
-      );
+      toast.info(t("omo.fillRecommendedAllSet"));
     } else {
       toast.warning(
         t("omo.fillRecommendedNoMatch", {
-          defaultValue:
-            "Recommended models not found in configured providers (e.g. {{examples}})",
           examples,
         }),
       );
@@ -869,17 +832,11 @@ export function OmoFormFields({
         );
       }
       setLocalFilePath(data.filePath);
-      toast.success(
-        t("omo.importLocalReplaceSuccess", {
-          defaultValue:
-            "Imported local file and replaced Agents/Categories/Other Fields",
-        }),
-      );
+      toast.success(t("omo.importLocalReplaceSuccess"));
     } catch (err) {
       toast.error(
         t("omo.importLocalFailed", {
           error: String(err),
-          defaultValue: "Failed to read local file: {{error}}",
         }),
       );
     }
@@ -939,7 +896,7 @@ export function OmoFormFields({
             size="icon"
             className={cn("h-7 w-7 shrink-0", advStr && "text-primary")}
             onClick={() => toggleAdvancedEditor(scope, key, advStr, isExpanded)}
-            title={t("omo.advancedLabel", { defaultValue: "Advanced" })}
+            title={t("omo.advancedLabel")}
           >
             <Settings className="h-3.5 w-3.5" />
           </Button>
@@ -981,8 +938,8 @@ export function OmoFormFields({
     const rowPrefix = isAgent ? "custom-agent" : "custom-cat";
     const emptyKeyPrefix = isAgent ? "__custom_agent_" : "__custom_cat_";
     const keyPlaceholder = isAgent
-      ? t("omo.agentKeyPlaceholder", { defaultValue: "agent key" })
-      : t("omo.categoryKeyPlaceholder", { defaultValue: "category key" });
+      ? t("omo.agentKeyPlaceholder")
+      : t("omo.categoryKeyPlaceholder");
 
     const key = item.key || `${emptyKeyPrefix}${index}`;
     const currentVariant =
@@ -1025,7 +982,7 @@ export function OmoFormFields({
             size="icon"
             className={cn("h-7 w-7 shrink-0", advStr && "text-primary")}
             onClick={() => toggleAdvancedEditor(scope, key, advStr, isExpanded)}
-            title={t("omo.advancedLabel", { defaultValue: "Advanced" })}
+            title={t("omo.advancedLabel")}
           >
             <Settings className="h-3.5 w-3.5" />
           </Button>
@@ -1141,7 +1098,7 @@ export function OmoFormFields({
       onClick={onClick}
     >
       <Plus className="h-3.5 w-3.5 mr-1" />
-      {t("omo.custom", { defaultValue: "Custom" })}
+      {t("omo.custom")}
     </Button>
   );
 
@@ -1173,7 +1130,7 @@ export function OmoFormFields({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className="text-sm font-semibold">
-          {t("omo.modelConfiguration", { defaultValue: "Model Configuration" })}
+          {t("omo.modelConfiguration")}
         </Label>
         <div className="flex items-center gap-1.5">
           <Button
@@ -1189,7 +1146,7 @@ export function OmoFormFields({
             ) : (
               <FolderInput className="h-3.5 w-3.5 mr-1" />
             )}
-            {t("omo.importLocal", { defaultValue: "Import Local" })}
+            {t("omo.importLocal")}
           </Button>
           <Button
             type="button"
@@ -1199,7 +1156,7 @@ export function OmoFormFields({
             onClick={handleFillAllRecommended}
           >
             <Wand2 className="h-3.5 w-3.5 mr-1" />
-            {t("omo.fillRecommended", { defaultValue: "Fill Recommended" })}
+            {t("omo.fillRecommended")}
           </Button>
         </div>
       </div>
@@ -1208,19 +1165,16 @@ export function OmoFormFields({
         {t("omo.configSummary", {
           agents: configuredAgentCount,
           categories: configuredCategoryCount,
-          defaultValue:
-            "{{agents}} agents, {{categories}} categories configured · Click ⚙ for advanced params",
         })}
         <span className="ml-1">
           ·{" "}
           {t("omo.enabledModelsCount", {
             count: modelOptions.length,
-            defaultValue: "{{count}} configured models available",
           })}
         </span>
         {localFilePath && (
           <span className="ml-1 text-primary/70">
-            · {t("omo.source", { defaultValue: "from:" })}{" "}
+            · {t("omo.source")}{" "}
             <span className="font-mono text-[10px]">
               {localFilePath.replace(/^.*\//, "")}
             </span>
@@ -1229,7 +1183,7 @@ export function OmoFormFields({
       </div>
 
       {renderModelSection({
-        title: t("omo.mainAgents", { defaultValue: "Main Agents" }),
+        title: t("omo.mainAgents"),
         isOpen: mainAgentsOpen,
         onToggle: () => setMainAgentsOpen(!mainAgentsOpen),
         badge: `${mainAgents.length}`,
@@ -1237,7 +1191,7 @@ export function OmoFormFields({
       })}
 
       {renderModelSection({
-        title: t("omo.subAgents", { defaultValue: "Sub Agents" }),
+        title: t("omo.subAgents"),
         isOpen: subAgentsOpen,
         onToggle: () => setSubAgentsOpen(!subAgentsOpen),
         badge: `${subAgents.length + customAgents.length}`,
@@ -1247,9 +1201,7 @@ export function OmoFormFields({
             {subAgents.map(renderAgentRow)}
             {customAgents.length > 0 && (
               <>
-                {renderCustomDivider(
-                  t("omo.customAgents", { defaultValue: "Custom Agents" }),
-                )}
+                {renderCustomDivider(t("omo.customAgents"))}
                 {customAgents.map((a, i) =>
                   renderCustomModelRow("agent", a, i),
                 )}
@@ -1261,7 +1213,7 @@ export function OmoFormFields({
 
       {!isSlim &&
         renderModelSection({
-          title: t("omo.categories", { defaultValue: "Categories" }),
+          title: t("omo.categories"),
           isOpen: categoriesOpen,
           onToggle: () => setCategoriesOpen(!categoriesOpen),
           badge: `${OMO_BUILTIN_CATEGORIES.length + customCategories.length}`,
@@ -1271,11 +1223,7 @@ export function OmoFormFields({
               {OMO_BUILTIN_CATEGORIES.map(renderCategoryRow)}
               {customCategories.length > 0 && (
                 <>
-                  {renderCustomDivider(
-                    t("omo.customCategories", {
-                      defaultValue: "Custom Categories",
-                    }),
-                  )}
+                  {renderCustomDivider(t("omo.customCategories"))}
                   {customCategories.map((c, i) =>
                     renderCustomModelRow("category", c, i),
                   )}
@@ -1286,9 +1234,7 @@ export function OmoFormFields({
         })}
 
       {renderModelSection({
-        title: t("omo.otherFieldsJson", {
-          defaultValue: "Other Fields (JSON)",
-        }),
+        title: t("omo.otherFieldsJson"),
         isOpen: otherFieldsOpen,
         onToggle: () => setOtherFieldsOpen(!otherFieldsOpen),
         badge:
@@ -1312,10 +1258,7 @@ export function OmoFormFields({
             />
             {isSlim && (
               <p className="mt-1 text-[10px] text-muted-foreground">
-                {t("omo.slimOtherFieldsHint", {
-                  defaultValue:
-                    "Use this area for top-level OMO Slim config such as council, fallback, multiplexer, disabled_mcps, and todoContinuation.",
-                })}
+                {t("omo.slimOtherFieldsHint")}
               </p>
             )}
           </>

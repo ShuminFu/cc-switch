@@ -119,9 +119,7 @@ export function UsageTrendChart({
   return (
     <div className="rounded-xl border border-border/50 bg-card/40 p-6 backdrop-blur-sm">
       <div className="mb-6 flex items-center justify-between">
-        <h3 className="text-lg font-semibold">
-          {t("usage.trends", "使用趋势")}
-        </h3>
+        <h3 className="text-lg font-semibold">{t("usage.trends")}</h3>
         <p className="text-sm text-muted-foreground">{rangeLabel}</p>
       </div>
 
@@ -189,7 +187,7 @@ export function UsageTrendChart({
               yAxisId="tokens"
               type="monotone"
               dataKey="inputTokens"
-              name={t("usage.inputTokens", "输入 Tokens")}
+              name={t("usage.inputTokens")}
               stroke="#3b82f6"
               fillOpacity={1}
               fill="url(#colorInput)"
@@ -199,7 +197,7 @@ export function UsageTrendChart({
               yAxisId="tokens"
               type="monotone"
               dataKey="outputTokens"
-              name={t("usage.outputTokens", "输出 Tokens")}
+              name={t("usage.outputTokens")}
               stroke="#22c55e"
               fillOpacity={1}
               fill="url(#colorOutput)"
@@ -209,7 +207,7 @@ export function UsageTrendChart({
               yAxisId="tokens"
               type="monotone"
               dataKey="cacheCreationTokens"
-              name={t("usage.cacheCreationTokens", "缓存创建")}
+              name={t("usage.cacheCreationTokens")}
               stroke="#f97316"
               fillOpacity={1}
               fill="url(#colorCacheCreation)"
@@ -219,7 +217,7 @@ export function UsageTrendChart({
               yAxisId="tokens"
               type="monotone"
               dataKey="cacheReadTokens"
-              name={t("usage.cacheReadTokens", "缓存命中")}
+              name={t("usage.cacheReadTokens")}
               stroke="#a855f7"
               fillOpacity={1}
               fill="url(#colorCacheRead)"
@@ -229,7 +227,7 @@ export function UsageTrendChart({
               yAxisId="cost"
               type="monotone"
               dataKey="cost"
-              name={t("usage.cost", "成本")}
+              name={t("usage.cost")}
               stroke="#f43f5e"
               fill="none"
               strokeWidth={2}

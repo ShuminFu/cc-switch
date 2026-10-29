@@ -695,9 +695,7 @@ export function DeepLinkImportDialog() {
                     <div className="space-y-3 pt-2 border-t border-border-default">
                       <div className="grid grid-cols-3 items-center gap-4">
                         <div className="font-medium text-sm text-muted-foreground">
-                          {t("deeplink.usageScript", {
-                            defaultValue: "用量查询",
-                          })}
+                          {t("deeplink.usageScript")}
                         </div>
                         <div className="col-span-2 text-sm">
                           <span
@@ -708,12 +706,8 @@ export function DeepLinkImportDialog() {
                             }`}
                           >
                             {request.usageEnabled !== false
-                              ? t("deeplink.usageScriptEnabled", {
-                                  defaultValue: "已启用",
-                                })
-                              : t("deeplink.usageScriptDisabled", {
-                                  defaultValue: "未启用",
-                                })}
+                              ? t("deeplink.usageScriptEnabled")
+                              : t("deeplink.usageScriptDisabled")}
                           </span>
                         </div>
                       </div>
@@ -723,9 +717,7 @@ export function DeepLinkImportDialog() {
                         request.usageApiKey !== request.apiKey && (
                           <div className="grid grid-cols-3 items-center gap-4">
                             <div className="font-medium text-sm text-muted-foreground">
-                              {t("deeplink.usageApiKey", {
-                                defaultValue: "用量 API Key",
-                              })}
+                              {t("deeplink.usageApiKey")}
                             </div>
                             <div className="col-span-2 text-sm font-mono text-muted-foreground">
                               {request.usageApiKey.length > 4
@@ -740,9 +732,7 @@ export function DeepLinkImportDialog() {
                         request.usageBaseUrl !== request.endpoint && (
                           <div className="grid grid-cols-3 items-center gap-4">
                             <div className="font-medium text-sm text-muted-foreground">
-                              {t("deeplink.usageBaseUrl", {
-                                defaultValue: "用量查询地址",
-                              })}
+                              {t("deeplink.usageBaseUrl")}
                             </div>
                             <div className="col-span-2 text-sm break-all">
                               {request.usageBaseUrl}
@@ -755,13 +745,10 @@ export function DeepLinkImportDialog() {
                         request.usageAutoInterval > 0 && (
                           <div className="grid grid-cols-3 items-center gap-4">
                             <div className="font-medium text-sm text-muted-foreground">
-                              {t("deeplink.usageAutoInterval", {
-                                defaultValue: "自动查询",
-                              })}
+                              {t("deeplink.usageAutoInterval")}
                             </div>
                             <div className="col-span-2 text-sm">
                               {t("deeplink.usageAutoIntervalValue", {
-                                defaultValue: "每 {{minutes}} 分钟",
                                 minutes: request.usageAutoInterval,
                               })}
                             </div>

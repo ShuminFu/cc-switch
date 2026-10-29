@@ -57,7 +57,6 @@ export function useWindowChrome(settings: Settings | undefined): WindowChrome {
   const notifyWindowControlError = (error: unknown) => {
     toast.error(
       t("notifications.windowControlFailed", {
-        defaultValue: "窗口控制失败：{{error}}",
         error: extractErrorMessage(error),
       }),
     );

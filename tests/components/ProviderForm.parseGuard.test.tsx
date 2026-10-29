@@ -110,7 +110,7 @@ describe("ProviderForm config parse guard", () => {
 
     await waitFor(() =>
       expect(toastErrorMock).toHaveBeenCalledWith(
-        expect.stringMatching(/auth\.json/),
+        "providerForm.codexAuthInvalid",
       ),
     );
     expect(onSubmit).not.toHaveBeenCalled();
@@ -129,7 +129,11 @@ describe("ProviderForm config parse guard", () => {
 
     // Clearing auth.json also clears the API key, which is a soft issue:
     // confirm "save anyway" so the submit goes through.
-    fireEvent.click(await screen.findByRole("button", { name: "仍要保存" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "providerForm.softValidation.saveAnyway",
+      }),
+    );
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const settings = JSON.parse(onSubmit.mock.calls[0][0].settingsConfig);
@@ -152,7 +156,7 @@ describe("ProviderForm config parse guard", () => {
 
     await waitFor(() =>
       expect(toastErrorMock).toHaveBeenCalledWith(
-        expect.stringMatching(/config\.toml/),
+        "providerForm.codexConfigInvalid",
       ),
     );
     expect(onSubmit).not.toHaveBeenCalled();
@@ -183,7 +187,7 @@ describe("ProviderForm config parse guard", () => {
 
     await waitFor(() =>
       expect(toastErrorMock).toHaveBeenCalledWith(
-        expect.stringMatching(/Gemini/),
+        "providerForm.geminiConfigInvalid",
       ),
     );
     expect(onSubmit).not.toHaveBeenCalled();

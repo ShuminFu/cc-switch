@@ -89,24 +89,16 @@ export function BackupListSection({
     try {
       const safetyId = await restore(confirmFilename);
       setConfirmFilename(null);
-      toast.success(
-        t("settings.backupManager.restoreSuccess", {
-          defaultValue: "Restore successful! Safety backup created",
-        }),
-        {
-          description: safetyId
-            ? `${t("settings.backupManager.safetyBackupId", { defaultValue: "Safety Backup ID" })}: ${safetyId}`
-            : undefined,
-          duration: 6000,
-          closeButton: true,
-        },
-      );
+      toast.success(t("settings.backupManager.restoreSuccess"), {
+        description: safetyId
+          ? `${t("settings.backupManager.safetyBackupId")}: ${safetyId}`
+          : undefined,
+        duration: 6000,
+        closeButton: true,
+      });
     } catch (error) {
       const detail =
-        extractErrorMessage(error) ||
-        t("settings.backupManager.restoreFailed", {
-          defaultValue: "Restore failed",
-        });
+        extractErrorMessage(error) || t("settings.backupManager.restoreFailed");
       toast.error(detail);
     }
   };
@@ -126,17 +118,10 @@ export function BackupListSection({
     try {
       await remove(deleteFilename);
       setDeleteFilename(null);
-      toast.success(
-        t("settings.backupManager.deleteSuccess", {
-          defaultValue: "Backup deleted",
-        }),
-      );
+      toast.success(t("settings.backupManager.deleteSuccess"));
     } catch (error) {
       const detail =
-        extractErrorMessage(error) ||
-        t("settings.backupManager.deleteFailed", {
-          defaultValue: "Delete failed",
-        });
+        extractErrorMessage(error) || t("settings.backupManager.deleteFailed");
       toast.error(detail);
     }
   };
@@ -147,17 +132,10 @@ export function BackupListSection({
       await rename({ oldFilename: editingFilename, newName: editValue.trim() });
       setEditingFilename(null);
       setEditValue("");
-      toast.success(
-        t("settings.backupManager.renameSuccess", {
-          defaultValue: "Backup renamed",
-        }),
-      );
+      toast.success(t("settings.backupManager.renameSuccess"));
     } catch (error) {
       const detail =
-        extractErrorMessage(error) ||
-        t("settings.backupManager.renameFailed", {
-          defaultValue: "Rename failed",
-        });
+        extractErrorMessage(error) || t("settings.backupManager.renameFailed");
       toast.error(detail);
     }
   };
@@ -171,9 +149,7 @@ export function BackupListSection({
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="backup-interval" className="text-sm">
-            {t("settings.backupManager.intervalLabel", {
-              defaultValue: "Auto-backup Interval",
-            })}
+            {t("settings.backupManager.intervalLabel")}
           </Label>
           <Select
             value={intervalValue}
@@ -186,38 +162,31 @@ export function BackupListSection({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="0">
-                {t("settings.backupManager.intervalDisabled", {
-                  defaultValue: "Disabled",
-                })}
+                {t("settings.backupManager.intervalDisabled")}
               </SelectItem>
               <SelectItem value="6">
                 {t("settings.backupManager.intervalHours", {
                   hours: 6,
-                  defaultValue: "6 hours",
                 })}
               </SelectItem>
               <SelectItem value="12">
                 {t("settings.backupManager.intervalHours", {
                   hours: 12,
-                  defaultValue: "12 hours",
                 })}
               </SelectItem>
               <SelectItem value="24">
                 {t("settings.backupManager.intervalHours", {
                   hours: 24,
-                  defaultValue: "24 hours",
                 })}
               </SelectItem>
               <SelectItem value="48">
                 {t("settings.backupManager.intervalHours", {
                   hours: 48,
-                  defaultValue: "48 hours",
                 })}
               </SelectItem>
               <SelectItem value="168">
                 {t("settings.backupManager.intervalDays", {
                   days: 7,
-                  defaultValue: "7 days",
                 })}
               </SelectItem>
             </SelectContent>
@@ -226,9 +195,7 @@ export function BackupListSection({
 
         <div className="space-y-2">
           <Label htmlFor="backup-retain" className="text-sm">
-            {t("settings.backupManager.retainLabel", {
-              defaultValue: "Backup Retention",
-            })}
+            {t("settings.backupManager.retainLabel")}
           </Label>
           <Select
             value={retainValue}
@@ -254,9 +221,7 @@ export function BackupListSection({
       <div>
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-medium">
-            {t("settings.backupManager.title", {
-              defaultValue: "Database Backups",
-            })}
+            {t("settings.backupManager.title")}
           </h4>
           <Button
             variant="outline"
@@ -266,29 +231,19 @@ export function BackupListSection({
             onClick={async () => {
               try {
                 await create();
-                toast.success(
-                  t("settings.backupManager.createSuccess", {
-                    defaultValue: "Backup created successfully",
-                  }),
-                );
+                toast.success(t("settings.backupManager.createSuccess"));
               } catch (error) {
                 const detail =
                   extractErrorMessage(error) ||
-                  t("settings.backupManager.createFailed", {
-                    defaultValue: "Backup failed",
-                  });
+                  t("settings.backupManager.createFailed");
                 toast.error(detail);
               }
             }}
           >
             <Download className="h-3 w-3 mr-1" />
             {isCreating
-              ? t("settings.backupManager.creating", {
-                  defaultValue: "Backing up...",
-                })
-              : t("settings.backupManager.createBackup", {
-                  defaultValue: "Backup Now",
-                })}
+              ? t("settings.backupManager.creating")
+              : t("settings.backupManager.createBackup")}
           </Button>
         </div>
 
@@ -296,9 +251,7 @@ export function BackupListSection({
           <div className="text-sm text-muted-foreground py-2">Loading...</div>
         ) : backups.length === 0 ? (
           <div className="text-sm text-muted-foreground py-2">
-            {t("settings.backupManager.empty", {
-              defaultValue: "No backups yet",
-            })}
+            {t("settings.backupManager.empty")}
           </div>
         ) : (
           <div className="space-y-1.5 max-h-48 overflow-y-auto">
@@ -320,7 +273,6 @@ export function BackupListSection({
                         className="h-7 text-xs"
                         placeholder={t(
                           "settings.backupManager.namePlaceholder",
-                          { defaultValue: "Enter new name" },
                         )}
                         autoFocus
                         disabled={isRenaming}
@@ -366,9 +318,7 @@ export function BackupListSection({
                       className="h-7 w-7"
                       onClick={() => handleStartRename(backup.filename)}
                       disabled={isRestoring || isRenaming || isDeleting}
-                      title={t("settings.backupManager.rename", {
-                        defaultValue: "Rename",
-                      })}
+                      title={t("settings.backupManager.rename")}
                     >
                       <Pencil className="h-3 w-3" />
                     </Button>
@@ -378,9 +328,7 @@ export function BackupListSection({
                       className="h-7 w-7 text-destructive hover:text-destructive"
                       onClick={() => setDeleteFilename(backup.filename)}
                       disabled={isRestoring || isDeleting}
-                      title={t("settings.backupManager.delete", {
-                        defaultValue: "Delete",
-                      })}
+                      title={t("settings.backupManager.delete")}
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>
@@ -393,12 +341,8 @@ export function BackupListSection({
                     >
                       <RotateCcw className="h-3 w-3 mr-1" />
                       {isRestoring
-                        ? t("settings.backupManager.restoring", {
-                            defaultValue: "Restoring...",
-                          })
-                        : t("settings.backupManager.restore", {
-                            defaultValue: "Restore",
-                          })}
+                        ? t("settings.backupManager.restoring")
+                        : t("settings.backupManager.restore")}
                     </Button>
                   </div>
                 )}
@@ -416,15 +360,10 @@ export function BackupListSection({
         <DialogContent className="max-w-md" zIndex="alert">
           <DialogHeader>
             <DialogTitle>
-              {t("settings.backupManager.confirmTitle", {
-                defaultValue: "Confirm Restore",
-              })}
+              {t("settings.backupManager.confirmTitle")}
             </DialogTitle>
             <DialogDescription>
-              {t("settings.backupManager.confirmMessage", {
-                defaultValue:
-                  "Restoring this backup will overwrite the current database. A safety backup will be created first.",
-              })}
+              {t("settings.backupManager.confirmMessage")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -433,16 +372,12 @@ export function BackupListSection({
               onClick={() => setConfirmFilename(null)}
               disabled={isRestoring}
             >
-              {t("common.cancel", { defaultValue: "Cancel" })}
+              {t("common.cancel")}
             </Button>
             <Button onClick={handleRestore} disabled={isRestoring}>
               {isRestoring
-                ? t("settings.backupManager.restoring", {
-                    defaultValue: "Restoring...",
-                  })
-                : t("settings.backupManager.restore", {
-                    defaultValue: "Restore",
-                  })}
+                ? t("settings.backupManager.restoring")
+                : t("settings.backupManager.restore")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -456,15 +391,10 @@ export function BackupListSection({
         <DialogContent className="max-w-md" zIndex="alert">
           <DialogHeader>
             <DialogTitle>
-              {t("settings.backupManager.deleteConfirmTitle", {
-                defaultValue: "Confirm Delete",
-              })}
+              {t("settings.backupManager.deleteConfirmTitle")}
             </DialogTitle>
             <DialogDescription>
-              {t("settings.backupManager.deleteConfirmMessage", {
-                defaultValue:
-                  "This backup will be permanently deleted. This action cannot be undone.",
-              })}
+              {t("settings.backupManager.deleteConfirmMessage")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -473,7 +403,7 @@ export function BackupListSection({
               onClick={() => setDeleteFilename(null)}
               disabled={isDeleting}
             >
-              {t("common.cancel", { defaultValue: "Cancel" })}
+              {t("common.cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -481,12 +411,8 @@ export function BackupListSection({
               disabled={isDeleting}
             >
               {isDeleting
-                ? t("settings.backupManager.deleting", {
-                    defaultValue: "Deleting...",
-                  })
-                : t("settings.backupManager.delete", {
-                    defaultValue: "Delete",
-                  })}
+                ? t("settings.backupManager.deleting")
+                : t("settings.backupManager.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

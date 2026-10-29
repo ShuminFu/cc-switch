@@ -81,12 +81,11 @@ export function useProviderShellActions({
 
   const disableOmoCallbacks = {
     onSuccess: () => {
-      toast.success(t("omo.disabled", { defaultValue: "OMO 已停用" }));
+      toast.success(t("omo.disabled"));
     },
     onError: (error: Error) => {
       toast.error(
         t("omo.disableFailed", {
-          defaultValue: "停用 OMO 失败: {{error}}",
           error: extractErrorMessage(error),
         }),
       );
@@ -103,10 +102,7 @@ export function useProviderShellActions({
       await settingsApi.openExternal(url);
     } catch (error) {
       const detail =
-        extractErrorMessage(error) ||
-        t("notifications.openLinkFailed", {
-          defaultValue: "链接打开失败",
-        });
+        extractErrorMessage(error) || t("notifications.openLinkFailed");
       toast.error(detail);
     }
   };
@@ -144,9 +140,8 @@ export function useProviderShellActions({
         );
         const errorMessage = extractErrorMessage(error);
         toast.error(
-          t("provider.duplicateLiveIdsLoadFailed", {
-            defaultValue: "读取配置中的供应商标识失败，请先修复配置后再试",
-          }) + (errorMessage ? `: ${errorMessage}` : ""),
+          t("provider.duplicateLiveIdsLoadFailed") +
+            (errorMessage ? `: ${errorMessage}` : ""),
         );
         return;
       }
@@ -178,11 +173,7 @@ export function useProviderShellActions({
           await providersApi.updateSortOrder(updates, activeApp);
         } catch (error) {
           console.error("[App] Failed to update sort order", error);
-          toast.error(
-            t("provider.sortUpdateFailed", {
-              defaultValue: "排序更新失败",
-            }),
-          );
+          toast.error(t("provider.sortUpdateFailed"));
           return; // 如果排序更新失败，不继续添加
         }
       }
@@ -201,18 +192,13 @@ export function useProviderShellActions({
       await providersApi.openTerminal(provider.id, activeApp, {
         cwd: selectedDir,
       });
-      toast.success(
-        t("provider.terminalOpened", {
-          defaultValue: "终端已打开",
-        }),
-      );
+      toast.success(t("provider.terminalOpened"));
     } catch (error) {
       console.error("[App] Failed to open terminal", error);
       const errorMessage = extractErrorMessage(error);
       toast.error(
-        t("provider.terminalOpenFailed", {
-          defaultValue: "打开终端失败",
-        }) + (errorMessage ? `: ${errorMessage}` : ""),
+        t("provider.terminalOpenFailed") +
+          (errorMessage ? `: ${errorMessage}` : ""),
       );
     }
   };

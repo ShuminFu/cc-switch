@@ -62,9 +62,7 @@ export const SessionMessageItem = memo(function SessionMessageItem({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            aria-label={t("sessionManager.copyMessage", {
-              defaultValue: "复制内容",
-            })}
+            aria-label={t("sessionManager.copyMessage")}
             variant="ghost"
             size="icon"
             className="absolute top-2 right-2 size-6 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -73,11 +71,7 @@ export const SessionMessageItem = memo(function SessionMessageItem({
             <Copy className="size-3" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>
-          {t("sessionManager.copyMessage", {
-            defaultValue: "复制内容",
-          })}
-        </TooltipContent>
+        <TooltipContent>{t("sessionManager.copyMessage")}</TooltipContent>
       </Tooltip>
       <div className="flex items-center justify-between text-xs mb-1.5 pr-6">
         <span className={cn("font-semibold", getRoleTone(message.role))}>
@@ -104,16 +98,12 @@ export const SessionMessageItem = memo(function SessionMessageItem({
           {expanded ? (
             <>
               <ChevronUp className="size-3" />
-              {t("sessionManager.collapseContent", {
-                defaultValue: "收起",
-              })}
+              {t("sessionManager.collapseContent")}
             </>
           ) : (
             <>
               <ChevronDown className="size-3" />
-              {t("sessionManager.expandContent", {
-                defaultValue: "展开完整内容",
-              })}
+              {t("sessionManager.expandContent")}
               <span className="text-muted-foreground/60">
                 ({Math.round(message.content.length / 1000)}k)
               </span>

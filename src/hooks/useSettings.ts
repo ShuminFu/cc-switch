@@ -155,11 +155,7 @@ export function useSettings(): UseSettingsResult {
             "[useSettings] Failed to sync providers after toggling Claude plugin",
             syncResult.error,
           );
-          toast.error(
-            t("notifications.syncClaudePluginFailed", {
-              defaultValue: "同步 Claude 插件失败",
-            }),
-          );
+          toast.error(t("notifications.syncClaudePluginFailed"));
         }
         return true;
       } catch (error) {
@@ -167,11 +163,7 @@ export function useSettings(): UseSettingsResult {
           "[useSettings] Failed to sync Claude plugin config",
           error,
         );
-        toast.error(
-          t("notifications.syncClaudePluginFailed", {
-            defaultValue: "同步 Claude 插件失败",
-          }),
-        );
+        toast.error(t("notifications.syncClaudePluginFailed"));
         return false;
       }
     },
@@ -231,11 +223,7 @@ export function useSettings(): UseSettingsResult {
             await settingsApi.setAutoLaunch(payload.launchOnStartup);
           } catch (error) {
             console.error("Failed to update auto-launch:", error);
-            toast.error(
-              t("settings.autoLaunchFailed", {
-                defaultValue: "设置开机自启失败",
-              }),
-            );
+            toast.error(t("settings.autoLaunchFailed"));
           }
         }
 
@@ -259,12 +247,8 @@ export function useSettings(): UseSettingsResult {
             );
             toast.error(
               nextSkipClaudeOnboarding
-                ? t("notifications.skipClaudeOnboardingFailed", {
-                    defaultValue: "跳过 Claude Code 初次安装确认失败",
-                  })
-                : t("notifications.clearClaudeOnboardingSkipFailed", {
-                    defaultValue: "恢复 Claude Code 初次安装确认失败",
-                  }),
+                ? t("notifications.skipClaudeOnboardingFailed")
+                : t("notifications.clearClaudeOnboardingSkipFailed"),
             );
           }
         }
@@ -298,7 +282,6 @@ export function useSettings(): UseSettingsResult {
         console.error("[useSettings] Failed to auto-save settings", error);
         toast.error(
           t("notifications.settingsSaveFailed", {
-            defaultValue: "保存设置失败: {{error}}",
             error: (error as Error)?.message ?? String(error),
           }),
         );
@@ -372,11 +355,7 @@ export function useSettings(): UseSettingsResult {
             await settingsApi.setAutoLaunch(payload.launchOnStartup);
           } catch (error) {
             console.error("Failed to update auto-launch:", error);
-            toast.error(
-              t("settings.autoLaunchFailed", {
-                defaultValue: "设置开机自启失败",
-              }),
-            );
+            toast.error(t("settings.autoLaunchFailed"));
           }
         }
 
@@ -397,12 +376,8 @@ export function useSettings(): UseSettingsResult {
             );
             toast.error(
               nextSkipClaudeOnboarding
-                ? t("notifications.skipClaudeOnboardingFailed", {
-                    defaultValue: "跳过 Claude Code 初次安装确认失败",
-                  })
-                : t("notifications.clearClaudeOnboardingSkipFailed", {
-                    defaultValue: "恢复 Claude Code 初次安装确认失败",
-                  }),
+                ? t("notifications.skipClaudeOnboardingFailed")
+                : t("notifications.clearClaudeOnboardingSkipFailed"),
             );
           }
         }
@@ -459,12 +434,9 @@ export function useSettings(): UseSettingsResult {
         setRequiresRestart(appDirChanged);
 
         if (!options?.silent) {
-          toast.success(
-            t("notifications.settingsSaved", {
-              defaultValue: "设置已保存",
-            }),
-            { closeButton: true },
-          );
+          toast.success(t("notifications.settingsSaved"), {
+            closeButton: true,
+          });
         }
 
         return { requiresRestart: appDirChanged };
@@ -472,7 +444,6 @@ export function useSettings(): UseSettingsResult {
         console.error("[useSettings] Failed to save settings", error);
         toast.error(
           t("notifications.settingsSaveFailed", {
-            defaultValue: "保存设置失败: {{error}}",
             error: (error as Error)?.message ?? String(error),
           }),
         );

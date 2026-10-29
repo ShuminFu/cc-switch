@@ -7,6 +7,7 @@ import { ProviderIcon } from "@/components/ProviderIcon";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import type { VisibleApps } from "@/types";
 import type { AppId } from "@/lib/api";
+import type { TranslationKey } from "@/i18n/keys";
 
 interface AppVisibilitySettingsProps {
   settings: SettingsFormState;
@@ -16,7 +17,7 @@ interface AppVisibilitySettingsProps {
 const APP_CONFIG: Array<{
   id: AppId;
   icon: string;
-  nameKey: string;
+  nameKey: TranslationKey;
 }> = [
   { id: "claude", icon: "claude", nameKey: "apps.claudeCode" },
   {

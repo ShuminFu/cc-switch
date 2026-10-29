@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import React, { useState } from "react";
 import { Play, Wand2, Eye, EyeOff, Save, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
@@ -32,6 +33,7 @@ import {
   detectCodingPlanProvider,
 } from "@/config/codingPlanProviders";
 import { formatUsageDataSummary } from "@/utils/usageDisplay";
+import type { TranslationKey } from "@/i18n/keys";
 
 /**
  * 火山引擎账号级 AccessKey 的密钥管理页（IAM）。
@@ -52,9 +54,7 @@ interface UsageScriptModalProps {
 }
 
 // 生成预设模板的函数（支持国际化）
-const generatePresetTemplates = (
-  t: (key: string) => string,
-): Record<string, string> => ({
+const generatePresetTemplates = (t: TFunction): Record<string, string> => ({
   [TEMPLATE_TYPES.CUSTOM]: `({
   request: {
     url: "",
@@ -129,7 +129,7 @@ const generatePresetTemplates = (
 });
 
 // 模板名称国际化键映射
-const TEMPLATE_NAME_KEYS: Record<string, string> = {
+const TEMPLATE_NAME_KEYS: Record<string, TranslationKey> = {
   [TEMPLATE_TYPES.CUSTOM]: "usageScript.templateCustom",
   [TEMPLATE_TYPES.GENERAL]: "usageScript.templateGeneral",
   [TEMPLATE_TYPES.NEW_API]: "usageScript.templateNewAPI",

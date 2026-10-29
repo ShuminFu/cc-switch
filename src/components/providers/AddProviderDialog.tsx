@@ -69,31 +69,19 @@ export function AddProviderDialog({
           "[AddProviderDialog] Failed to save universal provider",
           error,
         );
-        toast.error(
-          t("universalProvider.addFailed", {
-            defaultValue: "统一供应商添加失败",
-          }),
-        );
+        toast.error(t("universalProvider.addFailed"));
         return;
       }
 
       try {
         await universalProvidersApi.sync(provider.id);
-        toast.success(
-          t("universalProvider.addedAndSynced", {
-            defaultValue: "统一供应商已添加并同步",
-          }),
-        );
+        toast.success(t("universalProvider.addedAndSynced"));
       } catch (error) {
         console.error(
           "[AddProviderDialog] Provider saved but sync failed",
           error,
         );
-        toast.warning(
-          t("universalProvider.addedButSyncFailed", {
-            defaultValue: "统一供应商已添加，但同步失败",
-          }),
-        );
+        toast.warning(t("universalProvider.addedButSyncFailed"));
       }
 
       setUniversalFormOpen(false);

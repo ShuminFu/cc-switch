@@ -41,8 +41,7 @@ export const VIEW_TITLES: Record<SubView, ViewTitle> = {
   skillsDiscovery: (t) => t("skills.title"),
   mcp: (t) => t("mcp.unifiedPanel.title"),
   agents: (t) => t("agents.title"),
-  universal: (t) =>
-    t("universalProvider.title", { defaultValue: "统一供应商" }),
+  universal: (t) => t("universalProvider.title"),
   sessions: (t) => t("sessionManager.title"),
   workspace: (t) => t("workspace.title"),
   openclawEnv: (t) => t("openclaw.env.title"),

@@ -124,7 +124,7 @@ describe("GrokBuildProviderForm", () => {
       target: { value: "[models" },
     });
 
-    expect(screen.getByText(/Invalid config\.toml:/)).toBeInTheDocument();
+    expect(screen.getByText("grokBuild.invalidToml")).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 

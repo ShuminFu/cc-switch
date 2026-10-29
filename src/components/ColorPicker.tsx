@@ -33,7 +33,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
   presets = DEFAULT_PRESETS,
 }) => {
   const { t } = useTranslation();
-  const displayLabel = label ?? t("providerIcon.color", "图标颜色");
+  const displayLabel = label ?? t("providerIcon.color");
   return (
     <div className="space-y-3">
       <Label>{displayLabel}</Label>

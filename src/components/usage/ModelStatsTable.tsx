@@ -44,19 +44,11 @@ export function ModelStatsTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{t("usage.model", "模型")}</TableHead>
-            <TableHead className="text-right">
-              {t("usage.requests", "请求数")}
-            </TableHead>
-            <TableHead className="text-right">
-              {t("usage.tokens", "Tokens")}
-            </TableHead>
-            <TableHead className="text-right">
-              {t("usage.totalCost", "总成本")}
-            </TableHead>
-            <TableHead className="text-right">
-              {t("usage.avgCost", "平均成本")}
-            </TableHead>
+            <TableHead>{t("usage.model")}</TableHead>
+            <TableHead className="text-right">{t("usage.requests")}</TableHead>
+            <TableHead className="text-right">{t("usage.tokens")}</TableHead>
+            <TableHead className="text-right">{t("usage.totalCost")}</TableHead>
+            <TableHead className="text-right">{t("usage.avgCost")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -66,7 +58,7 @@ export function ModelStatsTable({
                 colSpan={5}
                 className="text-center text-muted-foreground"
               >
-                {t("usage.noData", "暂无数据")}
+                {t("usage.noData")}
               </TableCell>
             </TableRow>
           ) : (

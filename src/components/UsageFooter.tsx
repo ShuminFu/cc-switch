@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import React from "react";
 import { RefreshCw, AlertCircle, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -150,7 +151,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
             <Clock size={10} />
             {lastQueriedAt
               ? formatRelativeTime(lastQueriedAt, now, t)
-              : t("usage.never", { defaultValue: "从未更新" })}
+              : t("usage.never")}
           </span>
           <button
             onClick={(e) => {
@@ -201,7 +202,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
             <Clock size={10} />
             {lastQueriedAt
               ? formatRelativeTime(lastQueriedAt, now, t)
-              : t("usage.never", { defaultValue: "从未更新" })}
+              : t("usage.never")}
           </span>
 
           {/* 刷新按钮 */}
@@ -431,7 +432,7 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
 function formatRelativeTime(
   timestamp: number,
   now: number,
-  t: (key: string, options?: { count?: number }) => string,
+  t: TFunction,
 ): string {
   const diff = Math.floor((now - timestamp) / 1000); // 秒
 

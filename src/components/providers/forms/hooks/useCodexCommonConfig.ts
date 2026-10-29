@@ -320,11 +320,7 @@ export function useCodexCommonConfig({
         return;
       }
       if (!parsedSnippet.hasContent) {
-        setCommonConfigError(
-          t("codexConfig.noCommonConfigToApply", {
-            defaultValue: "通用配置片段为空或没有可写入的内容",
-          }),
-        );
+        setCommonConfigError(t("codexConfig.noCommonConfigToApply"));
         setUseCommonConfig(false);
         return;
       }

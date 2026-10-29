@@ -295,40 +295,21 @@ export function ProviderList({
 
     const messages: string[] = [];
     if (!claudeDesktopStatus.supported) {
-      messages.push(
-        t("claudeDesktop.statusUnsupported", {
-          defaultValue: "当前平台暂不支持 Claude Desktop 3P 配置写入。",
-        }),
-      );
+      messages.push(t("claudeDesktop.statusUnsupported"));
       return messages;
     }
 
     if (claudeDesktopStatus.staleRawModels) {
-      messages.push(
-        t("claudeDesktop.statusStaleRawModels", {
-          defaultValue:
-            "Claude Desktop profile 中存在非 claude-* 模型名，新版 Claude Desktop 可能拒绝加载；重新切换当前供应商可修复。",
-        }),
-      );
+      messages.push(t("claudeDesktop.statusStaleRawModels"));
     }
     if (claudeDesktopStatus.missingRouteMappings) {
-      messages.push(
-        t("claudeDesktop.statusMissingRouteMappings", {
-          defaultValue:
-            "当前供应商启用了模型映射，但没有有效路由；请编辑供应商并补全至少一个模型映射。",
-        }),
-      );
+      messages.push(t("claudeDesktop.statusMissingRouteMappings"));
     }
     if (
       claudeDesktopStatus.mode === "proxy" &&
       !claudeDesktopStatus.gatewayTokenConfigured
     ) {
-      messages.push(
-        t("claudeDesktop.statusGatewayTokenMissing", {
-          defaultValue:
-            "当前本地路由 token 尚未生成；重新切换该供应商会写入新的本地 token。",
-        }),
-      );
+      messages.push(t("claudeDesktop.statusGatewayTokenMissing"));
     }
 
     const expected = claudeDesktopStatus.expectedBaseUrl?.replace(/\/+$/, "");
@@ -338,8 +319,6 @@ export function ProviderList({
         t("claudeDesktop.statusBaseUrlMismatch", {
           expected,
           actual,
-          defaultValue:
-            "Claude Desktop profile 指向的地址与当前供应商不一致；当前为 {{actual}}，应为 {{expected}}。重新切换当前供应商可修复。",
         }),
       );
     }
@@ -450,9 +429,7 @@ export function ProviderList({
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
           <div className="flex items-center gap-2 font-medium">
             <AlertTriangle className="h-4 w-4 shrink-0" />
-            {t("claudeDesktop.statusTitle", {
-              defaultValue: "Claude Desktop 配置需要检查",
-            })}
+            {t("claudeDesktop.statusTitle")}
           </div>
           <ul className="mt-2 space-y-1 text-xs leading-relaxed">
             {claudeDesktopStatusMessages.map((message) => (
@@ -478,12 +455,8 @@ export function ProviderList({
                   ref={searchInputRef}
                   value={searchTerm}
                   onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={t("provider.searchPlaceholder", {
-                    defaultValue: "Search name, notes, or URL...",
-                  })}
-                  aria-label={t("provider.searchAriaLabel", {
-                    defaultValue: "Search providers",
-                  })}
+                  placeholder={t("provider.searchPlaceholder")}
+                  aria-label={t("provider.searchAriaLabel")}
                   className="pr-16 pl-9"
                 />
                 {searchTerm && (
@@ -493,7 +466,7 @@ export function ProviderList({
                     className="absolute text-xs -translate-y-1/2 right-11 top-1/2"
                     onClick={() => setSearchTerm("")}
                   >
-                    {t("common.clear", { defaultValue: "Clear" })}
+                    {t("common.clear")}
                   </Button>
                 )}
                 <Button
@@ -501,24 +474,14 @@ export function ProviderList({
                   size="icon"
                   className="ml-auto"
                   onClick={() => setIsSearchOpen(false)}
-                  aria-label={t("provider.searchCloseAriaLabel", {
-                    defaultValue: "Close provider search",
-                  })}
+                  aria-label={t("provider.searchCloseAriaLabel")}
                 >
                   <X className="w-4 h-4" />
                 </Button>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                <span>
-                  {t("provider.searchScopeHint", {
-                    defaultValue: "Matches provider name, notes, and URL.",
-                  })}
-                </span>
-                <span>
-                  {t("provider.searchCloseHint", {
-                    defaultValue: "Press Esc to close",
-                  })}
-                </span>
+                <span>{t("provider.searchScopeHint")}</span>
+                <span>{t("provider.searchCloseHint")}</span>
               </div>
             </div>
           </motion.div>
@@ -527,9 +490,7 @@ export function ProviderList({
 
       {filteredProviders.length === 0 ? (
         <div className="px-6 py-8 text-sm text-center border border-dashed rounded-lg border-border text-muted-foreground">
-          {t("provider.noSearchResults", {
-            defaultValue: "No providers match your search.",
-          })}
+          {t("provider.noSearchResults")}
         </div>
       ) : (
         renderProviderList()

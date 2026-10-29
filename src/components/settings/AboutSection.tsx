@@ -42,6 +42,7 @@ import { isWindows } from "@/lib/platform";
 import { isUpdateAvailable } from "@/lib/version";
 import { ToolUpgradeConfirmDialog } from "./ToolUpgradeConfirmDialog";
 import { ToolInstallRow } from "./ToolInstallRow";
+import type { TranslationKey } from "@/i18n/keys";
 
 interface AboutSectionProps {
   isPortable: boolean;
@@ -82,7 +83,7 @@ const WSL_SHELL_FLAG_OPTIONS = ["-lic", "-lc", "-c"] as const;
 
 const ENV_BADGE_CONFIG: Record<
   string,
-  { labelKey: string; className: string }
+  { labelKey: TranslationKey; className: string }
 > = {
   wsl: {
     labelKey: "settings.envBadge.wsl",

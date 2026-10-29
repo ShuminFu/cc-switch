@@ -40,14 +40,15 @@ import type {
   S3SyncSettings,
   WebDavSyncSettings,
 } from "@/types";
+import type { TranslationKey } from "@/i18n/keys";
 
 // ─── WebDAV service presets ─────────────────────────────────
 
 interface WebDavPreset {
   id: string;
-  label: string;
+  label: TranslationKey;
   baseUrl: string;
-  hint: string;
+  hint: TranslationKey | "";
   matchPattern?: string; // substring match on URL
 }
 
@@ -96,8 +97,8 @@ function detectPreset(url: string): string {
 
 interface S3Preset {
   id: string;
-  label: string;
-  hint: string;
+  label: TranslationKey;
+  hint: TranslationKey | "";
   defaultEndpoint?: string;
   regionPlaceholder?: string;
 }

@@ -16,21 +16,14 @@ export function AuthCenterPanel() {
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-primary" />
               <h3 className="text-base font-semibold">
-                {t("settings.authCenter.title", {
-                  defaultValue: "OAuth 认证中心",
-                })}
+                {t("settings.authCenter.title")}
               </h3>
             </div>
             <p className="text-sm text-muted-foreground">
-              {t("settings.authCenter.description", {
-                defaultValue:
-                  "在 Claude Code 中使用您的其他订阅，请注意合规风险。",
-              })}
+              {t("settings.authCenter.description")}
             </p>
           </div>
-          <Badge variant="secondary">
-            {t("settings.authCenter.beta", { defaultValue: "Beta" })}
-          </Badge>
+          <Badge variant="secondary">{t("settings.authCenter.beta")}</Badge>
         </div>
       </section>
 
@@ -42,9 +35,7 @@ export function AuthCenterPanel() {
           <div>
             <h4 className="font-medium">GitHub Copilot</h4>
             <p className="text-sm text-muted-foreground">
-              {t("settings.authCenter.copilotDescription", {
-                defaultValue: "管理 GitHub Copilot 账号",
-              })}
+              {t("settings.authCenter.copilotDescription")}
             </p>
           </div>
         </div>
@@ -60,9 +51,7 @@ export function AuthCenterPanel() {
           <div>
             <h4 className="font-medium">ChatGPT (Codex OAuth)</h4>
             <p className="text-sm text-muted-foreground">
-              {t("settings.authCenter.codexOauthDescription", {
-                defaultValue: "管理 ChatGPT 账号",
-              })}
+              {t("settings.authCenter.codexOauthDescription")}
             </p>
           </div>
         </div>

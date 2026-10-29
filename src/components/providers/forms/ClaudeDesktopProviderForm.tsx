@@ -362,16 +362,10 @@ export function ClaudeDesktopProviderForm({
 
   const presetCategoryLabels: Record<string, string> = useMemo(
     () => ({
-      official: t("providerForm.categoryOfficial", { defaultValue: "官方" }),
-      cn_official: t("providerForm.categoryCnOfficial", {
-        defaultValue: "国内官方",
-      }),
-      aggregator: t("providerForm.categoryAggregation", {
-        defaultValue: "聚合服务",
-      }),
-      third_party: t("providerForm.categoryThirdParty", {
-        defaultValue: "第三方",
-      }),
+      official: t("providerForm.categoryOfficial"),
+      cn_official: t("providerForm.categoryCnOfficial"),
+      aggregator: t("providerForm.categoryAggregation"),
+      third_party: t("providerForm.categoryThirdParty"),
     }),
     [t],
   );
@@ -522,7 +516,6 @@ export function ClaudeDesktopProviderForm({
       toast.success(
         t("providerForm.fetchModelsSuccess", {
           count: models.length,
-          defaultValue: `已获取 ${models.length} 个模型`,
         }),
       );
     } catch (error) {
@@ -537,11 +530,7 @@ export function ClaudeDesktopProviderForm({
 
   const handleSubmit = async (values: ProviderFormData) => {
     if (!values.name.trim()) {
-      toast.error(
-        t("providerForm.fillSupplierName", {
-          defaultValue: "请填写供应商名称",
-        }),
-      );
+      toast.error(t("providerForm.fillSupplierName"));
       return;
     }
     if (isOfficial) {
@@ -569,19 +558,11 @@ export function ClaudeDesktopProviderForm({
       return;
     }
     if (!baseUrl.trim()) {
-      toast.error(
-        t("providerForm.fetchModelsNeedEndpoint", {
-          defaultValue: "请先填写接口地址",
-        }),
-      );
+      toast.error(t("providerForm.fetchModelsNeedEndpoint"));
       return;
     }
     if (!usesManagedOAuth && !apiKey.trim()) {
-      toast.error(
-        t("providerForm.fetchModelsNeedApiKey", {
-          defaultValue: "请先填写 API Key",
-        }),
-      );
+      toast.error(t("providerForm.fetchModelsNeedApiKey"));
       return;
     }
 
@@ -600,11 +581,7 @@ export function ClaudeDesktopProviderForm({
       // 对齐 Claude Code 的兜底，保证落库四档齐全、子 agent 不会找不到模型。
       const primary = routeEntries.find((route) => route.model);
       if (!primary) {
-        toast.error(
-          t("claudeDesktop.routesRequired", {
-            defaultValue: "至少填写一个模型映射",
-          }),
-        );
+        toast.error(t("claudeDesktop.routesRequired"));
         return;
       }
       for (const route of routeEntries) {
@@ -625,12 +602,7 @@ export function ClaudeDesktopProviderForm({
         (route) => !route.route || !isClaudeSafeRoute(route.route),
       );
       if (invalid) {
-        toast.error(
-          t("claudeDesktop.directModelInvalid", {
-            defaultValue:
-              "直连模型必须使用 Claude Desktop 可识别的 Sonnet / Opus / Haiku 模型名",
-          }),
-        );
+        toast.error(t("claudeDesktop.directModelInvalid"));
         return;
       }
     }
@@ -720,7 +692,7 @@ export function ClaudeDesktopProviderForm({
           ) : (
             <Download className="h-3.5 w-3.5" />
           )}
-          {t("providerForm.fetchModels", { defaultValue: "获取模型" })}
+          {t("providerForm.fetchModels")}
         </Button>
       )}
       <Button
@@ -757,10 +729,7 @@ export function ClaudeDesktopProviderForm({
 
         {isOfficial && (
           <div className="rounded-lg border border-border-default bg-muted/20 p-3 text-sm text-muted-foreground">
-            {t("claudeDesktop.officialNotice", {
-              defaultValue:
-                "Claude Desktop 官方供应商使用应用内置的 1P 登录，无需配置 API Key 和接口地址。",
-            })}
+            {t("claudeDesktop.officialNotice")}
           </div>
         )}
 
@@ -815,29 +784,17 @@ export function ClaudeDesktopProviderForm({
             <div className="space-y-3 rounded-lg border border-border-default bg-muted/20 p-4">
               <div className="flex items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <Label>
-                    {t("claudeDesktop.modelMappingToggle", {
-                      defaultValue: "需要模型映射",
-                    })}
-                  </Label>
+                  <Label>{t("claudeDesktop.modelMappingToggle")}</Label>
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     {needsModelMapping
-                      ? t("claudeDesktop.modelMappingOnHint", {
-                          defaultValue:
-                            "Claude Desktop 只接受 claude-sonnet-* / claude-opus-* / claude-haiku-* 三档角色 ID。开启后 CC Switch 会把这三档映射到供应商的实际模型，并在使用期间保持本地路由开启。",
-                        })
-                      : t("claudeDesktop.modelMappingOffHint", {
-                          defaultValue:
-                            "仅当供应商直接接受 Claude Desktop 可识别的三档角色 ID（claude-sonnet-* / claude-opus-* / claude-haiku-*）时才适用直连；其他模型名（含 claude-3-5-sonnet-… 等旧式 ID）请打开此开关走映射。",
-                        })}
+                      ? t("claudeDesktop.modelMappingOnHint")
+                      : t("claudeDesktop.modelMappingOffHint")}
                   </p>
                 </div>
                 <Switch
                   checked={needsModelMapping}
                   onCheckedChange={handleModelMappingChange}
-                  aria-label={t("claudeDesktop.modelMappingToggle", {
-                    defaultValue: "需要模型映射",
-                  })}
+                  aria-label={t("claudeDesktop.modelMappingToggle")}
                 />
               </div>
             </div>
@@ -845,9 +802,7 @@ export function ClaudeDesktopProviderForm({
             {needsModelMapping && (
               <div className="space-y-4 rounded-lg border border-border-default p-4">
                 <div className="space-y-2">
-                  <Label>
-                    {t("providerForm.apiFormat", { defaultValue: "API 格式" })}
-                  </Label>
+                  <Label>{t("providerForm.apiFormat")}</Label>
                   <Select
                     value={apiFormat}
                     onValueChange={(value) =>
@@ -859,25 +814,16 @@ export function ClaudeDesktopProviderForm({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="anthropic">
-                        {t("providerForm.apiFormatAnthropic", {
-                          defaultValue: "Anthropic Messages (原生)",
-                        })}
+                        {t("providerForm.apiFormatAnthropic")}
                       </SelectItem>
                       <SelectItem value="openai_chat">
-                        {t("providerForm.apiFormatOpenAIChat", {
-                          defaultValue: "OpenAI Chat Completions (需开启路由)",
-                        })}
+                        {t("providerForm.apiFormatOpenAIChat")}
                       </SelectItem>
                       <SelectItem value="openai_responses">
-                        {t("providerForm.apiFormatOpenAIResponses", {
-                          defaultValue: "OpenAI Responses API (需开启路由)",
-                        })}
+                        {t("providerForm.apiFormatOpenAIResponses")}
                       </SelectItem>
                       <SelectItem value="gemini_native">
-                        {t("providerForm.apiFormatGeminiNative", {
-                          defaultValue:
-                            "Gemini Native generateContent (需开启路由)",
-                        })}
+                        {t("providerForm.apiFormatGeminiNative")}
                       </SelectItem>
                     </SelectContent>
                   </Select>
@@ -886,11 +832,7 @@ export function ClaudeDesktopProviderForm({
                 <div className="space-y-3">
                   <div className="space-y-1 border-t border-border-default pt-4">
                     <div className="flex items-center justify-between">
-                      <Label>
-                        {t("claudeDesktop.routeMapTitle", {
-                          defaultValue: "模型映射",
-                        })}
-                      </Label>
+                      <Label>{t("claudeDesktop.routeMapTitle")}</Label>
                       {!usesManagedOAuth && (
                         <Button
                           type="button"
@@ -905,60 +847,31 @@ export function ClaudeDesktopProviderForm({
                           ) : (
                             <Download className="h-3.5 w-3.5" />
                           )}
-                          {t("providerForm.fetchModels", {
-                            defaultValue: "获取模型",
-                          })}
+                          {t("providerForm.fetchModels")}
                         </Button>
                       )}
                     </div>
                     <p className="text-xs leading-relaxed text-muted-foreground">
-                      {t("claudeDesktop.routeMapHint", {
-                        defaultValue:
-                          "为 Sonnet、Opus、Haiku 三档分别填写实际请求模型；菜单显示名可写 DeepSeek、Kimi 等品牌名。留空的档会自动沿用 Sonnet（或第一个已填档）的模型，确保子 agent 调用的 Haiku 始终可用。",
-                      })}
+                      {t("claudeDesktop.routeMapHint")}
                     </p>
                   </div>
 
                   <div className="hidden grid-cols-[140px_1fr_1fr_116px] gap-2 px-1 text-xs font-medium text-muted-foreground md:grid">
-                    <span>
-                      {t("claudeDesktop.routeModelLabel", {
-                        defaultValue: "模型角色",
-                      })}
-                    </span>
-                    <span>
-                      {t("claudeDesktop.labelOverrideLabel", {
-                        defaultValue: "菜单显示名",
-                      })}
-                    </span>
-                    <span>
-                      {t("claudeDesktop.upstreamModelLabel", {
-                        defaultValue: "实际请求模型",
-                      })}
-                    </span>
-                    <span>
-                      {t("claudeDesktop.supports1mLabel", {
-                        defaultValue: "声明支持 1M",
-                      })}
-                    </span>
+                    <span>{t("claudeDesktop.routeModelLabel")}</span>
+                    <span>{t("claudeDesktop.labelOverrideLabel")}</span>
+                    <span>{t("claudeDesktop.upstreamModelLabel")}</span>
+                    <span>{t("claudeDesktop.supports1mLabel")}</span>
                   </div>
                   {routes.map((route, index) => {
                     const role = routeRoleFromId(route.route);
                     const roleLabel =
                       role === "opus"
-                        ? t("claudeDesktop.routeRoleOpus", {
-                            defaultValue: "Opus",
-                          })
+                        ? t("claudeDesktop.routeRoleOpus")
                         : role === "haiku"
-                          ? t("claudeDesktop.routeRoleHaiku", {
-                              defaultValue: "Haiku",
-                            })
+                          ? t("claudeDesktop.routeRoleHaiku")
                           : role === "fable"
-                            ? t("claudeDesktop.routeRoleFable", {
-                                defaultValue: "Fable",
-                              })
-                            : t("claudeDesktop.routeRoleSonnet", {
-                                defaultValue: "Sonnet",
-                              });
+                            ? t("claudeDesktop.routeRoleFable")
+                            : t("claudeDesktop.routeRoleSonnet");
                     // Haiku 档示范映射到轻量模型（flash），其余档映射到 pro；
                     // 两列占位联动，保持每行「菜单显示名 ↔ 实际请求模型」品牌一致。
                     const isHaikuRole = role === "haiku";
@@ -1015,9 +928,7 @@ export function ClaudeDesktopProviderForm({
                               })
                             }
                           />
-                          {t("claudeDesktop.supports1mShort", {
-                            defaultValue: "1M",
-                          })}
+                          {t("claudeDesktop.supports1mShort")}
                         </label>
                       </div>
                     );
@@ -1043,28 +954,19 @@ export function ClaudeDesktopProviderForm({
                     ) : (
                       <ChevronRight className="h-4 w-4" />
                     )}
-                    {t("claudeDesktop.directModelListTitle", {
-                      defaultValue:
-                        "手动指定 Claude Desktop 模型列表（高级，可选）",
-                    })}
+                    {t("claudeDesktop.directModelListTitle")}
                   </Button>
                 </CollapsibleTrigger>
                 {!directModelsExpanded && (
                   <p className="ml-1 mt-1 text-xs text-muted-foreground">
-                    {t("claudeDesktop.directModelListCollapsedHint", {
-                      defaultValue:
-                        "原生 Claude 模型供应商通常不用填写，Claude Desktop 会自动读取 /v1/models。",
-                    })}
+                    {t("claudeDesktop.directModelListCollapsedHint")}
                   </p>
                 )}
                 <CollapsibleContent className="space-y-4 pt-2">
                   <div className="space-y-4 rounded-lg border border-border-default p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <p className="flex-1 text-xs leading-relaxed text-muted-foreground">
-                        {t("claudeDesktop.directModelListHint", {
-                          defaultValue:
-                            "仅当供应商的 /v1/models 不可用或没有返回 Claude Desktop 可识别的 Sonnet / Opus / Haiku 模型名时填写；勾选 1M 会向 Claude Desktop 声明支持 1M 上下文。",
-                        })}
+                        {t("claudeDesktop.directModelListHint")}
                       </p>
                       {renderActionButtons(
                         () =>
@@ -1077,9 +979,7 @@ export function ClaudeDesktopProviderForm({
                               supports1m: false,
                             }),
                           ]),
-                        t("claudeDesktop.addModel", {
-                          defaultValue: "添加模型",
-                        }),
+                        t("claudeDesktop.addModel"),
                       )}
                     </div>
 
@@ -1119,9 +1019,7 @@ export function ClaudeDesktopProviderForm({
                                   })
                                 }
                               />
-                              {t("claudeDesktop.supports1mShort", {
-                                defaultValue: "1M",
-                              })}
+                              {t("claudeDesktop.supports1mShort")}
                             </label>
                             <Button
                               aria-label={t("common.delete")}

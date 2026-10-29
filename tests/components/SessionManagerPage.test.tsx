@@ -14,6 +14,7 @@ import { sessionsApi } from "@/lib/api/sessions";
 import type { SessionMessage, SessionMeta } from "@/types";
 import { setSessionFixtures } from "../msw/state";
 import { findUnnamedButtons } from "../a11y/buttonName";
+import { loadZhTranslations } from "../utils/zhTranslations";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -151,6 +152,9 @@ const expandDirectoryGroup = (provider: string, directory: string) => {
 };
 
 describe("SessionManagerPage", () => {
+  // 断言基于真实的中文文案（含插值）
+  loadZhTranslations();
+
   beforeEach(() => {
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
@@ -259,18 +263,12 @@ describe("SessionManagerPage", () => {
       ).toBeInTheDocument(),
     );
 
-    expect(
-      screen.getByRole("button", { name: "common.refresh" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "复制命令" }),
     ).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "sessionManager.searchSessions" }),
-    );
-    expect(
-      screen.getByRole("button", { name: "common.close" }),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    expect(screen.getByRole("button", { name: "关闭" })).toBeInTheDocument();
 
     expect(await findUnnamedButtons(container)).toEqual([]);
   });
@@ -305,12 +303,8 @@ describe("SessionManagerPage", () => {
       expect(screen.queryByText("Alpha Session")).not.toBeInTheDocument(),
     );
 
-    expect(
-      screen.getByText("sessionManager.selectSession"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("sessionManager.emptySession"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("请选择会话查看详情")).toBeInTheDocument();
+    expect(screen.queryByText("该会话暂无可展示内容")).not.toBeInTheDocument();
     expect(toastErrorMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalled();
   });
@@ -454,12 +448,12 @@ describe("SessionManagerPage", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: /展开或折叠 codex 供应商分组/,
+        name: /展开或折叠 Codex 供应商分组/,
       }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: /展开或折叠 claude 供应商分组/,
+        name: /展开或折叠 Claude 供应商分组/,
       }),
     ).toBeInTheDocument();
     expect(
@@ -480,7 +474,7 @@ describe("SessionManagerPage", () => {
     );
 
     await switchToGroupedView();
-    expandDirectoryGroup("codex", "codex");
+    expandDirectoryGroup("Codex", "codex");
 
     expect(
       screen.getByRole("button", { name: /展开或折叠 codex 目录分组/ }),
@@ -534,14 +528,14 @@ describe("SessionManagerPage", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: /展开或折叠 claude 供应商分组/,
+        name: /展开或折叠 Claude 供应商分组/,
       }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /展开或折叠 claude 目录分组/ }),
     ).not.toBeInTheDocument();
 
-    expandDirectoryGroup("claude", "claude");
+    expandDirectoryGroup("Claude", "claude");
 
     expect(
       screen.getByRole("button", { name: /展开或折叠 claude 目录分组/ }),
@@ -593,10 +587,10 @@ describe("SessionManagerPage", () => {
     await enterGroupedBatchMode();
 
     const codexProviderCheckbox = screen.getByRole("checkbox", {
-      name: /选择 codex 供应商分组内会话/,
+      name: /选择 Codex 供应商分组内会话/,
     });
     const claudeProviderCheckbox = screen.getByRole("checkbox", {
-      name: /选择 claude 供应商分组内会话/,
+      name: /选择 Claude 供应商分组内会话/,
     });
 
     fireEvent.click(codexProviderCheckbox);
@@ -621,10 +615,10 @@ describe("SessionManagerPage", () => {
     );
 
     await enterGroupedBatchMode();
-    expandDirectoryGroup("codex", "codex");
+    expandDirectoryGroup("Codex", "codex");
 
     const providerCheckbox = screen.getByRole("checkbox", {
-      name: /选择 codex 供应商分组内会话/,
+      name: /选择 Codex 供应商分组内会话/,
     });
     const codexDirectoryCheckbox = screen.getByRole("checkbox", {
       name: /选择 codex 目录分组内会话/,
@@ -647,13 +641,13 @@ describe("SessionManagerPage", () => {
     );
 
     await enterGroupedBatchMode();
-    expandDirectoryGroup("codex", "codex");
+    expandDirectoryGroup("Codex", "codex");
 
     fireEvent.click(screen.getAllByRole("checkbox", { name: "选择会话" })[0]);
 
     expect(
       screen.getByRole("checkbox", {
-        name: /选择 codex 供应商分组内会话/,
+        name: /选择 Codex 供应商分组内会话/,
       }),
     ).toHaveAttribute("aria-checked", "mixed");
     expect(
@@ -672,7 +666,7 @@ describe("SessionManagerPage", () => {
     );
 
     await enterGroupedBatchMode();
-    expandDirectoryGroup("codex", "codex");
+    expandDirectoryGroup("Codex", "codex");
     fireEvent.click(
       screen.getByRole("checkbox", {
         name: /选择 codex 目录分组内会话/,

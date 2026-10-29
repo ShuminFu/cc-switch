@@ -51,7 +51,7 @@ export function UniversalProviderCard({
             size="icon"
             className="h-8 w-8"
             onClick={() => onSync(provider.id)}
-            title={t("universalProvider.sync", { defaultValue: "同步到应用" })}
+            title={t("universalProvider.sync")}
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -60,7 +60,7 @@ export function UniversalProviderCard({
             size="icon"
             className="h-8 w-8"
             onClick={() => onDuplicate(provider)}
-            title={t("universalProvider.duplicate", { defaultValue: "复制" })}
+            title={t("universalProvider.duplicate")}
           >
             <Copy className="h-4 w-4" />
           </Button>
@@ -69,7 +69,7 @@ export function UniversalProviderCard({
             size="icon"
             className="h-8 w-8"
             onClick={() => onEdit(provider)}
-            title={t("common.edit", { defaultValue: "编辑" })}
+            title={t("common.edit")}
           >
             <Edit2 className="h-4 w-4" />
           </Button>
@@ -78,7 +78,7 @@ export function UniversalProviderCard({
             size="icon"
             className="h-8 w-8 text-destructive hover:text-destructive"
             onClick={() => onDelete(provider.id)}
-            title={t("common.delete", { defaultValue: "删除" })}
+            title={t("common.delete")}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -107,9 +107,7 @@ export function UniversalProviderCard({
           ))}
           {enabledApps.length === 0 && (
             <span className="text-xs text-muted-foreground">
-              {t("universalProvider.noAppsEnabled", {
-                defaultValue: "未启用任何应用",
-              })}
+              {t("universalProvider.noAppsEnabled")}
             </span>
           )}
         </div>

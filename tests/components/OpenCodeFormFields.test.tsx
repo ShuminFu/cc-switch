@@ -51,7 +51,9 @@ const renderOpenCodeForm = (
 };
 
 const expandFirstModel = () => {
-  fireEvent.click(screen.getByRole("button", { name: "Toggle model details" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "opencode.toggleModelDetails" }),
+  );
 };
 
 describe("OpenCodeFormFields", () => {
@@ -91,7 +93,7 @@ describe("OpenCodeFormFields", () => {
     const onHeadersChange = vi.fn();
     const { rerender, props } = renderOpenCodeForm({ onHeadersChange });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add header" }));
+    fireEvent.click(screen.getByRole("button", { name: "opencode.addHeader" }));
 
     const nextHeaders = onHeadersChange.mock.calls[0][0];
     const headerKey = Object.keys(nextHeaders)[0];
@@ -103,7 +105,9 @@ describe("OpenCodeFormFields", () => {
       </FormShell>,
     );
 
-    expect(screen.getByPlaceholderText("X-Title")).toHaveValue("");
+    expect(
+      screen.getByPlaceholderText("opencode.headerNamePlaceholder"),
+    ).toHaveValue("");
   });
 
   it("removes provider headers", () => {
@@ -113,7 +117,9 @@ describe("OpenCodeFormFields", () => {
       onHeadersChange,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove header" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "opencode.removeHeader" }),
+    );
 
     expect(onHeadersChange).toHaveBeenCalledWith({});
   });
@@ -147,8 +153,8 @@ describe("OpenCodeFormFields", () => {
 
     expandFirstModel();
 
-    expect(screen.getByLabelText("Context")).toHaveValue(1048576);
-    expect(screen.getByLabelText("Output")).toHaveValue(131072);
+    expect(screen.getByLabelText("opencode.limitContext")).toHaveValue(1048576);
+    expect(screen.getByLabelText("opencode.limitOutput")).toHaveValue(131072);
   });
 
   it("updates model token limits as structured numbers", () => {
@@ -156,7 +162,7 @@ describe("OpenCodeFormFields", () => {
     renderOpenCodeForm({ onModelsChange });
 
     expandFirstModel();
-    fireEvent.change(screen.getByLabelText("Context"), {
+    fireEvent.change(screen.getByLabelText("opencode.limitContext"), {
       target: { value: "2000000" },
     });
 
@@ -173,7 +179,7 @@ describe("OpenCodeFormFields", () => {
     const { rerender, props } = renderOpenCodeForm({ onModelsChange });
 
     expandFirstModel();
-    fireEvent.change(screen.getByLabelText("Context"), {
+    fireEvent.change(screen.getByLabelText("opencode.limitContext"), {
       target: { value: "" },
     });
 
@@ -190,7 +196,7 @@ describe("OpenCodeFormFields", () => {
         <OpenCodeFormFields {...props} models={withoutContext} />
       </FormShell>,
     );
-    fireEvent.change(screen.getByLabelText("Output"), {
+    fireEvent.change(screen.getByLabelText("opencode.limitOutput"), {
       target: { value: "" },
     });
 

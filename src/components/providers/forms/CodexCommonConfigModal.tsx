@@ -84,9 +84,7 @@ export const CodexCommonConfigModal: React.FC<CodexCommonConfigModalProps> = ({
               ) : (
                 <Download className="w-4 h-4" />
               )}
-              {t("codexConfig.extractFromCurrent", {
-                defaultValue: "从编辑内容提取",
-              })}
+              {t("codexConfig.extractFromCurrent")}
             </Button>
           )}
           <Button type="button" variant="outline" onClick={handleClose}>

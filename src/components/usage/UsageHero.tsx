@@ -71,6 +71,10 @@ const TITLE_THEMES: Record<AppType | "all", TitleTheme> = {
   },
 };
 
+const isTitleThemeKey = (
+  value: string | undefined,
+): value is keyof typeof TITLE_THEMES => !!value && value in TITLE_THEMES;
+
 /**
  * Combine per-app summaries into a single rolled-up summary.
  *
@@ -190,8 +194,9 @@ export function UsageHero({
   const titleTheme =
     TITLE_THEMES[(appType ?? "all") as keyof typeof TITLE_THEMES] ??
     TITLE_THEMES.all;
-  const appLabel =
-    appType && appType in TITLE_THEMES ? t(`usage.appFilter.${appType}`) : null;
+  const appLabel = isTitleThemeKey(appType)
+    ? t(`usage.appFilter.${appType}`)
+    : null;
 
   const cacheWriteState = deriveCacheWriteState(
     appType ? [appType] : allApps.map((a) => a.appType),
@@ -212,15 +217,9 @@ export function UsageHero({
     muted: cacheWriteState === "na",
     tooltip:
       cacheWriteState === "na"
-        ? t(
-            "usage.cacheWriteNotReported",
-            "OpenAI 协议不区分缓存写入，仅上报缓存命中",
-          )
+        ? t("usage.cacheWriteNotReported")
         : cacheWriteState === "partial"
-          ? t(
-              "usage.cacheWritePartial",
-              "部分协议（如 OpenAI）不上报缓存写入，数值可能偏低",
-            )
+          ? t("usage.cacheWritePartial")
           : undefined,
   };
 
@@ -269,7 +268,7 @@ export function UsageHero({
                         <span className="text-muted-foreground/30">•</span>
                       </>
                     )}
-                    {t("usage.realTotal", "真实消耗 Tokens")}
+                    {t("usage.realTotal")}
                   </div>
                   <div className="flex items-baseline gap-2">
                     <span
@@ -311,7 +310,7 @@ export function UsageHero({
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               <MiniStat
                 icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
-                label={t("usage.freshInput", "新增输入")}
+                label={t("usage.freshInput")}
                 value={formatTokensShort(input, lang)}
                 accent="text-blue-500"
               />
@@ -323,7 +322,7 @@ export function UsageHero({
               />
               <MiniStat
                 icon={<Database className="h-3.5 w-3.5" />}
-                label={t("usage.cacheWrite", "缓存写入")}
+                label={t("usage.cacheWrite")}
                 value={cacheWriteDisplay.value}
                 accent="text-amber-500"
                 muted={cacheWriteDisplay.muted}
@@ -331,7 +330,7 @@ export function UsageHero({
               />
               <MiniStat
                 icon={<Sparkles className="h-3.5 w-3.5" />}
-                label={t("usage.cacheRead", "缓存命中")}
+                label={t("usage.cacheRead")}
                 value={formatTokensShort(cacheRead, lang)}
                 accent="text-emerald-500"
               />
@@ -339,7 +338,7 @@ export function UsageHero({
               <div className="col-span-2 lg:col-span-1 flex flex-col justify-center rounded-xl border border-border/40 bg-background/40 p-3 shadow-sm">
                 <div className="flex items-center justify-between text-[11px] mb-2">
                   <span className="text-muted-foreground font-medium">
-                    {t("usage.cacheHitRate", "缓存命中率")}
+                    {t("usage.cacheHitRate")}
                   </span>
                   <span className="font-bold text-emerald-500 tabular-nums">
                     {hitPercentLabel}%

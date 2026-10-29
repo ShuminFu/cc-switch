@@ -846,7 +846,7 @@
     "installCommandsCopied": "Install commands copied",
     "installCommandsCopyFailed": "Copy failed, please copy manually.",
     "importFailedError": "Import config failed: {{message}}",
-    "exportFailedError": "Export config failed:",
+    "exportFailedError": "Export config failed: {{message}}",
     "restartRequired": "Restart Required",
     "restartRequiredMessage": "Modifying the CC Switch configuration directory requires restarting the application to take effect. Restart now?",
     "restartNow": "Restart Now",
@@ -1490,7 +1490,8 @@
       "claude": "Claude Code",
       "codex": "Codex",
       "gemini": "Gemini",
-      "opencode": "OpenCode"
+      "opencode": "OpenCode",
+      "grokbuild": "Grok Build"
     },
     "rawInputLabel": "Raw",
     "dataSources": "Data Sources",

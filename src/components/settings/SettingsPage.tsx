@@ -199,11 +199,7 @@ export function SettingsPage({
       } catch (error) {
         console.error("[SettingsPage] Failed to autosave settings", error);
         updateSettings(previousValues);
-        toast.error(
-          t("settings.saveFailedGeneric", {
-            defaultValue: "保存失败，请重试",
-          }),
-        );
+        toast.error(t("settings.saveFailedGeneric"));
         return false;
       }
     },
@@ -229,9 +225,7 @@ export function SettingsPage({
               {t("settings.tabGeneral")}
             </TabsTrigger>
             <TabsTrigger value="proxy">{t("settings.tabProxy")}</TabsTrigger>
-            <TabsTrigger value="auth">
-              {t("settings.tabAuth", { defaultValue: "认证" })}
-            </TabsTrigger>
+            <TabsTrigger value="auth">{t("settings.tabAuth")}</TabsTrigger>
             <TabsTrigger value="advanced">
               {t("settings.tabAdvanced")}
             </TabsTrigger>
@@ -404,15 +398,10 @@ export function SettingsPage({
                             <HardDriveDownload className="h-5 w-5 text-amber-500" />
                             <div className="text-left">
                               <h3 className="text-base font-semibold">
-                                {t("settings.advanced.backup.title", {
-                                  defaultValue: "Backup & Restore",
-                                })}
+                                {t("settings.advanced.backup.title")}
                               </h3>
                               <p className="text-sm text-muted-foreground font-normal">
-                                {t("settings.advanced.backup.description", {
-                                  defaultValue:
-                                    "Manage automatic backups, view and restore database snapshots",
-                                })}
+                                {t("settings.advanced.backup.description")}
                               </p>
                             </div>
                           </div>

@@ -2,6 +2,7 @@
  * 预设供应商配置模板
  */
 import { ProviderCategory } from "../types";
+import type { TranslationKey } from "@/i18n/keys";
 
 export interface TemplateValueConfig {
   label: string;
@@ -24,7 +25,7 @@ export interface PresetTheme {
 
 export interface ProviderPreset {
   name: string;
-  nameKey?: string; // i18n key for localized display name
+  nameKey?: TranslationKey; // i18n key for localized display name
   websiteUrl: string;
   // 新增：第三方/聚合等可单独配置获取 API Key 的链接
   apiKeyUrl?: string;

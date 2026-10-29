@@ -35,7 +35,9 @@ describe("icon-only buttons have accessible names", () => {
       <BackupListSection onSettingsChange={() => {}} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "settings.backupManager.rename" }),
+    );
 
     expect(
       screen.getByRole("button", { name: "common.confirm" }),

@@ -26,8 +26,9 @@ import {
   type UniversalProviderPreset,
 } from "@/config/universalProviderPresets";
 import { ProviderIcon } from "@/components/ProviderIcon";
+import type { TranslationKey } from "@/i18n/keys";
 
-type PresetTranslator = (key: string) => unknown;
+type PresetTranslator = (key: TranslationKey) => unknown;
 
 export const PresetSortMode = {
   Original: "original",
@@ -205,34 +206,19 @@ export function ProviderPresetSelector({
   const getCategoryHint = (): ReactNode => {
     switch (category) {
       case "official":
-        return t("providerForm.officialHint", {
-          defaultValue: "💡 官方供应商使用浏览器登录，无需配置 API Key",
-        });
+        return t("providerForm.officialHint");
       case "cn_official":
-        return t("providerForm.cnOfficialApiKeyHint", {
-          defaultValue: "💡 国产官方供应商只需填写 API Key，请求地址已预设",
-        });
+        return t("providerForm.cnOfficialApiKeyHint");
       case "aggregator":
-        return t("providerForm.aggregatorApiKeyHint", {
-          defaultValue: "💡 聚合服务供应商只需填写 API Key 即可使用",
-        });
+        return t("providerForm.aggregatorApiKeyHint");
       case "third_party":
-        return t("providerForm.thirdPartyApiKeyHint", {
-          defaultValue: "💡 第三方供应商需要填写 API Key 和请求地址",
-        });
+        return t("providerForm.thirdPartyApiKeyHint");
       case "custom":
-        return t("providerForm.customApiKeyHint", {
-          defaultValue: "💡 自定义配置需手动填写所有必要字段",
-        });
+        return t("providerForm.customApiKeyHint");
       case "omo":
-        return t("providerForm.omoHint", {
-          defaultValue:
-            "💡 OMO 配置管理 Agent 模型分配，兼容 oh-my-openagent.jsonc / oh-my-opencode.jsonc",
-        });
+        return t("providerForm.omoHint");
       default:
-        return t("providerPreset.hint", {
-          defaultValue: "选择预设后可继续调整下方字段。",
-        });
+        return t("providerPreset.hint");
     }
   };
 
@@ -315,12 +301,8 @@ export function ProviderPresetSelector({
                   setSearchOpen(false);
                 }
               }}
-              placeholder={t("providerPreset.searchPlaceholder", {
-                defaultValue: "Search presets...",
-              })}
-              aria-label={t("providerPreset.searchAriaLabel", {
-                defaultValue: "Search provider presets",
-              })}
+              placeholder={t("providerPreset.searchPlaceholder")}
+              aria-label={t("providerPreset.searchAriaLabel")}
               className="w-60 h-8"
               autoFocus
             />
@@ -329,17 +311,13 @@ export function ProviderPresetSelector({
             type="button"
             variant="ghost"
             size="icon"
-            aria-label={t("providerPreset.searchAriaLabel", {
-              defaultValue: "Search provider presets",
-            })}
+            aria-label={t("providerPreset.searchAriaLabel")}
             aria-pressed={searchOpen}
             onClick={() => {
               setSearchOpen((v) => !v);
               if (searchOpen) setSearchQuery("");
             }}
-            title={t("providerPreset.searchTooltip", {
-              defaultValue: "Search presets",
-            })}
+            title={t("providerPreset.searchTooltip")}
             className={
               searchOpen || searchQuery.trim()
                 ? "size-8 bg-accent text-foreground"
@@ -353,19 +331,13 @@ export function ProviderPresetSelector({
             type="button"
             variant="ghost"
             size="icon"
-            aria-label={t("providerPreset.sortAriaLabel", {
-              defaultValue: "Toggle preset sorting",
-            })}
+            aria-label={t("providerPreset.sortAriaLabel")}
             aria-pressed={sortMode === PresetSortMode.NameAsc}
             onClick={toggleSortMode}
             title={
               sortMode === PresetSortMode.NameAsc
-                ? t("providerPreset.sortOriginalTooltip", {
-                    defaultValue: "Restore original order",
-                  })
-                : t("providerPreset.sortNameAscTooltip", {
-                    defaultValue: "Sort A-Z",
-                  })
+                ? t("providerPreset.sortOriginalTooltip")
+                : t("providerPreset.sortNameAscTooltip")
             }
             className={
               sortMode === PresetSortMode.NameAsc
@@ -393,9 +365,7 @@ export function ProviderPresetSelector({
 
         {visiblePresetEntries.length === 0 && (
           <div className="col-span-full rounded-md border border-dashed border-border-default px-3 py-2 text-xs text-muted-foreground">
-            {t("providerPreset.noSearchResults", {
-              defaultValue: "No matching presets.",
-            })}
+            {t("providerPreset.noSearchResults")}
           </div>
         )}
 
@@ -447,9 +417,7 @@ export function ProviderPresetSelector({
               type="button"
               onClick={() => onUniversalPresetSelect(preset)}
               className="inline-flex items-center justify-start gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-accent text-muted-foreground hover:bg-accent/80 relative w-full"
-              title={t("universalProvider.hint", {
-                defaultValue: "跨应用统一配置，自动同步到 Claude/Codex/Gemini",
-              })}
+              title={t("universalProvider.hint")}
             >
               <ProviderIcon
                 icon={preset.icon}
@@ -468,16 +436,10 @@ export function ProviderPresetSelector({
               type="button"
               onClick={onManageUniversalProviders}
               className="inline-flex items-center justify-start gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-accent text-muted-foreground hover:bg-accent/80 w-full"
-              title={t("universalProvider.manage", {
-                defaultValue: "管理统一供应商",
-              })}
+              title={t("universalProvider.manage")}
             >
               <Settings2 className="h-4 w-4 flex-shrink-0" />
-              <span className="truncate">
-                {t("universalProvider.manage", {
-                  defaultValue: "管理",
-                })}
-              </span>
+              <span className="truncate">{t("universalProvider.manage")}</span>
             </button>
           )}
         </div>

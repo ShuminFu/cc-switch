@@ -10,6 +10,7 @@
  */
 import { ProviderCategory } from "../types";
 import type { PresetTheme } from "./claudeProviderPresets";
+import type { TranslationKey } from "@/i18n/keys";
 
 export type ClaudeDesktopApiFormat =
   | "anthropic"
@@ -42,7 +43,7 @@ export type ClaudeDesktopRoleId = keyof typeof CLAUDE_DESKTOP_ROLE_ROUTE_IDS;
 
 export interface ClaudeDesktopProviderPreset {
   name: string;
-  nameKey?: string;
+  nameKey?: TranslationKey;
   websiteUrl: string;
   apiKeyUrl?: string;
   category?: ProviderCategory;

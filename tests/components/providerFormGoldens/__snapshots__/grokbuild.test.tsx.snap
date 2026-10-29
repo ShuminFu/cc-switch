@@ -3,7 +3,7 @@
 exports[`ProviderForm settingsConfig goldens: grokbuild > custom custom > create 1`] = `
 {
   "errors": [
-    "请填写供应商名称、API 地址、API Key 和模型",
+    "providerForm.requiredFields",
   ],
   "filled": [
     "codexApiKey (api key)",

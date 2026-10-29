@@ -43,7 +43,7 @@ export function PricingEditModal({
 
     // 验证模型 ID
     if (isNew && !formData.modelId.trim()) {
-      toast.error(t("usage.modelIdRequired", "模型 ID 不能为空"));
+      toast.error(t("usage.modelIdRequired"));
       return;
     }
 
@@ -57,7 +57,7 @@ export function PricingEditModal({
 
     for (const value of values) {
       if (!isNonNegativeDecimalString(value)) {
-        toast.error(t("usage.invalidPrice", "价格必须为非负数"));
+        toast.error(t("usage.invalidPrice"));
         return;
       }
     }
@@ -73,9 +73,7 @@ export function PricingEditModal({
       });
 
       toast.success(
-        isNew
-          ? t("usage.pricingAdded", "定价已添加")
-          : t("usage.pricingUpdated", "定价已更新"),
+        isNew ? t("usage.pricingAdded") : t("usage.pricingUpdated"),
         { closeButton: true },
       );
 
@@ -90,8 +88,8 @@ export function PricingEditModal({
       isOpen={open}
       title={
         isNew
-          ? t("usage.addPricing", "新增定价")
-          : `${t("usage.editPricing", "编辑定价")} - ${model.modelId}`
+          ? t("usage.addPricing")
+          : `${t("usage.editPricing")} - ${model.modelId}`
       }
       onClose={onClose}
       footer={
@@ -106,20 +104,17 @@ export function PricingEditModal({
             <Save className="h-4 w-4 mr-2" />
           )}
           {updatePricing.isPending
-            ? t("common.saving", "保存中...")
+            ? t("common.saving")
             : isNew
-              ? t("common.add", "新增")
-              : t("common.save", "保存")}
+              ? t("common.add")
+              : t("common.save")}
         </Button>
       }
     >
       {isNew && (
         <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-border/50 bg-muted/20 px-3 py-2.5">
           <p className="text-xs text-muted-foreground">
-            {t(
-              "usage.modelsDevHint",
-              "无需手动填写，可从 models.dev 选择模型定价",
-            )}
+            {t("usage.modelsDevHint")}
           </p>
           <Button
             type="button"
@@ -129,7 +124,7 @@ export function PricingEditModal({
             className="shrink-0"
           >
             <Globe className="mr-1.5 h-4 w-4" />
-            {t("usage.importFromModelsDev", "从 models.dev 导入")}
+            {t("usage.importFromModelsDev")}
           </Button>
         </div>
       )}
@@ -137,42 +132,34 @@ export function PricingEditModal({
       <form id="pricing-form" onSubmit={handleSubmit} className="space-y-6">
         {isNew && (
           <div className="space-y-2">
-            <Label htmlFor="modelId">{t("usage.modelId", "模型 ID")}</Label>
+            <Label htmlFor="modelId">{t("usage.modelId")}</Label>
             <Input
               id="modelId"
               value={formData.modelId}
               onChange={(e) =>
                 setFormData({ ...formData, modelId: e.target.value })
               }
-              placeholder={t("usage.modelIdPlaceholder", {
-                defaultValue: "例如: claude-3-5-sonnet-20241022",
-              })}
+              placeholder={t("usage.modelIdPlaceholder")}
               required
             />
           </div>
         )}
 
         <div className="space-y-2">
-          <Label htmlFor="displayName">
-            {t("usage.displayName", "显示名称")}
-          </Label>
+          <Label htmlFor="displayName">{t("usage.displayName")}</Label>
           <Input
             id="displayName"
             value={formData.displayName}
             onChange={(e) =>
               setFormData({ ...formData, displayName: e.target.value })
             }
-            placeholder={t("usage.displayNamePlaceholder", {
-              defaultValue: "例如: Claude 3.5 Sonnet",
-            })}
+            placeholder={t("usage.displayNamePlaceholder")}
             required
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="inputCost">
-            {t("usage.inputCostPerMillion", "输入成本 (每百万 tokens, USD)")}
-          </Label>
+          <Label htmlFor="inputCost">{t("usage.inputCostPerMillion")}</Label>
           <Input
             id="inputCost"
             type="number"
@@ -187,9 +174,7 @@ export function PricingEditModal({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="outputCost">
-            {t("usage.outputCostPerMillion", "输出成本 (每百万 tokens, USD)")}
-          </Label>
+          <Label htmlFor="outputCost">{t("usage.outputCostPerMillion")}</Label>
           <Input
             id="outputCost"
             type="number"
@@ -205,10 +190,7 @@ export function PricingEditModal({
 
         <div className="space-y-2">
           <Label htmlFor="cacheReadCost">
-            {t(
-              "usage.cacheReadCostPerMillion",
-              "缓存读取成本 (每百万 tokens, USD)",
-            )}
+            {t("usage.cacheReadCostPerMillion")}
           </Label>
           <Input
             id="cacheReadCost"
@@ -225,10 +207,7 @@ export function PricingEditModal({
 
         <div className="space-y-2">
           <Label htmlFor="cacheCreationCost">
-            {t(
-              "usage.cacheCreationCostPerMillion",
-              "缓存写入成本 (每百万 tokens, USD)",
-            )}
+            {t("usage.cacheCreationCostPerMillion")}
           </Label>
           <Input
             id="cacheCreationCost"

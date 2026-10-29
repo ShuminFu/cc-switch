@@ -47,18 +47,11 @@ const EnvPanel: React.FC = () => {
       const detail = extractErrorMessage(error);
       let description = detail || undefined;
       if (detail === "OPENCLAW_ENV_EMPTY") {
-        description = t("openclaw.env.empty", {
-          defaultValue:
-            "OpenClaw env cannot be empty. Use {} for an empty object.",
-        });
+        description = t("openclaw.env.empty");
       } else if (detail === "OPENCLAW_ENV_INVALID_JSON") {
-        description = t("openclaw.env.invalidJson", {
-          defaultValue: "OpenClaw env must be valid JSON.",
-        });
+        description = t("openclaw.env.invalidJson");
       } else if (detail === "OPENCLAW_ENV_OBJECT_REQUIRED") {
-        description = t("openclaw.env.objectRequired", {
-          defaultValue: "OpenClaw env must be a JSON object.",
-        });
+        description = t("openclaw.env.objectRequired");
       }
       toast.error(t("openclaw.env.saveFailed"), {
         description,
@@ -82,10 +75,7 @@ const EnvPanel: React.FC = () => {
         {t("openclaw.env.description")}
       </p>
       <p className="text-xs text-muted-foreground mb-4">
-        {t("openclaw.env.editorHint", {
-          defaultValue:
-            "Edit the full env section as JSON. Nested objects such as env.vars and env.shellEnv are supported.",
-        })}
+        {t("openclaw.env.editorHint")}
       </p>
 
       <JsonEditor

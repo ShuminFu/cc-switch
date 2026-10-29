@@ -151,7 +151,7 @@ export function UsageDashboard({
     );
 
     if (range.liveEndTime) {
-      return `${startStr} → ${t("usage.liveEndTimeNow", "现在")}`;
+      return `${startStr} → ${t("usage.liveEndTimeNow")}`;
     }
 
     const endStr = new Date(resolvedRange.endDate * 1000).toLocaleString(

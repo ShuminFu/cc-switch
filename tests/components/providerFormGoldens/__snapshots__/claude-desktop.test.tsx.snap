@@ -2533,7 +2533,7 @@ exports[`ProviderForm settingsConfig goldens: claude-desktop > claude-desktop-66
 exports[`ProviderForm settingsConfig goldens: claude-desktop > custom custom > create 1`] = `
 {
   "errors": [
-    "请填写供应商名称",
+    "providerForm.fillSupplierName",
   ],
   "filled": [
     "apiKey (api key)",
