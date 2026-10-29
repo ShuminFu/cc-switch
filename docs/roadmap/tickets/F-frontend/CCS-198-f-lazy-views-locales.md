@@ -48,3 +48,5 @@ f-app-shell-split
 - `pnpm test:unit`: 117 files, 1225 tests passed.
 - `pnpm typecheck`: clean. `pnpm lint`: clean (0 warnings). `pnpm format:check`: clean.
 - No Rust files touched.
+
+**Review.** Re-checked independently: `pnpm build:renderer` entry chunk is 944.92 kB and `dist/index.html` references only that script, with the locales (`en`/`ja`/`zh`/`zh-TW`) and the heavy views/dialogs in separate chunks. `pnpm test:unit` (117 files, 1225 tests), `pnpm typecheck` and `pnpm format:check` pass. One follow-up fix: the `configLoadError` listener in `src/main.tsx` is registered before `bootstrap()` waits for `i18nReady`. An early event could therefore show the error dialog before the locale chunk arrived, falling back to the hard-coded Chinese `defaultValue`. `handleConfigLoadError` now awaits `i18nReady` first. `i18nReady` never rejects, so this cannot block the exit path. Per-app preset splitting is still limited to "all presets load with the lazy ProviderForm chunk", as noted above. The acceptance criteria (≥30% smaller entry, unit tests) are met.

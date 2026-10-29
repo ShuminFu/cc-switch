@@ -45,6 +45,9 @@ async function handleConfigLoadError(
   const path = payload?.path ?? "~/.cc-switch/config.json";
   const detail = payload?.error ?? "Unknown error";
 
+  // 事件可能早于语言包加载到达，先等待以显示当前语言的提示
+  await i18nReady;
+
   await message(
     i18n.t("errors.configLoadFailedMessage", {
       path,
