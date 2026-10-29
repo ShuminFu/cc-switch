@@ -808,10 +808,13 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, ProxyError> {
     }
 
     // 映射 finish_reason → stop_reason
+    // Gemini 兼容层 / Ollama / vLLM 会在携带 tool_calls 时返回 "stop"，
+    // 此时同样映射为 tool_use，否则 Claude Code 会结束回合而不执行工具。
     let stop_reason = choice
         .get("finish_reason")
         .and_then(|r| r.as_str())
         .map(|r| match r {
+            "stop" if has_tool_use => "tool_use",
             "stop" => "end_turn",
             "length" => "max_tokens",
             "tool_calls" | "function_call" => "tool_use",
@@ -1628,6 +1631,59 @@ mod tests {
         assert_eq!(result["content"][0]["name"], "get_weather");
         assert_eq!(result["content"][0]["input"]["location"], "Tokyo");
         assert_eq!(result["stop_reason"], "tool_use");
+    }
+
+    #[test]
+    fn test_openai_to_anthropic_finish_stop_with_tool_calls_maps_tool_use() {
+        // Gemini-compatible / Ollama / vLLM backends return "stop" with tool_calls.
+        let input = json!({
+            "id": "chatcmpl-stop-tool",
+            "object": "chat.completion",
+            "model": "gemini-2.5-pro",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{\"location\": \"Tokyo\"}"}
+                    }]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+        });
+
+        let result = openai_to_anthropic(input).unwrap();
+        assert_eq!(result["content"][0]["type"], "tool_use");
+        assert_eq!(result["stop_reason"], "tool_use");
+    }
+
+    #[test]
+    fn test_openai_to_anthropic_finish_length_with_tool_calls_keeps_max_tokens() {
+        let input = json!({
+            "id": "chatcmpl-len-tool",
+            "object": "chat.completion",
+            "model": "gpt-4",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{}"}
+                    }]
+                },
+                "finish_reason": "length"
+            }]
+        });
+
+        let result = openai_to_anthropic(input).unwrap();
+        assert_eq!(result["stop_reason"], "max_tokens");
     }
 
     #[test]

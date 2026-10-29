@@ -746,7 +746,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         // （第一个 usage 为 null，后续才补全）。此处只做缓存，不立即发送，
                                         // 等到 [DONE] 或流末尾再统一发出，确保 usage 完整且只发一次。
                                         if let Some(finish_reason) = &choice.finish_reason {
-                                            let stop_reason = map_stop_reason(Some(finish_reason));
+                                            let mut stop_reason = map_stop_reason(Some(finish_reason));
                                             let usage_json =
                                                 chunk_usage_json.clone().or_else(|| latest_usage.clone());
 
@@ -766,6 +766,15 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                 &mut open_tool_block_indices,
                                             ) {
                                                 yield Ok(event);
+                                            }
+
+                                            // Gemini 兼容层 / Ollama / vLLM 会在携带 tool_calls 时返回
+                                            // finish_reason "stop"；若映射为 end_turn，Claude Code 会直接结束
+                                            // 回合而不执行工具。已发出工具块时改为 tool_use（length 保持 max_tokens）。
+                                            if stop_reason.as_deref() == Some("end_turn")
+                                                && tool_blocks_by_index.values().any(|state| state.started)
+                                            {
+                                                stop_reason = Some("tool_use".to_string());
                                             }
 
                                             // 缓存 message_delta，等到 [DONE] 时发送（以便收集完整的 usage）
@@ -1356,6 +1365,62 @@ mod tests {
                 .and_then(|v| v.as_u64()),
             Some(0)
         );
+    }
+
+    fn message_delta_stop_reason(events: &[Value]) -> Vec<&str> {
+        events
+            .iter()
+            .filter(|event| event_type(event) == Some("message_delta"))
+            .filter_map(|event| event.pointer("/delta/stop_reason").and_then(|v| v.as_str()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_streaming_finish_stop_with_tool_calls_maps_to_tool_use() {
+        // Gemini-compatible / Ollama / vLLM backends send finish_reason "stop"
+        // together with tool_calls.
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_stop_tool\",\"model\":\"gemini-2.5-pro\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_0\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Tokyo\\\"}\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_stop_tool\",\"model\":\"gemini-2.5-pro\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        assert!(events.iter().any(|event| {
+            event_type(event) == Some("content_block_start")
+                && event
+                    .pointer("/content_block/type")
+                    .and_then(|v| v.as_str())
+                    == Some("tool_use")
+        }));
+        assert_eq!(message_delta_stop_reason(&events), vec!["tool_use"]);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_finish_stop_text_only_maps_to_end_turn() {
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_stop_text\",\"model\":\"gemini-2.5-pro\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_stop_text\",\"model\":\"gemini-2.5-pro\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        assert_eq!(message_delta_stop_reason(&events), vec!["end_turn"]);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_finish_length_with_tool_calls_keeps_max_tokens() {
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_len_tool\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_0\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_len_tool\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+
+        assert_eq!(message_delta_stop_reason(&events), vec!["max_tokens"]);
     }
 
     #[tokio::test]
