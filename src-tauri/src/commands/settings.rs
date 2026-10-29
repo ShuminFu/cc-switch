@@ -51,6 +51,21 @@ fn merge_settings_for_save(
     incoming
 }
 
+/// 前端整体保存设置：在设置写锁内与最新值合并后写入，返回保存前的旧设置
+/// 与合并后的统一会话开关值。合并基准取锁内的最新值而非锁外快照，避免覆盖
+/// 期间并发提交的迁移标记、同步状态等后端状态。
+fn persist_settings_for_save(
+    incoming: crate::settings::AppSettings,
+) -> Result<(crate::settings::AppSettings, bool), crate::error::AppError> {
+    let mut unify_codex_enabled = false;
+    let existing = crate::settings::update_settings_with(|existing| {
+        let merged = merge_settings_for_save(incoming, existing);
+        unify_codex_enabled = merged.unify_codex_session_history;
+        merged
+    })?;
+    Ok((existing, unify_codex_enabled))
+}
+
 /// 获取设置
 #[tauri::command]
 pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
@@ -77,12 +92,9 @@ pub async fn save_settings(
     state: tauri::State<'_, crate::store::AppState>,
     settings: crate::settings::AppSettings,
 ) -> Result<bool, String> {
-    let existing = crate::settings::get_settings();
-    let merged = merge_settings_for_save(settings, &existing);
-    let unify_codex_changed =
-        merged.unify_codex_session_history != existing.unify_codex_session_history;
-    let unify_codex_enabled = merged.unify_codex_session_history;
-    crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
+    let (existing, unify_codex_enabled) =
+        persist_settings_for_save(settings).map_err(|e| e.to_string())?;
+    let unify_codex_changed = unify_codex_enabled != existing.unify_codex_session_history;
 
     // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，
     // 不必等下一次切换才生效。
@@ -96,7 +108,10 @@ pub async fn save_settings(
             crate::services::provider::reapply_current_codex_official_live(state.inner())
         {
             log::warn!("统一 Codex 会话历史开关变更后重写 live 配置失败，回滚设置: {err}");
-            if let Err(rollback_err) = crate::settings::update_settings(existing) {
+            // 回滚同样在写锁内与最新值合并，保留期间并发提交的迁移标记等后端状态
+            if let Err(rollback_err) = crate::settings::update_settings_with(|current| {
+                merge_settings_for_save(existing, current)
+            }) {
                 log::error!("回滚统一会话开关设置失败: {rollback_err}");
             }
             return Err(format!(
@@ -708,6 +723,125 @@ mod tests {
         assert!(validate_app_config_dir_override(picked, home, None).is_err());
         crate::picked_paths::register(crate::picked_paths::PickPurpose::Directory, picked);
         assert!(validate_app_config_dir_override(picked, home, None).is_ok());
+    }
+
+    /// 前端整体保存与后端增量写入（迁移标记、同步设置）并发时不丢写
+    mod save_race {
+        use super::super::persist_settings_for_save;
+        use crate::paths::{self, Paths};
+        use crate::settings::{
+            get_settings, get_settings_for_frontend, mark_codex_provider_template_migrated,
+            scoped_settings_store, set_webdav_sync_settings, AppSettings,
+            CodexProviderTemplateMigration, SharedSettingsStore, WebDavSyncSettings,
+        };
+
+        fn template_marker(completed_at: &str) -> CodexProviderTemplateMigration {
+            CodexProviderTemplateMigration {
+                completed_at: completed_at.to_string(),
+                migrated_provider_ids: Vec::new(),
+            }
+        }
+
+        fn saved_file() -> serde_json::Value {
+            let path = paths::current().settings_path();
+            serde_json::from_slice(&std::fs::read(path).expect("read settings.json"))
+                .expect("settings.json is valid json")
+        }
+
+        #[test]
+        fn save_after_marker_commit_keeps_marker() {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let _paths = paths::scoped(Paths::with_home(temp.path()));
+            let _settings = scoped_settings_store();
+
+            // 前端拿到的快照早于迁移标记写入
+            let snapshot = get_settings_for_frontend();
+            mark_codex_provider_template_migrated(template_marker("marker")).expect("mark");
+
+            let mut incoming = snapshot;
+            incoming.show_in_tray = !incoming.show_in_tray;
+            let (previous, _) = persist_settings_for_save(incoming.clone()).expect("save");
+
+            assert!(previous.local_migrations.is_some());
+            let current = get_settings();
+            assert_eq!(current.show_in_tray, incoming.show_in_tray);
+            assert_eq!(
+                current
+                    .local_migrations
+                    .as_ref()
+                    .and_then(|m| m.codex_provider_template_v1.as_ref())
+                    .map(|m| m.completed_at.as_str()),
+                Some("marker")
+            );
+            assert_eq!(saved_file(), serde_json::to_value(&current).unwrap());
+        }
+
+        #[test]
+        fn concurrent_sync_settings_and_saves_keep_file_and_memory_in_sync() {
+            const ITERATIONS: usize = 200;
+            const SAVERS: usize = 2;
+
+            let temp = tempfile::tempdir().expect("tempdir");
+            let home = temp.path().to_path_buf();
+            let _paths = paths::scoped(Paths::with_home(&home));
+            let _settings = scoped_settings_store();
+            let shared = SharedSettingsStore::current();
+            let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+            let savers: Vec<_> = (0..SAVERS)
+                .map(|n| {
+                    let shared = shared.clone();
+                    let home = home.clone();
+                    let done = done.clone();
+                    std::thread::spawn(move || {
+                        let _paths = paths::scoped(Paths::with_home(&home));
+                        let _settings = shared.install();
+                        let mut i = 0usize;
+                        while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                            // 不携带 webdav 的保存（如普通设置页保存）应保留现有同步设置
+                            let incoming = AppSettings {
+                                webdav_sync: None,
+                                language: Some(format!("saver-{n}-{i}")),
+                                ..get_settings_for_frontend()
+                            };
+                            persist_settings_for_save(incoming).expect("save");
+                            i += 1;
+                        }
+                    })
+                })
+                .collect();
+
+            for i in 0..ITERATIONS {
+                set_webdav_sync_settings(Some(WebDavSyncSettings {
+                    base_url: format!("https://dav.example.com/{i}"),
+                    username: "alice".to_string(),
+                    password: format!("secret-{i}"),
+                    ..WebDavSyncSettings::default()
+                }))
+                .expect("set webdav");
+                mark_codex_provider_template_migrated(template_marker(&format!("marker-{i}")))
+                    .expect("mark");
+            }
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            for saver in savers {
+                saver.join().expect("saver thread");
+            }
+
+            let current = get_settings();
+            let last = ITERATIONS - 1;
+            let webdav = current.webdav_sync.as_ref().expect("webdav kept");
+            assert_eq!(webdav.base_url, format!("https://dav.example.com/{last}"));
+            assert_eq!(webdav.password, format!("secret-{last}"));
+            assert_eq!(
+                current
+                    .local_migrations
+                    .as_ref()
+                    .and_then(|m| m.codex_provider_template_v1.as_ref())
+                    .map(|m| m.completed_at.clone()),
+                Some(format!("marker-{last}"))
+            );
+            assert_eq!(saved_file(), serde_json::to_value(&current).unwrap());
+        }
     }
 }
 

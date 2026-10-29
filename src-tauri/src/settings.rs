@@ -839,6 +839,29 @@ impl Drop for ScopedSettingsStore {
     }
 }
 
+/// 当前线程所用设置缓存的句柄，用于在测试中把同一份缓存注入其他线程，
+/// 以覆盖跨线程并发写入。
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct SharedSettingsStore(Arc<SettingsStore>);
+
+#[cfg(test)]
+impl SharedSettingsStore {
+    pub(crate) fn current() -> Self {
+        Self(settings_store())
+    }
+
+    /// 在当前线程注入该缓存，guard 释放时恢复之前的缓存
+    pub(crate) fn install(&self) -> ScopedSettingsStore {
+        let previous =
+            SCOPED_SETTINGS_STORE.with(|scoped| scoped.borrow_mut().replace(self.0.clone()));
+        ScopedSettingsStore {
+            previous,
+            _not_send: PhantomData,
+        }
+    }
+}
+
 fn resolve_override_path(raw: &str) -> PathBuf {
     let paths = crate::paths::current();
     if raw == "~" {
@@ -880,17 +903,29 @@ pub fn get_settings_for_frontend() -> AppSettings {
     settings
 }
 
-pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
-    new_settings.normalize_paths();
-    let store = settings_store();
-    save_settings_file(&store, &new_settings)?;
+/// 整体替换设置。写锁覆盖"写文件 + 替换内存"，与其他写入方串行，
+/// 保证文件与内存缓存不会因并发写入而不一致。
+pub fn update_settings(new_settings: AppSettings) -> Result<(), AppError> {
+    update_settings_with(|_| new_settings).map(|_| ())
+}
 
+/// 在设置写锁内基于当前值构造新设置：`build` 读到的是锁内的最新值，
+/// 构造结果经路径归一化后写入文件并替换内存缓存，返回替换前的旧值。
+/// 用于需要与现有值合并的整体保存（如前端保存设置），避免"锁外快照 →
+/// 整体替换"覆盖掉期间 [`mutate_settings`] 提交的迁移标记、同步状态等。
+pub fn update_settings_with<F>(build: F) -> Result<AppSettings, AppError>
+where
+    F: FnOnce(&AppSettings) -> AppSettings,
+{
+    let store = settings_store();
     let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
     });
-    *guard = new_settings;
-    Ok(())
+    let mut next = build(&guard);
+    next.normalize_paths();
+    save_settings_file(&store, &next)?;
+    Ok(std::mem::replace(&mut *guard, next))
 }
 
 fn mutate_settings<F>(mutator: F) -> Result<(), AppError>
