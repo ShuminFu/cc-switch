@@ -78,5 +78,20 @@
         }
       }
     }
+  },
+  "proxy_e2e": {
+    "scenario": "non-streaming Claude /v1/messages, single provider, usage logging on",
+    "requests": 50,
+    "profile": "debug",
+    "platform": "linux-x86_64",
+    "latency_ms": {
+      "p50": 2.87,
+      "p95": 3.18,
+      "max": 4.39
+    },
+    "db_statements_per_request": 17.0,
+    "allocations_per_request": 593.0,
+    "allocated_bytes_per_request": 172849.0,
+    "_note": "Proxy e2e baseline (CCS-014), measured by tests/proxy_e2e.rs::perf_baseline_non_streaming_request. Refresh with `CC_SWITCH_UPDATE_PERF_BASELINE=1 cargo test --manifest-path src-tauri/Cargo.toml --test proxy_e2e perf_baseline`, then `npx prettier --write docs/dev/perf-baseline.json`. Gates: db_statements_per_request must not grow; allocations_per_request may not exceed 3x. Latency is informational."
   }
 }

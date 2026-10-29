@@ -34,6 +34,10 @@ mod prompt_files;
 mod provider;
 mod provider_defaults;
 mod proxy;
+/// End-to-end proxy harness, used by `tests/proxy_e2e.rs`.
+#[cfg(feature = "testkit")]
+#[doc(hidden)]
+pub mod proxy_harness;
 mod services;
 mod session_manager;
 mod settings;

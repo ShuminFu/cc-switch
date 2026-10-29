@@ -18,8 +18,9 @@ doctest = false
 [features]
 default = []
 test-hooks = []
-# Exposes `proxy::providers::testkit` (golden bridge fixtures) to integration tests.
-testkit = []
+# Exposes `proxy::providers::testkit` (golden bridge fixtures) and `proxy_harness`
+# (mock upstream + real proxy server, with a SQL statement counter) to integration tests.
+testkit = ["rusqlite/trace"]
 
 [build-dependencies]
 tauri-build = { version = "2.4.0", features = [] }

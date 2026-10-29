@@ -1,0 +1,681 @@
+//! End-to-end proxy scenarios: a real `ProxyServer` (router, forwarder,
+//! circuit breakers, rectifiers, usage logger) in front of scripted mock
+//! upstreams, plus the latency / allocation / SQL-statement baseline that is
+//! committed to `docs/dev/perf-baseline.json`.
+//!
+//! Everything runs on the `#[tokio::test]` current-thread runtime: the scoped
+//! test paths, the statement counter and the allocation counter are all
+//! per-thread, so concurrent tests in this binary do not disturb each other.
+
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use cc_switch_lib::proxy_harness::{
+    db_statement_count, HarnessCircuit, HarnessHealth, MockReply, MockUpstream, ProxyHarness,
+};
+use serde_json::{json, Value};
+
+#[path = "support.rs"]
+mod support;
+use support::TestEnv;
+
+// ============================================================================
+// Allocation counter (per thread)
+// ============================================================================
+
+struct CountingAlloc;
+
+thread_local! {
+    static ALLOCATIONS: Cell<u64> = const { Cell::new(0) };
+    static ALLOCATED_BYTES: Cell<u64> = const { Cell::new(0) };
+}
+
+fn note_allocation(size: usize) {
+    // const-initialised, destructor-free thread locals never allocate, so this
+    // is safe to call from inside the allocator.
+    let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
+    let _ = ALLOCATED_BYTES.try_with(|bytes| bytes.set(bytes.get() + size as u64));
+}
+
+unsafe impl GlobalAlloc for CountingAlloc {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        note_allocation(layout.size());
+        System.alloc(layout)
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        note_allocation(layout.size());
+        System.alloc_zeroed(layout)
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        note_allocation(new_size);
+        System.realloc(ptr, layout, new_size)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        System.dealloc(ptr, layout)
+    }
+}
+
+#[global_allocator]
+static GLOBAL: CountingAlloc = CountingAlloc;
+
+fn allocation_snapshot() -> (u64, u64) {
+    (ALLOCATIONS.with(Cell::get), ALLOCATED_BYTES.with(Cell::get))
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+const MODEL: &str = "claude-sonnet-4-5";
+
+fn simple_request() -> Value {
+    json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "messages": [{ "role": "user", "content": "hello" }]
+    })
+}
+
+fn healthy() -> HarnessHealth {
+    HarnessHealth {
+        is_healthy: true,
+        consecutive_failures: 0,
+    }
+}
+
+async fn json_body(response: reqwest::Response) -> Value {
+    let text = response.text().await.expect("read proxy response");
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("non-JSON body {text:?}: {e}"))
+}
+
+fn first_text(body: &Value) -> &str {
+    body["content"][0]["text"].as_str().unwrap_or_default()
+}
+
+// ============================================================================
+// Failover and circuit breaker
+// ============================================================================
+
+#[tokio::test]
+async fn failover_moves_to_second_provider_when_first_returns_5xx() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(503, "overloaded")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(first_text(&json_body(response).await), "from b");
+
+    assert_eq!(a.hits(), 1, "primary is tried once");
+    assert_eq!(b.hits(), 1, "secondary serves the request");
+    // Both upstreams receive the provider's own credentials, not the client's.
+    assert_eq!(
+        a.requests()[0].headers["authorization"],
+        "Bearer sk-harness-a"
+    );
+    assert_eq!(
+        b.requests()[0].headers["authorization"],
+        "Bearer sk-harness-b"
+    );
+    assert_eq!(b.requests()[0].path, "/v1/messages");
+
+    let a_health = harness
+        .wait_for_health(
+            "a",
+            &HarnessHealth {
+                is_healthy: true,
+                consecutive_failures: 1,
+            },
+        )
+        .await;
+    assert_eq!(a_health.consecutive_failures, 1);
+
+    let status = harness.status().await;
+    assert_eq!(status.total_requests, 1);
+    assert_eq!(status.success_requests, 1);
+    assert_eq!(status.failover_count, 1);
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].provider_id, "b");
+    assert_eq!(logs[0].status_code, 200);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn non_retryable_client_error_does_not_fail_over() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(400, "messages: field required")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 400);
+    assert_eq!(a.hits(), 1);
+    assert_eq!(b.hits(), 0, "a 400 is the client's fault on every provider");
+    // A client error must not count against the provider's health.
+    assert_eq!(harness.health("a").await, healthy());
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn breaker_opens_after_threshold_and_skips_the_provider() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(502, "bad gateway")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            failure_threshold: 2,
+            success_threshold: 1,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await;
+
+    for _ in 0..2 {
+        let response = harness.messages(&simple_request()).await;
+        assert_eq!(response.status(), 200);
+    }
+    assert_eq!(a.hits(), 2, "a fails twice and reaches the threshold");
+
+    let a_health = harness
+        .wait_for_health(
+            "a",
+            &HarnessHealth {
+                is_healthy: false,
+                consecutive_failures: 2,
+            },
+        )
+        .await;
+    assert!(
+        !a_health.is_healthy,
+        "health row follows the breaker threshold"
+    );
+
+    // Breaker is open: a is no longer even tried.
+    for _ in 0..3 {
+        let response = harness.messages(&simple_request()).await;
+        assert_eq!(response.status(), 200);
+    }
+    assert_eq!(a.hits(), 2, "open breaker skips a");
+    assert_eq!(b.hits(), 5);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn half_open_probe_failure_reopens_and_success_closes_the_breaker() {
+    let _env = TestEnv::new();
+    // a: fails, fails (the half-open probe), then recovers.
+    let a = MockUpstream::sequence(vec![
+        MockReply::error(500, "boom"),
+        MockReply::error(500, "still down"),
+        MockReply::message("from a", 10, 5),
+    ])
+    .await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            failure_threshold: 1,
+            success_threshold: 1,
+            timeout_seconds: 1,
+        })
+        .spawn()
+        .await;
+    let wait_out_open = || tokio::time::sleep(Duration::from_millis(1100));
+
+    // 1. a fails once → Open; b serves.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 1);
+
+    // 2. Still open: a is skipped.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 1);
+
+    // 3. Timeout elapsed → HalfOpen probe goes to a and fails → Open again.
+    wait_out_open().await;
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 2, "half-open lets one probe through");
+
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 2, "failed probe re-opens the breaker");
+
+    // 4. Next probe succeeds → Closed; a serves again from then on.
+    wait_out_open().await;
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!(a.hits(), 3);
+
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!(a.hits(), 4, "closed breaker routes to the primary again");
+    assert_eq!(harness.wait_for_health("a", &healthy()).await, healthy());
+
+    harness.shutdown().await;
+}
+
+// ============================================================================
+// Rectifiers
+// ============================================================================
+
+#[tokio::test]
+async fn signature_rectifier_strips_thinking_blocks_and_retries_same_provider() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::sequence(vec![
+        MockReply::error(
+            400,
+            "messages.1.content.0: Invalid `signature` in `thinking` block",
+        ),
+        MockReply::message("rectified", 10, 5),
+    ])
+    .await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let request = json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "messages": [
+            { "role": "user", "content": "first" },
+            {
+                "role": "assistant",
+                "content": [
+                    { "type": "thinking", "thinking": "hmm", "signature": "forged" },
+                    { "type": "text", "text": "answer" }
+                ]
+            },
+            { "role": "user", "content": "second" }
+        ]
+    });
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(first_text(&json_body(response).await), "rectified");
+
+    let requests = upstream.requests();
+    assert_eq!(requests.len(), 2, "one rejected attempt plus one retry");
+    let original = requests[0].json();
+    assert_eq!(original["messages"][1]["content"][0]["type"], "thinking");
+    let retried = requests[1].json();
+    assert_eq!(
+        retried["messages"][1]["content"],
+        json!([{ "type": "text", "text": "answer" }]),
+        "thinking block removed on retry"
+    );
+    // Rectified retries are neutral for provider health.
+    assert_eq!(harness.wait_for_health("p1", &healthy()).await, healthy());
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn budget_rectifier_raises_thinking_budget_and_retries() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::sequence(vec![
+        MockReply::error(
+            400,
+            "thinking.enabled.budget_tokens: Input should be greater than or equal to 1024",
+        ),
+        MockReply::message("budget ok", 10, 5),
+    ])
+    .await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let request = json!({
+        "model": MODEL,
+        "max_tokens": 512,
+        "thinking": { "type": "enabled", "budget_tokens": 256 },
+        "messages": [{ "role": "user", "content": "think" }]
+    });
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(first_text(&json_body(response).await), "budget ok");
+
+    let requests = upstream.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].json()["thinking"]["budget_tokens"], 256);
+    let retried = requests[1].json();
+    assert_eq!(retried["thinking"]["type"], "enabled");
+    assert_eq!(retried["thinking"]["budget_tokens"], 32000);
+    assert_eq!(retried["max_tokens"], 64000);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn media_rectifier_replaces_images_when_upstream_rejects_them() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::sequence(vec![
+        MockReply::error(400, "This model does not support image input"),
+        MockReply::message("text only", 10, 5),
+    ])
+    .await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let request = json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "messages": [{
+            "role": "user",
+            "content": [
+                { "type": "text", "text": "what is this?" },
+                {
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo=" }
+                }
+            ]
+        }]
+    });
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(first_text(&json_body(response).await), "text only");
+
+    let requests = upstream.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0].json()["messages"][0]["content"][1]["type"],
+        "image"
+    );
+    let retried = requests[1].json();
+    let retried_content = retried["messages"][0]["content"].to_string();
+    assert!(
+        !retried_content.contains("\"image\""),
+        "image block removed on retry: {retried_content}"
+    );
+    assert!(
+        retried_content.contains("[Unsupported Image]"),
+        "image replaced by the marker: {retried_content}"
+    );
+
+    harness.shutdown().await;
+}
+
+// ============================================================================
+// Streaming and usage logging
+// ============================================================================
+
+fn anthropic_sse_chunks() -> Vec<String> {
+    let events = [
+        (
+            "message_start",
+            json!({
+                "type": "message_start",
+                "message": {
+                    "id": "msg_sse", "type": "message", "role": "assistant", "model": MODEL,
+                    "content": [], "stop_reason": null,
+                    "usage": { "input_tokens": 21, "output_tokens": 1 }
+                }
+            }),
+        ),
+        (
+            "content_block_start",
+            json!({ "type": "content_block_start", "index": 0,
+                    "content_block": { "type": "text", "text": "" } }),
+        ),
+        (
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 0,
+                    "delta": { "type": "text_delta", "text": "Hello" } }),
+        ),
+        (
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 0,
+                    "delta": { "type": "text_delta", "text": " world" } }),
+        ),
+        (
+            "content_block_stop",
+            json!({ "type": "content_block_stop", "index": 0 }),
+        ),
+        (
+            "message_delta",
+            json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" },
+                    "usage": { "output_tokens": 9 } }),
+        ),
+        ("message_stop", json!({ "type": "message_stop" })),
+    ];
+    events
+        .iter()
+        .map(|(event, data)| format!("event: {event}\ndata: {data}\n\n"))
+        .collect()
+}
+
+#[tokio::test]
+async fn sse_stream_passes_through_unchanged_and_logs_usage() {
+    let _env = TestEnv::new();
+    let chunks = anthropic_sse_chunks();
+    let upstream = MockUpstream::always(MockReply::sse(chunks.clone())).await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let mut request = simple_request();
+    request["stream"] = json!(true);
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    let content_type = response.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "{content_type}"
+    );
+    let body = response.text().await.expect("read stream");
+    assert_eq!(body, chunks.concat(), "SSE bytes are passed through as-is");
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs.len(), 1);
+    let row = &logs[0];
+    assert!(row.is_streaming);
+    assert_eq!(row.status_code, 200);
+    assert_eq!(row.input_tokens, 21);
+    assert_eq!(row.output_tokens, 9);
+    assert_eq!(row.provider_id, "p1");
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn request_logs_record_success_and_failure_rows() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::sequence(vec![
+        MockReply::message("ok", 1200, 300),
+        MockReply::error(500, "upstream exploded"),
+    ])
+    .await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    let success = harness.wait_for_request_logs(1).await;
+    assert_eq!(success.len(), 1);
+
+    let response = harness.messages(&simple_request()).await;
+    assert!(response.status().is_server_error(), "{}", response.status());
+    let logs = harness.wait_for_request_logs(2).await;
+    assert_eq!(logs.len(), 2);
+
+    let ok = logs
+        .iter()
+        .find(|row| row.status_code == 200)
+        .expect("success row");
+    assert_eq!(ok.app_type, "claude");
+    assert_eq!(ok.provider_id, "p1");
+    assert_eq!(ok.model, MODEL);
+    assert_eq!(ok.request_model.as_deref(), Some(MODEL));
+    assert_eq!(ok.input_tokens, 1200);
+    assert_eq!(ok.output_tokens, 300);
+    assert!(!ok.is_streaming);
+    assert!(ok.error_message.is_none());
+    assert!(ok.session_id.is_some());
+    let cost: f64 = ok.total_cost_usd.parse().expect("numeric cost");
+    assert!(cost > 0.0, "seeded pricing gives a non-zero cost: {cost}");
+
+    let failed = logs
+        .iter()
+        .find(|row| row.status_code != 200)
+        .expect("failure row");
+    assert_eq!(failed.provider_id, "p1");
+    assert!(failed.status_code >= 500, "{}", failed.status_code);
+    assert_eq!(failed.input_tokens, 0);
+    let message = failed.error_message.as_deref().unwrap_or_default();
+    assert!(!message.is_empty(), "failure row carries the error message");
+    assert_ne!(ok.request_id, failed.request_id);
+
+    harness.shutdown().await;
+}
+
+// ============================================================================
+// Baseline: latency, allocations and SQL statements per request
+// ============================================================================
+
+const WARMUP_REQUESTS: usize = 5;
+const MEASURED_REQUESTS: usize = 50;
+
+fn baseline_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("docs")
+        .join("dev")
+        .join("perf-baseline.json")
+}
+
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    let rank = ((p / 100.0) * (sorted.len() - 1) as f64).round() as usize;
+    sorted[rank.min(sorted.len() - 1)]
+}
+
+fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
+#[tokio::test]
+async fn perf_baseline_non_streaming_request() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::messages("ok", 100, 20).await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+    let request = simple_request();
+
+    for _ in 0..WARMUP_REQUESTS {
+        let response = harness.messages(&request).await;
+        assert_eq!(response.status(), 200);
+        response.bytes().await.expect("read warm-up body");
+    }
+    harness.wait_for_request_logs(WARMUP_REQUESTS).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let statements_before = db_statement_count();
+    let (allocs_before, bytes_before) = allocation_snapshot();
+    let mut latencies_ms = Vec::with_capacity(MEASURED_REQUESTS);
+    for _ in 0..MEASURED_REQUESTS {
+        let started = Instant::now();
+        let response = harness.messages(&request).await;
+        assert_eq!(response.status(), 200);
+        response.bytes().await.expect("read body");
+        latencies_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    // Usage rows and health updates land in spawned tasks; let them finish
+    // before reading the counters (the harness's own reads are not counted).
+    let logs = harness
+        .wait_for_request_logs(WARMUP_REQUESTS + MEASURED_REQUESTS)
+        .await;
+    assert_eq!(logs.len(), WARMUP_REQUESTS + MEASURED_REQUESTS);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let statements = db_statement_count() - statements_before;
+    let (allocs_after, bytes_after) = allocation_snapshot();
+
+    latencies_ms.sort_by(|a, b| a.partial_cmp(b).expect("finite latency"));
+    let n = MEASURED_REQUESTS as f64;
+    let statements_per_request = statements as f64 / n;
+    let allocations_per_request = (allocs_after - allocs_before) as f64 / n;
+    let measured = json!({
+        "scenario": "non-streaming Claude /v1/messages, single provider, usage logging on",
+        "requests": MEASURED_REQUESTS,
+        "profile": if cfg!(debug_assertions) { "debug" } else { "release" },
+        "platform": format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        "latency_ms": {
+            "p50": round2(percentile(&latencies_ms, 50.0)),
+            "p95": round2(percentile(&latencies_ms, 95.0)),
+            "max": round2(*latencies_ms.last().expect("latencies")),
+        },
+        "db_statements_per_request": round2(statements_per_request),
+        "allocations_per_request": allocations_per_request.round(),
+        "allocated_bytes_per_request": ((bytes_after - bytes_before) as f64 / n).round(),
+    });
+
+    // JSON artifact for CI upload / local comparison.
+    let artifact = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("proxy-e2e-perf.json");
+    std::fs::write(
+        &artifact,
+        serde_json::to_string_pretty(&measured).expect("serialize measurement"),
+    )
+    .expect("write perf artifact");
+    println!(
+        "proxy e2e perf: {measured}\n(written to {})",
+        artifact.display()
+    );
+
+    let path = baseline_path();
+    let mut baseline: Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read perf baseline"))
+            .expect("parse perf baseline");
+
+    if std::env::var_os("CC_SWITCH_UPDATE_PERF_BASELINE").is_some() {
+        let mut entry = measured.clone();
+        entry["_note"] = json!(
+            "Proxy e2e baseline (CCS-014), measured by tests/proxy_e2e.rs::perf_baseline_non_streaming_request. \
+             Refresh with `CC_SWITCH_UPDATE_PERF_BASELINE=1 cargo test --manifest-path src-tauri/Cargo.toml --test proxy_e2e perf_baseline`, then `npx prettier --write docs/dev/perf-baseline.json`. \
+             Gates: db_statements_per_request must not grow; allocations_per_request may not exceed 3x. Latency is informational."
+        );
+        baseline["proxy_e2e"] = entry;
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&baseline).expect("serialize baseline") + "\n",
+        )
+        .expect("write perf baseline");
+        return;
+    }
+
+    let recorded = &baseline["proxy_e2e"];
+    let max_statements = recorded["db_statements_per_request"]
+        .as_f64()
+        .expect("baseline db_statements_per_request");
+    assert!(
+        statements_per_request <= max_statements,
+        "SQL statements per proxied request grew: {statements_per_request} > baseline {max_statements}. \
+         If intended, refresh docs/dev/perf-baseline.json (see its proxy_e2e._note)."
+    );
+    let baseline_allocations = recorded["allocations_per_request"]
+        .as_f64()
+        .expect("baseline allocations_per_request");
+    assert!(
+        allocations_per_request <= baseline_allocations * 3.0,
+        "allocations per proxied request grew: {allocations_per_request} > 3x baseline {baseline_allocations}"
+    );
+
+    harness.shutdown().await;
+}
