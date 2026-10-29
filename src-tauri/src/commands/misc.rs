@@ -1,11 +1,11 @@
 use crate::app_config::AppType;
 use crate::init_status::{InitErrorPayload, SkillsMigrationPayload};
 use crate::services::ProviderService;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::LazyLock;
 use tauri::AppHandle;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
@@ -959,8 +959,8 @@ async fn fetch_pypi_latest_version(client: &reqwest::Client, package: &str) -> O
 }
 
 /// 预编译的版本号正则表达式
-static VERSION_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\d+\.\d+\.\d+(-[\w.]+)?").expect("Invalid version regex"));
+static VERSION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\d+\.\d+\.\d+(-[\w.]+)?").expect("Invalid version regex"));
 
 /// 从版本输出中提取纯版本号
 fn extract_version(raw: &str) -> String {

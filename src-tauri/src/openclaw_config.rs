@@ -205,7 +205,7 @@ pub fn read_openclaw_config() -> Result<Value, AppError> {
     }
 
     let content = fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
-    json5::from_str(&content)
+    json_five::from_str(&content)
         .map_err(|e| AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}")))
 }
 
@@ -219,7 +219,7 @@ pub fn scan_openclaw_config_health() -> Result<Vec<OpenClawHealthWarning>, AppEr
     }
 
     let content = fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
-    match json5::from_str::<Value>(&content) {
+    match json_five::from_str::<Value>(&content) {
         Ok(config) => Ok(scan_openclaw_health_from_value(&config)),
         Err(err) => Ok(vec![OpenClawHealthWarning {
             code: "config_parse_failed".to_string(),
@@ -341,7 +341,7 @@ impl OpenClawConfigDocument {
         let next_source = self.text.to_string();
         if current_source.as_deref() == Some(next_source.as_str()) {
             let warnings = scan_openclaw_health_from_value(
-                &json5::from_str::<Value>(&next_source).map_err(|e| {
+                &json_five::from_str::<Value>(&next_source).map_err(|e| {
                     AppError::Config(format!(
                         "Failed to parse unchanged OpenClaw config as JSON5: {e}"
                     ))
@@ -363,7 +363,7 @@ impl OpenClawConfigDocument {
         atomic_write(&self.path, next_source.as_bytes())?;
 
         let warnings = scan_openclaw_health_from_value(
-            &json5::from_str::<Value>(&next_source).map_err(|e| {
+            &json_five::from_str::<Value>(&next_source).map_err(|e| {
                 AppError::Config(format!(
                     "Failed to parse newly written OpenClaw config as JSON5: {e}"
                 ))
@@ -1086,6 +1086,83 @@ mod tests {
 
             let written = fs::read_to_string(get_openclaw_config_path()).unwrap();
             assert!(written.contains("\"providers\": {}"));
+        });
+    }
+
+    /// Parity fixtures captured against the previous `json5` 0.4 crate before
+    /// the switch to `json_five::from_str`; every case here produced the same
+    /// `serde_json::Value` (or an error) under both parsers.
+    #[test]
+    fn json5_fixtures_parse_like_previous_parser() {
+        let cases: &[(&str, Value)] = &[
+            ("// line comment\n{a: 1}", json!({ "a": 1 })),
+            ("/* block */ {a: 1, /* inline */}", json!({ "a": 1 })),
+            ("{a: 1} // trailing comment", json!({ "a": 1 })),
+            ("{a: 1, b: [1, 2,],}", json!({ "a": 1, "b": [1, 2] })),
+            ("{unq_key$: 1, _x: 2}", json!({ "unq_key$": 1, "_x": 2 })),
+            (
+                r#"{'s': 'q\'x', "d": "y", 'a b': 1}"#,
+                json!({ "s": "q'x", "d": "y", "a b": 1 }),
+            ),
+            (
+                r"{u: '\u00e9\x41', z: '\0', p: 'C:\\x', v: '\v'}",
+                json!({ "u": "éA", "z": "\0", "p": "C:\\x", "v": "\u{b}" }),
+            ),
+            ("{h: 0x1F, H: 0XfF}", json!({ "h": 31, "H": 255 })),
+            (
+                "{n: -5, p: +5, f: 1.5, e: 1e3, E: -2.5E-2, dot: .5, tr: 5., one: 1.0, nz: -0}",
+                json!({
+                    "n": -5, "p": 5, "f": 1.5, "e": 1000.0, "E": -0.025,
+                    "dot": 0.5, "tr": 5.0, "one": 1.0, "nz": 0
+                }),
+            ),
+            (
+                "{inf: Infinity, ninf: -Infinity, nan: NaN}",
+                json!({ "inf": null, "ninf": null, "nan": null }),
+            ),
+            ("{a: 1, a: 2}", json!({ "a": 2 })),
+            ("{t: true, f: false, z: null}", json!({ "t": true, "f": false, "z": null })),
+            ("\u{FEFF}{a: 1}", json!({ "a": 1 })),
+            (
+                "{\n  // providers\n  models: { providers: { x: { baseUrl: 'h', apiKey: \"k\", models: [ { id: 'm', }, ], }, }, },\n}",
+                json!({ "models": { "providers": { "x": {
+                    "baseUrl": "h", "apiKey": "k", "models": [{ "id": "m" }]
+                } } } }),
+            ),
+        ];
+        for (source, expected) in cases {
+            let parsed: Value = json_five::from_str(source)
+                .unwrap_or_else(|e| panic!("failed to parse {source:?}: {e}"));
+            assert_eq!(&parsed, expected, "fixture {source:?}");
+        }
+
+        for invalid in [
+            "",
+            "  ",
+            "{a: 1,,}",
+            "{a:}",
+            "{a: 1 b: 2}",
+            "{big: 18446744073709551616}",
+            "{neg: -9223372036854775809}",
+        ] {
+            assert!(
+                json_five::from_str::<Value>(invalid).is_err(),
+                "expected parse error for {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn read_openclaw_config_accepts_json5_syntax() {
+        let source = "// comment\n{\n  models: {\n    providers: {\n      'demo': { baseUrl: 'https://example.com', models: [ { id: 'm1', }, ], },\n    },\n  },\n}\n";
+        with_test_paths(source, |_| {
+            let config = read_openclaw_config().unwrap();
+            assert_eq!(
+                config["models"]["providers"]["demo"],
+                json!({ "baseUrl": "https://example.com", "models": [{ "id": "m1" }] })
+            );
+            assert!(scan_openclaw_config_health().unwrap().is_empty());
         });
     }
 }

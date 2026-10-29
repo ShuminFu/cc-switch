@@ -2041,7 +2041,7 @@ impl SkillService {
         }
 
         let front_matter = parts[1].trim();
-        let meta: SkillMetadata = serde_yaml::from_str(front_matter).unwrap_or(SkillMetadata {
+        let meta: SkillMetadata = serde_norway::from_str(front_matter).unwrap_or(SkillMetadata {
             name: None,
             description: None,
         });

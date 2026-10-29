@@ -2,7 +2,7 @@
 //!
 //! 负责系统托盘图标和菜单的创建、更新和事件处理。
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, Submenu, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -41,9 +41,9 @@ const TIER_LABEL_GROUPS: &[(&str, &[&str])] = &[
 
 /// 每个 app 分区的子菜单句柄，用于 usage 更新时就地改 label 而非整菜单重建。
 /// `create_tray_menu` 每次重建都会整表覆盖写入，保证句柄始终指向当前活跃菜单。
-static TRAY_SECTION_SUBMENUS: Lazy<
+static TRAY_SECTION_SUBMENUS: LazyLock<
     std::sync::Mutex<std::collections::HashMap<AppType, Submenu<tauri::Wry>>>,
-> = Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+> = LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// 托盘菜单文本（国际化）
 #[derive(Clone, Copy)]
@@ -154,7 +154,7 @@ pub const AUTO_SUFFIX: &str = "auto";
 pub const TRAY_ID: &str = "cc-switch";
 
 /// 托盘分区：由应用注册表中具备 `TRAY` 能力的应用派生
-pub static TRAY_SECTIONS: Lazy<Vec<TrayAppSection>> = Lazy::new(|| {
+pub static TRAY_SECTIONS: LazyLock<Vec<TrayAppSection>> = LazyLock::new(|| {
     crate::apps::registry::with_caps(crate::apps::AppCaps::TRAY)
         .map(|d| TrayAppSection {
             app_type: d.app.clone(),

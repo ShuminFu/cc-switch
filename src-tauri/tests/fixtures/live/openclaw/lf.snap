@@ -2,12 +2,7 @@
 source: tests/config_writers.rs
 description: "openclaw writer, lf input"
 ---
-write: error: 配置错误: Failed to parse newly written OpenClaw config as JSON5:   --> 28:3
-   |
-28 |   /* block comment before an unknown section *
-   |   ^---
-   |
-   = expected identifier or string
+write: error: 配置错误: Failed to parse newly written OpenClaw config as JSON5: ParsingError: Unexpected end of input while processing block comment: line 28 column 3 (char 573)
 === .openclaw/openclaw.json ===
 {
   // OpenClaw config written by the user
