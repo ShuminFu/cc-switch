@@ -1,22 +1,47 @@
-import type { ReactNode } from "react";
+import { Suspense, lazy, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { AppId } from "@/lib/api";
-import { SettingsPage } from "@/components/settings/SettingsPage";
-import PromptPanel from "@/components/prompts/PromptPanel";
-import UnifiedMcpPanel from "@/components/mcp/UnifiedMcpPanel";
-import {
-  SkillsPage,
-  type SkillsPageSource,
-} from "@/components/skills/SkillsPage";
-import UnifiedSkillsPanel from "@/components/skills/UnifiedSkillsPanel";
-import { AgentsPanel } from "@/components/agents/AgentsPanel";
-import { UniversalProviderPanel } from "@/components/universal";
-import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
-import WorkspaceFilesPanel from "@/components/workspace/WorkspaceFilesPanel";
-import EnvPanel from "@/components/openclaw/EnvPanel";
-import ToolsPanel from "@/components/openclaw/ToolsPanel";
-import AgentsDefaultsPanel from "@/components/openclaw/AgentsDefaultsPanel";
-import HermesMemoryPanel from "@/components/hermes/HermesMemoryPanel";
+import type { SkillsPageSource } from "@/components/skills/skillsPageHeaderActions";
+import { LazyViewFallback, lazyNamed } from "@/components/common/LazyMount";
+
+// 非首页视图按需加载，避免其依赖（CodeMirror、图表、会话解析等）进入首屏包
+const SettingsPage = lazyNamed(
+  () => import("@/components/settings/SettingsPage"),
+  "SettingsPage",
+);
+const PromptPanel = lazy(() => import("@/components/prompts/PromptPanel"));
+const UnifiedMcpPanel = lazy(() => import("@/components/mcp/UnifiedMcpPanel"));
+const SkillsPage = lazyNamed(
+  () => import("@/components/skills/SkillsPage"),
+  "SkillsPage",
+);
+const UnifiedSkillsPanel = lazy(
+  () => import("@/components/skills/UnifiedSkillsPanel"),
+);
+const AgentsPanel = lazyNamed(
+  () => import("@/components/agents/AgentsPanel"),
+  "AgentsPanel",
+);
+const UniversalProviderPanel = lazyNamed(
+  () => import("@/components/universal/UniversalProviderPanel"),
+  "UniversalProviderPanel",
+);
+const SessionManagerPage = lazyNamed(
+  () => import("@/components/sessions/SessionManagerPage"),
+  "SessionManagerPage",
+);
+const WorkspaceFilesPanel = lazy(
+  () => import("@/components/workspace/WorkspaceFilesPanel"),
+);
+const EnvPanel = lazy(() => import("@/components/openclaw/EnvPanel"));
+const ToolsPanel = lazy(() => import("@/components/openclaw/ToolsPanel"));
+const AgentsDefaultsPanel = lazy(
+  () => import("@/components/openclaw/AgentsDefaultsPanel"),
+);
+const HermesMemoryPanel = lazy(
+  () => import("@/components/hermes/HermesMemoryPanel"),
+);
+
 import type { ShellPanelRefs } from "./panelRefs";
 import type { View } from "./views";
 
@@ -125,7 +150,7 @@ export function AppViewContent(props: AppViewContentProps) {
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
       >
-        {renderView(props)}
+        <Suspense fallback={<LazyViewFallback />}>{renderView(props)}</Suspense>
       </motion.div>
     </AnimatePresence>
   );

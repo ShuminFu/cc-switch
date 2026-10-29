@@ -1,7 +1,7 @@
 import { useRef, type RefObject } from "react";
 import type { PromptPanelHandle } from "@/components/prompts/PromptPanel";
 import type { UnifiedMcpPanelHandle } from "@/components/mcp/UnifiedMcpPanel";
-import type { SkillsPageHandle } from "@/components/skills/SkillsPage";
+import type { SkillsPageHandle } from "@/components/skills/skillsPageHeaderActions";
 import type { UnifiedSkillsPanelHandle } from "@/components/skills/UnifiedSkillsPanel";
 
 /** 顶栏操作按钮需要调用的各视图面板句柄 */

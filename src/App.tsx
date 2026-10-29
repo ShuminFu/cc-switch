@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { Provider, VisibleApps } from "@/types";
 import type { AppId } from "@/lib/api";
 import { useProvidersQuery, useSettingsQuery } from "@/lib/query";
@@ -14,11 +14,9 @@ import { useWindowChrome } from "@/hooks/useWindowChrome";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import { safeStorageSet } from "@/lib/storage";
 import { ALL_APP_IDS, useAppCaps } from "@/entities/app/registry";
-import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
-import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
-import UsageScriptModal from "@/components/UsageScriptModal";
-import type { SkillsPageSource } from "@/components/skills/SkillsPage";
+import { LazyMount, lazyNamed } from "@/components/common/LazyMount";
+import type { SkillsPageSource } from "@/components/skills/skillsPageHeaderActions";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
@@ -39,6 +37,18 @@ import {
   getInitialView,
   type View,
 } from "@/components/app-shell/views";
+
+// 供应商表单（含各应用预设与 CodeMirror）与用量脚本编辑器（含 prettier）
+// 体积较大，首次打开时才加载
+const AddProviderDialog = lazyNamed(
+  () => import("@/components/providers/AddProviderDialog"),
+  "AddProviderDialog",
+);
+const EditProviderDialog = lazyNamed(
+  () => import("@/components/providers/EditProviderDialog"),
+  "EditProviderDialog",
+);
+const UsageScriptModal = lazy(() => import("@/components/UsageScriptModal"));
 
 const DEFAULT_VISIBLE_APPS: VisibleApps = {
   claude: true,
@@ -233,42 +243,48 @@ function App() {
         />
       </main>
 
-      <AddProviderDialog
-        open={isAddOpen}
-        onOpenChange={setIsAddOpen}
-        appId={activeApp}
-        onSubmit={addProvider}
-      />
-
-      <EditProviderDialog
-        open={Boolean(editingProvider)}
-        provider={effectiveEditingProvider}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEditingProvider(null);
-          }
-        }}
-        onSubmit={async ({ provider, originalId }) => {
-          await updateProvider(provider, originalId);
-          setEditingProvider(null);
-        }}
-        appId={activeApp}
-        isProxyTakeover={isCurrentAppTakeoverActive}
-      />
-
-      {effectiveUsageProvider && (
-        <UsageScriptModal
-          key={effectiveUsageProvider.id}
-          provider={effectiveUsageProvider}
+      <LazyMount when={isAddOpen}>
+        <AddProviderDialog
+          open={isAddOpen}
+          onOpenChange={setIsAddOpen}
           appId={activeApp}
-          isOpen={Boolean(usageProvider)}
-          onClose={() => setUsageProvider(null)}
-          onSave={(script) => {
-            if (usageProvider) {
-              void saveUsageScript(usageProvider, script);
+          onSubmit={addProvider}
+        />
+      </LazyMount>
+
+      <LazyMount when={Boolean(editingProvider)}>
+        <EditProviderDialog
+          open={Boolean(editingProvider)}
+          provider={effectiveEditingProvider}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingProvider(null);
             }
           }}
+          onSubmit={async ({ provider, originalId }) => {
+            await updateProvider(provider, originalId);
+            setEditingProvider(null);
+          }}
+          appId={activeApp}
+          isProxyTakeover={isCurrentAppTakeoverActive}
         />
+      </LazyMount>
+
+      {effectiveUsageProvider && (
+        <Suspense fallback={null}>
+          <UsageScriptModal
+            key={effectiveUsageProvider.id}
+            provider={effectiveUsageProvider}
+            appId={activeApp}
+            isOpen={Boolean(usageProvider)}
+            onClose={() => setUsageProvider(null)}
+            onSave={(script) => {
+              if (usageProvider) {
+                void saveUsageScript(usageProvider, script);
+              }
+            }}
+          />
+        </Suspense>
       )}
 
       <ProviderConfirmDialog

@@ -9,7 +9,7 @@ import {
 import type { Settings, VisibleApps } from "@/types";
 import type { AppId } from "@/lib/api";
 import type { AppCaps } from "@/entities/app/registry";
-import type { SkillsPageSource } from "@/components/skills/SkillsPage";
+import type { SkillsPageSource } from "@/components/skills/skillsPageHeaderActions";
 import { useAutoCompact } from "@/hooks/useAutoCompact";
 import { HEADER_HEIGHT } from "@/hooks/useWindowChrome";
 import { cn } from "@/lib/utils";

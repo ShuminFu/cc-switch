@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   getSkillsPageHeaderActions,
   type SkillsPageSource,
-} from "@/components/skills/SkillsPage";
+} from "@/components/skills/skillsPageHeaderActions";
 import { useScanUnmanagedSkills } from "@/hooks/useSkills";
 import type { ShellPanelRefs } from "./panelRefs";
 import type { View } from "./views";

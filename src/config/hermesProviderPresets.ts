@@ -5,28 +5,13 @@
 import type { ProviderCategory } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
 
-/**
- * Marker field and source values that `hermes_config.rs::get_providers`
- * injects onto each settings payload. Kept in sync with the Rust constants
- * `PROVIDER_SOURCE_FIELD` / `PROVIDER_SOURCE_CUSTOM_LIST` / `PROVIDER_SOURCE_DICT`.
- */
-export const HERMES_PROVIDER_SOURCE_FIELD = "_cc_source";
-export const HERMES_PROVIDER_SOURCE_CUSTOM_LIST = "custom_providers";
-export const HERMES_PROVIDER_SOURCE_DICT = "providers_dict";
-
-/**
- * True when the provider was sourced from Hermes' v12+ `providers:` dict —
- * CC Switch renders those read-only and routes edits to Hermes Web UI.
- */
-export function isHermesReadOnlyProvider(settingsConfig: unknown): boolean {
-  if (!settingsConfig || typeof settingsConfig !== "object") {
-    return false;
-  }
-  const marker = (settingsConfig as Record<string, unknown>)[
-    HERMES_PROVIDER_SOURCE_FIELD
-  ];
-  return marker === HERMES_PROVIDER_SOURCE_DICT;
-}
+// 来源标记与只读判断拆到轻量模块，首页供应商卡片无需加载整份预设
+export {
+  HERMES_PROVIDER_SOURCE_FIELD,
+  HERMES_PROVIDER_SOURCE_CUSTOM_LIST,
+  HERMES_PROVIDER_SOURCE_DICT,
+  isHermesReadOnlyProvider,
+} from "./hermesProviderSource";
 
 /**
  * A model entry under a Hermes custom_provider.
