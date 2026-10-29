@@ -411,7 +411,11 @@ mod tests {
             (
                 "services/proxy.rs",
                 include_str!("../services/proxy.rs"),
-                &["ifletOk(live_config)=self.read_claude_live()"],
+                &[
+                    "ifletOk(live_config)=self.read_claude_live()",
+                    "forapp_typein[\"claude\",\"codex\",\"gemini\",\"grokbuild\"]",
+                    "forapp_typein[AppType::Claude,AppType::Codex,AppType::Gemini,AppType::GrokBuild,]",
+                ],
             ),
             (
                 "tray.rs",
@@ -421,7 +425,10 @@ mod tests {
             (
                 "app_config.rs",
                 include_str!("../app_config.rs"),
-                &["apps.push(AppType::"],
+                &[
+                    "apps.push(AppType::",
+                    "AppType::GrokBuild,AppType::OpenCode,AppType::OpenClaw,AppType::Hermes,]",
+                ],
             ),
         ];
         for (name, src, patterns) in sites {

@@ -710,15 +710,9 @@ impl MultiAppConfig {
         log::info!("检测到已存在配置文件且 Prompt 列表为空，将尝试从现有提示词文件自动导入");
 
         let mut imported = false;
-        for app in [
-            AppType::Claude,
-            AppType::Codex,
-            AppType::Gemini,
-            AppType::GrokBuild,
-            AppType::OpenCode,
-            AppType::OpenClaw,
-            AppType::Hermes,
-        ] {
+        for app in
+            crate::apps::registry::with_caps(crate::apps::AppCaps::PROMPTS).map(|d| d.app.clone())
+        {
             // 复用已有的单应用导入逻辑
             if Self::auto_import_prompt_if_exists(self, app)? {
                 imported = true;

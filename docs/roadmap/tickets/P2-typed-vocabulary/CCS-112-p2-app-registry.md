@@ -70,3 +70,18 @@ p0-config-writer-snapshots
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib` -> 2209 passed, 0 failed, 3 ignored
 - `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast` -> 2367 passed, 0 failed
   (config-writer snapshots, proxy_e2e and migration tests unchanged; no snapshot files modified)
+
+**Review.** All four listed sites are confirmed registry-driven and the acceptance criteria hold.
+The review found several more hand-kept copies of the same capability sets in the files touched
+by the ticket, and they now also come from `APPS`:
+- `services/proxy.rs`: `restore_live_configs` and the `enabled`-clearing loop in the
+  stop-with-restore path both use `with_caps(PROXY_TAKEOVER)`. `migrate_legacy_proxy_token_in_live`
+  now uses `with_caps(PROXY_TAKEOVER)` + `read_live_for_takeover`. Its old `_ => read_grok_live()`
+  fallback would have read the wrong file for any future takeover app.
+- `app_config.rs`: the prompt auto-import list in `MultiAppConfig` now uses `with_caps(PROMPTS)`.
+
+The guard test `former_hard_coded_app_lists_stay_removed` now has patterns for these loops.
+Each pattern matches the pre-review source and is absent from the new one. The legacy v3.7.0
+MCP migration list in `app_config.rs` and the common-config migration list in `lib.rs` are
+deliberately left unchanged. Re-verified: fmt clean, `clippy --all-targets -D warnings` clean,
+`cargo test --no-fail-fast` all green (lib 2209 passed / 0 failed / 3 ignored).
