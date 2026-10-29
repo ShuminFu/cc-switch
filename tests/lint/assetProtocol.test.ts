@@ -12,7 +12,7 @@ function listSourceFiles(dir: string): string[] {
     const full = path.join(dir, entry);
     if (statSync(full).isDirectory()) {
       out.push(...listSourceFiles(full));
-    } else if (/\.(ts|tsx)$/.test(entry)) {
+    } else if (/\.(ts|tsx|js|jsx|css|html|json|svg)$/.test(entry)) {
       out.push(full);
     }
   }
