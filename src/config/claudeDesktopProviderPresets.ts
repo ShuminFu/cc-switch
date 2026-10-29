@@ -8,9 +8,8 @@
  *
  * 翻译来源：src/config/claudeProviderPresets.ts（排除 OAuth 与不兼容预设）
  */
-import { ProviderCategory } from "../types";
 import type { PresetTheme } from "./claudeProviderPresets";
-import type { TranslationKey } from "@/i18n/keys";
+import type { BasePreset } from "@/features/providers/forms/basePreset";
 
 export type ClaudeDesktopApiFormat =
   | "anthropic"
@@ -41,16 +40,7 @@ export const CLAUDE_DESKTOP_ROLE_ROUTE_IDS = {
 
 export type ClaudeDesktopRoleId = keyof typeof CLAUDE_DESKTOP_ROLE_ROUTE_IDS;
 
-export interface ClaudeDesktopProviderPreset {
-  name: string;
-  nameKey?: TranslationKey;
-  websiteUrl: string;
-  apiKeyUrl?: string;
-  category?: ProviderCategory;
-  isPartner?: boolean;
-  primePartner?: boolean; // 置顶合作伙伴（顶级）：徽章显示为心形
-  partnerPromotionKey?: string;
-
+export interface ClaudeDesktopProviderPreset extends BasePreset {
   baseUrl: string;
   apiKeyField?: "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
 
@@ -60,10 +50,7 @@ export interface ClaudeDesktopProviderPreset {
   providerType?: "github_copilot" | "codex_oauth";
   requiresOAuth?: boolean;
 
-  endpointCandidates?: string[];
   theme?: PresetTheme;
-  icon?: string;
-  iconColor?: string;
 }
 
 const passthroughRoutes = (supports1m = false): ClaudeDesktopRoutePreset[] => [

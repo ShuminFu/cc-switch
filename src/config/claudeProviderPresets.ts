@@ -1,8 +1,7 @@
 /**
  * 预设供应商配置模板
  */
-import { ProviderCategory } from "../types";
-import type { TranslationKey } from "@/i18n/keys";
+import type { BasePreset } from "@/features/providers/forms/basePreset";
 
 export interface TemplateValueConfig {
   label: string;
@@ -23,29 +22,14 @@ export interface PresetTheme {
   textColor?: string;
 }
 
-export interface ProviderPreset {
-  name: string;
-  nameKey?: TranslationKey; // i18n key for localized display name
-  websiteUrl: string;
-  // 新增：第三方/聚合等可单独配置获取 API Key 的链接
-  apiKeyUrl?: string;
+export interface ProviderPreset extends BasePreset {
   settingsConfig: object;
-  isOfficial?: boolean; // 标识是否为官方预设
-  isPartner?: boolean; // 标识是否为商业合作伙伴
-  primePartner?: boolean; // 置顶合作伙伴（顶级）：徽章显示为心形
-  partnerPromotionKey?: string; // 合作伙伴促销信息的 i18n key
-  category?: ProviderCategory; // 新增：分类
   // 新增：指定该预设所使用的 API Key 字段名（默认 ANTHROPIC_AUTH_TOKEN）
   apiKeyField?: "ANTHROPIC_AUTH_TOKEN" | "ANTHROPIC_API_KEY";
   // 新增：模板变量定义，用于动态替换配置中的值
   templateValues?: Record<string, TemplateValueConfig>; // editorValue 存储编辑器中的实时输入值
-  // 新增：请求地址候选列表（用于地址管理/测速）
-  endpointCandidates?: string[];
   // 新增：视觉主题配置
   theme?: PresetTheme;
-  // 图标配置
-  icon?: string; // 图标名称
-  iconColor?: string; // 图标颜色
 
   // Claude API 格式（仅 Claude 供应商使用）
   // - "anthropic" (默认): Anthropic Messages API 格式，直接透传

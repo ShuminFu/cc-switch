@@ -1,22 +1,11 @@
 import type { ProviderCategory, OpenCodeProviderConfig } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
-import type { TranslationKey } from "@/i18n/keys";
+import type { BasePreset } from "@/features/providers/forms/basePreset";
 
-export interface OpenCodeProviderPreset {
-  name: string;
-  nameKey?: TranslationKey; // i18n key for localized display name
-  websiteUrl: string;
-  apiKeyUrl?: string;
+export interface OpenCodeProviderPreset extends BasePreset {
   settingsConfig: OpenCodeProviderConfig;
-  isOfficial?: boolean;
-  isPartner?: boolean;
-  primePartner?: boolean; // 置顶合作伙伴（顶级）：徽章显示为心形
-  partnerPromotionKey?: string;
-  category?: ProviderCategory;
   templateValues?: Record<string, TemplateValueConfig>;
   theme?: PresetTheme;
-  icon?: string;
-  iconColor?: string;
   isCustomTemplate?: boolean;
 }
 

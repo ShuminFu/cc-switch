@@ -2,13 +2,9 @@
  * OpenClaw provider presets configuration
  * OpenClaw uses models.providers structure with custom provider configs
  */
-import type {
-  ProviderCategory,
-  OpenClawProviderConfig,
-  OpenClawDefaultModel,
-} from "../types";
+import type { OpenClawProviderConfig, OpenClawDefaultModel } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
-import type { TranslationKey } from "@/i18n/keys";
+import type { BasePreset } from "@/features/providers/forms/basePreset";
 
 /** Suggested default model configuration for a preset */
 export interface OpenClawSuggestedDefaults {
@@ -18,26 +14,13 @@ export interface OpenClawSuggestedDefaults {
   modelCatalog?: Record<string, { alias?: string }>;
 }
 
-export interface OpenClawProviderPreset {
-  name: string;
-  nameKey?: TranslationKey; // i18n key for localized display name
-  websiteUrl: string;
-  apiKeyUrl?: string;
+export interface OpenClawProviderPreset extends BasePreset {
   /** OpenClaw settings_config structure */
   settingsConfig: OpenClawProviderConfig;
-  isOfficial?: boolean;
-  isPartner?: boolean;
-  primePartner?: boolean; // 置顶合作伙伴（顶级）：徽章显示为心形
-  partnerPromotionKey?: string;
-  category?: ProviderCategory;
   /** Template variable definitions */
   templateValues?: Record<string, TemplateValueConfig>;
   /** Visual theme config */
   theme?: PresetTheme;
-  /** Icon name */
-  icon?: string;
-  /** Icon color */
-  iconColor?: string;
   /** Mark as custom template (for UI distinction) */
   isCustomTemplate?: boolean;
   /** Suggested default model configuration */

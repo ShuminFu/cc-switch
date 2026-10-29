@@ -1,5 +1,4 @@
-import type { ProviderCategory } from "@/types";
-import type { TranslationKey } from "@/i18n/keys";
+import type { BasePreset } from "@/features/providers/forms/basePreset";
 
 /**
  * Gemini 预设供应商的视觉主题配置
@@ -13,24 +12,12 @@ export interface GeminiPresetTheme {
   textColor?: string;
 }
 
-export interface GeminiProviderPreset {
-  name: string;
-  nameKey?: TranslationKey; // i18n key for localized display name
-  websiteUrl: string;
-  apiKeyUrl?: string;
+export interface GeminiProviderPreset extends BasePreset {
   settingsConfig: object;
   baseURL?: string;
   model?: string;
   description?: string;
-  category?: ProviderCategory;
-  isPartner?: boolean;
-  primePartner?: boolean; // 置顶合作伙伴（顶级）：徽章显示为心形
-  partnerPromotionKey?: string;
-  endpointCandidates?: string[];
   theme?: GeminiPresetTheme;
-  // 图标配置
-  icon?: string; // 图标名称
-  iconColor?: string; // 图标颜色
 }
 
 export const geminiProviderPresets: GeminiProviderPreset[] = [

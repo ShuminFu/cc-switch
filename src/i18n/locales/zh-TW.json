@@ -1102,6 +1102,9 @@
     "fillTemplateValue": "請填寫 {{label}}",
     "endpointRequired": "非官方供應商請填寫 API 端點",
     "apiKeyRequired": "非官方供應商請填寫 API Key",
+    "errorSummary": {
+      "title": "儲存前請先修正以下問題"
+    },
     "softValidation": {
       "title": "設定存在以下問題",
       "hint": "仍要儲存嗎？儲存後切換此供應商時可能失敗，可以之後再補全。",

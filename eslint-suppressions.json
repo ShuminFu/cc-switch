@@ -124,12 +124,12 @@
       "count": 2
     }
   },
-  "src/components/providers/forms/ProviderForm.tsx": {
+  "src/components/providers/forms/ProviderFormFull.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     },
     "cc-switch/no-app-literal-comparison": {
-      "count": 9
+      "count": 7
     },
     "no-empty": {
       "count": 1

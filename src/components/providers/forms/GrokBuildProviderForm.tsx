@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import {
-  Form,
   FormControl,
   FormField,
   FormItem,
@@ -15,7 +10,7 @@ import {
 import { Input } from "@/components/ui/input";
 import JsonEditor from "@/components/JsonEditor";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { providerSchema, type ProviderFormData } from "@/lib/schemas/provider";
+import type { ProviderFormData } from "@/lib/schemas/provider";
 import {
   buildLocalProxyRequestOverrides,
   formatRequestOverrideObject,
@@ -28,7 +23,13 @@ import type {
   ProviderCategory,
   ProviderMeta,
 } from "@/types";
-import type { ProviderFormProps, ProviderFormValues } from "./ProviderForm";
+import {
+  ProviderFormShell,
+  useProviderForm,
+  useSaveGate,
+  type ProviderFormProps,
+  type ProviderFormValues,
+} from "@/features/providers/forms";
 import { BasicFormFields } from "./BasicFormFields";
 import { CodexFormFields } from "./CodexFormFields";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
@@ -157,23 +158,20 @@ export function GrokBuildProviderForm({
     [],
   );
 
-  const form = useForm<ProviderFormData>({
-    resolver: zodResolver(providerSchema),
-    defaultValues: {
-      name: initialData?.name ?? initialConfig.name,
-      websiteUrl: initialData?.websiteUrl ?? "",
-      notes: initialData?.notes ?? "",
-      settingsConfig: JSON.stringify({ config: rawConfig }),
-      icon:
-        resolveProviderIcon(
-          "grokbuild",
-          initialData?.icon,
-          initialData?.iconColor,
-        ) ?? "",
-      iconColor: initialData?.iconColor ?? "",
-    },
-    mode: "onSubmit",
+  const form = useProviderForm("grokbuild", {
+    name: initialData?.name ?? initialConfig.name,
+    websiteUrl: initialData?.websiteUrl ?? "",
+    notes: initialData?.notes ?? "",
+    settingsConfig: JSON.stringify({ config: rawConfig }),
+    icon:
+      resolveProviderIcon(
+        "grokbuild",
+        initialData?.icon,
+        initialData?.iconColor,
+      ) ?? "",
+    iconColor: initialData?.iconColor ?? "",
   });
+  const gate = useSaveGate();
   const { isSubmitting } = form.formState;
   const websiteUrl = form.watch("websiteUrl") ?? "";
 
@@ -296,11 +294,11 @@ export function GrokBuildProviderForm({
       (!apiKey.trim() && !envKey) ||
       !profile.trim()
     ) {
-      toast.error(t("providerForm.requiredFields"));
+      gate.block(t("providerForm.requiredFields"));
       return;
     }
     if (!Number.isInteger(parsedContextWindow) || parsedContextWindow <= 0) {
-      toast.error(t("grokBuild.contextWindowInvalid"));
+      gate.block(t("grokBuild.contextWindowInvalid"));
       return;
     }
 
@@ -315,7 +313,7 @@ export function GrokBuildProviderForm({
     });
     const configError = validateGrokBuildConfig(finalConfig);
     if (configError) {
-      toast.error(
+      gate.block(
         t("grokBuild.invalidToml", {
           error: configError,
         }),
@@ -328,7 +326,7 @@ export function GrokBuildProviderForm({
       bodyOverride,
     );
     if (requestOverrides.error) {
-      toast.error(requestOverrides.error);
+      gate.block(requestOverrides.error);
       return;
     }
 
@@ -380,183 +378,174 @@ export function GrokBuildProviderForm({
   const rawConfigError = validateGrokBuildConfig(rawConfig);
 
   return (
-    <Form {...form}>
-      <form
-        id="provider-form"
-        onSubmit={form.handleSubmit(handleSubmit)}
-        className="space-y-6"
-      >
-        {!initialData && (
-          <ProviderPresetSelector
-            selectedPresetId={selectedPresetId}
-            presetEntries={grokPresetEntries}
-            presetCategoryLabels={presetCategoryLabels}
-            onPresetChange={handlePresetChange}
-            category={category}
-          />
-        )}
-
-        <BasicFormFields form={form} />
-
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <FormItem>
-            <FormLabel htmlFor="grokbuild-profile">
-              {t("grokBuild.profile")}
-            </FormLabel>
-            <Input
-              id="grokbuild-profile"
-              value={profile}
-              onChange={(event) => {
-                const value = event.target.value;
-                setProfile(value);
-                syncStructuredConfig({ model: value });
-              }}
-              placeholder="grok-4.5"
-              autoComplete="off"
-            />
-          </FormItem>
-
-          <FormItem>
-            <FormLabel htmlFor="grokbuild-api-backend">
-              {t("grokBuild.apiBackend")}
-            </FormLabel>
-            <Input
-              id="grokbuild-api-backend"
-              value={apiBackend}
-              onChange={(event) => {
-                const value = event.target.value;
-                setApiBackend(value);
-                syncStructuredConfig({ apiBackend: value });
-              }}
-              placeholder="responses"
-              autoComplete="off"
-            />
-          </FormItem>
-
-          <FormItem>
-            <FormLabel htmlFor="grokbuild-context-window">
-              {t("grokBuild.contextWindow")}
-            </FormLabel>
-            <Input
-              id="grokbuild-context-window"
-              type="number"
-              min={1}
-              step={1}
-              value={contextWindow}
-              onChange={(event) => {
-                const value = event.target.value;
-                setContextWindow(value);
-                syncStructuredConfig({
-                  contextWindow: Number.parseInt(value, 10),
-                });
-              }}
-            />
-          </FormItem>
-        </div>
-
-        <CodexFormFields
-          appId="grokbuild"
-          providerId={providerId}
-          codexApiKey={apiKey}
-          onApiKeyChange={(value) => {
-            setApiKey(value);
-            syncStructuredConfig({ apiKey: value });
-          }}
+    <ProviderFormShell
+      form={form}
+      gate={gate}
+      onSubmit={handleSubmit}
+      className="space-y-6"
+      showButtons={showButtons}
+      submitLabel={submitLabel}
+      onCancel={onCancel}
+    >
+      {!initialData && (
+        <ProviderPresetSelector
+          selectedPresetId={selectedPresetId}
+          presetEntries={grokPresetEntries}
+          presetCategoryLabels={presetCategoryLabels}
+          onPresetChange={handlePresetChange}
           category={category}
-          shouldShowApiKeyLink={Boolean(websiteUrl)}
-          websiteUrl={websiteUrl}
-          isPartner={isPartner}
-          partnerPromotionKey={partnerPromotionKey}
-          shouldShowSpeedTest
-          codexBaseUrl={baseUrl}
-          onBaseUrlChange={(value) => {
-            setBaseUrl(value);
-            syncStructuredConfig({ baseUrl: value });
-          }}
-          isFullUrl={isFullUrl}
-          onFullUrlChange={setIsFullUrl}
-          isEndpointModalOpen={isEndpointModalOpen}
-          onEndpointModalToggle={setIsEndpointModalOpen}
-          onCustomEndpointsChange={setDraftCustomEndpoints}
-          autoSelect={endpointAutoSelect}
-          onAutoSelectChange={setEndpointAutoSelect}
-          codexModel={upstreamModel}
-          onModelChange={(value) => {
-            setUpstreamModel(value);
-            syncStructuredConfig({ upstreamModel: value });
-          }}
-          apiFormat={apiFormat}
-          onApiFormatChange={(value) => {
-            const backend = grokApiBackendFromApiFormat(value);
-            setApiFormat(value);
-            setApiBackend(backend);
-            syncStructuredConfig({ apiBackend: backend });
-          }}
-          anthropicAuthField={anthropicAuthField}
-          onAnthropicAuthFieldChange={setAnthropicAuthField}
-          impersonateClaudeCode={impersonateClaudeCode}
-          onImpersonateClaudeCodeChange={setImpersonateClaudeCode}
-          maxOutputTokens={maxOutputTokens}
-          onMaxOutputTokensChange={setMaxOutputTokens}
-          codexChatReasoning={codexChatReasoning}
-          onCodexChatReasoningChange={setCodexChatReasoning}
-          promptCacheRouting={promptCacheRouting}
-          onPromptCacheRoutingChange={setPromptCacheRouting}
-          speedTestEndpoints={speedTestEndpoints}
-          customUserAgent={customUserAgent}
-          onCustomUserAgentChange={setCustomUserAgent}
-          localProxyHeadersOverride={headersOverride}
-          onLocalProxyHeadersOverrideChange={setHeadersOverride}
-          localProxyBodyOverride={bodyOverride}
-          onLocalProxyBodyOverrideChange={setBodyOverride}
         />
+      )}
 
-        <div className="space-y-2">
-          <FormLabel htmlFor="grokbuild-config-toml">
-            {t("grokBuild.rawConfig")}
+      <BasicFormFields />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <FormItem>
+          <FormLabel htmlFor="grokbuild-profile">
+            {t("grokBuild.profile")}
           </FormLabel>
-          <JsonEditor
-            value={rawConfig}
-            onChange={handleRawConfigChange}
-            placeholder=""
-            darkMode={isDarkMode}
-            rows={12}
-            showValidation={false}
-            language="javascript"
+          <Input
+            id="grokbuild-profile"
+            value={profile}
+            onChange={(event) => {
+              const value = event.target.value;
+              setProfile(value);
+              syncStructuredConfig({ model: value });
+            }}
+            placeholder="grok-4.5"
+            autoComplete="off"
           />
-          {rawConfigError && (
-            <p className="text-xs text-destructive">
-              {t("grokBuild.invalidToml", {
-                error: rawConfigError,
-              })}
-            </p>
-          )}
-        </div>
+        </FormItem>
 
-        <FormField
-          control={form.control}
-          name="settingsConfig"
-          render={() => (
-            <FormItem className="hidden">
-              <FormControl>
-                <Input type="hidden" />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
+        <FormItem>
+          <FormLabel htmlFor="grokbuild-api-backend">
+            {t("grokBuild.apiBackend")}
+          </FormLabel>
+          <Input
+            id="grokbuild-api-backend"
+            value={apiBackend}
+            onChange={(event) => {
+              const value = event.target.value;
+              setApiBackend(value);
+              syncStructuredConfig({ apiBackend: value });
+            }}
+            placeholder="responses"
+            autoComplete="off"
+          />
+        </FormItem>
+
+        <FormItem>
+          <FormLabel htmlFor="grokbuild-context-window">
+            {t("grokBuild.contextWindow")}
+          </FormLabel>
+          <Input
+            id="grokbuild-context-window"
+            type="number"
+            min={1}
+            step={1}
+            value={contextWindow}
+            onChange={(event) => {
+              const value = event.target.value;
+              setContextWindow(value);
+              syncStructuredConfig({
+                contextWindow: Number.parseInt(value, 10),
+              });
+            }}
+          />
+        </FormItem>
+      </div>
+
+      <CodexFormFields
+        appId="grokbuild"
+        providerId={providerId}
+        codexApiKey={apiKey}
+        onApiKeyChange={(value) => {
+          setApiKey(value);
+          syncStructuredConfig({ apiKey: value });
+        }}
+        category={category}
+        shouldShowApiKeyLink={Boolean(websiteUrl)}
+        websiteUrl={websiteUrl}
+        isPartner={isPartner}
+        partnerPromotionKey={partnerPromotionKey}
+        shouldShowSpeedTest
+        codexBaseUrl={baseUrl}
+        onBaseUrlChange={(value) => {
+          setBaseUrl(value);
+          syncStructuredConfig({ baseUrl: value });
+        }}
+        isFullUrl={isFullUrl}
+        onFullUrlChange={setIsFullUrl}
+        isEndpointModalOpen={isEndpointModalOpen}
+        onEndpointModalToggle={setIsEndpointModalOpen}
+        onCustomEndpointsChange={setDraftCustomEndpoints}
+        autoSelect={endpointAutoSelect}
+        onAutoSelectChange={setEndpointAutoSelect}
+        codexModel={upstreamModel}
+        onModelChange={(value) => {
+          setUpstreamModel(value);
+          syncStructuredConfig({ upstreamModel: value });
+        }}
+        apiFormat={apiFormat}
+        onApiFormatChange={(value) => {
+          const backend = grokApiBackendFromApiFormat(value);
+          setApiFormat(value);
+          setApiBackend(backend);
+          syncStructuredConfig({ apiBackend: backend });
+        }}
+        anthropicAuthField={anthropicAuthField}
+        onAnthropicAuthFieldChange={setAnthropicAuthField}
+        impersonateClaudeCode={impersonateClaudeCode}
+        onImpersonateClaudeCodeChange={setImpersonateClaudeCode}
+        maxOutputTokens={maxOutputTokens}
+        onMaxOutputTokensChange={setMaxOutputTokens}
+        codexChatReasoning={codexChatReasoning}
+        onCodexChatReasoningChange={setCodexChatReasoning}
+        promptCacheRouting={promptCacheRouting}
+        onPromptCacheRoutingChange={setPromptCacheRouting}
+        speedTestEndpoints={speedTestEndpoints}
+        customUserAgent={customUserAgent}
+        onCustomUserAgentChange={setCustomUserAgent}
+        localProxyHeadersOverride={headersOverride}
+        onLocalProxyHeadersOverrideChange={setHeadersOverride}
+        localProxyBodyOverride={bodyOverride}
+        onLocalProxyBodyOverrideChange={setBodyOverride}
+      />
+
+      <div className="space-y-2">
+        <FormLabel htmlFor="grokbuild-config-toml">
+          {t("grokBuild.rawConfig")}
+        </FormLabel>
+        <JsonEditor
+          value={rawConfig}
+          onChange={handleRawConfigChange}
+          placeholder=""
+          darkMode={isDarkMode}
+          rows={12}
+          showValidation={false}
+          language="javascript"
         />
-
-        {showButtons && (
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" type="button" onClick={onCancel}>
-              {t("common.cancel")}
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {submitLabel}
-            </Button>
-          </div>
+        {rawConfigError && (
+          <p className="text-xs text-destructive">
+            {t("grokBuild.invalidToml", {
+              error: rawConfigError,
+            })}
+          </p>
         )}
-      </form>
-    </Form>
+      </div>
+
+      <FormField
+        control={form.control}
+        name="settingsConfig"
+        render={() => (
+          <FormItem className="hidden">
+            <FormControl>
+              <Input type="hidden" />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </ProviderFormShell>
   );
 }

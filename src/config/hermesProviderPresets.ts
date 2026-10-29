@@ -2,9 +2,9 @@
  * Hermes Agent provider presets configuration
  * Hermes uses custom_providers array in config.yaml
  */
-import type { ProviderCategory } from "../types";
 import type { PresetTheme, TemplateValueConfig } from "./claudeProviderPresets";
 import type { TranslationKey } from "@/i18n/keys";
+import type { BasePreset } from "@/features/providers/forms/basePreset";
 
 // 来源标记与只读判断拆到轻量模块，首页供应商卡片无需加载整份预设
 export {
@@ -82,21 +82,10 @@ export const hermesApiModes: Array<{
   },
 ];
 
-export interface HermesProviderPreset {
-  name: string;
-  nameKey?: TranslationKey;
-  websiteUrl: string;
-  apiKeyUrl?: string;
+export interface HermesProviderPreset extends BasePreset {
   settingsConfig: HermesProviderSettingsConfig;
-  isOfficial?: boolean;
-  isPartner?: boolean;
-  primePartner?: boolean; // 置顶合作伙伴（顶级）：徽章显示为心形
-  partnerPromotionKey?: string;
-  category?: ProviderCategory;
   templateValues?: Record<string, TemplateValueConfig>;
   theme?: PresetTheme;
-  icon?: string;
-  iconColor?: string;
   isCustomTemplate?: boolean;
   /** Optional top-level `model:` defaults written on switch. */
   suggestedDefaults?: HermesSuggestedDefaults;

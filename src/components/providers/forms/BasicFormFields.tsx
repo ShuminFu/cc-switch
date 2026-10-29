@@ -20,20 +20,18 @@ import {
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { IconPicker } from "@/components/IconPicker";
 import { getIconMetadata } from "@/icons/extracted/metadata";
-import type { UseFormReturn } from "react-hook-form";
+import { useFormContext } from "react-hook-form";
 import type { ProviderFormData } from "@/lib/schemas/provider";
 
 interface BasicFormFieldsProps {
-  form: UseFormReturn<ProviderFormData>;
   /** Slot to render content between icon and name fields */
   beforeNameSlot?: ReactNode;
 }
 
-export function BasicFormFields({
-  form,
-  beforeNameSlot,
-}: BasicFormFieldsProps) {
+/** 名称、备注、网址与图标字段；表单实例来自外层 ProviderFormShell 的 FormProvider */
+export function BasicFormFields({ beforeNameSlot }: BasicFormFieldsProps) {
   const { t } = useTranslation();
+  const form = useFormContext<ProviderFormData>();
   const [iconDialogOpen, setIconDialogOpen] = useState(false);
 
   const currentIcon = form.watch("icon");
