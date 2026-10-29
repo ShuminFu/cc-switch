@@ -1,0 +1,2 @@
+intent = "Image sources and document blocks: a URL image keeps image_url.url, base64 images build a data URI, empty images are skipped, text documents become text parts, base64 PDFs become file parts, and URL documents become a placeholder."
+source_commit = "a0215f2"
