@@ -3,7 +3,7 @@
 //! 将旧版 config.json (MultiAppConfig) 数据迁移到 SQLite 数据库。
 
 use super::{lock_conn, to_json_string, Database};
-use crate::app_config::MultiAppConfig;
+use crate::app_config::{AppType, MultiAppConfig};
 use crate::error::AppError;
 use rusqlite::{params, Connection};
 
@@ -217,26 +217,14 @@ impl Database {
         tx: &rusqlite::Transaction<'_>,
         config: &MultiAppConfig,
     ) -> Result<(), AppError> {
-        if let Some(snippet) = &config.common_config_snippets.claude {
-            tx.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-                params!["common_config_claude", snippet],
-            )
-            .map_err(|e| AppError::Database(format!("Migrate settings failed: {e}")))?;
-        }
-        if let Some(snippet) = &config.common_config_snippets.codex {
-            tx.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-                params!["common_config_codex", snippet],
-            )
-            .map_err(|e| AppError::Database(format!("Migrate settings failed: {e}")))?;
-        }
-        if let Some(snippet) = &config.common_config_snippets.gemini {
-            tx.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-                params!["common_config_gemini", snippet],
-            )
-            .map_err(|e| AppError::Database(format!("Migrate settings failed: {e}")))?;
+        for app in [AppType::Claude, AppType::Codex, AppType::Gemini] {
+            if let Some(snippet) = config.common_config_snippets.get(&app) {
+                tx.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                    params![format!("common_config_{}", app.as_str()), snippet],
+                )
+                .map_err(|e| AppError::Database(format!("Migrate settings failed: {e}")))?;
+            }
         }
 
         Ok(())

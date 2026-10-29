@@ -96,17 +96,16 @@ impl LiveEnv {
     fn with_settings(base: AppSettings) -> Self {
         let env = TestEnv::new();
         let home = env.home().to_path_buf();
-        let dir = |rel: &str| Some(home.join(rel).to_string_lossy().into_owned());
-        update_settings(AppSettings {
-            claude_config_dir: dir(".claude"),
-            codex_config_dir: dir(".codex"),
-            gemini_config_dir: dir(".gemini"),
-            grok_config_dir: dir(".grok"),
-            opencode_config_dir: dir(".config/opencode"),
-            openclaw_config_dir: dir(".openclaw"),
-            hermes_config_dir: dir(".hermes"),
-            ..base
-        })
+        let dir = |rel: &str| home.join(rel).to_string_lossy().into_owned();
+        update_settings(
+            base.with_config_dir(&AppType::Claude, dir(".claude"))
+                .with_config_dir(&AppType::Codex, dir(".codex"))
+                .with_config_dir(&AppType::Gemini, dir(".gemini"))
+                .with_config_dir(&AppType::GrokBuild, dir(".grok"))
+                .with_config_dir(&AppType::OpenCode, dir(".config/opencode"))
+                .with_config_dir(&AppType::OpenClaw, dir(".openclaw"))
+                .with_config_dir(&AppType::Hermes, dir(".hermes")),
+        )
         .expect("pin app config dirs");
         Self { home, _env: env }
     }

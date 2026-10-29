@@ -90,8 +90,10 @@ pub async fn acknowledge_settings_load_failure() -> Result<bool, IpcError> {
 #[tauri::command]
 pub async fn save_settings(
     state: tauri::State<'_, crate::store::AppState>,
-    settings: crate::settings::AppSettings,
+    settings: serde_json::Value,
 ) -> Result<bool, IpcError> {
+    let settings = crate::settings::AppSettings::from_frontend_value(settings)
+        .map_err(|e| IpcError::from(crate::error::AppError::InvalidInput(e.to_string())))?;
     let (existing, unify_codex_enabled) =
         persist_settings_for_save(settings).map_err(IpcError::from)?;
     let unify_codex_changed = unify_codex_enabled != existing.unify_codex_session_history;

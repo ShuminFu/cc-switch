@@ -794,10 +794,10 @@ fn explicit_default_claude_dir_keeps_default_split_mcp_path() {
     let claude_dir = home.join(".claude");
     fs::create_dir_all(&claude_dir).expect("create explicit default claude dir");
 
-    update_settings(AppSettings {
-        claude_config_dir: Some(claude_dir.to_string_lossy().to_string()),
-        ..AppSettings::default()
-    })
+    update_settings(
+        AppSettings::default()
+            .with_config_dir(&AppType::Claude, claude_dir.to_string_lossy().to_string()),
+    )
     .expect("set explicit default claude config dir");
 
     assert_eq!(
@@ -849,10 +849,10 @@ fn custom_claude_dir_writes_mcp_inside_config_dir() {
     let custom_dir = home.join("profiles").join(".claude");
     fs::create_dir_all(&custom_dir).expect("create custom claude dir");
 
-    update_settings(AppSettings {
-        claude_config_dir: Some(custom_dir.to_string_lossy().to_string()),
-        ..AppSettings::default()
-    })
+    update_settings(
+        AppSettings::default()
+            .with_config_dir(&AppType::Claude, custom_dir.to_string_lossy().to_string()),
+    )
     .expect("set custom claude config dir");
 
     let expected_mcp_path = custom_dir.join(".claude.json");
@@ -924,10 +924,10 @@ fn custom_claude_dir_sync_does_not_copy_default_profile() {
 
     let custom_dir = home.join("profiles").join("work").join(".claude");
     fs::create_dir_all(&custom_dir).expect("create custom claude dir");
-    update_settings(AppSettings {
-        claude_config_dir: Some(custom_dir.to_string_lossy().to_string()),
-        ..AppSettings::default()
-    })
+    update_settings(
+        AppSettings::default()
+            .with_config_dir(&AppType::Claude, custom_dir.to_string_lossy().to_string()),
+    )
     .expect("set custom claude config dir");
 
     let expected_mcp_path = custom_dir.join(".claude.json");
@@ -1022,10 +1022,10 @@ fn custom_claude_dir_read_only_mcp_queries_do_not_create_profile() {
 
     let custom_dir = home.join("profiles").join("work").join(".claude");
     fs::create_dir_all(&custom_dir).expect("create custom claude dir");
-    update_settings(AppSettings {
-        claude_config_dir: Some(custom_dir.to_string_lossy().to_string()),
-        ..AppSettings::default()
-    })
+    update_settings(
+        AppSettings::default()
+            .with_config_dir(&AppType::Claude, custom_dir.to_string_lossy().to_string()),
+    )
     .expect("set custom claude config dir");
 
     let expected_mcp_path = custom_dir.join(".claude.json");

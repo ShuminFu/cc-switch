@@ -2259,7 +2259,7 @@ user_profile_enabled: false
         with_test_home(|| {
             // Clear any settings override so resolution reaches the HERMES_HOME branch.
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
+            s.set_config_dir(&crate::app_config::AppType::Hermes, None);
             crate::settings::update_settings(s).unwrap();
 
             let old = std::env::var_os("HERMES_HOME");
@@ -2288,7 +2288,10 @@ user_profile_enabled: false
             let custom_path = custom.path().to_path_buf();
 
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = Some(custom_path.to_string_lossy().to_string());
+            s.set_config_dir(
+                &crate::app_config::AppType::Hermes,
+                Some(custom_path.to_string_lossy().to_string()),
+            );
             crate::settings::update_settings(s).unwrap();
 
             let old = std::env::var_os("HERMES_HOME");
@@ -2301,7 +2304,7 @@ user_profile_enabled: false
                 None => std::env::remove_var("HERMES_HOME"),
             }
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
+            s.set_config_dir(&crate::app_config::AppType::Hermes, None);
             crate::settings::update_settings(s).unwrap();
 
             assert_eq!(
@@ -2316,7 +2319,7 @@ user_profile_enabled: false
     fn blank_hermes_home_falls_through_to_platform_default() {
         with_test_home(|| {
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
+            s.set_config_dir(&crate::app_config::AppType::Hermes, None);
             crate::settings::update_settings(s).unwrap();
 
             let old = std::env::var_os("HERMES_HOME");
@@ -2341,7 +2344,7 @@ user_profile_enabled: false
     fn default_hermes_dir_without_override_is_platform_correct() {
         with_test_home(|| {
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
+            s.set_config_dir(&crate::app_config::AppType::Hermes, None);
             crate::settings::update_settings(s).unwrap();
 
             let old = std::env::var_os("HERMES_HOME");

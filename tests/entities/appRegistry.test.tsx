@@ -8,10 +8,12 @@ import {
   appLabel,
   appsWithCap,
   isAppId,
+  resolveAppId,
   sharedFeatureAppOf,
   useAppCaps,
 } from "@/entities/app/registry";
 import { APP_ICON_MAP, MCP_APP_IDS, SKILLS_APP_IDS } from "@/config/appConfig";
+import { APP_STORAGE_KEY, getInitialApp } from "@/components/app-shell/views";
 
 const EXPECTED_LABELS: Record<AppId, string> = {
   claude: "Claude",
@@ -62,6 +64,32 @@ describe("app registry", () => {
     expect(isAppId(null)).toBe(false);
     expect(isAppId(undefined)).toBe(false);
     expect(isAppId("__proto__")).toBe(false);
+  });
+
+  it("resolves persisted app ids through registry aliases", () => {
+    for (const id of ALL_APP_IDS) {
+      expect(resolveAppId(id)).toBe(id);
+    }
+    expect(resolveAppId("claude_desktop")).toBe("claude-desktop");
+    expect(resolveAppId("claudeDesktop")).toBe("claude-desktop");
+    expect(resolveAppId(" Grok ")).toBe("grokbuild");
+    expect(resolveAppId("grok-build")).toBe("grokbuild");
+    expect(resolveAppId("unknown")).toBeUndefined();
+    expect(resolveAppId("__proto__")).toBeUndefined();
+    expect(resolveAppId(null)).toBeUndefined();
+  });
+
+  it("restores the last app from localStorage via aliases", () => {
+    try {
+      window.localStorage.setItem(APP_STORAGE_KEY, "claude_desktop");
+      expect(getInitialApp()).toBe("claude-desktop");
+      window.localStorage.setItem(APP_STORAGE_KEY, "codex");
+      expect(getInitialApp()).toBe("codex");
+      window.localStorage.setItem(APP_STORAGE_KEY, "bogus");
+      expect(getInitialApp()).toBe("claude");
+    } finally {
+      window.localStorage.removeItem(APP_STORAGE_KEY);
+    }
   });
 
   it("matches the previous capability chains", () => {

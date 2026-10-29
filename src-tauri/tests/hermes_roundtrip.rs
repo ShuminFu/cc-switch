@@ -3,7 +3,7 @@
 
 mod support;
 
-use cc_switch_lib::{hermes_config, update_settings, AppSettings};
+use cc_switch_lib::{hermes_config, update_settings, AppSettings, AppType};
 
 /// 读取并回写 Hermes provider 时，Hermes v12+ 新增或未来才会出现的字段
 /// （例如 `rate_limit_delay`、`key_env`）必须透传，不能因为 UI 不感知就静默丢弃。
@@ -16,10 +16,10 @@ fn with_temp_hermes_dir<F: FnOnce(&std::path::Path)>(f: F) {
     let _ = std::fs::remove_dir_all(&hermes_dir);
     std::fs::create_dir_all(&hermes_dir).expect("create temp hermes dir");
 
-    update_settings(AppSettings {
-        hermes_config_dir: Some(hermes_dir.to_string_lossy().into_owned()),
-        ..AppSettings::default()
-    })
+    update_settings(
+        AppSettings::default()
+            .with_config_dir(&AppType::Hermes, hermes_dir.to_string_lossy().into_owned()),
+    )
     .expect("set hermes_config_dir override");
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&hermes_dir)));

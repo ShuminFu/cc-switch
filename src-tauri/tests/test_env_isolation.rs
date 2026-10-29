@@ -1,6 +1,6 @@
 use std::sync::{Arc, Barrier};
 
-use cc_switch_lib::{get_claude_settings_path, update_settings, AppSettings};
+use cc_switch_lib::{get_claude_settings_path, update_settings, AppSettings, AppType};
 
 #[path = "support.rs"]
 mod support;
@@ -10,47 +10,48 @@ use support::{create_test_state, TestEnv};
 #[test]
 fn parallel_test_envs_do_not_share_home_settings_or_db() {
     let barrier = Arc::new(Barrier::new(2));
-    let handles: Vec<_> = ["alpha", "beta"]
-        .into_iter()
-        .map(|name| {
-            let barrier = Arc::clone(&barrier);
-            std::thread::spawn(move || {
-                let test_env = TestEnv::new();
-                let home = test_env.home().to_path_buf();
-                let claude_dir = home.join(format!("claude-{name}"));
-                update_settings(AppSettings {
-                    claude_config_dir: Some(claude_dir.to_string_lossy().into_owned()),
-                    ..AppSettings::default()
-                })
-                .expect("update settings");
-                let state = create_test_state().expect("create test state");
-                state
-                    .db
-                    .set_setting("test_env_owner", name)
-                    .expect("write db setting");
-
-                // 两个线程都写完后再读，确保读到的是各自的数据
-                barrier.wait();
-
-                let settings_path = get_claude_settings_path();
-                assert!(
-                    settings_path.starts_with(&claude_dir),
-                    "{name}: {settings_path:?} should be under {claude_dir:?}"
-                );
-                assert_eq!(
+    let handles: Vec<_> =
+        ["alpha", "beta"]
+            .into_iter()
+            .map(|name| {
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    let test_env = TestEnv::new();
+                    let home = test_env.home().to_path_buf();
+                    let claude_dir = home.join(format!("claude-{name}"));
+                    update_settings(AppSettings::default().with_config_dir(
+                        &AppType::Claude,
+                        claude_dir.to_string_lossy().into_owned(),
+                    ))
+                    .expect("update settings");
+                    let state = create_test_state().expect("create test state");
                     state
                         .db
-                        .get_setting("test_env_owner")
-                        .expect("read db setting")
-                        .as_deref(),
-                    Some(name)
-                );
-                assert!(home.join(".cc-switch").join("cc-switch.db").exists());
-                barrier.wait();
-                home
+                        .set_setting("test_env_owner", name)
+                        .expect("write db setting");
+
+                    // 两个线程都写完后再读，确保读到的是各自的数据
+                    barrier.wait();
+
+                    let settings_path = get_claude_settings_path();
+                    assert!(
+                        settings_path.starts_with(&claude_dir),
+                        "{name}: {settings_path:?} should be under {claude_dir:?}"
+                    );
+                    assert_eq!(
+                        state
+                            .db
+                            .get_setting("test_env_owner")
+                            .expect("read db setting")
+                            .as_deref(),
+                        Some(name)
+                    );
+                    assert!(home.join(".cc-switch").join("cc-switch.db").exists());
+                    barrier.wait();
+                    home
+                })
             })
-        })
-        .collect();
+            .collect();
 
     let homes: Vec<_> = handles
         .into_iter()

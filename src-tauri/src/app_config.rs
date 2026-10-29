@@ -431,54 +431,54 @@ impl FromStr for AppType {
 }
 
 /// 通用配置片段（按应用分治）
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+///
+/// 以应用规范标识（注册表 slug）为键；JSON 形状与旧版按字段定义的结构体一致
+/// （`{"claude": "...", "codex": "..."}`），键经注册表别名归一，未知键原样保留。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommonConfigSnippets {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codex: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gemini: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opencode: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub openclaw: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hermes: Option<String>,
+    snippets: std::collections::BTreeMap<String, String>,
 }
 
 impl CommonConfigSnippets {
     /// 获取指定应用的通用配置片段
     pub fn get(&self, app: &AppType) -> Option<&String> {
-        match app {
-            AppType::Claude => self.claude.as_ref(),
-            AppType::ClaudeDesktop => None,
-            AppType::Codex => self.codex.as_ref(),
-            AppType::Gemini => self.gemini.as_ref(),
-            AppType::GrokBuild => None,
-            AppType::OpenCode => self.opencode.as_ref(),
-            AppType::OpenClaw => self.openclaw.as_ref(),
-            AppType::Hermes => self.hermes.as_ref(),
-        }
+        self.snippets.get(app.as_str())
     }
 
     /// 设置指定应用的通用配置片段
     pub fn set(&mut self, app: &AppType, snippet: Option<String>) {
-        match app {
-            AppType::Claude => self.claude = snippet,
-            AppType::ClaudeDesktop => {}
-            AppType::Codex => self.codex = snippet,
-            AppType::Gemini => self.gemini = snippet,
-            AppType::GrokBuild => {}
-            AppType::OpenCode => self.opencode = snippet,
-            AppType::OpenClaw => self.openclaw = snippet,
-            AppType::Hermes => self.hermes = snippet,
+        match snippet {
+            Some(snippet) => self.snippets.insert(app.as_str().to_string(), snippet),
+            None => self.snippets.remove(app.as_str()),
+        };
+    }
+}
+
+impl Serialize for CommonConfigSnippets {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.snippets.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CommonConfigSnippets {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = std::collections::BTreeMap::<String, Option<String>>::deserialize(deserializer)?;
+        let mut snippets = std::collections::BTreeMap::new();
+        let mut from_alias = Vec::new();
+        for (key, snippet) in raw {
+            let Some(snippet) = snippet else { continue };
+            match crate::apps::registry::find_by_id(&key.trim().to_lowercase()) {
+                Some(d) if d.slug != key => from_alias.push((d.slug.to_string(), snippet)),
+                _ => {
+                    snippets.insert(key, snippet);
+                }
+            }
         }
+        // 规范键与别名同时出现时规范键优先
+        for (slug, snippet) in from_alias {
+            snippets.entry(slug).or_insert(snippet);
+        }
+        Ok(Self { snippets })
     }
 }
 
@@ -629,7 +629,9 @@ impl MultiAppConfig {
             log::info!(
                 "迁移通用配置：claude_common_config_snippet → common_config_snippets.claude"
             );
-            config.common_config_snippets.claude = Some(old_claude_snippet);
+            config
+                .common_config_snippets
+                .set(&AppType::Claude, Some(old_claude_snippet));
             updated = true;
         }
 
@@ -980,6 +982,31 @@ mod tests {
     use std::env;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn common_config_snippets_keep_json_shape_and_map_aliases() {
+        let snippets: CommonConfigSnippets = serde_json::from_value(serde_json::json!({
+            "claude": "{\"a\":1}",
+            "codex": null,
+            "grok": "g = 1",
+            "ninth": "n"
+        }))
+        .expect("snippets");
+        assert_eq!(
+            snippets.get(&AppType::Claude).map(String::as_str),
+            Some("{\"a\":1}")
+        );
+        assert_eq!(snippets.get(&AppType::Codex), None);
+        assert_eq!(
+            snippets.get(&AppType::GrokBuild).map(String::as_str),
+            Some("g = 1"),
+            "alias keys are normalized through the registry"
+        );
+        assert_eq!(
+            serde_json::to_value(&snippets).unwrap(),
+            serde_json::json!({ "claude": "{\"a\":1}", "grokbuild": "g = 1", "ninth": "n" })
+        );
+    }
 
     #[test]
     fn app_type_parses_claude_desktop_aliases() {

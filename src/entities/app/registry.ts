@@ -36,6 +36,8 @@ export interface AppDescriptor {
   caps: AppCaps;
   /** 会话 / Skills / MCP 等共享功能视图所借用的应用；缺省为自身 */
   featureHost?: AppId;
+  /** 旧版持久化值中可能出现的别名（已小写），与后端注册表 `aliases` 一致 */
+  aliases?: readonly string[];
 }
 
 const caps = (overrides: Partial<AppCaps> = {}): AppCaps => ({
@@ -63,10 +65,16 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
       proxyTakeover: false,
     }),
     featureHost: "claude",
+    aliases: ["claude_desktop", "claudedesktop"],
   },
   { id: "codex", label: "Codex", caps: caps() },
   { id: "gemini", label: "Gemini", caps: caps() },
-  { id: "grokbuild", label: "Grok Build", caps: caps() },
+  {
+    id: "grokbuild",
+    label: "Grok Build",
+    caps: caps(),
+    aliases: ["grok-build", "grok_build", "grok"],
+  },
   {
     id: "opencode",
     label: "OpenCode",
@@ -117,6 +125,24 @@ export const ALL_APP_IDS: readonly AppId[] = APP_REGISTRY.map((app) => app.id);
 /** 判断任意字符串（如 localStorage 中的值）是否为已知应用 ID */
 export function isAppId(value: unknown): value is AppId {
   return typeof value === "string" && BY_ID.has(value);
+}
+
+const BY_ALIAS = new Map<string, AppId>(
+  APP_REGISTRY.flatMap((app) =>
+    (app.aliases ?? []).map((alias) => [alias, app.id] as const),
+  ),
+);
+
+/**
+ * 把持久化的应用标识（localStorage、旧版设置等）经注册表别名归一为规范 AppId；
+ * 未知值返回 undefined。
+ */
+export function resolveAppId(value: unknown): AppId | undefined {
+  if (typeof value !== "string") return undefined;
+  if (BY_ID.has(value)) return value as AppId;
+  const normalized = value.trim().toLowerCase();
+  if (BY_ID.has(normalized)) return normalized as AppId;
+  return BY_ALIAS.get(normalized);
 }
 
 export function getAppDescriptor(id: string): AppDescriptor | undefined {
