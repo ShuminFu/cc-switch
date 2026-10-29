@@ -60,6 +60,12 @@ pub enum AppError {
     AllProvidersCircuitOpen,
     #[error("未配置供应商")]
     NoProvidersConfigured,
+    /// 应用不具备某项能力（如 Claude Desktop 没有提示词文件）
+    #[error("{app} 暂不支持 {feature} ({app} does not support {feature})")]
+    Unsupported {
+        app: &'static str,
+        feature: &'static str,
+    },
 }
 
 impl AppError {
@@ -81,6 +87,13 @@ impl AppError {
         Self::Toml {
             path: path.as_ref().display().to_string(),
             source,
+        }
+    }
+
+    pub fn unsupported(app: &crate::app_config::AppType, feature: &'static str) -> Self {
+        Self::Unsupported {
+            app: app.descriptor().display_name,
+            feature,
         }
     }
 
