@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { Provider } from "@/types";
 import { providersApi, type AppId } from "@/lib/api";
+import { providerKeys } from "@/entities/provider/keys";
 
 export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
   const queryClient = useQueryClient();
@@ -77,7 +78,7 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
       try {
         await providersApi.updateSortOrder(updates, appId);
         await queryClient.invalidateQueries({
-          queryKey: ["providers", appId],
+          queryKey: providerKeys.list(appId),
         });
 
         // 刷新故障转移队列（因为队列顺序依赖 sort_index）

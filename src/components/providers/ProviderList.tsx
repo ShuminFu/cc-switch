@@ -46,6 +46,9 @@ import { useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
+import { providerKeys } from "@/entities/provider/keys";
+import { invalidateProviderGraph } from "@/entities/provider/invalidate";
+import { STALE_TIME } from "@/lib/query/queryClient";
 
 interface ProviderListProps {
   providers: Record<string, Provider>;
@@ -98,8 +101,10 @@ export function ProviderList({
   );
 
   const { data: opencodeLiveIds } = useQuery({
-    queryKey: ["opencodeLiveProviderIds"],
+    queryKey: providerKeys.opencodeLiveIds,
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
+    // 直接读取 OpenCode live 配置文件，可能被外部修改
+    staleTime: STALE_TIME.live,
     enabled: appId === "opencode",
   });
 
@@ -192,7 +197,7 @@ export function ProviderList({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { data: claudeDesktopStatus } = useQuery({
-    queryKey: ["claudeDesktopStatus"],
+    queryKey: providerKeys.claudeDesktopStatus,
     queryFn: () => providersApi.getClaudeDesktopStatus(),
     enabled: appId === "claude-desktop",
     refetchInterval: appId === "claude-desktop" ? 5000 : false,
@@ -230,10 +235,7 @@ export function ProviderList({
     },
     onSuccess: (imported) => {
       if (imported) {
-        queryClient.invalidateQueries({ queryKey: ["providers", appId] });
-        if (appId === "claude-desktop") {
-          queryClient.invalidateQueries({ queryKey: ["claudeDesktopStatus"] });
-        }
+        void invalidateProviderGraph(queryClient, appId);
         toast.success(t("provider.importCurrentDescription"));
       } else {
         toast.info(t("provider.noProviders"));

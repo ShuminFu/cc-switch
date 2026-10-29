@@ -98,6 +98,7 @@ import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import HermesMemoryPanel from "@/components/hermes/HermesMemoryPanel";
 import { safeStorageGet, safeStorageSet } from "@/lib/storage";
 import { isAppId, useAppCaps } from "@/entities/app/registry";
+import { providerKeys } from "@/entities/provider/keys";
 
 type View =
   | "providers"
@@ -358,7 +359,7 @@ function App() {
   }, [activeApp, refetch]);
 
   useTauriEvent("universal-provider-synced", async () => {
-    await queryClient.invalidateQueries({ queryKey: ["providers"] });
+    await queryClient.invalidateQueries({ queryKey: providerKeys.all });
     try {
       await providersApi.updateTrayMenu();
     } catch (error) {
@@ -375,7 +376,7 @@ function App() {
     await queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
     await queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
     await queryClient.invalidateQueries({
-      queryKey: ["providers", "claude-desktop"],
+      queryKey: providerKeys.list("claude-desktop"),
     });
   });
 
@@ -615,7 +616,7 @@ function App() {
       // Invalidate queries to refresh the isInConfig state
       if (activeApp === "opencode") {
         await queryClient.invalidateQueries({
-          queryKey: ["opencodeLiveProviderIds"],
+          queryKey: providerKeys.opencodeLiveIds,
         });
       } else if (activeApp === "openclaw") {
         await queryClient.invalidateQueries({
@@ -682,7 +683,7 @@ function App() {
         liveProviderIds =
           activeApp === "opencode"
             ? await queryClient.ensureQueryData({
-                queryKey: ["opencodeLiveProviderIds"],
+                queryKey: providerKeys.opencodeLiveIds,
                 queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
               })
             : activeApp === "openclaw"
@@ -777,11 +778,11 @@ function App() {
   const handleImportSuccess = async () => {
     try {
       await queryClient.invalidateQueries({
-        queryKey: ["providers"],
+        queryKey: providerKeys.all,
         refetchType: "all",
       });
       await queryClient.refetchQueries({
-        queryKey: ["providers"],
+        queryKey: providerKeys.all,
         type: "all",
       });
     } catch (error) {

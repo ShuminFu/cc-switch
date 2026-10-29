@@ -109,7 +109,7 @@ import {
   useCodexOauth,
 } from "./hooks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { useSettingsQuery } from "@/lib/query";
+import { STALE_TIME, useSettingsQuery } from "@/lib/query";
 import {
   CLAUDE_DEFAULT_CONFIG,
   CODEX_DEFAULT_CONFIG,
@@ -122,6 +122,7 @@ import { HERMES_DEFAULT_CONFIG } from "./hooks/useHermesFormState";
 import { resolveManagedAccountId } from "@/lib/authBinding";
 import { useOpenClawLiveProviderIds } from "@/hooks/useOpenClaw";
 import { useHermesLiveProviderIds } from "@/hooks/useHermes";
+import { providerKeys } from "@/entities/provider/keys";
 
 type PresetEntry = {
   id: string;
@@ -893,8 +894,10 @@ function ProviderFormFull({
     data: opencodeLiveProviderIds = [],
     isLoading: isOpencodeLiveProviderIdsLoading,
   } = useQuery({
-    queryKey: ["opencodeLiveProviderIds"],
+    queryKey: providerKeys.opencodeLiveIds,
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
+    // 直接读取 OpenCode live 配置文件，可能被外部修改
+    staleTime: STALE_TIME.live,
     enabled: isOpenCodeApp && !isAnyOmoCategory,
   });
 

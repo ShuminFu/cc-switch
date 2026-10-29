@@ -19,7 +19,9 @@ import type {
   SessionMessage,
 } from "@/types";
 import { usageKeys } from "@/lib/query/usage";
+import { STALE_TIME } from "@/lib/query/queryClient";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { providerKeys } from "@/entities/provider/keys";
 
 const sortProviders = (
   providers: Record<string, Provider>,
@@ -60,8 +62,11 @@ export const useProvidersQuery = (
   const { isProxyRunning = false } = options || {};
 
   return useQuery({
-    queryKey: ["providers", appId],
+    queryKey: providerKeys.list(appId),
     placeholderData: keepPreviousData,
+    // 数据库支撑，增删改切换 / 托盘事件都会主动失效或 refetch，
+    // 无需在每次切换应用或窗口聚焦时重新拉取
+    staleTime: STALE_TIME.short,
     // 当代理服务运行时，每 10 秒刷新一次供应商列表
     // 这样可以自动反映后端熔断器自动禁用代理目标的变更
     refetchInterval: isProxyRunning ? 10000 : false,

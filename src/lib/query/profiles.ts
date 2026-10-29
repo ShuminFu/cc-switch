@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { profilesApi, providersApi } from "@/lib/api";
 import type { ProfileScope } from "@/lib/api/profiles";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { providerKeys } from "@/entities/provider/keys";
 
 const updateTrayMenuSafely = async () => {
   try {
@@ -121,12 +122,14 @@ export const useApplyProfileMutation = () => {
     onSuccess: async (warnings) => {
       await queryClient.invalidateQueries({ queryKey: ["profiles"] });
       await queryClient.invalidateQueries({
-        queryKey: ["providers", "claude"],
+        queryKey: providerKeys.list("claude"),
       });
       await queryClient.invalidateQueries({
-        queryKey: ["providers", "claude-desktop"],
+        queryKey: providerKeys.list("claude-desktop"),
       });
-      await queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
+      await queryClient.invalidateQueries({
+        queryKey: providerKeys.list("codex"),
+      });
       await queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
       await queryClient.invalidateQueries({ queryKey: ["skills"] });
       await updateTrayMenuSafely();

@@ -110,7 +110,7 @@
   },
   "src/components/providers/ProviderList.tsx": {
     "cc-switch/no-app-literal-comparison": {
-      "count": 21
+      "count": 20
     }
   },
   "src/components/providers/forms/OmoFormFields.tsx": {
@@ -318,7 +318,7 @@
       "count": 1
     },
     "cc-switch/no-app-literal-comparison": {
-      "count": 14
+      "count": 2
     }
   },
   "src/lib/query/queries.ts": {

@@ -17,6 +17,8 @@ import { PromptConfirmation } from "./deeplink/PromptConfirmation";
 import { McpConfirmation } from "./deeplink/McpConfirmation";
 import { SkillConfirmation } from "./deeplink/SkillConfirmation";
 import { ProviderIcon } from "./ProviderIcon";
+import { invalidateProviderGraph } from "@/entities/provider/invalidate";
+import { providerKeys } from "@/entities/provider/keys";
 
 interface DeeplinkError {
   url: string;
@@ -131,12 +133,18 @@ export function DeepLinkImportDialog() {
         }
       };
 
+      const refreshProviders = async () => {
+        if (request.app) {
+          await invalidateProviderGraph(queryClient, request.app);
+        } else {
+          await queryClient.invalidateQueries({ queryKey: providerKeys.all });
+        }
+      };
+
       // Handle different result types
       if ("type" in result) {
         if (result.type === "provider") {
-          await queryClient.invalidateQueries({
-            queryKey: ["providers", request.app],
-          });
+          await refreshProviders();
           toast.success(t("deeplink.importSuccess"), {
             description: t("deeplink.importSuccessDescription", {
               name: request.name,
@@ -180,9 +188,7 @@ export function DeepLinkImportDialog() {
         await refreshMcp(result);
       } else {
         // Legacy return type (string ID) - assume provider
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", request.app],
-        });
+        await refreshProviders();
         toast.success(t("deeplink.importSuccess"), {
           description: t("deeplink.importSuccessDescription", {
             name: request.name,

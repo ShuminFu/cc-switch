@@ -1,8 +1,29 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { failoverApi } from "@/lib/api/failover";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { providerKeys } from "@/entities/provider/keys";
+
+/**
+ * 故障转移队列变更后需要一起刷新的缓存：队列本身、可添加的供应商，
+ * 以及供应商列表（队列变化可能伴随当前供应商切换）。
+ */
+function invalidateFailoverQueueGraph(
+  queryClient: QueryClient,
+  appType: string,
+) {
+  queryClient.invalidateQueries({ queryKey: ["failoverQueue", appType] });
+  queryClient.invalidateQueries({
+    queryKey: ["availableProvidersForFailover", appType],
+  });
+  queryClient.invalidateQueries({ queryKey: providerKeys.list(appType) });
+}
 
 // ========== 熔断器 Hooks ==========
 
@@ -43,7 +64,7 @@ export function useResetCircuitBreaker() {
       });
       // 刷新供应商列表（因为可能发生了自动恢复切换）
       queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
+        queryKey: providerKeys.list(variables.appType),
       });
       // 刷新代理状态（更新 active_targets）
       queryClient.invalidateQueries({
@@ -128,15 +149,7 @@ export function useAddToFailoverQueue() {
       providerId: string;
     }) => failoverApi.addToFailoverQueue(appType, providerId),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: ["failoverQueue", variables.appType],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["availableProvidersForFailover", variables.appType],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
-      });
+      invalidateFailoverQueueGraph(queryClient, variables.appType);
     },
   });
 }
@@ -156,15 +169,7 @@ export function useRemoveFromFailoverQueue() {
       providerId: string;
     }) => failoverApi.removeFromFailoverQueue(appType, providerId),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: ["failoverQueue", variables.appType],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["availableProvidersForFailover", variables.appType],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
-      });
+      invalidateFailoverQueueGraph(queryClient, variables.appType);
       // 清除该供应商的健康状态缓存（退出队列后不再需要健康监控）
       queryClient.invalidateQueries({
         queryKey: ["providerHealth", variables.providerId, variables.appType],
@@ -273,15 +278,7 @@ export function useSetAutoFailoverEnabled() {
       // 启用/关闭故障转移可能触发：
       // - 立即切到队列 P1（当前供应商变化）
       // - 队列为空时自动把当前供应商加入队列（队列内容变化）
-      queryClient.invalidateQueries({
-        queryKey: ["failoverQueue", variables.appType],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["availableProvidersForFailover", variables.appType],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["providers", variables.appType],
-      });
+      invalidateFailoverQueueGraph(queryClient, variables.appType);
       queryClient.invalidateQueries({
         queryKey: ["proxyStatus"],
       });

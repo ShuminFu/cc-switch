@@ -24,6 +24,8 @@ vi.mock("@/hooks/useHermes", () => ({
 
 vi.mock("@/hooks/useOpenClaw", () => ({
   openclawKeys: {
+    liveProviderIds: ["openclaw", "liveProviderIds"],
+    defaultModel: ["openclaw", "defaultModel"],
     health: ["openclaw", "health"],
   },
 }));
