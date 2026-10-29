@@ -16,9 +16,11 @@ mod support;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use cc_switch_lib::{paths, Database, MultiAppConfig, SCHEMA_VERSION};
+use cc_switch_lib::{
+    paths, update_settings, AppSettings, Database, MultiAppConfig, SCHEMA_VERSION,
+};
 use rusqlite::types::Value;
-use rusqlite::Connection;
+use rusqlite::{Connection, DatabaseName};
 use support::TestEnv;
 
 /// 至少覆盖的不同起始版本数（验收标准）
@@ -557,14 +559,22 @@ fn every_released_schema_migrates_to_current() {
         let path = db_path();
         std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
 
-        let before = Connection::open_in_memory().expect("open memory db");
-        load_fixture(&before, &sql_path);
+        load_fixture(&open(&path), &sql_path);
+        // 从同一份已加载的文件复制对照库，而不是再加载一次 fixture：两次加载跨秒时
+        // 刷新后的时间戳不同，会让「数据保留」断言偶发失败
+        let mut before = Connection::open_in_memory().expect("open memory db");
+        before
+            .restore(
+                DatabaseName::Main,
+                &path,
+                None::<fn(rusqlite::backup::Progress)>,
+            )
+            .expect("copy fixture db into memory");
         assert_eq!(
             user_version(&before),
             version,
             "{label}: fixture user_version"
         );
-        load_fixture(&open(&path), &sql_path);
         let pre = full_snapshot(&open(&path));
 
         drop(Database::init().unwrap_or_else(|e| panic!("{label}: init failed: {e}")));
@@ -666,6 +676,32 @@ fn premigration_backup_includes_uncheckpointed_wal_writes() {
         "pre-migration backup is missing the uncheckpointed WAL write"
     );
     drop(writer);
+}
+
+/// 备份保留数为最小值 1 时，同一次启动中 auto-vacuum 重建不得再备份而把迁移前快照清理掉
+#[test]
+fn premigration_backup_survives_minimum_retention() {
+    let _env = TestEnv::new();
+    update_settings(AppSettings {
+        backup_retain_count: Some(1),
+        ..AppSettings::default()
+    })
+    .expect("set backup retention to 1");
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    {
+        let conn = open(&path);
+        load_fixture(&conn, &fixtures_dir().join("db/v1.sql"));
+        let mode: i64 = conn
+            .query_row("PRAGMA auto_vacuum;", [], |row| row.get(0))
+            .expect("read auto_vacuum");
+        assert_ne!(mode, 2, "fixture must need an auto-vacuum rebuild");
+    }
+    let pre = full_snapshot(&open(&path));
+
+    drop(Database::init().expect("init v1 database"));
+    assert_eq!(user_version(&open(&path)), SCHEMA_VERSION);
+    assert_backup_matches("retain=1", &pre);
 }
 
 /// 迁移失败时，启动错误信息中必须包含迁移前备份 ID，且该备份文件存在

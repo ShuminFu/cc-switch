@@ -58,4 +58,9 @@ p0-migration-harness
 - `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: clean
 - `cargo fmt --manifest-path src-tauri/Cargo.toml --check`: clean
 
-**Known limitation:** backup retention (`backup_retain_count`, minimum 1) still applies to `.db` backups. With retain = 1, the auto-vacuum rebuild backup taken later in the same `init` can prune the pre-migration snapshot. `.config.json` copies are never pruned.
+**Known limitation:** `.config.json` copies are not pruned by backup retention, and renaming or deleting a `.db` backup in the UI leaves its `.config.json` companion untouched.
+
+**Review**
+- Fixed a retention gap: with `backup_retain_count = 1`, upgrading an older DB whose `auto_vacuum` is not INCREMENTAL took a second backup before the auto-vacuum rebuild, and that pruned the pre-migration snapshot right away, leaving only post-migration state. `ensure_incremental_auto_vacuum` now takes `backup_before_rebuild`, and `init` skips that extra backup when a pre-migration snapshot was taken in the same startup. Restoring the snapshot and starting again reproduces the rebuilt state. New test `premigration_backup_survives_minimum_retention` fails without the fix.
+- Fixed an existing flaky test in `every_released_schema_migrates_to_current`: it loaded the fixture twice, and the refreshed timestamps differed when the two loads fell in different seconds. The comparison DB is now restored from the loaded file (failed 1 in 2 runs before the change, 0 in 80 after).
+- All acceptance criteria were checked against the code. `cargo test --test migrations`: 9 passed. Full `cargo test --no-fail-fast`: 2407 passed, 0 failed. clippy `--all-targets -D warnings` and fmt are clean.

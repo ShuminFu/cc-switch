@@ -141,7 +141,9 @@ impl Database {
         };
         db.create_tables().map_err(&with_backup_hint)?;
         db.apply_schema_migrations().map_err(&with_backup_hint)?;
-        if let Err(e) = db.ensure_incremental_auto_vacuum() {
+        // 本次启动已做过迁移前快照时不再重复备份：否则在较小的备份保留数（最小 1）下，
+        // 重建前的备份会把迁移前快照清理掉
+        if let Err(e) = db.ensure_incremental_auto_vacuum(backup_id.is_none()) {
             log::warn!("Failed to ensure incremental auto-vacuum: {e}");
         }
         db.ensure_model_pricing_seeded()?;
@@ -239,7 +241,11 @@ impl Database {
         Ok(true)
     }
 
-    pub(crate) fn ensure_incremental_auto_vacuum(&self) -> Result<bool, AppError> {
+    /// `backup_before_rebuild` 为 true 时，在 VACUUM 重建已有数据库之前先备份
+    pub(crate) fn ensure_incremental_auto_vacuum(
+        &self,
+        backup_before_rebuild: bool,
+    ) -> Result<bool, AppError> {
         let mode = {
             let conn = lock_conn!(self.conn);
             Self::get_auto_vacuum_mode(&conn)?
@@ -256,7 +262,9 @@ impl Database {
             log::info!(
                 "Detected auto_vacuum={mode}, rebuilding database to enable incremental vacuum"
             );
-            self.backup_database_file()?;
+            if backup_before_rebuild {
+                self.backup_database_file()?;
+            }
         }
 
         let rebuilt = {
