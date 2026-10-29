@@ -5,7 +5,7 @@
 
 use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
-use crate::error::AppError;
+use crate::error::{AppError, IpcError};
 use crate::services::stream_check::{
     HealthStatus, StreamCheckConfig, StreamCheckResult, StreamCheckService,
 };
@@ -20,7 +20,7 @@ pub async fn stream_check_provider(
     copilot_state: State<'_, CopilotAuthState>,
     app_type: AppType,
     provider_id: String,
-) -> Result<StreamCheckResult, AppError> {
+) -> Result<StreamCheckResult, IpcError> {
     let config = state.db.get_stream_check_config()?;
 
     let providers = state.db.get_all_providers(app_type.as_str())?;
@@ -51,7 +51,7 @@ pub async fn stream_check_all_providers(
     copilot_state: State<'_, CopilotAuthState>,
     app_type: AppType,
     proxy_targets_only: bool,
-) -> Result<Vec<(String, StreamCheckResult)>, AppError> {
+) -> Result<Vec<(String, StreamCheckResult)>, IpcError> {
     let config = state.db.get_stream_check_config()?;
     let providers = state.db.get_all_providers(app_type.as_str())?;
 
@@ -113,8 +113,8 @@ pub async fn stream_check_all_providers(
 
 /// 获取连通性检查配置
 #[tauri::command]
-pub fn get_stream_check_config(state: State<'_, AppState>) -> Result<StreamCheckConfig, AppError> {
-    state.db.get_stream_check_config()
+pub fn get_stream_check_config(state: State<'_, AppState>) -> Result<StreamCheckConfig, IpcError> {
+    state.db.get_stream_check_config().map_err(IpcError::from)
 }
 
 /// 保存连通性检查配置
@@ -122,8 +122,11 @@ pub fn get_stream_check_config(state: State<'_, AppState>) -> Result<StreamCheck
 pub fn save_stream_check_config(
     state: State<'_, AppState>,
     config: StreamCheckConfig,
-) -> Result<(), AppError> {
-    state.db.save_stream_check_config(&config)
+) -> Result<(), IpcError> {
+    state
+        .db
+        .save_stream_check_config(&config)
+        .map_err(IpcError::from)
 }
 
 /// Copilot 供应商的 base_url 需要从 OAuth 管理器动态解析（按账号或默认端点）。

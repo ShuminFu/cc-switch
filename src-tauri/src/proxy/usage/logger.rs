@@ -4,6 +4,7 @@ use super::calculator::{CostBreakdown, CostCalculator, ModelPricing};
 use super::parser::TokenUsage;
 use crate::database::{Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 use crate::error::AppError;
+use crate::proxy::runtime_config::RuntimeConfigStore;
 use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{find_model_pricing_row, is_placeholder_pricing_model};
 use rust_decimal::Decimal;
@@ -40,11 +41,22 @@ pub struct RequestLog {
 /// 使用量记录器
 pub struct UsageLogger<'a> {
     db: &'a Database,
+    /// 代理请求路径上使用运行时配置快照读取计费配置与定价，避免每个请求查库
+    runtime_config: Option<&'a RuntimeConfigStore>,
 }
 
 impl<'a> UsageLogger<'a> {
     pub fn new(db: &'a Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            runtime_config: None,
+        }
+    }
+
+    /// 计费配置、供应商与模型定价改从运行时配置快照读取（快照随配置写入自动失效）
+    pub fn with_runtime_config(mut self, runtime_config: &'a RuntimeConfigStore) -> Self {
+        self.runtime_config = Some(runtime_config);
+        self
     }
 
     /// 记录成功的请求
@@ -199,6 +211,15 @@ impl<'a> UsageLogger<'a> {
 
     /// 获取模型定价
     pub fn get_model_pricing(&self, model_id: &str) -> Result<Option<ModelPricing>, AppError> {
+        match self.runtime_config {
+            Some(runtime_config) => {
+                runtime_config.model_pricing(model_id, || self.load_model_pricing(model_id))
+            }
+            None => self.load_model_pricing(model_id),
+        }
+    }
+
+    fn load_model_pricing(&self, model_id: &str) -> Result<Option<ModelPricing>, AppError> {
         let conn = crate::database::lock_conn!(self.db.conn);
         let row = find_model_pricing_row(&conn, model_id)?;
         match row {
@@ -225,14 +246,21 @@ impl<'a> UsageLogger<'a> {
         } else {
             app_type
         };
-        let default_multiplier_raw =
-            match self.db.get_default_cost_multiplier(default_app_type).await {
-                Ok(value) => value,
-                Err(e) => {
-                    log::warn!("[USG-003] 获取默认倍率失败 (app_type={app_type}): {e}");
-                    "1".to_string()
-                }
-            };
+        let default_multiplier = match self.runtime_config {
+            Some(runtime_config) => {
+                runtime_config
+                    .default_cost_multiplier(default_app_type)
+                    .await
+            }
+            None => self.db.get_default_cost_multiplier(default_app_type).await,
+        };
+        let default_multiplier_raw = match default_multiplier {
+            Ok(value) => value,
+            Err(e) => {
+                log::warn!("[USG-003] 获取默认倍率失败 (app_type={app_type}): {e}");
+                "1".to_string()
+            }
+        };
         let default_multiplier = match Decimal::from_str(&default_multiplier_raw) {
             Ok(value) => value,
             Err(e) => {
@@ -243,14 +271,17 @@ impl<'a> UsageLogger<'a> {
             }
         };
 
-        let default_pricing_source_raw =
-            match self.db.get_pricing_model_source(default_app_type).await {
-                Ok(value) => value,
-                Err(e) => {
-                    log::warn!("[USG-003] 获取默认计费模式失败 (app_type={app_type}): {e}");
-                    PRICING_SOURCE_RESPONSE.to_string()
-                }
-            };
+        let default_pricing_source = match self.runtime_config {
+            Some(runtime_config) => runtime_config.pricing_model_source(default_app_type).await,
+            None => self.db.get_pricing_model_source(default_app_type).await,
+        };
+        let default_pricing_source_raw = match default_pricing_source {
+            Ok(value) => value,
+            Err(e) => {
+                log::warn!("[USG-003] 获取默认计费模式失败 (app_type={app_type}): {e}");
+                PRICING_SOURCE_RESPONSE.to_string()
+            }
+        };
         let default_pricing_source = if default_pricing_source_raw == PRICING_SOURCE_RESPONSE
             || default_pricing_source_raw == PRICING_SOURCE_REQUEST
         {
@@ -262,11 +293,17 @@ impl<'a> UsageLogger<'a> {
             PRICING_SOURCE_RESPONSE.to_string()
         };
 
-        let provider = self
-            .db
-            .get_provider_by_id(provider_id, app_type)
-            .ok()
-            .flatten();
+        let provider = match self.runtime_config {
+            Some(runtime_config) => runtime_config
+                .app_providers(app_type)
+                .ok()
+                .and_then(|providers| providers.all.get(provider_id).cloned()),
+            None => self
+                .db
+                .get_provider_by_id(provider_id, app_type)
+                .ok()
+                .flatten(),
+        };
 
         let (provider_multiplier, provider_pricing_source) = provider
             .as_ref()

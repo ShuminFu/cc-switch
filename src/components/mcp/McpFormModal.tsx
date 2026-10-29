@@ -409,9 +409,18 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
       await onSave();
     } catch (error: any) {
       const detail = extractErrorMessage(error);
-      const mapped = translateMcpBackendError(detail, t);
-      const msg = mapped || detail || t("mcp.error.saveFailed");
-      toast.error(msg, { duration: mapped || detail ? 6000 : 4000 });
+      const mapped = translateMcpBackendError(error, t);
+      if (mapped) {
+        // 按错误码给出译文摘要，原始文案作为补充说明
+        toast.error(mapped, {
+          description: detail || undefined,
+          duration: 6000,
+        });
+      } else {
+        toast.error(detail || t("mcp.error.saveFailed"), {
+          duration: detail ? 6000 : 4000,
+        });
+      }
     } finally {
       setSaving(false);
     }

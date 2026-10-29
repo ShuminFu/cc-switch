@@ -8,10 +8,13 @@ use std::collections::HashMap;
 
 /// 供应商结构体
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 pub struct Provider {
     pub id: String,
     pub name: String,
     #[serde(rename = "settingsConfig")]
+    // specta 对 serde_json::Value 内联展开会无限递归，导出为 unknown
+    #[cfg_attr(test, specta(type = specta_typescript::Unknown))]
     pub settings_config: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "websiteUrl")]
@@ -222,6 +225,7 @@ pub struct ProviderManager {
 
 /// 用量查询脚本配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 pub struct UsageScript {
     pub enabled: bool,
     pub language: String,
@@ -310,6 +314,7 @@ pub struct UsageResult {
 
 /// 认证绑定来源
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum AuthBindingSource {
     /// 从 provider 自身配置读取认证信息（默认）
@@ -321,6 +326,7 @@ pub enum AuthBindingSource {
 
 /// 通用认证绑定
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(specta::Type))]
 pub struct AuthBinding {
     /// 认证来源
     #[serde(default)]
@@ -335,6 +341,7 @@ pub struct AuthBinding {
 
 /// Claude Desktop 3P 写入模式。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum ClaudeDesktopMode {
     Direct,
@@ -343,6 +350,7 @@ pub enum ClaudeDesktopMode {
 
 /// Claude Desktop 本地路由模式下暴露给 Desktop 的安全模型路由。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeDesktopModelRoute {
     /// 真实上游模型名，只保存在 CC Switch 内部，不写入 Claude Desktop profile。
@@ -357,6 +365,7 @@ pub struct ClaudeDesktopModelRoute {
 
 /// Codex Responses -> Chat Completions 的 reasoning 能力描述。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(specta::Type))]
 pub struct CodexChatReasoningConfig {
     #[serde(rename = "supportsThinking", skip_serializing_if = "Option::is_none")]
     pub supports_thinking: Option<bool>,
@@ -377,10 +386,12 @@ pub struct CodexChatReasoningConfig {
 
 /// Local proxy request overrides applied after route/protocol transforms.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(specta::Type))]
 pub struct LocalProxyRequestOverrides {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub headers: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, specta(type = Option<specta_typescript::Unknown>))]
     pub body: Option<serde_json::Value>,
 }
 
@@ -392,6 +403,7 @@ impl LocalProxyRequestOverrides {
 
 /// 供应商元数据
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(specta::Type))]
 pub struct ProviderMeta {
     /// 自定义端点列表（按 URL 去重存储）
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -439,10 +451,8 @@ pub struct ProviderMeta {
     /// 每月消费限额（USD）
     #[serde(rename = "limitMonthlyUsd", skip_serializing_if = "Option::is_none")]
     pub limit_monthly_usd: Option<String>,
-    /// Claude API 格式（仅 Claude 供应商使用）
-    /// - "anthropic": 原生 Anthropic Messages API，直接透传
-    /// - "openai_chat": OpenAI Chat Completions 格式，需要转换
-    /// - "openai_responses": OpenAI Responses API 格式，需要转换
+    /// Claude API 格式（仅 Claude 供应商使用），取值见
+    /// [`crate::proxy::protocol::ClaudeApiFormat`]：`anthropic` 直接透传，其余需要格式转换
     #[serde(rename = "apiFormat", skip_serializing_if = "Option::is_none")]
     pub api_format: Option<String>,
     /// 通用认证绑定（provider_config / managed_account）

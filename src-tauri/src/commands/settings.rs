@@ -1,6 +1,6 @@
-#![allow(non_snake_case)]
-
 use tauri::{AppHandle, Emitter};
+
+use crate::error::IpcError;
 use tauri_plugin_updater::UpdaterExt;
 
 /// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
@@ -68,20 +68,20 @@ fn persist_settings_for_save(
 
 /// 获取设置
 #[tauri::command]
-pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
+pub async fn get_settings() -> Result<crate::settings::AppSettings, IpcError> {
     Ok(crate::settings::get_settings_for_frontend())
 }
 
 /// 获取 settings.json 的加载失败记录（解析失败时含备份路径）
 #[tauri::command]
 pub async fn get_settings_load_failure(
-) -> Result<Option<crate::settings::SettingsLoadFailure>, String> {
+) -> Result<Option<crate::settings::SettingsLoadFailure>, IpcError> {
     Ok(crate::settings::get_settings_load_failure())
 }
 
 /// 用户确认后清除 settings.json 加载失败记录，允许以当前设置覆盖该文件
 #[tauri::command]
-pub async fn acknowledge_settings_load_failure() -> Result<bool, String> {
+pub async fn acknowledge_settings_load_failure() -> Result<bool, IpcError> {
     crate::settings::acknowledge_settings_load_failure();
     Ok(true)
 }
@@ -91,9 +91,9 @@ pub async fn acknowledge_settings_load_failure() -> Result<bool, String> {
 pub async fn save_settings(
     state: tauri::State<'_, crate::store::AppState>,
     settings: crate::settings::AppSettings,
-) -> Result<bool, String> {
+) -> Result<bool, IpcError> {
     let (existing, unify_codex_enabled) =
-        persist_settings_for_save(settings).map_err(|e| e.to_string())?;
+        persist_settings_for_save(settings).map_err(IpcError::from)?;
     let unify_codex_changed = unify_codex_enabled != existing.unify_codex_session_history;
 
     // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，
@@ -114,9 +114,9 @@ pub async fn save_settings(
             }) {
                 log::error!("回滚统一会话开关设置失败: {rollback_err}");
             }
-            return Err(format!(
-                "统一 Codex 会话历史开关未生效（live 配置重写失败）: {err}"
-            ));
+            return Err(
+                format!("统一 Codex 会话历史开关未生效（live 配置重写失败）: {err}").into(),
+            );
         }
 
         if unify_codex_enabled {
@@ -167,20 +167,20 @@ pub struct CodexUnifyHistoryRestoreResult {
 
 /// 是否存在统一会话开关的迁移备份（决定关闭弹窗里是否显示"恢复备份"勾选）。
 #[tauri::command]
-pub async fn has_codex_unify_history_backup() -> Result<bool, String> {
+pub async fn has_codex_unify_history_backup() -> Result<bool, IpcError> {
     Ok(crate::codex_history_migration::has_codex_official_history_unify_backup())
 }
 
 /// 按迁移备份账本把当时迁入共享桶的官方会话还原回 "openai" 桶。
 /// 由关闭统一会话开关的确认弹窗触发；幂等，可安全重试。
 #[tauri::command]
-pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreResult, String> {
+pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreResult, IpcError> {
     let outcome = tauri::async_runtime::spawn_blocking(|| {
         crate::codex_history_migration::restore_codex_official_history_from_backups()
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(IpcError::from)?;
 
     if let Some(reason) = &outcome.skipped_reason {
         log::debug!("○ Codex official history restore skipped: {reason}");
@@ -201,7 +201,7 @@ pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreR
 
 /// 重启应用程序（当 app_config_dir 变更后使用）
 #[tauri::command]
-pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
+pub async fn restart_app(app: AppHandle) -> Result<bool, IpcError> {
     crate::save_window_state_before_exit(&app);
 
     // 在后台延迟重启，让函数有时间返回响应
@@ -224,7 +224,7 @@ pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
 /// `process.relaunch()`，旧进程可能已经处在 bundle 被替换后的不稳定窗口期。
 /// 这里把退出清理、安装和重启串在同一个后端流程中，避免依赖旧前端继续执行。
 #[tauri::command]
-pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> {
+pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, IpcError> {
     let updater = app
         .updater_builder()
         .build()
@@ -301,7 +301,7 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
 /// 已是最新版本，但数据库仍不兼容（通常由第三方客户端或更高版本创建），应提示用户
 /// 升级无法解决，而不是让其反复尝试。
 #[tauri::command]
-pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>, String> {
+pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>, IpcError> {
     let updater = app
         .updater_builder()
         .build()
@@ -315,7 +315,7 @@ pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>
 
 /// 获取 app_config_dir 覆盖配置 (从 Store)
 #[tauri::command]
-pub async fn get_app_config_dir_override(app: AppHandle) -> Result<Option<String>, String> {
+pub async fn get_app_config_dir_override(app: AppHandle) -> Result<Option<String>, IpcError> {
     Ok(crate::app_store::refresh_app_config_dir_override(&app)
         .map(|p| p.to_string_lossy().to_string()))
 }
@@ -325,7 +325,7 @@ pub async fn get_app_config_dir_override(app: AppHandle) -> Result<Option<String
 pub async fn set_app_config_dir_override(
     app: AppHandle,
     path: Option<String>,
-) -> Result<bool, String> {
+) -> Result<bool, IpcError> {
     if let Some(raw) = path.as_deref() {
         validate_app_config_dir_override(
             raw,
@@ -369,7 +369,7 @@ fn validate_app_config_dir_override(
 
 /// 设置开机自启
 #[tauri::command]
-pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
+pub async fn set_auto_launch(enabled: bool) -> Result<bool, IpcError> {
     if enabled {
         crate::auto_launch::enable_auto_launch().map_err(|e| format!("启用开机自启失败: {e}"))?;
     } else {
@@ -857,16 +857,17 @@ mod tests {
 
 /// 获取开机自启状态
 #[tauri::command]
-pub async fn get_auto_launch_status() -> Result<bool, String> {
-    crate::auto_launch::is_auto_launch_enabled().map_err(|e| format!("获取开机自启状态失败: {e}"))
+pub async fn get_auto_launch_status() -> Result<bool, IpcError> {
+    Ok(crate::auto_launch::is_auto_launch_enabled()
+        .map_err(|e| format!("获取开机自启状态失败: {e}"))?)
 }
 
 /// 获取整流器配置
 #[tauri::command]
 pub async fn get_rectifier_config(
     state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::RectifierConfig, String> {
-    state.db.get_rectifier_config().map_err(|e| e.to_string())
+) -> Result<crate::proxy::types::RectifierConfig, IpcError> {
+    state.db.get_rectifier_config().map_err(IpcError::from)
 }
 
 /// 设置整流器配置
@@ -874,11 +875,11 @@ pub async fn get_rectifier_config(
 pub async fn set_rectifier_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::RectifierConfig,
-) -> Result<bool, String> {
+) -> Result<bool, IpcError> {
     state
         .db
         .set_rectifier_config(&config)
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     Ok(true)
 }
 
@@ -886,8 +887,8 @@ pub async fn set_rectifier_config(
 #[tauri::command]
 pub async fn get_optimizer_config(
     state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::OptimizerConfig, String> {
-    state.db.get_optimizer_config().map_err(|e| e.to_string())
+) -> Result<crate::proxy::types::OptimizerConfig, IpcError> {
+    state.db.get_optimizer_config().map_err(IpcError::from)
 }
 
 /// 设置优化器配置
@@ -895,35 +896,11 @@ pub async fn get_optimizer_config(
 pub async fn set_optimizer_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::OptimizerConfig,
-) -> Result<bool, String> {
+) -> Result<bool, IpcError> {
     state
         .db
         .set_optimizer_config(&config)
-        .map_err(|e| e.to_string())?;
-    Ok(true)
-}
-
-/// 获取 Copilot 优化器配置
-#[tauri::command]
-pub async fn get_copilot_optimizer_config(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::CopilotOptimizerConfig, String> {
-    state
-        .db
-        .get_copilot_optimizer_config()
-        .map_err(|e| e.to_string())
-}
-
-/// 设置 Copilot 优化器配置
-#[tauri::command]
-pub async fn set_copilot_optimizer_config(
-    state: tauri::State<'_, crate::AppState>,
-    config: crate::proxy::types::CopilotOptimizerConfig,
-) -> Result<bool, String> {
-    state
-        .db
-        .set_copilot_optimizer_config(&config)
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     Ok(true)
 }
 
@@ -931,8 +908,8 @@ pub async fn set_copilot_optimizer_config(
 #[tauri::command]
 pub async fn get_log_config(
     state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::LogConfig, String> {
-    state.db.get_log_config().map_err(|e| e.to_string())
+) -> Result<crate::proxy::types::LogConfig, IpcError> {
+    state.db.get_log_config().map_err(IpcError::from)
 }
 
 /// 设置日志配置
@@ -940,11 +917,8 @@ pub async fn get_log_config(
 pub async fn set_log_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::LogConfig,
-) -> Result<bool, String> {
-    state
-        .db
-        .set_log_config(&config)
-        .map_err(|e| e.to_string())?;
+) -> Result<bool, IpcError> {
+    state.db.set_log_config(&config).map_err(IpcError::from)?;
     log::set_max_level(config.to_level_filter());
     log::info!(
         "日志配置已更新: enabled={}, level={}",

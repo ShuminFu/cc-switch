@@ -6,6 +6,7 @@ import type { DeleteSessionOptions } from "@/lib/api/sessions";
 import type { SwitchResult } from "@/lib/api/providers";
 import type { Provider, SessionMeta, Settings } from "@/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { getIpcErrorAction } from "@/lib/errors/errorActions";
 import { generateUUID } from "@/utils/uuid";
 import { invalidateProviderGraph } from "@/entities/provider/invalidate";
 import { CODEX_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
@@ -232,7 +233,8 @@ export const useSwitchProviderMutation = () => {
           error: detail,
         }),
         duration: 6000,
-        action: {
+        // 可修复的错误码优先给出修复按钮，否则提供复制
+        action: getIpcErrorAction(error, t) ?? {
           label: t("common.copy"),
           onClick: () => {
             navigator.clipboard?.writeText(detail).catch(() => undefined);

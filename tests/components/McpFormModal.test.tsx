@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import type { McpServer } from "@/types";
 import McpFormModal from "@/components/mcp/McpFormModal";
+import { IpcError } from "@/lib/api/ipc";
 
 const toastErrorMock = vi.hoisted(() => vi.fn());
 const toastSuccessMock = vi.hoisted(() => vi.fn());
@@ -487,5 +488,35 @@ type = "stdio"
 
     const addButton = screen.getByText("common.add") as HTMLButtonElement;
     expect(addButton.disabled).toBe(false);
+  });
+
+  it("后端返回结构化错误时按错误码翻译，并附上原始文案", async () => {
+    upsertMock.mockRejectedValueOnce(
+      new IpcError({
+        code: "MCP_VALIDATION",
+        message: "MCP validation failed: server is not an object",
+        details: null,
+        i18nKey: null,
+      }),
+    );
+    renderForm();
+
+    fireEvent.change(screen.getByPlaceholderText("mcp.form.titlePlaceholder"), {
+      target: { value: "bad-spec" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("mcp.form.jsonPlaceholder"), {
+      target: { value: '{"type":"stdio","command":"ok"}' },
+    });
+
+    fireEvent.click(screen.getByText("common.add"));
+
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    expect(toastErrorMock).toHaveBeenLastCalledWith(
+      "mcp.error.validationFailed",
+      {
+        description: "MCP validation failed: server is not an object",
+        duration: 6000,
+      },
+    );
   });
 });

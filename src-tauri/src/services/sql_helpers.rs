@@ -194,6 +194,15 @@ mod tests {
     }
 
     #[test]
+    fn cache_inclusive_apps_come_from_registry() {
+        assert_eq!(
+            input_includes_cache_app_type_list(),
+            "'codex', 'gemini', 'grokbuild'"
+        );
+        assert!(fresh_input_sql("").contains("app_type IN ('codex', 'gemini', 'grokbuild')"));
+    }
+
+    #[test]
     fn fresh_input_keeps_normalized_rollup_value() {
         let conn = setup_conn();
         conn.execute(

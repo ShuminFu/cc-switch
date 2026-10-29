@@ -2,7 +2,6 @@
 //!
 //! 定义各 API 处理器的配置结构和使用量解析器
 
-use crate::app_config::AppType;
 use crate::proxy::usage::parser::TokenUsage;
 use serde_json::Value;
 
@@ -171,62 +170,6 @@ pub const GEMINI_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
     app_type_str: "gemini",
 };
 
-// ============================================================================
-// Handler 配置（预留，用于进一步简化）
-// ============================================================================
-
-/// Handler 基础配置
-///
-/// 预留结构，可用于进一步统一各 handler 的配置
-#[allow(dead_code)]
-#[derive(Clone)]
-pub struct HandlerConfig {
-    /// 应用类型
-    pub app_type: AppType,
-    /// 日志标签
-    pub tag: &'static str,
-    /// 应用类型字符串
-    pub app_type_str: &'static str,
-    /// 使用量解析配置
-    pub parser_config: &'static UsageParserConfig,
-}
-
-/// Claude Handler 配置
-#[allow(dead_code)]
-pub const CLAUDE_HANDLER_CONFIG: HandlerConfig = HandlerConfig {
-    app_type: AppType::Claude,
-    tag: "Claude",
-    app_type_str: "claude",
-    parser_config: &CLAUDE_PARSER_CONFIG,
-};
-
-/// Codex Chat Completions Handler 配置
-#[allow(dead_code)]
-pub const CODEX_CHAT_HANDLER_CONFIG: HandlerConfig = HandlerConfig {
-    app_type: AppType::Codex,
-    tag: "Codex",
-    app_type_str: "codex",
-    parser_config: &OPENAI_PARSER_CONFIG,
-};
-
-/// Codex Responses Handler 配置
-#[allow(dead_code)]
-pub const CODEX_RESPONSES_HANDLER_CONFIG: HandlerConfig = HandlerConfig {
-    app_type: AppType::Codex,
-    tag: "Codex",
-    app_type_str: "codex",
-    parser_config: &CODEX_PARSER_CONFIG,
-};
-
-/// Gemini Handler 配置
-#[allow(dead_code)]
-pub const GEMINI_HANDLER_CONFIG: HandlerConfig = HandlerConfig {
-    app_type: AppType::Gemini,
-    tag: "Gemini",
-    app_type_str: "gemini",
-    parser_config: &GEMINI_PARSER_CONFIG,
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,28 +193,10 @@ mod tests {
     }
 
     #[test]
-    fn handler_configs_point_at_matching_parser_configs() {
-        let cases = [
-            (&CLAUDE_HANDLER_CONFIG, AppType::Claude, "claude"),
-            (&CODEX_CHAT_HANDLER_CONFIG, AppType::Codex, "codex"),
-            (&CODEX_RESPONSES_HANDLER_CONFIG, AppType::Codex, "codex"),
-            (&GEMINI_HANDLER_CONFIG, AppType::Gemini, "gemini"),
-        ];
-        for (handler, app_type, app_type_str) in cases {
-            assert_eq!(handler.app_type, app_type);
-            assert_eq!(handler.app_type_str, app_type_str);
-            assert_eq!(handler.parser_config.app_type_str, app_type_str);
-        }
-
+    fn codex_parser_configs_use_distinct_stream_filters() {
         // Codex 两个入口分别使用 OpenAI Chat 与自动检测解析器
-        let chat_filter = CODEX_CHAT_HANDLER_CONFIG
-            .parser_config
-            .stream_event_filter
-            .unwrap();
-        let responses_filter = CODEX_RESPONSES_HANDLER_CONFIG
-            .parser_config
-            .stream_event_filter
-            .unwrap();
+        let chat_filter = OPENAI_PARSER_CONFIG.stream_event_filter.unwrap();
+        let responses_filter = CODEX_PARSER_CONFIG.stream_event_filter.unwrap();
         let completed = r#"{"type":"response.completed","response":{}}"#;
         assert!(!chat_filter(completed));
         assert!(responses_filter(completed));

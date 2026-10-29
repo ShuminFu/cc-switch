@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -79,9 +77,9 @@ where
 #[tauri::command]
 pub async fn s3_test_connection(
     settings: S3SyncSettings,
-    #[allow(non_snake_case)] preserveEmptyPassword: Option<bool>,
+    preserve_empty_password: Option<bool>,
 ) -> Result<Value, String> {
-    let preserve_empty = preserveEmptyPassword.unwrap_or(true);
+    let preserve_empty = preserve_empty_password.unwrap_or(true);
     let resolved =
         resolve_secret_for_request(settings, settings::get_s3_sync_settings(), preserve_empty);
     s3_sync_service::check_connection(&resolved)
@@ -133,9 +131,9 @@ pub async fn s3_sync_download(state: State<'_, AppState>) -> Result<Value, Strin
 #[tauri::command]
 pub async fn s3_sync_save_settings(
     settings: S3SyncSettings,
-    #[allow(non_snake_case)] passwordTouched: Option<bool>,
+    password_touched: Option<bool>,
 ) -> Result<Value, String> {
-    let password_touched = passwordTouched.unwrap_or(false);
+    let password_touched = password_touched.unwrap_or(false);
     let existing = settings::get_s3_sync_settings();
     let mut sync_settings =
         resolve_secret_for_request(settings, existing.clone(), !password_touched);

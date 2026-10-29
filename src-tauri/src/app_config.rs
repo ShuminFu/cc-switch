@@ -52,26 +52,10 @@ impl McpApps {
 
     /// 获取所有启用的应用列表
     pub fn enabled_apps(&self) -> Vec<AppType> {
-        let mut apps = Vec::new();
-        if self.claude {
-            apps.push(AppType::Claude);
-        }
-        if self.codex {
-            apps.push(AppType::Codex);
-        }
-        if self.gemini {
-            apps.push(AppType::Gemini);
-        }
-        if self.grokbuild {
-            apps.push(AppType::GrokBuild);
-        }
-        if self.opencode {
-            apps.push(AppType::OpenCode);
-        }
-        if self.hermes {
-            apps.push(AppType::Hermes);
-        }
-        apps
+        crate::apps::registry::with_caps(crate::apps::AppCaps::MCP)
+            .map(|d| d.app.clone())
+            .filter(|app| self.is_enabled_for(app))
+            .collect()
     }
 
     /// 检查是否所有应用都未启用
@@ -133,26 +117,10 @@ impl SkillApps {
 
     /// 获取所有启用的应用列表
     pub fn enabled_apps(&self) -> Vec<AppType> {
-        let mut apps = Vec::new();
-        if self.claude {
-            apps.push(AppType::Claude);
-        }
-        if self.codex {
-            apps.push(AppType::Codex);
-        }
-        if self.gemini {
-            apps.push(AppType::Gemini);
-        }
-        if self.grokbuild {
-            apps.push(AppType::GrokBuild);
-        }
-        if self.opencode {
-            apps.push(AppType::OpenCode);
-        }
-        if self.hermes {
-            apps.push(AppType::Hermes);
-        }
-        apps
+        crate::apps::registry::with_caps(crate::apps::AppCaps::SKILLS)
+            .map(|d| d.app.clone())
+            .filter(|app| self.is_enabled_for(app))
+            .collect()
     }
 
     /// 检查是否所有应用都未启用
@@ -359,6 +327,7 @@ pub struct PromptRoot {
     pub hermes: PromptConfig,
 }
 
+use crate::apps::{AppDescriptor, InputTokenSemantics, SyncMode, APPS};
 use crate::config::{copy_file, get_app_config_dir, get_app_config_path, write_json_file};
 use crate::error::AppError;
 use crate::prompt_files::prompt_file_path;
@@ -366,6 +335,7 @@ use crate::provider::ProviderManager;
 
 /// 应用类型
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "lowercase")]
 pub enum AppType {
     Claude,
@@ -384,17 +354,13 @@ pub enum AppType {
 }
 
 impl AppType {
+    /// 应用描述符（见 [`crate::apps::APPS`]）
+    pub fn descriptor(&self) -> &'static AppDescriptor {
+        crate::apps::registry::descriptor(self)
+    }
+
     pub fn as_str(&self) -> &str {
-        match self {
-            AppType::Claude => "claude",
-            AppType::ClaudeDesktop => "claude-desktop",
-            AppType::Codex => "codex",
-            AppType::Gemini => "gemini",
-            AppType::GrokBuild => "grokbuild",
-            AppType::OpenCode => "opencode",
-            AppType::OpenClaw => "openclaw",
-            AppType::Hermes => "hermes",
-        }
+        self.descriptor().slug
     }
 
     /// Check if this app uses additive mode
@@ -402,40 +368,24 @@ impl AppType {
     /// - Switch mode (false): Only the current provider is written to live config (Claude, Codex, Gemini)
     /// - Additive mode (true): All providers are written to live config (OpenCode, OpenClaw, Hermes)
     pub fn is_additive_mode(&self) -> bool {
-        matches!(
-            self,
-            AppType::OpenCode | AppType::OpenClaw | AppType::Hermes
-        )
+        self.descriptor().sync_mode == SyncMode::Additive
     }
 
     /// 该应用上游上报的 `input_tokens` 是否包含 cache 部分。
     ///
     /// 这是 ingest 计价、logger 落库语义、聚合 SQL 与历史回填共用的唯一来源。
-    /// 穷举 match：新增 AppType 时必须在这里表态。
+    /// 取值来自应用注册表 [`APPS`] 的 `input_token_semantics`（新增 AppType 时
+    /// 必须在注册表中表态，`every_variant_registered_exactly_once` 会校验）。
     pub fn input_semantics(&self) -> InputSemantics {
-        match self {
-            AppType::Codex | AppType::Gemini | AppType::GrokBuild => InputSemantics::CacheInclusive,
-            AppType::Claude
-            | AppType::ClaudeDesktop
-            | AppType::OpenCode
-            | AppType::OpenClaw
-            | AppType::Hermes => InputSemantics::CacheExclusive,
+        match self.descriptor().input_token_semantics {
+            InputTokenSemantics::CacheInclusive => InputSemantics::CacheInclusive,
+            InputTokenSemantics::Fresh => InputSemantics::CacheExclusive,
         }
     }
 
     /// Return an iterator over all app types
     pub fn all() -> impl Iterator<Item = AppType> {
-        [
-            AppType::Claude,
-            AppType::ClaudeDesktop,
-            AppType::Codex,
-            AppType::Gemini,
-            AppType::GrokBuild,
-            AppType::OpenCode,
-            AppType::OpenClaw,
-            AppType::Hermes,
-        ]
-        .into_iter()
+        APPS.iter().map(|d| d.app.clone())
     }
 }
 
@@ -468,21 +418,15 @@ impl FromStr for AppType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let normalized = s.trim().to_lowercase();
-        match normalized.as_str() {
-            "claude" => Ok(AppType::Claude),
-            "claude-desktop" | "claude_desktop" | "claudedesktop" => Ok(AppType::ClaudeDesktop),
-            "codex" => Ok(AppType::Codex),
-            "gemini" => Ok(AppType::Gemini),
-            "grokbuild" | "grok-build" | "grok_build" | "grok" => Ok(AppType::GrokBuild),
-            "opencode" => Ok(AppType::OpenCode),
-            "openclaw" => Ok(AppType::OpenClaw),
-            "hermes" => Ok(AppType::Hermes),
-            other => Err(AppError::localized(
-                "unsupported_app",
-                format!("不支持的应用标识: '{other}'。可选值: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes。"),
-                format!("Unsupported app id: '{other}'. Allowed: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes."),
-            )),
+        if let Some(d) = crate::apps::registry::find_by_id(&normalized) {
+            return Ok(d.app.clone());
         }
+        let allowed = APPS.iter().map(|d| d.slug).collect::<Vec<_>>().join(", ");
+        Err(AppError::localized(
+            "unsupported_app",
+            format!("不支持的应用标识: '{normalized}'。可选值: {allowed}。"),
+            format!("Unsupported app id: '{normalized}'. Allowed: {allowed}."),
+        ))
     }
 }
 
@@ -803,15 +747,9 @@ impl MultiAppConfig {
         log::info!("检测到已存在配置文件且 Prompt 列表为空，将尝试从现有提示词文件自动导入");
 
         let mut imported = false;
-        for app in [
-            AppType::Claude,
-            AppType::Codex,
-            AppType::Gemini,
-            AppType::GrokBuild,
-            AppType::OpenCode,
-            AppType::OpenClaw,
-            AppType::Hermes,
-        ] {
+        for app in
+            crate::apps::registry::with_caps(crate::apps::AppCaps::PROMPTS).map(|d| d.app.clone())
+        {
             // 复用已有的单应用导入逻辑
             if Self::auto_import_prompt_if_exists(self, app)? {
                 imported = true;

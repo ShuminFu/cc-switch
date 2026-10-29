@@ -292,21 +292,36 @@ async fn mock_handler(State(state): State<MockState>, request: Request) -> Respo
 
 thread_local! {
     static DB_STATEMENTS: Cell<u64> = const { Cell::new(0) };
+    static DB_READ_STATEMENTS: Cell<u64> = const { Cell::new(0) };
     static DB_COUNTER_PAUSED: Cell<bool> = const { Cell::new(false) };
+}
+
+fn is_read_statement(sql: &str) -> bool {
+    let keyword = sql.split_whitespace().next().unwrap_or_default();
+    keyword.eq_ignore_ascii_case("SELECT") || keyword.eq_ignore_ascii_case("WITH")
 }
 
 fn count_statement(sql: &str) {
     // SQLite also traces trigger programs as `-- TRIGGER name`; only count statements.
-    if DB_COUNTER_PAUSED.with(Cell::get) || sql.trim_start().starts_with("--") {
+    let sql = sql.trim_start();
+    if DB_COUNTER_PAUSED.with(Cell::get) || sql.starts_with("--") {
         return;
     }
     DB_STATEMENTS.with(|count| count.set(count.get() + 1));
+    if is_read_statement(sql) {
+        DB_READ_STATEMENTS.with(|count| count.set(count.get() + 1));
+    }
 }
 
 /// SQL statements executed on this thread by harness databases, excluding
 /// the harness's own inspection queries.
 pub fn db_statement_count() -> u64 {
     DB_STATEMENTS.with(Cell::get)
+}
+
+/// The read (`SELECT` / `WITH`) subset of [`db_statement_count`].
+pub fn db_read_statement_count() -> u64 {
+    DB_READ_STATEMENTS.with(Cell::get)
 }
 
 /// Run a harness inspection query without counting its statements.
@@ -341,7 +356,8 @@ impl Default for HarnessCircuit {
 
 /// Builder for [`ProxyHarness`]; providers are tried in the order added.
 pub struct ProxyHarnessBuilder {
-    providers: Vec<(String, String)>,
+    /// `(id, base_url, meta)`; `meta` is the provider's JSON `meta` object.
+    providers: Vec<(String, String, Option<Value>)>,
     auto_failover: bool,
     max_retries: u32,
     circuit: HarnessCircuit,
@@ -350,7 +366,16 @@ pub struct ProxyHarnessBuilder {
 impl ProxyHarnessBuilder {
     /// Add a Claude provider pointing at `upstream`.
     pub fn provider(mut self, id: &str, upstream: &MockUpstream) -> Self {
-        self.providers.push((id.to_string(), upstream.base_url()));
+        self.providers
+            .push((id.to_string(), upstream.base_url(), None));
+        self
+    }
+
+    /// Add a Claude provider pointing at `upstream` with the given JSON `meta`
+    /// (e.g. `{"apiFormat": "openai_responses", "providerType": "github_copilot"}`).
+    pub fn provider_with_meta(mut self, id: &str, upstream: &MockUpstream, meta: Value) -> Self {
+        self.providers
+            .push((id.to_string(), upstream.base_url(), Some(meta)));
         self
     }
 
@@ -377,7 +402,7 @@ impl ProxyHarnessBuilder {
         let db = Arc::new(Database::memory().expect("in-memory database"));
         install_statement_counter(&db);
 
-        for (index, (id, base_url)) in self.providers.iter().enumerate() {
+        for (index, (id, base_url, meta)) in self.providers.iter().enumerate() {
             let mut provider = Provider::with_id(
                 id.clone(),
                 format!("Harness {id}"),
@@ -390,6 +415,11 @@ impl ProxyHarnessBuilder {
                 None,
             );
             provider.sort_index = Some(index);
+            if let Some(meta) = meta {
+                provider.meta = Some(
+                    serde_json::from_value(meta.clone()).expect("valid harness provider meta"),
+                );
+            }
             db.save_provider(HARNESS_APP_TYPE, &provider)
                 .expect("save harness provider");
             if self.auto_failover {

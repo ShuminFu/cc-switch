@@ -6,7 +6,8 @@ use crate::app_config::AppType;
 use crate::provider::Provider;
 use crate::proxy::{
     extract_session_id,
-    forwarder::RequestForwarder,
+    forwarder::{RequestForwarder, RequestScope},
+    protocol::WireFormat,
     server::ProxyState,
     types::{AppProxyConfig, CopilotOptimizerConfig, OptimizerConfig, RectifierConfig},
     ProxyError,
@@ -75,9 +76,6 @@ pub struct RequestContext {
     pub tag: &'static str,
     /// 应用类型字符串（如 "claude"、"codex"、"gemini"）
     pub app_type_str: &'static str,
-    /// 应用类型（预留，目前通过 app_type_str 使用）
-    #[allow(dead_code)]
-    pub app_type: AppType,
     /// Session ID（从客户端请求提取或新生成）
     pub session_id: String,
     /// Session ID 是否由客户端提供。生成的 UUID 不能作为上游缓存 key，否则每个请求都会换 key。
@@ -113,17 +111,18 @@ impl RequestContext {
     ) -> Result<Self, ProxyError> {
         let start_time = Instant::now();
 
-        // 从数据库读取应用级代理配置（per-app）
+        // 应用级代理配置（per-app）与整流器/优化器配置均取自运行时配置快照，
+        // 稳态下不读数据库（配置写入后快照自动失效）
         let app_config = state
-            .db
-            .get_proxy_config_for_app(app_type_str)
+            .runtime_config
+            .app_proxy_config(app_type_str)
             .await
             .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        // 从数据库读取整流器配置
-        let rectifier_config = state.db.get_rectifier_config().unwrap_or_default();
-        let optimizer_config = state.db.get_optimizer_config().unwrap_or_default();
-        let copilot_optimizer_config = state.db.get_copilot_optimizer_config().unwrap_or_default();
+        let processing = state.runtime_config.processing_configs();
+        let rectifier_config = processing.rectifier.clone();
+        let optimizer_config = processing.optimizer.clone();
+        let copilot_optimizer_config = processing.copilot_optimizer.clone();
 
         let current_provider_id =
             crate::settings::get_current_provider(&app_type).unwrap_or_default();
@@ -185,7 +184,6 @@ impl RequestContext {
             outbound_model: None,
             tag,
             app_type_str,
-            app_type,
             session_id,
             session_client_provided: session_result.client_provided,
             rectifier_config,
@@ -216,23 +214,26 @@ impl RequestContext {
     /// 配置生效规则：
     /// - 故障转移开启：超时配置正常生效（0 表示禁用超时）
     /// - 故障转移关闭：超时配置不生效（全部传入 0）
-    pub fn create_forwarder(&self, state: &ProxyState) -> RequestForwarder {
-        let (non_streaming_timeout, first_byte_timeout, idle_timeout) =
-            if self.app_config.auto_failover_enabled {
-                // 故障转移开启：使用配置的值（0 = 禁用超时）
-                (
-                    self.app_config.non_streaming_timeout as u64,
-                    self.app_config.streaming_first_byte_timeout as u64,
-                    self.app_config.streaming_idle_timeout as u64,
-                )
-            } else {
-                // 故障转移关闭：不启用超时配置
-                log::debug!(
-                    "[{}] Failover disabled, timeout configs are bypassed",
-                    self.tag
-                );
-                (0, 0, 0)
-            };
+    pub fn create_forwarder(
+        &self,
+        state: &ProxyState,
+        client_format: WireFormat,
+    ) -> RequestForwarder {
+        // 流式静默期超时由响应流自行处理（见 streaming_timeout_config），不传入 forwarder
+        let (non_streaming_timeout, first_byte_timeout) = if self.app_config.auto_failover_enabled {
+            // 故障转移开启：使用配置的值（0 = 禁用超时）
+            (
+                self.app_config.non_streaming_timeout as u64,
+                self.app_config.streaming_first_byte_timeout as u64,
+            )
+        } else {
+            // 故障转移关闭：不启用超时配置
+            log::debug!(
+                "[{}] Failover disabled, timeout configs are bypassed",
+                self.tag
+            );
+            (0, 0)
+        };
 
         // 故障转移关闭时强制 max_retries=0（仅尝试 1 个 provider），与「不超时 + 不切换」语义一致。
         let max_retries = if self.app_config.auto_failover_enabled {
@@ -242,23 +243,19 @@ impl RequestContext {
         };
 
         RequestForwarder::new(
-            state.provider_router.clone(),
-            non_streaming_timeout,
-            state.status.clone(),
-            state.current_providers.clone(),
-            state.gemini_shadow.clone(),
-            state.codex_chat_history.clone(),
-            state.failover_manager.clone(),
-            state.app_handle.clone(),
-            self.current_provider_id.clone(),
-            self.session_id.clone(),
-            self.session_client_provided,
-            first_byte_timeout,
-            idle_timeout,
-            self.rectifier_config.clone(),
-            self.optimizer_config.clone(),
-            self.copilot_optimizer_config.clone(),
-            max_retries,
+            state.forwarder_deps.clone(),
+            RequestScope {
+                client_format,
+                current_provider_id_at_start: self.current_provider_id.clone(),
+                session_id: self.session_id.clone(),
+                session_client_provided: self.session_client_provided,
+                rectifier_config: self.rectifier_config.clone(),
+                optimizer_config: self.optimizer_config.clone(),
+                copilot_optimizer_config: self.copilot_optimizer_config.clone(),
+                non_streaming_timeout: Duration::from_secs(non_streaming_timeout),
+                streaming_first_byte_timeout: Duration::from_secs(first_byte_timeout),
+                max_attempts: RequestScope::max_attempts_for(max_retries),
+            },
         )
     }
 

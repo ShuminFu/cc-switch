@@ -29,6 +29,7 @@ use std::time::SystemTime;
 
 /// 同步结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSyncResult {
     pub imported: u32,
@@ -39,6 +40,7 @@ pub struct SessionSyncResult {
 
 /// 数据来源分布
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct DataSourceSummary {
     pub data_source: String,

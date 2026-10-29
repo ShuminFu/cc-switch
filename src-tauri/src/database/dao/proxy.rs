@@ -605,23 +605,12 @@ impl Database {
 
         let now = chrono::Utc::now().to_rfc3339();
 
-        // 先查询当前状态
-        let current = conn.query_row(
-            "SELECT consecutive_failures FROM provider_health
-             WHERE provider_id = ?1 AND app_type = ?2",
-            rusqlite::params![provider_id, app_type],
-            |row| Ok(row.get::<_, i64>(0)? as u32),
-        );
-
+        // 新行的初始状态（相当于此前失败次数为 0）
         let (is_healthy, consecutive_failures) = if success {
-            // 成功：重置失败计数
             (1, 0)
         } else {
-            // 失败：增加失败计数
-            let failures = current.unwrap_or(0) + 1;
             // 使用传入的阈值而非硬编码
-            let healthy = if failures >= failure_threshold { 0 } else { 1 };
-            (healthy, failures)
+            (if failure_threshold <= 1 { 0 } else { 1 }, 1)
         };
 
         let (last_success_at, last_failure_at) = if success {
@@ -630,17 +619,23 @@ impl Database {
             (None, Some(now.clone()))
         };
 
-        // UPSERT
+        // 单条 UPSERT：已有行时在 SQL 内基于旧值累加失败计数（成功则清零），
+        // 免去请求路径上「先 SELECT 再写」的额外查询
         conn.execute(
-            "INSERT OR REPLACE INTO provider_health
+            "INSERT INTO provider_health
              (provider_id, app_type, is_healthy, consecutive_failures,
               last_success_at, last_failure_at, last_error, updated_at)
-             VALUES (?1, ?2, ?3, ?4,
-                     COALESCE(?5, (SELECT last_success_at FROM provider_health
-                                   WHERE provider_id = ?1 AND app_type = ?2)),
-                     COALESCE(?6, (SELECT last_failure_at FROM provider_health
-                                   WHERE provider_id = ?1 AND app_type = ?2)),
-                     ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(provider_id, app_type) DO UPDATE SET
+                 consecutive_failures = CASE WHEN ?9 THEN 0
+                                             ELSE provider_health.consecutive_failures + 1 END,
+                 is_healthy = CASE WHEN ?9 THEN 1
+                                   WHEN provider_health.consecutive_failures + 1 >= ?10 THEN 0
+                                   ELSE 1 END,
+                 last_success_at = COALESCE(excluded.last_success_at, provider_health.last_success_at),
+                 last_failure_at = COALESCE(excluded.last_failure_at, provider_health.last_failure_at),
+                 last_error = excluded.last_error,
+                 updated_at = excluded.updated_at",
             rusqlite::params![
                 provider_id,
                 app_type,
@@ -650,6 +645,8 @@ impl Database {
                 last_failure_at,
                 error_msg,
                 &now,
+                success,
+                failure_threshold as i64,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -977,6 +974,51 @@ mod tests {
                 ..
             }
         ));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn provider_health_upsert_accumulates_and_resets() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        for id in ["p1", "p2"] {
+            let provider = crate::provider::Provider::with_id(
+                id.to_string(),
+                id.to_uppercase(),
+                serde_json::json!({}),
+                None,
+            );
+            db.save_provider("claude", &provider)?;
+        }
+
+        db.update_provider_health_with_threshold("p1", "claude", false, Some("e1".into()), 2)
+            .await?;
+        let health = db.get_provider_health("p1", "claude").await?;
+        assert_eq!(health.consecutive_failures, 1);
+        assert!(health.is_healthy);
+
+        db.update_provider_health_with_threshold("p1", "claude", false, Some("e2".into()), 2)
+            .await?;
+        let health = db.get_provider_health("p1", "claude").await?;
+        assert_eq!(health.consecutive_failures, 2);
+        assert!(!health.is_healthy);
+        assert_eq!(health.last_error.as_deref(), Some("e2"));
+        let last_failure_at = health.last_failure_at.clone();
+        assert!(last_failure_at.is_some());
+
+        db.update_provider_health_with_threshold("p1", "claude", true, None, 2)
+            .await?;
+        let health = db.get_provider_health("p1", "claude").await?;
+        assert_eq!(health.consecutive_failures, 0);
+        assert!(health.is_healthy);
+        assert!(health.last_success_at.is_some());
+        // 成功写入不覆盖上一次失败时间
+        assert_eq!(health.last_failure_at, last_failure_at);
+
+        // 阈值为 1 时首次失败即不健康
+        db.update_provider_health_with_threshold("p2", "claude", false, None, 1)
+            .await?;
+        assert!(!db.get_provider_health("p2", "claude").await?.is_healthy);
 
         Ok(())
     }

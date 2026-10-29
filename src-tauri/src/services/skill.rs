@@ -18,7 +18,7 @@ use tokio::time::timeout;
 use crate::app_config::{AppType, InstalledSkill, SkillApps, UnmanagedSkill};
 use crate::config::get_app_config_dir;
 use crate::database::Database;
-use crate::error::format_skill_error;
+use crate::error::{ErrorCode, IpcError};
 
 // ========== 数据结构 ==========
 
@@ -499,43 +499,45 @@ impl SkillService {
     }
 
     /// 获取应用的 skills 目录
-    pub fn get_app_skills_dir(app: &AppType) -> Result<PathBuf> {
+    ///
+    /// Claude Desktop 没有 skills 目录，返回 `Ok(None)`。
+    pub fn get_app_skills_dir(app: &AppType) -> Result<Option<PathBuf>> {
         // 目录覆盖：优先使用用户在 settings.json 中配置的 override 目录
         match app {
             AppType::Claude => {
                 if let Some(custom) = crate::settings::get_claude_override_dir() {
-                    return Ok(custom.join("skills"));
+                    return Ok(Some(custom.join("skills")));
                 }
             }
-            AppType::ClaudeDesktop => {}
+            AppType::ClaudeDesktop => return Ok(None),
             AppType::Codex => {
                 if let Some(custom) = crate::settings::get_codex_override_dir() {
-                    return Ok(custom.join("skills"));
+                    return Ok(Some(custom.join("skills")));
                 }
             }
             AppType::Gemini => {
                 if let Some(custom) = crate::settings::get_gemini_override_dir() {
-                    return Ok(custom.join("skills"));
+                    return Ok(Some(custom.join("skills")));
                 }
             }
             AppType::GrokBuild => {
                 if let Some(custom) = crate::settings::get_grok_override_dir() {
-                    return Ok(custom.join("skills"));
+                    return Ok(Some(custom.join("skills")));
                 }
             }
             AppType::OpenCode => {
                 if let Some(custom) = crate::settings::get_opencode_override_dir() {
-                    return Ok(custom.join("skills"));
+                    return Ok(Some(custom.join("skills")));
                 }
             }
             AppType::OpenClaw => {
                 if let Some(custom) = crate::settings::get_openclaw_override_dir() {
-                    return Ok(custom.join("skills"));
+                    return Ok(Some(custom.join("skills")));
                 }
             }
             AppType::Hermes => {
                 if let Some(custom) = crate::settings::get_hermes_override_dir() {
-                    return Ok(custom.join("skills"));
+                    return Ok(Some(custom.join("skills")));
                 }
             }
         }
@@ -545,16 +547,16 @@ impl SkillService {
         // 走 Known Folder API，测试无法隔离真实用户目录。
         let home = crate::config::get_home_dir();
 
-        Ok(match app {
+        Ok(Some(match app {
             AppType::Claude => home.join(".claude").join("skills"),
-            AppType::ClaudeDesktop => home.join(".claude-desktop").join("skills"),
+            AppType::ClaudeDesktop => return Ok(None),
             AppType::Codex => home.join(".codex").join("skills"),
             AppType::Gemini => home.join(".gemini").join("skills"),
             AppType::GrokBuild => home.join(".grok").join("skills"),
             AppType::OpenCode => home.join(".config").join("opencode").join("skills"),
             AppType::OpenClaw => home.join(".openclaw").join("skills"),
             AppType::Hermes => crate::hermes_config::get_hermes_dir().join("skills"),
-        })
+        }))
     }
 
     // ========== 统一管理方法 ==========
@@ -581,8 +583,8 @@ impl SkillService {
 
         // 允许多级目录（如 a/b/c），但必须是安全的相对路径。
         let source_rel = Self::sanitize_skill_source_path(&skill.directory).ok_or_else(|| {
-            anyhow!(format_skill_error(
-                "INVALID_SKILL_DIRECTORY",
+            anyhow!(IpcError::skill(
+                ErrorCode::InvalidSkillDirectory,
                 &[("directory", &skill.directory)],
                 Some("checkZipContent"),
             ))
@@ -592,8 +594,8 @@ impl SkillService {
             .file_name()
             .and_then(|name| Self::sanitize_install_name(&name.to_string_lossy()))
             .ok_or_else(|| {
-                anyhow!(format_skill_error(
-                    "INVALID_SKILL_DIRECTORY",
+                anyhow!(IpcError::skill(
+                    ErrorCode::InvalidSkillDirectory,
                     &[("directory", &skill.directory)],
                     Some("checkZipContent"),
                 ))
@@ -620,8 +622,8 @@ impl SkillService {
                     return Ok(updated);
                 } else {
                     // 不同仓库的同名 skill，报错
-                    return Err(anyhow!(format_skill_error(
-                        "SKILL_DIRECTORY_CONFLICT",
+                    return Err(anyhow!(IpcError::skill(
+                        ErrorCode::SkillDirectoryConflict,
                         &[
                             ("directory", &install_name),
                             (
@@ -663,8 +665,8 @@ impl SkillService {
             )
             .await
             .map_err(|_| {
-                anyhow!(format_skill_error(
-                    "DOWNLOAD_TIMEOUT",
+                anyhow!(IpcError::skill(
+                    ErrorCode::DownloadTimeout,
                     &[
                         ("owner", &repo.owner),
                         ("name", &repo.name),
@@ -680,8 +682,8 @@ impl SkillService {
                 Self::resolve_skill_source_dir(&temp_dir, &skill.directory).ok_or_else(|| {
                     let missing = temp_dir.join(&source_rel).display().to_string();
                     let _ = fs::remove_dir_all(&temp_dir);
-                    anyhow!(format_skill_error(
-                        "SKILL_DIR_NOT_FOUND",
+                    anyhow!(IpcError::skill(
+                        ErrorCode::SkillDirNotFound,
                         &[("path", &missing)],
                         Some("checkRepoUrl"),
                     ))
@@ -689,16 +691,16 @@ impl SkillService {
 
             let canonical_temp = temp_dir.canonicalize().unwrap_or_else(|_| temp_dir.clone());
             let canonical_source = source.canonicalize().map_err(|_| {
-                anyhow!(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
+                anyhow!(IpcError::skill(
+                    ErrorCode::SkillDirNotFound,
                     &[("path", &source.display().to_string())],
                     Some("checkRepoUrl"),
                 ))
             })?;
             if !canonical_source.starts_with(&canonical_temp) || !canonical_source.is_dir() {
                 let _ = fs::remove_dir_all(&temp_dir);
-                return Err(anyhow!(format_skill_error(
-                    "INVALID_SKILL_DIRECTORY",
+                return Err(anyhow!(IpcError::skill(
+                    ErrorCode::InvalidSkillDirectory,
                     &[("directory", &skill.directory)],
                     Some("checkZipContent"),
                 )));
@@ -1022,8 +1024,8 @@ impl SkillService {
         )
         .await
         .map_err(|_| {
-            anyhow!(format_skill_error(
-                "DOWNLOAD_TIMEOUT",
+            anyhow!(IpcError::skill(
+                ErrorCode::DownloadTimeout,
                 &[("owner", &owner), ("name", &name), ("timeout", "60")],
                 Some("checkNetwork"),
             ))
@@ -1041,8 +1043,8 @@ impl SkillService {
             })
             .ok_or_else(|| {
                 let _ = fs::remove_dir_all(&temp_dir);
-                anyhow!(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
+                anyhow!(IpcError::skill(
+                    ErrorCode::SkillDirNotFound,
                     &[("path", &skill.directory)],
                     Some("checkRepoUrl"),
                 ))
@@ -1052,8 +1054,8 @@ impl SkillService {
             .ok_or_else(|| {
                 let missing = temp_dir.join(&remote_match.directory).display().to_string();
                 let _ = fs::remove_dir_all(&temp_dir);
-                anyhow!(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
+                anyhow!(IpcError::skill(
+                    ErrorCode::SkillDirNotFound,
                     &[("path", &missing)],
                     Some("checkRepoUrl"),
                 ))
@@ -1391,7 +1393,7 @@ impl SkillService {
         // 收集所有待扫描的目录及其来源标签
         let mut scan_sources: Vec<(PathBuf, String)> = Vec::new();
         for app in AppType::all() {
-            if let Ok(d) = Self::get_app_skills_dir(&app) {
+            if let Ok(Some(d)) = Self::get_app_skills_dir(&app) {
                 scan_sources.push((d, app.as_str().to_string()));
             }
         }
@@ -1462,7 +1464,7 @@ impl SkillService {
         // 收集所有候选搜索目录
         let mut search_sources: Vec<(PathBuf, String)> = Vec::new();
         for app in AppType::all() {
-            if let Ok(d) = Self::get_app_skills_dir(&app) {
+            if let Ok(Some(d)) = Self::get_app_skills_dir(&app) {
                 search_sources.push((d, app.as_str().to_string()));
             }
         }
@@ -1593,7 +1595,9 @@ impl SkillService {
 
         Self::validate_sync_source_dir(&source, directory)?;
 
-        let app_dir = Self::get_app_skills_dir(app)?;
+        let Some(app_dir) = Self::get_app_skills_dir(app)? else {
+            return Ok(());
+        };
         fs::create_dir_all(&app_dir)?;
 
         let dest = app_dir.join(directory);
@@ -1760,7 +1764,9 @@ impl SkillService {
             return Ok(());
         }
 
-        let app_dir = Self::get_app_skills_dir(app)?;
+        let Some(app_dir) = Self::get_app_skills_dir(app)? else {
+            return Ok(());
+        };
         let skill_path = app_dir.join(directory);
 
         if skill_path.exists() || Self::is_symlink(&skill_path) {
@@ -1779,7 +1785,9 @@ impl SkillService {
 
         let skills = db.get_all_installed_skills()?;
         let ssot_dir = Self::get_ssot_dir()?;
-        let app_dir = Self::get_app_skills_dir(app)?;
+        let Some(app_dir) = Self::get_app_skills_dir(app)? else {
+            return Ok(());
+        };
 
         let indexed_skills: HashMap<String, &InstalledSkill> = skills
             .values()
@@ -1924,8 +1932,8 @@ impl SkillService {
             timeout(std::time::Duration::from_secs(60), self.download_repo(repo))
                 .await
                 .map_err(|_| {
-                    anyhow!(format_skill_error(
-                        "DOWNLOAD_TIMEOUT",
+                    anyhow!(IpcError::skill(
+                        ErrorCode::DownloadTimeout,
                         &[
                             ("owner", &repo.owner),
                             ("name", &repo.name),
@@ -2040,7 +2048,7 @@ impl SkillService {
         }
 
         let front_matter = parts[1].trim();
-        let meta: SkillMetadata = serde_yaml::from_str(front_matter).unwrap_or(SkillMetadata {
+        let meta: SkillMetadata = serde_norway::from_str(front_matter).unwrap_or(SkillMetadata {
             name: None,
             description: None,
         });
@@ -2247,8 +2255,8 @@ impl SkillService {
         let mut response = client.get(url).send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16().to_string();
-            return Err(anyhow::anyhow!(format_skill_error(
-                "DOWNLOAD_FAILED",
+            return Err(anyhow::anyhow!(IpcError::skill(
+                ErrorCode::DownloadFailed,
                 &[("status", &status)],
                 match status.as_str() {
                     "403" => Some("http403"),
@@ -2302,8 +2310,8 @@ impl SkillService {
         let mut archive = zip::ZipArchive::new(reader)?;
 
         if archive.is_empty() {
-            return Err(anyhow!(format_skill_error(
-                "EMPTY_ARCHIVE",
+            return Err(anyhow!(IpcError::skill(
+                ErrorCode::EmptyArchive,
                 &[],
                 Some("checkRepoUrl"),
             )));
@@ -2424,8 +2432,8 @@ impl SkillService {
 
         for app in AppType::all() {
             let app_dir = match Self::get_app_skills_dir(&app) {
-                Ok(dir) => dir,
-                Err(_) => continue,
+                Ok(Some(dir)) => dir,
+                Ok(None) | Err(_) => continue,
             };
             let candidate = app_dir.join(&skill.directory);
             if candidate.is_dir() {
@@ -2628,8 +2636,8 @@ impl SkillService {
 
         if skill_dirs.is_empty() {
             let _ = fs::remove_dir_all(&temp_dir);
-            return Err(anyhow!(format_skill_error(
-                "NO_SKILLS_IN_ZIP",
+            return Err(anyhow!(IpcError::skill(
+                ErrorCode::NoSkillsInZip,
                 &[],
                 Some("checkZipContent"),
             )));
@@ -2683,8 +2691,8 @@ impl SkillService {
                 Some(name) => name,
                 None => {
                     let _ = fs::remove_dir_all(&temp_dir);
-                    return Err(anyhow!(format_skill_error(
-                        "INVALID_SKILL_DIRECTORY",
+                    return Err(anyhow!(IpcError::skill(
+                        ErrorCode::InvalidSkillDirectory,
                         &[("zip", &zip_path.display().to_string())],
                         Some("checkZipContent"),
                     )));
@@ -2777,8 +2785,8 @@ impl SkillService {
             .with_context(|| format!("Failed to read ZIP file: {}", zip_path.display()))?;
 
         if archive.is_empty() {
-            return Err(anyhow!(format_skill_error(
-                "EMPTY_ARCHIVE",
+            return Err(anyhow!(IpcError::skill(
+                ErrorCode::EmptyArchive,
                 &[],
                 Some("checkZipContent"),
             )));
@@ -3061,8 +3069,8 @@ pub fn migrate_skills_to_ssot(db: &Arc<Database>) -> Result<usize> {
     // 扫描各应用目录
     for app in AppType::all() {
         let app_dir = match SkillService::get_app_skills_dir(&app) {
-            Ok(d) => d,
-            Err(_) => continue,
+            Ok(Some(d)) => d,
+            Ok(None) | Err(_) => continue,
         };
 
         let entries = match fs::read_dir(&app_dir) {
@@ -3181,13 +3189,22 @@ mod tests {
         let _guard = EnvGuard(std::env::var_os("CC_SWITCH_TEST_HOME"));
         std::env::set_var("CC_SWITCH_TEST_HOME", temp.path());
 
-        let dir =
-            SkillService::get_app_skills_dir(&AppType::Claude).expect("resolve claude skills dir");
+        let dir = SkillService::get_app_skills_dir(&AppType::Claude)
+            .expect("resolve claude skills dir")
+            .expect("claude has a skills dir");
         assert!(
             dir.starts_with(temp.path()),
             "skills dir must live under the overridden test home, got {}",
             dir.display()
         );
+    }
+
+    #[test]
+    fn claude_desktop_has_no_skills_dir() {
+        // 回归：曾返回不存在的 ~/.claude-desktop/skills，被当作扫描/导入来源
+        assert!(SkillService::get_app_skills_dir(&AppType::ClaudeDesktop)
+            .expect("resolve claude desktop skills dir")
+            .is_none());
     }
 
     #[test]

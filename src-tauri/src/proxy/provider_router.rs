@@ -9,6 +9,8 @@ use crate::provider::Provider;
 use crate::proxy::circuit_breaker::{
     AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
 };
+use crate::proxy::protocol::{AppRef, BreakerKey};
+use crate::proxy::runtime_config::RuntimeConfigStore;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -18,15 +20,25 @@ use tokio::sync::RwLock;
 pub struct ProviderRouter {
     /// 数据库连接
     db: Arc<Database>,
-    /// 熔断器管理器 - key 格式: "app_type:provider_id"
-    circuit_breakers: Arc<RwLock<HashMap<String, Arc<CircuitBreaker>>>>,
+    /// 运行时配置快照（请求路径上的配置/供应商读取不再直连数据库）
+    runtime_config: Arc<RuntimeConfigStore>,
+    /// 熔断器管理器 - 每个（应用, 供应商）一个熔断器
+    circuit_breakers: Arc<RwLock<HashMap<BreakerKey, Arc<CircuitBreaker>>>>,
 }
 
 impl ProviderRouter {
-    /// 创建新的供应商路由器
+    /// 创建新的供应商路由器（独立的运行时配置快照，测试用）
+    #[cfg(test)]
     pub fn new(db: Arc<Database>) -> Self {
+        let runtime_config = Arc::new(RuntimeConfigStore::new(db.clone()));
+        Self::with_runtime_config(db, runtime_config)
+    }
+
+    /// 使用共享的运行时配置快照创建路由器（代理服务器内与 `ProxyState` 共用同一份）
+    pub fn with_runtime_config(db: Arc<Database>, runtime_config: Arc<RuntimeConfigStore>) -> Self {
         Self {
             db,
+            runtime_config,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -41,8 +53,8 @@ impl ProviderRouter {
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
 
-        // 检查该应用的自动故障转移开关是否开启（从 proxy_config 表读取）
-        let auto_failover_enabled = match self.db.get_proxy_config_for_app(app_type).await {
+        // 检查该应用的自动故障转移开关是否开启（proxy_config，经运行时配置快照）
+        let auto_failover_enabled = match self.runtime_config.app_proxy_config(app_type).await {
             Ok(config) => config.auto_failover_enabled,
             Err(e) => {
                 log::error!("[{app_type}] 读取 proxy_config 失败: {e}，默认禁用故障转移");
@@ -50,26 +62,19 @@ impl ProviderRouter {
             }
         };
 
+        let app_providers = self.runtime_config.app_providers(app_type)?;
+
         if auto_failover_enabled {
             // 故障转移开启：仅按队列顺序依次尝试（P1 → P2 → ...）
-            let all_providers = self.db.get_all_providers(app_type)?;
+            // 使用 DAO 返回的队列排序，确保和前端展示一致
+            total_providers = app_providers.failover_queue.len();
 
-            // 使用 DAO 返回的排序结果，确保和前端展示一致
-            let ordered_ids: Vec<String> = self
-                .db
-                .get_failover_queue(app_type)?
-                .into_iter()
-                .map(|item| item.provider_id)
-                .collect();
-
-            total_providers = ordered_ids.len();
-
-            for provider_id in ordered_ids {
-                let Some(provider) = all_providers.get(&provider_id).cloned() else {
+            for provider_id in &app_providers.failover_queue {
+                let Some(provider) = app_providers.all.get(provider_id).cloned() else {
                     continue;
                 };
 
-                let circuit_key = format!("{app_type}:{}", provider.id);
+                let circuit_key = BreakerKey::new(app_type, provider.id.as_str());
                 let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
                 if breaker.is_available().await {
@@ -82,15 +87,11 @@ impl ProviderRouter {
             // 故障转移关闭：仅使用当前供应商，跳过熔断器检查
             let current_id = AppType::from_str(app_type)
                 .ok()
-                .and_then(|app_enum| {
-                    crate::settings::get_effective_current_provider(&self.db, &app_enum)
-                        .ok()
-                        .flatten()
-                })
-                .or_else(|| self.db.get_current_provider(app_type).ok().flatten());
+                .and_then(|app_enum| app_providers.effective_current_provider(&app_enum))
+                .or_else(|| app_providers.db_current.clone());
 
             if let Some(current_id) = current_id {
-                if let Some(current) = self.db.get_provider_by_id(&current_id, app_type)? {
+                if let Some(current) = app_providers.all.get(&current_id).cloned() {
                     total_providers = 1;
                     result.push(current);
                 }
@@ -119,7 +120,7 @@ impl ProviderRouter {
     /// 注意：调用方需持有返回的 `HalfOpenPermit` 直到请求结束，并通过 `record_result()`
     /// 或 `release_permit_neutral()` 释放；请求被取消时守卫 Drop 也会释放名额。
     pub async fn allow_provider_request(&self, provider_id: &str, app_type: &str) -> AllowResult {
-        let circuit_key = format!("{app_type}:{provider_id}");
+        let circuit_key = BreakerKey::new(app_type, provider_id);
         let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
         breaker.allow_request().await
     }
@@ -133,12 +134,12 @@ impl ProviderRouter {
         success: bool,
         error_msg: Option<String>,
     ) -> Result<(), AppError> {
-        let circuit_key = format!("{app_type}:{provider_id}");
+        let circuit_key = BreakerKey::new(app_type, provider_id);
         let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
         // 1. 按应用独立获取熔断器配置；读取失败时回退到熔断器自身的阈值，
         //    保证数据库健康状态与熔断器使用同一个阈值
-        let failure_threshold = match self.db.get_proxy_config_for_app(app_type).await {
+        let failure_threshold = match self.runtime_config.app_proxy_config(app_type).await {
             Ok(app_config) => app_config.circuit_failure_threshold,
             Err(e) => {
                 let fallback = breaker.failure_threshold().await;
@@ -170,7 +171,7 @@ impl ProviderRouter {
     }
 
     /// 重置熔断器（手动恢复）
-    pub async fn reset_circuit_breaker(&self, circuit_key: &str) {
+    pub async fn reset_circuit_breaker(&self, circuit_key: &BreakerKey) {
         let breakers = self.circuit_breakers.read().await;
         if let Some(breaker) = breakers.get(circuit_key) {
             breaker.reset().await;
@@ -179,7 +180,7 @@ impl ProviderRouter {
 
     /// 重置指定供应商的熔断器
     pub async fn reset_provider_breaker(&self, provider_id: &str, app_type: &str) {
-        let circuit_key = format!("{app_type}:{provider_id}");
+        let circuit_key = BreakerKey::new(app_type, provider_id);
         self.reset_circuit_breaker(&circuit_key).await;
     }
 
@@ -209,23 +210,23 @@ impl ProviderRouter {
 
     /// 更新指定应用已创建熔断器的配置（热更新）
     pub async fn update_app_configs(&self, app_type: &str, config: CircuitBreakerConfig) {
-        let prefix = format!("{app_type}:");
+        let app = AppRef::from(app_type);
         let breakers = self.circuit_breakers.read().await;
         for (key, breaker) in breakers.iter() {
-            if key.starts_with(&prefix) {
+            if key.app() == &app {
                 breaker.update_config(config.clone()).await;
             }
         }
     }
 
     /// 获取熔断器状态
-    #[allow(dead_code)]
+    #[allow(dead_code)] // reserved for the breaker UI probe (p3-breaker-ui-probe)
     pub async fn get_circuit_breaker_stats(
         &self,
         provider_id: &str,
         app_type: &str,
     ) -> Option<crate::proxy::circuit_breaker::CircuitBreakerStats> {
-        let circuit_key = format!("{app_type}:{provider_id}");
+        let circuit_key = BreakerKey::new(app_type, provider_id);
         let breakers = self.circuit_breakers.read().await;
 
         if let Some(breaker) = breakers.get(&circuit_key) {
@@ -236,7 +237,7 @@ impl ProviderRouter {
     }
 
     /// 获取或创建熔断器
-    async fn get_or_create_circuit_breaker(&self, key: &str) -> Arc<CircuitBreaker> {
+    async fn get_or_create_circuit_breaker(&self, key: &BreakerKey) -> Arc<CircuitBreaker> {
         // 先尝试读锁获取
         {
             let breakers = self.circuit_breakers.read().await;
@@ -245,31 +246,32 @@ impl ProviderRouter {
             }
         }
 
-        // 如果不存在，获取写锁创建
+        // 按应用独立读取熔断器配置；必须在拿写锁之前完成，
+        // 否则快照未命中时的数据库读取会阻塞所有熔断器查询
+        let config = match self
+            .runtime_config
+            .app_proxy_config(key.app().as_str())
+            .await
+        {
+            Ok(app_config) => CircuitBreakerConfig::from(&app_config),
+            Err(_) => CircuitBreakerConfig::default(),
+        };
+
+        // 如果不存在，获取写锁创建（持锁期间不再有 await）
         let mut breakers = self.circuit_breakers.write().await;
 
-        // 双重检查，防止竞争条件
+        // 双重检查，防止竞争条件（并发创建时以先插入者为准）
         if let Some(breaker) = breakers.get(key) {
             return breaker.clone();
         }
 
-        // 从 key 中提取 app_type (格式: "app_type:provider_id")
-        let app_type = key.split(':').next().unwrap_or("claude");
-
-        // 按应用独立读取熔断器配置
-        let config = match self.db.get_proxy_config_for_app(app_type).await {
-            Ok(app_config) => crate::proxy::circuit_breaker::CircuitBreakerConfig {
-                failure_threshold: app_config.circuit_failure_threshold,
-                success_threshold: app_config.circuit_success_threshold,
-                timeout_seconds: app_config.circuit_timeout_seconds as u64,
-                error_rate_threshold: app_config.circuit_error_rate_threshold,
-                min_requests: app_config.circuit_min_requests,
-            },
-            Err(_) => crate::proxy::circuit_breaker::CircuitBreakerConfig::default(),
-        };
-
+        log::debug!(
+            "[{}] 创建熔断器: provider_id={}",
+            key.app(),
+            key.provider_id()
+        );
         let breaker = Arc::new(CircuitBreaker::new(config));
-        breakers.insert(key.to_string(), breaker.clone());
+        breakers.insert(key.clone(), breaker.clone());
 
         breaker
     }
@@ -285,8 +287,8 @@ mod tests {
     use tempfile::TempDir;
 
     struct TempHome {
-        #[allow(dead_code)]
-        dir: TempDir,
+        /// Held only so the temp directory lives as long as the guard.
+        _dir: TempDir,
         original_home: Option<String>,
         original_userprofile: Option<String>,
         original_test_home: Option<String>,
@@ -305,7 +307,7 @@ mod tests {
             crate::settings::reload_settings().expect("reload settings");
 
             Self {
-                dir,
+                _dir: dir,
                 original_home,
                 original_userprofile,
                 original_test_home,
@@ -339,8 +341,75 @@ mod tests {
         let db = Arc::new(Database::memory().unwrap());
         let router = ProviderRouter::new(db);
 
-        let breaker = router.get_or_create_circuit_breaker("claude:test").await;
+        let breaker = router
+            .get_or_create_circuit_breaker(&BreakerKey::new("claude", "test"))
+            .await;
         assert!(breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[serial]
+    async fn test_concurrent_breaker_creation_yields_single_entry() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = Arc::new(ProviderRouter::new(db));
+        let key = BreakerKey::new("claude", "concurrent");
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(16));
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                let router = router.clone();
+                let key = key.clone();
+                let barrier = barrier.clone();
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    router.get_or_create_circuit_breaker(&key).await
+                })
+            })
+            .collect();
+
+        let mut breakers = Vec::new();
+        for handle in handles {
+            breakers.push(handle.await.unwrap());
+        }
+
+        let first = &breakers[0];
+        assert!(breakers.iter().all(|b| Arc::ptr_eq(first, b)));
+        let map = router.circuit_breakers.read().await;
+        assert_eq!(map.len(), 1);
+        assert!(Arc::ptr_eq(first, map.get(&key).unwrap()));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial]
+    async fn test_breaker_creation_does_not_hold_map_lock_during_db_read() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = Arc::new(ProviderRouter::new(db.clone()));
+        let key = BreakerKey::new("claude", "slow-db");
+
+        let handle = {
+            // 持有数据库连接锁，让创建熔断器时的配置读取阻塞在数据库上
+            let conn = db.conn.lock().unwrap();
+            let handle = {
+                let router = router.clone();
+                let key = key.clone();
+                tokio::spawn(async move { router.get_or_create_circuit_breaker(&key).await })
+            };
+            std::thread::sleep(std::time::Duration::from_millis(200));
+
+            // 配置读取阻塞期间，熔断器表仍可被其他请求读取
+            assert!(
+                router.circuit_breakers.try_read().is_ok(),
+                "breaker map lock is held while reading the config from the database"
+            );
+            drop(conn);
+            handle
+        };
+
+        let breaker = handle.await.unwrap();
+        let map = router.circuit_breakers.read().await;
+        assert!(Arc::ptr_eq(&breaker, map.get(&key).unwrap()));
     }
 
     #[tokio::test]
@@ -575,6 +644,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stats.state, CircuitState::Open);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_update_app_configs_only_touches_that_app() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = ProviderRouter::new(db);
+
+        let claude = router
+            .get_or_create_circuit_breaker(&BreakerKey::new("claude", "shared:id"))
+            .await;
+        let codex = router
+            .get_or_create_circuit_breaker(&BreakerKey::new("codex", "shared:id"))
+            .await;
+        let claude_threshold = claude.failure_threshold().await;
+
+        router
+            .update_app_configs(
+                "codex",
+                CircuitBreakerConfig {
+                    failure_threshold: claude_threshold + 7,
+                    ..CircuitBreakerConfig::default()
+                },
+            )
+            .await;
+
+        assert_eq!(codex.failure_threshold().await, claude_threshold + 7);
+        assert_eq!(claude.failure_threshold().await, claude_threshold);
     }
 
     #[tokio::test]

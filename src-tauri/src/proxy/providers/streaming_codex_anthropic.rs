@@ -657,7 +657,7 @@ pub(crate) fn responses_sse_events_from_anthropic_message(
 }
 
 /// Convert the upstream Anthropic Messages SSE into the Responses SSE that Codex expects.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn create_responses_sse_stream_from_anthropic<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {

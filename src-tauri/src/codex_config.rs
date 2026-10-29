@@ -7,6 +7,7 @@ use crate::config::{
 };
 use crate::error::AppError;
 use crate::model_capabilities::{image_input_capability_from_modalities, ImageInputCapability};
+use crate::proxy::protocol::ClaudeApiFormat;
 use serde_json::{json, Value};
 use std::fs;
 use std::process::Command;
@@ -131,11 +132,11 @@ impl CodexCatalogToolProfile {
     /// the proxy router). This string-only mapping is the fallback for non-Anthropic
     /// cases.
     pub fn from_api_format(api_format: Option<&str>) -> Self {
-        match api_format {
-            Some("anthropic") => CodexCatalogToolProfile::Anthropic,
+        match api_format.map(str::parse::<ClaudeApiFormat>) {
+            Some(Ok(ClaudeApiFormat::Anthropic)) => CodexCatalogToolProfile::Anthropic,
             // Native (direct) Responses gateways reject Codex's freeform custom
             // tools (apply_patch, etc.); strip them via the NativeResponses profile.
-            Some("openai_responses") => CodexCatalogToolProfile::NativeResponses,
+            Some(Ok(ClaudeApiFormat::OpenAiResponses)) => CodexCatalogToolProfile::NativeResponses,
             _ => CodexCatalogToolProfile::ProxyChat,
         }
     }

@@ -3,7 +3,10 @@
 
 mod app_config;
 mod app_store;
+mod apps;
 mod auto_launch;
+#[cfg(test)]
+mod bindings;
 mod claude_desktop_config;
 mod claude_mcp;
 mod claude_plugin;
@@ -803,15 +806,9 @@ pub fn run() {
             if app_state.db.is_prompts_table_empty().unwrap_or(false) {
                 log::info!("Prompts table empty, importing from live configurations...");
 
-                for app in [
-                    crate::app_config::AppType::Claude,
-                    crate::app_config::AppType::Codex,
-                    crate::app_config::AppType::Gemini,
-                    crate::app_config::AppType::GrokBuild,
-                    crate::app_config::AppType::OpenCode,
-                    crate::app_config::AppType::OpenClaw,
-                    crate::app_config::AppType::Hermes,
-                ] {
+                for app in crate::apps::registry::with_caps(crate::apps::AppCaps::PROMPTS)
+                    .map(|d| d.app.clone())
+                {
                     match crate::services::prompt::PromptService::import_from_file_on_first_launch(
                         &app_state,
                         app.clone(),
@@ -1218,6 +1215,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::get_app_registry,
             commands::get_providers,
             commands::get_current_provider,
             commands::add_provider,
@@ -1231,8 +1229,6 @@ pub fn run() {
             commands::import_claude_desktop_providers_from_claude,
             commands::ensure_claude_desktop_official_provider,
             commands::ensure_codex_official_provider,
-            commands::get_claude_config_status,
-            commands::get_config_status,
             commands::get_claude_code_config_path,
             commands::get_config_dir,
             commands::open_config_folder,
@@ -1260,8 +1256,6 @@ pub fn run() {
             commands::set_rectifier_config,
             commands::get_optimizer_config,
             commands::set_optimizer_config,
-            commands::get_copilot_optimizer_config,
-            commands::set_copilot_optimizer_config,
             commands::get_log_config,
             commands::set_log_config,
             commands::restart_app,
@@ -1270,10 +1264,7 @@ pub fn run() {
             commands::check_for_updates,
             commands::is_portable_mode,
             commands::copy_text_to_clipboard,
-            commands::get_claude_plugin_status,
-            commands::read_claude_plugin_config,
             commands::apply_claude_plugin_config,
-            commands::is_claude_plugin_applied,
             commands::apply_claude_onboarding_skip,
             commands::clear_claude_onboarding_skip,
             // Claude MCP management
@@ -1283,8 +1274,8 @@ pub fn run() {
             commands::delete_claude_mcp_server,
             commands::validate_mcp_command,
             // usage query
-            commands::queryProviderUsage,
-            commands::testUsageScript,
+            commands::query_provider_usage,
+            commands::test_usage_script,
             // subscription quota
             commands::get_subscription_quota,
             commands::get_codex_oauth_quota,
@@ -1355,7 +1346,6 @@ pub fn run() {
             // Deep link import
             commands::merge_deeplink_config,
             commands::preview_deeplink_import,
-            commands::import_from_deeplink,
             commands::import_from_deeplink_unified,
             update_tray_menu,
             // Environment variable management
@@ -1483,7 +1473,6 @@ pub fn run() {
             // Hermes specific
             commands::import_hermes_providers_from_live,
             commands::get_hermes_live_provider_ids,
-            commands::get_hermes_live_provider,
             commands::get_hermes_model_config,
             commands::open_hermes_web_ui,
             commands::launch_hermes_dashboard,
@@ -1540,10 +1529,6 @@ pub fn run() {
             commands::delete_daily_memory_file,
             commands::search_daily_memory_files,
             commands::open_workspace_directory,
-            // lightweight mode (for testing or low-resource environments)
-            commands::enter_lightweight_mode,
-            commands::exit_lightweight_mode,
-            commands::is_lightweight_mode,
         ]);
 
     let app = builder
@@ -1737,11 +1722,9 @@ pub(crate) fn remove_tray_icon_before_exit(app_handle: &tauri::AppHandle) {
 ///
 /// 检查 `proxy_config.enabled` 字段，如果有任一应用的状态为 `true`，
 /// 则自动启动代理服务并接管对应应用的 Live 配置。
-const PROXY_STARTUP_APP_TYPES: [&str; 4] = ["claude", "codex", "gemini", "grokbuild"];
-
 async fn enabled_proxy_apps_on_startup(db: &database::Database) -> Vec<&'static str> {
     let mut apps = Vec::new();
-    for app_type in PROXY_STARTUP_APP_TYPES {
+    for app_type in apps::registry::with_caps(apps::AppCaps::PROXY_TAKEOVER).map(|d| d.slug) {
         if db
             .get_proxy_config_for_app(app_type)
             .await

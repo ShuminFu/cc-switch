@@ -1,6 +1,6 @@
 //! 使用统计相关命令
 
-use crate::error::AppError;
+use crate::error::{AppError, IpcError};
 use crate::services::usage_stats::*;
 use crate::store::AppState;
 use rust_decimal::Decimal;
@@ -9,6 +9,7 @@ use tauri::State;
 
 /// 获取使用量汇总
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_usage_summary(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -16,35 +17,43 @@ pub fn get_usage_summary(
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
-) -> Result<UsageSummary, AppError> {
-    state.db.get_usage_summary(
-        start_date,
-        end_date,
-        app_type.as_deref(),
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+) -> Result<UsageSummary, IpcError> {
+    state
+        .db
+        .get_usage_summary(
+            start_date,
+            end_date,
+            app_type.as_deref(),
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+        .map_err(IpcError::from)
 }
 
 /// 获取按 app_type 拆分的使用量汇总
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_usage_summary_by_app(
     state: State<'_, AppState>,
     start_date: Option<i64>,
     end_date: Option<i64>,
     provider_name: Option<String>,
     model: Option<String>,
-) -> Result<Vec<UsageSummaryByApp>, AppError> {
-    state.db.get_usage_summary_by_app(
-        start_date,
-        end_date,
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+) -> Result<Vec<UsageSummaryByApp>, IpcError> {
+    state
+        .db
+        .get_usage_summary_by_app(
+            start_date,
+            end_date,
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+        .map_err(IpcError::from)
 }
 
 /// 获取每日趋势
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_usage_trends(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -52,18 +61,22 @@ pub fn get_usage_trends(
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
-) -> Result<Vec<DailyStats>, AppError> {
-    state.db.get_daily_trends(
-        start_date,
-        end_date,
-        app_type.as_deref(),
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+) -> Result<Vec<DailyStats>, IpcError> {
+    state
+        .db
+        .get_daily_trends(
+            start_date,
+            end_date,
+            app_type.as_deref(),
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+        .map_err(IpcError::from)
 }
 
 /// 获取 Provider 统计
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_provider_stats(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -71,18 +84,22 @@ pub fn get_provider_stats(
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
-) -> Result<Vec<ProviderStats>, AppError> {
-    state.db.get_provider_stats(
-        start_date,
-        end_date,
-        app_type.as_deref(),
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+) -> Result<Vec<ProviderStats>, IpcError> {
+    state
+        .db
+        .get_provider_stats(
+            start_date,
+            end_date,
+            app_type.as_deref(),
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+        .map_err(IpcError::from)
 }
 
 /// 获取模型统计
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_model_stats(
     state: State<'_, AppState>,
     start_date: Option<i64>,
@@ -90,39 +107,51 @@ pub fn get_model_stats(
     app_type: Option<String>,
     provider_name: Option<String>,
     model: Option<String>,
-) -> Result<Vec<ModelStats>, AppError> {
-    state.db.get_model_stats(
-        start_date,
-        end_date,
-        app_type.as_deref(),
-        provider_name.as_deref(),
-        model.as_deref(),
-    )
+) -> Result<Vec<ModelStats>, IpcError> {
+    state
+        .db
+        .get_model_stats(
+            start_date,
+            end_date,
+            app_type.as_deref(),
+            provider_name.as_deref(),
+            model.as_deref(),
+        )
+        .map_err(IpcError::from)
 }
 
 /// 获取请求日志列表
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_request_logs(
     state: State<'_, AppState>,
     filters: LogFilters,
     page: u32,
     page_size: u32,
-) -> Result<PaginatedLogs, AppError> {
-    state.db.get_request_logs(&filters, page, page_size)
+) -> Result<PaginatedLogs, IpcError> {
+    state
+        .db
+        .get_request_logs(&filters, page, page_size)
+        .map_err(IpcError::from)
 }
 
 /// 获取单个请求详情
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_request_detail(
     state: State<'_, AppState>,
     request_id: String,
-) -> Result<Option<RequestLogDetail>, AppError> {
-    state.db.get_request_detail(&request_id)
+) -> Result<Option<RequestLogDetail>, IpcError> {
+    state
+        .db
+        .get_request_detail(&request_id)
+        .map_err(IpcError::from)
 }
 
 /// 获取模型定价列表
 #[tauri::command]
-pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, AppError> {
+#[cfg_attr(test, specta::specta)]
+pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, IpcError> {
     log::info!("获取模型定价列表");
     let db = state.db.clone();
     let conn = crate::database::lock_conn!(db.conn);
@@ -170,6 +199,7 @@ pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingI
 
 /// 更新模型定价
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn update_model_pricing(
     state: State<'_, AppState>,
     model_id: String,
@@ -178,7 +208,7 @@ pub fn update_model_pricing(
     output_cost: String,
     cache_read_cost: String,
     cache_creation_cost: String,
-) -> Result<(), AppError> {
+) -> Result<(), IpcError> {
     let db = state.db.clone();
     let model_id = model_id.trim().to_string();
     let display_name = display_name.trim().to_string();
@@ -187,14 +217,16 @@ pub fn update_model_pricing(
             "usage.modelIdRequired",
             "模型 ID 不能为空",
             "Model ID is required",
-        ));
+        )
+        .into());
     }
     if display_name.is_empty() {
         return Err(AppError::localized(
             "usage.displayNameRequired",
             "显示名称不能为空",
             "Display name is required",
-        ));
+        )
+        .into());
     }
 
     for (label, value) in [
@@ -215,7 +247,8 @@ pub fn update_model_pricing(
                 "usage.invalidPrice",
                 format!("{label} 价格必须为非负数: {value}"),
                 format!("{label} price must be non-negative: {value}"),
-            ));
+            )
+            .into());
         }
     }
 
@@ -250,17 +283,22 @@ pub fn update_model_pricing(
 
 /// 检查 Provider 使用限额
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn check_provider_limits(
     state: State<'_, AppState>,
     provider_id: String,
     app_type: String,
-) -> Result<crate::services::usage_stats::ProviderLimitStatus, AppError> {
-    state.db.check_provider_limits(&provider_id, &app_type)
+) -> Result<crate::services::usage_stats::ProviderLimitStatus, IpcError> {
+    state
+        .db
+        .check_provider_limits(&provider_id, &app_type)
+        .map_err(IpcError::from)
 }
 
 /// 删除模型定价
 #[tauri::command]
-pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), AppError> {
+#[cfg_attr(test, specta::specta)]
+pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), IpcError> {
     state.db.delete_model_pricing(&model_id)?;
 
     log::info!("已删除模型定价: {model_id}");
@@ -271,22 +309,27 @@ pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Res
 ///
 /// 文件扫描与数据库写入在阻塞线程池中执行，避免在主线程上运行导致界面卡顿。
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub async fn sync_session_usage(
     state: State<'_, AppState>,
-) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
-    crate::services::session_usage::sync_all_session_usage_blocking(state.db.clone()).await
+) -> Result<crate::services::session_usage::SessionSyncResult, IpcError> {
+    crate::services::session_usage::sync_all_session_usage_blocking(state.db.clone())
+        .await
+        .map_err(IpcError::from)
 }
 
 /// 获取数据来源分布
 #[tauri::command]
+#[cfg_attr(test, specta::specta)]
 pub fn get_usage_data_sources(
     state: State<'_, AppState>,
-) -> Result<Vec<crate::services::session_usage::DataSourceSummary>, AppError> {
-    crate::services::session_usage::get_data_source_breakdown(&state.db)
+) -> Result<Vec<crate::services::session_usage::DataSourceSummary>, IpcError> {
+    crate::services::session_usage::get_data_source_breakdown(&state.db).map_err(IpcError::from)
 }
 
 /// 模型定价信息
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPricingInfo {
     pub model_id: String,

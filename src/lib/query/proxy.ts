@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { GlobalProxyConfig, AppProxyConfig } from "@/types/proxy";
 import { providerKeys } from "@/entities/provider/keys";
+import { getIpcErrorAction } from "@/lib/errors/errorActions";
 
 // ========== 代理服务器状态 Hooks ==========
 
@@ -125,7 +126,9 @@ export function useSwitchProxyProvider() {
       });
     },
     onError: (error: Error) => {
-      toast.error(t("proxy.switchFailed", { error: error.message }));
+      toast.error(t("proxy.switchFailed", { error: error.message }), {
+        action: getIpcErrorAction(error, t) ?? undefined,
+      });
     },
   });
 }

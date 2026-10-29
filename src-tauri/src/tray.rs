@@ -2,7 +2,7 @@
 //!
 //! 负责系统托盘图标和菜单的创建、更新和事件处理。
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, Submenu, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -41,9 +41,9 @@ const TIER_LABEL_GROUPS: &[(&str, &[&str])] = &[
 
 /// 每个 app 分区的子菜单句柄，用于 usage 更新时就地改 label 而非整菜单重建。
 /// `create_tray_menu` 每次重建都会整表覆盖写入，保证句柄始终指向当前活跃菜单。
-static TRAY_SECTION_SUBMENUS: Lazy<
+static TRAY_SECTION_SUBMENUS: LazyLock<
     std::sync::Mutex<std::collections::HashMap<AppType, Submenu<tauri::Wry>>>,
-> = Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+> = LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// 托盘菜单文本（国际化）
 #[derive(Clone, Copy)]
@@ -143,8 +143,8 @@ impl TrayTexts {
 /// 托盘应用分区配置
 pub struct TrayAppSection {
     pub app_type: AppType,
-    pub prefix: &'static str,
-    pub empty_id: &'static str,
+    pub prefix: String,
+    pub empty_id: String,
     pub header_label: &'static str,
     pub log_name: &'static str,
 }
@@ -153,36 +153,18 @@ pub struct TrayAppSection {
 pub const AUTO_SUFFIX: &str = "auto";
 pub const TRAY_ID: &str = "cc-switch";
 
-pub const TRAY_SECTIONS: [TrayAppSection; 4] = [
-    TrayAppSection {
-        app_type: AppType::Claude,
-        prefix: "claude_",
-        empty_id: "claude_empty",
-        header_label: "Claude",
-        log_name: "Claude",
-    },
-    TrayAppSection {
-        app_type: AppType::Codex,
-        prefix: "codex_",
-        empty_id: "codex_empty",
-        header_label: "Codex",
-        log_name: "Codex",
-    },
-    TrayAppSection {
-        app_type: AppType::Gemini,
-        prefix: "gemini_",
-        empty_id: "gemini_empty",
-        header_label: "Gemini",
-        log_name: "Gemini",
-    },
-    TrayAppSection {
-        app_type: AppType::GrokBuild,
-        prefix: "grokbuild_",
-        empty_id: "grokbuild_empty",
-        header_label: "Grok Build",
-        log_name: "Grok Build",
-    },
-];
+/// 托盘分区：由应用注册表中具备 `TRAY` 能力的应用派生
+pub static TRAY_SECTIONS: LazyLock<Vec<TrayAppSection>> = LazyLock::new(|| {
+    crate::apps::registry::with_caps(crate::apps::AppCaps::TRAY)
+        .map(|d| TrayAppSection {
+            app_type: d.app.clone(),
+            prefix: format!("{}_", d.slug),
+            empty_id: format!("{}_empty", d.slug),
+            header_label: d.display_name,
+            log_name: d.display_name,
+        })
+        .collect()
+});
 
 /// 配色阈值（与前端 `utilizationColor` 语义一致）。
 const UTIL_WARN_PCT: f64 = 70.0;
@@ -470,7 +452,7 @@ pub fn handle_profile_tray_event(app: &tauri::AppHandle, event_id: &str) -> bool
 /// 处理供应商托盘事件
 pub fn handle_provider_tray_event(app: &tauri::AppHandle, event_id: &str) -> bool {
     for section in TRAY_SECTIONS.iter() {
-        if let Some(suffix) = event_id.strip_prefix(section.prefix) {
+        if let Some(suffix) = event_id.strip_prefix(section.prefix.as_str()) {
             // 处理 Auto 点击
             if suffix == AUTO_SUFFIX {
                 log::info!("切换到{} Auto模式", section.log_name);
@@ -690,10 +672,11 @@ pub fn create_tray_menu(
         if providers.is_empty() {
             // 空供应商：显示禁用的菜单项
             let label = format!("{} {}", section.header_label, tray_texts.no_providers_label);
-            let empty_item = MenuItem::with_id(app, section.empty_id, &label, false, None::<&str>)
-                .map_err(|e| {
-                    AppError::Message(format!("创建{}空提示失败: {e}", section.log_name))
-                })?;
+            let empty_item =
+                MenuItem::with_id(app, section.empty_id.as_str(), &label, false, None::<&str>)
+                    .map_err(|e| {
+                        AppError::Message(format!("创建{}空提示失败: {e}", section.log_name))
+                    })?;
             menu_builder = menu_builder.item(&empty_item);
         } else {
             let current_provider = providers.get(&current_id);
@@ -1100,7 +1083,7 @@ pub(crate) async fn refresh_all_usage_in_tray(app: &tauri::AppHandle) {
             let provider_id = current_id.clone();
             let app_str = app_type_str.to_string();
             script_futures.push(async move {
-                if let Err(e) = crate::commands::queryProviderUsage(
+                if let Err(e) = crate::commands::query_provider_usage(
                     app_clone,
                     state,
                     copilot_state,

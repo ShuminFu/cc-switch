@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./ipc";
 import type {
   Settings,
   WebDavSyncSettings,
@@ -26,6 +26,14 @@ export interface CodexUnifyHistoryRestoreResult {
   skippedReason?: string;
 }
 
+/** settings.json 加载失败记录（CCS-084，对应后端 `SettingsLoadFailure`） */
+export interface SettingsLoadFailure {
+  path: string;
+  error: string;
+  /** 原始内容的备份路径；为 null 时保存会被拒绝，直到用户确认 */
+  backupPath: string | null;
+}
+
 export interface WebDavSyncResult {
   status: string;
 }
@@ -42,6 +50,16 @@ export const settingsApi = {
 
   async save(settings: Settings): Promise<boolean> {
     return await invoke("save_settings", { settings });
+  },
+
+  /** settings.json 的加载失败记录（解析失败时含备份路径），无失败时为 null */
+  async getLoadFailure(): Promise<SettingsLoadFailure | null> {
+    return await invoke("get_settings_load_failure");
+  },
+
+  /** 用户确认后清除加载失败记录，允许以当前设置覆盖 settings.json */
+  async acknowledgeLoadFailure(): Promise<boolean> {
+    return await invoke("acknowledge_settings_load_failure");
   },
 
   /** 是否存在统一 Codex 会话历史的迁移备份（关闭弹窗据此显示"恢复备份"勾选） */

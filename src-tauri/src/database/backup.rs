@@ -171,6 +171,8 @@ impl Database {
                 .step(-1)
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
+        // Backup API 整库覆盖不经过 update hook，需手动让运行时配置快照失效
+        self.mark_config_changed();
 
         let backup_id = backup_path
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
@@ -951,6 +953,9 @@ impl Database {
             let mut main_conn = lock_conn!(self.conn);
             Self::copy_database(&temp_conn, &mut main_conn)
         };
+        // Backup API 整库覆盖不经过 update hook，需手动让运行时配置快照失效
+        // （成功与回滚两条路径都可能已改写主库内容）
+        self.mark_config_changed();
         if let Err(err) = restore_result {
             log::error!("Restoring backup {filename} failed, rolling back: {err}");
             if let Some(safety_path) = safety_backup.as_ref() {
@@ -961,6 +966,7 @@ impl Database {
                             let mut main_conn = lock_conn!(self.conn);
                             Self::copy_database(&safety_conn, &mut main_conn)
                         });
+                self.mark_config_changed();
                 if let Err(rollback_err) = rollback {
                     log::error!("Rolling back to safety backup {safety_id} failed: {rollback_err}");
                 }

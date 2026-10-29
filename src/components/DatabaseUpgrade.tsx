@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { exit } from "@tauri-apps/plugin-process";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import {
   Database,
   Download,
@@ -124,7 +125,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
     } catch (e) {
       unlistenRef.current?.();
       unlistenRef.current = null;
-      setErrorMsg(e instanceof Error ? e.message : String(e));
+      setErrorMsg(extractErrorMessage(e) || String(e));
       setPhase("error");
     }
   }, []);
@@ -145,7 +146,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
         });
         await invoke("restart_app");
       } catch (e) {
-        setRestoreError(e instanceof Error ? e.message : String(e));
+        setRestoreError(extractErrorMessage(e) || String(e));
         setRestoringFile(null);
       }
     },

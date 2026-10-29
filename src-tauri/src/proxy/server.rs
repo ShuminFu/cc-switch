@@ -9,18 +9,21 @@
 //! a direct (non-proxied) CLI request.
 
 use super::{
+    endpoints::{RouteMethod, CLIENT_ENDPOINTS},
     failover_switch::FailoverSwitchManager,
+    forwarder::ForwarderDeps,
     handlers,
     inbound_auth::{self, InboundGuard},
     log_codes::srv as log_srv,
     provider_router::ProviderRouter,
     providers::{codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore},
+    runtime_config::RuntimeConfigStore,
     types::*,
     ProxyError,
 };
 use crate::database::Database;
 use axum::{
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, Request, State},
     routing::{any, get, post},
     Router,
 };
@@ -48,10 +51,70 @@ pub struct ProxyState {
     pub gemini_shadow: Arc<GeminiShadowStore>,
     /// Codex Chat bridge history，用于恢复 previous_response_id 指向的 tool call
     pub codex_chat_history: Arc<CodexChatHistoryStore>,
-    /// AppHandle，用于发射事件和更新托盘菜单
-    pub app_handle: Option<tauri::AppHandle>,
-    /// 故障转移切换管理器
-    pub failover_manager: Arc<FailoverSwitchManager>,
+    /// 运行时配置快照（per-app 代理配置、整流/优化器配置、供应商、计费默认值），
+    /// 请求路径只读快照，不直连数据库
+    pub runtime_config: Arc<RuntimeConfigStore>,
+    /// forwarder 的共享依赖（含 AppHandle 与故障转移切换管理器；每个请求只克隆这一个 `Arc`）
+    pub forwarder_deps: Arc<ForwarderDeps>,
+}
+
+impl ProxyState {
+    /// 由各共享组件组装状态，并派生 [`ForwarderDeps`]
+    pub(crate) fn new(
+        db: Arc<Database>,
+        config: ProxyConfig,
+        runtime_config: Arc<RuntimeConfigStore>,
+        provider_router: Arc<ProviderRouter>,
+        failover_manager: Arc<FailoverSwitchManager>,
+        app_handle: Option<tauri::AppHandle>,
+    ) -> Self {
+        let status = Arc::new(RwLock::new(ProxyStatus::default()));
+        let current_providers = Arc::new(RwLock::new(std::collections::HashMap::new()));
+        let gemini_shadow = Arc::new(GeminiShadowStore::default());
+        let codex_chat_history = Arc::new(CodexChatHistoryStore::default());
+        let forwarder_deps = Arc::new(ForwarderDeps {
+            router: provider_router.clone(),
+            status: status.clone(),
+            current_providers: current_providers.clone(),
+            gemini_shadow: gemini_shadow.clone(),
+            codex_chat_history: codex_chat_history.clone(),
+            failover_manager,
+            app_handle,
+        });
+        Self {
+            db,
+            config: Arc::new(RwLock::new(config)),
+            status,
+            start_time: Arc::new(RwLock::new(None)),
+            current_providers,
+            provider_router,
+            gemini_shadow,
+            codex_chat_history,
+            runtime_config,
+            forwarder_deps,
+        }
+    }
+
+    /// 只依赖数据库的状态（共享同一份运行时配置快照）
+    #[cfg(test)]
+    pub(crate) fn for_db(db: Arc<Database>, config: ProxyConfig) -> Self {
+        let runtime_config = Arc::new(RuntimeConfigStore::new(db.clone()));
+        let provider_router = Arc::new(ProviderRouter::with_runtime_config(
+            db.clone(),
+            runtime_config.clone(),
+        ));
+        let failover_manager = Arc::new(FailoverSwitchManager::with_runtime_config(
+            runtime_config.clone(),
+        ));
+        Self::new(
+            db,
+            config,
+            runtime_config,
+            provider_router,
+            failover_manager,
+            None,
+        )
+    }
 }
 
 /// 代理HTTP服务器
@@ -69,23 +132,26 @@ impl ProxyServer {
         db: Arc<Database>,
         app_handle: Option<tauri::AppHandle>,
     ) -> Self {
+        // 运行时配置快照：路由器、故障转移管理器与请求上下文共用同一份
+        let runtime_config = Arc::new(RuntimeConfigStore::new(db.clone()));
         // 创建共享的 ProviderRouter（熔断器状态将跨所有请求保持）
-        let provider_router = Arc::new(ProviderRouter::new(db.clone()));
+        let provider_router = Arc::new(ProviderRouter::with_runtime_config(
+            db.clone(),
+            runtime_config.clone(),
+        ));
         // 创建故障转移切换管理器
-        let failover_manager = Arc::new(FailoverSwitchManager::new(db.clone()));
+        let failover_manager = Arc::new(FailoverSwitchManager::with_runtime_config(
+            runtime_config.clone(),
+        ));
 
-        let state = ProxyState {
+        let state = ProxyState::new(
             db,
-            config: Arc::new(RwLock::new(config.clone())),
-            status: Arc::new(RwLock::new(ProxyStatus::default())),
-            start_time: Arc::new(RwLock::new(None)),
-            current_providers: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            config.clone(),
+            runtime_config,
             provider_router,
-            gemini_shadow: Arc::new(GeminiShadowStore::default()),
-            codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
-            app_handle,
             failover_manager,
-        };
+            app_handle,
+        );
 
         Self {
             config,
@@ -331,81 +397,34 @@ impl ProxyServer {
     }
 
     fn build_router(&self, guard: Arc<InboundGuard>) -> Router {
-        Router::new()
+        let mut router = Router::new()
             // 健康检查
             .route("/health", get(handlers::health_check))
             .route("/status", get(handlers::get_status))
-            // Claude API (支持带前缀和不带前缀两种格式)
-            .route("/v1/messages", post(handlers::handle_messages))
-            .route("/claude/v1/messages", post(handlers::handle_messages))
-            // Claude Desktop 3P 本地 gateway（独立 provider namespace）
+            // Claude Desktop 3P 本地 gateway 模型列表
             .route(
                 "/claude-desktop/v1/models",
                 get(handlers::handle_claude_desktop_models),
             )
-            .route(
-                "/claude-desktop/v1/messages",
-                post(handlers::handle_claude_desktop_messages),
-            )
-            // OpenAI Chat Completions API (Codex CLI，支持带前缀和不带前缀)
-            .route("/chat/completions", post(handlers::handle_chat_completions))
-            .route(
-                "/v1/chat/completions",
-                post(handlers::handle_chat_completions),
-            )
-            .route(
-                "/v1/v1/chat/completions",
-                post(handlers::handle_chat_completions),
-            )
-            .route(
-                "/codex/v1/chat/completions",
-                post(handlers::handle_chat_completions),
-            )
             // OpenAI Models API (Codex CLI reachability check)
             .route("/models", get(handlers::handle_models))
-            .route("/v1/models", get(handlers::handle_models))
-            // OpenAI Responses API (Codex CLI，支持带前缀和不带前缀)
-            .route("/responses", post(handlers::handle_responses))
-            .route("/v1/responses", post(handlers::handle_responses))
-            .route("/v1/v1/responses", post(handlers::handle_responses))
-            .route("/codex/v1/responses", post(handlers::handle_responses))
-            // Grok Build uses the Responses protocol but has an independent
-            // provider namespace and failover queue.
-            .route(
-                "/grokbuild/v1/responses",
-                post(handlers::handle_grokbuild_responses),
-            )
-            // OpenAI Responses Compact API (Codex CLI 远程压缩，透传)
-            .route(
-                "/responses/compact",
-                post(handlers::handle_responses_compact),
-            )
-            .route(
-                "/v1/responses/compact",
-                post(handlers::handle_responses_compact),
-            )
-            .route(
-                "/v1/v1/responses/compact",
-                post(handlers::handle_responses_compact),
-            )
-            .route(
-                "/codex/v1/responses/compact",
-                post(handlers::handle_responses_compact),
-            )
-            .route(
-                "/grokbuild/v1/responses/compact",
-                post(handlers::handle_grokbuild_responses_compact),
-            )
-            // Gemini API (支持带前缀和不带前缀)
-            //
-            // 用 `any(..)` 覆盖所有 HTTP 方法：除了 POST `:generateContent` /
-            // `:streamGenerateContent` / `:countTokens` 之外，Gemini SDK / CLI 还会发
-            // GET `/models`、GET `/models/<id>` 等只读端点。如果只挂 POST，这些 GET
-            // 请求会在路由层 404，绕过本地代理的统计、整流和故障转移。
-            .route("/v1beta/*path", any(handlers::handle_gemini))
-            .route("/gemini/v1beta/*path", any(handlers::handle_gemini))
-            // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
-            .route("/gemini/v1/*path", any(handlers::handle_gemini))
+            .route("/v1/models", get(handlers::handle_models));
+
+        // 代理端点：路由由 CLIENT_ENDPOINTS 表生成，统一交给 handle_proxied
+        for client in CLIENT_ENDPOINTS {
+            let handler = move |State(state): State<ProxyState>, request: Request| {
+                handlers::handle_proxied(state, request, client)
+            };
+            let method_router = match client.method {
+                RouteMethod::Post => post(handler),
+                RouteMethod::Any => any(handler),
+            };
+            for path in client.paths {
+                router = router.route(path, method_router.clone());
+            }
+        }
+
+        router
             // 提高默认请求体大小限制（避免 413 Payload Too Large）。
             // 注意：DefaultBodyLimit 只对 axum 提取器生效，接收原始 Request 的 handler
             // 通过 `handlers::read_request_body` 以同一上限 MAX_REQUEST_BODY_BYTES 自行限流。
@@ -421,6 +440,8 @@ impl ProxyServer {
     /// 在不重启服务的情况下更新运行时配置
     pub async fn apply_runtime_config(&self, config: &ProxyConfig) {
         *self.state.config.write().await = config.clone();
+        // 运行时配置变更后让快照失效，下一个请求重新加载
+        self.state.runtime_config.invalidate();
     }
 
     /// 热更新熔断器配置

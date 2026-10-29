@@ -186,7 +186,7 @@ impl AllowResult {
     }
 
     /// 本次放行是否占用了 HalfOpen 探测名额
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn used_half_open_permit(&self) -> bool {
         self.permit.is_some()
     }
@@ -373,13 +373,12 @@ impl CircuitBreaker {
     }
 
     /// 获取当前状态
-    #[allow(dead_code)]
+    #[allow(dead_code)] // reserved for the breaker UI probe (p3-breaker-ui-probe)
     pub async fn get_state(&self) -> CircuitState {
         *self.state.read().await
     }
 
     /// 获取统计信息
-    #[allow(dead_code)]
     pub async fn get_stats(&self) -> CircuitBreakerStats {
         CircuitBreakerStats {
             state: *self.state.read().await,
@@ -391,7 +390,6 @@ impl CircuitBreaker {
     }
 
     /// 重置熔断器（手动恢复）
-    #[allow(dead_code)]
     pub async fn reset(&self) {
         log::info!("[{}] 熔断器手动重置 → Closed", log_cb::MANUAL_RESET);
         self.transition_to_closed().await;

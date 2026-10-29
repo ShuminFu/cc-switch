@@ -7,15 +7,16 @@ pub mod cache_injector;
 pub mod circuit_breaker;
 pub(crate) mod content_encoding;
 pub mod copilot_optimizer;
+pub(crate) mod endpoints;
 pub mod error;
 pub mod error_mapper;
+pub(crate) mod errors;
 pub(crate) mod failover_switch;
 mod forwarder;
 pub mod gemini_url;
 pub mod handler_config;
 pub mod handler_context;
 mod handlers;
-mod health;
 pub mod http_client;
 pub mod hyper_client;
 pub mod inbound_auth;
@@ -23,10 +24,12 @@ pub(crate) mod json_canonical;
 pub mod log_codes;
 pub mod media_sanitizer;
 pub mod model_mapper;
+pub mod protocol;
 pub mod provider_router;
 pub mod providers;
-pub mod response_handler;
 pub mod response_processor;
+pub(crate) mod routing;
+pub(crate) mod runtime_config;
 pub(crate) mod server;
 pub mod session;
 pub(crate) mod sse;
@@ -47,11 +50,7 @@ pub use error::ProxyError;
 #[allow(unused_imports)]
 pub use provider_router::ProviderRouter;
 #[allow(unused_imports)]
-pub use response_handler::{NonStreamHandler, ResponseType, StreamHandler};
-#[allow(unused_imports)]
-pub use session::{
-    extract_session_id, ClientFormat, ProxySession, SessionIdResult, SessionIdSource,
-};
+pub use session::{extract_session_id, SessionIdResult, SessionIdSource};
 #[allow(unused_imports)]
 pub use types::{ProxyConfig, ProxyServerInfo, ProxyStatus};
 

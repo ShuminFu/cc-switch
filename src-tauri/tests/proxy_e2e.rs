@@ -16,7 +16,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use cc_switch_lib::proxy_harness::{
-    db_statement_count, HarnessCircuit, HarnessHealth, MockReply, MockUpstream, ProxyHarness,
+    db_read_statement_count, db_statement_count, HarnessCircuit, HarnessHealth, MockReply,
+    MockUpstream, ProxyHarness,
 };
 use serde_json::{json, Value};
 
@@ -153,6 +154,127 @@ async fn failover_moves_to_second_provider_when_first_returns_5xx() {
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].provider_id, "b");
     assert_eq!(logs[0].status_code, 200);
+
+    harness.shutdown().await;
+}
+
+/// A successful non-streaming OpenAI Responses reply.
+fn responses_reply(text: &str) -> MockReply {
+    MockReply::json(
+        200,
+        json!({
+            "id": "resp_harness",
+            "status": "completed",
+            "model": "gpt-5.6",
+            "output": [{
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": text }]
+            }],
+            "usage": { "input_tokens": 12, "output_tokens": 4 }
+        }),
+    )
+}
+
+/// The response is decoded with the route plan of the attempt that succeeded,
+/// not with the plan of the provider tried first (CCS-126).
+#[tokio::test]
+async fn failover_from_copilot_responses_to_anthropic_decodes_with_the_anthropic_plan() {
+    let _env = TestEnv::new();
+    let copilot = MockUpstream::always(responses_reply("from copilot")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider_with_meta(
+            "copilot",
+            &copilot,
+            json!({ "providerType": "github_copilot", "apiFormat": "openai_responses" }),
+        )
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    let body = json_body(response).await;
+    // Anthropic passthrough: the upstream message reaches the client untouched
+    // instead of being run through the Responses → Anthropic converter.
+    assert_eq!(body["id"], "msg_harness");
+    assert_eq!(body["type"], "message");
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(body["usage"]["input_tokens"], 10);
+
+    // The harness has no Copilot token source, so the Copilot attempt fails
+    // before sending and the request fails over to the Anthropic provider.
+    assert_eq!(copilot.hits(), 0);
+    assert_eq!(b.hits(), 1);
+    assert_eq!(b.requests()[0].path, "/v1/messages");
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs[0].provider_id, "b");
+    assert_eq!(logs[0].status_code, 200);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn failover_from_responses_provider_to_anthropic_passes_the_message_through() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(503, "overloaded")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider_with_meta("a", &a, json!({ "apiFormat": "openai_responses" }))
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    let body = json_body(response).await;
+    assert_eq!(body["id"], "msg_harness");
+    assert_eq!(first_text(&body), "from b");
+
+    assert_eq!(a.hits(), 1);
+    assert!(
+        a.requests()[0].path.ends_with("/responses"),
+        "first attempt is sent in the Responses format: {}",
+        a.requests()[0].path
+    );
+    assert!(a.requests()[0].json().get("input").is_some());
+    assert_eq!(b.requests()[0].path, "/v1/messages");
+    assert!(b.requests()[0].json().get("messages").is_some());
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn failover_from_anthropic_to_responses_provider_converts_the_response() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(503, "overloaded")).await;
+    let b = MockUpstream::always(responses_reply("from responses")).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider_with_meta("b", &b, json!({ "apiFormat": "openai_responses" }))
+        .failover(true)
+        .spawn()
+        .await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    let body = json_body(response).await;
+    // Decoded with the Responses plan of the second attempt.
+    assert_eq!(body["id"], "resp_harness");
+    assert_eq!(body["type"], "message");
+    assert_eq!(first_text(&body), "from responses");
+    assert_eq!(body["stop_reason"], "end_turn");
+
+    assert_eq!(a.requests()[0].path, "/v1/messages");
+    assert!(b.requests()[0].path.ends_with("/responses"));
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs[0].provider_id, "b");
 
     harness.shutdown().await;
 }
@@ -735,12 +857,27 @@ async fn router_returns_400_for_malformed_json_on_every_body_reading_route() {
     let host = format!("127.0.0.1:{}", harness.port());
     let token = harness.token().to_string();
 
+    // 覆盖 ClientEndpoint 表生成的全部 POST 路由别名（Claude Desktop 需 gateway token，单独鉴权）
     for uri in [
         "/v1/messages",
+        "/claude/v1/messages",
+        "/chat/completions",
         "/v1/chat/completions",
+        "/v1/v1/chat/completions",
+        "/codex/v1/chat/completions",
+        "/responses",
         "/v1/responses",
+        "/v1/v1/responses",
+        "/codex/v1/responses",
+        "/responses/compact",
         "/v1/responses/compact",
+        "/v1/v1/responses/compact",
+        "/codex/v1/responses/compact",
+        "/grokbuild/v1/responses",
+        "/grokbuild/v1/responses/compact",
         "/v1beta/models/gemini-pro:generateContent",
+        "/gemini/v1beta/models/gemini-pro:generateContent",
+        "/gemini/v1/models/gemini-pro:generateContent",
     ] {
         let request = axum::http::Request::builder()
             .method("POST")
@@ -759,6 +896,77 @@ async fn router_returns_400_for_malformed_json_on_every_body_reading_route() {
         assert_eq!(response.status().as_u16(), 400, "{uri}");
     }
     assert_eq!(upstream.hits(), 0, "malformed bodies never reach upstream");
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn router_applies_per_endpoint_flags_from_the_endpoint_table() {
+    use tower::ServiceExt;
+
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::message("leaked", 10, 5)).await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+    let host = format!("127.0.0.1:{}", harness.port());
+    let token = harness.token().to_string();
+
+    // Claude Desktop 端点需 gateway token：缺少 Authorization 时在读取请求体之前就返回 401
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/claude-desktop/v1/messages")
+        .header("host", &host)
+        .header("content-type", "application/json")
+        .header("x-api-key", &token)
+        .body(axum::body::Body::from("{not json"))
+        .expect("build router request");
+    let response = harness
+        .router()
+        .oneshot(request)
+        .await
+        .expect("router response");
+    assert_eq!(response.status().as_u16(), 401);
+
+    // Gemini 端点挂载为 any(..) 且允许空请求体：GET 只读端点不会在路由层 404/405，
+    // 也不会因空 body 被当成畸形 JSON 拒绝
+    for uri in [
+        "/v1beta/models",
+        "/gemini/v1beta/models",
+        "/gemini/v1/models",
+    ] {
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("host", &host)
+            .header("x-goog-api-key", &token)
+            .body(axum::body::Body::empty())
+            .expect("build router request");
+        let response = harness
+            .router()
+            .oneshot(request)
+            .await
+            .expect("router response");
+        let status = response.status().as_u16();
+        assert!(
+            !matches!(status, 400 | 404 | 405),
+            "{uri} returned {status}"
+        );
+    }
+
+    // 其余端点只挂 POST
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/v1/messages")
+        .header("host", &host)
+        .header("x-api-key", &token)
+        .body(axum::body::Body::empty())
+        .expect("build router request");
+    let response = harness
+        .router()
+        .oneshot(request)
+        .await
+        .expect("router response");
+    assert_eq!(response.status().as_u16(), 405);
+    assert_eq!(upstream.hits(), 0);
 
     harness.shutdown().await;
 }
@@ -802,6 +1010,58 @@ async fn foreign_host_text_plain_post_is_rejected_on_the_wire() {
 }
 
 // ============================================================================
+// Runtime config snapshot
+// ============================================================================
+
+#[tokio::test]
+async fn config_and_provider_changes_reach_the_next_request_without_restart() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::messages("from a", 10, 5).await;
+    let b = MockUpstream::messages("from b", 10, 5).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .spawn()
+        .await;
+
+    // Warm the snapshot on the current provider.
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(first_text(&json_body(response).await), "from a");
+
+    // Switching the current provider is a plain DB write; the cached snapshot
+    // must notice it on the very next request.
+    harness
+        .db()
+        .set_current_provider("claude", "b")
+        .expect("switch current provider");
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(first_text(&json_body(response).await), "from b");
+
+    // Same for per-app proxy_config: enable failover with only `a` queued.
+    harness
+        .db()
+        .add_to_failover_queue("claude", "a")
+        .expect("queue a");
+    let mut config = harness
+        .db()
+        .get_proxy_config_for_app("claude")
+        .await
+        .expect("read proxy config");
+    config.auto_failover_enabled = true;
+    harness
+        .db()
+        .update_proxy_config_for_app(config)
+        .await
+        .expect("enable failover");
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(first_text(&json_body(response).await), "from a");
+
+    assert_eq!(a.hits(), 2);
+    assert_eq!(b.hits(), 1);
+    harness.shutdown().await;
+}
+
+// ============================================================================
 // Baseline: latency, allocations and SQL statements per request
 // ============================================================================
 
@@ -841,6 +1101,7 @@ async fn perf_baseline_non_streaming_request() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let statements_before = db_statement_count();
+    let reads_before = db_read_statement_count();
     let (allocs_before, bytes_before) = allocation_snapshot();
     let mut latencies_ms = Vec::with_capacity(MEASURED_REQUESTS);
     for _ in 0..MEASURED_REQUESTS {
@@ -858,11 +1119,13 @@ async fn perf_baseline_non_streaming_request() {
     assert_eq!(logs.len(), WARMUP_REQUESTS + MEASURED_REQUESTS);
     tokio::time::sleep(Duration::from_millis(100)).await;
     let statements = db_statement_count() - statements_before;
+    let reads = db_read_statement_count() - reads_before;
     let (allocs_after, bytes_after) = allocation_snapshot();
 
     latencies_ms.sort_by(|a, b| a.partial_cmp(b).expect("finite latency"));
     let n = MEASURED_REQUESTS as f64;
     let statements_per_request = statements as f64 / n;
+    let reads_per_request = reads as f64 / n;
     let allocations_per_request = (allocs_after - allocs_before) as f64 / n;
     let measured = json!({
         "scenario": "non-streaming Claude /v1/messages, single provider, usage logging on",
@@ -875,6 +1138,7 @@ async fn perf_baseline_non_streaming_request() {
             "max": round2(*latencies_ms.last().expect("latencies")),
         },
         "db_statements_per_request": round2(statements_per_request),
+        "db_reads_per_request": round2(reads_per_request),
         "allocations_per_request": allocations_per_request.round(),
         "allocated_bytes_per_request": ((bytes_after - bytes_before) as f64 / n).round(),
     });
@@ -901,7 +1165,7 @@ async fn perf_baseline_non_streaming_request() {
         entry["_note"] = json!(
             "Proxy e2e baseline (CCS-014), measured by tests/proxy_e2e.rs::perf_baseline_non_streaming_request. \
              Refresh with `CC_SWITCH_UPDATE_PERF_BASELINE=1 cargo test --manifest-path src-tauri/Cargo.toml --test proxy_e2e perf_baseline`, then `npx prettier --write docs/dev/perf-baseline.json`. \
-             Gates: db_statements_per_request must not grow; allocations_per_request may not exceed 3x. Latency is informational."
+             Gates: db_reads_per_request must be 0 (runtime config snapshot, CCS-124); db_statements_per_request must not grow; allocations_per_request may not exceed 3x. Latency is informational."
         );
         baseline["proxy_e2e"] = entry;
         std::fs::write(
@@ -911,6 +1175,14 @@ async fn perf_baseline_non_streaming_request() {
         .expect("write perf baseline");
         return;
     }
+
+    // Steady-state requests are served from the runtime config snapshot (CCS-124):
+    // the only statements left are the request-log and provider-health writes.
+    assert_eq!(
+        reads, 0,
+        "proxied requests must not read the database once the runtime config snapshot is warm \
+         ({reads} SELECTs over {MEASURED_REQUESTS} requests)"
+    );
 
     let recorded = &baseline["proxy_e2e"];
     let max_statements = recorded["db_statements_per_request"]

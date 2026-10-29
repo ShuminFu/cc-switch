@@ -600,27 +600,18 @@ impl ProxyService {
     ///
     /// 旧占位符只在回环监听时被代理接受，迁移后客户端重启即可使用新 token。
     fn migrate_legacy_proxy_token_in_live(&self) {
-        for app_type in [
-            AppType::Claude,
-            AppType::Codex,
-            AppType::Gemini,
-            AppType::GrokBuild,
-        ] {
-            let config = match app_type {
-                AppType::Claude => self.read_claude_live(),
-                AppType::Codex => self.read_codex_live(),
-                AppType::Gemini => self.read_gemini_live(),
-                _ => self.read_grok_live(),
-            };
-            let Ok(config) = config else {
+        for app_type in
+            crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER).map(|d| &d.app)
+        {
+            let Ok(config) = self.read_live_for_takeover(app_type) else {
                 continue;
             };
-            if !Self::live_has_proxy_placeholder_for_app(&app_type, &config)
+            if !Self::live_has_proxy_placeholder_for_app(app_type, &config)
                 || !config.to_string().contains(PROXY_TOKEN_PLACEHOLDER)
             {
                 continue;
             }
-            match self.write_live_config_for_app(&app_type, &config) {
+            match self.write_live_config_for_app(app_type, &config) {
                 Ok(()) => log::info!("{app_type:?} Live 接管配置已迁移到本安装的代理 token"),
                 Err(e) => log::warn!("{app_type:?} Live 接管配置迁移代理 token 失败: {e}"),
             }
@@ -1014,16 +1005,21 @@ impl ProxyService {
     /// 在清空 Live Token 之前调用，确保数据库中的 Provider 配置有最新的 Token。
     /// 这样代理才能从数据库读取到正确的认证信息。
     async fn sync_live_to_provider(&self, app_type: &AppType) -> Result<(), String> {
-        let live_config = match app_type {
-            AppType::Claude => self.read_claude_live()?,
-            AppType::Codex => self.read_codex_live()?,
-            AppType::Gemini => self.read_gemini_live()?,
-            AppType::GrokBuild => self.read_grok_live()?,
-            _ => return Err("该应用不支持代理功能".to_string()),
-        };
+        let live_config = self.read_live_for_takeover(app_type)?;
 
         self.sync_live_config_to_provider(app_type, &live_config)
             .await
+    }
+
+    /// 读取支持代理接管的应用的 Live 配置
+    fn read_live_for_takeover(&self, app_type: &AppType) -> Result<Value, String> {
+        match app_type {
+            AppType::Claude => self.read_claude_live(),
+            AppType::Codex => self.read_codex_live(),
+            AppType::Gemini => self.read_gemini_live(),
+            AppType::GrokBuild => self.read_grok_live(),
+            _ => Err("该应用不支持代理功能".to_string()),
+        }
     }
 
     async fn sync_live_config_to_provider(
@@ -1287,24 +1283,13 @@ impl ProxyService {
     }
 
     async fn sync_live_to_providers(&self) -> Result<(), String> {
-        if let Ok(live_config) = self.read_claude_live() {
-            self.sync_live_config_to_provider(&AppType::Claude, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_codex_live() {
-            self.sync_live_config_to_provider(&AppType::Codex, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_gemini_live() {
-            self.sync_live_config_to_provider(&AppType::Gemini, &live_config)
-                .await?;
-        }
-
-        if let Ok(live_config) = self.read_grok_live() {
-            self.sync_live_config_to_provider(&AppType::GrokBuild, &live_config)
-                .await?;
+        for app_type in
+            crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER).map(|d| &d.app)
+        {
+            if let Ok(live_config) = self.read_live_for_takeover(app_type) {
+                self.sync_live_config_to_provider(app_type, &live_config)
+                    .await?;
+            }
         }
 
         log::info!("Live 配置 Token 同步完成");
@@ -1380,7 +1365,9 @@ impl ProxyService {
             .map_err(|e| format!("清除接管状态失败: {e}"))?;
 
         // 4. 清除所有应用的 enabled 状态（用户手动关闭，不需要下次自动恢复）
-        for app_type in ["claude", "codex", "gemini", "grokbuild"] {
+        for app_type in
+            crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER).map(|d| d.slug)
+        {
             if let Ok(mut config) = self.db.get_proxy_config_for_app(app_type).await {
                 if config.enabled {
                     config.enabled = false;
@@ -1832,14 +1819,11 @@ impl ProxyService {
     async fn restore_live_configs(&self) -> Result<(), String> {
         let mut errors = Vec::new();
 
-        for app_type in [
-            AppType::Claude,
-            AppType::Codex,
-            AppType::Gemini,
-            AppType::GrokBuild,
-        ] {
+        for app_type in
+            crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER).map(|d| &d.app)
+        {
             if let Err(e) = self
-                .restore_live_config_for_app_with_fallback(&app_type)
+                .restore_live_config_for_app_with_fallback(app_type)
                 .await
             {
                 errors.push(e);

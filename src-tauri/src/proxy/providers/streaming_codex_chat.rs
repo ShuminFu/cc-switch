@@ -715,7 +715,7 @@ fn leading_think_prefix_decision(buffer: &str) -> ThinkPrefixDecision {
 }
 
 /// Create a stream that converts Chat Completions SSE chunks into Responses SSE events.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn create_responses_sse_stream_from_chat<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {

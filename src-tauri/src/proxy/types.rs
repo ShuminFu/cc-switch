@@ -57,6 +57,7 @@ impl Default for ProxyConfig {
 
 /// 代理服务器状态
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(specta::Type))]
 pub struct ProxyStatus {
     /// 是否运行中
     pub running: bool,
@@ -73,6 +74,7 @@ pub struct ProxyStatus {
     /// 失败请求数
     pub failed_requests: u64,
     /// 成功率 (0-100)
+    #[cfg_attr(test, specta(type = specta_typescript::Number))]
     pub success_rate: f32,
     /// 运行时间（秒）
     pub uptime_seconds: u64,
@@ -93,6 +95,7 @@ pub struct ProxyStatus {
 
 /// 活跃的代理目标信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
 pub struct ActiveTarget {
     pub app_type: String, // "Claude" | "Codex" | "Gemini"
     pub provider_name: String,
@@ -116,15 +119,6 @@ pub struct ProxyTakeoverStatus {
     pub grokbuild: bool,
     pub opencode: bool,
     pub openclaw: bool,
-}
-
-/// API 格式类型（预留，当前不需要格式转换）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum ApiFormat {
-    Claude,
-    OpenAI,
-    Gemini,
 }
 
 /// Provider健康状态

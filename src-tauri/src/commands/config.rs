@@ -1,19 +1,12 @@
-#![allow(non_snake_case)]
-
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::app_config::AppType;
 use crate::codex_config;
-use crate::config::{self, get_claude_settings_path, ConfigStatus};
+use crate::config::{self, get_claude_settings_path};
+use crate::error::IpcError;
 use crate::settings;
-use crate::store::AppState;
-
-#[tauri::command]
-pub async fn get_claude_config_status() -> Result<ConfigStatus, String> {
-    Ok(config::get_claude_config_status())
-}
 
 use std::str::FromStr;
 
@@ -63,92 +56,16 @@ fn validate_common_config_snippet(app_type: &str, snippet: &str) -> Result<(), S
 }
 
 #[tauri::command]
-pub async fn get_config_status(
-    state: State<'_, AppState>,
-    app: String,
-) -> Result<ConfigStatus, String> {
-    match AppType::from_str(&app).map_err(|e| e.to_string())? {
-        AppType::Claude => Ok(config::get_claude_config_status()),
-        AppType::ClaudeDesktop => {
-            let status = crate::claude_desktop_config::get_status(
-                state.db.as_ref(),
-                state.proxy_service.is_running().await,
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(ConfigStatus {
-                exists: status.configured,
-                path: status.config_library_path.unwrap_or_default(),
-            })
-        }
-        AppType::Codex => {
-            let auth_path = codex_config::get_codex_auth_path();
-            let config_text = codex_config::read_codex_config_text().unwrap_or_default();
-            let exists = auth_path.exists() || !config_text.trim().is_empty();
-            let path = codex_config::get_codex_config_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::Gemini => {
-            let env_path = crate::gemini_config::get_gemini_env_path();
-            let exists = env_path.exists();
-            let path = crate::gemini_config::get_gemini_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::GrokBuild => {
-            let config_path = crate::grok_config::get_grok_config_path();
-            let exists = config_path.exists();
-            let path = crate::grok_config::get_grok_config_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::OpenCode => {
-            let config_path = crate::opencode_config::get_opencode_config_path();
-            let exists = config_path.exists();
-            let path = crate::opencode_config::get_opencode_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::OpenClaw => {
-            let config_path = crate::openclaw_config::get_openclaw_config_path();
-            let exists = config_path.exists();
-            let path = crate::openclaw_config::get_openclaw_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::Hermes => {
-            let config_path = crate::hermes_config::get_hermes_config_path();
-            let exists = config_path.exists();
-            let path = crate::hermes_config::get_hermes_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn get_claude_code_config_path() -> Result<String, String> {
+pub async fn get_claude_code_config_path() -> Result<String, IpcError> {
     Ok(get_claude_settings_path().to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub async fn get_config_dir(app: String) -> Result<String, String> {
-    let dir = match AppType::from_str(&app).map_err(|e| e.to_string())? {
+pub async fn get_config_dir(app: String) -> Result<String, IpcError> {
+    let dir = match AppType::from_str(&app).map_err(IpcError::from)? {
         AppType::Claude => config::get_claude_config_dir(),
         AppType::ClaudeDesktop => {
-            crate::claude_desktop_config::get_config_library_path().map_err(|e| e.to_string())?
+            crate::claude_desktop_config::get_config_library_path().map_err(IpcError::from)?
         }
         AppType::Codex => codex_config::get_codex_config_dir(),
         AppType::Gemini => crate::gemini_config::get_gemini_dir(),
@@ -162,11 +79,11 @@ pub async fn get_config_dir(app: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, String> {
-    let config_dir = match AppType::from_str(&app).map_err(|e| e.to_string())? {
+pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, IpcError> {
+    let config_dir = match AppType::from_str(&app).map_err(IpcError::from)? {
         AppType::Claude => config::get_claude_config_dir(),
         AppType::ClaudeDesktop => {
-            crate::claude_desktop_config::get_config_library_path().map_err(|e| e.to_string())?
+            crate::claude_desktop_config::get_config_library_path().map_err(IpcError::from)?
         }
         AppType::Codex => codex_config::get_codex_config_dir(),
         AppType::Gemini => crate::gemini_config::get_gemini_dir(),
@@ -191,9 +108,9 @@ pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, 
 #[tauri::command]
 pub async fn pick_directory(
     app: AppHandle,
-    #[allow(non_snake_case)] defaultPath: Option<String>,
-) -> Result<Option<String>, String> {
-    let initial = defaultPath
+    default_path: Option<String>,
+) -> Result<Option<String>, IpcError> {
+    let initial = default_path
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
 
@@ -222,13 +139,13 @@ pub async fn pick_directory(
 }
 
 #[tauri::command]
-pub async fn get_app_config_path() -> Result<String, String> {
+pub async fn get_app_config_path() -> Result<String, IpcError> {
     let config_path = config::get_app_config_path();
     Ok(config_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
+pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, IpcError> {
     let config_dir = config::get_app_config_dir();
 
     if !config_dir.exists() {
@@ -246,18 +163,18 @@ pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
 #[tauri::command]
 pub async fn get_claude_common_config_snippet(
     state: tauri::State<'_, crate::store::AppState>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     state
         .db
         .get_config_snippet("claude")
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn set_claude_common_config_snippet(
     snippet: String,
     state: tauri::State<'_, crate::store::AppState>,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let is_cleared = snippet.trim().is_empty();
 
     if !snippet.trim().is_empty() {
@@ -269,11 +186,11 @@ pub async fn set_claude_common_config_snippet(
     state
         .db
         .set_config_snippet("claude", value)
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     state
         .db
         .set_config_snippet_cleared("claude", is_cleared)
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     Ok(())
 }
 
@@ -281,11 +198,11 @@ pub async fn set_claude_common_config_snippet(
 pub async fn get_common_config_snippet(
     app_type: String,
     state: tauri::State<'_, crate::store::AppState>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     state
         .db
         .get_config_snippet(&app_type)
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// 对前端编辑器里的 config.toml 文本做通用配置片段的合并/剥离。
@@ -296,13 +213,13 @@ pub async fn update_toml_common_config_snippet(
     config_toml: String,
     snippet_toml: String,
     enabled: bool,
-) -> Result<String, String> {
+) -> Result<String, IpcError> {
     crate::services::provider::update_toml_common_config_snippet(
         &config_toml,
         &snippet_toml,
         enabled,
     )
-    .map_err(|e| e.to_string())
+    .map_err(IpcError::from)
 }
 
 #[tauri::command]
@@ -310,12 +227,12 @@ pub async fn set_common_config_snippet(
     app_type: String,
     snippet: String,
     state: tauri::State<'_, crate::store::AppState>,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let is_cleared = snippet.trim().is_empty();
     let old_snippet = state
         .db
         .get_config_snippet(&app_type)
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
 
     validate_common_config_snippet(&app_type, &snippet)?;
 
@@ -326,59 +243,59 @@ pub async fn set_common_config_snippet(
             .as_deref()
             .filter(|value| !value.trim().is_empty())
         {
-            let app = AppType::from_str(&app_type).map_err(|e| e.to_string())?;
+            let app = AppType::from_str(&app_type).map_err(IpcError::from)?;
             crate::services::provider::ProviderService::migrate_legacy_common_config_usage(
                 state.inner(),
                 app,
                 legacy_snippet,
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(IpcError::from)?;
         }
     }
 
     state
         .db
         .set_config_snippet(&app_type, value)
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     state
         .db
         .set_config_snippet_cleared(&app_type, is_cleared)
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
 
     if matches!(app_type.as_str(), "claude" | "codex" | "gemini") {
-        let app = AppType::from_str(&app_type).map_err(|e| e.to_string())?;
+        let app = AppType::from_str(&app_type).map_err(IpcError::from)?;
         crate::services::provider::ProviderService::sync_current_provider_for_app(
             state.inner(),
             app,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     }
 
     if app_type == "omo"
         && state
             .db
             .get_current_omo_provider("opencode", "omo")
-            .map_err(|e| e.to_string())?
+            .map_err(IpcError::from)?
             .is_some()
     {
         crate::services::OmoService::write_config_to_file(
             state.inner(),
             &crate::services::omo::STANDARD,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     }
     if app_type == "omo-slim"
         && state
             .db
             .get_current_omo_provider("opencode", "omo-slim")
-            .map_err(|e| e.to_string())?
+            .map_err(IpcError::from)?
             .is_some()
     {
         crate::services::OmoService::write_config_to_file(
             state.inner(),
             &crate::services::omo::SLIM,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     }
     Ok(())
 }
@@ -406,13 +323,13 @@ mod tests {
 
 #[tauri::command]
 pub async fn extract_common_config_snippet(
-    appType: String,
-    settingsConfig: Option<String>,
+    app_type: String,
+    settings_config: Option<String>,
     state: tauri::State<'_, crate::store::AppState>,
-) -> Result<String, String> {
-    let app = AppType::from_str(&appType).map_err(|e| e.to_string())?;
+) -> Result<String, IpcError> {
+    let app = AppType::from_str(&app_type).map_err(IpcError::from)?;
 
-    if let Some(settings_config) = settingsConfig.filter(|s| !s.trim().is_empty()) {
+    if let Some(settings_config) = settings_config.filter(|s| !s.trim().is_empty()) {
         let settings: serde_json::Value =
             serde_json::from_str(&settings_config).map_err(invalid_json_format_error)?;
 
@@ -420,9 +337,9 @@ pub async fn extract_common_config_snippet(
             app,
             &settings,
         )
-        .map_err(|e| e.to_string());
+        .map_err(IpcError::from);
     }
 
     crate::services::provider::ProviderService::extract_common_config_snippet(&state, app)
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }

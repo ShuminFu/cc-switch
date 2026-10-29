@@ -43,7 +43,7 @@ pub(crate) fn is_synthesized_tool_call_id(id: &str) -> bool {
 ///
 /// 转换工具库 API：当前无生产调用方（连通性检查不再发真实请求，曾是其唯一 crate 内
 /// 消费者），但保留其转换逻辑与下方测试套件，供代理转换路径复用 / 未来接线。
-#[allow(dead_code)]
+#[cfg(any(test, feature = "testkit"))]
 pub fn anthropic_to_gemini(body: Value) -> Result<Value, ProxyError> {
     anthropic_to_gemini_with_shadow(body, None, None, None)
 }
@@ -110,25 +110,10 @@ pub fn anthropic_to_gemini_with_shadow(
 }
 
 /// Convenience wrapper over [`gemini_to_anthropic_with_shadow_and_hints`]
-/// with no shadow store or schema hints. Used by the shared
-/// `ProviderAdapter::transform_response` path and by tests.
-#[allow(dead_code)] // kept as public API for non-streaming transform paths
+/// with no shadow store or schema hints. Test-only.
+#[cfg(test)]
 pub fn gemini_to_anthropic(body: Value) -> Result<Value, ProxyError> {
-    gemini_to_anthropic_with_shadow(body, None, None, None)
-}
-
-/// Convenience wrapper for callers that have a shadow store but no tool
-/// schema hints. Production call sites funnel through
-/// [`gemini_to_anthropic_with_shadow_and_hints`] directly; this helper exists
-/// for test ergonomics and future external callers.
-#[allow(dead_code)] // kept as public API for shadow-only transform paths
-pub fn gemini_to_anthropic_with_shadow(
-    body: Value,
-    shadow_store: Option<&GeminiShadowStore>,
-    provider_id: Option<&str>,
-    session_id: Option<&str>,
-) -> Result<Value, ProxyError> {
-    gemini_to_anthropic_with_shadow_and_hints(body, shadow_store, provider_id, session_id, None)
+    gemini_to_anthropic_with_shadow_and_hints(body, None, None, None, None)
 }
 
 pub fn gemini_to_anthropic_with_shadow_and_hints(

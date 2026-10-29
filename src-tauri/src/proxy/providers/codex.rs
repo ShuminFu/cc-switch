@@ -8,16 +8,10 @@
 use super::{AuthInfo, AuthStrategy, ProviderAdapter};
 use crate::provider::{CodexChatReasoningConfig, Provider};
 use crate::proxy::error::ProxyError;
-use regex::Regex;
+use crate::proxy::protocol::WireFormat;
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
-use std::sync::LazyLock;
 use toml::Value as TomlValue;
-
-/// 官方 Codex 客户端 User-Agent 正则
-#[allow(dead_code)]
-static CODEX_CLIENT_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(codex_vscode|codex_cli_rs)/[\d.]+").unwrap());
 
 /// Codex 适配器
 pub struct CodexAdapter;
@@ -496,22 +490,11 @@ fn infer_aggregator_platform_config(
 }
 
 fn is_chat_wire_api(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "chat"
-            | "chat_completions"
-            | "chat-completions"
-            | "openai_chat"
-            | "openai-chat"
-            | "openai_chat_completions"
-    )
+    WireFormat::from_codex_wire_api(value) == Some(WireFormat::OpenAiChat)
 }
 
 fn is_anthropic_wire_api(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "anthropic" | "anthropic_messages" | "anthropic-messages" | "claude" | "messages"
-    )
+    WireFormat::from_codex_wire_api(value) == Some(WireFormat::AnthropicMessages)
 }
 
 fn is_chat_completions_url(value: &str) -> bool {
@@ -569,14 +552,6 @@ fn extract_codex_base_url_from_toml(config_text: &str) -> Option<String> {
 impl CodexAdapter {
     pub fn new() -> Self {
         Self
-    }
-
-    /// 检测是否为官方 Codex 客户端
-    ///
-    /// 匹配 User-Agent 模式: `^(codex_vscode|codex_cli_rs)/[\d.]+`
-    #[allow(dead_code)]
-    pub fn is_official_client(user_agent: &str) -> bool {
-        CODEX_CLIENT_REGEX.is_match(user_agent)
     }
 
     /// 从 Provider 配置中提取 API Key
@@ -787,6 +762,7 @@ impl ProviderAdapter for CodexAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::protocol::ClaudeApiFormat;
     use serde_json::json;
 
     fn create_provider(config: serde_json::Value) -> Provider {
@@ -1054,9 +1030,10 @@ wire_api = "anthropic"
 
     #[test]
     fn test_anthropic_false_for_chat_and_responses() {
-        let chat = create_provider(json!({ "apiFormat": "openai_chat" }));
+        let chat = create_provider(json!({ "apiFormat": ClaudeApiFormat::OpenAiChat.as_str() }));
         assert!(!codex_provider_uses_anthropic(&chat));
-        let responses = create_provider(json!({ "apiFormat": "openai_responses" }));
+        let responses =
+            create_provider(json!({ "apiFormat": ClaudeApiFormat::OpenAiResponses.as_str() }));
         assert!(!codex_provider_uses_anthropic(&responses));
     }
 
@@ -1066,7 +1043,7 @@ wire_api = "anthropic"
         assert!(codex_provider_uses_anthropic(&anth));
         assert!(!codex_provider_uses_chat_completions(&anth));
 
-        let chat = create_provider(json!({ "apiFormat": "openai_chat" }));
+        let chat = create_provider(json!({ "apiFormat": ClaudeApiFormat::OpenAiChat.as_str() }));
         assert!(codex_provider_uses_chat_completions(&chat));
         assert!(!codex_provider_uses_anthropic(&chat));
     }
@@ -1121,7 +1098,7 @@ wire_api = "anthropic"
         // Native openai_responses (meta) → NativeResponses; chat → ProxyChat.
         let mut native = create_provider(json!({}));
         native.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_responses".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiResponses.to_string()),
             ..Default::default()
         });
         assert_eq!(
@@ -1129,7 +1106,7 @@ wire_api = "anthropic"
             CodexCatalogToolProfile::NativeResponses
         );
 
-        let chat = create_provider(json!({ "apiFormat": "openai_chat" }));
+        let chat = create_provider(json!({ "apiFormat": ClaudeApiFormat::OpenAiChat.as_str() }));
         assert_eq!(
             resolve_codex_catalog_tool_profile(&chat),
             CodexCatalogToolProfile::ProxyChat
@@ -1233,36 +1210,6 @@ wire_api = "anthropic"
     }
 
     // 官方客户端检测测试
-    #[test]
-    fn test_is_official_client_vscode() {
-        assert!(CodexAdapter::is_official_client("codex_vscode/1.0.0"));
-        assert!(CodexAdapter::is_official_client("codex_vscode/2.3.4"));
-        assert!(CodexAdapter::is_official_client("codex_vscode/0.1"));
-    }
-
-    #[test]
-    fn test_is_official_client_cli() {
-        assert!(CodexAdapter::is_official_client("codex_cli_rs/1.0.0"));
-        assert!(CodexAdapter::is_official_client("codex_cli_rs/0.5.2"));
-    }
-
-    #[test]
-    fn test_is_not_official_client() {
-        assert!(!CodexAdapter::is_official_client("Mozilla/5.0"));
-        assert!(!CodexAdapter::is_official_client("curl/7.68.0"));
-        assert!(!CodexAdapter::is_official_client("python-requests/2.25.1"));
-        assert!(!CodexAdapter::is_official_client("codex_other/1.0.0"));
-        assert!(!CodexAdapter::is_official_client(""));
-    }
-
-    #[test]
-    fn test_is_official_client_partial_match() {
-        // 必须从开头匹配
-        assert!(!CodexAdapter::is_official_client("some codex_vscode/1.0.0"));
-        assert!(!CodexAdapter::is_official_client(
-            "prefix_codex_cli_rs/1.0.0"
-        ));
-    }
 
     #[test]
     fn test_codex_provider_uses_chat_completions_from_active_wire_api() {
@@ -1308,7 +1255,7 @@ wire_api = "chat"
             "base_url": "https://example.com/v1"
         }));
         provider.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_chat".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
             ..Default::default()
         });
 
@@ -1325,7 +1272,7 @@ wire_api = "chat"
             "base_url": "https://api.deepseek.com/v1"
         }));
         provider.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_chat".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
             ..Default::default()
         });
 
@@ -1349,7 +1296,7 @@ wire_api = "responses"
 "#
         }));
         provider.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_chat".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
             ..Default::default()
         });
         let mut body = json!({
@@ -1386,7 +1333,7 @@ wire_api = "responses"
             }
         }));
         provider.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_chat".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
             ..Default::default()
         });
         let mut body = json!({

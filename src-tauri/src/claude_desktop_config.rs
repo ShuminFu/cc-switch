@@ -10,6 +10,7 @@ use crate::database::Database;
 use crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID;
 use crate::error::AppError;
 use crate::provider::{ClaudeDesktopMode, Provider};
+use crate::proxy::protocol::ClaudeApiFormat;
 
 pub const PROFILE_ID: &str = "00000000-0000-4000-8000-000000157210";
 pub const PROFILE_NAME: &str = "CC Switch";
@@ -409,10 +410,7 @@ pub fn validate_proxy_provider(provider: &Provider) -> Result<(), AppError> {
 
     if let Some(meta) = provider.meta.as_ref() {
         if let Some(api_format) = meta.api_format.as_deref() {
-            if !matches!(
-                api_format,
-                "" | "anthropic" | "openai_chat" | "openai_responses" | "gemini_native"
-            ) {
+            if !api_format.is_empty() && api_format.parse::<ClaudeApiFormat>().is_err() {
                 return Err(AppError::localized(
                     "claude_desktop.provider.api_format_unsupported",
                     format!("Claude Desktop 本地路由模式不支持 API 格式: {api_format}"),

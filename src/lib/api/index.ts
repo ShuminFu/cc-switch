@@ -1,4 +1,5 @@
 export type { AppId } from "./types";
+export { appsApi } from "./apps";
 export { providersApi, universalProvidersApi } from "./providers";
 export { settingsApi } from "./settings";
 export { backupsApi } from "./settings";
@@ -18,6 +19,7 @@ export * as authApi from "./auth";
 export * as copilotApi from "./copilot";
 export type { ProviderSwitchEvent } from "./providers";
 export type { Prompt } from "./prompts";
+export type { BackendAppCaps, BackendAppDescriptor } from "./apps";
 export type { Profile, ProfilePayload, ProfilesResponse } from "./profiles";
 export type {
   CopilotDeviceCodeResponse,

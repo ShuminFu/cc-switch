@@ -164,9 +164,12 @@ fn current_fingerprint(path: &Path) -> Result<Option<FileFingerprint>, AppError>
 }
 
 #[cfg(test)]
+type BeforeCommitHook = Box<dyn FnMut(&Path)>;
+
+#[cfg(test)]
 thread_local! {
     /// 测试钩子：在修改完成、写入前的指纹校验之前调用，用于模拟 Claude Code 并发保存
-    static BEFORE_COMMIT_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(&Path)>>> =
+    static BEFORE_COMMIT_HOOK: std::cell::RefCell<Option<BeforeCommitHook>> =
         const { std::cell::RefCell::new(None) };
 }
 
