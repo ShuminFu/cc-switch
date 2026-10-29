@@ -1,9 +1,21 @@
-use rquickjs::{Context, Function, Runtime};
+use rquickjs::{Context, Ctx, Function, Runtime};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use url::{Host, Url};
 
 use crate::error::AppError;
+
+/// 单个 JS 阶段（解析配置 / 执行 extractor）允许的最长执行时间
+const JS_EXEC_TIMEOUT: Duration = Duration::from_secs(5);
+/// 外层 tokio 超时相对 JS 中断截止时间的宽限，用于兜底单个长耗时原生操作
+const JS_TIMEOUT_GRACE: Duration = Duration::from_secs(1);
+/// 每个 JS 运行时的内存上限
+const JS_MEMORY_LIMIT: usize = 32 * 1024 * 1024;
+/// 每个 JS 运行时的最大栈大小
+const JS_MAX_STACK_SIZE: usize = 512 * 1024;
 
 /// 执行用量查询脚本
 pub async fn execute_usage_script(
@@ -29,71 +41,55 @@ pub async fn execute_usage_script(
         validate_base_url(base_url)?;
     }
 
-    // 3. 在独立作用域中提取 request 配置（确保 Runtime/Context 在 await 前释放）
-    let request_config = {
-        let runtime = Runtime::new().map_err(|e| {
+    // 3. 在沙箱运行时中提取 request 配置（阻塞线程 + 中断/内存/栈限制）
+    let request_config = run_sandboxed(script_with_vars.clone(), JS_EXEC_TIMEOUT, |ctx, script| {
+        // 执行用户代码，获取配置对象
+        let config: rquickjs::Object = ctx.eval(script).map_err(|e| {
             AppError::localized(
-                "usage_script.runtime_create_failed",
-                format!("创建 JS 运行时失败: {e}"),
-                format!("Failed to create JS runtime: {e}"),
-            )
-        })?;
-        let context = Context::full(&runtime).map_err(|e| {
-            AppError::localized(
-                "usage_script.context_create_failed",
-                format!("创建 JS 上下文失败: {e}"),
-                format!("Failed to create JS context: {e}"),
+                "usage_script.config_parse_failed",
+                format!("解析配置失败: {e}"),
+                format!("Failed to parse config: {e}"),
             )
         })?;
 
-        context.with(|ctx| {
-            // 执行用户代码，获取配置对象
-            let config: rquickjs::Object = ctx.eval(script_with_vars.clone()).map_err(|e| {
+        // 提取 request 配置
+        let request: rquickjs::Object = config.get("request").map_err(|e| {
+            AppError::localized(
+                "usage_script.request_missing",
+                format!("缺少 request 配置: {e}"),
+                format!("Missing request config: {e}"),
+            )
+        })?;
+
+        // 将 request 转换为 JSON 字符串
+        let request_json: String = ctx
+            .json_stringify(request)
+            .map_err(|e| {
                 AppError::localized(
-                    "usage_script.config_parse_failed",
-                    format!("解析配置失败: {e}"),
-                    format!("Failed to parse config: {e}"),
+                    "usage_script.request_serialize_failed",
+                    format!("序列化 request 失败: {e}"),
+                    format!("Failed to serialize request: {e}"),
+                )
+            })?
+            .ok_or_else(|| {
+                AppError::localized(
+                    "usage_script.serialize_none",
+                    "序列化返回 None",
+                    "Serialization returned None",
+                )
+            })?
+            .get()
+            .map_err(|e| {
+                AppError::localized(
+                    "usage_script.get_string_failed",
+                    format!("获取字符串失败: {e}"),
+                    format!("Failed to get string: {e}"),
                 )
             })?;
 
-            // 提取 request 配置
-            let request: rquickjs::Object = config.get("request").map_err(|e| {
-                AppError::localized(
-                    "usage_script.request_missing",
-                    format!("缺少 request 配置: {e}"),
-                    format!("Missing request config: {e}"),
-                )
-            })?;
-
-            // 将 request 转换为 JSON 字符串
-            let request_json: String = ctx
-                .json_stringify(request)
-                .map_err(|e| {
-                    AppError::localized(
-                        "usage_script.request_serialize_failed",
-                        format!("序列化 request 失败: {e}"),
-                        format!("Failed to serialize request: {e}"),
-                    )
-                })?
-                .ok_or_else(|| {
-                    AppError::localized(
-                        "usage_script.serialize_none",
-                        "序列化返回 None",
-                        "Serialization returned None",
-                    )
-                })?
-                .get()
-                .map_err(|e| {
-                    AppError::localized(
-                        "usage_script.get_string_failed",
-                        format!("获取字符串失败: {e}"),
-                        format!("Failed to get string: {e}"),
-                    )
-                })?;
-
-            Ok::<_, AppError>(request_json)
-        })?
-    }; // Runtime 和 Context 在这里被 drop
+        Ok::<_, AppError>(request_json)
+    })
+    .await?;
 
     // 4. 解析 request 配置
     let request: RequestConfig = serde_json::from_str(&request_config).map_err(|e| {
@@ -110,8 +106,110 @@ pub async fn execute_usage_script(
     // 6. 发送 HTTP 请求
     let response_data = send_http_request(&request, timeout_secs).await?;
 
-    // 7. 在独立作用域中执行 extractor（确保 Runtime/Context 在函数结束前释放）
-    let result: Value = {
+    // 7. 在沙箱运行时中执行 extractor（阻塞线程 + 中断/内存/栈限制）
+    let result: Value = run_sandboxed(script_with_vars, JS_EXEC_TIMEOUT, move |ctx, script| {
+        // 重新 eval 获取配置对象
+        let config: rquickjs::Object = ctx.eval(script).map_err(|e| {
+            AppError::localized(
+                "usage_script.config_reparse_failed",
+                format!("重新解析配置失败: {e}"),
+                format!("Failed to re-parse config: {e}"),
+            )
+        })?;
+
+        // 提取 extractor 函数
+        let extractor: Function = config.get("extractor").map_err(|e| {
+            AppError::localized(
+                "usage_script.extractor_missing",
+                format!("缺少 extractor 函数: {e}"),
+                format!("Missing extractor function: {e}"),
+            )
+        })?;
+
+        // 将响应数据转换为 JS 值
+        let response_js: rquickjs::Value = ctx.json_parse(response_data.as_str()).map_err(|e| {
+            AppError::localized(
+                "usage_script.response_parse_failed",
+                format!("解析响应 JSON 失败: {e}"),
+                format!("Failed to parse response JSON: {e}"),
+            )
+        })?;
+
+        // 调用 extractor(response)
+        let result_js: rquickjs::Value = extractor.call((response_js,)).map_err(|e| {
+            AppError::localized(
+                "usage_script.extractor_exec_failed",
+                format!("执行 extractor 失败: {e}"),
+                format!("Failed to execute extractor: {e}"),
+            )
+        })?;
+
+        // 转换为 JSON 字符串
+        let result_json: String = ctx
+            .json_stringify(result_js)
+            .map_err(|e| {
+                AppError::localized(
+                    "usage_script.result_serialize_failed",
+                    format!("序列化结果失败: {e}"),
+                    format!("Failed to serialize result: {e}"),
+                )
+            })?
+            .ok_or_else(|| {
+                AppError::localized(
+                    "usage_script.serialize_none",
+                    "序列化返回 None",
+                    "Serialization returned None",
+                )
+            })?
+            .get()
+            .map_err(|e| {
+                AppError::localized(
+                    "usage_script.get_string_failed",
+                    format!("获取字符串失败: {e}"),
+                    format!("Failed to get string: {e}"),
+                )
+            })?;
+
+        // 解析为 serde_json::Value
+        serde_json::from_str(&result_json).map_err(|e| {
+            AppError::localized(
+                "usage_script.json_parse_failed",
+                format!("JSON 解析失败: {e}"),
+                format!("JSON parse failed: {e}"),
+            )
+        })
+    })
+    .await?;
+
+    // 8. 验证返回值格式
+    validate_result(&result)?;
+
+    Ok(result)
+}
+
+fn script_timed_out_error(timeout: Duration) -> AppError {
+    let secs = timeout.as_secs();
+    AppError::localized(
+        "usage_script.timed_out",
+        format!("脚本执行超时（超过 {secs} 秒）"),
+        format!("Script timed out (exceeded {secs}s)"),
+    )
+}
+
+/// 在受限的 QuickJS 运行时中执行一个 JS 阶段。
+///
+/// - 运行在 `spawn_blocking` 线程上，避免死循环脚本占住 tokio 工作线程；
+/// - 运行时设置内存上限、栈上限和基于截止时间的中断处理器；
+/// - 外层再包一层 `tokio::time::timeout` 兜底。
+async fn run_sandboxed<T, F>(script: String, timeout: Duration, phase: F) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: for<'js> FnOnce(Ctx<'js>, String) -> Result<T, AppError> + Send + 'static,
+{
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let interrupted_flag = interrupted.clone();
+
+    let handle = tokio::task::spawn_blocking(move || {
         let runtime = Runtime::new().map_err(|e| {
             AppError::localized(
                 "usage_script.runtime_create_failed",
@@ -119,6 +217,18 @@ pub async fn execute_usage_script(
                 format!("Failed to create JS runtime: {e}"),
             )
         })?;
+        runtime.set_memory_limit(JS_MEMORY_LIMIT);
+        runtime.set_max_stack_size(JS_MAX_STACK_SIZE);
+        let deadline = Instant::now() + timeout;
+        runtime.set_interrupt_handler(Some(Box::new(move || {
+            if Instant::now() >= deadline {
+                interrupted_flag.store(true, Ordering::SeqCst);
+                true
+            } else {
+                false
+            }
+        })));
+
         let context = Context::full(&runtime).map_err(|e| {
             AppError::localized(
                 "usage_script.context_create_failed",
@@ -127,85 +237,24 @@ pub async fn execute_usage_script(
             )
         })?;
 
-        context.with(|ctx| {
-            // 重新 eval 获取配置对象
-            let config: rquickjs::Object = ctx.eval(script_with_vars.clone()).map_err(|e| {
-                AppError::localized(
-                    "usage_script.config_reparse_failed",
-                    format!("重新解析配置失败: {e}"),
-                    format!("Failed to re-parse config: {e}"),
-                )
-            })?;
+        context.with(|ctx| phase(ctx, script))
+    }); // Runtime 和 Context 在阻塞线程内被 drop
 
-            // 提取 extractor 函数
-            let extractor: Function = config.get("extractor").map_err(|e| {
-                AppError::localized(
-                    "usage_script.extractor_missing",
-                    format!("缺少 extractor 函数: {e}"),
-                    format!("Missing extractor function: {e}"),
-                )
-            })?;
+    let outcome = match tokio::time::timeout(timeout + JS_TIMEOUT_GRACE, handle).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => Err(AppError::localized(
+            "usage_script.sandbox_failed",
+            format!("脚本执行线程异常: {e}"),
+            format!("Script execution thread failed: {e}"),
+        )),
+        Err(_) => return Err(script_timed_out_error(timeout)),
+    };
 
-            // 将响应数据转换为 JS 值
-            let response_js: rquickjs::Value =
-                ctx.json_parse(response_data.as_str()).map_err(|e| {
-                    AppError::localized(
-                        "usage_script.response_parse_failed",
-                        format!("解析响应 JSON 失败: {e}"),
-                        format!("Failed to parse response JSON: {e}"),
-                    )
-                })?;
-
-            // 调用 extractor(response)
-            let result_js: rquickjs::Value = extractor.call((response_js,)).map_err(|e| {
-                AppError::localized(
-                    "usage_script.extractor_exec_failed",
-                    format!("执行 extractor 失败: {e}"),
-                    format!("Failed to execute extractor: {e}"),
-                )
-            })?;
-
-            // 转换为 JSON 字符串
-            let result_json: String = ctx
-                .json_stringify(result_js)
-                .map_err(|e| {
-                    AppError::localized(
-                        "usage_script.result_serialize_failed",
-                        format!("序列化结果失败: {e}"),
-                        format!("Failed to serialize result: {e}"),
-                    )
-                })?
-                .ok_or_else(|| {
-                    AppError::localized(
-                        "usage_script.serialize_none",
-                        "序列化返回 None",
-                        "Serialization returned None",
-                    )
-                })?
-                .get()
-                .map_err(|e| {
-                    AppError::localized(
-                        "usage_script.get_string_failed",
-                        format!("获取字符串失败: {e}"),
-                        format!("Failed to get string: {e}"),
-                    )
-                })?;
-
-            // 解析为 serde_json::Value
-            serde_json::from_str(&result_json).map_err(|e| {
-                AppError::localized(
-                    "usage_script.json_parse_failed",
-                    format!("JSON 解析失败: {e}"),
-                    format!("JSON parse failed: {e}"),
-                )
-            })
-        })?
-    }; // Runtime 和 Context 在这里被 drop
-
-    // 8. 验证返回值格式
-    validate_result(&result)?;
-
-    Ok(result)
+    // 被中断处理器终止的脚本统一报告为超时，而不是笼统的解析/执行失败
+    match outcome {
+        Err(_) if interrupted.load(Ordering::SeqCst) => Err(script_timed_out_error(timeout)),
+        other => other,
+    }
 }
 
 /// 请求配置结构
@@ -573,6 +622,170 @@ fn is_loopback_host(url: &Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 在独立线程中运行，并以硬超时兜底：即使脚本卡住执行线程，测试也会失败而不是挂起
+    fn run_with_hard_timeout<T, F>(limit: Duration, f: F) -> T
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(limit)
+            .expect("usage script did not finish within the hard test timeout")
+    }
+
+    fn run_custom_script(script: &'static str) -> (Result<Value, AppError>, Duration) {
+        run_with_hard_timeout(Duration::from_secs(10), move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let started = Instant::now();
+            let result = rt.block_on(execute_usage_script(
+                script,
+                "",
+                "",
+                10,
+                None,
+                None,
+                Some("custom"),
+            ));
+            (result, started.elapsed())
+        })
+    }
+
+    fn error_key(err: &AppError) -> &'static str {
+        match err {
+            AppError::Localized { key, .. } => key,
+            other => panic!("expected localized error, got {other}"),
+        }
+    }
+
+    #[test]
+    fn usage_script_infinite_loop_is_interrupted_near_deadline() {
+        let (result, elapsed) = run_custom_script("while(true){}");
+        let err = result.expect_err("infinite loop must not succeed");
+        assert_eq!(error_key(&err), "usage_script.timed_out");
+        assert!(
+            elapsed >= JS_EXEC_TIMEOUT - Duration::from_millis(500)
+                && elapsed < JS_EXEC_TIMEOUT + JS_TIMEOUT_GRACE + Duration::from_secs(2),
+            "loop should stop near the {JS_EXEC_TIMEOUT:?} deadline, took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn usage_script_huge_allocation_hits_memory_limit() {
+        // 未设内存上限时该脚本可以成功解析并走到 HTTP 请求阶段
+        let (result, _) = run_custom_script(
+            "const s = 'a'.repeat(1e9); \
+             ({ request: { url: 'http://127.0.0.1:1/' + s.length, method: 'GET' }, \
+                extractor: function (r) { return r; } })",
+        );
+        let err = result.expect_err("1e9-char string must exceed the memory limit");
+        assert_eq!(error_key(&err), "usage_script.config_parse_failed");
+    }
+
+    #[test]
+    fn usage_script_infinite_recursion_errors_without_stack_overflow() {
+        let (result, _) = run_custom_script("function f() { return f() + 1; } f();");
+        let err = result.expect_err("unbounded recursion must fail");
+        assert_eq!(error_key(&err), "usage_script.config_parse_failed");
+    }
+
+    #[test]
+    fn usage_script_extractor_phase_is_sandboxed() {
+        let result = run_with_hard_timeout(Duration::from_secs(10), || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(run_sandboxed(
+                "({ extractor: function () { for (;;) {} } })".to_string(),
+                Duration::from_millis(300),
+                |ctx, script| {
+                    let config: rquickjs::Object = ctx
+                        .eval(script)
+                        .map_err(|e| AppError::Message(e.to_string()))?;
+                    let extractor: Function = config
+                        .get("extractor")
+                        .map_err(|e| AppError::Message(e.to_string()))?;
+                    extractor
+                        .call::<_, rquickjs::Value>(())
+                        .map(|_| ())
+                        .map_err(|e| AppError::Message(e.to_string()))
+                },
+            ))
+        });
+        let err = result.expect_err("looping extractor must be interrupted");
+        assert_eq!(error_key(&err), "usage_script.timed_out");
+    }
+
+    #[test]
+    fn usage_script_sandbox_still_returns_normal_results() {
+        let value = run_with_hard_timeout(Duration::from_secs(10), || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(run_sandboxed(
+                "[1, 2, 3].map(function (x) { return x * 2; }).join(',')".to_string(),
+                JS_EXEC_TIMEOUT,
+                |ctx, script| {
+                    ctx.eval::<String, _>(script)
+                        .map_err(|e| AppError::Message(e.to_string()))
+                },
+            ))
+        })
+        .expect("plain script should evaluate");
+        assert_eq!(value, "2,4,6");
+    }
+
+    #[test]
+    fn usage_script_looping_scripts_do_not_starve_runtime_workers() {
+        let sleep_elapsed = run_with_hard_timeout(Duration::from_secs(10), || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let loops: Vec<_> = (0..4)
+                    .map(|_| {
+                        tokio::spawn(execute_usage_script(
+                            "while(true){}",
+                            "",
+                            "",
+                            10,
+                            None,
+                            None,
+                            Some("custom"),
+                        ))
+                    })
+                    .collect();
+                // 让循环脚本先占住执行线程
+                tokio::time::sleep(Duration::from_millis(200)).await;
+
+                let started = Instant::now();
+                tokio::spawn(tokio::time::sleep(Duration::from_millis(100)))
+                    .await
+                    .unwrap();
+                let sleep_elapsed = started.elapsed();
+
+                for handle in loops {
+                    let err = handle.await.unwrap().expect_err("loop must time out");
+                    assert_eq!(error_key(&err), "usage_script.timed_out");
+                }
+                sleep_elapsed
+            })
+        });
+        assert!(
+            sleep_elapsed < Duration::from_secs(2),
+            "unrelated sleep task was starved for {sleep_elapsed:?}"
+        );
+    }
 
     #[test]
     fn test_https_bypass_prevention() {
