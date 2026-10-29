@@ -65,13 +65,13 @@ export const fetchProvidersForApp = async (
   try {
     providers = await providersApi.getAll(appId);
   } catch (error) {
-    console.error("获取供应商列表失败:", error);
+    console.error("Failed to fetch providers:", error);
   }
 
   try {
     currentProviderId = await providersApi.getCurrent(appId);
   } catch (error) {
-    console.error("获取当前供应商失败:", error);
+    console.error("Failed to fetch current provider:", error);
   }
 
   return {

@@ -91,16 +91,19 @@ export function useCommonConfigSnippet({
                 // 清理 localStorage
                 safeStorageRemove(LEGACY_STORAGE_KEY);
                 console.log(
-                  "[迁移] Claude 通用配置已从 localStorage 迁移到 config.json",
+                  "[Migration] Claude common config migrated from localStorage to config.json",
                 );
               }
             } catch (e) {
-              console.warn("[迁移] 从 localStorage 迁移失败:", e);
+              console.warn(
+                "[Migration] Failed to migrate from localStorage:",
+                e,
+              );
             }
           }
         }
       } catch (error) {
-        console.error("加载通用配置失败:", error);
+        console.error("Failed to load common config:", error);
       } finally {
         if (mounted) {
           setIsLoading(false);
@@ -139,6 +142,7 @@ export function useCommonConfigSnippet({
           settingsConfig,
           commonConfigSnippet,
           true,
+          t,
         );
         if (!error) {
           isUpdatingFromCommonConfig.current = true;
@@ -157,6 +161,7 @@ export function useCommonConfigSnippet({
     isLoading,
     onConfigChange,
     settingsConfig,
+    t,
   ]);
 
   // 新建模式：如果通用配置片段存在且有效，默认启用
@@ -177,6 +182,7 @@ export function useCommonConfigSnippet({
             settingsConfig,
             commonConfigSnippet,
             true,
+            t,
           );
           if (!error) {
             isUpdatingFromCommonConfig.current = true;
@@ -197,6 +203,7 @@ export function useCommonConfigSnippet({
     isLoading,
     settingsConfig,
     onConfigChange,
+    t,
   ]);
 
   // 处理通用配置开关
@@ -206,6 +213,7 @@ export function useCommonConfigSnippet({
         settingsConfig,
         commonConfigSnippet,
         checked,
+        t,
       );
 
       if (snippetError) {
@@ -224,7 +232,7 @@ export function useCommonConfigSnippet({
         isUpdatingFromCommonConfig.current = false;
       }, 0);
     },
-    [settingsConfig, commonConfigSnippet, onConfigChange],
+    [settingsConfig, commonConfigSnippet, onConfigChange, t],
   );
 
   // 处理通用配置片段变化
@@ -239,7 +247,7 @@ export function useCommonConfigSnippet({
         configApi
           .setCommonConfigSnippet("claude", "")
           .catch((error: unknown) => {
-            console.error("保存通用配置失败:", error);
+            console.error("Failed to save common config:", error);
             setCommonConfigError(
               t("claudeConfig.saveFailed", { error: String(error) }),
             );
@@ -250,6 +258,7 @@ export function useCommonConfigSnippet({
             settingsConfig,
             previousSnippet,
             false,
+            t,
           );
           onConfigChange(updatedConfig);
           setUseCommonConfig(false);
@@ -258,7 +267,11 @@ export function useCommonConfigSnippet({
       }
 
       // 验证JSON格式
-      const validationError = validateJsonConfig(value, "通用配置片段");
+      const validationError = validateJsonConfig(
+        value,
+        t,
+        "commonConfigSnippet",
+      );
       if (validationError) {
         setCommonConfigError(validationError);
       } else {
@@ -267,7 +280,7 @@ export function useCommonConfigSnippet({
         configApi
           .setCommonConfigSnippet("claude", value)
           .catch((error: unknown) => {
-            console.error("保存通用配置失败:", error);
+            console.error("Failed to save common config:", error);
             setCommonConfigError(
               t("claudeConfig.saveFailed", { error: String(error) }),
             );
@@ -280,6 +293,7 @@ export function useCommonConfigSnippet({
           settingsConfig,
           previousSnippet,
           false,
+          t,
         );
         if (removeResult.error) {
           setCommonConfigError(removeResult.error);
@@ -289,6 +303,7 @@ export function useCommonConfigSnippet({
           removeResult.updatedConfig,
           value,
           true,
+          t,
         );
 
         if (addResult.error) {
@@ -305,7 +320,7 @@ export function useCommonConfigSnippet({
         }, 0);
       }
     },
-    [commonConfigSnippet, settingsConfig, useCommonConfig, onConfigChange],
+    [commonConfigSnippet, settingsConfig, useCommonConfig, onConfigChange, t],
   );
 
   // 当配置变化时检查是否包含通用配置（但避免在通过通用配置更新时检查）
@@ -337,7 +352,11 @@ export function useCommonConfigSnippet({
       }
 
       // 验证 JSON 格式
-      const validationError = validateJsonConfig(extracted, "提取的配置");
+      const validationError = validateJsonConfig(
+        extracted,
+        t,
+        "extractedConfig",
+      );
       if (validationError) {
         setCommonConfigError(validationError);
         return;
@@ -349,7 +368,7 @@ export function useCommonConfigSnippet({
       // 保存到后端
       await configApi.setCommonConfigSnippet("claude", extracted);
     } catch (error) {
-      console.error("提取通用配置失败:", error);
+      console.error("Failed to extract common config:", error);
       setCommonConfigError(
         t("claudeConfig.extractFailed", { error: String(error) }),
       );

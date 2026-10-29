@@ -894,7 +894,10 @@
       "defaultCostMultiplierRequired": "Default multiplier is required",
       "defaultCostMultiplierInvalid": "Invalid multiplier format"
     },
-    "saveFailedGeneric": "Save failed, please try again"
+    "saveFailedGeneric": "Save failed, please try again",
+    "validation": {
+      "pathRequired": "Path cannot be empty"
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -1195,7 +1198,24 @@
     "fetchModelsEndpointNotFound": "No reachable models endpoint found. Please check the Base URL or confirm whether the provider exposes this API.",
     "fetchModelsTimeout": "Request timed out, please check network connection",
     "requiredFields": "Please fill in the provider name, API endpoint, API Key and model",
-    "providerKeyStatusLoading": "Provider key status is still loading, please try again shortly"
+    "providerKeyStatusLoading": "Provider key status is still loading, please try again shortly",
+    "validation": {
+      "invalidUrl": "Please enter a valid URL",
+      "configRequired": "Please fill in the config content",
+      "configJsonInvalid": "Config JSON format error",
+      "jsonSyntaxAtPosition": "JSON format error: {{detail}} (position {{position}})",
+      "jsonSyntaxAtLineColumn": "JSON format error: line {{line}}, column {{column}}",
+      "jsonSyntax": "JSON format error: {{detail}}",
+      "jsonMustBeObject": "{{field}} must be a JSON object",
+      "jsonSyntaxCheck": "{{field}} has a JSON format error, please check the syntax",
+      "fieldConfig": "Config",
+      "fieldCommonConfigSnippet": "Common config snippet",
+      "fieldExtractedConfig": "Extracted config",
+      "commonConfigApplyFailed": "Failed to parse the config JSON; cannot apply the common config",
+      "authJsonMustBeObject": "auth.json must be a JSON object",
+      "authJsonInvalid": "auth.json has a JSON format error",
+      "tomlInvalid": "TOML format error"
+    }
   },
   "copilot": {
     "authSection": "GitHub Copilot Authentication",
@@ -1863,7 +1883,13 @@
       "commandRequired": "Please enter command",
       "singleServerObjectRequired": "Please paste a single MCP server object (do not include top-level mcpServers)",
       "saveFailed": "Save failed",
-      "deleteFailed": "Delete failed"
+      "deleteFailed": "Delete failed",
+      "tomlEmpty": "TOML content cannot be empty",
+      "tomlUnrecognized": "Unrecognized TOML format. Provide a single MCP server config, or use the [mcp_servers.<id>] format",
+      "serverConfigNotObject": "Server config must be an object",
+      "stdioCommandRequired": "An stdio MCP server must include the command field",
+      "urlFieldRequired": "A {{type}} MCP server must include the url field",
+      "unsupportedType": "Unsupported MCP server type: {{type}}"
     },
     "validation": {
       "ok": "Command available",
@@ -3039,5 +3065,8 @@
     "expiredHint": "Run the {{tool}} command to refresh your login",
     "queryFailed": "Query failed",
     "refresh": "Refresh"
+  },
+  "managedAuth": {
+    "deviceCodeExpired": "Device code expired. Please try again."
   }
 }

@@ -245,7 +245,7 @@ export function useTemplateValues({
           );
           onConfigChange(configString);
         } catch (err) {
-          console.error("更新模板值失败:", err);
+          console.error("Failed to update template values:", err);
         }
 
         return nextValues;

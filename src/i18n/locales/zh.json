@@ -894,7 +894,10 @@
       "defaultCostMultiplierRequired": "默认倍率不能为空",
       "defaultCostMultiplierInvalid": "默认倍率格式不正确"
     },
-    "saveFailedGeneric": "保存失败，请重试"
+    "saveFailedGeneric": "保存失败，请重试",
+    "validation": {
+      "pathRequired": "路径不能为空"
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -1195,7 +1198,24 @@
     "fetchModelsEndpointNotFound": "未找到可用的模型列表端点，请检查 Base URL 或确认供应商是否开放该接口",
     "fetchModelsTimeout": "请求超时，请检查网络连接",
     "requiredFields": "请填写供应商名称、API 地址、API Key 和模型",
-    "providerKeyStatusLoading": "正在加载供应商标识状态，请稍后再试"
+    "providerKeyStatusLoading": "正在加载供应商标识状态，请稍后再试",
+    "validation": {
+      "invalidUrl": "请输入有效的网址",
+      "configRequired": "请填写配置内容",
+      "configJsonInvalid": "配置 JSON 格式错误",
+      "jsonSyntaxAtPosition": "JSON 格式错误：{{detail}}（位置：{{position}}）",
+      "jsonSyntaxAtLineColumn": "JSON 格式错误：第 {{line}} 行，第 {{column}} 列",
+      "jsonSyntax": "JSON 格式错误：{{detail}}",
+      "jsonMustBeObject": "{{field}}必须是 JSON 对象",
+      "jsonSyntaxCheck": "{{field}} JSON 格式错误，请检查语法",
+      "fieldConfig": "配置",
+      "fieldCommonConfigSnippet": "通用配置片段",
+      "fieldExtractedConfig": "提取的配置",
+      "commonConfigApplyFailed": "配置 JSON 解析失败，无法应用通用配置",
+      "authJsonMustBeObject": "auth.json 必须是 JSON 对象",
+      "authJsonInvalid": "auth.json JSON 格式错误",
+      "tomlInvalid": "TOML 格式错误"
+    }
   },
   "copilot": {
     "authSection": "GitHub Copilot 认证",
@@ -1863,7 +1883,13 @@
       "commandRequired": "请填写命令",
       "singleServerObjectRequired": "此处只需单个服务器对象，请不要粘贴包含 mcpServers 的整份配置",
       "saveFailed": "保存失败",
-      "deleteFailed": "删除失败"
+      "deleteFailed": "删除失败",
+      "tomlEmpty": "TOML 内容不能为空",
+      "tomlUnrecognized": "无法识别的 TOML 格式。请提供单个 MCP 服务器配置，或使用 [mcp_servers.<id>] 格式",
+      "serverConfigNotObject": "服务器配置必须是对象",
+      "stdioCommandRequired": "stdio 类型的 MCP 服务器必须包含 command 字段",
+      "urlFieldRequired": "{{type}} 类型的 MCP 服务器必须包含 url 字段",
+      "unsupportedType": "不支持的 MCP 服务器类型: {{type}}"
     },
     "validation": {
       "ok": "命令可用",
@@ -3039,5 +3065,8 @@
     "expiredHint": "请运行 {{tool}} 命令刷新登录",
     "queryFailed": "查询失败",
     "refresh": "刷新"
+  },
+  "managedAuth": {
+    "deviceCodeExpired": "设备码已过期，请重试"
   }
 }

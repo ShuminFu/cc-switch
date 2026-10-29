@@ -67,7 +67,7 @@ describe("provider form schema (CCS-190)", () => {
       resolverOptions,
     );
     expect(bad.values).toEqual({});
-    expect(bad.errors.settingsConfig?.message).toMatch(/JSON/);
+    expect(bad.errors.settingsConfig?.message).toMatch(/json/i);
   });
 });
 

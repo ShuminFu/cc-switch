@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { authApi, settingsApi } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import type {
@@ -14,6 +15,7 @@ export function useManagedAuth(
   authProvider: ManagedAuthProvider,
   githubDomain?: string,
 ) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const queryKey = ["managed-auth-status", authProvider];
 
@@ -99,7 +101,7 @@ export function useManagedAuth(
       const expire = () => {
         stopPolling();
         setPollingState("error");
-        setError("Device code expired. Please try again.");
+        setError(t("managedAuth.deviceCodeExpired"));
       };
 
       // Chained setTimeout: the next poll is only scheduled once the current

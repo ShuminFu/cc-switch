@@ -147,7 +147,7 @@ wire_api = "responses"
     clickSave();
 
     const summary = await findSummary();
-    expect(summary.querySelector("ul")?.textContent).toMatch(/JSON/);
+    expect(summary.querySelector("ul")?.textContent).toMatch(/json/i);
     expect(onSubmit).not.toHaveBeenCalled();
   });
 

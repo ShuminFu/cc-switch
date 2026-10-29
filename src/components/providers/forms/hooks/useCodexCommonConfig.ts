@@ -145,16 +145,19 @@ export function useCodexCommonConfig({
                 // 清理 localStorage
                 safeStorageRemove(LEGACY_STORAGE_KEY);
                 console.log(
-                  "[迁移] Codex 通用配置已从 localStorage 迁移到 config.json",
+                  "[Migration] Codex common config migrated from localStorage to config.json",
                 );
               }
             } catch (e) {
-              console.warn("[迁移] 从 localStorage 迁移失败:", e);
+              console.warn(
+                "[Migration] Failed to migrate from localStorage:",
+                e,
+              );
             }
           }
         }
       } catch (error) {
-        console.error("加载 Codex 通用配置失败:", error);
+        console.error("Failed to load Codex common config:", error);
       } finally {
         if (mounted) {
           setIsLoading(false);
@@ -399,7 +402,7 @@ export function useCodexCommonConfig({
         configApi
           .setCommonConfigSnippet("codex", "")
           .catch((error: unknown) => {
-            console.error("保存 Codex 通用配置失败:", error);
+            console.error("Failed to save Codex common config:", error);
             setCommonConfigError(
               t("codexConfig.saveFailed", { error: String(error) }),
             );
@@ -459,7 +462,7 @@ export function useCodexCommonConfig({
       configApi
         .setCommonConfigSnippet("codex", value)
         .catch((error: unknown) => {
-          console.error("保存 Codex 通用配置失败:", error);
+          console.error("Failed to save Codex common config:", error);
           setCommonConfigError(
             t("codexConfig.saveFailed", { error: String(error) }),
           );
@@ -518,7 +521,7 @@ export function useCodexCommonConfig({
       // 保存到后端
       await configApi.setCommonConfigSnippet("codex", extracted);
     } catch (error) {
-      console.error("提取 Codex 通用配置失败:", error);
+      console.error("Failed to extract Codex common config:", error);
       setCommonConfigError(
         t("codexConfig.extractFailed", { error: String(error) }),
       );

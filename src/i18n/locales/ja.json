@@ -894,7 +894,10 @@
       "defaultCostMultiplierRequired": "デフォルト倍率は必須です",
       "defaultCostMultiplierInvalid": "デフォルト倍率の形式が正しくありません"
     },
-    "saveFailedGeneric": "保存に失敗しました。もう一度お試しください"
+    "saveFailedGeneric": "保存に失敗しました。もう一度お試しください",
+    "validation": {
+      "pathRequired": "パスを入力してください"
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -1195,7 +1198,24 @@
     "fetchModelsEndpointNotFound": "利用可能なモデル一覧エンドポイントが見つかりません。Base URL を確認するか、プロバイダーが該当 API を公開しているかご確認ください",
     "fetchModelsTimeout": "リクエストがタイムアウトしました。ネットワーク接続を確認してください",
     "requiredFields": "プロバイダー名、API エンドポイント、API Key、モデルを入力してください",
-    "providerKeyStatusLoading": "プロバイダーキーの状態を読み込み中です。しばらくしてから再試行してください"
+    "providerKeyStatusLoading": "プロバイダーキーの状態を読み込み中です。しばらくしてから再試行してください",
+    "validation": {
+      "invalidUrl": "有効な URL を入力してください",
+      "configRequired": "設定内容を入力してください",
+      "configJsonInvalid": "設定 JSON の形式が正しくありません",
+      "jsonSyntaxAtPosition": "JSON の形式エラー：{{detail}}（位置：{{position}}）",
+      "jsonSyntaxAtLineColumn": "JSON の形式エラー：{{line}} 行目、{{column}} 列目",
+      "jsonSyntax": "JSON の形式エラー：{{detail}}",
+      "jsonMustBeObject": "{{field}}は JSON オブジェクトである必要があります",
+      "jsonSyntaxCheck": "{{field}}の JSON 形式が正しくありません。構文を確認してください",
+      "fieldConfig": "設定",
+      "fieldCommonConfigSnippet": "共通設定スニペット",
+      "fieldExtractedConfig": "抽出した設定",
+      "commonConfigApplyFailed": "設定 JSON の解析に失敗したため、共通設定を適用できません",
+      "authJsonMustBeObject": "auth.json は JSON オブジェクトである必要があります",
+      "authJsonInvalid": "auth.json の JSON 形式が正しくありません",
+      "tomlInvalid": "TOML の形式が正しくありません"
+    }
   },
   "copilot": {
     "authSection": "GitHub Copilot 認証",
@@ -1863,7 +1883,13 @@
       "commandRequired": "コマンドを入力してください",
       "singleServerObjectRequired": "単一の MCP サーバーオブジェクトを貼り付けてください（トップレベルの mcpServers は不要）",
       "saveFailed": "保存に失敗しました",
-      "deleteFailed": "削除に失敗しました"
+      "deleteFailed": "削除に失敗しました",
+      "tomlEmpty": "TOML の内容を入力してください",
+      "tomlUnrecognized": "認識できない TOML 形式です。単一の MCP サーバー設定を指定するか、[mcp_servers.<id>] 形式を使用してください",
+      "serverConfigNotObject": "サーバー設定はオブジェクトである必要があります",
+      "stdioCommandRequired": "stdio タイプの MCP サーバーには command フィールドが必要です",
+      "urlFieldRequired": "{{type}} タイプの MCP サーバーには url フィールドが必要です",
+      "unsupportedType": "サポートされていない MCP サーバータイプ: {{type}}"
     },
     "validation": {
       "ok": "コマンドが見つかりました",
@@ -3039,5 +3065,8 @@
     "expiredHint": "{{tool}}コマンドを実行してログインを更新してください",
     "queryFailed": "クエリに失敗しました",
     "refresh": "更新"
+  },
+  "managedAuth": {
+    "deviceCodeExpired": "デバイスコードの有効期限が切れました。もう一度お試しください"
   }
 }

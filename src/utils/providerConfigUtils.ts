@@ -1,5 +1,6 @@
 // 供应商配置处理工具函数
 
+import type { TFunction } from "i18next";
 import type { TemplateValueConfig } from "../config/claudeProviderPresets";
 import type { CodexApiFormat } from "@/types";
 import { deepClone } from "@/utils/deepClone";
@@ -69,22 +70,38 @@ export interface UpdateCommonConfigResult {
   error?: string;
 }
 
+// 校验提示中出现的字段名
+export type JsonConfigField =
+  | "config"
+  | "commonConfigSnippet"
+  | "extractedConfig";
+
+const JSON_CONFIG_FIELD_KEYS = {
+  config: "providerForm.validation.fieldConfig",
+  commonConfigSnippet: "providerForm.validation.fieldCommonConfigSnippet",
+  extractedConfig: "providerForm.validation.fieldExtractedConfig",
+} as const satisfies Record<JsonConfigField, string>;
+
 // 验证JSON配置格式
 export const validateJsonConfig = (
   value: string,
-  fieldName: string = "配置",
+  t: TFunction,
+  field: JsonConfigField = "config",
 ): string => {
   if (!value.trim()) {
     return "";
   }
+  const fieldName = t(JSON_CONFIG_FIELD_KEYS[field]);
   try {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return `${fieldName}必须是 JSON 对象`;
+      return t("providerForm.validation.jsonMustBeObject", {
+        field: fieldName,
+      });
     }
     return "";
   } catch {
-    return `${fieldName}JSON格式错误，请检查语法`;
+    return t("providerForm.validation.jsonSyntaxCheck", { field: fieldName });
   }
 };
 
@@ -93,6 +110,7 @@ export const updateCommonConfigSnippet = (
   jsonString: string,
   snippetString: string,
   enabled: boolean,
+  t: TFunction,
 ): UpdateCommonConfigResult => {
   let config: Record<string, any>;
   try {
@@ -100,7 +118,7 @@ export const updateCommonConfigSnippet = (
   } catch (err) {
     return {
       updatedConfig: jsonString,
-      error: "配置 JSON 解析失败，无法应用通用配置",
+      error: t("providerForm.validation.commonConfigApplyFailed"),
     };
   }
 
@@ -111,7 +129,11 @@ export const updateCommonConfigSnippet = (
   }
 
   // 使用统一的验证函数
-  const snippetError = validateJsonConfig(snippetString, "通用配置片段");
+  const snippetError = validateJsonConfig(
+    snippetString,
+    t,
+    "commonConfigSnippet",
+  );
   if (snippetError) {
     return {
       updatedConfig: JSON.stringify(config, null, 2),

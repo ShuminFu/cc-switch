@@ -1,9 +1,10 @@
 import { z } from "zod";
+import i18next from "i18next";
 
 const directorySchema = z
   .string()
   .trim()
-  .min(1, "路径不能为空")
+  .min(1, { error: () => i18next.t("settings.validation.pathRequired") })
   .optional()
   .or(z.literal(""));
 

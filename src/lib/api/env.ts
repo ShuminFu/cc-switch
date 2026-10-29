@@ -50,7 +50,7 @@ export async function checkAllEnvConflicts(): Promise<
       try {
         results[app] = await checkEnvConflicts(app);
       } catch (error) {
-        console.error(`检查 ${app} 环境变量失败:`, error);
+        console.error(`Failed to check ${app} environment variables:`, error);
         results[app] = [];
       }
     }),
