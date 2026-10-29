@@ -40,11 +40,14 @@ const FRESH_TIMESTAMP_COLUMNS: &[(&str, &str)] = &[
     ("stream_check_logs", "tested_at"),
 ];
 
+/// fixture 中的 proxy_config 是旧版本 seed 的默认值；加载后改成非默认值，
+/// 这样「数据保留」断言才能发现迁移把用户配置重置为默认值的问题。
+const CUSTOMIZED_PROXY_LISTEN_PORT: i64 = 23456;
+
 /// 需要逐行校验保留情况的用户数据表。
 ///
-/// 不在列表中的表：`model_pricing`（启动时重新 seed / 修复）、`proxy_config`
-/// （由迁移重建为按应用分行，seed 默认值）、`skills`（v3 起结构整体更换，见
-/// [`assert_rows_preserved`] 中的特殊处理）。
+/// 不在列表中的表：`model_pricing`（启动时重新 seed / 修复）。`skills` 在 v3 起
+/// 结构整体更换，见 [`assert_rows_preserved`] 中的特殊处理。
 const USER_DATA_TABLES: &[&str] = &[
     "providers",
     "provider_endpoints",
@@ -59,6 +62,7 @@ const USER_DATA_TABLES: &[&str] = &[
     "session_log_sync",
     "profiles",
     "skills",
+    "proxy_config",
 ];
 
 fn fixtures_dir() -> PathBuf {
@@ -138,6 +142,13 @@ fn load_fixture(conn: &Connection, sql_path: &Path) {
             conn.execute(&format!("UPDATE \"{table}\" SET \"{column}\" = ?1"), [now])
                 .expect("refresh fixture timestamps");
         }
+    }
+    if table_exists(conn, "proxy_config") {
+        conn.execute(
+            "UPDATE proxy_config SET listen_port = ?1",
+            [CUSTOMIZED_PROXY_LISTEN_PORT],
+        )
+        .expect("customize proxy_config");
     }
 }
 
@@ -380,7 +391,8 @@ fn full_snapshot(conn: &Connection) -> (i32, SchemaShape, BTreeMap<String, Vec<R
 /// fixture 中的每一行在迁移后仍存在，且两边都有的列取值不变。
 ///
 /// skills 表在 v3 从「安装状态」（v1 以 key、v2 以 (directory, app_type) 为主键）
-/// 换成统一结构（id 主键），旧行由迁移转换而非原样保留，因此只在新旧都是统一结构时比较。
+/// 换成统一结构（id 主键），旧行不原样保留，而是写入
+/// `settings.skills_ssot_migration_snapshot` 供启动后重新导入，因此改为校验快照。
 fn assert_rows_preserved(label: &str, before: &Connection, after: &Connection) {
     for table in USER_DATA_TABLES {
         if !table_exists(before, table) {
@@ -392,6 +404,7 @@ fn assert_rows_preserved(label: &str, before: &Connection, after: &Connection) {
         );
         let old_rows = table_rows(before, table);
         if *table == "skills" && old_rows.first().is_some_and(|r| !r.contains_key("id")) {
+            assert_legacy_skills_snapshotted(label, &old_rows, after);
             continue;
         }
         let new_rows = table_rows(after, table);
@@ -406,6 +419,41 @@ fn assert_rows_preserved(label: &str, before: &Connection, after: &Connection) {
             );
         }
     }
+}
+
+/// v3 之前的已安装 skill 必须出现在迁移快照中，并标记为待重新导入
+fn assert_legacy_skills_snapshotted(label: &str, old_rows: &[Row], after: &Connection) {
+    let setting = |key: &str| -> String {
+        after
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .unwrap_or_else(|e| panic!("{label}: read setting {key}: {e}"))
+    };
+    assert_eq!(
+        setting("skills_ssot_migration_pending"),
+        "true",
+        "{label}: legacy skills must be marked for re-import"
+    );
+    let snapshot: Vec<serde_json::Value> =
+        serde_json::from_str(&setting("skills_ssot_migration_snapshot"))
+            .unwrap_or_else(|e| panic!("{label}: parse skills snapshot: {e}"));
+    let installed = old_rows
+        .iter()
+        .filter(|r| r.get("installed") == Some(&Value::Integer(1)))
+        .count();
+    assert!(installed > 0, "{label}: fixture has no installed skill");
+    assert_eq!(
+        snapshot.len(),
+        installed,
+        "{label}: skills snapshot {snapshot:?} does not cover {old_rows:?}"
+    );
+    assert!(
+        snapshot
+            .iter()
+            .any(|s| s["directory"] == "fixture-skill" && s["app_type"] == "claude"),
+        "{label}: fixture skill missing from snapshot {snapshot:?}"
+    );
 }
 
 /// 用当前代码创建一个全新的数据库，作为等价性比较的基准

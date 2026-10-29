@@ -92,6 +92,10 @@ Fixture generation needs full history and tags; this clone has none, so they wer
 - `bash -n scripts/gen-db-fixture.sh`: OK (shellcheck is not installed).
 - Every `gen-db-fixture.sh` run logged `wrote …/v<N>.sql (schema v<N>)`.
 
+**Review.** An independent review checked the acceptance criteria and re-ran the migrations test, the `--lib` suite, fmt and clippy; all pass. It found two gaps in the row-preservation check and fixed them:
+- `proxy_config` was left out of the preserved tables on the grounds that migration rebuilds it, but every fixture from v2 on already has per-app rows, and they survive migration. The table is now checked. The fixture rows are the old release's defaults, so the test first sets a non-default `listen_port`; a migration that resets user proxy settings to defaults now fails the test.
+- Pre-v3 `skills` rows (v1, v2) were skipped without any check. The test now asserts that migration sets `skills_ssot_migration_pending` and that `skills_ssot_migration_snapshot` lists every installed legacy skill.
+
 **Acceptance criteria**
 - [x] At least 10 distinct start versions (14) plus 2 legacy JSON fixtures pass
 - [x] `cargo test --manifest-path src-tauri/Cargo.toml --test migrations`
