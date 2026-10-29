@@ -27,7 +27,7 @@ p1-proxy-lifecycle-lock
 
 **Summary.** `ProxyService::update_config` (src-tauri/src/services/proxy.rs) now delegates restarts to a new `restart_with_config` helper (called under the existing `lifecycle` lock from CCS-054):
 - **Port changed:** the new server is bound first; only after a successful bind (and ephemeral-port persist) is it swapped into `self.server` and the old server stopped. A failed bind leaves the old server untouched and running.
-- **Same port, address changed:** the old server must be stopped first (the port would conflict). If the new config fails to start, a server is restarted from `previous` and put back into the server slot. If stopping the old server fails, it is put back and an error is returned.
+- **Same port, address changed:** the old server must be stopped first (the port would conflict). If the new config fails to start, a server is restarted from `previous` and put back into the server slot. If stopping the old server reports an error, it is not put back (its shutdown signal was already sent, so it would be a dead instance reported as running); the new config is tried and, on failure, `previous` is restarted.
 - **Any failure:** `previous` is written back to the DB, so later startups and the Live takeover keep using the working address/port. Takeover Live rewrites only happen after a successful restart, as before.
 
 **Files.** `src-tauri/src/services/proxy.rs` (implementation + 2 tokio tests).
@@ -43,3 +43,8 @@ p1-proxy-lifecycle-lock
 - `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`: clean.
 - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`: clean.
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2111 passed, 0 failed, 3 ignored.
+
+**Review.** Verified each acceptance criterion against `2bd2dfb`; both tests assert the fix (running status, original port in status and DB, TCP connect). Follow-up fixes in `restart_with_config`:
+- Same-port path: when `stop()` on the old server returned an error, the implementation put the already-signalled instance back into the server slot, so `is_running()` stayed true for a server that was shutting down (and inconsistent with `ProxyService::stop`, which drops it). It now logs the error and continues with the new config / `previous` fallback.
+- Port-change path: if the new server binds but persisting the ephemeral port fails, `ProxyServer::start` has already updated the global `http_client` proxy port used for self-loop detection; it is now reset to the still-running old server's port.
+- Re-verified: fmt/clippy clean; `cargo test --lib` 2111 passed / 0 failed; full `cargo test --no-fail-fast` 2267 passed / 0 failed.

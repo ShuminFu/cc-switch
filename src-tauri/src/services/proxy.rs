@@ -3242,6 +3242,10 @@ impl ProxyService {
                 .await
             {
                 let _ = new_server.stop().await;
+                // 新服务器启动时已改写全局代理端口，旧服务器仍在运行，需改回旧端口
+                if let Some(server) = self.server.read().await.as_ref() {
+                    crate::proxy::http_client::set_proxy_port(server.get_status().await.port);
+                }
                 return Err(e);
             }
 
@@ -3259,9 +3263,8 @@ impl ProxyService {
         let old_server = self.server.write().await.take();
         if let Some(server) = old_server {
             if let Err(e) = server.stop().await {
-                // 旧服务器停止失败时放回原处，保持运行状态
-                *self.server.write().await = Some(server);
-                return Err(format!("重启前停止代理服务器失败: {e}"));
+                // 关闭信号已发出，旧实例不可再用：继续尝试新配置，失败时再以旧配置恢复
+                log::warn!("重启前停止代理服务器失败: {e}");
             }
         }
 
