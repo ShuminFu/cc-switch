@@ -2,16 +2,13 @@
 //!
 //! 定义各 API 处理器的配置结构和使用量解析器
 
+use crate::proxy::protocol::WireFormat;
+use crate::proxy::stream::StreamUsageFormat;
 use crate::proxy::usage::parser::TokenUsage;
 use serde_json::Value;
 
 /// 使用量解析器类型别名
-pub type StreamUsageParser = fn(&[Value]) -> Option<TokenUsage>;
 pub type ResponseUsageParser = fn(&Value) -> Option<TokenUsage>;
-
-/// 模型提取器类型别名
-/// 参数: (流式事件列表, 请求中的模型名称) -> 最终使用的模型名称
-pub type StreamModelExtractor = fn(&[Value], &str) -> String;
 
 /// 流式 usage 事件预过滤器类型别名。
 ///
@@ -22,12 +19,10 @@ pub type StreamUsageEventFilter = fn(&str) -> bool;
 /// 各 API 的使用量解析配置
 #[derive(Clone, Copy)]
 pub struct UsageParserConfig {
-    /// 流式响应解析器
-    pub stream_parser: StreamUsageParser,
+    /// 流式 usage 的事件格式（由 `UsageTap` 逐事件累计 usage 与归因模型）
+    pub stream_usage: StreamUsageFormat,
     /// 非流式响应解析器
     pub response_parser: ResponseUsageParser,
-    /// 流式响应中的模型提取器
-    pub model_extractor: StreamModelExtractor,
     /// 流式 usage 事件预过滤器
     pub stream_event_filter: Option<StreamUsageEventFilter>,
     /// 应用类型字符串（用于日志记录）
@@ -55,125 +50,61 @@ fn gemini_stream_usage_event_filter(data: &str) -> bool {
 }
 
 // ============================================================================
-// 模型提取器实现
-// ============================================================================
-
-/// Claude 流式响应模型提取（优先使用 usage.model）
-///
-/// 空字符串模型名视为缺失（转换层对无回显上游会合成 model:""），
-/// 落到 fallback_model（映射后的出站模型或客户端请求模型）。
-fn claude_model_extractor(events: &[Value], fallback_model: &str) -> String {
-    // 首先尝试从解析的 usage 中获取模型
-    if let Some(usage) = TokenUsage::from_claude_stream_events(events) {
-        if let Some(model) = usage.model.filter(|m| !m.is_empty()) {
-            return model;
-        }
-    }
-    fallback_model.to_string()
-}
-
-/// OpenAI Chat Completions 流式响应模型提取（优先使用 usage.model）
-fn openai_model_extractor(events: &[Value], fallback_model: &str) -> String {
-    // 首先尝试从解析的 usage 中获取模型
-    if let Some(usage) = TokenUsage::from_openai_stream_events(events) {
-        if let Some(model) = usage.model.filter(|m| !m.is_empty()) {
-            return model;
-        }
-    }
-    // 回退：从事件中直接提取
-    events
-        .iter()
-        .find_map(|e| e.get("model")?.as_str().filter(|m| !m.is_empty()))
-        .unwrap_or(fallback_model)
-        .to_string()
-}
-
-/// Codex 智能流式响应模型提取（自动检测格式）
-fn codex_auto_model_extractor(events: &[Value], fallback_model: &str) -> String {
-    // 首先尝试从解析的 usage 中获取模型
-    if let Some(usage) = TokenUsage::from_codex_stream_events_auto(events) {
-        if let Some(model) = usage.model.filter(|m| !m.is_empty()) {
-            return model;
-        }
-    }
-    // 回退：从 response.completed 事件中提取
-    events
-        .iter()
-        .find_map(|e| {
-            if e.get("type")?.as_str()? == "response.completed" {
-                e.get("response")?
-                    .get("model")?
-                    .as_str()
-                    .filter(|m| !m.is_empty())
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            // 再回退：从 OpenAI 格式事件中提取
-            events
-                .iter()
-                .find_map(|e| e.get("model")?.as_str().filter(|m| !m.is_empty()))
-        })
-        .unwrap_or(fallback_model)
-        .to_string()
-}
-
-/// Gemini 流式响应模型提取（优先使用 usage.model）
-fn gemini_model_extractor(events: &[Value], fallback_model: &str) -> String {
-    // 首先尝试从解析的 usage 中获取模型
-    if let Some(usage) = TokenUsage::from_gemini_stream_chunks(events) {
-        if let Some(model) = usage.model.filter(|m| !m.is_empty()) {
-            return model;
-        }
-    }
-    fallback_model.to_string()
-}
-
-// ============================================================================
 // 预定义配置
 // ============================================================================
 
 /// Claude API 解析配置
 pub const CLAUDE_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
-    stream_parser: TokenUsage::from_claude_stream_events,
+    stream_usage: StreamUsageFormat::Anthropic,
     response_parser: TokenUsage::from_claude_response,
-    model_extractor: claude_model_extractor,
     stream_event_filter: Some(claude_stream_usage_event_filter),
     app_type_str: "claude",
 };
 
 /// OpenAI Chat Completions API 解析配置（用于 Codex /v1/chat/completions）
 pub const OPENAI_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
-    stream_parser: TokenUsage::from_openai_stream_events,
+    stream_usage: StreamUsageFormat::OpenAiChat,
     response_parser: TokenUsage::from_openai_response,
-    model_extractor: openai_model_extractor,
     stream_event_filter: Some(openai_stream_usage_event_filter),
     app_type_str: "codex",
 };
 
 /// Codex 智能解析配置（自动检测 OpenAI 或 Codex 格式）
 pub const CODEX_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
-    stream_parser: TokenUsage::from_codex_stream_events_auto,
+    stream_usage: StreamUsageFormat::CodexAuto,
     response_parser: TokenUsage::from_codex_response_auto,
-    model_extractor: codex_auto_model_extractor,
     stream_event_filter: Some(codex_stream_usage_event_filter),
     app_type_str: "codex",
 };
 
 /// Gemini API 解析配置
 pub const GEMINI_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
-    stream_parser: TokenUsage::from_gemini_stream_chunks,
+    stream_usage: StreamUsageFormat::Gemini,
     response_parser: TokenUsage::from_gemini_response,
-    model_extractor: gemini_model_extractor,
     stream_event_filter: Some(gemini_stream_usage_event_filter),
     app_type_str: "gemini",
 };
 
+/// 按客户端线协议选择 usage 解析配置（透传响应与转换后的流式响应共用）
+pub fn parser_config_for(client_format: WireFormat) -> &'static UsageParserConfig {
+    match client_format {
+        WireFormat::AnthropicMessages => &CLAUDE_PARSER_CONFIG,
+        WireFormat::OpenAiChat => &OPENAI_PARSER_CONFIG,
+        WireFormat::OpenAiResponses => &CODEX_PARSER_CONFIG,
+        WireFormat::GeminiNative => &GEMINI_PARSER_CONFIG,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::stream::UsageTap;
     use serde_json::json;
+
+    /// 按配置的流式 usage 格式折叠事件并取归因模型
+    fn extract_model(config: UsageParserConfig, events: &[Value], fallback: &str) -> String {
+        UsageTap::from_events(config.stream_usage, events).model(fallback)
+    }
 
     #[test]
     fn parser_configs_carry_expected_app_type_and_filters() {
@@ -246,7 +177,7 @@ mod tests {
             }
         })];
         assert_eq!(
-            claude_model_extractor(&events, "fallback"),
+            extract_model(CLAUDE_PARSER_CONFIG, &events, "fallback"),
             "claude-upstream"
         );
 
@@ -254,8 +185,14 @@ mod tests {
             "type": "message_start",
             "message": { "model": "", "usage": { "input_tokens": 10 } }
         })];
-        assert_eq!(claude_model_extractor(&empty_model, "fallback"), "fallback");
-        assert_eq!(claude_model_extractor(&[], "fallback"), "fallback");
+        assert_eq!(
+            extract_model(CLAUDE_PARSER_CONFIG, &empty_model, "fallback"),
+            "fallback"
+        );
+        assert_eq!(
+            extract_model(CLAUDE_PARSER_CONFIG, &[], "fallback"),
+            "fallback"
+        );
     }
 
     #[test]
@@ -264,9 +201,16 @@ mod tests {
             json!({ "model": "", "choices": [] }),
             json!({ "model": "gpt-chunk", "choices": [] }),
         ];
-        assert_eq!(openai_model_extractor(&events, "fallback"), "gpt-chunk");
         assert_eq!(
-            openai_model_extractor(&[json!({ "choices": [] })], "fallback"),
+            extract_model(OPENAI_PARSER_CONFIG, &events, "fallback"),
+            "gpt-chunk"
+        );
+        assert_eq!(
+            extract_model(
+                OPENAI_PARSER_CONFIG,
+                &[json!({ "choices": [] })],
+                "fallback"
+            ),
             "fallback"
         );
     }
@@ -278,24 +222,34 @@ mod tests {
             "response": { "model": "gpt-responses" }
         })];
         assert_eq!(
-            codex_auto_model_extractor(&completed, "fallback"),
+            extract_model(CODEX_PARSER_CONFIG, &completed, "fallback"),
             "gpt-responses"
         );
 
         let chunks = vec![json!({ "model": "gpt-chat", "choices": [] })];
-        assert_eq!(codex_auto_model_extractor(&chunks, "fallback"), "gpt-chat");
+        assert_eq!(
+            extract_model(CODEX_PARSER_CONFIG, &chunks, "fallback"),
+            "gpt-chat"
+        );
 
         let empty = vec![json!({
             "type": "response.completed",
             "response": { "model": "" }
         })];
-        assert_eq!(codex_auto_model_extractor(&empty, "fallback"), "fallback");
+        assert_eq!(
+            extract_model(CODEX_PARSER_CONFIG, &empty, "fallback"),
+            "fallback"
+        );
     }
 
     #[test]
     fn gemini_model_extractor_uses_fallback_without_usage() {
         assert_eq!(
-            gemini_model_extractor(&[json!({ "candidates": [] })], "gemini-req"),
+            extract_model(
+                GEMINI_PARSER_CONFIG,
+                &[json!({ "candidates": [] })],
+                "gemini-req"
+            ),
             "gemini-req"
         );
     }

@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ir::UsageIR;
+#[cfg(any(test, feature = "testkit"))]
+use crate::proxy::stream::{StreamUsageFormat, UsageTap};
 
 /// Session 日志 request_id 前缀，与 `session_usage.rs` 中的格式保持一致
 pub const SESSION_REQUEST_ID_PREFIX: &str = "session:";
@@ -78,122 +80,10 @@ impl TokenUsage {
         })
     }
 
-    /// 从 Claude API 流式响应解析
+    /// 从 Claude API 流式响应解析（批量折叠，运行时由 `UsageTap` 逐事件累计）
+    #[cfg(any(test, feature = "testkit"))]
     pub fn from_claude_stream_events(events: &[Value]) -> Option<Self> {
-        let mut usage = Self::default();
-        let mut model: Option<String> = None;
-        let mut message_id: Option<String> = None;
-        let mut input_from_delta = false;
-
-        for event in events {
-            if let Some(event_type) = event.get("type").and_then(|v| v.as_str()) {
-                match event_type {
-                    "message_start" => {
-                        if let Some(message) = event.get("message") {
-                            if model.is_none() {
-                                if let Some(m) = message.get("model").and_then(|v| v.as_str()) {
-                                    model = Some(m.to_string());
-                                }
-                            }
-                            if message_id.is_none() {
-                                if let Some(id) = message.get("id").and_then(|v| v.as_str()) {
-                                    message_id = Some(id.to_string());
-                                }
-                            }
-                        }
-                        if let Some(msg_usage) = event.get("message").and_then(|m| m.get("usage")) {
-                            // 从 message_start 获取 input_tokens（原生 Claude API）
-                            if let Some(input) =
-                                msg_usage.get("input_tokens").and_then(|v| v.as_u64())
-                            {
-                                usage.input_tokens = input as u32;
-                            }
-                            usage.cache_read_tokens = msg_usage
-                                .get("cache_read_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0)
-                                as u32;
-                            usage.cache_creation_tokens = msg_usage
-                                .get("cache_creation_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0)
-                                as u32;
-                        }
-                    }
-                    "message_delta" => {
-                        if let Some(delta_usage) = event.get("usage") {
-                            // 从 message_delta 获取 output_tokens
-                            if let Some(output) =
-                                delta_usage.get("output_tokens").and_then(|v| v.as_u64())
-                            {
-                                usage.output_tokens = output as u32;
-                            }
-
-                            let delta_input = delta_usage
-                                .get("input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                            let delta_cache_read = delta_usage
-                                .get("cache_read_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                            let delta_cache_creation = delta_usage
-                                .get("cache_creation_input_tokens")
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-
-                            // 部分 Anthropic-compatible SSE provider 会在 message_start 上报完整上下文，
-                            // 但在 message_delta 上报修正后的 fresh input。遇到更小的正数 delta input
-                            // 时采用 delta；若同一 usage 块带有缓存计数，也同步采用以避免重复计数。
-                            // 若 delta 缺少缓存字段，则保留 start 中已有的缓存值作为 best-effort fallback。
-                            if let Some(input) = delta_input {
-                                let should_use_delta_input = input > 0
-                                    && (usage.input_tokens == 0
-                                        || input < usage.input_tokens
-                                        || (input_from_delta && input <= usage.input_tokens));
-
-                                if should_use_delta_input {
-                                    usage.input_tokens = input;
-                                    input_from_delta = true;
-                                    if let Some(cache_read) = delta_cache_read {
-                                        usage.cache_read_tokens = cache_read;
-                                    }
-                                    if let Some(cache_creation) = delta_cache_creation {
-                                        usage.cache_creation_tokens = cache_creation;
-                                    }
-                                }
-                            }
-                            // 从 message_delta 中处理缓存命中(cache_read_input_tokens)
-                            if usage.cache_read_tokens == 0 {
-                                if let Some(cache_read) = delta_cache_read {
-                                    usage.cache_read_tokens = cache_read;
-                                }
-                            }
-                            // 从 message_delta 中处理缓存创建(cache_creation_input_tokens)
-                            // 注: 现在 zhipu 没有返回 cache_creation_input_tokens 字段
-                            if usage.cache_creation_tokens == 0 {
-                                if let Some(cache_creation) = delta_cache_creation {
-                                    usage.cache_creation_tokens = cache_creation;
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // 用 has_billable_tokens 而非仅看 input/output：完全缓存命中、无输出的流式请求
-        // （input==0 && output==0 但 cache_read>0）是真实的 cache-read 计费，必须保留。
-        // Gemini→Anthropic 路径在 input 改为 fresh(promptTokenCount - cachedContentTokenCount)
-        // 后尤其会出现这种全缓存场景；旧 gate 会把它当成"无 usage"丢弃。
-        if usage.has_billable_tokens() {
-            usage.model = model;
-            usage.message_id = message_id;
-            Some(usage)
-        } else {
-            None
-        }
+        UsageTap::from_events(StreamUsageFormat::Anthropic, events).usage()
     }
 
     /// 从 Codex API 非流式响应解析
@@ -253,24 +143,9 @@ impl TokenUsage {
     }
 
     /// 智能 Codex 流式响应解析 - 自动检测 OpenAI 或 Codex 格式
+    #[cfg(any(test, feature = "testkit"))]
     pub fn from_codex_stream_events_auto(events: &[Value]) -> Option<Self> {
-        log::debug!("[Codex] 智能解析流式事件，共 {} 个事件", events.len());
-
-        // 先尝试 Codex Responses API 格式 (response.completed 事件)
-        for event in events {
-            if let Some(event_type) = event.get("type").and_then(|v| v.as_str()) {
-                if event_type == "response.completed" {
-                    if let Some(response) = event.get("response") {
-                        log::debug!("[Codex] 找到 response.completed 事件");
-                        return Self::from_codex_response_auto(response);
-                    }
-                }
-            }
-        }
-
-        // 回退到 OpenAI Chat Completions 格式 (最后一个 chunk 包含 usage)
-        log::debug!("[Codex] 尝试 OpenAI 流式格式");
-        Self::from_openai_stream_events(events)
+        UsageTap::from_events(StreamUsageFormat::CodexAuto, events).usage()
     }
 
     /// 从 OpenAI Chat Completions API 响应解析 (prompt_tokens, completion_tokens)
@@ -294,19 +169,9 @@ impl TokenUsage {
     }
 
     /// 从 OpenAI Chat Completions API 流式响应解析
+    #[cfg(any(test, feature = "testkit"))]
     pub fn from_openai_stream_events(events: &[Value]) -> Option<Self> {
-        log::debug!("[Codex] 解析 OpenAI 流式事件，共 {} 个事件", events.len());
-        // OpenAI 流式响应在最后一个 chunk 中包含 usage
-        for event in events.iter().rev() {
-            if let Some(usage) = event.get("usage") {
-                if !usage.is_null() {
-                    log::debug!("[Codex] 找到 usage: {usage:?}");
-                    return Self::from_openai_response(event);
-                }
-            }
-        }
-        log::debug!("[Codex] 未找到 usage 信息");
-        None
+        UsageTap::from_events(StreamUsageFormat::OpenAiChat, events).usage()
     }
 
     /// 从 Gemini API 非流式响应解析
@@ -330,30 +195,9 @@ impl TokenUsage {
     }
 
     /// 从 Gemini API 流式响应解析
+    #[cfg(any(test, feature = "testkit"))]
     pub fn from_gemini_stream_chunks(chunks: &[Value]) -> Option<Self> {
-        let mut usage = UsageIR::default();
-        let mut model: Option<String> = None;
-
-        for chunk in chunks {
-            // usageMetadata 为累计值（输入通常在所有 chunk 中保持不变），取最后一个
-            if let Some(metadata) = chunk.get("usageMetadata") {
-                usage = UsageIR::from_gemini(metadata);
-            }
-
-            // 提取实际使用的模型名称（modelVersion 字段）
-            if model.is_none() {
-                if let Some(model_version) = chunk.get("modelVersion").and_then(|v| v.as_str()) {
-                    model = Some(model_version.to_string());
-                }
-            }
-        }
-
-        let usage = usage.to_token_usage();
-        if usage.input_tokens > 0 || usage.output_tokens > 0 {
-            Some(Self { model, ..usage })
-        } else {
-            None
-        }
+        UsageTap::from_events(StreamUsageFormat::Gemini, chunks).usage()
     }
 }
 
