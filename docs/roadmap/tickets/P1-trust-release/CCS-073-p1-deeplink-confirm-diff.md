@@ -122,3 +122,23 @@ in en / zh / zh-TW / ja.
   `cargo test --lib`: 2183 passed, 0 failed, 3 ignored.
 - `pnpm typecheck`: clean. `pnpm test:unit`: 123 files, 1263 tests passed.
   `pnpm format:check`: all files use Prettier code style.
+
+**Review.** Independent review checked each acceptance criterion against
+`26ef2fe` and confirmed them (RTL gate tests fail on the previous dialog;
+backend preview matches `import_provider_from_deeplink` activation rules and
+the MCP "existing server only merges apps" path). Two gaps were fixed in the
+review follow-up:
+- the same-name diff built its candidate without the homepage inference the
+  import applies to links without `homepage`/inline config, so re-previewing
+  such a link reported `websiteUrl` as removed. The preview now infers it the
+  same way (`test_preview_diff_infers_homepage_like_import`);
+- `maskFieldValue` only checked the leaf key, so header values in the diff
+  (`settingsConfig.env.ANTHROPIC_CUSTOM_HEADERS`,
+  `settingsConfig.options.headers.Authorization`) were shown in clear. Any
+  field path naming a header, authorization or cookie is now masked, matching
+  the always-masked MCP headers (new case in `tests/lib/deeplinkMask.test.ts`).
+Verification: `cargo test --lib deeplink` 51 passed, `cargo test --lib`
+2184 passed / 0 failed, fmt and clippy clean; `pnpm typecheck` and
+`pnpm format:check` clean; deeplink vitest files 21/21. The only
+`pnpm test:unit` failure is in another lane's untracked, in-progress
+`tests/components/ProviderFormErrorSummary.test.tsx` and is unrelated.

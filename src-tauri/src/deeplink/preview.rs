@@ -9,7 +9,7 @@ use super::mcp::parse_mcp_apps;
 use super::provider::{
     build_provider_from_request, classify_claude_env_key, parse_and_merge_config, ClaudeEnvKeyClass,
 };
-use super::utils::decode_base64_param;
+use super::utils::{decode_base64_param, infer_homepage_from_endpoint};
 use super::DeepLinkImportRequest;
 use crate::error::AppError;
 use crate::provider::Provider;
@@ -197,7 +197,22 @@ fn fill_provider_preview(
     if let Some(name) = request.name.as_deref().map(str::trim) {
         let providers = state.db.get_all_providers(app_type.as_str())?;
         if let Some(existing) = providers.values().find(|p| p.name.trim() == name) {
-            let candidate = build_provider_from_request(&app_type, request)?;
+            // Build the candidate like import_provider_from_deeplink does,
+            // which infers the homepage from the primary endpoint when the
+            // link has none.
+            let mut candidate_request = request.clone();
+            if candidate_request
+                .homepage
+                .as_deref()
+                .is_none_or(|s| s.is_empty())
+            {
+                candidate_request.homepage = candidate_request
+                    .endpoint
+                    .as_deref()
+                    .and_then(|ep| ep.split(',').map(str::trim).find(|e| !e.is_empty()))
+                    .and_then(infer_homepage_from_endpoint);
+            }
+            let candidate = build_provider_from_request(&app_type, &candidate_request)?;
             preview.existing = Some(PreviewExistingProvider {
                 id: existing.id.clone(),
                 name: existing.name.clone(),

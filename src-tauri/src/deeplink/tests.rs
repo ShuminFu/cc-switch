@@ -1183,6 +1183,36 @@ fn test_preview_provider_flags_env_script_and_diffs_same_name_provider() {
 
 #[test]
 #[serial_test::serial]
+fn test_preview_diff_infers_homepage_like_import() {
+    use super::preview::preview_deeplink_import;
+    use super::provider::import_provider_from_deeplink;
+
+    let _test_home = TestHomeGuard::new();
+    let state = preview_state();
+    // No homepage and no inline config: the import infers the homepage from
+    // the endpoint, so the preview must not report it as removed.
+    let request = DeepLinkImportRequest {
+        version: "v1".to_string(),
+        resource: "provider".to_string(),
+        app: Some("claude".to_string()),
+        name: Some("Same".to_string()),
+        endpoint: Some("https://api.same.example/v1".to_string()),
+        api_key: Some("sk-same-key-123456".to_string()),
+        ..Default::default()
+    };
+    import_provider_from_deeplink(&state, request.clone()).expect("seed provider");
+
+    let preview = preview_deeplink_import(&state, &request).expect("preview");
+    let existing = preview.existing.expect("same-name provider found");
+    assert!(
+        !existing.changes.iter().any(|c| c.field == "websiteUrl"),
+        "homepage is inferred on import: {:?}",
+        existing.changes
+    );
+}
+
+#[test]
+#[serial_test::serial]
 fn test_preview_provider_without_risk_writes_live_when_first() {
     use super::preview::preview_deeplink_import;
 

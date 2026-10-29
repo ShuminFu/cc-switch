@@ -55,7 +55,15 @@ export function maskConfigText(text: string): string {
  * (e.g. `settingsConfig.env.ANTHROPIC_AUTH_TOKEN`).
  */
 export function maskFieldValue(field: string, value: string): string {
-  const leaf = field.split(".").pop() ?? field;
-  if (isSensitiveKey(leaf)) return maskSecret(value);
+  const parts = field.split(".");
+  const leaf = parts[parts.length - 1] ?? field;
+  // Header values (Authorization, ANTHROPIC_CUSTOM_HEADERS, ...) carry
+  // credentials under names the key check does not catch, so always mask them
+  if (
+    isSensitiveKey(leaf) ||
+    parts.some((part) => /header|authorization|cookie/i.test(part))
+  ) {
+    return maskSecret(value);
+  }
   return value.includes("\n") ? maskConfigText(value) : value;
 }

@@ -52,6 +52,21 @@ describe("deeplink masking", () => {
     ).toBe("https://a.b");
   });
 
+  it("masks header values in a diff field regardless of the leaf name", () => {
+    expect(
+      maskFieldValue(
+        "settingsConfig.env.ANTHROPIC_CUSTOM_HEADERS",
+        "x-relay-auth: sk-abcdefghijk",
+      ),
+    ).toBe(`x-re${"*".repeat(20)}`);
+    expect(
+      maskFieldValue(
+        "settingsConfig.options.headers.Authorization",
+        "Bearer sk-abcdefghijk",
+      ),
+    ).toBe(`Bear${"*".repeat(20)}`);
+  });
+
   it("masks secret lines inside multi-line config text", () => {
     const toml =
       'model = "grok-4"\napi_key = "xai-abcdefghijkl"\nbase_url = "https://x.ai"';
