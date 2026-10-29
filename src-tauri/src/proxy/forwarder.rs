@@ -6,12 +6,12 @@ use super::handler_context::DEFAULT_NON_STREAMING_BODY_TIMEOUT;
 use super::hyper_client::ProxyResponse;
 use super::{
     body_filter::filter_private_params_with_whitelist,
-    circuit_breaker::HalfOpenPermit,
     content_encoding::{decompress_body, get_content_encoding},
     error::*,
     failover_switch::FailoverSwitchManager,
     json_canonical::{canonicalize_value, short_value_hash},
     log_codes::fwd as log_fwd,
+    pipeline::failover::{Attempt, AttemptRecorder},
     provider_router::ProviderRouter,
     providers::{
         codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore, get_adapter,
@@ -224,41 +224,6 @@ impl RequestForwarder {
         Self { shared, req }
     }
 
-    async fn record_success_result(
-        &self,
-        provider_id: &str,
-        app_type: &str,
-        half_open_permit: Option<&HalfOpenPermit>,
-    ) {
-        if half_open_permit.is_some() {
-            if let Err(e) = self
-                .shared
-                .router
-                .record_result(provider_id, app_type, half_open_permit, true, None)
-                .await
-            {
-                log::warn!(
-                    "[{app_type}] 记录 Provider 成功结果失败: provider_id={provider_id}, error={e}"
-                );
-            }
-            return;
-        }
-
-        let router = self.shared.router.clone();
-        let provider_id = provider_id.to_string();
-        let app_type = app_type.to_string();
-        tokio::spawn(async move {
-            if let Err(e) = router
-                .record_result(&provider_id, &app_type, None, true, None)
-                .await
-            {
-                log::warn!(
-                    "[{app_type}] 异步记录 Provider 成功结果失败: provider_id={provider_id}, error={e}"
-                );
-            }
-        });
-    }
-
     /// 整流（thinking signature 或 budget）重试失败后的统一收尾。
     ///
     /// `None` 表示已记录熔断器、累积 `last_error`/`last_provider`，
@@ -269,9 +234,8 @@ impl RequestForwarder {
     async fn handle_rectifier_retry_failure(
         &self,
         retry_err: ProxyError,
+        attempt: Attempt<'_, '_>,
         provider: &Provider,
-        app_type_str: &str,
-        half_open_permit: Option<&HalfOpenPermit>,
         rectifier_label: &str,
         last_error: &mut Option<ProxyError>,
         last_provider: &mut Option<Provider>,
@@ -285,40 +249,21 @@ impl RequestForwarder {
         };
 
         if is_provider_error {
-            let _ = self
-                .shared
-                .router
-                .record_result(
-                    &provider.id,
-                    app_type_str,
-                    half_open_permit,
-                    false,
-                    Some(retry_err.to_string()),
+            attempt
+                .fail_provider(
+                    retry_err.to_string(),
+                    format!(
+                        "Provider {} {rectifier_label}重试失败: {}",
+                        provider.name, retry_err
+                    ),
                 )
                 .await;
-            {
-                let mut status = self.shared.status.write().await;
-                status.last_error = Some(format!(
-                    "Provider {} {rectifier_label}重试失败: {}",
-                    provider.name, retry_err
-                ));
-            }
             *last_error = Some(retry_err);
             *last_provider = Some(provider.clone());
             return None;
         }
 
-        self.shared
-            .router
-            .release_permit_neutral(&provider.id, app_type_str, half_open_permit)
-            .await;
-        let mut status = self.shared.status.write().await;
-        status.failed_requests += 1;
-        status.last_error = Some(retry_err.to_string());
-        if status.total_requests > 0 {
-            status.success_rate =
-                (status.success_requests as f32 / status.total_requests as f32) * 100.0;
-        }
+        attempt.fail_request(retry_err.to_string()).await;
         Some(ForwardError {
             error: retry_err,
             provider: Some(provider.clone()),
@@ -399,6 +344,11 @@ impl RequestForwarder {
 
         // 单 Provider 场景下跳过熔断器检查（故障转移关闭时）
         let bypass_circuit_breaker = providers.len() == 1;
+        let recorder = AttemptRecorder::new(
+            &self.shared,
+            app_type_str,
+            &self.req.current_provider_id_at_start,
+        );
 
         // 依次尝试每个供应商
         for provider in providers.iter() {
@@ -421,22 +371,11 @@ impl RequestForwarder {
 
             // 发起请求前先获取熔断器放行许可（HalfOpen 会占用探测名额）
             // 单 Provider 场景下跳过此检查，避免熔断器阻塞所有请求
-            // `half_open_permit` 守卫在本轮迭代内持有：若请求在记录结果前被取消
+            // `attempt` 在本轮迭代内持有 HalfOpen 探测许可：若请求在记录结果前被取消
             // （客户端断开等导致 future 被 drop），守卫 Drop 时会释放探测名额
-            let (allowed, half_open_permit) = if bypass_circuit_breaker {
-                (true, None)
-            } else {
-                let permit = self
-                    .shared
-                    .router
-                    .allow_provider_request(&provider.id, app_type_str)
-                    .await;
-                (permit.allowed, permit.permit)
-            };
-
-            if !allowed {
+            let Some(attempt) = recorder.begin(provider, bypass_circuit_breaker).await else {
                 continue;
-            }
+            };
 
             // PRE-SEND 优化器：每个 provider 独立决定是否优化
             // clone body 以避免 Bedrock 优化字段泄漏到非 Bedrock provider（failover 场景）
@@ -456,17 +395,6 @@ impl RequestForwarder {
 
             attempted_providers += 1;
 
-            // 更新状态中的当前 Provider 信息（per-attempt 维度的标识）
-            //
-            // total_requests / last_request_at / active_connections 已由
-            // forward_with_retry wrapper 在客户端请求维度统一处理，这里只刷
-            // 新「正在尝试哪个 provider」的展示字段。
-            {
-                let mut status = self.shared.status.write().await;
-                status.current_provider = Some(provider.name.clone());
-                status.current_provider_id = Some(provider.id.clone());
-            }
-
             // 转发请求（每个 Provider 只尝试一次，重试由客户端控制）
             match self
                 .forward(
@@ -482,52 +410,7 @@ impl RequestForwarder {
                 .await
             {
                 Ok((response, plan, outbound_model)) => {
-                    // 成功：普通闭合熔断状态异步记录，避免阻塞流式首包返回；
-                    // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
-                    self.record_success_result(
-                        &provider.id,
-                        app_type_str,
-                        half_open_permit.as_ref(),
-                    )
-                    .await;
-
-                    // 更新当前应用类型使用的 provider
-                    {
-                        let mut current_providers = self.shared.current_providers.write().await;
-                        current_providers.insert(
-                            app_type_str.to_string(),
-                            (provider.id.clone(), provider.name.clone()),
-                        );
-                    }
-
-                    // 更新成功统计
-                    {
-                        let mut status = self.shared.status.write().await;
-                        status.success_requests += 1;
-                        status.last_error = None;
-                        let should_switch =
-                            self.req.current_provider_id_at_start.as_str() != provider.id.as_str();
-                        if should_switch {
-                            status.failover_count += 1;
-
-                            // 异步触发供应商切换，更新 UI/托盘，并把“当前供应商”同步为实际使用的 provider
-                            let fm = self.shared.failover_manager.clone();
-                            let ah = self.shared.app_handle.clone();
-                            let pid = provider.id.clone();
-                            let pname = provider.name.clone();
-                            let at = app_type_str.to_string();
-
-                            tokio::spawn(async move {
-                                let _ = fm.try_switch(ah.as_ref(), &at, &pid, &pname).await;
-                            });
-                        }
-                        // 重新计算成功率
-                        if status.total_requests > 0 {
-                            status.success_rate = (status.success_requests as f32
-                                / status.total_requests as f32)
-                                * 100.0;
-                        }
-                    }
+                    attempt.succeed().await;
 
                     return Ok(ForwardResult {
                         response,
@@ -588,49 +471,7 @@ impl RequestForwarder {
                                     log::info!(
                                         "[{app_type_str}] [Media] Unsupported-image retry succeeded"
                                     );
-                                    self.record_success_result(
-                                        &provider.id,
-                                        app_type_str,
-                                        half_open_permit.as_ref(),
-                                    )
-                                    .await;
-
-                                    {
-                                        let mut current_providers =
-                                            self.shared.current_providers.write().await;
-                                        current_providers.insert(
-                                            app_type_str.to_string(),
-                                            (provider.id.clone(), provider.name.clone()),
-                                        );
-                                    }
-
-                                    {
-                                        let mut status = self.shared.status.write().await;
-                                        status.success_requests += 1;
-                                        status.last_error = None;
-                                        let should_switch =
-                                            self.req.current_provider_id_at_start.as_str()
-                                                != provider.id.as_str();
-                                        if should_switch {
-                                            status.failover_count += 1;
-                                            let fm = self.shared.failover_manager.clone();
-                                            let ah = self.shared.app_handle.clone();
-                                            let pid = provider.id.clone();
-                                            let pname = provider.name.clone();
-                                            let at = app_type_str.to_string();
-
-                                            tokio::spawn(async move {
-                                                let _ = fm
-                                                    .try_switch(ah.as_ref(), &at, &pid, &pname)
-                                                    .await;
-                                            });
-                                        }
-                                        if status.total_requests > 0 {
-                                            status.success_rate = (status.success_requests as f32
-                                                / status.total_requests as f32)
-                                                * 100.0;
-                                        }
-                                    }
+                                    attempt.succeed().await;
 
                                     return Ok(ForwardResult {
                                         response,
@@ -647,9 +488,8 @@ impl RequestForwarder {
                                     if let Some(err) = self
                                         .handle_rectifier_retry_failure(
                                             retry_err,
+                                            attempt,
                                             provider,
-                                            app_type_str,
-                                            half_open_permit.as_ref(),
                                             "media 降级",
                                             &mut last_error,
                                             &mut last_provider,
@@ -674,22 +514,7 @@ impl RequestForwarder {
                             if rectifier_retried {
                                 log::warn!("[{app_type_str}] [RECT-005] 整流器已触发过，不再重试");
                                 // 释放 HalfOpen permit（不记录熔断器，这是客户端兼容性问题）
-                                self.shared
-                                    .router
-                                    .release_permit_neutral(
-                                        &provider.id,
-                                        app_type_str,
-                                        half_open_permit.as_ref(),
-                                    )
-                                    .await;
-                                let mut status = self.shared.status.write().await;
-                                status.failed_requests += 1;
-                                status.last_error = Some(e.to_string());
-                                if status.total_requests > 0 {
-                                    status.success_rate = (status.success_requests as f32
-                                        / status.total_requests as f32)
-                                        * 100.0;
-                                }
+                                attempt.fail_request(e.to_string()).await;
                                 return Err(ForwardError {
                                     error: e,
                                     provider: Some(provider.clone()),
@@ -733,54 +558,7 @@ impl RequestForwarder {
                                 {
                                     Ok((response, plan, outbound_model)) => {
                                         log::info!("[{app_type_str}] [RECT-002] 整流重试成功");
-                                        self.record_success_result(
-                                            &provider.id,
-                                            app_type_str,
-                                            half_open_permit.as_ref(),
-                                        )
-                                        .await;
-
-                                        // 更新当前应用类型使用的 provider
-                                        {
-                                            let mut current_providers =
-                                                self.shared.current_providers.write().await;
-                                            current_providers.insert(
-                                                app_type_str.to_string(),
-                                                (provider.id.clone(), provider.name.clone()),
-                                            );
-                                        }
-
-                                        // 更新成功统计
-                                        {
-                                            let mut status = self.shared.status.write().await;
-                                            status.success_requests += 1;
-                                            status.last_error = None;
-                                            let should_switch =
-                                                self.req.current_provider_id_at_start.as_str()
-                                                    != provider.id.as_str();
-                                            if should_switch {
-                                                status.failover_count += 1;
-
-                                                // 异步触发供应商切换，更新 UI/托盘
-                                                let fm = self.shared.failover_manager.clone();
-                                                let ah = self.shared.app_handle.clone();
-                                                let pid = provider.id.clone();
-                                                let pname = provider.name.clone();
-                                                let at = app_type_str.to_string();
-
-                                                tokio::spawn(async move {
-                                                    let _ = fm
-                                                        .try_switch(ah.as_ref(), &at, &pid, &pname)
-                                                        .await;
-                                                });
-                                            }
-                                            if status.total_requests > 0 {
-                                                status.success_rate = (status.success_requests
-                                                    as f32
-                                                    / status.total_requests as f32)
-                                                    * 100.0;
-                                            }
-                                        }
+                                        attempt.succeed().await;
 
                                         return Ok(ForwardResult {
                                             response,
@@ -797,9 +575,8 @@ impl RequestForwarder {
                                         if let Some(err) = self
                                             .handle_rectifier_retry_failure(
                                                 retry_err,
+                                                attempt,
                                                 provider,
-                                                app_type_str,
-                                                half_open_permit.as_ref(),
                                                 "整流",
                                                 &mut last_error,
                                                 &mut last_provider,
@@ -827,22 +604,7 @@ impl RequestForwarder {
                                 log::warn!(
                                     "[{app_type_str}] [RECT-013] budget 整流器已触发过，不再重试"
                                 );
-                                self.shared
-                                    .router
-                                    .release_permit_neutral(
-                                        &provider.id,
-                                        app_type_str,
-                                        half_open_permit.as_ref(),
-                                    )
-                                    .await;
-                                let mut status = self.shared.status.write().await;
-                                status.failed_requests += 1;
-                                status.last_error = Some(e.to_string());
-                                if status.total_requests > 0 {
-                                    status.success_rate = (status.success_requests as f32
-                                        / status.total_requests as f32)
-                                        * 100.0;
-                                }
+                                attempt.fail_request(e.to_string()).await;
                                 return Err(ForwardError {
                                     error: e,
                                     provider: Some(provider.clone()),
@@ -854,22 +616,7 @@ impl RequestForwarder {
                                 log::warn!(
                                     "[{app_type_str}] [RECT-014] budget 整流器触发但无可整流内容，不做无意义重试"
                                 );
-                                self.shared
-                                    .router
-                                    .release_permit_neutral(
-                                        &provider.id,
-                                        app_type_str,
-                                        half_open_permit.as_ref(),
-                                    )
-                                    .await;
-                                let mut status = self.shared.status.write().await;
-                                status.failed_requests += 1;
-                                status.last_error = Some(e.to_string());
-                                if status.total_requests > 0 {
-                                    status.success_rate = (status.success_requests as f32
-                                        / status.total_requests as f32)
-                                        * 100.0;
-                                }
+                                attempt.fail_request(e.to_string()).await;
                                 return Err(ForwardError {
                                     error: e,
                                     provider: Some(provider.clone()),
@@ -901,48 +648,7 @@ impl RequestForwarder {
                             {
                                 Ok((response, plan, outbound_model)) => {
                                     log::info!("[{app_type_str}] [RECT-011] budget 整流重试成功");
-                                    self.record_success_result(
-                                        &provider.id,
-                                        app_type_str,
-                                        half_open_permit.as_ref(),
-                                    )
-                                    .await;
-
-                                    {
-                                        let mut current_providers =
-                                            self.shared.current_providers.write().await;
-                                        current_providers.insert(
-                                            app_type_str.to_string(),
-                                            (provider.id.clone(), provider.name.clone()),
-                                        );
-                                    }
-
-                                    {
-                                        let mut status = self.shared.status.write().await;
-                                        status.success_requests += 1;
-                                        status.last_error = None;
-                                        let should_switch =
-                                            self.req.current_provider_id_at_start.as_str()
-                                                != provider.id.as_str();
-                                        if should_switch {
-                                            status.failover_count += 1;
-                                            let fm = self.shared.failover_manager.clone();
-                                            let ah = self.shared.app_handle.clone();
-                                            let pid = provider.id.clone();
-                                            let pname = provider.name.clone();
-                                            let at = app_type_str.to_string();
-                                            tokio::spawn(async move {
-                                                let _ = fm
-                                                    .try_switch(ah.as_ref(), &at, &pid, &pname)
-                                                    .await;
-                                            });
-                                        }
-                                        if status.total_requests > 0 {
-                                            status.success_rate = (status.success_requests as f32
-                                                / status.total_requests as f32)
-                                                * 100.0;
-                                        }
-                                    }
+                                    attempt.succeed().await;
 
                                     return Ok(ForwardResult {
                                         response,
@@ -959,9 +665,8 @@ impl RequestForwarder {
                                     if let Some(err) = self
                                         .handle_rectifier_retry_failure(
                                             retry_err,
+                                            attempt,
                                             provider,
-                                            app_type_str,
-                                            half_open_permit.as_ref(),
                                             "budget 整流",
                                             &mut last_error,
                                             &mut last_provider,
@@ -977,22 +682,7 @@ impl RequestForwarder {
                     }
 
                     if signature_rectifier_non_retryable_client_error {
-                        self.shared
-                            .router
-                            .release_permit_neutral(
-                                &provider.id,
-                                app_type_str,
-                                half_open_permit.as_ref(),
-                            )
-                            .await;
-                        let mut status = self.shared.status.write().await;
-                        status.failed_requests += 1;
-                        status.last_error = Some(e.to_string());
-                        if status.total_requests > 0 {
-                            status.success_rate = (status.success_requests as f32
-                                / status.total_requests as f32)
-                                * 100.0;
-                        }
+                        attempt.fail_request(e.to_string()).await;
                         return Err(ForwardError {
                             error: e,
                             provider: Some(provider.clone()),
@@ -1007,23 +697,12 @@ impl RequestForwarder {
                     match category {
                         ErrorCategory::Retryable => {
                             // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
-                            let _ = self
-                                .shared
-                                .router
-                                .record_result(
-                                    &provider.id,
-                                    app_type_str,
-                                    half_open_permit.as_ref(),
-                                    false,
-                                    Some(e.to_string()),
+                            attempt
+                                .fail_provider(
+                                    e.to_string(),
+                                    format!("Provider {} 失败: {}", provider.name, e),
                                 )
                                 .await;
-
-                            {
-                                let mut status = self.shared.status.write().await;
-                                status.last_error =
-                                    Some(format!("Provider {} 失败: {}", provider.name, e));
-                            }
 
                             let (log_code, log_message) = build_retryable_failure_log(
                                 &provider.name,
@@ -1040,24 +719,7 @@ impl RequestForwarder {
                         }
                         ErrorCategory::NonRetryable | ErrorCategory::ClientAbort => {
                             // 不可重试：客户端层错误或客户端断连 → 不污染健康度，仅释放 HalfOpen permit
-                            self.shared
-                                .router
-                                .release_permit_neutral(
-                                    &provider.id,
-                                    app_type_str,
-                                    half_open_permit.as_ref(),
-                                )
-                                .await;
-                            {
-                                let mut status = self.shared.status.write().await;
-                                status.failed_requests += 1;
-                                status.last_error = Some(e.to_string());
-                                if status.total_requests > 0 {
-                                    status.success_rate = (status.success_requests as f32
-                                        / status.total_requests as f32)
-                                        * 100.0;
-                                }
-                            }
+                            attempt.fail_request(e.to_string()).await;
                             return Err(ForwardError {
                                 error: e,
                                 provider: Some(provider.clone()),
@@ -1070,15 +732,9 @@ impl RequestForwarder {
 
         if attempted_providers == 0 {
             // providers 列表非空，但全部被熔断器拒绝（典型：HalfOpen 探测名额被占用）
-            {
-                let mut status = self.shared.status.write().await;
-                status.failed_requests += 1;
-                status.last_error = Some("所有供应商暂时不可用（熔断器限制）".to_string());
-                if status.total_requests > 0 {
-                    status.success_rate =
-                        (status.success_requests as f32 / status.total_requests as f32) * 100.0;
-                }
-            }
+            recorder
+                .fail_request("所有供应商暂时不可用（熔断器限制）".to_string())
+                .await;
             return Err(ForwardError {
                 error: ProxyError::NoAvailableProvider,
                 provider: None,
@@ -1086,15 +742,7 @@ impl RequestForwarder {
         }
 
         // 所有供应商都失败了
-        {
-            let mut status = self.shared.status.write().await;
-            status.failed_requests += 1;
-            status.last_error = Some("所有供应商都失败".to_string());
-            if status.total_requests > 0 {
-                status.success_rate =
-                    (status.success_requests as f32 / status.total_requests as f32) * 100.0;
-            }
-        }
+        recorder.fail_request("所有供应商都失败".to_string()).await;
 
         if let Some((log_code, log_message)) =
             build_terminal_failure_log(attempted_providers, providers.len(), last_error.as_ref())
