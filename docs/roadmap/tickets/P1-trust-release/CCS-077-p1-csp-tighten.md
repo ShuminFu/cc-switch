@@ -58,3 +58,14 @@ one all 4 pass.
 avatar and URL icons render with no CSP violations, and that
 `fetch('https://example.com')` is blocked. They were not run in this headless
 environment. Item 3 (the grep for direct fetches) is done and is enforced by the new test.
+
+**Review.** The CSP change, the guard test and the "no other direct fetch" claim all
+check out: `src` has a single `fetch(` (`ModelsDevPickerDialog.tsx`, `https://models.dev/api.json`),
+and the remaining `http://` matches are SVG `xmlns` attributes, not image loads.
+One defect was found. Commit `1a7c021` also deleted
+`src/components/providers/forms/ProviderFormFull.tsx`, a deletion another lane had staged.
+At that commit `ProviderForm.tsx` still imports `./ProviderFormFull`, so the committed tree
+did not build. The review follow-up puts the file back in the tree (index only). It goes
+away when the provider-form change that stops importing it is committed. Status stays
+Partial until the two `pnpm tauri dev` devtools checks are run in an interactive session.
+
