@@ -1,6 +1,6 @@
 # Commands / IPC / app shell — findings (CMD-xx)
 
-Part of the [next-phase proposals](../README.md). 39 findings. Priorities: P2 = 28, P3 = 11.
+Part of the [next-phase proposals](../README.md). 47 findings. Priorities: P1 = 1, P2 = 33, P3 = 13.
 
 ## Area summary
 
@@ -10,6 +10,7 @@ The command layer is large (285 `#[tauri::command]` functions across 34 files, 2
 
 | ID | Title | Type | Priority | Effort | Confidence | Verdict |
 |---|---|---|---|---|---|---|
+| [CMD-40](#cmd-40) | Cold-start and lightweight-mode deep links are silently dropped (no get_current()/pending buffer) | bug | P1 | S | high |  |
 | [CMD-01](#cmd-01) | Deep-link URLs carrying API keys are logged in plaintext | security | P2 (first pass P1) | S | high | confirmed |
 | [CMD-03](#cmd-03) | Overly broad CSP and over-granted capabilities | security | P2 (first pass P1) | S | medium | partially-confirmed |
 | [CMD-05](#cmd-05) | `open_provider_terminal` writes the provider API key to a world-readable temp file | security | P2 | S | high |  |
@@ -38,6 +39,11 @@ The command layer is large (285 `#[tauri::command]` functions across 34 files, 2
 | [CMD-33](#cmd-33) | Feature — headless / CLI mode reusing the service layer | feature | P2 | L | medium |  |
 | [CMD-36](#cmd-36) | Exit/restart paths rely on `std::process::exit` after fixed sleeps | tech-debt | P2 | M | medium |  |
 | [CMD-37](#cmd-37) | Window recreated by lightweight mode loses Linux/decoration/theme setup | bug | P2 | S | medium |  |
+| [CMD-41](#cmd-41) | settings.json is written non-atomically and a corrupt file is silently replaced by defaults | bug | P2 | S | high |  |
+| [CMD-42](#cmd-42) | Failed JSON->SQLite migration is swallowed, never retried, and never shown to the user | bug | P2 | S | high |  |
+| [CMD-43](#cmd-43) | Changing the data directory flips path resolution in-process before the (optional) restart, splitting DB and backups/skills | bug | P2 | S | high |  |
+| [CMD-44](#cmd-44) | Tray 'Auto' enable path persists failover flags before switching and never rolls back (diverges from the UI command) | bug | P2 | S | high |  |
+| [CMD-45](#cmd-45) | Three of six window-restore paths skip the Windows taskbar / macOS Dock re-enable (window shown without taskbar button or Dock icon) | ux | P2 | S | high |  |
 | [CMD-02](#cmd-02) | `copilot_get_token` / `copilot_get_token_for_account` hand raw bearer tokens to the webview | security | P3 (first pass P1) | S | high | partially-confirmed |
 | [CMD-04](#cmd-04) | Sync credentials (WebDAV password, S3 secret) persist in plaintext `settings.json` | security | P3 (first pass P1) | M | high | partially-confirmed |
 | [CMD-17](#cmd-17) | Two locale detectors and a second hard-coded i18n table in Rust | tech-debt | P3 | S | high |  |
@@ -49,8 +55,21 @@ The command layer is large (285 `#[tauri::command]` functions across 34 files, 2
 | [CMD-35](#cmd-35) | Feature — extension API for provider adapters and usage scripts | feature | P3 | XL | low |  |
 | [CMD-38](#cmd-38) | `set_app_config_dir_override` accepts unvalidated paths and silently falls back later | bug | P3 | S | high |  |
 | [CMD-39](#cmd-39) | Updater has three overlapping entry points and the frontend calls the plugin directly | tech-debt | P3 | S | high |  |
+| [CMD-46](#cmd-46) | Startup takeover restore failure silently and permanently disables the user's proxy takeover | ux | P3 | S | high |  |
+| [CMD-47](#cmd-47) | Auto-launch registration is never reconciled with the OS; `get_auto_launch_status` is dead code | bug | P3 | S | medium |  |
 
 ## Findings
+
+### CMD-40: Cold-start and lightweight-mode deep links are silently dropped (no get_current()/pending buffer)
+
+**Type:** bug · **Priority:** P1 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/lib.rs:885-907 registers the only Rust handler via `app.deep_link().on_open_url(...)` inside the app `setup` closure; `app.deep_link()` can only resolve after the plugin's own setup managed its state, and tauri-plugin-deep-link 2.4.7 (Cargo.lock:5691) emits `deep-link://new-url` for the launch argv from that plugin setup (`init_deep_link` -> `handle_cli_arguments(std::env::args())` on Windows/Linux, verified in the plugin source), i.e. before this listener exists. No call to `deep_link().get_current()` or any `std::env::args()` scan exists in src-tauri/src/lib.rs (grep: only `register_all` at 864/876 and `on_open_url` at 885); the single-instance callback (lib.rs:235-271) only fires for a *second* instance; the frontend only `listen("deeplink-import")` (src/components/DeepLinkImportDialog.tsx:52-57) and package.json has no `@tauri-apps/plugin-deep-link`, so the JS `getCurrent()` fallback is not used either. Lightweight mode adds a second loss path on all platforms: lib.rs:242-255, 892-905 and 1617-1634 call `exit_lightweight_mode` (which rebuilds the webview, src-tauri/src/lightweight.rs:66-69) and then immediately `emit("deeplink-import")` before React has mounted the listener; the macOS `RunEvent::Opened` arm (lib.rs:1611-1634) has the same race at cold launch.
+- **Problem:** Clicking a `ccswitch://` import link while CC Switch is not running (deterministic on Windows/Linux, timing-dependent on macOS) or while it sits in lightweight mode opens the app but no import dialog ever appears and nothing tells the user; the headline one-click import flow fails precisely in the most common state (app closed). This is distinct from CMD-24 (double handling on macOS) - here the link is handled zero times.
+- **Proposal:** Add a backend pending slot (e.g. `OnceLock<Mutex<Option<DeepLinkImportRequest>>>` next to `init_status`) that `handle_deeplink_url` fills whenever it emits; in `setup`, after `on_open_url`, feed `app.deep_link().get_current()` through `handle_deeplink_url` so the launch argv is covered; add a `take_pending_deeplink` command that `DeepLinkImportDialog` calls on mount (and after any webview re-creation), mirroring the JS plugin's `onOpenUrl` = `getCurrent()` + `listen` pattern. Optionally delay emits until a `frontend-ready` command has been received for the current webview.
+- **Acceptance:** With the app not running on Windows/Linux, `cc-switch(.exe) "ccswitch://..."` launches the app and shows the import dialog; in lightweight mode a deep link recreates the window and shows the dialog; a test shows `take_pending_deeplink` returns the stored request exactly once and `None` afterwards.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+- **Possible overlap with:** SESS-04 (check before scheduling)
 
 ### CMD-01: Deep-link URLs carrying API keys are logged in plaintext
 
@@ -314,6 +333,56 @@ The command layer is large (285 `#[tauri::command]` functions across 34 files, 2
 - **Proposal:** Extract `window_setup::apply(&window, &settings)` (HW-accel policy, decorations, theme, Linux nudge) and call it from both `setup` and `exit_lightweight_mode`; or implement lightweight mode as `hide()` + webview suspension rather than destroy.
 - **Acceptance:** A Linux smoke test toggling lightweight mode twice shows no white screen and preserves the decoration setting; the function is unit-covered with `tauri::test::mock_app`.
 
+### CMD-41: settings.json is written non-atomically and a corrupt file is silently replaced by defaults
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/settings.rs:664-700 `save_settings_file` opens the real file with `.truncate(true)` and `write_all`s into it (no temp file, no rename, no fsync) although `crate::config::atomic_write` (src-tauri/src/config.rs:297-346, temp + `fs::rename`) already exists and is used for live configs; settings.rs:639-661 `load_from_file` returns `Self::default()` on any `serde_json` error with just a `log::warn!`; settings.rs:760-774 `mutate_settings` then re-saves those defaults over the damaged file. Writers are hot paths: `set_current_provider` (980-992) on every switch, `update_webdav_sync_status`/`update_s3_sync_status` (1118-1124, 1138-1144) on every sync, and `get_effective_current_provider` (1022) during every tray rebuild.
+- **Problem:** A crash, power loss or ENOSPC during one of these frequent writes leaves a truncated settings.json; the next launch silently drops every device-level setting (current-provider pointers, per-app config-dir overrides, language, visible apps, WebDAV/S3 credentials, `local_migrations` markers - whose loss re-triggers the Codex history migrations) and the first subsequent write overwrites the broken file, so the user cannot even recover it by hand.
+- **Proposal:** Route `save_settings_file` through `config::atomic_write` (write `settings.json.tmp`, fsync, rename; keep mode 0600 on unix). On parse failure rename the broken file to `settings.json.corrupt-<timestamp>`, log at error level and record an `init_status` error (kind `settings_corrupt`) that the frontend surfaces, before falling back to defaults.
+- **Acceptance:** A fault-injection test that aborts the write after N bytes leaves either the complete old or the complete new file; a unit test with malformed JSON verifies a `.corrupt-*` sibling is created, `get_init_error()` reports it, and the file is never overwritten by defaults while the sibling is missing.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CMD-42: Failed JSON->SQLite migration is swallowed, never retried, and never shown to the user
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/lib.rs:391-416 only enters the migration branch when `!has_db && has_json`; lib.rs:452-467 creates `cc-switch.db` first; lib.rs:470-491 on `db.migrate_from_json` error only does `log::error!("配置迁移失败...")` and continues - `config.json` is renamed to `.migrated` solely on success (479-484) and no `init_status::set_init_error` is set (contrast the retry/exit dialog for `Database::init` failures at 458-462 and for config-load failures at 404-408). `migrate_from_json` is a single transaction (src-tauri/src/database/migration.rs:12-23), so the DB is left empty but present.
+- **Problem:** If the one-time migration fails (disk full, constraint violation from an unusual old config, read-only directory) the user gets an empty app with no message; because the DB file now exists every later launch skips the migration forever, and the live-config auto-import (lib.rs:566-607) immediately seeds a `default` provider, making the data loss look intentional. The user's providers/MCP/prompts are still in config.json but nothing points them there.
+- **Proposal:** On migration failure either delete the freshly created DB and show the same retry/exit dialog used for `Database::init` failures, or set `InitErrorPayload { kind: "migration_failed", path: config.json }` that main.tsx renders as a recovery screen (retry / continue with an empty DB and archive config.json). Never rename or discard config.json on failure.
+- **Acceptance:** Forcing `migrate_from_json` to fail (e.g. read-only DB directory) shows a dialog/recovery UI instead of an empty provider list; after fixing the cause and relaunching, the migration runs again and providers appear; `config.json.migrated` exists only after a successful migration.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CMD-43: Changing the data directory flips path resolution in-process before the (optional) restart, splitting DB and backups/skills
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/app_store.rs:242-274 `set_app_config_dir_to_store` ends with `refresh_app_config_dir_override` (272), which replaces the process-wide cache (186-190) that `crate::config::get_app_config_dir()` consults on every call (src-tauri/src/config.rs:183-186). Per-call resolvers: `backup_database_file` (src-tauri/src/database/backup.rs:299 `get_app_config_dir().join("cc-switch.db")`), `list_backups`/`restore_from_backup`/`delete_backup` (517, 564, 677), `periodic_backup_if_needed` (239), skills SSOT and backup dirs (src-tauri/src/services/skill.rs:478, 489, 1162). The SQLite connection was opened once at startup (lib.rs:381-382, 452-454). The frontend calls `set_app_config_dir_override` on every settings save (src/hooks/useSettings.ts:363) and offers `handleRestartLater` (src/components/settings/SettingsPage.tsx:153-156). The read-only getter `get_app_config_dir_override` (src-tauri/src/commands/settings.rs:289-292) also calls `refresh_...`, and `read_override_from_store` returns `None` when the path is momentarily absent (app_store.rs:215-221), clearing the cache.
+- **Problem:** After picking a new data directory and choosing 'restart later', the running app keeps reading/writing providers in the OLD database while creating/listing/restoring backups and installing/uninstalling skills in the NEW directory: `create_db_backup` reports 'Database file not found' (or snapshots a foreign cc-switch.db already living there), `restore_db_backup` can restore a foreign backup over the live DB, and skill files land where the current DB does not track them. Merely opening Settings while an external/removable override directory is unmounted silently reverts path resolution to ~/.cc-switch mid-session. Not covered by CMD-38 (which is about validating the path on input).
+- **Proposal:** Resolve the override exactly once at startup (lib.rs:322) into an immutable `OnceLock<PathBuf>`; make `set_app_config_dir_override` write the store only and return `{ restartRequired: true }`; make the getter read the store without side effects; have the UI force (or auto-trigger `restart_app`) when the data directory changed instead of offering 'later'; let `Database` own its `db_path` and derive `backups/` from it so backup code never re-resolves the directory.
+- **Acceptance:** Change the data dir in Settings, choose 'later', run 'Create backup' -> the backup is written next to the currently open DB and `list_db_backups` returns the same set as before; unit test: `get_app_config_dir_override` against a missing path leaves `get_app_config_dir()` unchanged.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CMD-44: Tray 'Auto' enable path persists failover flags before switching and never rolls back (diverges from the UI command)
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/tray.rs:504-590 `handle_auto_click`: auto-adds the current provider to the queue (519-523), starts the proxy (534-541), takes over the app (545-550), writes `set_proxy_flags_sync(app, true, true)` (553-555) and only then calls `switch_proxy_target` (558-565); on error it returns without undoing the flags, the takeover or the queue entry. The UI command `set_auto_failover_enabled` (src-tauri/src/commands/failover.rs:343-345, 386-409) refuses when takeover is off, switches to P1 first, removes the auto-added queue item on failure and persists `auto_failover_enabled` last, with a comment (386-387) naming exactly this dirty-state hazard. The tray path also ignores the `enable_local_proxy`/`proxy_confirmed` gates (src-tauri/src/settings.rs:365-368) that the UI honours.
+- **Problem:** Clicking 'Auto' in the tray when the queue head cannot be a proxy target (e.g. an official provider, cf. proxy.rs:293-300) or when the switch fails leaves `proxy_config.enabled=true, auto_failover_enabled=true`, the live config taken over but pointing at no valid target, and a stray queue entry; the main UI then shows failover 'on' while routing is broken and `stop_proxy_server` refuses to stop because takeover is flagged. Two implementations of one operation with different failure semantics.
+- **Proposal:** Extract a single `enable_auto_failover(state, app_type) -> Result<p1_id>` in the service layer (validate gates -> switch to P1 -> persist flags, with rollback of the auto-added queue entry) and call it from both `set_auto_failover_enabled` and `handle_auto_click`; hide/disable the tray 'Auto' item when local proxy is disabled or unconfirmed.
+- **Acceptance:** With an official provider as queue P1, tray 'Auto' fails cleanly: `get_proxy_config_for_app().auto_failover_enabled` stays false, the queue is unchanged, tray and UI show the previous state; a unit test exercises both entry points through the shared function.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CMD-45: Three of six window-restore paths skip the Windows taskbar / macOS Dock re-enable (window shown without taskbar button or Dock icon)
+
+**Type:** ux · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** Hide paths set `set_skip_taskbar(true)` / `apply_tray_policy(false)`: src-tauri/src/lib.rs:292-302 (close to tray), 1175-1182 (silent startup), src-tauri/src/lightweight.rs:8-17. Restore paths that undo them: src-tauri/src/tray.rs:946-962 (`show_main`), lightweight.rs:36-55 and 71-90, lib.rs:1594-1603 (`Reopen`). Restore paths that do NOT: the single-instance callback lib.rs:261-270, the `handle_deeplink_url` focus block lib.rs:160-171, and the macOS `RunEvent::Opened` block lib.rs:1660-1665. lib.rs:1596-1599 even nests `#[cfg(target_os = "windows")]` inside the `#[cfg(target_os = "macos")]` arm (dead code), evidence of copy-paste drift.
+- **Problem:** On Windows, after close-to-tray or silent startup, relaunching via the Start-menu/desktop shortcut (single-instance) or opening a deep link shows the window with WS_EX_TOOLWINDOW still set: no taskbar button and no Alt+Tab entry until the user goes through the tray menu. On macOS the same paths show the window while the app stays an Accessory app (no Dock icon, no Cmd+Tab).
+- **Proposal:** Introduce `show_main_window(app)` (unminimize, show, focus, `set_skip_taskbar(false)` on Windows, `apply_tray_policy(true)` on macOS, Linux nudge) and `hide_main_window(app)` counterparts in one module and use them at all six sites; delete the dead cfg block.
+- **Acceptance:** Windows: close to tray -> relaunch via shortcut -> window has a taskbar button and appears in Alt+Tab; macOS: close to tray -> open a `ccswitch://` link -> Dock icon is back; `rg set_skip_taskbar src-tauri/src` shows exactly one show and one hide implementation.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### CMD-02: `copilot_get_token` / `copilot_get_token_for_account` hand raw bearer tokens to the webview
 
 **Type:** security · **Priority:** P3 · **Effort:** S · **Confidence:** high
@@ -414,3 +483,23 @@ The command layer is large (285 `#[tauri::command]` functions across 34 files, 2
 - **Problem:** Update logic is split across Rust and TS, the capability grant is wider than needed (CMD-03), and the GitHub-page fallback is dead weight.
 - **Proposal:** One `UpdateService` in Rust (`check`, `download_and_install` with progress events), the frontend uses only the typed commands; drop the plugin grant.
 - **Acceptance:** `rg "plugin-updater" src/` is empty; `updater:default` removed from capabilities; update flow still works on all OSes.
+
+### CMD-46: Startup takeover restore failure silently and permanently disables the user's proxy takeover
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/lib.rs:1770-1804 `restore_proxy_state_on_startup`: on `set_takeover_for_app(app, true)` error it logs and calls `set_takeover_for_app(app, false)` (1794-1800), persisting `proxy_config.enabled=false`; no `app.emit`, tray refresh or `init_status` entry is produced (contrast the `proxy-flags-changed`/`proxy-official-warning` events used elsewhere, e.g. tray.rs:581). The task is detached (lib.rs:1041-1151) and runs after the window is shown (1185), so the UI's first `get_proxy_takeover_status` can show 'on' before the flag flips.
+- **Problem:** A transient failure (port already in use, live config file locked or read-only, DB busy) turns takeover off with zero user-visible feedback; the Claude/Codex/Gemini CLI silently reverts to direct provider calls (losing failover and usage logging) and the user discovers it later, if at all, and may be looking at stale status in the window.
+- **Proposal:** Retry once after a short delay; on persistent failure emit `proxy-restore-failed { appType, error }` and refresh the tray, with the frontend showing a persistent toast containing a 'Retry' action; prefer keeping `enabled=true` plus a `restore_failed_at` marker so the next launch retries instead of giving up.
+- **Acceptance:** Make the live config read-only and restart with takeover enabled -> a toast names the app and error with a working Retry; the tray and the proxy settings page reflect the real state; after fixing the cause and clicking Retry, takeover is active without restarting.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CMD-47: Auto-launch registration is never reconciled with the OS; `get_auto_launch_status` is dead code
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** src-tauri/src/auto_launch.rs:19-41 builds the launcher from `current_exe()` at call time; its only callers are the commands `set_auto_launch` (src-tauri/src/commands/settings.rs:305-313) and `get_auto_launch_status` (623-627). The frontend defines `getAutoLaunchStatus` (src/lib/api/settings.ts:232-233) but never calls it; the toggle renders `settings.launchOnStartup` from settings.json (src/components/settings/WindowSettings.tsx:28) and `setAutoLaunch` runs only when the value changes and after the settings mutation already succeeded (src/hooks/useSettings.ts:361-371); nothing in `setup` (src-tauri/src/lib.rs:318-1200) checks or re-applies the registration.
+- **Problem:** The login item/registry/autostart entry points at the executable path captured when the toggle was flipped; moving or renaming the app (new AppImage filename, moving `CC Switch.app`, relocating a portable install) or the user removing the item in OS settings leaves `launchOnStartup: true` with nothing launching, while the toggle still shows 'on' - the only fix is the undiscoverable off/on cycle. A failed `set_auto_launch` after the settings save likewise leaves the setting true.
+- **Proposal:** At startup, when `launch_on_startup` is true, call `enable_auto_launch()` idempotently (re-registering the current path) and log mismatches; make the Settings UI display `get_auto_launch_status()` (OS truth) and persist `launchOnStartup` only after the OS call succeeds (reorder in useSettings.ts).
+- **Acceptance:** Enable auto-launch, move the app bundle/AppImage, relaunch -> `is_auto_launch_enabled()` is true and the platform entry points at the new path; remove the login item externally -> the Settings toggle shows off on next open.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

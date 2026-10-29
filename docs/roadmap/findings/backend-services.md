@@ -1,6 +1,6 @@
 # Backend services — findings (SVC-xx)
 
-Part of the [next-phase proposals](../README.md). 41 findings. Priorities: P1 = 3, P2 = 28, P3 = 10.
+Part of the [next-phase proposals](../README.md). 53 findings. Priorities: P1 = 4, P2 = 32, P3 = 17.
 
 ## Area summary
 
@@ -13,6 +13,7 @@ The services layer (~37k lines, 36 files) is where cc-switch's hardest invariant
 | [SVC-01](#svc-01) | Provider switch persists "current" pointers before the live write, and a failed write poisons the next backfill | bug | P1 (first pass P0) | M | medium | partially-confirmed |
 | [SVC-02](#svc-02) | Cloud sync is last-writer-wins: no remote precondition on upload and no local-dirty check on download | bug | P1 (first pass P0) | L | high | partially-confirmed |
 | [SVC-08](#svc-08) | Gemini `settings.json` merge swallows parse errors and overwrites the file with provider-only content | bug | P1 | S | high | confirmed |
+| [SVC-42](#svc-42) | Cloud sync replicates device-local takeover/proxy state and profile pointers; a download silently enables proxy takeover on the other device | bug | P1 | M | high |  |
 | [SVC-03](#svc-03) | GitHub skill archive extraction skips `enclosed_name()` and has no entry/size caps (zip-slip / zip-bomb) | security | P2 (first pass P1) | S | medium | partially-confirmed |
 | [SVC-04](#svc-04) | Sync uploads the full providers table (API keys, OAuth tokens) in plaintext | security | P2 (first pass P1) | L | high | partially-confirmed |
 | [SVC-05](#svc-05) | `futures::executor::block_on` inside synchronous Tauri commands blocks the main thread | bug | P2 (first pass P1) | M | medium | partially-confirmed |
@@ -41,6 +42,10 @@ The services layer (~37k lines, 36 files) is where cc-switch's hardest invariant
 | [SVC-30](#svc-30) | Balance/coding-plan/subscription quota clients are 16 hand-rolled HTTP functions with no shared abstraction or mocked tests | refactor | P2 | M | high |  |
 | [SVC-31](#svc-31) | `ConfigService::sync_current_providers_to_live` is legacy dead code kept alive only by tests | tech-debt | P2 | S | high |  |
 | [SVC-41](#svc-41) | The live/backfill/takeover ownership model is documented only in scattered Chinese inline comments | docs | P2 | S | high |  |
+| [SVC-43](#svc-43) | ProxyService::update_config drops the running server before the replacement binds; a failed restart leaves takeover placeholders pointing at a dead port | bug | P2 | M | high |  |
+| [SVC-44](#svc-44) | Remote db.sql from WebDAV/S3 is executed verbatim with execute_batch; only a header comment is validated | security | P2 | M | medium |  |
+| [SVC-45](#svc-45) | SkillService::sync_to_app deletes real directories in app skill dirs whose names collide with a managed skill not enabled for that app | bug | P2 | S | medium |  |
+| [SVC-46](#svc-46) | Universal providers: sync_universal_to_apps never refreshes the live file of the app using the derived provider, and delete_universal removes the current provider without the guard | bug | P2 | S | high |  |
 | [SVC-06](#svc-06) | Best-effort takeover swallows live-write errors while the DB marks the app as taken over | bug | P3 (first pass P1) | S | high | partially-confirmed |
 | [SVC-32](#svc-32) | Deprecated v3.6 compatibility APIs and dead code are still exported | tech-debt | P3 | S | high |  |
 | [SVC-33](#svc-33) | `McpService::import_from_*` is six copies of the same loop | tech-debt | P3 | S | high |  |
@@ -51,6 +56,13 @@ The services layer (~37k lines, 36 files) is where cc-switch's hardest invariant
 | [SVC-38](#svc-38) | `SkillService` discards errors in uninstall/migration paths with `let _ =` | bug | P3 | S | high |  |
 | [SVC-39](#svc-39) | Prompt service writes DB and file in opposite orders and silently backfills DB content from the live file | bug | P3 | S | medium |  |
 | [SVC-40](#svc-40) | Subscription quota refresh re-fetches a new Gemini access token on every call and embeds the CLI client secret | tech-debt | P3 | S | medium |  |
+| [SVC-47](#svc-47) | OmoService hand-rolls a JSONC parser that rejects trailing commas and rewrites the user's commented config on import, while json5 is already used for the sibling files | bug | P3 | S | high |  |
+| [SVC-48](#svc-48) | Env manager: process-environment conflicts on Unix are reported as deleted while nothing happens, then restoring the backup fails on those same entries | bug | P3 | S | high |  |
+| [SVC-49](#svc-49) | install_from_zip deletes an existing SSOT directory that has no DB row and leaks the kept temp dir on every early error | bug | P3 | S | high |  |
+| [SVC-50](#svc-50) | ProxyService::stop forgets the server handle before ProxyServer::stop succeeds; a 5 s shutdown timeout leaves proxy_enabled=true and an orphan listener | bug | P3 | S | medium |  |
+| [SVC-51](#svc-51) | start_with_takeover is a dead global-takeover path whose semantics diverge from the per-app flow (never sets proxy_config.enabled, cannot be undone via set_takeover_for_app) | tech-debt | P3 | S | high |  |
+| [SVC-52](#svc-52) | Auto-sync suppression is checked only when a change is enqueued, so a pre-queued signal still re-uploads the snapshot right after a download | bug | P3 | S | medium |  |
+| [SVC-53](#svc-53) | restore_skills_zip has a crash window in which the skills SSOT directory disappears (renamed to .bak) with no startup recovery | bug | P3 | S | medium |  |
 
 ## Findings
 
@@ -83,6 +95,16 @@ The services layer (~37k lines, 36 files) is where cc-switch's hardest invariant
 - **Proposal:** Propagate the parse error (fail the switch with a localized message naming the file) and keep the existing behavior only when the file does not exist; optionally back the unparsable file up as `settings.json.corrupt-<ts>` before refusing.
 - **Acceptance:** Test writing `{` to the Gemini settings path then switching to a provider with `config: {}` returns an error and leaves the file untouched.
 - **Verification:** **confirmed** — Confirmed at live.rs:1603-1606: `read_json_file::<Value>(&settings_path).unwrap_or_else(|_| json!({}))` turns any parse error into an empty object that is merged with the provider's `config` keys and written at 1636 via `write_json_file` (config.rs:274-286, atomic replace, no backup), whereas the no-config branch at 1631 propagates the same error with `?`. The path is reachable: the E-FlowCode Gemini preset (src/config/geminiProviderPresets.ts:355-370) ships a `config` object and the Gemini config editor exposes one. The same swallow exists in `update_selected_type` (gemini_config.rs:294-335), reached from `write_packycode_settings` for every Packycode/Generic Gemini switch (live.rs:1655-1657), so even config-less providers can wipe an unparsable settings.json; Gemini CLI tolerates comments/trailing commas in settings.json (to my knowledge), which serde_json rejects, making the trigger more plausible than transient corruption. P1 stands; the fix should cover both sites and keep a `.corrupt-<ts>` copy.
+
+### SVC-42: Cloud sync replicates device-local takeover/proxy state and profile pointers; a download silently enables proxy takeover on the other device
+
+**Type:** bug · **Priority:** P1 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/webdav_auto_sync.rs:313-325` and `src-tauri/src/services/s3_auto_sync.rs:43-56` — `should_trigger_for_table` fires an upload for `proxy_config` and `settings`. `src-tauri/src/services/sync_protocol.rs:105-110` — `build_local_snapshot` uses `export_sql_string_for_sync`, whose `SYNC_SKIP_TABLES` (`src-tauri/src/database/backup.rs:19-25`) excludes only logs/health/live-backup/rollups, so `proxy_config` rows (per-app `enabled`, `proxy_enabled`, `listen_address`, `listen_port`; `src-tauri/src/database/schema.rs:126-139`) and `settings` keys (`current_profile_id_<scope>` from `src-tauri/src/database/dao/profiles.rs:129`, `official_providers_seeded`, `skills_ssot_migration_snapshot`) ship to the remote. On the receiving device `src-tauri/src/lib.rs:1756-1803` — `enabled_proxy_apps_on_startup` reads `proxy_config.enabled` and `restore_proxy_state_on_startup` calls `set_takeover_for_app(app, true)` (`src-tauri/src/services/proxy.rs:730-851`), which, finding no backup and no placeholder locally (769-784), backs up and rewrites that machine's live files with proxy placeholders. `src-tauri/src/services/profile.rs:338-346` — `apply` auto-saves the *local* state into whatever profile id the synced `current_profile_id_<scope>` names.
+- **Problem:** Device A enables takeover for Claude (or merely has a proxy port/profile selected) and uploads; device B downloads, restarts, and without any user action its `~/.claude/settings.json` is backed up and rewritten to point at a local proxy that B never configured (and whose port/address came from A). Profile auto-save on B overwrites the snapshot A captured under the shared `current_profile_id_claude`. `is_live_takeover_active_sync` and the tray/profile UI on B also show takeover ON. These columns/keys are device-local state by design (the settings.json file is explicitly kept out of sync for the same reason) but the DB copy of them is not.
+- **Proposal:** Define a device-local allowlist for sync: skip `proxy_config` entirely (or export it with `enabled=0`, `proxy_enabled=0` and preserve the local row on import, the same way `SYNC_PRESERVE_TABLES` restores logs), and preserve/skip `settings` keys matching `current_profile_id_%`, `proxy_takeover_%`, `official_providers_seeded`, `skills_ssot_migration_%`. Remove `proxy_config` from `should_trigger_for_table` so toggling takeover does not trigger an upload. Longer term, move device-local columns into a separate non-synced table.
+- **Acceptance:** A test builds a snapshot from DB A with `proxy_config.enabled=1` for claude, `listen_port=16000` and `current_profile_id_claude='p1'`, applies it to a fresh DB B, and asserts B still has `enabled=0`, its own listen port and no `current_profile_id_claude`; `enabled_proxy_apps_on_startup` on B returns empty after the download; toggling takeover on A no longer enqueues an auto-sync signal.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
 
 ### SVC-03: GitHub skill archive extraction skips `enclosed_name()` and has no entry/size caps (zip-slip / zip-bomb)
 
@@ -344,6 +366,46 @@ The services layer (~37k lines, 36 files) is where cc-switch's hardest invariant
 - **Proposal:** Add `src-tauri/src/services/README.md` with: the SSOT ↔ live ↔ proxy-backup state machine (one diagram), the ownership signals and their precedence, the backfill strip list per app, the sync protocol layout and compatibility rules, and error/logging conventions (English-first messages, localized keys for user-facing errors). Link each section from the relevant module docs.
 - **Acceptance:** README exists and is referenced from `CLAUDE.md`/CONTRIBUTING; new app adapters (SVC-18) must fill a checklist from it.
 
+### SVC-43: ProxyService::update_config drops the running server before the replacement binds; a failed restart leaves takeover placeholders pointing at a dead port
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/proxy.rs:3045-3083` — the new config is persisted to the DB first (3045-3048), then `server_guard.take()` + `server.stop()` (3061-3066), then `ProxyServer::new(..).start().await?` (3069-3073). `src-tauri/src/proxy/server.rs:112-114` — `TcpListener::bind` returns `BindFailed` when the new port is occupied. On that `?` the function returns with `*server_guard == None`, the DB holding the unusable config, `proxy_enabled` still true and every per-app `enabled` flag still true; the live re-takeover that would rewrite the proxy URL (3087-3109) runs only after success.
+- **Problem:** A user changes the listen port to one that is in use (or an address that cannot be bound): the old server is stopped, the new one fails, and Claude/Codex/Gemini/Grok live files keep `127.0.0.1:<old port>` placeholders while nothing listens. `get_takeover_status` still reports takeover on, `is_running()` reports false, and the DB config is the broken one, so `start()` from the tray fails the same way. The clients are dead until the user manually restores or toggles takeover off/on.
+- **Proposal:** When only the port changes, bind the replacement listener before stopping the old server; in every failure path restore `previous` into the DB and restart the old server, and if that also fails run `restore_live_configs` and clear the per-app flags so the UI and live files agree. Return a localized error naming the port conflict.
+- **Acceptance:** Test: proxy running on port A with Claude taken over; `update_config` to a port already bound by a test listener returns Err, the server is still listening on A, `get_proxy_config()` equals the previous config, and `~/.claude/settings.json` still points at A. A second test with a free port verifies the live URL is rewritten.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-44: Remote db.sql from WebDAV/S3 is executed verbatim with execute_batch; only a header comment is validated
+
+**Type:** security · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/services/sync_protocol.rs:309-340` — `apply_snapshot` passes the downloaded bytes straight to `db.import_sql_string_for_sync`. `src-tauri/src/database/backup.rs:99-122` — `validate_cc_switch_sql_export` only checks that the text starts with `-- CC Switch SQLite 导出`, then `temp_conn.execute_batch(sql_content)`. Integrity is checked only against `manifest.json` fetched from the same remote (`src-tauri/src/services/webdav_sync.rs:218-242`, `src-tauri/src/services/s3_sync.rs:100-117`), so there is no authenticity check. `src-tauri/Cargo.toml:76` — rusqlite is built with the `hooks` feature (so `Connection::authorizer` is available).
+- **Problem:** Anyone who can write to the sync location (a shared Nextcloud/WebDAV folder, a bucket with leaked or over-broad credentials, a misconfigured public bucket, a hostile sync peer) can prepend `ATTACH DATABASE '/home/user/.bashrc' AS x; CREATE TABLE x.t(a); INSERT INTO x.t VALUES('...');` or `PRAGMA` statements; the moment the user clicks Download they execute with the user's privileges. SQLite-based arbitrary file write is a known primitive. The same vector applies to the manual SQL import, but sync makes it remote-triggered.
+- **Proposal:** Install an authorizer on the temporary import connection (`conn.authorizer(Some(|ctx| ...))`) that allows only `CreateTable`, `CreateIndex`, `Insert`, `Transaction`, `Read`, `Update` on the `main` schema and denies `Attach`, `Detach`, `Pragma`, `Function`, `DropTable` etc.; reject any statement list that touches a schema other than `main`. Alternatively replace raw SQL with a row-level JSON export consumed by the typed DAO.
+- **Acceptance:** Tests feeding exports that contain `ATTACH DATABASE`, `PRAGMA`, or `SELECT load_extension(...)` fail `import_sql_string_for_sync` with a localized error and leave the main DB and filesystem untouched; the existing export/import round-trip tests still pass.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-45: SkillService::sync_to_app deletes real directories in app skill dirs whose names collide with a managed skill not enabled for that app
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/services/skill.rs:1782-1803` — for every entry in the app skills dir, if `indexed_skills` (keyed by lowercased directory name) has it and `!skill.apps.is_enabled_for(app)` the code calls `Self::remove_path(&path)?` (1794); `remove_path` (1649-1664) runs `remove_dir_all` on real directories. The symlink-to-SSOT check (1799) is applied only to names that are *not* managed. `sync_to_app` runs for all apps from `sync_current_to_live` (`src-tauri/src/services/provider/live.rs:1298-1303`, i.e. config import and cloud restore), from `migrate_storage` (1209-1211) and from skill toggles. `scan_unmanaged` (1411) also hides same-name directories, so the user never sees the copy that is about to be deleted.
+- **Problem:** A user who already had `~/.claude/skills/foo` (hand-installed or edited locally) and later installs `foo` from a repo via cc-switch for Codex only, loses the Claude copy — without backup — the next time any sync_to_app(Claude) runs (cloud restore, config import, storage migration, or toggling an unrelated app). The DB-only conflict check in `install` (595-637) does not detect the on-disk copy either.
+- **Proposal:** Only delete a managed-name entry when it is a symlink into the SSOT dir or a copy whose `compute_dir_hash` equals the managed skill's `content_hash` (or carries a `.cc-switch-managed` marker written by `replace_dest_with_copy`); otherwise leave it, log a warning and report it through `scan_unmanaged` with a `conflict` flag so the UI can offer import/replace.
+- **Acceptance:** Test: managed skill `foo` enabled for codex only; a real directory `~/.claude/skills/foo` with different content exists; `sync_to_app(&Claude)` leaves it intact and `scan_unmanaged` lists it. A second test confirms a symlink or hash-identical copy is still removed.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-46: Universal providers: sync_universal_to_apps never refreshes the live file of the app using the derived provider, and delete_universal removes the current provider without the guard
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/provider/mod.rs:3913-3963` — each `universal-{app}-{id}` child is written with `save_provider` only; there is no equivalent of the `is_current` branch in `update()` (2286-2359) that calls `write_live_with_common_config` / `update_live_backup_from_provider`. `src-tauri/src/services/provider/mod.rs:3886-3910` and the disabled-app arms at 3929-3932, 3943-3946, 3957-3960 — `let _ = state.db.delete_provider(..)` with no check against the effective current provider, whereas `ProviderService::delete` refuses to delete the current one (2418-2425). `src-tauri/src/settings.rs:1003-1027` — once the row is gone, `get_effective_current_provider` silently clears the local pointer. `src-tauri/src/commands/provider.rs:815-850` — the commands call these service functions directly, with no extra live sync.
+- **Problem:** Editing the API key or base URL of a universal provider whose Claude child is the active provider updates the DB row but `~/.claude/settings.json` (or the takeover backup) keeps the old credentials until the next manual switch; the UI shows the new key. Deleting the universal provider (or unticking an app) while its child is current leaves the app with no current provider, the stale live file still in place, no backfill on the next switch, and a confusing empty selection.
+- **Proposal:** Factor the current-provider live sync out of `update()` into a helper and call it for each child in `sync_universal_to_apps` when that child is the effective current provider; in `delete_universal` and the disable arms, refuse (or require an explicit `force` flag from the UI) when a child is current, mirroring `ProviderService::delete`.
+- **Acceptance:** Tests: (1) universal provider with Claude child current → `sync_universal_to_apps` after changing the key rewrites the live settings; (2) `delete_universal` with a current child returns an error and leaves the row; (3) `sync_universal_to_apps` with `apps.claude=false` and a current Claude child returns an error.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### SVC-06: Best-effort takeover swallows live-write errors while the DB marks the app as taken over
 
 **Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
@@ -434,3 +496,74 @@ The services layer (~37k lines, 36 files) is where cc-switch's hardest invariant
 - **Problem:** Unnecessary token-endpoint traffic (Google rate limits refreshes), and the secret's provenance is only a comment, which will raise questions in security review.
 - **Proposal:** Cache the refreshed `(access_token, expires_at)` in `UsageCache`/memory and reuse until expiry; move the client id/secret behind a documented `gemini_oauth` module with a link to the upstream source and a build-time override.
 - **Acceptance:** Two consecutive Gemini quota queries within an hour perform one refresh (mock server counts).
+
+### SVC-47: OmoService hand-rolls a JSONC parser that rejects trailing commas and rewrites the user's commented config on import, while json5 is already used for the sibling files
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/omo.rs:95-104` — `read_jsonc_object` runs `strip_jsonc_comments` (345-399) then `serde_json::from_str`; a trailing comma (accepted by opencode's own JSONC loader and editors) fails with `Failed to parse oh-my-opencode config`. `src-tauri/src/services/omo.rs:245-297` — `import_from_local` saves the provider and immediately calls `write_config_to_file` (295) → `write_profile_config` → `write_json_file` (182), replacing the hand-written `.jsonc` with comment-free, re-ordered JSON. `src-tauri/src/opencode_config.rs:98` and `src-tauri/src/openclaw_config.rs:206-220` parse the neighbouring files with `json5::from_str` (`src-tauri/Cargo.toml:82`).
+- **Problem:** Users with a `oh-my-openagent.jsonc` that contains trailing commas cannot import at all; users whose file parses lose every comment and the key order the moment they click Import, because the import path immediately rewrites the file it just read. Two JSONC parsers with different dialects also mean opencode.json and oh-my-openagent.jsonc are treated inconsistently.
+- **Proposal:** Replace `strip_jsonc_comments` with the shared `json5::from_str::<Value>` helper from `opencode_config`; on `import_from_local`, do not rewrite the file (the provider is already current) or write a `<file>.bak` before the first managed write and tell the user.
+- **Acceptance:** Unit test: `{ // c
+  "agents": {}, }` parses; import test on a commented file leaves the original bytes untouched (or produces a `.bak` with the original bytes); `strip_jsonc_comments` removed.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-48: Env manager: process-environment conflicts on Unix are reported as deleted while nothing happens, then restoring the backup fails on those same entries
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/env_checker.rs:83-99` — every `std::env::vars()` match is reported with `source_type: "system"`. `src-tauri/src/services/env_manager.rs:144-147` — `delete_single_env` returns `Ok(())` for `"system"` without doing anything, so `delete_env_vars` (21-40) reports success and records the entry in the backup (43-66). `src-tauri/src/services/env_manager.rs:200-228` — `restore_single_env` returns `Err` for `"system"`, and `restore_from_backup` (161-164) aborts on the first such entry with no rollback of the file entries already appended. `env_checker.rs:106-115` scans only bash/zsh rc files and `/etc/profile`, never `~/.zshenv`, `/etc/zshrc`, `/etc/zprofile` or fish config, so the variable's real source is never shown.
+- **Problem:** On macOS/Linux a user sees `ANTHROPIC_BASE_URL` flagged as a conflict (set by launchd, systemd user env, `~/.zshenv` or the parent shell), clicks delete, gets a success toast and a backup, and the conflict is still there on the next check. Restoring that backup errors out, and if the backup mixes file and system entries the restore stops part-way.
+- **Proposal:** Return a per-entry outcome (`Removed`, `Unsupported { reason }`) from `delete_env_vars`, exclude unsupported entries from the backup, and have the UI explain that the variable is set outside shell rc files; extend the scanned file list (`~/.zshenv`, `/etc/zshrc`, `/etc/zprofile`, `~/.config/fish/config.fish`) so the real source can be shown; make `restore_from_backup` continue past unsupported entries and report them.
+- **Acceptance:** With `ANTHROPIC_BASE_URL` set only in the process env, delete returns a non-removed status for that entry, the backup omits it, and restoring the backup succeeds; a backup containing one file entry and one system entry restores the file entry.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-49: install_from_zip deletes an existing SSOT directory that has no DB row and leaks the kept temp dir on every early error
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/skill.rs:2627-2632` — after a DB-only conflict check (2606-2617), `if dest.exists() { let _ = fs::remove_dir_all(&dest); }` destroys any `ssot/<name>` that exists on disk without a row (half-finished install, hand-placed skill, remnant of a failed update), unlike `install()` (644) which reuses it. `src-tauri/src/services/skill.rs:2689-2691` — `extract_local_zip` calls `temp_dir.keep()`; `install_from_zip` removes the directory only at 2543, 2596 and 2668, so the `?` returns at 2540, 2632, 2654 and 2657 leave the extracted archive in the OS temp dir. `extract_local_zip` (2695-2717) also has no entry-count or total-size cap, unlike `src-tauri/src/services/webdav_sync/archive.rs:92-134`.
+- **Problem:** A skill directory that exists in the SSOT without a DB record is wiped without backup when a zip with the same name is installed; every failure after extraction (DB save, sync, copy) leaks a full copy of the archive to `/tmp`, and a crafted or accidental huge zip can fill the disk before any check runs.
+- **Proposal:** Hold the extracted directory in a drop guard that removes it; when `dest` already exists, back it up with the same mechanism as `create_uninstall_backup` (or reuse it when the hash matches) instead of deleting; apply `MAX_EXTRACT_ENTRIES` and a total-bytes cap in `extract_local_zip`.
+- **Acceptance:** Tests: (a) pre-existing `ssot/foo` without DB row survives (backup created) when installing `foo.zip`; (b) with `save_skill` forced to fail, no `.tmp*` directory remains afterwards; (c) a zip whose entries exceed the cap is rejected before extraction.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-50: ProxyService::stop forgets the server handle before ProxyServer::stop succeeds; a 5 s shutdown timeout leaves proxy_enabled=true and an orphan listener
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/services/proxy.rs:1262-1266` — `self.server.write().await.take()` then `server.stop().await?`. `src-tauri/src/proxy/server.rs:233-251` — `stop` returns `StopTimeout`/`StopFailed` after 5 s while the spawned serve task (whose `JoinHandle` was taken and dropped) keeps running with in-flight streamed responses. On that error the `proxy_enabled=false` write (1269-1280) is skipped, `is_running()` already returns false, and `stop_with_restore` (1294-1296) merely logs the error.
+- **Problem:** Stopping the proxy while a long LLM stream is in flight (common: responses regularly exceed 5 s) yields an error toast, `proxy_enabled` stays true in the DB although the UI shows stopped, and a subsequent `start()` fails with address-in-use until the orphaned task finishes its last connection.
+- **Proposal:** Keep the server in the slot until `stop` returns; on timeout call `JoinHandle::abort()` (after the graceful signal) and treat the result as success-with-warning; clear `proxy_enabled` regardless of the stop outcome.
+- **Acceptance:** Test with a route that streams for 10 s: `stop()` returns within ~5 s, `get_global_proxy_config().proxy_enabled` is false, and `start()` on the same port succeeds immediately afterwards.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-51: start_with_takeover is a dead global-takeover path whose semantics diverge from the per-app flow (never sets proxy_config.enabled, cannot be undone via set_takeover_for_app)
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/proxy.rs:606-683` plus its private helpers `takeover_live_configs` (1528-1582), `backup_live_configs` (1372-1435) and `sync_live_to_providers` (1235-1258); `grep -rn start_with_takeover src-tauri/src` finds no caller outside `proxy.rs` tests (3670, 3994+). It writes placeholders into all four live files but only sets the legacy any-of flag (633); `set_takeover_for_app(enabled=false)` returns early when `proxy_config.enabled` is false (860-862) and `get_takeover_status` (686-724) reads only per-app flags, so a takeover started this way is reported as off and cannot be released per app. SVC-32 covers deprecated MCP/skill APIs, not this path.
+- **Problem:** About 300 lines of live-file mutation logic exist only to satisfy tests, encode a second (inconsistent) definition of 'taken over', and will silently rot as the per-app flow evolves (e.g. the Claude model-field policy and Codex catalog handling already differ between the two paths).
+- **Proposal:** Delete `start_with_takeover`, `takeover_live_configs`, `backup_live_configs` and `sync_live_to_providers`, port the tests that use them to `set_takeover_for_app(app, true)` for each app, and keep `recover_from_crash` as the only global entry point.
+- **Acceptance:** No `start_with_takeover`/`takeover_live_configs`/`backup_live_configs`/`sync_live_to_providers` symbols remain; `cargo test` in `src-tauri` passes; the rewritten tests assert `get_takeover_status` reports the apps they took over.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-52: Auto-sync suppression is checked only when a change is enqueued, so a pre-queued signal still re-uploads the snapshot right after a download
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/services/webdav_auto_sync.rs:408-419` — `is_auto_sync_suppressed()` is consulted only in `notify_db_changed`; `run_worker_loop` (437-463) and `run_auto_sync_upload` (376-406) never re-check it. The channel has capacity 1 (427), the debounce is 1 s (285), and `run_with_sync_lock` (`src-tauri/src/services/webdav_sync.rs:32-43`) simply waits for the download to release the mutex. Same structure in `src-tauri/src/services/s3_auto_sync.rs:134-145,163-190`. `src-tauri/src/services/sync_protocol.rs:143-151` — every upload rebuilds the manifest with this device's name and a fresh `created_at`.
+- **Problem:** Sequence: a provider edit enqueues a signal; the user clicks Download (suppression guard created in `commands/webdav_sync.rs:120`); the debounce expires while the download holds the lock; the upload runs as soon as the download finishes and republishes the just-downloaded data under this device's name and timestamp. Other devices now see a 'newer' snapshot from this device and the sync status shows an upload the user did not ask for — the exact situation the suppression guard was added to prevent.
+- **Proposal:** Re-check `is_auto_sync_suppressed()` inside `run_auto_sync_upload` before `build_local_snapshot`, and skip the upload when the local snapshot's `manifest_hash`/artifact hashes equal `status.last_remote_manifest_hash`; drain the channel when a download completes.
+- **Acceptance:** A worker-loop test with a fake transport: enqueue a signal, create the suppression guard, let the debounce elapse, drop the guard — no upload is performed; a second test shows an unchanged snapshot is not re-uploaded.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SVC-53: restore_skills_zip has a crash window in which the skills SSOT directory disappears (renamed to .bak) with no startup recovery
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/services/webdav_sync/archive.rs:143-160` — the live SSOT dir is renamed to `skills.bak` (149) and then the extracted tree is *copied* into place with `copy_dir_recursive` (152), which for a large skills set takes seconds; only an `Err` from the copy triggers the rename-back (153-156). `src-tauri/src/services/sync_protocol.rs:321-324` — this runs before the DB import, so after a crash the old DB still references every skill; `src-tauri/src/services/skill.rs:1666-1669` — `sync_to_app_dir` then fails with `Skill 不存在于 SSOT` for all of them and app-dir symlinks dangle. The `SkillsBackup` tempdir (164-193) is lost with the process, and nothing at startup looks for a `skills.bak` without `skills`.
+- **Problem:** A crash, power loss or forced quit during the copy leaves the user with an empty/partial skills directory and a `.bak` sibling they do not know about; every skill shows as broken until they rename the directory by hand.
+- **Proposal:** Extract into a sibling temp directory inside the SSOT parent, then perform two renames (`skills` → `skills.bak`, `skills.new` → `skills`) so the window is a single rename; at startup (and in `get_ssot_dir`) detect `skills.bak` present with `skills` missing or empty and restore it automatically.
+- **Acceptance:** Test that injects a failure between the two renames and then calls the startup recovery: the SSOT dir is back with its original content; a test that `restore_skills_zip` leaves no `.bak` on success.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

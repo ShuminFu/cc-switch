@@ -1,6 +1,6 @@
 # Proxy core — findings (PROXY-xx)
 
-Part of the [next-phase proposals](../README.md). 36 findings. Priorities: P1 = 1, P2 = 22, P3 = 13.
+Part of the [next-phase proposals](../README.md). 48 findings. Priorities: P1 = 1, P2 = 27, P3 = 20.
 
 ## Area summary
 
@@ -33,6 +33,11 @@ The proxy core (server, forwarder, router, circuit breaker, response processor a
 | [PROXY-21](#proxy-21) | No request flight recorder, replay, or export for debugging failed requests | feature | P2 | M | high |  |
 | [PROXY-22](#proxy-22) | No active health probing; breaker recovery always burns a real user request (and `health.rs` is a stub) | feature | P2 | M | high |  |
 | [PROXY-35](#proxy-35) | No developer or user documentation of the proxy pipeline, failover semantics, timeout rules, or header policy | docs | P2 | M | high |  |
+| [PROXY-37](#proxy-37) | Underscore-key filter deletes legitimate keys inside tool_use inputs, tool results, Gemini function args and metadata on every upstream body | bug | P2 | S | medium |  |
+| [PROXY-38](#proxy-38) | Prefixed client routes /claude/* and /gemini/* are forwarded to the upstream with the prefix intact (404 on passthrough) | bug | P2 | S | high |  |
+| [PROXY-39](#proxy-39) | Emptying the failover queue (or deleting its last provider) while failover is enabled turns every request into 503 'no providers configured' | bug | P2 | S | high |  |
+| [PROXY-40](#proxy-40) | Trust store differs per HTTP stack: corporate/MITM CAs work for native Claude (raw path) but not for Codex, Gemini, Copilot or the fallback client; no custom-CA option | bug | P2 | S | high |  |
+| [PROXY-41](#proxy-41) | Native Anthropic/Gemini/Chat streaming paths have no semantic stream-start validation; a 2xx stream whose first event is an error is scored as success and never fails over | bug | P2 | M | medium |  |
 | [PROXY-23](#proxy-23) | SSE usage collectors buffer every "usage"-matching event for the whole stream, and the passthrough SSE buffer is unbounded | performance | P3 | S | medium |  |
 | [PROXY-24](#proxy-24) | Rectified request body is discarded when failing over to the next provider, doubling calls on every subsequent provider | bug | P3 | S | high |  |
 | [PROXY-25](#proxy-25) | Request-side hop-by-hop headers (`connection`, `keep-alive`, `te`, `upgrade`, `expect`) are forwarded upstream | bug | P3 | S | high |  |
@@ -46,6 +51,13 @@ The proxy core (server, forwarder, router, circuit breaker, response processor a
 | [PROXY-33](#proxy-33) | Upstream-proxy credentials are logged unmasked | security | P3 | S | high |  |
 | [PROXY-34](#proxy-34) | `ProxyStatus` counters mutated under an async RwLock in 13 places with `success_rate` recomputed by hand each time | tech-debt | P3 | M | high |  |
 | [PROXY-36](#proxy-36) | Circuit breaker and router unit tests miss error-rate, concurrency, hot-update and leak scenarios | test | P3 | S | high |  |
+| [PROXY-42](#proxy-42) | Rectifier-retry failures use a different retryability rule than the main path: 429/401/403/404/408 and auth/config/transform errors abort failover and skip breaker accounting | bug | P3 | S | high |  |
+| [PROXY-43](#proxy-43) | Header-case/order capture is per TCP connection, so every keep-alive request after the first is written with stale header casing and order | bug | P3 | S | high |  |
+| [PROXY-44](#proxy-44) | Codex OAuth session headers are rewritten with the proxy's codex_-prefixed session id, replacing the client's real session_id value | bug | P3 | S | medium |  |
+| [PROXY-45](#proxy-45) | Upstream response bodies are buffered and decompressed without any size cap; a gzip/zstd bomb from a hostile or buggy relay can exhaust the desktop app's memory | security | P3 | S | medium |  |
+| [PROXY-46](#proxy-46) | mask_url byte-slices a non-URL string at index 20 and panics on multi-byte input, reachable from proxy-URL validation | bug | P3 | S | high |  |
+| [PROXY-47](#proxy-47) | Bedrock thinking optimizer sets budget_tokens to max_tokens - 1, overrides the caller's smaller budget or disabled thinking, and forces effort=max plus the 1M beta for every adaptive model | bug | P3 | S | medium |  |
+| [PROXY-48](#proxy-48) | Two write paths for auto_failover_enabled with different invariants: saving the per-app settings form can silently flip failover from a stale snapshot, bypassing the P1-switch and queue checks | bug | P3 | S | medium |  |
 
 ## Findings
 
@@ -263,6 +275,56 @@ The proxy core (server, forwarder, router, circuit breaker, response processor a
 - **Proposal:** `docs/dev/proxy-architecture.md` (request lifecycle sequence diagram, breaker state machine, timeout matrix per path/streaming/failover, header policy table, rectifier catalog with examples, error codes); user-manual section on network exposure and failover semantics; keep it updated via a CI check that lists header policy constants.
 - **Acceptance:** Docs merged and linked from README; a new contributor can locate where a header is dropped from the doc alone.
 
+### PROXY-37: Underscore-key filter deletes legitimate keys inside tool_use inputs, tool results, Gemini function args and metadata on every upstream body
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/forwarder.rs:3358-3360` — `prepare_upstream_request_body` runs `filter_private_params_with_whitelist(body, &[])` (empty whitelist) on every outbound body, at `:1527` and again at `:1535`; `src-tauri/src/proxy/body_filter.rs:82-101` — every object key starting with `_` is dropped recursively, the only exemption being direct children of `properties`/`patternProperties`/`definitions`/`$defs` (`:120-125`); no exemption exists for `messages[].content[].input` (Anthropic `tool_use`), structured `tool_result` content, Gemini `functionCall.args`/`functionResponse.response`, OpenAI Responses `input[]` items, or client `metadata`. The only test touching underscores (`body_filter.rs:301-325`) proves schema *names* survive, not replayed call *values*.
+- **Problem:** A tool whose schema legitimately declares `_id`/`_meta` (MCP's `_meta` is part of the MCP spec; `_id` is ubiquitous in JSON APIs) keeps the key in `tools[].input_schema`, but when the model calls it with `{"_id": ...}` the replayed assistant `tool_use.input` on the next turn silently loses the key. The history the upstream sees no longer matches what the model emitted and what the tool actually received; schemas with `required: ["_id"]` make the replayed call invalid on strict gateways; Gemini `functionCall.args` suffers identically. The module's stated purpose (strip proxy-private params like `_internal_id`) is defeated by applying it to opaque model/user-owned payloads.
+- **Proposal:** Restrict the filter to the request's own top-level keys (optionally plus `metadata`), never descending into `messages`, `input`, `contents`, `tools` or `system`; or invert the design and strip only keys the proxy itself adds. Add round-trip regression tests with `tool_use.input._meta` (Anthropic), `input[].arguments` containing `_id` (Responses) and `functionCall.args._id` (Gemini).
+- **Acceptance:** A request whose history contains `tool_use.input._meta` / `functionCall.args._id` is forwarded with those keys intact; a top-level `_debug` key is still removed; new unit tests cover both cases for all three body formats.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-38: Prefixed client routes /claude/* and /gemini/* are forwarded to the upstream with the prefix intact (404 on passthrough)
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/server.rs:297-298` registers `/claude/v1/messages` and `:363-366` registers `/gemini/v1beta/*path` and `/gemini/v1/*path` as prefixed aliases; `src-tauri/src/proxy/handlers.rs:180-186` strips a prefix only when `strip_prefix` is `Some`, which is passed only for `/claude-desktop` (`:135`), while the Claude route passes `None` (`:121`); `handlers.rs:1752-1755` forwards the full `path_and_query` for Gemini; `src-tauri/src/proxy/providers/claude.rs:786-811` and `providers/gemini.rs:213-227` `build_url` simply concatenate base + endpoint (only de-duplicating `/v1/v1` / `/v1beta/v1beta`); no `strip_prefix("/claude")` or `"/gemini"` exists anywhere under `src-tauri/src`. Only the Claude *transform* path escapes because `rewrite_claude_transform_endpoint` recognizes `/claude/v1/messages` (`forwarder.rs:2732-2734`, `:2997`). Codex, by contrast, normalizes the endpoint (`handlers.rs:712`, `:802`).
+- **Problem:** A client configured with `http://127.0.0.1:15721/claude` against a native Anthropic provider, or `http://127.0.0.1:15721/gemini`, is forwarded to `https://api.anthropic.com/claude/v1/messages` / `https://generativelanguage.googleapis.com/gemini/v1beta/models/...:generateContent` and receives an upstream 404. Because 404 is Retryable (`forwarder.rs:2571-2574`) the proxy then walks every provider in the failover queue, consuming HalfOpen permits and health scores, before surfacing the 404. The routes advertise support for prefixed URLs but never worked for passthrough.
+- **Proposal:** Normalize the inbound path in the handlers: pass `Some("/claude")` / `Some("/gemini")` as `strip_prefix` for the prefixed routes (or derive the endpoint from the axum `*path` capture), mirroring the `/claude-desktop` handling, and add route-level tests asserting the upstream URL built for every registered route.
+- **Acceptance:** A request to `/gemini/v1beta/models/gemini-2.5-pro:generateContent` reaches `<base>/v1beta/models/gemini-2.5-pro:generateContent`; `/claude/v1/messages` with an `anthropic` api_format provider reaches `<base>/v1/messages`; unprefixed routes are unchanged; tests cover each registered prefixed route.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-39: Emptying the failover queue (or deleting its last provider) while failover is enabled turns every request into 503 'no providers configured'
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/provider_router.rs:51-78` — with `auto_failover_enabled` the candidate set is *only* the failover queue; `:98-105` — an empty result with `total_providers == 0` returns `AppError::NoProvidersConfigured`, mapped to 503 `未配置供应商` (`error.rs:35-36`, `:134-136`); `src-tauri/src/commands/failover.rs:49-59` — `remove_from_failover_queue` has no guard, while the enable path checks emptiness only at enable time (`:100-134`); `src/components/proxy/FailoverQueueManager.tsx:91-105` lets the user remove any entry. Queue membership is a column on the provider row, so deleting the last queued provider has the same effect.
+- **Problem:** The user still has a valid current provider and an active takeover, yet Claude Code/Codex get 503 `未配置供应商` on every request until they realise the queue is empty; the message blames configuration that is present, nothing disables failover or emits an event, and the header toggle still shows failover as enabled.
+- **Proposal:** In `select_providers`, when failover is enabled but the queue yields no candidates, fall back to the effective current provider (the failover-off branch) and log a warning; in addition refuse (command + UI) to remove the last queue entry while failover is on, or auto-disable failover with a toast/event when the queue becomes empty (including via provider deletion).
+- **Acceptance:** With failover on and an emptied queue, requests are still served by the current provider and `last_error` carries a warning; a `provider_router.rs` unit test covers 'failover on + empty queue'; the UI either blocks removing the last entry or shows the auto-disable toast.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-40: Trust store differs per HTTP stack: corporate/MITM CAs work for native Claude (raw path) but not for Codex, Gemini, Copilot or the fallback client; no custom-CA option
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/Cargo.toml:42` — `reqwest` is built with `rustls-tls` (webpki roots only; `rustls-tls-native-roots` is not enabled) and `src-tauri/src/proxy/http_client.rs:216-264` never calls `use_preconfigured_tls`/`add_root_certificate`; `src-tauri/src/proxy/hyper_client.rs:59-73` — the pooled fallback client uses `with_webpki_roots()` only; `:564-579` — the raw path loads webpki **plus** `rustls_native_certs` precisely so 'proxy MITM CAs (Clash, mitmproxy)' are trusted; `src-tauri/src/proxy/forwarder.rs:2110-2172` — the stack is chosen by `should_preserve_exact_header_case` (`:3141-3156`): only native-Anthropic providers get the raw path, everything else (Codex, Gemini, Copilot, Codex OAuth, every transform format, any SOCKS proxy) goes through reqwest. PERF-26 in the roadmap notes the two hyper stores but proposes sharing a config between the two hyper paths only, which does not touch reqwest.
+- **Problem:** On a corporate network or behind a TLS-intercepting proxy, Claude requests succeed while every Codex/Gemini/Copilot request fails with `invalid peer certificate: UnknownIssuer`; the same Claude provider flips to failing as soon as its api_format changes or a SOCKS proxy is configured. Users cannot add a CA or opt out of verification per provider, so the only workaround is disabling the interceptor, and the behaviour looks like a provider outage.
+- **Proposal:** Build one `rustls::ClientConfig` (webpki + native certs, plus an optional user-supplied PEM from settings) and use it for reqwest (`Client::builder().use_preconfigured_tls(config)` or `rustls-tls-native-roots` + `add_root_certificate`), the hyper-util client and the raw connector; expose an 'extra CA certificate' setting (and an explicit, off-by-default per-provider 'skip TLS verification' with a warning) in proxy settings.
+- **Acceptance:** With a self-signed CA installed in the OS store, requests through Codex/Gemini/Copilot providers succeed exactly like native Claude; a test asserts all three client paths derive from the same root-store builder; the CA setting is documented.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-41: Native Anthropic/Gemini/Chat streaming paths have no semantic stream-start validation; a 2xx stream whose first event is an error is scored as success and never fails over
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/forwarder.rs:2177-2205` — after `prepare_success_response_for_failover`, semantic validation runs only for `codex_responses_to_anthropic` (`:2185-2188`) and `openai_responses` (`:2189-2204`, via `validate_responses_stream_start` `:2315-2395`, which keeps priming until a productive event or a terminal failure); `:2397-2430` — every other streaming response is committed after *any* first chunk; `:492-496` — provider success is recorded at that point. Anthropic-compatible gateways emit `event: error` / `{"type":"error","error":{"type":"overloaded_error"}}` with HTTP 200 as the first SSE block; Gemini relays emit `{"error":{...}}` as the first chunk.
+- **Problem:** For the primary use case (native Anthropic providers) a relay that answers 200 followed immediately by an `overloaded_error`/`rate_limit_error` event resets the breaker's failure counter, bumps `success_requests`, and the user receives the error with no failover even though other queue providers are healthy. The Responses path already solves exactly this; behaviour is inconsistent across formats.
+- **Proposal:** Generalise `validate_responses_stream_start` into a per-format `inspect_stream_start(block) -> None | Ok | Err` (Anthropic: `error` event or `type: error` → Err, `message_start`/`content_block_*` → Ok; Gemini: top-level `error` → Err, `candidates` → Ok; Chat: `error` with a reportable message → Err, `choices` → Ok) and run it inside the retry loop for all streaming responses with the same 256 KB cap; map Err to `TransformError` so it stays Retryable.
+- **Acceptance:** A mock upstream returning 200 + `event: error` as the first Anthropic SSE block triggers failover to the next provider and records a failure for the first; a normal `message_start` stream is replayed byte-identically; tests exist for Anthropic, Gemini and Chat formats.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### PROXY-23: SSE usage collectors buffer every "usage"-matching event for the whole stream, and the passthrough SSE buffer is unbounded
 
 **Type:** performance · **Priority:** P3 · **Effort:** S · **Confidence:** medium
@@ -379,3 +441,74 @@ The proxy core (server, forwarder, router, circuit breaker, response processor a
 - **Problem:** PROXY-02, PROXY-09 and PROXY-10 are exactly the untested paths.
 - **Proposal:** Add tests: error-rate open; window reset on close; hot update of `timeout_seconds`; 100 concurrent `record_failure` tasks keep counters consistent; permit released when the awaiting future is dropped; passthrough stream idle timeout yields a terminal event and triggers the finish guard; `SseUsageFinishGuard` fires `finish()` on drop.
 - **Acceptance:** Tests exist and pass; mutation of the error-rate branch fails a test.
+
+### PROXY-42: Rectifier-retry failures use a different retryability rule than the main path: 429/401/403/404/408 and auth/config/transform errors abort failover and skip breaker accounting
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/forwarder.rs:294-298` — `handle_rectifier_retry_failure` treats only `Timeout`, `ForwardFailed` and `UpstreamError{status >= 500}` as provider errors; everything else returns `Some(ForwardError)` after `release_permit_neutral` (`:323-336`), i.e. no failover and no `record_result`; `:2554-2584` — `categorize_proxy_error` for the very same request classifies 429, 401, 403, 404, 408, 409, 451, `ConfigError`, `TransformError`, `AuthError` and `StreamIdleTimeout` as Retryable. The media retry (`:647-666`), signature retry (`:796-815`) and budget retry (`:956-975`) all route through the stricter helper.
+- **Problem:** Once any rectifier has fired on provider A, a subsequent 429 (rate limit) or 401 (bad key) from A ends the request immediately instead of trying provider B, and A's health/breaker is not updated, so the next request hits the same wall. The comment at `:292-293` ('client error, next provider cannot fix it') does not hold for rate limits or credential failures, which are provider-specific by definition.
+- **Proposal:** Reuse `categorize_proxy_error(&retry_err, provider)` inside `handle_rectifier_retry_failure` (Retryable → record failure + continue; NonRetryable → neutral release + return) and delete the ad-hoc `is_provider_error` match; add a test where the signature rectifier fires, the retry returns 429, and the next provider is attempted with A's failure recorded.
+- **Acceptance:** `forward_with_retry` with providers [A, B], where A returns `invalid signature` then 429 and B returns 200, yields B's response; breaker stats for A show one recorded failure; existing rectifier tests still pass.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-43: Header-case/order capture is per TCP connection, so every keep-alive request after the first is written with stale header casing and order
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/server.rs:156-175` — `stream.peek` + `OriginalHeaderCases::from_raw_bytes` run once per accepted connection, before the first request; `:178-192` — the same `original_cases` is cloned into every `service_fn` invocation on that connection; `src-tauri/src/proxy/hyper_client.rs:618-645` — `build_raw_request` emits headers in the captured order and appends any header absent from the capture in lowercase at the tail (`:634-645`). `peek` returns only bytes already in the socket buffer (`server.rs:160-163`), so a request whose headers arrive in a second segment is captured partially. Claude Code and Codex use HTTP keep-alive, so most requests are not the first on their connection.
+- **Problem:** The raw TCP/TLS path exists solely to reproduce exact wire casing/order for gateways that fingerprint headers. For the 2nd+ request on a connection the order is the first request's, and any header that was not in the first request (for example `anthropic-beta` appearing later, or a changed `x-app`) is emitted lowercase at the end — exactly the signature the feature tries to avoid. The degradation is silent (debug log only).
+- **Proposal:** Capture casing per request instead of per connection: read hyper's `HeaderCaseMap` from `req.extensions()` (available with `http1::Builder::preserve_header_case(true)`), or parse the request head per request with a small framed reader in front of hyper; if neither is feasible, discard the connection-level map after the first request, fall back to title-case for subsequent ones, and log at warn.
+- **Acceptance:** A test sending two requests with different header sets on one keep-alive connection asserts that the upstream wire bytes of the second request keep its own casing and order, with no lowercase tail headers.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+- **Possible overlap with:** SEC-25 (check before scheduling)
+
+### PROXY-44: Codex OAuth session headers are rewritten with the proxy's codex_-prefixed session id, replacing the client's real session_id value
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/session.rs:289-317` — Codex session ids extracted from the `session_id`/`x-session-id` header or `metadata.session_id` are returned as `format!("codex_{session_id}")` (`:295`, `:312`); `src-tauri/src/proxy/handler_context.rs:121-122`, `:236` — that value becomes `RequestContext.session_id` → `RequestForwarder.session_id`; `src-tauri/src/proxy/forwarder.rs:1684-1689` and `:3082-3102` build `session_id`, `x-client-request-id` and `x-codex-window-id` from it, and `:2044-2046` `insert`s them, overwriting the client's original headers; the comment at `:2042-2043` states the intent is to send the client-provided session id. The unit test at `:3864-3883` feeds an unprefixed id, so the prefix is never exercised; the same prefixed value is reused as `prompt_cache_key` on the Chat bridge (`:1437-1443`).
+- **Problem:** The ChatGPT Codex backend receives `session_id: codex_<uuid>` and `x-codex-window-id: codex_<uuid>:0` instead of the client's `<uuid>`. Affinity still works because the value is stable, but it diverges from what the official CLI sends, breaks server-side correlation with the user's local Codex session logs, and overwrites a header the client already sent correctly.
+- **Proposal:** Keep the `codex_` prefix for internal keys (shadow stores, usage logs) but carry the raw client value separately (e.g. `SessionIdResult.raw_client_id`) and use the raw value for upstream headers and `prompt_cache_key`; when the client already sent `session_id`, pass it through instead of overwriting. Extend the test to go through `extract_session_id`.
+- **Acceptance:** With `session_id: 123e4567-...` from the client, the upstream request carries exactly that value in `session_id` and `x-client-request-id` and `<id>:0` in `x-codex-window-id`; internal usage logs still show `codex_<id>`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-45: Upstream response bodies are buffered and decompressed without any size cap; a gzip/zstd bomb from a hostile or buggy relay can exhaust the desktop app's memory
+
+**Type:** security · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/hyper_client.rs:161-184` — `ProxyResponse::bytes()` collects the whole body (`collect()`, `r.bytes()`, or a `BytesMut` loop) with no limit; `src-tauri/src/proxy/response_processor.rs:82-133`, `src-tauri/src/proxy/forwarder.rs:2211-2221`, `:2271-2279`, `:2296-2304` — bodies are then decoded via `decompress_body`; `src-tauri/src/proxy/content_encoding.rs:33-65` — gzip/deflate `read_to_end`, `BrotliDecompress` and `zstd::decode_all` write into unbounded `Vec`s. The request side is capped at 200 MB (`server.rs:368`) but the response side has no counterpart, although a cap pattern already exists (`forwarder.rs:2319`, 256 KB priming cap).
+- **Problem:** Providers are arbitrary third-party relays added by the user (or via deep link). A 1 MB zstd/brotli body that inflates to many GB, or a non-streaming 200 that never ends, grows memory without bound inside the Tauri process that also hosts the UI, so one bad relay response can crash the whole app; Cloudflare HTML error pages and similar are likewise read in full.
+- **Proposal:** Add a configurable `max_response_bytes` (default e.g. 64 MB) enforced in `ProxyResponse::bytes()` (via `http_body_util::Limited` or a counting loop) and a decompressed-size limit in `decompress_body` (`Read::take` on each decoder); surface violations as `TransformError`/`UpstreamError` so failover still applies.
+- **Acceptance:** A mock upstream returning a 2 MB gzip body that inflates to 2 GB is rejected with bounded allocation (RSS stays below limit + slack) and the request fails over; normal responses are unaffected; unit tests cover both caps.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-46: mask_url byte-slices a non-URL string at index 20 and panics on multi-byte input, reachable from proxy-URL validation
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/http_client.rs:327-334` — when `url::Url::parse` fails, `format!("{}...", &url[..20])` slices by byte offset; `:232-233` and `:244-245` call `mask_url(url)` precisely on the parse-failure path of `build_client`, which `validate_proxy` (`:92-97`) and `apply_proxy` (`:106-108`) run on user input from the settings UI.
+- **Problem:** A pasted proxy string containing non-ASCII characters around byte 20 (for example a Chinese label or a full-width colon such as `代理服务器：http://...`) panics with 'byte index 20 is not a char boundary' inside the Tauri command instead of returning 'Invalid proxy URL'; the command never resolves and the UI shows no validation message.
+- **Proposal:** Truncate by characters (`url.chars().take(20).collect::<String>()`) or use `str::floor_char_boundary`, and add a unit test with a multi-byte string.
+- **Acceptance:** `mask_url("代理服务器：http://127.0.0.1:7890")` returns a truncated string without panicking; `validate_proxy` on that input returns `Err` with a readable message; the new test is part of `http_client.rs` tests.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-47: Bedrock thinking optimizer sets budget_tokens to max_tokens - 1, overrides the caller's smaller budget or disabled thinking, and forces effort=max plus the 1M beta for every adaptive model
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/thinking_optimizer.rs:38-43` — `budget_target = max_tokens.saturating_sub(1)` (16384 when `max_tokens` is absent); `:59-69` — an explicitly configured lower `budget_tokens` is raised to that target; `:52-57` — `thinking: {type: disabled}` is overridden to enabled; `:27-32` — for adaptive models it unconditionally injects `output_config.effort = "max"` and appends `context-1m-2025-08-07`; applied per attempt whenever `optimizer_config.enabled && is_bedrock_provider` (`forwarder.rs:451-460`). No sub-switch or cap exists in `OptimizerConfig` (`types.rs` optimizer section).
+- **Problem:** With a budget essentially equal to `max_tokens`, the model can spend nearly the whole output allowance thinking, so the visible answer is cut off by `max_tokens` (Claude Code sees `stop_reason: max_tokens` with little or no text); a caller that deliberately set a small budget or disabled thinking for a cheap subagent call is silently overridden; `effort: max` maximises latency and cost on every request; and the 1M beta is injected even for models/accounts without 1M access, which Bedrock rejects.
+- **Proposal:** Cap the injected budget (e.g. `min(max_tokens * 3/4, 32000)`), never raise a caller-provided budget or re-enable caller-disabled thinking, and make `effort` and the 1M beta opt-in sub-switches of `OptimizerConfig` documented in the optimizer UI.
+- **Acceptance:** A request with `max_tokens: 4096, thinking: {enabled, budget_tokens: 1024}` keeps budget 1024; a request without a budget gets at most 3072; `output_config`/1M beta appear only when the corresponding switches are on; tests updated accordingly.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROXY-48: Two write paths for auto_failover_enabled with different invariants: saving the per-app settings form can silently flip failover from a stale snapshot, bypassing the P1-switch and queue checks
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/commands/failover.rs:79-182` — `set_auto_failover_enabled` validates takeover, auto-fills the queue and switches to P1 before writing; `src-tauri/src/commands/proxy.rs:133-148` — `update_proxy_config_for_app` writes the whole `AppProxyConfig`, including `auto_failover_enabled` and `enabled`, with no such checks (`src-tauri/src/database/dao/proxy.rs:275-290`); `src/components/proxy/AutoFailoverConfigPanel.tsx:25-54`, `:162-175` — the form snapshots `config.autoFailoverEnabled` and sends it back on save; `src/lib/query/failover.ts:224-245` — the header toggle's `onSuccess` does not invalidate `["appProxyConfig", appType]`, so the form keeps the pre-toggle value. The router reads the flag on every request (`src-tauri/src/proxy/provider_router.rs:43-49`), so the routing mode changes immediately.
+- **Problem:** Toggle failover on in the header, then save a timeout change in the Auto-Failover panel: failover is written back to `false` (or, in the other direction, to `true` without the P1 switch and queue auto-fill) with a 'saved' toast and no indication; the proxy's routing mode changes underneath the user. The same path can flip `enabled` (takeover) without the live-config rewrite the takeover command performs.
+- **Proposal:** Make `auto_failover_enabled` and `enabled` non-writable through `update_proxy_config_for_app` (ignore or reject them; the DAO already has a dedicated statement for those two flags at `dao/proxy.rs:892`), drop the field from the form payload, and invalidate `["appProxyConfig", appType]` in `useSetAutoFailoverEnabled.onSuccess`.
+- **Acceptance:** Saving the Auto-Failover panel after toggling failover elsewhere leaves the toggle state unchanged; a backend test asserts `update_proxy_config_for_app` cannot change `auto_failover_enabled` or `enabled`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

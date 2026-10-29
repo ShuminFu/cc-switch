@@ -1,6 +1,6 @@
 # Database / DAO / migrations — findings (DB-xx)
 
-Part of the [next-phase proposals](../README.md). 34 findings. Priorities: P1 = 2, P2 = 22, P3 = 10.
+Part of the [next-phase proposals](../README.md). 44 findings. Priorities: P1 = 2, P2 = 25, P3 = 17.
 
 ## Area summary
 
@@ -34,6 +34,9 @@ The database layer is functional and has clearly had care put into it: migration
 | [DB-26](#db-26) | Tests run against an un-migrated in-memory schema and skip backups/concurrency/hostile import | test | P2 | M | high |  |
 | [DB-27](#db-27) | UI invalidates every usage query on each log event, amplifying read load under the single lock | performance | P2 | S | medium |  |
 | [DB-33](#db-33) | No developer documentation for the schema, table ownership, retention/backup semantics or migration checklist | docs | P2 | S | high |  |
+| [DB-35](#db-35) | Sync import restores local-only tables from a stale snapshot: every log/rollup/live-backup row written during the import window is silently lost | bug | P2 | S | high |  |
+| [DB-36](#db-36) | Cache-inclusive app-type list is duplicated in four places and already inconsistent: cost backfill omits `grokbuild`, overcharging cached input | bug | P2 | S | high |  |
+| [DB-37](#db-37) | Legacy `update_proxy_config` has no WHERE clause and copies the claude row's retries/timeouts onto every app row, silently resetting per-app failover tuning on every global save and takeover stop | bug | P2 | S | high |  |
 | [DB-08](#db-08) | No migration ledger/checksums; `SCHEMA_VERSION` and sync `DB_COMPAT_VERSION` are independent hand-bumped constants | refactor | P3 (first pass P1) | L | medium | partially-confirmed |
 | [DB-21](#db-21) | `get_all_providers` issues one endpoint query per provider (N+1) and is on the tray/failover path | performance | P3 | S | high |  |
 | [DB-22](#db-22) | `provider_endpoints` has no uniqueness constraint; duplicates accumulate | bug | P3 | S | high |  |
@@ -44,6 +47,13 @@ The database layer is functional and has clearly had care put into it: migration
 | [DB-31](#db-31) | `update_provider_health` uses an unindexed read-then-REPLACE and relies on a FK to a possibly-deleted provider | tech-debt | P3 | S | medium |  |
 | [DB-32](#db-32) | `DB_COMPAT_VERSION` strict equality blocks sync between app versions that are actually compatible | tech-debt | P3 | S | medium |  |
 | [DB-34](#db-34) | Startup seeding and fixups run as hundreds of individual autocommits | performance | P3 | S | high |  |
+| [DB-38](#db-38) | `update_endpoint_last_used` is a dead write that still rewrites the whole provider row, races concurrent edits and triggers cloud auto-sync | bug | P3 | S | high |  |
+| [DB-39](#db-39) | Provider spend limits are half-wired end to end: dead v2 columns, meta-only storage, an unused query hook and no proxy enforcement | tech-debt | P3 | M | high |  |
+| [DB-40](#db-40) | `get_request_logs` trusts unclamped IPC pagination arithmetic and performs per-row autocommit UPDATEs inside a read while a SELECT cursor is open | bug | P3 | S | high |  |
+| [DB-41](#db-41) | Codex state database filename `state_5.sqlite` is hard-coded, so the next Codex bump silently turns history migration/restore into a no-op | risk | P3 | S | medium |  |
+| [DB-42](#db-42) | Restoring a DB backup discards all usage logs/stats recorded since the backup, unlike sync import which preserves them, and the confirmation dialog does not say so | ux | P3 | M | high |  |
+| [DB-43](#db-43) | Every sync export copies the entire database — including the log tables it is about to skip — into an in-memory SQLite snapshot | performance | P3 | M | medium |  |
+| [DB-44](#db-44) | WebDAV and S3 transports use separate sync mutexes and separate auto-sync suppression counters, allowing a download on one transport to interleave with an upload on the other | risk | P3 | S | medium |  |
 
 ## Findings
 
@@ -272,6 +282,36 @@ The database layer is functional and has clearly had care put into it: migration
 - **Proposal:** Add `docs/dev/database.md` with an ERD (tables, keys, timestamp units), the synced/device classification, retention and backup rules, the "add a column/table" checklist, and how to test migrations against a real old DB (`tests.rs:565` already embeds a v3.8 schema; link it). Fix the module doc and README wording.
 - **Acceptance:** Doc merged; module doc lists all DAO files; README statements match behaviour.
 
+### DB-35: Sync import restores local-only tables from a stale snapshot: every log/rollup/live-backup row written during the import window is silently lost
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/backup.rs:94-147` — `import_sql_string_inner` takes `self.snapshot_to_memory()` at line 108 (lock acquired and released inside, 150-164), then without the lock executes the remote SQL, `create_tables_on_conn`, `apply_schema_migrations_on_conn` and the row-by-row `restore_tables(local_snapshot, &temp_conn, SYNC_PRESERVE_TABLES)` (120-130, seconds-to-minutes on a 30-day log table per DB-11), and only then re-locks `main_conn` and overwrites it via `Backup::step(-1)` (134-140). Writers that keep running in that window: the proxy logger (`src-tauri/src/proxy/usage/logger.rs:81-118`, one row per proxied request), the 60 s session-usage sync loop (`src-tauri/src/lib.rs:1092-1145`) and the daily `periodic_backup_if_needed` task (`lib.rs:1076-1088`). The sync mutex (`src-tauri/src/services/webdav_sync.rs:32-41`) only serialises sync-vs-sync, not DB writers; `SYNC_PRESERVE_TABLES` (28-34) also includes `proxy_live_backup`.
+- **Problem:** Rows inserted into `proxy_request_logs`, `usage_daily_rollups`, `stream_check_logs` or `proxy_live_backup` between the snapshot and the overwrite are restored from the stale copy and vanish; usage/cost history for that window is unrecoverable, and a `proxy_live_backup` row created by a takeover started during the window disappears so the original live config cannot be restored on takeover stop. DB-20 is about last-writer-wins between devices; this is an intra-process TOCTOU on the tables the importer explicitly promises to keep.
+- **Proposal:** Build the temp DB from the remote SQL first (it needs no local state), then take `lock_conn!(self.conn)` once and, inside that single critical section, copy the preserved tables directly from the live `main_conn` into `temp_conn` (`restore_tables(&main_conn, &temp_conn, ..)` wrapped in one transaction per DB-11) and immediately run `Backup::new(&temp_conn, &mut main_conn).step(-1)`. Drop `snapshot_to_memory` from this path. Optionally pause the proxy logger via the existing suppression-guard pattern for the few ms the lock is held.
+- **Acceptance:** A test runs `import_sql_string_for_sync` while a second thread inserts 1 000 `proxy_request_logs` rows and one `proxy_live_backup` row; after the import all of them are present. Code review confirms the preserved-table copy and the main-DB overwrite happen under one `lock_conn!` scope; `sync_import_preserves_local_only_tables` still passes.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DB-36: Cache-inclusive app-type list is duplicated in four places and already inconsistent: cost backfill omits `grokbuild`, overcharging cached input
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/sql_helpers.rs:19` `CACHE_INCLUSIVE_APP_TYPES = ["codex","gemini","grokbuild"]`; `src-tauri/src/proxy/usage/logger.rs:74-78` writes `INPUT_TOKEN_SEMANTICS_TOTAL` for `codex | gemini | grokbuild`; `src-tauri/src/proxy/usage/calculator.rs:62` `input_includes_cache_read = matches!(app_type, "codex" | "gemini" | "grokbuild")`; but `src-tauri/src/services/usage_stats.rs:1820` in `maybe_backfill_log_costs` has `cache_inclusive_app = matches!(log.app_type.as_str(), "codex" | "gemini")`, so lines 1821-1831 use the full `input_tokens` (cache included) as billable input for grokbuild rows. A fourth variant lives at `usage_stats.rs:377` (`codex | gemini | opencode`) and in `effective_usage_log_filter` line 317.
+- **Problem:** Any grokbuild row priced by the backfill (rows logged before pricing existed, rows re-priced after a pricing edit via `backfill_missing_usage_costs_for_model`, and rows lazily priced from the request-log page) gets input cost on total tokens while the live path subtracts cache reads/writes — the same request costs different amounts depending on which code path priced it, and the drift will recur for every future app type.
+- **Proposal:** Introduce one source of truth, e.g. `pub fn input_tokens_include_cache(app_type: &str) -> bool` in `sql_helpers.rs` (or a method on `AppType`), and use it from `fresh_input_sql`, the logger, `CostCalculator::calculate_for_app` and `maybe_backfill_log_costs`; keep the separate 'session source lacks cache_creation' list explicitly named. Add a test that prices a grokbuild TOTAL-semantics row (input 1000, cache_read 600, cache_creation 100) through both the live calculator and the backfill and asserts equality.
+- **Acceptance:** `rg '"codex" \| "gemini"' src-tauri/src` matches only the helper; the new equality test passes for codex, gemini, grokbuild and claude rows; existing `test_backfill_distinguishes_legacy_and_total_cache_semantics` still passes.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DB-37: Legacy `update_proxy_config` has no WHERE clause and copies the claude row's retries/timeouts onto every app row, silently resetting per-app failover tuning on every global save and takeover stop
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/dao/proxy.rs:459-486` — `UPDATE proxy_config SET listen_address, listen_port, max_retries, enable_logging, streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout ...` with no `WHERE`; its input comes from `get_proxy_config` (420-456), which reads only `WHERE app_type = 'claude'`. Live callers: `src-tauri/src/services/proxy.rs:3033-3049` (`ProxyService::update_config`, wired to the Tauri `update_proxy_config` command at `src-tauri/src/commands/proxy.rs:79-84` and the global settings form `src/hooks/useProxyConfig.ts:24-27`), `proxy.rs:1348-1353` (every takeover stop) and `proxy.rs:573-589` (ephemeral-port start). Per-app values are set by `update_proxy_config_for_app` (`dao/proxy.rs:275-314`) from `src/components/proxy/AutoFailoverConfigPanel.tsx:27-70` and seeded differently per app (`src-tauri/src/database/schema.rs:148-182`: claude 6/90/180 vs codex 3/60/120). `update_circuit_breaker_config` (748-774) has the same no-WHERE shape and no non-test callers.
+- **Problem:** A user who tunes Codex's max_retries/timeouts in the per-app panel loses the values the next time they save the global listen address/port, stop live takeover, or start the proxy with port 0 — all rows become claude's 6/90/180/600 without any feedback, and the per-app panel then shows the clobbered values as if the user had chosen them.
+- **Proposal:** Restrict the legacy UPDATE to the truly global mirror columns (`listen_address`, `listen_port`, `enable_logging`) and write `max_retries`/timeouts only `WHERE app_type = 'claude'` (or drop those fields from the legacy `ProxyConfig` write path entirely); delete the unused `update_circuit_breaker_config`; make `set_live_takeover_active`/stop-takeover touch only the flag it owns.
+- **Acceptance:** Regression test: set codex `max_retries=9`/`streaming_idle_timeout=300` via `update_proxy_config_for_app`, call `update_proxy_config(claude_cfg)` and stop takeover, assert codex values unchanged and claude values updated; `rg update_circuit_breaker_config src-tauri/src` returns nothing.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### DB-08: No migration ledger/checksums; `SCHEMA_VERSION` and sync `DB_COMPAT_VERSION` are independent hand-bumped constants
 
 **Type:** refactor · **Priority:** P3 · **Effort:** L · **Confidence:** medium
@@ -362,3 +402,73 @@ The database layer is functional and has clearly had care put into it: migration
 - **Problem:** Dozens of journal round-trips on every launch and on every open of the pricing page; partial failure leaves a half-seeded table.
 - **Proposal:** Wrap seed+repair in one `unchecked_transaction` and gate it on a `seed_version` setting (DB-19); drop the re-seed from the `get_model_pricing` command.
 - **Acceptance:** SQLite trace shows one `BEGIN/COMMIT` around seeding; pricing page open issues zero writes.
+
+### DB-38: `update_endpoint_last_used` is a dead write that still rewrites the whole provider row, races concurrent edits and triggers cloud auto-sync
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/provider/endpoints.rs:71-90` loads all providers (`get_all_providers`, N+1 per DB-21), sets `endpoint.last_used` inside `meta.custom_endpoints` and calls `save_provider`. `src-tauri/src/database/dao/providers.rs:186-187` `std::mem::take(&mut meta_clone.custom_endpoints)` then the UPDATE branch (201-238) never writes `provider_endpoints`; `provider_endpoints` has no `last_used` column (`src-tauri/src/database/schema.rs:50-58`) and `get_all_providers` hard-codes `last_used: None` (providers.rs:85-89). The UPDATE still rewrites `settings_config`/`meta` from the stale in-memory copy outside any transaction spanning the read, and a `providers` UPDATE fires the update hook (`src-tauri/src/database/mod.rs:83-93`) which `should_trigger_for_table` accepts (`src-tauri/src/services/webdav_auto_sync.rs:43-56`). Invoked from `src/lib/api/vscode.ts:61-68`.
+- **Problem:** The feature never persists anything, yet each call costs a full provider scan plus a full-row rewrite under the global lock, can overwrite a provider edit that landed between its read and write (losing e.g. a just-saved API key), and enqueues a WebDAV/S3 upload for a no-op change.
+- **Proposal:** Either implement it properly — add `last_used INTEGER` to `provider_endpoints` in the next migration, write it with a single `UPDATE provider_endpoints SET last_used=?1 WHERE provider_id=?2 AND app_type=?3 AND url=?4`, and read it back in `get_all_providers` — or delete the command, the service function and the TS wrapper. In both cases `save_provider`'s UPDATE path should either persist endpoints or document that it ignores them.
+- **Acceptance:** After invoking the command, `get_custom_endpoints` returns `lastUsed` set (or the command no longer exists); a SQL trace of the call shows no statement touching `providers`; no auto-sync signal is enqueued (unit test with `enqueue_change_signal` spy).
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DB-39: Provider spend limits are half-wired end to end: dead v2 columns, meta-only storage, an unused query hook and no proxy enforcement
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/schema.rs:597-605` (`migrate_v1_to_v2`) adds `providers.cost_multiplier`, `limit_daily_usd`, `limit_monthly_usd`, `provider_type`; `create_tables_on_conn` (27-44) never creates them, and no DAO reads or writes them (`rg limit_daily_usd` hits only the migration, `tests.rs:617-618` and the `ProviderMeta` JSON fields at `src-tauri/src/provider.rs:431-441`). `check_provider_limits` (`src-tauri/src/services/usage_stats.rs:1599-1685`) parses limits from `meta` JSON and turns any DB error into `0.0` usage (1648, 1667); it is exported as a command (`src-tauri/src/commands/usage.rs:257`) and wrapped by `useProviderLimits` (`src/lib/query/usage.ts:349-352`) which no component calls; no file under `src-tauri/src/proxy` references daily/monthly limits, and no UI sets `limitDailyUsd`.
+- **Problem:** Fresh and migrated databases have different `providers` columns (a concrete instance of the drift DB-07/DB-26 warn about), four dead columns and a dead command confuse contributors, and the `limit_*` naming promises a spending guard that does not exist — a user who finds the meta fields and sets them gets no enforcement.
+- **Proposal:** Decide the feature's fate: (a) finish it — expose daily/monthly limits in the provider form, enforce them in the provider router (skip providers over limit during failover, return 429 with a notification otherwise), compute today's spend with DB-14's integer cost column, and drop the dead columns with `ALTER TABLE ... DROP COLUMN` in a migration; or (b) remove `check_provider_limits`, `useProviderLimits`, the `ProviderMeta` limit fields and the dead columns. Either way add a schema golden test asserting fresh == migrated column sets.
+- **Acceptance:** Either a router test shows a provider over its daily limit is skipped and the UI exposes the setting, or `rg 'limit_daily_usd|check_provider_limits|useProviderLimits'` returns nothing; `PRAGMA table_info(providers)` is identical for `Database::memory()` and a DB migrated from the `tests.rs:565` v3.8 fixture.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DB-40: `get_request_logs` trusts unclamped IPC pagination arithmetic and performs per-row autocommit UPDATEs inside a read while a SELECT cursor is open
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/usage_stats.rs:1466-1471, 1524-1526` — `let offset = page * page_size;` on `u32` values passed straight through from the Tauri command (`src-tauri/src/commands/usage.rs:105-112`, no clamp; `page_size` may be 0 or 4 billion). Lines 1544-1555 iterate `stmt.query_map(..)` and call `maybe_backfill_log_costs(&conn, ..)` per row, which executes `UPDATE proxy_request_logs ... WHERE request_id = ?` (1852-1869) on the same connection with no enclosing transaction; `get_request_detail` (1566-1596) does the same.
+- **Problem:** `page * page_size` panics in debug builds and wraps in release, returning the wrong page; a huge `page_size` materialises the whole table; and a dashboard page of N unpriced rows (typical right after adding a model price) costs N fsync'd autocommit writes under the global lock inside a nominally read-only command while the table is being stepped — SQLite permits this but makes the pending cursor's row visibility undefined.
+- **Proposal:** Clamp `page_size` to 1..=500 and use `page.checked_mul(page_size)` (reject overflow with `InvalidInput`); collect the page first, then run any lazy backfill for those rows in one `unchecked_transaction` after the cursor is dropped — or drop lazy backfill from read paths entirely and rely on the explicit backfill job plus `backfill_missing_usage_costs_for_model` after pricing edits.
+- **Acceptance:** Tests: `get_request_logs(page=u32::MAX, page_size=2)` returns an error rather than panicking; `page_size=0`/`10_000` are clamped; a SQL trace of a page load over 50 unpriced rows shows at most one `BEGIN`/`COMMIT` (or zero writes).
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DB-41: Codex state database filename `state_5.sqlite` is hard-coded, so the next Codex bump silently turns history migration/restore into a no-op
+
+**Type:** risk · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/codex_state_db.rs:15-18` `CODEX_STATE_DB_FILENAME = "state_5.sqlite"` with a comment acknowledging Codex bumps the number across releases; `codex_state_db_paths` (28-38) only joins that one name. Consumers `src-tauri/src/codex_history_migration.rs:404-411` and `1108-1115` iterate those paths and skip missing files (`if !db_path.exists() ... return Ok(0)` at 1125-1127), so a `state_6.sqlite` install migrates/restores 0 index rows while the JSONL half of the migration proceeds.
+- **Problem:** After a Codex upgrade the 'unify session history' feature rewrites JSONL files but leaves the thread index untouched (or restores JSONL but not index rows), producing an inconsistent Codex history with no error surfaced beyond `restored_state_rows: 0`.
+- **Proposal:** Resolve candidates by scanning each candidate directory for `state_*.sqlite`, choose the highest version, log a warning when it exceeds the last known version, and add a `state_db_missing`/`state_db_version_unknown` warning to the migration/restore outcome so the UI can tell the user; keep the existing `table_exists`/`has_column` guards for schema drift.
+- **Acceptance:** Unit test: a dir containing only `state_6.sqlite` resolves to that file; a dir with none yields an outcome warning; existing `state_db_paths_include_codex_sqlite_home_env` tests pass.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DB-42: Restoring a DB backup discards all usage logs/stats recorded since the backup, unlike sync import which preserves them, and the confirmation dialog does not say so
+
+**Type:** ux · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/database/backup.rs:552-599` — `restore_from_backup` copies the whole backup over the live DB via `Backup::step(-1)` (583-590) with no table preservation, while the sync importer keeps `proxy_request_logs`, `stream_check_logs`, `proxy_live_backup`, `usage_daily_rollups` through `SYNC_PRESERVE_TABLES` + `restore_tables` (28-34, 128-130, 179-233). The UI confirmation only says 'Restoring this backup will overwrite the current database. A safety backup will be created first.' (`src/i18n/locales/en.json:453-454`, `src/components/settings/BackupListSection.tsx:87-100`). Automatic backups are taken every 24 h by default (`src-tauri/src/settings.rs:1065-1074`).
+- **Problem:** A user restoring yesterday's automatic backup to undo a bad provider edit also silently loses up to a day of request logs, cost history and the live-config backup row used to exit takeover; nothing in the dialog warns them and the only recovery is to restore the safety backup and redo the edit by hand.
+- **Proposal:** Add a `preserve_local_tables: bool` option to `restore_from_backup` (default true) that reuses `restore_tables` to carry the current local-only tables into the restored DB, expose it as a checkbox in the restore dialog, and show the backup's timestamp plus the number of newer log rows that would be discarded when the box is unchecked.
+- **Acceptance:** Test: insert log/rollup/live-backup rows after creating a backup, restore with preservation on — rows survive; with it off — rows are gone; the dialog text mentions usage data and the backup time.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DB-43: Every sync export copies the entire database — including the log tables it is about to skip — into an in-memory SQLite snapshot
+
+**Type:** performance · **Priority:** P3 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/database/backup.rs:53-56` `export_sql_string_for_sync` calls `snapshot_to_memory` (150-164), which runs the Backup API from the live file into `:memory:` for all pages, and only afterwards `dump_sql` skips `SYNC_SKIP_TABLES` row data (434-436). This runs on every WebDAV/S3 auto-sync upload, which fires 1-10 s after any providers/settings/proxy_config write (`src-tauri/src/services/webdav_auto_sync.rs:15-16, 43-56, 106-124, 167-194`), and on manual uploads. Distinct from DB-12 (the output `String`): streaming the dump to a file would not remove this copy.
+- **Problem:** With a 30-day `proxy_request_logs` table of hundreds of MB, each provider edit triggers a full-database RAM copy under the global lock (blocking the proxy logger and UI for the copy duration) even though 99% of the copied pages are discarded; memory spikes scale with log volume, not config size.
+- **Proposal:** Dump directly from a second read-only connection to the DB file (`OpenFlags::SQLITE_OPEN_READ_ONLY`, consistent via a single `BEGIN`), or build the snapshot by `ATTACH`ing the live file and `CREATE TABLE snap.x AS SELECT * FROM main.x` only for non-skipped tables; keep `snapshot_to_memory` for the full manual export if DB-12's binary export is not adopted.
+- **Acceptance:** Peak RSS during an auto-sync upload on a DB with 500 MB of logs stays within 2x the size of the config tables; the sync export holds the main lock for less than 50 ms on that DB (timing test); `sync_import_preserves_local_only_tables` and the manifest hash tests pass.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DB-44: WebDAV and S3 transports use separate sync mutexes and separate auto-sync suppression counters, allowing a download on one transport to interleave with an upload on the other
+
+**Type:** risk · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** Two independent locks: `src-tauri/src/services/webdav_sync.rs:32-41` and `src-tauri/src/services/s3_sync.rs:26-35` (each its own `OnceLock<tokio::sync::Mutex<()>>`), used by `src-tauri/src/commands/webdav_sync.rs:60-68` and `src-tauri/src/commands/s3_sync.rs:55-63`. Two independent suppression counters and change channels: `src-tauri/src/services/webdav_auto_sync.rs:18-19` and `src-tauri/src/services/s3_auto_sync.rs:18-19`; the WebDAV download command suppresses only the WebDAV worker (`commands/webdav_sync.rs:120`), the S3 download only S3 (`commands/s3_sync.rs:112`). `apply_snapshot` replaces the skills directory before importing the DB (`src-tauri/src/services/sync_protocol.rs:321-337`), and the post-download `run_post_import_sync` writes providers/settings (`commands/webdav_sync.rs:127-129`), which the other transport's hook-driven worker will pick up.
+- **Problem:** With both transports configured, a WebDAV download can run while an S3 auto-upload snapshots the DB and zips the skills dir, pushing a skills.zip/db.sql pair from two different generations (or stale data mid-import) to S3 with a self-consistent manifest; a later S3 download on another device then applies that mismatched pair.
+- **Proposal:** Move the sync mutex and the suppression counter into `sync_protocol.rs` as one process-wide pair shared by all transports; have every download command suppress all auto-sync workers and hold the shared lock across skills + DB replacement and the post-import sync.
+- **Acceptance:** Test: with both workers started, `AutoSyncSuppressionGuard::new()` from the shared module makes both `notify_db_changed` functions no-ops; a WebDAV download holds the lock so a concurrent S3 upload future does not start until it completes.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

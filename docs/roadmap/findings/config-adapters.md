@@ -1,6 +1,6 @@
 # Per-app config adapters & MCP sync — findings (CFG-xx)
 
-Part of the [next-phase proposals](../README.md). 37 findings. Priorities: P2 = 26, P3 = 11.
+Part of the [next-phase proposals](../README.md). 48 findings. Priorities: P2 = 31, P3 = 17.
 
 ## Area summary
 
@@ -36,6 +36,11 @@ The eight per-app adapters are functionally rich and the newest ones (OpenClaw w
 | [CFG-24](#cfg-24) | Feature — schema validation with path-based, localized errors | feature | P2 | L | high |  |
 | [CFG-25](#cfg-25) | `UniversalProvider::to_codex_provider` builds TOML by string formatting without escaping | bug | P2 | S | high |  |
 | [CFG-26](#cfg-26) | No developer documentation of adapter contracts, ownership, backfill rules and backup locations | docs | P2 | M | high |  |
+| [CFG-38](#cfg-38) | Default Codex switch mode overwrites ~/.codex/auth.json (ChatGPT login) with the third-party API key | risk | P2 | S | medium |  |
+| [CFG-39](#cfg-39) | ~/.claude.json is rewritten by unlocked read-modify-write while Claude Code owns it | bug | P2 | M | medium |  |
+| [CFG-40](#cfg-40) | MCP projection deletes same-id servers the user added directly in an app, while live import only runs on first launch | bug | P2 | M | medium |  |
+| [CFG-42](#cfg-42) | Only Hermes merges on write: Codex/OpenCode/Gemini/Grok projection replaces the live entry, drops app-native fields and force-enables servers the user disabled in the app | bug | P2 | M | high |  |
+| [CFG-43](#cfg-43) | Codex history migration replaces session JSONL files by rename while Codex may still be appending to them | bug | P2 | S | medium |  |
 | [CFG-27](#cfg-27) | Codex two-file "atomic" write is not atomic and reads a value it never uses | bug | P3 | S | high |  |
 | [CFG-28](#cfg-28) | `write_json_file` alphabetizes keys and omits the trailing newline, reordering user-visible files on every switch | bug | P3 | S | high |  |
 | [CFG-29](#cfg-29) | Usage-script template variables are substituted textually into JS source | bug | P3 | S | high |  |
@@ -47,6 +52,12 @@ The eight per-app adapters are functionally rich and the newest ones (OpenClaw w
 | [CFG-35](#cfg-35) | Feature — adapters for additional tools once `AppAdapter` exists | feature | P3 | XL | medium |  |
 | [CFG-36](#cfg-36) | Feature — editable Hermes v12+ `providers:` dict entries | feature | P3 | M | medium |  |
 | [CFG-37](#cfg-37) | OpenClaw section rewrite loses in-section comments and uses two different JSON5 parsers | bug | P3 | M | high |  |
+| [CFG-41](#cfg-41) | MCP projection rewrites each live file once per server (plus once per disabled server) instead of once per app | performance | P3 | M | high |  |
+| [CFG-44](#cfg-44) | Codex history migration is all-or-nothing per startup and its backups have no retention or visibility | tech-debt | P3 | M | high |  |
+| [CFG-45](#cfg-45) | remove_server_from_codex / remove_server_from_grokbuild swallow TOML parse errors and report success | bug | P3 | S | high |  |
+| [CFG-46](#cfg-46) | MCP sync silently does nothing when an app's config directory is missing, while the DB and UI record the server as enabled | ux | P3 | S | high |  |
+| [CFG-47](#cfg-47) | Claude Desktop 3P profile is written with coworkEgressAllowedHosts: ["*"] | security | P3 | S | medium |  |
+| [CFG-48](#cfg-48) | write_claude_config replaces an unparseable or non-object ~/.claude/config.json with {} | bug | P3 | S | medium |  |
 
 ## Findings
 
@@ -305,6 +316,56 @@ The eight per-app adapters are functionally rich and the newest ones (OpenClaw w
 - **Proposal:** `docs/dev/config-adapters.md` with a per-app ownership matrix (file, format, mode, owned keys/sections, backfill strips, backup path, env overrides), the SSOT model, and sequence diagrams for switch/backfill/takeover; rustdoc module headers for each adapter; a user-facing "Where are my backups?" page.
 - **Acceptance:** Doc exists and is linked from `CLAUDE.md`/`README`; each adapter module has a `//!` header pointing to its row in the matrix.
 
+### CFG-38: Default Codex switch mode overwrites ~/.codex/auth.json (ChatGPT login) with the third-party API key
+
+**Type:** risk · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/settings.rs:521` — `preserve_codex_official_auth_on_switch: false` is the default. `src-tauri/src/codex_config.rs:1715-1724` — `should_write_auth` is true for every non-official provider while that flag is false, so `write_codex_live_for_provider` takes the `write_codex_live_atomic(auth, config_text)` branch; `src-tauri/src/codex_config.rs:244` — `write_json_file(&auth_path, auth)` replaces the whole file. The config-only path (`prepare_codex_provider_live_config` → `experimental_bearer_token`, `:1733-1744`) already exists but is opt-in. `src-tauri/src/services/provider/mod.rs:2636-2663` — the only copy of the previous tokens is the backfill into the *current* provider's DB snapshot (skipped when `read_live_settings` fails). `src-tauri/src/codex_config.rs:1715-1718` + `:361-386` — switching back to an official provider whose stored `auth` has no login material takes the config-only branch and leaves the third-party key in `auth.json`.
+- **Problem:** Out of the box, every switch to a third-party Codex provider destroys the user's ChatGPT OAuth material (`tokens.*`, `last_refresh`) on disk; it survives only inside cc-switch's SQLite DB. A `codex login` performed while a third-party provider is active is captured into that third-party provider's snapshot on the next switch, never into the official one. If the official provider was seeded without login material, switching back leaves `auth.json` holding the third-party key while `config.toml` points at OpenAI (401 until the user logs in again). The safe mode is hidden behind an off-by-default 'compat' flag with no explanation in the switch flow.
+- **Proposal:** Default `preserve_codex_official_auth_on_switch` to `true` for new installs (honour an explicit `false` in existing settings files). In the `should_write_auth` branch, refuse to overwrite an `auth.json` that has OAuth material (`codex_auth_has_oauth_login_material`) with an API-key-only payload unless the user confirmed once. When the official provider's stored `auth` has no login material, do not leave a third-party key behind: strip `OPENAI_API_KEY` from `auth.json` instead. Surface the mode in the Codex settings card with a one-line explanation.
+- **Acceptance:** Fresh install with a logged-in Codex: switching official → third-party → official with default settings leaves `~/.codex/auth.json` byte-identical (tokens intact). Unit test for `write_codex_live_for_provider` with an OAuth `auth.json` on disk and a third-party provider asserts the OAuth keys survive. Switching third-party → official with an empty stored `auth` never leaves `OPENAI_API_KEY=<third-party key>` in `auth.json`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-39: ~/.claude.json is rewritten by unlocked read-modify-write while Claude Code owns it
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/claude_mcp.rs:345-404` — `set_mcp_servers_map` reads the whole `~/.claude.json` (`:349-353`), replaces `mcpServers`, and writes the entire document back (`:402`) with no lock and no check that the file is unchanged since the read; the same pattern is in `set_has_completed_onboarding` (`:150-173`) and `upsert_mcp_server` (`:239-266`), and it is executed once per MCP server by `sync_single_server_to_claude`/`remove_server_from_claude` (`src-tauri/src/mcp/claude.rs:117-149`) inside `project_servers_to_app` (`src-tauri/src/services/mcp.rs:234-241`). The codebase already has the right guard elsewhere: `src-tauri/src/openclaw_config.rs:327-337` refuses to save when the on-disk source changed since load, and `src-tauri/src/codex_history_migration.rs:1060-1073` re-checks mtime/len before replacing a file.
+- **Problem:** `~/.claude.json` is Claude Code's live state file (projects, OAuth account, onboarding counters, tips, per-project MCP/allow lists) that Claude Code rewrites at startup, on exit and on many events. Every cc-switch window 'read → serialize → tmp write → rename' (repeated N times per sync) can clobber a Claude Code write with a stale copy (silent loss of Claude Code state), or be clobbered by Claude Code right after the rename (silent loss of the MCP change the UI just reported as applied).
+- **Proposal:** Add a shared `guarded_rmw(path, |value| …)` helper for every JSON adapter that edits a foreign-owned file: capture `(mtime, len)` or a content hash at read, re-check immediately before `rename`, retry a few times on mismatch, otherwise return a typed conflict error. Coalesce the per-server loop into one RMW per app (see the batching finding). Optionally take an advisory `flock` on Unix.
+- **Acceptance:** A test simulates an external modification of `~/.claude.json` between read and write and asserts the external change is preserved (retry) or a conflict error is returned, never silently overwritten; `project_servers_to_app` performs at most one rewrite of `~/.claude.json` per call.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-40: MCP projection deletes same-id servers the user added directly in an app, while live import only runs on first launch
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/services/mcp.rs:225-243` — `project_servers_to_app` calls `remove_server_from_app` for every DB server whose `apps.<app>` flag is off, regardless of whether cc-switch ever wrote that entry. The removers delete by id only: `src-tauri/src/mcp/codex.rs:404-444`, `src-tauri/src/mcp/claude.rs:137-149`, `src-tauri/src/mcp/gemini.rs:132-144`, `src-tauri/src/mcp/grokbuild.rs:158-181`, `src-tauri/src/mcp/hermes.rs:236-246`, `src-tauri/src/opencode_config.rs:196-204`. `src-tauri/src/lib.rs:760-761` — live MCP configs are imported into the DB only when the table is empty, so an entry added later with `claude mcp add` or by hand in `config.toml` is unknown to the DB (contrast `src-tauri/src/lib.rs:677-707`, where OpenCode/OpenClaw/Hermes *providers* are re-imported on every startup). The projection runs after every provider switch (`src-tauri/src/services/provider/mod.rs:2743`), on `sync_current_to_live` (`src-tauri/src/services/provider/live.rs:1224,1295`) and on the manual sync.
+- **Problem:** A user with `context7` in the DB enabled only for Claude who later adds a `context7` entry directly to `~/.codex/config.toml` loses that Codex entry on the next provider switch (for any app) or sync, with no warning; the same applies to `~/.claude.json`, Gemini `settings.json`, `opencode.json`, `~/.grok/config.toml` and Hermes `config.yaml`. The DB is treated as the single source of truth for *removal* although it is populated from the live files exactly once.
+- **Proposal:** Track ownership: when cc-switch projects a server into an app, record `(app, id)` (a `projected_apps` column on `mcp_servers` or a sidecar table); `project_servers_to_app` removes only ids it previously projected whose live entry still equals the last projected spec, and reports foreign entries as warnings instead of deleting them. Alternatively (or additionally) run the MCP import on every startup like the additive-provider import, so hand-added entries become DB rows before any projection.
+- **Acceptance:** Test: DB has server X with `apps.codex=false`; `~/.codex/config.toml` contains a hand-written `[mcp_servers.X]`; after `sync_enabled_for_app(Codex)` the entry is still present and the result carries a warning naming it. A server cc-switch itself projected and then disabled is still removed.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-42: Only Hermes merges on write: Codex/OpenCode/Gemini/Grok projection replaces the live entry, drops app-native fields and force-enables servers the user disabled in the app
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/mcp/opencode.rs:76` and `:96` — `convert_to_opencode_format` unconditionally inserts `"enabled": true`; `src-tauri/src/opencode_config.rs:182-194` — `set_mcp_server` replaces the entry wholesale, so OpenCode-only keys (`timeout`, OAuth settings, `enabled: false`) are lost. `src-tauri/src/mcp/codex.rs:393` — `doc["mcp_servers"][id] = Item::Table(...)` replaces the Codex table, so hand-set `enabled = false`, `startup_timeout_sec`, `enabled_tools` disappear unless they happen to be in the DB spec; `src-tauri/src/mcp/grokbuild.rs:154` and `src-tauri/src/mcp/gemini.rs:124-128` do the same. By contrast `src-tauri/src/mcp/hermes.rs:188-233` merges and lets an existing Hermes `enabled` win (`:225-227`) over a hard-coded allowlist (`HERMES_EXTRA_FIELDS`, `:32-40`), so for Hermes a cc-switch 'enable' is a silent no-op when the user had `enabled: false`, and any Hermes field outside the allowlist is dropped.
+- **Problem:** Toggling a server in cc-switch (or any provider switch, which re-projects) overrides per-app decisions the user made inside the app: an OpenCode server the user disabled comes back enabled, Codex per-server timeouts/tool filters vanish, while in Hermes the opposite happens (cc-switch cannot enable a server). Behaviour differs per app with no documentation, and the Hermes allowlist needs manual upkeep as Hermes evolves.
+- **Proposal:** Define one merge policy in the shared layer: core transport keys (`type/command/args/env/url/headers`, per adapter mapping) come from the DB; every other key already present in the live entry is preserved (inverse allowlist, no per-app field lists); `enabled` is written explicitly from cc-switch's toggle for all apps. Implement it once as `merge_live_entry(existing, projected, core_keys)` and use it in the Codex, OpenCode, Gemini and Grok writers; move Hermes onto the same helper.
+- **Acceptance:** Round-trip tests per adapter: a live entry with an app-native extra key and `enabled:false` → cc-switch enable → the extra key survives and `enabled` is true; cc-switch disable → entry removed/disabled consistently across apps; a Hermes entry with a key not in the old allowlist survives a sync.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-43: Codex history migration replaces session JSONL files by rename while Codex may still be appending to them
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/codex_history_migration.rs:1022-1058` — `rewrite_codex_session_file_lines` reads the whole file, rewrites the `session_meta` line and calls `atomic_write` (`:1056`), i.e. tmp file + `rename` over the original (`src-tauri/src/config.rs:344-350`). `:1060-1073` — `ensure_codex_session_file_unchanged` only compares mtime/len before and after the read; it cannot see an open writer. `:961-1009` — every `.jsonl` under `sessions/` and `archived_sessions/` is a candidate. `src-tauri/src/lib.rs:609-668` — the migrations run in `spawn_blocking` on every startup with no check that a `codex` process is running.
+- **Problem:** On macOS/Linux a Codex process that has the rollout file open keeps writing to the now-unlinked inode: every turn after the migration is lost for that session (the file cc-switch left behind stops growing) and the state DB points at a truncated transcript. The first cc-switch start after an upgrade is exactly when a session created under an old provider id is most likely to be live. On Windows the replace typically fails with a sharing violation instead, aborting the whole run (see the all-or-nothing finding).
+- **Proposal:** Skip files whose mtime is within a recent window (e.g. 15 min), log them, and do not write the completion marker while any file was skipped so the next startup retries; optionally detect a running `codex` process and defer the whole migration. If a file is skipped repeatedly, fall back to an in-place rewrite of the same inode (open with truncate) rather than rename.
+- **Acceptance:** A test creates a jsonl, keeps it open with a writer, runs the migration and asserts the file was skipped and the marker not written; a second run after the writer closes migrates it and writes the marker. No session file with mtime inside the window is rewritten in one run.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### CFG-27: Codex two-file "atomic" write is not atomic and reads a value it never uses
 
 **Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
@@ -403,3 +464,63 @@ The eight per-app adapters are functionally rich and the newest ones (OpenClaw w
 - **Problem:** The best adapter in the tree still degrades files on every provider write, and dialect differences between the two parsers can make a file readable but unwritable ("Failed to parse OpenClaw config as round-trip JSON5 document").
 - **Proposal:** Use the `json_five` rt AST for reading as well (convert to `Value` from the AST), patch nested paths in the AST instead of replacing root sections, and track the upstream panic fix (or vendor a patch).
 - **Acceptance:** Fixture with comments inside `models.providers` keeps them after `set_provider`; a single parser is used for read and write.
+
+### CFG-41: MCP projection rewrites each live file once per server (plus once per disabled server) instead of once per app
+
+**Type:** performance · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/services/mcp.rs:234-241` — the loop calls `sync_server_to_app`/`remove_server_from_app` per server, and each adapter does a full read-parse-write: `src-tauri/src/mcp/claude.rs:126-133` and `:142-148` (`remove` writes even when the id was absent), `src-tauri/src/mcp/gemini.rs:122-128,138-144`, `src-tauri/src/mcp/codex.rs:349-399,427-442`, `src-tauri/src/mcp/grokbuild.rs:142-156,174-180`, `src-tauri/src/mcp/opencode.rs:184-207` → `src-tauri/src/opencode_config.rs:182-204`. `src-tauri/src/services/mcp.rs:196-215` — `sync_all_enabled` repeats this for all six apps. Only Hermes short-circuits unchanged writes (`src-tauri/src/hermes_config.rs:445-447`). Each write is a tmp-file + rename (`src-tauri/src/config.rs:297-352`), and Gemini re-runs the timeout/`cmd /c` transforms on every entry (`src-tauri/src/gemini_mcp.rs:76-165`).
+- **Problem:** With N servers, a provider switch or 'sync all' performs up to 6·N file replacements (N of them no-ops), each a crash/race window on files other processes own (see the `~/.claude.json` race), each bumping mtime on files Claude Code and Gemini watch, and each re-emitting the whole document. Partial failure is also hard to reason about: server k failing leaves 1..k-1 applied and k+1..N not.
+- **Proposal:** Give every adapter one `reconcile(desired: &IndexMap<String, Value>) -> Result<ReconcileReport>` that reads once, diffs against the current map, and writes once only if something changed; `project_servers_to_app` builds the desired map and calls it. Keep `sync_single_server_to_*` as thin wrappers over `reconcile` for the toggle path.
+- **Acceptance:** A test with 20 servers and one app asserts exactly one write (count `atomic_write` calls or compare mtime) for `sync_enabled_for_app`, and zero writes when the live file already matches the desired projection.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-44: Codex history migration is all-or-nothing per startup and its backups have no retention or visibility
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/codex_history_migration.rs:143-160` — a fresh timestamped `backup_root` (`:749-754`) is created on every attempt, `migrate_codex_jsonl_files(...)?` aborts on the first file error and the completion marker is written only afterwards (`:151`); `:973-979` — each file's result is propagated with `?`; `:1031` — a single non-UTF-8 or unreadable `.jsonl` (`fs::read_to_string`) fails the whole migration, which re-runs and re-fails on every startup (`src-tauri/src/lib.rs:611-640` only logs). `:1178-1187` — every rewritten session file is copied under `~/.cc-switch/backups/codex-history-provider-migration-v1/<ts>/jsonl/…`. Retention helpers exist for Hermes/OpenClaw/DB backups (`src-tauri/src/hermes_config.rs:383-413`, `src-tauri/src/openclaw_config.rs:405-435`, `src-tauri/src/database/backup.rs:337`) but none for the two migration directories; the unify backups additionally serve as the restore ledger (`:435-465`).
+- **Problem:** One bad file blocks the migration for every other session indefinitely with only a log line, while a user with a large `~/.codex/sessions` tree receives a full copy of every rewritten transcript (potentially gigabytes) under `~/.cc-switch/backups` that nothing prunes and no UI shows; each failed attempt adds another timestamp directory.
+- **Proposal:** Make per-file failures non-fatal: collect `(path, error)` into the outcome, migrate the rest, write the marker with a `pending_files` list and retry only those (capped). Add a retention policy for `codex-history-provider-migration-v1` (not a ledger) and a ledger-aware one for `codex-official-history-unify-v1` (keep generations referenced by `collect_official_ledger`), plus a size readout and purge action in Settings → Backups.
+- **Acceptance:** A test with one invalid-UTF-8 jsonl among valid ones migrates the valid ones, records the failure and writes the marker; backup generations beyond the retain count are pruned; the settings page shows the migration backup size.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-45: remove_server_from_codex / remove_server_from_grokbuild swallow TOML parse errors and report success
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/mcp/codex.rs:418-424` — on `parse::<DocumentMut>()` failure the remover logs a warning and `return Ok(())`; `src-tauri/src/mcp/grokbuild.rs:167-173` — same. The add path returns an error for the same condition (`src-tauri/src/mcp/codex.rs:365-369`). `src-tauri/src/services/mcp.rs:78-92` — `toggle_app` has already persisted `apps.codex=false` before calling the remover, so the UI shows the server disabled while `config.toml` still lists it; `sync_all_enabled` (`:196-215`) aggregates adapter errors, but a swallowed error never reaches it.
+- **Problem:** A user disables or deletes an MCP server, sees success, and Codex/Grok keep launching the server (possibly with credentials the user meant to revoke). Because the DB now says 'not enabled', later projections only retry the same silent branch, so the state never self-heals.
+- **Proposal:** Return `Err(AppError::McpValidation(…))` from both removers on parse failure (mirroring `sync_single_server_to_codex`), let `toggle_app`/`delete_server` surface it, and keep the DB change (the user's intent) while the toast says which app needs a manual fix.
+- **Acceptance:** Unit test: invalid `config.toml` + `remove_server_from_codex` → `Err`; `toggle_app(…, false)` propagates the error to the command layer and the frontend shows it.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-46: MCP sync silently does nothing when an app's config directory is missing, while the DB and UI record the server as enabled
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/mcp/claude.rs:11-15` with `:42-44`, `:122-124`, `:138-140`; `src-tauri/src/mcp/codex.rs:16-20`; `src-tauri/src/mcp/gemini.rs:11-15`; `src-tauri/src/mcp/grokbuild.rs:14-16`; `src-tauri/src/mcp/opencode.rs:29-32`; `src-tauri/src/mcp/hermes.rs:47-49` — every `should_sync_*` guard makes the adapter return `Ok(())` when the directory does not exist. `src-tauri/src/services/mcp.rs:78-92` — `toggle_app` saves `apps.<app>=true` first and treats `Ok(())` as applied. The checks resolve through the override dirs (`src-tauri/src/config.rs:37-43`, `src-tauri/src/codex_config.rs:158-164`), so a mistyped custom directory in Settings produces the same permanent silent no-op.
+- **Problem:** The toggle turns green, nothing is written, and the user has no signal why Claude/Codex/Gemini do not see the server. The guard's policy (never create directories for uninstalled apps) is reasonable, but its outcome is indistinguishable from success in the command result.
+- **Proposal:** Return a small `SyncOutcome { applied: bool, skipped_reason: Option<&'static str> }` from the adapters (or a warning list from `toggle_app`/`upsert_server`/`sync_all_enabled`) and render a non-blocking hint in the MCP panel ('Codex config directory not found: ~/.codex — nothing was written'); offer 'create directory and write anyway' for custom override paths.
+- **Acceptance:** Toggling a server for an app whose directory is missing returns a result the frontend shows as a warning; the MCP list shows a 'not applied' badge for that app; no directory is created unless the user opts in.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-47: Claude Desktop 3P profile is written with coworkEgressAllowedHosts: ["*"]
+
+**Type:** security · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/claude_desktop_config.rs:1021-1041` — `build_gateway_profile` hard-codes `"coworkEgressAllowedHosts": ["*"]` (`:1027`) for both direct and proxy profiles; tests `:1507` and `:1568` lock the value in; the profile is written to `configLibrary/<PROFILE_ID>.json` by `apply_provider_to_paths_inner` (`:969-1006`, write at `:1002`) with no UI control.
+- **Problem:** Applying any cc-switch provider to Claude Desktop also lifts the Cowork egress allowlist to every host, a security-relevant change the user did not ask for and cannot see or narrow in cc-switch. A direct provider only needs the gateway host; proxy mode only needs the local proxy origin.
+- **Proposal:** Default the allowlist to the minimum the profile needs (gateway host for direct, proxy origin for proxy) and expose an optional 'additional egress hosts' field in the Claude Desktop provider form, with `*` as an explicit opt-in that shows a warning.
+- **Acceptance:** A direct-mode profile contains only the gateway host in `coworkEgressAllowedHosts`; proxy mode contains only the proxy origin; `*` appears only when the user enables it; existing tests are updated accordingly.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CFG-48: write_claude_config replaces an unparseable or non-object ~/.claude/config.json with {}
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/claude_plugin.rs:57-63` — any parse failure or non-object root collapses to `json!({})`, then `:80-83` writes `{"primaryApiKey":"any"}` back with `fs::write`, discarding whatever the file held. The sibling helper for `~/.claude.json` errors instead (`src-tauri/src/claude_mcp.rs:158-160`, '根必须是对象'). This is a second instance of the pattern already reported for Gemini `settings.json` (CFG-02), in a different adapter and trigger (plugin apply).
+- **Problem:** A temporarily invalid or hand-edited `~/.claude/config.json` (trailing comma, BOM, comment) is silently wiped when the user clicks 'apply plugin config'; no backup, no error.
+- **Proposal:** Mirror `set_has_completed_onboarding`: return `AppError::Config` on parse failure or non-object root, leave the file untouched, and route the write through `atomic_write` (the non-atomic `fs::write` is already noted in CFG-32).
+- **Acceptance:** Unit test: invalid JSON in `~/.claude/config.json` → `write_claude_config` returns `Err` and the file is byte-identical afterwards; `clear_claude_config` behaves the same.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

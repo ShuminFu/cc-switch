@@ -1,6 +1,6 @@
 # Proxy providers & format conversion — findings (PROV-xx)
 
-Part of the [next-phase proposals](../README.md). 33 findings. Priorities: P2 = 23, P3 = 10.
+Part of the [next-phase proposals](../README.md). 43 findings. Priorities: P2 = 28, P3 = 15.
 
 ## Area summary
 
@@ -33,6 +33,11 @@ The provider/format layer is large (~36k lines in scope, ~600 unit tests) and ha
 | [PROV-27](#prov-27) | Test-coverage holes in the Claude-side converters and Gemini bridge | test | P2 | M | high |  |
 | [PROV-28](#prov-28) | Auth managers have no HTTP-mocked or concurrency tests | test | P2 | M | high |  |
 | [PROV-32](#prov-32) | #5508 reasoning forward-attach is not mirrored in the Claude→Chat direction for text-only assistant turns | bug | P2 | S | medium |  |
+| [PROV-34](#prov-34) | Gemini stream converter turns upstream error payloads and truncated streams into clean `end_turn` completions | bug | P2 | S | high |  |
+| [PROV-35](#prov-35) | Empty upstream message ids collapse usage rows onto `request_id = "session:"` and `INSERT OR REPLACE` overwrites history | bug | P2 | S | high |  |
+| [PROV-36](#prov-36) | Codex→Anthropic bridge cannot carry unsigned `thinking`: dangling reasoning item in streaming, and thinking disabled on every tool-continuation turn for non-signing gateways | bug | P2 | M | medium |  |
+| [PROV-37](#prov-37) | Chat→Anthropic converter emits `message_stop` with open blocks and no `message_delta` when `[DONE]` arrives without a prior `finish_reason` | bug | P2 | S | medium |  |
+| [PROV-38](#prov-38) | `CodexAdapter::extract_base_url` takes the first `base_url` in config.toml while routing decisions use the active `model_provider` block | bug | P2 | S | medium |  |
 | [PROV-03](#prov-03) | Gemini streaming text uses an ambiguous prefix heuristic that can drop or duplicate text | bug | P3 (first pass P1) | M | medium | partially-confirmed |
 | [PROV-16](#prov-16) | Chat-SSE converter emits empty thinking blocks and can reopen closed blocks after `finish_reason` | bug | P3 | S | medium |  |
 | [PROV-22](#prov-22) | `response_handler.rs` is dead code | tech-debt | P3 | S | high |  |
@@ -43,6 +48,11 @@ The provider/format layer is large (~36k lines in scope, ~600 unit tests) and ha
 | [PROV-30](#prov-30) | Shadow/history stores take write locks and clone on every read; prune is O(total calls) | performance | P3 | S | high |  |
 | [PROV-31](#prov-31) | Silent field drops across request transforms are undocumented | docs | P3 | S | high |  |
 | [PROV-33](#prov-33) | Text-only model registry is hard-coded in `model_capabilities.rs` | tech-debt | P3 | S | high |  |
+| [PROV-39](#prov-39) | Responses→Anthropic streaming drops message text delivered only in `output_text.done` / `output_item.done` (no done-only fallback for text) | bug | P3 | S | medium |  |
+| [PROV-40](#prov-40) | Inline `<think>` reasoning is withheld until `</think>` in the Chat→Responses stream (no incremental reasoning deltas) | ux | P3 | M | high |  |
+| [PROV-41](#prov-41) | Copilot `/models` list is cached for the process lifetime (documented as a 5-minute TTL), so live-model resolution keeps silently rewriting models | bug | P3 | S | high |  |
+| [PROV-42](#prov-42) | Copilot detection inside `transform_claude_request_for_api_format` reads a `baseUrl` key no other code path writes or reads | tech-debt | P3 | S | medium |  |
+| [PROV-43](#prov-43) | Codex OAuth `originator`/`version` headers are compile-time constants with no override, so a raised `minimal_client_version` breaks every ChatGPT-backed request until a release | feature | P3 | S | medium |  |
 
 ## Findings
 
@@ -259,6 +269,56 @@ The provider/format layer is large (~36k lines in scope, ~600 unit tests) and ha
 - **Proposal:** When `preserve_reasoning_content` is set, write `reasoning_content` on every assistant message that had `thinking`/`redacted_thinking` blocks (not only tool-call turns), reusing `codex_chat_common::append_reasoning_content`.
 - **Acceptance:** Test: Anthropic assistant message `[thinking, text]` with a Kimi provider → Chat assistant message with `reasoning_content`; generic provider unchanged.
 
+### PROV-34: Gemini stream converter turns upstream error payloads and truncated streams into clean `end_turn` completions
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/providers/streaming_gemini.rs:237-406` — the chunk loop only reads `responseId`, `modelVersion`, `usageMetadata`, `promptFeedback.blockReason` (`:325`) and `candidates`; lines 1-575 contain no access to a top-level `error` key at all. After the loop, `streaming_gemini.rs:555-572` unconditionally emits `message_delta` + `message_stop` using `map_finish_reason(latest_finish_reason.as_deref(), ...)`, whose fallback is `_ => "end_turn"` (`streaming_gemini.rs:18-31`) even when no `finishReason` was ever received; `streaming_gemini.rs:486` then records the empty/partial turn into the shadow store. A transport error (`streaming_gemini.rs:405-406`) yields a raw `io::Error` instead of an Anthropic `error` SSE event. Contrast `streaming_responses.rs:1260-1270` (`response.failed`/`error` → `event: error`) and `streaming_responses.rs:1481-1533` (clean EOF → `max_tokens` or `stream_truncated`), and `streaming.rs:649-668` (no success terminal events without `finish_reason`).
+- **Problem:** Gemini-compatible relays (and Gemini itself on quota/safety failures delivered inside a 200 SSE body) send `data: {"error": {...}}`. The converter has already emitted `message_start`, so Claude Code receives an empty assistant turn with `stop_reason: end_turn` and no error text; a connection dropped mid-answer is likewise presented as a normal completion, and the truncated turn is written to the Gemini shadow store and replayed on the next request. Retry/failover logic in the client never fires because the stream looks successful.
+- **Proposal:** In the chunk loop, detect a top-level `error` object (`error.message`/`error.code`/`error.status`) and emit `event: error` with the upstream details, mark the stream terminated and skip shadow recording. At EOF without any `finishReason`, emit `stop_reason: "max_tokens"` when partial visible text exists, or an `error` event (`stream_truncated`) when nothing substantive was produced, mirroring `streaming_responses.rs:1481-1533`. Convert the `Err(e)` branch into an Anthropic `error` SSE event as `streaming.rs` and `streaming_responses.rs` do.
+- **Acceptance:** Unit tests in `streaming_gemini.rs`: (a) an SSE whose only payload is `{"error":{"code":429,"message":"quota"}}` yields `event: error` containing "quota" and no `message_stop`; (b) a stream ending after partial text with no `finishReason` yields `stop_reason: "max_tokens"`; (c) an upstream `Err` yields an `error` SSE event rather than an `Err` stream item; (d) no shadow turn is recorded for case (a).
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROV-35: Empty upstream message ids collapse usage rows onto `request_id = "session:"` and `INSERT OR REPLACE` overwrites history
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/usage/parser.rs:52-56` — `dedup_request_id` returns `session:{message_id}` whenever `message_id` is `Some`; `parser.rs:91-94` and `parser.rs:128-133` store the upstream `id` as `Some(id.to_string())` with no emptiness filter. `src-tauri/src/proxy/usage/logger.rs:82` writes with `INSERT OR REPLACE INTO proxy_request_logs` keyed on `request_id`. Every Claude-side converter synthesizes an empty id when the upstream omits one: `transform.rs:712`, `transform_responses.rs:846` (`unwrap_or("")`), `streaming.rs:256`, `streaming_responses.rs:438/476/498/673/736/1183/1508`, `streaming_gemini.rs:312/416` (`unwrap_or_default()`), `transform_gemini.rs:148/248`. `src-tauri/src/proxy/handlers.rs:447` runs `from_claude_stream_events` on the converted stream, so these ids become the dedup key.
+- **Problem:** Any upstream that omits `id` (OpenAI-compatible relays), `responseId` (Gemini-format relays) or never sends `response.created` (Responses-compatible gateways, explicitly tolerated at `streaming_responses.rs:476-498`) produces `request_id = "session:"` for every request. Each new request replaces the previous row, so cost totals, request counts and history for that provider silently collapse to a single row — a data-loss bug in the usage database rather than a cosmetic one.
+- **Proposal:** Treat empty ids as absent in `TokenUsage::from_claude_response` / `from_claude_stream_events` (`.filter(|s| !s.is_empty())`) so `dedup_request_id` falls back to a UUID; have the converters synthesize `msg_{uuid}` when the upstream id is empty so clients also get a unique id; add a defensive check in `UsageLogger::log_request` that refuses the bare `session:` prefix.
+- **Acceptance:** Logging two converted responses that carry `id: ""` produces two distinct `proxy_request_logs` rows; a regression test asserts `TokenUsage { message_id: Some(""), .. }.dedup_request_id() != "session:"`; converter tests assert `message_start.message.id` is non-empty when the upstream omits `id`/`responseId`/`response.created`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROV-36: Codex→Anthropic bridge cannot carry unsigned `thinking`: dangling reasoning item in streaming, and thinking disabled on every tool-continuation turn for non-signing gateways
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/providers/transform_codex_anthropic.rs:66-80` — `encode_anthropic_thinking_block` returns `None` unless the block carries a non-empty `signature`/`data`, so `responses_reasoning_item_from_anthropic_block` (`:96-100`) yields no item for unsigned thinking (locked in for the non-streaming path by `transform_codex_anthropic.rs:2277` `test_unsigned_thinking_is_not_replayed_as_encrypted_reasoning`). In the streaming path `streaming_codex_anthropic.rs:241-262` has already emitted `response.output_item.added` + `reasoning_summary_part.added` and streamed `reasoning_summary_text.delta`s, but `close_block` (`streaming_codex_anthropic.rs:411-420`) returns `Vec::new()` when no item can be built, so no `summary_part.done`/`output_item.done` is sent and the item is absent from `response.completed.output`. On the next request `trailing_turn_supports_thinking` (`transform_codex_anthropic.rs:895-941`) requires a thinking block in the paired assistant turn; otherwise `thinking` is disabled/omitted (`:318-330`). The DeepSeek/Kimi placeholder normalization that fixes exactly this on the Claude path (`claude.rs:140-160`, `normalize_anthropic_tool_thinking_history`) only runs when `adapter.name() == "Claude"` (`src-tauri/src/proxy/forwarder.rs:1331-1339`), never for the CodexAdapter→Anthropic bridge.
+- **Problem:** DeepSeek, Kimi, GLM and MiniMax Anthropic-compatible endpoints emit `thinking` blocks without signatures. Through Codex: (1) the client receives a reasoning item whose summary streams and then never completes (Responses protocol violation; the item vanishes from the final output); (2) every tool-result turn is replayed without any thinking history, so reasoning is silently switched off for the rest of the agentic loop or, for vendors that insist on replayed thinking (documented at `claude.rs:140-146`), the follow-up request 400s.
+- **Proposal:** Encode unsigned thinking too (e.g. a second envelope prefix `ccswitch-anthropic-thinking-unsigned-v1:` wrapping the plain block) so `responses_reasoning_item_from_anthropic_block` always returns an item; on replay emit a plain `thinking` block (no signature) and let `trailing_turn_supports_thinking` accept it for providers matched by `is_reasoning_vendor_identifier`; alternatively apply `normalize_anthropic_tool_thinking_history` on the CodexAdapter Anthropic path. In streaming, always close the reasoning item (summary-only `output_item.done`) even when no envelope is produced.
+- **Acceptance:** Streaming test: Anthropic SSE with an unsigned `thinking` block followed by `tool_use` yields exactly one `response.output_item.added` and one matching `response.output_item.done` for the reasoning item, and the item appears in `response.completed.output`. Request test: replaying that Codex history for a `deepseek-*` model keeps thinking enabled and places a `thinking` block before the `tool_use` in the assistant turn.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROV-37: Chat→Anthropic converter emits `message_stop` with open blocks and no `message_delta` when `[DONE]` arrives without a prior `finish_reason`
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/providers/streaming.rs:188-206` — on `[DONE]` the converter flushes `pending_message_delta` only if it exists, then unconditionally yields `message_stop`. Open text/thinking/tool blocks are closed and `pending_message_delta` is populated only inside the `finish_reason` branch (`streaming.rs:517-621`). The clean-EOF path (`streaming.rs:649-668`) likewise never closes open blocks. Compare `streaming_responses.rs:1481-1533`, which closes dangling blocks and synthesizes `max_tokens` on a clean EOF.
+- **Problem:** Gateways that send `finish_reason: null` on every chunk, or strip it when they truncate, and then `[DONE]` produce an Anthropic stream with an unterminated `content_block` (tool_use `input_json_delta`s never finalized by `content_block_stop`), no `stop_reason` and no `usage`. Claude Code either rejects the malformed stream or runs a tool with incomplete input, and the request is never recorded in usage because `message_delta` never arrives.
+- **Proposal:** On `[DONE]` (and on clean EOF after `message_start`), close `current_non_tool_block_index` and every index in `open_tool_block_indices`, run the late-start logic for pending tool fragments, then emit one `message_delta` (`stop_reason` = `tool_use` if a tool block was open, else `end_turn`; `usage` = `latest_usage` or zeros) before `message_stop`. Extract the block-closing code from the `finish_reason` branch into a helper shared by all three paths.
+- **Acceptance:** A test feeding text deltas, a tool_call delta and `data: [DONE]` with no `finish_reason` asserts `content_block_stop` for every started block, exactly one `message_delta` with `stop_reason: "tool_use"`, then `message_stop`; `TokenUsage::from_claude_stream_events` on that output returns `Some`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROV-38: `CodexAdapter::extract_base_url` takes the first `base_url` in config.toml while routing decisions use the active `model_provider` block
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/providers/codex.rs:654-700` — after `grok_config::extract_base_url` (`:685`), the adapter falls back to a textual scan `config_str.find("base_url = \"")` (`:688-699`) that returns the first occurrence anywhere in the file. `codex_provider_uses_chat_completions` (`codex.rs:28-78`), `should_send_codex_chat_prompt_cache_key` (`:97-135`) and `infer_codex_chat_reasoning_config` (`:347-360`) instead call `extract_codex_base_url_from_toml` (`:563-566`) → `codex_config::extract_codex_base_url` (`src-tauri/src/codex_config.rs:342-359`), which resolves `model_providers.<model_provider>.base_url`. PROV-29 records the duplicated parsing but not this divergence.
+- **Problem:** A config.toml with several `[model_providers.*]` blocks (typical for users who import their own Codex config) where the active provider is not the first block sends the request to provider A's host while the Responses→Chat/Anthropic bridge, prompt-cache-key policy and reasoning inference are evaluated for provider B: wrong endpoint, 404 on `/responses` vs `/chat/completions`, or a Chat body posted to a Responses host.
+- **Proposal:** Make `CodexAdapter::extract_base_url` call `codex_config::extract_codex_base_url` (active-provider aware) before any textual scan and delete the string scan; warn when multiple provider blocks exist and the active one lacks `base_url`.
+- **Acceptance:** A test with `model_provider = "b"`, `[model_providers.a] base_url = "https://a/v1"` listed before `[model_providers.b] base_url = "https://b/v1/chat/completions"` asserts `extract_base_url` returns the `https://b/...` URL and `codex_provider_uses_chat_completions` is true for the same provider.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### PROV-03: Gemini streaming text uses an ambiguous prefix heuristic that can drop or duplicate text
 
 **Type:** bug · **Priority:** P3 · **Effort:** M · **Confidence:** medium
@@ -349,3 +409,53 @@ The provider/format layer is large (~36k lines in scope, ~600 unit tests) and ha
 - **Problem:** Every new model requires a code release to stop the proxy from sending images that will 400 (the reactive retry at `forwarder.rs:181-194` mitigates but costs a failed round-trip).
 - **Proposal:** Move capabilities into the model pricing/catalog table (which already has per-model rows) with `input_modalities`, seeded from this list and editable in the UI; keep the static list only as the seed migration.
 - **Acceptance:** `is_confirmed_text_only_model` reads from the DB-backed catalog; adding a model via UI changes media sanitization without a rebuild.
+
+### PROV-39: Responses→Anthropic streaming drops message text delivered only in `output_text.done` / `output_item.done` (no done-only fallback for text)
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/providers/streaming_responses.rs:1275-1290` — the `response.output_text.done` arm only closes the current text block and ignores `data.text`; `:643` treats `content_part.done` as a no-op; the `response.output_item.done` handler (`:1291-1434`) has arms for `function_call` (`:1296`) and `reasoning` (`:1358`) only. Tool calls (`:904-920`, `:1314-1330`) and reasoning (`:1385-1400`) both have explicit "gateway skipped delta events" fallbacks; text has none.
+- **Problem:** Responses-compatible gateways that deliver the answer only in `response.output_text.done.text` or in the completed `message` item — the same class of gateways the tool and reasoning fallbacks were written for — produce an empty assistant message with `stop_reason: end_turn`, so the user sees a blank reply and the turn is lost.
+- **Proposal:** Track emitted text per content index; on `output_text.done` (and on `output_item.done` for `message` items) emit a `text_delta` with the full text when nothing was streamed for that index, then close the block — the same shape as the tool/reasoning fallbacks.
+- **Acceptance:** A test with `response.created` → `response.output_text.done {"text":"Hello"}` → `response.completed` asserts the Anthropic stream contains a text block with "Hello"; existing delta-based tests still emit the text exactly once.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROV-40: Inline `<think>` reasoning is withheld until `</think>` in the Chat→Responses stream (no incremental reasoning deltas)
+
+**Type:** ux · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/providers/streaming_codex_chat.rs:199-202` — in `InlineThinkMode::Reasoning` every content delta is appended to `inline_think.buffer` and `drain_complete_inline_think` (`:206-225`) returns `Vec::new()` until `split_leading_think_block` finds the closing tag; only `flush_inline_think_at_boundary` (`:240-262`) releases the buffer at a tool-call boundary or at finalization.
+- **Problem:** Models and gateways that emit inline `<think>` tags (Qwen3, DeepSeek-R1 via vLLM/llama.cpp without a reasoning parser, several relays) produce no Codex-visible output for the entire reasoning phase, which can last tens of seconds to minutes; Codex shows an idle spinner and users assume the request hung, whereas native `reasoning_content` streams incrementally.
+- **Proposal:** While in `Reasoning` mode, emit `reasoning_summary_text.delta` for the buffer prefix that cannot contain a partial `</think>` (retain only the longest suffix that is a prefix of `</think>`), then on the closing tag emit the remainder, finalize reasoning and switch to text; keep the current full-buffer flush for the boundary/EOF cases.
+- **Acceptance:** A streaming test with `<think>` + three reasoning deltas + `</think>answer` asserts a `reasoning_summary_text.delta` is emitted before the chunk containing `</think>` is processed, no `<think>`/`</think>` text leaks into any delta, and the final `response.completed` output equals today's.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROV-41: Copilot `/models` list is cached for the process lifetime (documented as a 5-minute TTL), so live-model resolution keeps silently rewriting models
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/providers/copilot_auth.rs:421` declares `copilot_models: HashMap<String, Vec<CopilotModel>>` with no timestamp; `fetch_models_for_account` (`copilot_auth.rs:791-803`) returns the cached vector unconditionally and only `remove_account`/`clear_auth` evict it. Its callers are `src-tauri/src/proxy/forwarder.rs:2478-2479` — whose doc comment at `forwarder.rs:2455-2457` states "首次请求或 5 min 缓存过期后会触发一次 HTTP" — and `commands/copilot.rs:185/196`. `resolve_against_models` → `family_fallback` (`copilot_model_map.rs:113-127`, `156-177`) rewrites the model to the highest version present in that list, and the forwarder overwrites `body["model"]` with only an info log (`forwarder.rs:2490-2494`).
+- **Problem:** After a user enables a newer model in GitHub Copilot settings (or GitHub rolls one out), every request is silently rewritten to an older family version until the app restarts, and the UI model command returns the same stale list. Because the fallback also picks a *higher* version than requested when the exact one is absent, the Claude Code model indicator does not reflect what actually answered, and premium-request multipliers differ between versions.
+- **Proposal:** Store `(fetched_at, models)` and refetch when older than the documented TTL or after a `model_not_supported` 400; expose an explicit refresh in the Copilot commands; surface substitutions at warn level and via a response header (e.g. `x-ccswitch-model-resolved`) or make family fallback opt-in per provider.
+- **Acceptance:** Unit test: two `fetch_models_for_account` calls separated by more than the TTL trigger a second fetch (injectable clock/fetcher); after a `model_not_supported` 400 the next request refetches before resolving; a test asserts the rewritten model is logged at warn level with both ids.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROV-42: Copilot detection inside `transform_claude_request_for_api_format` reads a `baseUrl` key no other code path writes or reads
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/providers/claude.rs:351-358` — `is_copilot` is `meta.provider_type == "github_copilot"` OR `settings_config.get("baseUrl")` containing `githubcopilot.com`. `ClaudeAdapter::extract_base_url` (`claude.rs:673-706`) reads `env.ANTHROPIC_BASE_URL`, `base_url`, `baseURL` and `apiEndpoint` — never `baseUrl` — and `is_github_copilot` (`claude.rs:502-519`) relies on it for the URL fallback that `test_github_copilot_detection_by_url` protects. The Copilot branch at `claude.rs:359-375` is what derives the prompt-cache session key from `metadata.user_id` / `metadata.session_id`.
+- **Problem:** A Copilot provider recognised only by URL (legacy rows without `meta.providerType`) is treated as non-Copilot in this function, so its cache-key derivation diverges from every other Copilot code path, and the `baseUrl` lookup is dead code that misleads maintainers into thinking that key is supported.
+- **Proposal:** Replace the ad-hoc check with `ClaudeAdapter::new().is_github_copilot(provider)` (make it `pub(crate)`) and delete the `baseUrl` lookup; add a test with `env.ANTHROPIC_BASE_URL = https://api.githubcopilot.com` and no meta asserting the Copilot session-key branch is taken.
+- **Acceptance:** `transform_claude_request_for_api_format` yields the same `prompt_cache_key` for a URL-detected Copilot provider as for a meta-detected one given identical `metadata.user_id`; `grep -rn '"baseUrl"' src-tauri/src/proxy/providers/` returns nothing.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PROV-43: Codex OAuth `originator`/`version` headers are compile-time constants with no override, so a raised `minimal_client_version` breaks every ChatGPT-backed request until a release
+
+**Type:** feature · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/proxy/providers/claude.rs:26-32` — `CODEX_OAUTH_ORIGINATOR = "codex_cli_rs"` and `CODEX_OAUTH_CLIENT_VERSION = "0.144.1"`, with the comment "version 需 ≥ 目标模型 catalog 的 minimal_client_version（luna=0.144.0），新模型抬门槛时同步 bump"; they are emitted verbatim for every `AuthStrategy::CodexOAuth` request in `get_auth_headers` (`claude.rs:846-860`). No provider meta field, proxy setting or environment variable feeds these values.
+- **Problem:** When OpenAI raises the minimum client version for a model cohort (the comment documents this already happened for gpt-5.6-luna), all Codex OAuth users receive HTTP 404 "Model not found" with no actionable hint until CC Switch ships a new build; there is no escape hatch for users or for support.
+- **Proposal:** Read an optional override (`meta.codexClientVersion`, a proxy setting, or `CC_SWITCH_CODEX_CLIENT_VERSION`) falling back to the constant; on the Codex OAuth path map a 404 whose body mentions "Model not found" to an error message naming the client-version setting; keep the constant as the default and add it to the release checklist.
+- **Acceptance:** Unit test: a provider with the override emits `version: <override>` and `originator: codex_cli_rs`; integration test: a 404 from `chatgpt.com/backend-api/codex` surfaces an error whose message mentions the client-version override.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

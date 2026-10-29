@@ -1,6 +1,6 @@
 # Provider management UI — findings (FE-PROV-xx)
 
-Part of the [next-phase proposals](../README.md). 40 findings. Priorities: P1 = 2, P2 = 24, P3 = 14.
+Part of the [next-phase proposals](../README.md). 55 findings. Priorities: P1 = 2, P2 = 28, P3 = 25.
 
 ## Area summary
 
@@ -36,6 +36,10 @@ The provider UI is feature-rich and clearly battle-hardened (sequence guards in 
 | [FE-PROV-24](#fe-prov-24) | No unsaved-changes guard or "live config differs" view in the edit dialog | ux | P2 | M | high |  |
 | [FE-PROV-25](#fe-prov-25) | `SectionHeader` is declared inside `OmoFormFields` render (remount every render) | bug | P2 | S | high |  |
 | [FE-PROV-32](#fe-prov-32) | Test gaps: dialogs tested with the form mocked out; no real `ProviderForm` submit test; brittle source-string test | test | P2 | L | high |  |
+| [FE-PROV-41](#fe-prov-41) | Escape inside a nested FullScreenPanel (speed test, common-config, universal form) also closes the parent Add/Edit dialog, discarding all edits | bug | P2 | S | high |  |
+| [FE-PROV-42](#fe-prov-42) | Duplicate is enabled for Hermes-managed (read-only) providers and produces an uneditable, undeletable copy | bug | P2 | S | high |  |
+| [FE-PROV-43](#fe-prov-43) | Partner star and promotion key are only persisted when the user adds draft custom endpoints | bug | P2 | S | high |  |
+| [FE-PROV-44](#fe-prov-44) | Additive-mode duplicate-key guard is client-only and vacuous while the key queries are loading or errored; backend add_provider silently overwrites the existing provider | bug | P2 | S | medium |  |
 | [FE-PROV-26](#fe-prov-26) | Unguarded `JSON.parse` of form output in both dialogs | bug | P3 | S | high |  |
 | [FE-PROV-27](#fe-prov-27) | First-run "common config" notice fires inside every provider form for every app | ux | P3 | S | high |  |
 | [FE-PROV-28](#fe-prov-28) | OpenCode option values are JSON-parsed on every keystroke; keys starting with `option-` render blank | ux | P3 | S | high |  |
@@ -50,6 +54,17 @@ The provider UI is feature-rich and clearly battle-hardened (sequence guards in 
 | [FE-PROV-38](#fe-prov-38) | Docs gap: no documentation of form architecture, `ProviderMeta` field semantics or per-app `settingsConfig` shapes | docs | P3 | S | high |  |
 | [FE-PROV-39](#fe-prov-39) | Dead code and duplicated computations in the form shell | tech-debt | P3 | S | high |  |
 | [FE-PROV-40](#fe-prov-40) | Per-project provider binding (profiles) does not cover most apps or expose which provider a profile will apply | feature | P3 | L | medium |  |
+| [FE-PROV-45](#fe-prov-45) | Add-mode speed-test drafts are discarded when the panel is reopened; the hook meant to carry them (useCustomEndpoints) is dead code | bug | P3 | S | high |  |
+| [FE-PROV-46](#fe-prov-46) | useManagedAuth keeps running after unmount: a device-code login that resolves after the dialog closes opens the browser, writes the clipboard and starts an uncleared polling interval | bug | P3 | S | medium |  |
+| [FE-PROV-47](#fe-prov-47) | Universal provider save in the panel misreports a sync failure as a save failure and leaves the list stale, diverging from the AddProviderDialog implementation of the same flow | bug | P3 | S | high |  |
+| [FE-PROV-48](#fe-prov-48) | Gemini .env editor comments, blank lines and key order are destroyed by every API-key/base-URL/model keystroke | bug | P3 | S | high |  |
+| [FE-PROV-49](#fe-prov-49) | Card action buttons never reflect in-flight mutations, so double-clicks issue concurrent switch/failover/add-to-config calls | bug | P3 | S | medium |  |
+| [FE-PROV-50](#fe-prov-50) | OpenClaw model-catalog registration failure after add is swallowed (console.warn only) while the UI reports success | bug | P3 | S | high |  |
+| [FE-PROV-51](#fe-prov-51) | Additive-mode cards show 'Add' and hide the default-model button until the live-id query resolves, then flip | ux | P3 | S | high |  |
+| [FE-PROV-52](#fe-prov-52) | Provider-key field is triplicated (~210 lines, key regex copied 10x) and the 'existing keys' source is owned by three different hooks | refactor | P3 | M | high |  |
+| [FE-PROV-53](#fe-prov-53) | No behaviour tests for the ProviderActions/ProviderCard state matrix or ProviderList's additive, failover and Hermes branches | test | P3 | M | high |  |
+| [FE-PROV-54](#fe-prov-54) | Show the configured model(s) and API format on provider cards (and include them in search) | feature | P3 | M | medium |  |
+| [FE-PROV-55](#fe-prov-55) | Per-provider 'Copy share link' (ccswitch:// deep link) action is missing although the importer exists | feature | P3 | M | medium |  |
 
 ## Findings
 
@@ -293,6 +308,46 @@ The provider UI is feature-rich and clearly battle-hardened (sequence guards in 
 - **Proposal:** Add `tests/integration/providerForm.<app>.test.tsx` rendering the real `ProviderForm` with mocked `@/lib/api`, covering preset select → field edits → JSON edit → submit payload per app; add regressions for FE-PROV-01/02/04/05/06/08/20; replace the source-string test with a render snapshot; assert on i18n keys (mock `t` to return keys) instead of literals.
 - **Acceptance:** Coverage report shows `ProviderForm.tsx` and `*FormFields.tsx` > 70% lines; CI test names reference each fixed bug.
 
+### FE-PROV-41: Escape inside a nested FullScreenPanel (speed test, common-config, universal form) also closes the parent Add/Edit dialog, discarding all edits
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/common/FullScreenPanel.tsx:60-84 — every open panel registers its own bubble-phase `window` keydown listener; the handler bails only on `event.defaultPrevented` or `isTextEditableTarget(event.target)` (src/utils/domUtils.ts:1-11 — INPUT/TEXTAREA/SELECT/contentEditable only), then calls `event.stopPropagation()` (which does not stop sibling listeners on the same `window`) and `onClose()`. Listeners are added in open order, so the outer dialog's listener (src/components/providers/EditProviderDialog.tsx:225-228; src/components/providers/AddProviderDialog.tsx:356-360) runs before the inner one. Panels nested inside the provider form: src/components/providers/forms/EndpointSpeedTest.tsx:482-487, src/components/providers/forms/CommonConfigEditor.tsx:266, src/components/providers/forms/CodexCommonConfigModal.tsx:68, src/components/providers/forms/GeminiCommonConfigModal.tsx:62, and src/components/universal/UniversalProviderFormModal.tsx:347 (opened from AddProviderDialog.tsx:404-411). Only Radix dialogs are protected because they preventDefault on Escape.
+- **Problem:** With focus on a button or list row (e.g., right after clicking an endpoint row or the speed-test button), pressing Esc fires the Edit/Add dialog's handler first: the whole form unmounts and every unsaved edit is lost, and only afterwards does the inner panel close. Users expect Esc to close the innermost panel only. (Distinct from FE-PROV-24, which is about the missing dirty-check; even with a dirty check the wrong panel would be targeted.)
+- **Proposal:** Give FullScreenPanel a module-level open-panel stack (push on open, pop on close) and let a panel act on Escape only when it is the top of the stack; alternatively register in capture phase and call `event.preventDefault()` + `event.stopImmediatePropagation()` so outer panels see `defaultPrevented`. Add a vitest with two nested panels.
+- **Acceptance:** With the edit dialog open and the endpoint speed-test panel open, focusing a button and pressing Esc closes only the speed-test panel and the edit form keeps its state; a second Esc closes the dialog. A unit test covers two nested FullScreenPanels.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-42: Duplicate is enabled for Hermes-managed (read-only) providers and produces an uneditable, undeletable copy
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/providers/ProviderActions.tsx:298-306 — the Duplicate button has no `isReadOnly` gate, while Edit (287-293) and Delete (`canDelete = !isReadOnly && ...` at 223-224, 355-367) are gated; src/components/providers/ProviderCard.tsx:226-227 `isHermesReadOnly = isHermesReadOnlyProvider(provider.settingsConfig)`, which checks the `_cc_source === "providers_dict"` marker inside settingsConfig (src/config/hermesProviderPresets.ts:13-29); src/App.tsx:710-726 deep-clones `settingsConfig` (marker included) into the copy and 763-770 adds it with `addToLive = false`.
+- **Problem:** The copy inherits the read-only marker, so it renders the 'Hermes Managed' badge with Edit and Delete disabled: a zombie DB row the UI can never fix or remove. Its only live action is 'Add to config', which pushes a bogus dict-overlay entry into the Hermes config.
+- **Proposal:** Pass `isReadOnly` to the Duplicate button (disabled with the managed hint), or strip `_cc_source` from the cloned settingsConfig in `handleDuplicateProvider` so the copy becomes a normal editable custom provider; add a test either way.
+- **Acceptance:** For a provider whose settingsConfig contains `_cc_source: "providers_dict"`, Duplicate is disabled with the managed tooltip (or the duplicate has no marker and is editable/deletable). An RTL test for ProviderActions asserts the disabled state.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-43: Partner star and promotion key are only persisted when the user adds draft custom endpoints
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/providers/forms/ProviderForm.tsx:1411-1451 — `isPartner: true` and `partnerPromotionKey` are merged into `mergedMeta` only inside `if (!isEditMode && draftCustomEndpoints.length > 0)`; `payload.isPartner` (1396-1398) is never read by src/components/providers/AddProviderDialog.tsx:110-311 (it only consumes presetCategory/meta/presetId/providerKey/suggestedDefaults). `draftCustomEndpoints` changes only while EndpointSpeedTest is mounted (src/components/providers/forms/ClaudeFormFields.tsx:703-716, conditional on `isEndpointModalOpen`) and only for `isCustom` entries (src/components/providers/forms/EndpointSpeedTest.tsx:201-216). No Rust setter exists (`is_partner` appears only as struct fields at src-tauri/src/provider.rs:421-429). Consumers: src/components/providers/ProviderCard.tsx:455-465 (partner star) and src/components/providers/forms/GrokBuildProviderForm.tsx:95.
+- **Problem:** In the normal flow (pick a partner preset, click Add) `meta.isPartner` and `meta.partnerPromotionKey` are silently dropped, so the partner badge never appears and the promotion key is lost; they only survive if the user happens to open the speed-test panel and add a custom URL. The partner marketing feature is effectively dead.
+- **Proposal:** Move the partner/promotion merge out of the endpoint block and apply it to `nextMeta` from `activePreset` unconditionally in add mode; make AddProviderDialog honour `values.isPartner`. Add a test that adds a partner preset without opening the endpoint modal.
+- **Acceptance:** Adding any `isPartner` preset without touching endpoints yields `meta.isPartner === true` and `meta.partnerPromotionKey` set; the card shows the partner star; test in tests/components/AddProviderDialog.test.tsx with a real ProviderForm submit.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-44: Additive-mode duplicate-key guard is client-only and vacuous while the key queries are loading or errored; backend add_provider silently overwrites the existing provider
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** src/components/providers/forms/ProviderForm.tsx:950-969 — `isProviderKeyLockStateLoading` returns `false` whenever `!isEditMode`; 850-858 `opencodeLiveProviderIds` defaults to `[]` while loading or on error, and 905-948 builds `additiveExistingProviderKeys` from that plus `existingOpencodeKeys` (src/components/providers/forms/hooks/useOmoModelSource.ts:48-54), whose query swallows backend errors and returns `{}` (src/lib/query/queries.ts:68-76); 1077-1083 the duplicate toast is the only guard. src/lib/query/mutations.ts:58-73 uses `providerKey` verbatim as the row id; src-tauri/src/services/provider/mod.rs:2088-2105 `ProviderService::add` performs no existence check and src-tauri/src/database/dao/providers.rs:189-238 `save_provider` UPDATEs when `(id, app_type)` exists, then mod.rs:2117-2121 rewrites the live entry.
+- **Problem:** If the providers or live-id query is pending or failed (unparsable opencode.json / openclaw.json makes the live-id command error; a DB read error yields `{}`), the add form accepts a key that already exists and `add_provider` overwrites that provider's settings, meta and live entry in place while toasting '供应商已添加' — silent data loss with no undo.
+- **Proposal:** In add mode, extend `isProviderKeyLockStateLoading` to cover `isLoading || isError` of both the providers query and the live-id query (block submit with the existing 'status loading' toast and disable the key input), and add a backend guard in `ProviderService::add` that returns a localized error when `(id, app_type)` already exists.
+- **Acceptance:** `add_provider` with an existing id returns an error instead of updating; with the live-id query mocked to reject, the add form refuses to submit; a Rust unit test and a vitest cover both.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### FE-PROV-26: Unguarded `JSON.parse` of form output in both dialogs
 
 **Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
@@ -418,3 +473,113 @@ The provider UI is feature-rich and clearly battle-hardened (sequence guards in 
 - **Problem:** Users cannot bind a provider to a project for Gemini/OpenCode/OpenClaw/Hermes, and cannot see what applying a profile will change before applying it.
 - **Proposal:** Extend `ProfileScope` to the remaining apps (backend mirror), show a preview (provider name, MCP count) per scope in the switcher, and allow explicit "Snapshot now".
 - **Acceptance:** ProfileSwitcher visible on all app tabs; hovering/expanding a profile shows the provider it will activate.
+
+### FE-PROV-45: Add-mode speed-test drafts are discarded when the panel is reopened; the hook meant to carry them (useCustomEndpoints) is dead code
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/providers/forms/EndpointSpeedTest.tsx:100-102 initialises `entries` once from `buildInitialEntries(initialEndpoints, value)` (57-85: only preset/config candidates plus the currently selected URL); the panel is mounted only while open (src/components/providers/forms/ClaudeFormFields.tsx:703, CodexFormFields.tsx:1011, GeminiFormFields.tsx:196), so each reopen rebuilds entries; 201-216 then emits `onCustomEndpointsChange` with whatever `isCustom` entries exist, overwriting `draftCustomEndpoints` via src/components/providers/forms/ProviderForm.tsx:2137-2139. src/components/providers/forms/hooks/useSpeedTestEndpoints.ts:33-35,44-105 never feeds the drafts back as candidates, and src/components/providers/forms/hooks/useCustomEndpoints.ts (which merges drafts) has no importers (only exported at hooks/index.ts:7).
+- **Problem:** User adds https://b.example (not the selected URL), saves the panel, reopens it to re-test: the draft vanishes from the list, `draftCustomEndpoints` is reset to [], and the endpoint is never written to `meta.custom_endpoints` on submit.
+- **Proposal:** Pass `draftCustomEndpoints` into `useSpeedTestEndpoints` (or directly to EndpointSpeedTest) as `isCustom: true` candidates in add mode; delete `useCustomEndpoints` or wire it in; add a test that opens, adds, closes and reopens the panel.
+- **Acceptance:** Add flow: open panel → add custom URL → Save → reopen: the URL is still listed as custom; submitting the form persists it in `meta.custom_endpoints`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-46: useManagedAuth keeps running after unmount: a device-code login that resolves after the dialog closes opens the browser, writes the clipboard and starts an uncleared polling interval
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** src/components/providers/forms/hooks/useManagedAuth.ts:51-55 — the unmount cleanup only calls `stopPolling()`; 57-123 the side effects live in the hook-level `useMutation({ onSuccess })`, which TanStack Query still invokes after the component unmounts (only `mutate(vars, callbacks)` callbacks are skipped): it copies the user code (64-68), calls `settingsApi.openExternal` (70-74), starts `setInterval(pollOnce, >= 8s)` (117) and a `setTimeout` for `expires_in` seconds (118-122) with nothing left to clear them; `pollOnce` also calls `refetchStatus()`/`setPollingState` on the dead component (95-101). CopilotAuthSection.tsx:278/292 and CodexOAuthSection.tsx:232/246 trigger `addAccount` from inside the provider form dialogs.
+- **Problem:** Closing the Add/Edit dialog while `authStartLogin` is in flight does not cancel the login: the OS browser pops up after the user left, and the backend `authPollForAccount` is polled in the background for up to the device-code lifetime (~15 min), with React warnings for state updates on an unmounted component.
+- **Proposal:** Keep an `isMountedRef` (set false in the cleanup) and an `AbortController`; in `onSuccess` return early when unmounted; store interval/timeout ids in refs that the cleanup clears even when created later; or move the side effects to per-call `mutate(undefined, { onSuccess })` callbacks, which are skipped after unmount.
+- **Acceptance:** Test with fake timers: unmount while `authStartLogin` is pending, then resolve it — no `openExternal`, no `copyText`, no interval scheduled, no state update warnings.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-47: Universal provider save in the panel misreports a sync failure as a save failure and leaves the list stale, diverging from the AddProviderDialog implementation of the same flow
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/universal/UniversalProviderPanel.tsx:55-86 — a single try/catch wraps `upsert` then `sync`; a sync error toasts `universalProvider.saveError` ('保存统一供应商失败') and skips `loadProviders()`/`setEditingProvider(null)`; src/components/providers/AddProviderDialog.tsx:62-103 implements the identical flow with two-phase error handling (`addedButSyncFailed` warning); src/components/universal/UniversalProviderFormModal.tsx:229-230 calls `onClose()` synchronously right after `onSave(provider)`, so the form input is gone before the error is known.
+- **Problem:** When sync fails after a successful upsert, the user is told the provider was not saved although it was persisted, the list does not show it, and re-adding creates a duplicate; the modal has already closed so nothing can be retried. (Complements FE-PROV-37, which covers duplication inside the modal, not the panel/dialog divergence.)
+- **Proposal:** Extract a shared `saveUniversalProvider(provider, { sync })` helper used by both the panel and AddProviderDialog with distinct toasts for upsert vs sync failure; always `loadProviders()` after a successful upsert; await `onSave` before closing the modal and keep it open on upsert failure.
+- **Acceptance:** With `universalProvidersApi.sync` mocked to reject, the panel shows the 'added but sync failed' warning, the new provider appears exactly once in the list, and no `saveError` toast fires; with `upsert` rejecting, the modal stays open with the entered values.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-48: Gemini .env editor comments, blank lines and key order are destroyed by every API-key/base-URL/model keystroke
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/providers/forms/hooks/useGeminiConfigState.ts:26-74 — `envObjToString` emits only `KEY=VALUE` lines with priority keys reordered first, and `envStringToObj` skips `#` comments and blank lines (63); 154-193 the API-key, base-URL and model handlers rebuild the whole env text through that round trip on every change; src/components/providers/forms/hooks/useGeminiCommonConfig.ts:259-261,313-315 do the same when toggling the common snippet.
+- **Problem:** A user who annotates the env editor (`# prod key`, grouped sections) loses the annotations and ordering the moment they type one character in the API Key box, with no warning; the editor presents itself as free-form `.env` text but is lossy.
+- **Proposal:** Make the env helpers line-preserving: patch the matching `KEY=` line in place, append new keys at the end, and leave comments/blank/unknown lines untouched (the same approach the Codex TOML helpers already use, src/utils/providerConfigUtils.ts:1257-1373); unit-test the round trip.
+- **Acceptance:** Given env text `# note\nGEMINI_API_KEY=a\n\nFOO=1`, typing key `b` produces `# note\nGEMINI_API_KEY=b\n\nFOO=1`; toggling the common snippet keeps comments.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-49: Card action buttons never reflect in-flight mutations, so double-clicks issue concurrent switch/failover/add-to-config calls
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** src/hooks/useProviderActions.ts:421-426 computes `isLoading` from the four mutations, but src/App.tsx:304-315 does not destructure it and App.tsx:987 passes the providers-query `isLoading` (App.tsx:279) to ProviderList instead; src/components/providers/ProviderActions.tsx:271-280 the main button has no pending/disabled input; src/components/providers/ProviderList.tsx:180-189 calls `addToQueue.mutate`/`removeFromQueue.mutate` with no `isPending` guard; src-tauri/src/commands/provider.rs:103-110 `switch_provider` is a synchronous command, so two invocations run concurrently on Tauri's blocking pool.
+- **Problem:** Two quick clicks on different cards start two concurrent `switch_provider` calls whose DB `set_current` and live-file writes can interleave (DB says B, live config says A); both success toasts fire and `syncClaudePlugin` (useProviderActions.ts:48-72,264-266) can apply the wrong `official` flag last. Failover toggles can likewise be queued twice.
+- **Proposal:** Thread `isLoading` (or per-mutation `isPending`) from `useProviderActions` and the failover mutations down to ProviderList/ProviderActions and disable the main and failover buttons while pending; optionally serialise provider mutations per app in Rust with a mutex.
+- **Acceptance:** While a switch is pending every card's main button is disabled; an RTL test asserts a second click does not call `onSwitch`; a hook test asserts `isLoading` is consumed by ProviderList.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-50: OpenClaw model-catalog registration failure after add is swallowed (console.warn only) while the UI reports success
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/hooks/useProviderActions.ts:89-132 — after `addProviderMutation` resolves (which already toasts '供应商已添加' in src/lib/query/mutations.ts:122-129), the catalog merge and `setDefaultModel` run inside a try whose catch only `console.warn`s (125-131); the merge is a read-modify-write of the whole catalog (96-98) with no retry; tests/hooks/useProviderActions.test.tsx has no case for this branch.
+- **Problem:** The provider appears added, but its models are missing from the OpenClaw `/model` allowlist and no default model is set; the user gets no indication and has to discover it inside OpenClaw. A concurrent catalog write can also be clobbered by the read-modify-write.
+- **Proposal:** Toast a warning with the error (`notifications.openclawModelsRegisterFailed`) and offer a retry action; add a backend `merge_openclaw_model_catalog` command (atomic merge) instead of get+set from the frontend; add a hook test for the failure path.
+- **Acceptance:** With `openclawApi.setModelCatalog` mocked to reject, a warning toast with a retry appears and the provider still exists; tests/hooks/useProviderActions.test.tsx covers it.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-51: Additive-mode cards show 'Add' and hide the default-model button until the live-id query resolves, then flip
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/providers/ProviderList.tsx:119-133 — `isProviderInConfig` returns `false` while `opencodeLiveIds`/`openclawLiveIds`/`hermesLiveIds` are still `undefined`, and no loading flag is forwarded (404); src/components/providers/ProviderActions.tsx:143-165,231-260 render the green '添加' main button and omit the OpenClaw/Hermes default-model button whenever `!isInConfig`; src/components/providers/ProviderCard.tsx:301-306 drives the blue highlight from the same value; a click in that window runs `onSwitch` → `switchProvider`, which re-applies and toasts '已添加到配置' (src/hooks/useProviderActions.ts:298-301).
+- **Problem:** Every switch to the OpenCode/OpenClaw/Hermes tab flashes the whole list from 'not in config' to 'in config' once the query lands, and a click during the window re-adds an already-added provider with a misleading success toast.
+- **Proposal:** Expose `isLoading` from `useOpenClawLiveProviderIds`/`useHermesLiveProviderIds`/the opencode query, pass a tri-state `isInConfig: boolean | undefined` to the card, and render the main button disabled with a spinner (and no highlight change) until the value is known.
+- **Acceptance:** With the live-id query pending, additive cards show a disabled main button and no default-model button toggling; an RTL test with a deferred query shows no 'Add' label before resolution.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-52: Provider-key field is triplicated (~210 lines, key regex copied 10x) and the 'existing keys' source is owned by three different hooks
+
+**Type:** refactor · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** src/components/providers/forms/ProviderForm.tsx:1876-2086 — three near-identical `beforeNameSlot` blocks for opencode/openclaw/hermes; the pattern `/^[a-z0-9]+(-[a-z0-9]+)*$/` appears at 1056, 1903, 1919, 1932, 1969, 1985, 1998, 2039, 2055, 2068; the submit-time validation blocks 1058-1139 are repeated three times. Existing-key lists are computed in three places with different owners — src/components/providers/forms/hooks/useOmoModelSource.ts:48-54 (opencode), useOpenclawFormState.ts:61-68, useHermesFormState.ts:81-87 — each issuing its own `useProvidersQuery(app)` on every form mount regardless of `appId`. Dead helpers remain alongside: src/components/providers/forms/hooks/useCustomEndpoints.ts has no importers, and `useBaseUrlState`'s codex/gemini branches (useBaseUrlState.ts:54-84,111-159) are unreachable from the only call site (ProviderForm.tsx:457-464 passes `codexConfig: ""` and a no-op).
+- **Problem:** Fixes to key handling (FE-PROV-05, the duplicate-key guard above) must be applied three times and drift; every provider form fetches the openclaw and hermes provider lists even for Claude; dead hooks mislead readers. Narrower and independently shippable compared with the full-shell split in FE-PROV-17.
+- **Proposal:** Extract `<ProviderKeyField>` plus `isValidProviderKey()` and a single `useAdditiveProviderKey({ appId, providerId })` hook that owns the existing-keys and live-id queries (enabled by `appId`), the locked/loading state and the i18n messages; delete `useCustomEndpoints` and the unused `useBaseUrlState` branches (or wire the former into the speed-test fix).
+- **Acceptance:** One implementation of key validation with unit tests; `grep -c 'a-z0-9]+(-' src/components/providers/forms/ProviderForm.tsx` returns 0; rendering the Claude form issues no `useProvidersQuery("openclaw")`/`("hermes")` requests.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-53: No behaviour tests for the ProviderActions/ProviderCard state matrix or ProviderList's additive, failover and Hermes branches
+
+**Type:** test · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** tests/components/ProviderCardLayout.test.ts is the only card test and asserts source strings; tests/components/ProviderList.test.tsx:144-309 covers skeleton/empty/order/search with ProviderCard mocked out; nothing exercises src/components/providers/ProviderActions.tsx:88-224 (additive vs failover vs OMO vs read-only vs official-blocked states, `canDelete`), src/components/providers/ProviderCard.tsx:72-136,290-306 (`isOfficialProvider`, `extractApiUrl`, active/blue/green states) or src/components/providers/ProviderList.tsx:119-146,180-189,383-437 (isInConfig, OpenClaw default model, Hermes current, failover toggles); tests/hooks/useProviderActions.test.tsx:137-671 has no OpenClaw catalog-registration case. (FE-PROV-32 covers the dialog/form side only.)
+- **Problem:** Regressions such as Duplicate enabled on read-only providers, the loading-state flicker or a change to the official heuristic are invisible to CI, and the per-app button-state matrix is the most branch-heavy UI code in the area.
+- **Proposal:** Add RTL tests that render ProviderActions across the prop matrix (labels/disabled snapshots), ProviderCard with representative settingsConfig per app, and ProviderList for additive apps with pending/resolved live-id queries and failover enabled; add a useProviderActions test for catalog-registration failure.
+- **Acceptance:** New tests fail if Duplicate is enabled for `isReadOnly`, if `isOfficialProvider` changes for a Bedrock-style config, or if the failover toggle fires while pending; coverage for ProviderActions.tsx and ProviderCard.tsx is reported.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-54: Show the configured model(s) and API format on provider cards (and include them in search)
+
+**Type:** feature · **Priority:** P3 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** src/components/providers/ProviderCard.tsx:365-497 renders only name, status badges and the endpoint; the model is already parsed elsewhere (src/components/providers/forms/hooks/useModelState.ts:41-116 for Claude env keys, src/utils/providerConfigUtils.ts:1395-1414 `extractCodexModelName`, OpenClaw `settingsConfig.models[0].id` in src/hooks/useProviderActions.ts:383-386, `ProviderMeta.claudeDesktopModelRoutes`); src/components/providers/ProviderList.tsx:280-289 search matches name/notes/websiteUrl only.
+- **Problem:** Several providers often share one relay endpoint and differ only by default model or mapping; the list cannot tell them apart without opening each edit dialog, and search cannot find a provider by model name.
+- **Proposal:** Add `getProviderModelSummary(provider, appId)` reusing the parsers above and render a compact monospace chip (primary model, with haiku/opus in the title) next to the URL; include the summary in the search fields.
+- **Acceptance:** A Claude provider with `ANTHROPIC_MODEL=x` shows chip `x`; a Codex provider shows the TOML `model`; searching `x` matches that card; snapshot/RTL tests cover one provider per app.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-PROV-55: Per-provider 'Copy share link' (ccswitch:// deep link) action is missing although the importer exists
+
+**Type:** feature · **Priority:** P3 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** src/lib/api/deeplink.ts:5-47,70-78 — `DeepLinkImportRequest` already carries provider fields (endpoint, apiKey, model, haikuModel/sonnetModel/opusModel, notes, usage script) and `parseDeeplink`; src/components/DeepLinkImportDialog.tsx handles imports; no builder exists (grep `ccswitch://` in src returns only the parser comment) and src/components/providers/ProviderActions.tsx:283-368 offers edit/duplicate/test/usage/terminal/delete but no share or export. FE-PROV-33 asks only for bulk export.
+- **Problem:** Sharing a relay configuration with a teammate (the inverse of an existing feature) requires retyping endpoint, models and notes; the data model and parser are already in place.
+- **Proposal:** Add `buildProviderDeeplink(provider, appId, { includeApiKey })` mirroring the parser's fields, and a 'Share' item in ProviderActions that copies the link via `copyText`, with an explicit confirm when including the API key (default off).
+- **Acceptance:** For a Claude provider, the copied link round-trips through `parse_deeplink` into an equivalent provider (minus the key when excluded); a unit test covers the builder/parser round trip for Claude, Codex and Gemini.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

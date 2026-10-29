@@ -1,6 +1,6 @@
 # Product strategy & feature roadmap — findings (PRODUCT-xx)
 
-Part of the [next-phase proposals](../README.md). 65 findings. Priorities: P1 = 6, P2 = 41, P3 = 18.
+Part of the [next-phase proposals](../README.md). 73 findings. Priorities: P1 = 7, P2 = 47, P3 = 19.
 
 ## Area summary
 
@@ -32,6 +32,7 @@ Platform: Tauri plugins log/opener/process/updater/dialog/store/deep-link/window
 | [PRODUCT-62](#product-62) | THEME — "Trust & governance" (vault, listener auth, signed catalog, disclosure, policy, audit, signing) | risk | P1 (first pass P0) | XL | medium | partially-confirmed |
 | [PRODUCT-63](#product-63) | THEME — "Projects everywhere" (per-directory binding, all apps in profiles/tray/universal/takeover, usage by project) | feature | P1 | XL | high | partially-confirmed |
 | [PRODUCT-65](#product-65) | THEME — "Reliability engineering" (bridge fixtures, e2e scenarios, beta ring, diagnostics) | refactor | P1 | L | high | partially-confirmed |
+| [PRODUCT-66](#product-66) | Database backup restore skips the post-import live sync, settings reload and takeover reconciliation that import/WebDAV/S3 all run | bug | P1 | S | high |  |
 | [PRODUCT-03](#product-03) | Proactive provider health probing (documented but unimplemented) | bug | P2 (first pass P0) | M | high | confirmed |
 | [PRODUCT-05](#product-05) | Finish budget limits & alerts (backend exists, UI/enforcement missing) | feature | P2 (first pass P1) | M | high | confirmed |
 | [PRODUCT-06](#product-06) | System/tray notifications for failover, circuit open, budget, quota exhaustion and sync errors | feature | P2 (first pass P1) | M | high | confirmed |
@@ -73,6 +74,12 @@ Platform: Tauri plugins log/opener/process/updater/dialog/store/deep-link/window
 | [PRODUCT-55](#product-55) | Information architecture for eight apps (sidebar + app-scoped feature rail, progressive disclosure) | ux | P2 | M | medium |  |
 | [PRODUCT-61](#product-61) | THEME — "Proxy as a product" (daemon + CLI + proactive health + notifications + smart routing + web dashboard) | feature | P2 (first pass P1) | XL | medium | partially-confirmed |
 | [PRODUCT-64](#product-64) | THEME — "Platform SDK" (adapter trait, plugin surface for adapters/usage templates, new-app wave) | refactor | P2 | XL | medium |  |
+| [PRODUCT-67](#product-67) | Backup rotation deletes user-named, manual, safety and pre-migration backups indiscriminately | bug | P2 | S | high |  |
+| [PRODUCT-68](#product-68) | First project apply from 'No project' discards the un-snapshotted working configuration with no baseline snapshot or confirmation | bug | P2 | M | high |  |
+| [PRODUCT-69](#product-69) | Claude Desktop local routing is not modelled as a proxy consumer: project apply stops the server underneath it and startup never restores it | bug | P2 | M | high |  |
+| [PRODUCT-70](#product-70) | Deleting a universal provider bypasses the current-provider guard and silently drops child-delete errors | bug | P2 | S | high |  |
+| [PRODUCT-71](#product-71) | OpenClaw/Hermes: deleting or removing the provider behind the default model leaves `agents.defaults.model.primary` / `model.provider` dangling | bug | P2 | S | high |  |
+| [PRODUCT-72](#product-72) | Database-too-new recovery screen offers no restore path although a pre-migration backup exists, and reports offline as 'incompatible' | ux | P2 | M | medium |  |
 | [PRODUCT-30](#product-30) | Proxy web dashboard (read-only status/logs served by the proxy) | feature | P3 | M | high |  |
 | [PRODUCT-37](#product-37) | Tighten CSP and asset protocol scope | risk | P3 | S | high |  |
 | [PRODUCT-38](#product-38) | Linux polish: in-app GDK backend setting, tray fallback detection, official Flatpak | ux | P3 | M | high |  |
@@ -91,6 +98,7 @@ Platform: Tauri plugins log/opener/process/updater/dialog/store/deep-link/window
 | [PRODUCT-58](#product-58) | Provider terminal launch for all apps and "open with provider env" without writing live config | feature | P3 | S | high |  |
 | [PRODUCT-59](#product-59) | Prompt library sharing: per-project prompt presets and multi-app prompts | feature | P3 | M | high |  |
 | [PRODUCT-60](#product-60) | Dead/stub code cleanup: unreachable `agents` view, `api/vscode.ts` naming, unused `HealthChecker` | refactor | P3 | S | high |  |
+| [PRODUCT-73](#product-73) | App shell 'remove from config' / delete confirmation has no error handling or pending state | bug | P3 | S | high |  |
 
 ## Findings
 
@@ -153,6 +161,16 @@ Platform: Tauri plugins log/opener/process/updater/dialog/store/deep-link/window
 - **Proposal:** Fixture corpus + scenario harness in CI, beta channel, diagnostics bundle in issue template, release checklist that requires a fixture for every bridge fix.
 - **Acceptance:** regression rate (fixes referencing a prior fix) drops measurably over two releases; beta catches at least one issue before stable.
 - **Verification:** **partially-confirmed** — Evidence verified exactly: git log --format=%s -50 613fef7 yields 25 fix / 16 feat / 4 docs (plus one non-conventional "Fix/opencode known field editors"), CHANGELOG.md 3.15.0-3.17.0 has 176 Fixed vs 86 Added entries (3.15.0 alone 46 vs 15) across 8 releases in 58 days (2026-05-16 to 2026-07-13), and .github/CODEOWNERS requires @farion1231 on *, /.github/ and /src-tauri/ with 34 of ~41 non-merge commits in the last 300 by one author. None of the proposed items exist: no fixture dirs/files under src-tauri and [dev-dependencies] is only serial_test+tempfile (no mock-HTTP crate, no fake upstream in any test), package.json devDeps are msw+vitest with no Playwright/WebdriverIO/tauri-driver and .github/workflows/ci.yml runs only tsc/prettier/vitest plus fmt/clippy/cargo test, src-tauri/tauri.conf.json:64-66 has a single latest.json updater endpoint with no beta/channel strings in AboutSection.tsx/UpdateBadge.tsx, .github/ISSUE_TEMPLATE/bug_report.yml collects version/OS/app by hand with logs only under "Additional Context", and .github/pull_request_template.md has no test or fixture requirement (CONTRIBUTING.md:104 only says "You have tested it yourself"). The "mock-only tests" characterization is overstated: the backend has 2060 inline unit tests plus 114 integration tests in 12 files that use an isolated temp HOME with real file writes and real SQLite (src-tauri/tests/support.rs:7-24) and exercise takeover enter/restore (src-tauri/tests/provider_service.rs:532,1448,1547; profile_roundtrip.rs:647); the real gap is network-level (fake upstream, failover) and UI scenario coverage. The "100k users" figure cannot be verified from the repository (README.md:10 is only a downloads badge; the GitHub API is not reachable in this session), and .github/workflows/release.yml:612 already publishes every tag with prerelease: true, so a manual promote-to-latest step exists even though no user-facing beta ring does. P1 and effort L are proportionate for a weekly-shipping proxy app with this fix ratio and a single-owner gate; the proposal is sound and not implemented.
+
+### PRODUCT-66: Database backup restore skips the post-import live sync, settings reload and takeover reconciliation that import/WebDAV/S3 all run
+
+**Type:** bug · **Priority:** P1 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/commands/import_export.rs:42-60 (`import_config_from_file` runs `run_post_import_sync`) vs src-tauri/src/commands/import_export.rs:152-161 (`restore_db_backup` only calls `db.restore_from_backup`); src-tauri/src/commands/sync_support.rs:10-15 (`sync_current_to_live` + `reload_settings`); src-tauri/src/commands/webdav_sync.rs:128-129 and src-tauri/src/commands/s3_sync.rs:120-121 (both download paths run it); src-tauri/src/database/backup.rs:552-598 (restore = safety backup + SQLite Backup + migrations, nothing else); src/hooks/useBackupManager.ts:21-29 (frontend only `invalidateQueries`); src/components/settings/BackupListSection.tsx:87-112 (plain success toast, no re-sync/restart hint); takeover flags come from the restored DB: src-tauri/src/services/proxy.rs:686-716 (`get_takeover_status` reads `proxy_config.enabled`) and the original-live backups are DB rows (src-tauri/src/services/proxy.rs:932-934 `delete_live_backup`); src-tauri/src/settings.rs:1003-1027 (`get_effective_current_provider` falls back to the restored DB `is_current` when the settings pointer is gone); docs/user-manual/en/1-getting-started/1.5-settings.md:216-220 promises restore is safe.
+- **Problem:** Restore swaps the SQLite file under the running app but `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.gemini/.env` etc. still hold the pre-restore provider. The UI then shows the restored current provider while the CLIs keep using another one, and the next switch backfills that stale live content into the restored record. If the backup's takeover flags differ from the live state the results are worse: flag ON in backup/OFF live puts the provider list into hot-switch mode that never rewrites live files; flag OFF in backup/ON live leaves the 127.0.0.1 placeholder in the live file while the DB-held original-config backup is overwritten (the 'takeover residue' class of bug fixed repeatedly in 3.16.x). Nothing tells the user to re-select providers or restart.
+- **Proposal:** Make restore share the import pipeline: refuse (or auto-disable with live restore) while any takeover/route is active; after `restore_from_backup` run `run_post_import_sync`, reconcile takeover with the same routine as `restore_proxy_state_on_startup`, refresh the tray and emit `provider-switched`; return warnings like `import_config_from_file` does and render the same partial-success state in `BackupListSection`; document in the manual that restore rewrites live files.
+- **Acceptance:** With provider A current in the backup and B current+live, restoring yields live files == A with no manual re-select. With Claude takeover active, restore either refuses with a clear message or finishes with live files restored and `get_proxy_takeover_status` consistent with the files. An integration test covers both cases and the restore toast surfaces post-sync warnings.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
 
 ### PRODUCT-03: Proactive provider health probing (documented but unimplemented)
 
@@ -535,6 +553,66 @@ Platform: Tauri plugins log/opener/process/updater/dialog/store/deep-link/window
 - **Proposal:** Adapter trait + capability table first; then a signed "extension" package format (JSON manifest + JS usage template + optional preset bundle) installable from a repo like skills, with sandboxed execution (rquickjs already) and policy control; publish an authoring guide.
 - **Acceptance:** a community member ships a quota template for a new relay without a core PR; wave-1 apps land via adapters.
 
+### PRODUCT-67: Backup rotation deletes user-named, manual, safety and pre-migration backups indiscriminately
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/database/backup.rs:337-365 (`cleanup_db_backups` keeps the newest N of every `*.db` in `backups/` sorted by mtime); it runs inside `backup_database_file` (backup.rs:332), which is also the safety backup for restore (backup.rs:574), for import (backup.rs:103) and the pre-migration backup (src-tauri/src/database/mod.rs:131-137); renamed backups keep the `.db` suffix (backup.rs:640-660) so they rotate too; retention is user-settable 3-50 and interval down to 6h (src/components/settings/BackupListSection.tsx:193-247); README.md:301 promises 'auto-rotated, keeps 10 most recent'; docs/user-manual/en/1-getting-started/1.5-settings.md:220 promises 'A safety backup is always created before the restore operation, so you can recover if needed'.
+- **Problem:** A backup the user deliberately took and renamed (e.g. 'before-v4') is silently deleted after N automatic backups (with a 6h interval and retain=3, within 18 hours). Lowering retention from 50 to 3 wipes up to 47 backups at the next backup with no confirmation. The pre-migration backup that the DB-too-new recovery depends on and the safety backup created by a restore are subject to the same rotation, so the documented recovery guarantee does not hold.
+- **Proposal:** Rotate only auto-generated files (match `^db_backup_\d{8}_\d{6}(_\d+)?\.db$`) and treat renamed files as pinned, or add an explicit pin flag; tag safety and pre-migration backups (prefix or sidecar) and exempt them for a grace period; show the backup kind in the list; when retention is lowered, show how many backups will be removed and confirm; fix README/manual wording.
+- **Acceptance:** With retain=3, after 10 automatic backups a renamed backup and the pre-migration backup still exist; a unit test on `cleanup_db_backups` with mixed names passes; the UI shows auto/manual/safety kinds; README no longer claims a fixed 10.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PRODUCT-68: First project apply from 'No project' discards the un-snapshotted working configuration with no baseline snapshot or confirmation
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** src-tauri/src/services/profile.rs:338-345 (autosave of the outgoing state happens only when a current profile id exists); profile.rs:347-458 (apply then switches the provider, toggles MCP/skills and enables the prompt from the target snapshot); src-tauri/src/commands/profile.rs:153-159 (`clear_current_profile` only clears the marker, restores nothing); src/components/profiles/ProfileSwitcher.tsx:87-92 (apply on select, no confirmation or preview); src/components/profiles/ProfileManageDialog.tsx:31-36 (snapshots are maintained only by switch-time autosave, no manual re-snapshot); src/i18n/locales/en.json `profiles.manageDescription` ('the current configuration is automatically saved back to the project you are leaving') and `profiles.clearSuccess` ('Switched to no project').
+- **Problem:** A user who has never created a project, or who created project A earlier and then changed MCP/skills/prompt/provider while on 'No project', selects project B: MCP servers and skills are toggled, the prompt replaced and the provider switched, and there is no snapshot to go back to because autosave has no target. 'No project' does not undo anything. Projects are the 3.17.0 headline feature, so this is the first interaction many users have with it, and it loses configuration silently.
+- **Proposal:** When applying from `current_id == None`, auto-capture the scope into a reserved 'Before projects' baseline that 'No project' restores; or show a confirmation that lists the diff (`plan_toggles` already computes toggles/dangling) with a 'save current state as a new project' checkbox; add a manual 'Update project from current state' action in `ProfileManageDialog`.
+- **Acceptance:** From 'No project' with MCP {X,Y} enabled, applying project B (snapshot {Z}) and then choosing 'No project' returns MCP enablement to {X,Y} and the previous provider/prompt; apply shows what will change before writing; tests in services/profile.rs cover the None->profile path.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PRODUCT-69: Claude Desktop local routing is not modelled as a proxy consumer: project apply stops the server underneath it and startup never restores it
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** src-tauri/src/services/profile.rs:462 (`should_stop_proxy = !is_live_takeover_active_sync()`); src-tauri/src/database/dao/proxy.rs:513-525 (counts only `proxy_config.enabled` rows); src-tauri/src/services/proxy.rs:686-716 (takeover status has no Claude Desktop entry); src-tauri/src/commands/profile.rs:176-189 (stops the server); src-tauri/src/services/proxy.rs:1261-1287 (`stop()` also flips the global `proxy_enabled` to false); src-tauri/src/lib.rs:1754-1777 (startup restores only `claude/codex/gemini/grokbuild` takeovers); src/components/proxy/ClaudeDesktopRouteToggle.tsx:27-32,36-58 (the route is just start/stop of the server; its guard and src-tauri/src/commands/proxy.rs:21-36 check takeover flags only); src-tauri/src/claude_desktop_config.rs:182-185 (proxy-mode providers point Claude Desktop at the local gateway); docs/user-manual/en/2-providers/2.6-claude-desktop.md:89 ('keep CC Switch running, turn on Claude Desktop local routing'); CHANGELOG.md:465-466.
+- **Problem:** (1) Applying a project on the Claude Code or Codex tab while Claude Desktop uses a proxy-mode provider disables the scope's takeover, finds no takeover flags and stops the server, so Claude Desktop's gateway (127.0.0.1:15721) dies while the toast says 'Project applied'; because `stop()` clears `proxy_enabled`, a restart does not bring it back either. (2) Nothing persists 'Claude Desktop needs routing', so a Claude Desktop-only user must flip the route toggle after every launch. (3) The 'stop blocked while apps depend on takeover' guard (CHANGELOG 3.16.x) does not protect the Claude Desktop route.
+- **Proposal:** Derive or persist a `claude-desktop` consumer flag (current Claude Desktop provider has `claudeDesktopMode == "proxy"`), include it in `is_live_takeover_active_sync`/`get_takeover_status`, in `enabled_proxy_apps_on_startup` (start the server without takeover) and in both stop guards; in `apply_profile` stop the server only when no consumer remains.
+- **Acceptance:** With Claude Desktop on a proxy-mode provider: applying a Codex project leaves `/status` running; restarting CC Switch starts the server without user action; 'Stop proxy' is blocked with a message naming Claude Desktop; a test covers `should_stop_proxy` with a proxy-mode Claude Desktop provider.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PRODUCT-70: Deleting a universal provider bypasses the current-provider guard and silently drops child-delete errors
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/services/provider/mod.rs:3886-3910 (`delete_universal` calls `state.db.delete_provider` for `universal-{claude,codex,gemini}-{id}` with `let _ =`), while `ProviderService::delete` (mod.rs:2417-2425) refuses to delete the provider referenced by the settings/DB current pointers and (mod.rs:2395-2414) cleans additive-app live entries; src/components/universal/UniversalProviderPanel.tsx:289-299 (confirmation only says generated configs will be deleted); src-tauri/src/settings.rs:1003-1027 (the dangling settings pointer is later cleared and the DB `is_current` fallback used).
+- **Problem:** If a generated child is the current provider for Claude, Codex or Gemini, deletion leaves `currentProviderClaude` pointing at a missing id, the provider list shows no current provider, the live file keeps the deleted key, and the next switch backfills that content into whichever provider becomes current. Errors deleting a child are swallowed, so the universal row disappears while orphan children remain. Universal providers are the recommended way to enter one relay key once (manual 2.1), so the path is common.
+- **Proposal:** Route child deletion through `ProviderService::delete` (reusing the guard) and refuse the universal delete, or require picking a replacement, when any child is current; surface per-child failures as warnings in the command result; show in the confirm dialog which apps currently use the provider.
+- **Acceptance:** Deleting a universal provider whose Claude child is current is refused with an actionable message (or the UI forces choosing another provider first); after a successful delete no `universal-*-{id}` rows remain and `get_effective_current_provider` returns a valid id for every app; a unit test covers the current-child case.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PRODUCT-71: OpenClaw/Hermes: deleting or removing the provider behind the default model leaves `agents.defaults.model.primary` / `model.provider` dangling
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/services/provider/mod.rs:2369-2415 (additive apps skip the 'cannot delete current' guard and call `remove_openclaw_provider_from_live`/`remove_hermes_provider_from_live`); src-tauri/src/openclaw_config.rs:683-706 (removes only `models.providers[id]`); src-tauri/src/hermes_config.rs:868-888 (removes only the `custom_providers` entry) while `apply_switch_defaults` (hermes_config.rs:927-947, called from mod.rs:2686-2698) sets `model.provider` to that id; src/hooks/useProviderActions.ts:371-386 (OpenClaw 'Set as default' writes `primary: "<providerId>/<model>"`); src/App.tsx:656-688 ('remove from config' and delete share the path, invalidating only live-id/health caches); src-tauri/src/openclaw_config.rs:575-626 (health scan has no dangling-model check) and src-tauri/src/commands/hermes.rs has no health scan at all.
+- **Problem:** The default-model pointer the user set via 'Set as default' is left referencing a provider that no longer exists in the live file; OpenClaw/Hermes fail at the next start or request with an upstream/provider-not-found error and nothing in CC Switch (no guard, no health banner) explains why. Switch-mode apps are protected by the guard; the additive apps are not.
+- **Proposal:** Before removing from live, check whether the provider backs the default model (OpenClaw `agents.defaults.model.primary`/`fallbacks`, Hermes `model.provider`) and refuse with a message, offer to pick another provider, or clear/retarget the pointer; add a `dangling_default_model` warning to the OpenClaw health scan and a minimal Hermes health scan; invalidate `openclawKeys.defaultModel` / `hermesKeys.modelConfig` after removal.
+- **Acceptance:** With OpenClaw default `p/m`, deleting provider `p` is blocked or the default is retargeted and the health banner flags any stale pointer; the same for Hermes `model.provider`; tests in openclaw_config.rs/hermes_config.rs cover removal of the default's provider.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PRODUCT-72: Database-too-new recovery screen offers no restore path although a pre-migration backup exists, and reports offline as 'incompatible'
+
+**Type:** ux · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** src/components/DatabaseUpgrade.tsx:249-297 (only Upgrade / Open releases / Open config dir / Quit); DatabaseUpgrade.tsx:61-83 (a failed update check, e.g. offline, falls to `upgradable`) and :102-108 (a `false` from `install_update_and_restart` becomes `incompatible`, i.e. 'created by a third-party client'); src-tauri/src/lib.rs:420-447 (returns before `AppState` is managed, so `restore_db_backup`, src-tauri/src/commands/import_export.rs:152-155, which needs `State<AppState>`, is unusable here); src-tauri/src/database/mod.rs:131-137 (a pre-migration backup is created, i.e. exactly the file an older app can read); docs/user-manual/en/5-faq/5.2-questions.md:153 (recovery is only 'Restore from backup: ~/.cc-switch/backups/' by hand).
+- **Problem:** The screen is reached after a downgrade (rolling back a bad update, or an older portable build) and tells the user to upgrade or quit. The obvious recovery, restoring the backup taken before the schema bump, requires copying files manually in the config directory. Offline users are wrongly told their database comes from a third-party client.
+- **Proposal:** Add state-less `list_db_backups` + `restore_db_file(filename)` commands usable in the init-error state (copy the file, re-run the version precheck, continue startup) and list compatible backups (user_version <= supported) on the screen; distinguish 'could not check for updates' from 'no update available'; link the manual section.
+- **Acceptance:** With a v(N+1) database and a v(N) pre-migration backup, the screen lists the backup and restoring it boots the app without a manual file copy; offline, the screen shows 'could not check for updates, retry' instead of 'incompatible'; the backup used is protected from rotation.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### PRODUCT-30: Proxy web dashboard (read-only status/logs served by the proxy)
 
 **Type:** feature · **Priority:** P3 · **Effort:** M · **Confidence:** high · **Persona:** b, c
@@ -696,3 +774,13 @@ Platform: Tauri plugins log/opener/process/updater/dialog/store/deep-link/window
 - **Problem:** Misleading entry points for new contributors; stale naming drives wrong assumptions.
 - **Proposal:** Remove or finish (PRODUCT-42 / PRODUCT-03); rename `vscode.ts` → `endpoints.ts` + `importExport.ts`.
 - **Acceptance:** no unreachable views; no stub modules.
+
+### PRODUCT-73: App shell 'remove from config' / delete confirmation has no error handling or pending state
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/App.tsx:656-690 (`handleConfirmAction` awaits `providersApi.removeFromLiveConfig` with no try/catch and clears `confirmAction` only after success); src/App.tsx:1641 (invoked as `void handleConfirmAction()`); src/hooks/useProviderActions.ts:321-326 (`deleteProvider` rethrows from `mutateAsync`; the mutation toasts in src/lib/query/mutations.ts:252-260); src/components/ConfirmDialog.tsx:87-100 (no pending/disabled state on the confirm button).
+- **Problem:** When `remove_provider_from_live_config` fails (e.g. an unparsable OpenClaw/Hermes config) the promise rejects unhandled: no toast, the confirm dialog stays open and repeated clicks re-issue the command. For delete the error toast appears but the dialog also stays open with no indication of what happened.
+- **Proposal:** Wrap both branches in try/catch with `extractErrorMessage` toasts, always close the dialog (or keep it open with an inline error), and add an `isPending` prop to `ConfirmDialog` that disables both buttons while the action runs.
+- **Acceptance:** With the backend command mocked to reject, confirming shows an error toast, the dialog closes (or shows the error), and a second click during a pending call is ignored; a vitest covers both branches.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
