@@ -54,13 +54,13 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 
 | ID | Kind | Pri | Effort | Title | Depends on | Status |
 |---|---|---|---|---|---|---|
-| [CCS-049](P1-trust-release/CCS-049-p1-proxy-inbound-auth.md) | security | p0 | M | [proxy] Require a per-install token and reject foreign Host, Origin and non-JSON requests | CCS-014, CCS-012 | Open |
-| [CCS-050](P1-trust-release/CCS-050-p1-proxy-body-limit.md) | bug | p3 | S | [proxy] Enforce the request body limit and return 400 for malformed JSON |  | Open |
-| [CCS-051](P1-trust-release/CCS-051-p1-proxy-halfopen-permit.md) | bug | p1 | M | [proxy] Release the HalfOpen probe slot when a request is cancelled | CCS-014 | Open |
-| [CCS-052](P1-trust-release/CCS-052-p1-proxy-raw-send-no-resend.md) | bug | p1 | S | [proxy] Fall back from the raw header-case path only on pre-write errors |  | Open |
-| [CCS-053](P1-trust-release/CCS-053-p1-proxy-config-rollback.md) | bug | p1 | S | [proxy] Roll back the server and DB config when a port or address change fails to bind | CCS-054 | Open |
-| [CCS-054](P1-trust-release/CCS-054-p1-proxy-lifecycle-lock.md) | bug | p2 | S | [proxy] Serialize proxy start/stop with a lifecycle mutex and stop holding the server lock across shutdown |  | Open |
-| [CCS-055](P1-trust-release/CCS-055-p1-proxy-first-byte-timeout.md) | bug | p2 | S | [proxy] Apply the streaming first-byte timeout on the native-Claude raw path | CCS-052 | Open |
+| [CCS-049](P1-trust-release/CCS-049-p1-proxy-inbound-auth.md) | security | p0 | M | [proxy] Require a per-install token and reject foreign Host, Origin and non-JSON requests | CCS-014, CCS-012 | Done |
+| [CCS-050](P1-trust-release/CCS-050-p1-proxy-body-limit.md) | bug | p3 | S | [proxy] Enforce the request body limit and return 400 for malformed JSON |  | Done |
+| [CCS-051](P1-trust-release/CCS-051-p1-proxy-halfopen-permit.md) | bug | p1 | M | [proxy] Release the HalfOpen probe slot when a request is cancelled | CCS-014 | Done |
+| [CCS-052](P1-trust-release/CCS-052-p1-proxy-raw-send-no-resend.md) | bug | p1 | S | [proxy] Fall back from the raw header-case path only on pre-write errors |  | Done |
+| [CCS-053](P1-trust-release/CCS-053-p1-proxy-config-rollback.md) | bug | p1 | S | [proxy] Roll back the server and DB config when a port or address change fails to bind | CCS-054 | Done |
+| [CCS-054](P1-trust-release/CCS-054-p1-proxy-lifecycle-lock.md) | bug | p2 | S | [proxy] Serialize proxy start/stop with a lifecycle mutex and stop holding the server lock across shutdown |  | Done |
+| [CCS-055](P1-trust-release/CCS-055-p1-proxy-first-byte-timeout.md) | bug | p2 | S | [proxy] Apply the streaming first-byte timeout on the native-Claude raw path | CCS-052 | Done |
 | [CCS-056](P1-trust-release/CCS-056-p1-proxy-raw-body-timeout.md) | bug | p3 | S | [proxy] Bound non-streaming body reads on the raw path when failover is off |  | Open |
 | [CCS-057](P1-trust-release/CCS-057-p1-proxy-auth-guard-refresh.md) | bug | p3 | S | [proxy] Stop holding the Copilot/Codex auth read guard across network token refresh |  | Open |
 | [CCS-058](P1-trust-release/CCS-058-p1-proxy-mask-url.md) | security | p3 | S | [proxy] Make mask_url panic-free and never echo credentials from unparseable proxy URLs |  | Open |
@@ -219,7 +219,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 
 | ID | Kind | Pri | Effort | Title | Depends on | Status |
 |---|---|---|---|---|---|---|
-| [CCS-189](F-frontend/CCS-189-f-settingsconfig-goldens.md) | chore | p1 | S | [provider-form] Add per-app, per-preset settingsConfig golden snapshots | CCS-039 | Open |
+| [CCS-189](F-frontend/CCS-189-f-settingsconfig-goldens.md) | chore | p1 | S | [provider-form] Add per-app, per-preset settingsConfig golden snapshots | CCS-039 | Done |
 | [CCS-190](F-frontend/CCS-190-f-providerform-shell.md) | refactor | p2 | L | [provider-form] Turn ProviderForm into a shell with a base schema, a discriminated union and an inline error summary | CCS-189, CCS-119 | Open |
 | [CCS-191](F-frontend/CCS-191-f-providerform-core-apps.md) | refactor | p2 | L | [provider-form] Extract the Claude, Claude Desktop, Grok, Codex and Gemini form modules | CCS-190 | Open |
 | [CCS-192](F-frontend/CCS-192-f-providerform-additive-apps.md) | refactor | p2 | L | [provider-form] Extract the OpenCode, OpenClaw and Hermes form modules, with component tests | CCS-190 | Open |
@@ -231,12 +231,13 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-198](F-frontend/CCS-198-f-lazy-views-locales.md) | refactor | p3 | M | [perf] Lazy-load heavy views, per-app presets and locales | CCS-197 | Open |
 | [CCS-199](F-frontend/CCS-199-f-typed-i18n.md) | refactor | p3 | M | [i18n] Type the i18n keys and remove the 691 inline defaultValue fallbacks | CCS-020, CCS-198 | Open |
 | [CCS-200](F-frontend/CCS-200-f-radix-dialog-component-tests.md) | refactor | p3 | M | [ui] Move custom overlays to Radix Dialog and add component tests for the large panels | CCS-191 | Open |
-| [CCS-201](F-frontend/CCS-201-f-tauri-driver-e2e.md) | chore | p2 | M | [e2e] Add a tauri-driver and WebdriverIO smoke on Linux that gates release | CCS-024, CCS-023 | Open |
-| [CCS-202](F-frontend/CCS-202-f-resize-listener-leak.md) | bug | p3 | S | [shell] Unregister the onResized listener when App unmounts before it resolves |  | Open |
-| [CCS-203](F-frontend/CCS-203-f-safe-storage.md) | bug | p3 | S | [shell] Wrap all localStorage access in safe helpers |  | Open |
-| [CCS-204](F-frontend/CCS-204-f-a11y-icon-buttons.md) | bug | p3 | S | [a11y] Give icon-only buttons accessible names |  | Open |
+| [CCS-201](F-frontend/CCS-201-f-tauri-driver-e2e.md) | chore | p2 | M | [e2e] Add a tauri-driver and WebdriverIO smoke on Linux that gates release | CCS-024, CCS-023 | Partial |
+| [CCS-202](F-frontend/CCS-202-f-resize-listener-leak.md) | bug | p3 | S | [shell] Unregister the onResized listener when App unmounts before it resolves |  | Done |
+| [CCS-203](F-frontend/CCS-203-f-safe-storage.md) | bug | p3 | S | [shell] Wrap all localStorage access in safe helpers |  | Done |
+| [CCS-204](F-frontend/CCS-204-f-a11y-icon-buttons.md) | bug | p3 | S | [a11y] Give icon-only buttons accessible names |  | Done |
 | [CCS-205](F-frontend/CCS-205-f-live-diff-preview.md) | feature | p3 | M | [provider-form] Preview the diff of the target live config before saving | CCS-190, CCS-149 | Open |
 | [CCS-206](F-frontend/CCS-206-f-unsaved-changes-guard.md) | feature | p3 | S | [provider-form] Guard against closing the Add/Edit panel with unsaved changes | CCS-190, CCS-200 | Open |
 | [CCS-207](F-frontend/CCS-207-f-switching-state.md) | feature | p3 | S | [providers] Show a switching state and disable the other Switch buttons while a switch is pending | CCS-195 | Open |
 | [CCS-208](F-frontend/CCS-208-f-command-palette.md) | feature | p3 | S | [shell] Add a Cmd/Ctrl-K command palette to search and switch providers across apps | CCS-194, CCS-207 | Open |
 | [CCS-209](F-frontend/CCS-209-f-unpriced-requests-export.md) | feature | p3 | S | [usage] Filter and export unpriced requests, with a shortcut to add model pricing | CCS-159, CCS-021 | Open |
+| [CCS-210](F-frontend/CCS-210-f-markdowneditor-stale-onchange.md) | bug | p3 | S | [editor] Stop MarkdownEditor capturing a stale onChange |  | Open |
