@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Save } from "lucide-react";
+import { Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { Provider } from "@/types";
@@ -39,60 +39,57 @@ export function EditProviderDialog({
     unknown
   > | null>(null);
 
-  // 使用 ref 标记是否已经加载过，防止重复读取覆盖用户编辑
-  const [hasLoadedLive, setHasLoadedLive] = useState(false);
+  // 记录已完成实时配置读取的 key（appId + provider.id），防止重复读取覆盖用户编辑。
+  // 按 key 记录而非布尔值：被取消的读取（如切换了 provider）不会遗留"已加载"状态，
+  // 新一轮 effect 会为新的 key 重新读取，不会卡在加载占位
+  const [loadedLiveKey, setLoadedLiveKey] = useState<string | null>(null);
+
+  const liveKey = open && provider ? `${appId}:${provider.id}` : null;
+
+  // 代理接管模式 / OpenCode 不读取 live，无需等待，表单可立即渲染
+  const skipLiveRead = isProxyTakeover || appId === "opencode";
+
+  // 表单只在实时配置读取完成后才渲染：ProviderForm 及 Codex/Gemini 配置 hooks
+  // 只在挂载时消费 initialData，若先用数据库配置渲染、待 live 返回后再 reset，
+  // 会抹掉用户在此期间输入的内容
+  const hasLoadedLive =
+    liveKey !== null && (loadedLiveKey === liveKey || skipLiveRead);
 
   useEffect(() => {
     let cancelled = false;
+    const finish = (settings: Record<string, unknown> | null) => {
+      if (cancelled || !liveKey) return;
+      setLiveSettings(settings);
+      setLoadedLiveKey(liveKey);
+    };
     const load = async () => {
-      if (!open || !provider) {
+      if (!open || !provider || !liveKey) {
         setLiveSettings(null);
-        setHasLoadedLive(false);
+        setLoadedLiveKey(null);
         return;
       }
 
       // 关键修复：只在首次打开时加载一次
-      if (hasLoadedLive) {
+      if (loadedLiveKey === liveKey) {
         return;
       }
 
       // 代理接管模式：Live 配置已被代理改写，读取 live 会导致编辑界面展示代理地址/占位符等内容
       // 因此直接回退到 SSOT（数据库）配置，避免用户困惑与误保存
-      if (isProxyTakeover) {
-        if (!cancelled) {
-          setLiveSettings(null);
-          setHasLoadedLive(true);
-        }
-        return;
-      }
-
       // OpenCode uses additive mode - each provider's config is stored independently in DB
       // Reading live config would return the full opencode.json (with $schema, provider, mcp etc.)
       // instead of just the provider fragment, causing incorrect nested structure on save
-      if (appId === "opencode") {
-        if (!cancelled) {
-          setLiveSettings(null);
-          setHasLoadedLive(true);
-        }
+      if (skipLiveRead) {
+        finish(null);
         return;
       }
 
       if (appId === "openclaw") {
         try {
           const live = await openclawApi.getLiveProvider(provider.id);
-          if (!cancelled && live && typeof live === "object") {
-            setLiveSettings(live);
-          } else if (!cancelled) {
-            setLiveSettings(null);
-          }
+          finish(live && typeof live === "object" ? live : null);
         } catch {
-          if (!cancelled) {
-            setLiveSettings(null);
-          }
-        } finally {
-          if (!cancelled) {
-            setHasLoadedLive(true);
-          }
+          finish(null);
         }
         return;
       }
@@ -100,42 +97,32 @@ export function EditProviderDialog({
       try {
         const currentId = await providersApi.getCurrent(appId);
         if (currentId && provider.id === currentId) {
-          try {
-            const live = (await vscodeApi.getLiveProviderSettings(
-              appId,
-            )) as Record<string, unknown>;
-            if (!cancelled && live && typeof live === "object") {
-              setLiveSettings(live);
-              setHasLoadedLive(true);
-            }
-          } catch {
-            // 读取实时配置失败则回退到 SSOT（不打断编辑流程）
-            if (!cancelled) {
-              setLiveSettings(null);
-              setHasLoadedLive(true);
-            }
-          }
+          const live = (await vscodeApi.getLiveProviderSettings(
+            appId,
+          )) as Record<string, unknown>;
+          finish(live && typeof live === "object" ? live : null);
         } else {
-          if (!cancelled) {
-            setLiveSettings(null);
-            setHasLoadedLive(true);
-          }
+          finish(null);
         }
-      } finally {
-        // no-op
+      } catch {
+        // 读取实时配置失败则回退到 SSOT（不打断编辑流程）
+        finish(null);
       }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [open, provider?.id, appId, hasLoadedLive, isProxyTakeover]); // 只依赖 provider.id，不依赖整个 provider 对象
+  }, [open, provider?.id, appId, liveKey, loadedLiveKey, skipLiveRead]); // 只依赖 provider.id，不依赖整个 provider 对象
+
+  // 仅使用属于当前 key 的实时配置，避免切换 provider 时短暂套用上一个的 live 值
+  const effectiveLiveSettings =
+    loadedLiveKey !== null && loadedLiveKey === liveKey ? liveSettings : null;
 
   const initialSettingsConfig = useMemo(() => {
-    const base = (liveSettings ?? provider?.settingsConfig ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const base = (effectiveLiveSettings ??
+      provider?.settingsConfig ??
+      {}) as Record<string, unknown>;
 
     // Codex 的 modelCatalog 是 cc-switch 私有字段，SSOT 在数据库。Live 的 config.toml
     // 仅在写入时投影出 model_catalog_json 指针；Codex.app 改写配置、代理接管/恢复周期、
@@ -144,7 +131,7 @@ export function EditProviderDialog({
     // 因此始终以数据库 SSOT 的 modelCatalog 为准，仅在数据库确实没有时才回退到 Live 反解结果。
     if (
       appId === "codex" &&
-      liveSettings &&
+      effectiveLiveSettings &&
       provider?.settingsConfig &&
       typeof provider.settingsConfig === "object"
     ) {
@@ -156,7 +143,7 @@ export function EditProviderDialog({
     }
 
     return base;
-  }, [liveSettings, provider?.settingsConfig, appId]); // 只依赖 settingsConfig，不依赖整个 provider
+  }, [effectiveLiveSettings, provider?.settingsConfig, appId]); // 只依赖 settingsConfig，不依赖整个 provider
 
   // 固定 initialData，防止 provider 对象更新时重置表单
   const initialData = useMemo(() => {
@@ -230,7 +217,7 @@ export function EditProviderDialog({
         <Button
           type="submit"
           form="provider-form"
-          disabled={isFormSubmitting}
+          disabled={isFormSubmitting || !hasLoadedLive}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           <Save className="h-4 w-4 mr-2" />
@@ -238,17 +225,28 @@ export function EditProviderDialog({
         </Button>
       }
     >
-      <ProviderForm
-        appId={appId}
-        providerId={provider.id}
-        submitLabel={t("common.save")}
-        onSubmit={handleSubmit}
-        onCancel={() => onOpenChange(false)}
-        onSubmittingChange={setIsFormSubmitting}
-        initialData={initialData}
-        showButtons={false}
-        isProxyTakeover={isProxyTakeover}
-      />
+      {hasLoadedLive ? (
+        <ProviderForm
+          appId={appId}
+          providerId={provider.id}
+          submitLabel={t("common.save")}
+          onSubmit={handleSubmit}
+          onCancel={() => onOpenChange(false)}
+          onSubmittingChange={setIsFormSubmitting}
+          initialData={initialData}
+          showButtons={false}
+          isProxyTakeover={isProxyTakeover}
+        />
+      ) : (
+        <div
+          className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"
+          role="status"
+          data-testid="edit-provider-loading"
+        >
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t("common.loading")}
+        </div>
+      )}
     </FullScreenPanel>
   );
 }
