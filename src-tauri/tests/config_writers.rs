@@ -273,6 +273,42 @@ fn codex_config_toml_and_auth_json() {
     }
 }
 
+/// `auth.json` and `config.toml` are written as a pair: when the second write
+/// fails, the first one is rolled back so Codex never sees a half-switched live.
+#[cfg(unix)]
+#[test]
+fn codex_failed_config_write_rolls_back_auth_json() {
+    const W: &str = "codex";
+    let env = LiveEnv::new();
+    let auth = fixture(W, "auth.json");
+    env.seed(".codex/auth.json", &auth);
+    // A dangling config.toml symlink whose target's parent is a regular file:
+    // the atomic write follows the link and cannot create the parent dir.
+    env.seed(".codex/blocker", "");
+    std::os::unix::fs::symlink(
+        env.path(".codex/blocker/config.toml"),
+        env.path(".codex/config.toml"),
+    )
+    .expect("symlink config.toml");
+
+    let result = write_live(AppType::Codex, W, "relay", "Relay");
+    assert!(result.is_err(), "config.toml write should fail: {result:?}");
+    assert_eq!(
+        fs::read_to_string(env.path(".codex/auth.json")).expect("read auth.json"),
+        auth,
+        "auth.json must be rolled back when config.toml cannot be written"
+    );
+
+    // Without the blocker the same write does replace auth.json, so the
+    // assertion above really exercised the rollback.
+    fs::remove_file(env.path(".codex/config.toml")).expect("remove symlink");
+    write_live(AppType::Codex, W, "relay", "Relay").expect("write codex live");
+    assert_ne!(
+        fs::read_to_string(env.path(".codex/auth.json")).expect("read auth.json"),
+        auth
+    );
+}
+
 #[test]
 fn codex_preserves_official_auth_json() {
     const W: &str = "codex_preserve_auth";

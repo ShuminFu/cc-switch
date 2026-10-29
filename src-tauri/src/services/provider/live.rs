@@ -3,16 +3,15 @@
 //! Handles reading and writing live configuration files for Claude, Codex, and Gemini.
 
 use serde_json::Value;
-use toml_edit::{DocumentMut, Item, TableLike};
 
 use crate::app_config::AppType;
-use crate::codex_config::{get_codex_auth_path, get_codex_config_path};
-use crate::config::{delete_file, write_json_file};
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 use crate::services::mcp::McpService;
 use crate::store::AppState;
+
+pub use crate::apps::codex::update_toml_common_config_snippet;
 
 pub(crate) fn provider_exists_in_live_config(
     app_type: &AppType,
@@ -29,204 +28,6 @@ pub(crate) fn provider_exists_in_live_config(
     }
 }
 
-fn toml_value_is_subset(target: &toml_edit::Value, source: &toml_edit::Value) -> bool {
-    match (target, source) {
-        (toml_edit::Value::String(target), toml_edit::Value::String(source)) => {
-            target.value() == source.value()
-        }
-        (toml_edit::Value::Integer(target), toml_edit::Value::Integer(source)) => {
-            target.value() == source.value()
-        }
-        (toml_edit::Value::Float(target), toml_edit::Value::Float(source)) => {
-            target.value() == source.value()
-        }
-        (toml_edit::Value::Boolean(target), toml_edit::Value::Boolean(source)) => {
-            target.value() == source.value()
-        }
-        (toml_edit::Value::Datetime(target), toml_edit::Value::Datetime(source)) => {
-            target.value() == source.value()
-        }
-        (toml_edit::Value::Array(target), toml_edit::Value::Array(source)) => {
-            toml_array_contains_subset(target, source)
-        }
-        (toml_edit::Value::InlineTable(target), toml_edit::Value::InlineTable(source)) => {
-            source.iter().all(|(key, source_item)| {
-                target
-                    .get(key)
-                    .is_some_and(|target_item| toml_value_is_subset(target_item, source_item))
-            })
-        }
-        _ => false,
-    }
-}
-
-fn toml_array_contains_subset(target: &toml_edit::Array, source: &toml_edit::Array) -> bool {
-    let mut matched = vec![false; target.len()];
-    let target_items: Vec<&toml_edit::Value> = target.iter().collect();
-
-    source.iter().all(|source_item| {
-        if let Some((index, _)) = target_items
-            .iter()
-            .enumerate()
-            .find(|(index, target_item)| {
-                !matched[*index] && toml_value_is_subset(target_item, source_item)
-            })
-        {
-            matched[index] = true;
-            true
-        } else {
-            false
-        }
-    })
-}
-
-fn toml_remove_array_items(target: &mut toml_edit::Array, source: &toml_edit::Array) {
-    for source_item in source.iter() {
-        let index = {
-            let target_items: Vec<&toml_edit::Value> = target.iter().collect();
-            target_items
-                .iter()
-                .enumerate()
-                .find(|(_, target_item)| toml_value_is_subset(target_item, source_item))
-                .map(|(index, _)| index)
-        };
-
-        if let Some(index) = index {
-            target.remove(index);
-        }
-    }
-}
-
-fn toml_item_is_subset(target: &Item, source: &Item) -> bool {
-    if let Some(source_table) = source.as_table_like() {
-        let Some(target_table) = target.as_table_like() else {
-            return false;
-        };
-        return source_table.iter().all(|(key, source_item)| {
-            target_table
-                .get(key)
-                .is_some_and(|target_item| toml_item_is_subset(target_item, source_item))
-        });
-    }
-
-    match (target.as_value(), source.as_value()) {
-        (Some(target_value), Some(source_value)) => {
-            toml_value_is_subset(target_value, source_value)
-        }
-        _ => false,
-    }
-}
-
-fn merge_toml_item(target: &mut Item, source: &Item) {
-    if let Some(source_table) = source.as_table_like() {
-        if let Some(target_table) = target.as_table_like_mut() {
-            merge_toml_table_like(target_table, source_table);
-            return;
-        }
-    }
-
-    *target = source.clone();
-}
-
-fn merge_toml_table_like(target: &mut dyn TableLike, source: &dyn TableLike) {
-    for (key, source_item) in source.iter() {
-        match target.get_mut(key) {
-            Some(target_item) => merge_toml_item(target_item, source_item),
-            None => {
-                target.insert(key, source_item.clone());
-            }
-        }
-    }
-}
-
-fn remove_toml_item(target: &mut Item, source: &Item) {
-    if let Some(source_table) = source.as_table_like() {
-        if let Some(target_table) = target.as_table_like_mut() {
-            remove_toml_table_like(target_table, source_table);
-            if target_table.is_empty() {
-                *target = Item::None;
-            }
-            return;
-        }
-    }
-
-    if let Some(source_value) = source.as_value() {
-        let mut remove_item = false;
-
-        if let Some(target_value) = target.as_value_mut() {
-            match (target_value, source_value) {
-                (toml_edit::Value::Array(target_arr), toml_edit::Value::Array(source_arr)) => {
-                    toml_remove_array_items(target_arr, source_arr);
-                    remove_item = target_arr.is_empty();
-                }
-                (target_value, source_value)
-                    if toml_value_is_subset(target_value, source_value) =>
-                {
-                    remove_item = true;
-                }
-                _ => {}
-            }
-        }
-
-        if remove_item {
-            *target = Item::None;
-        }
-    }
-}
-
-fn remove_toml_table_like(target: &mut dyn TableLike, source: &dyn TableLike) {
-    let keys: Vec<String> = source.iter().map(|(key, _)| key.to_string()).collect();
-
-    for key in keys {
-        let mut remove_key = false;
-        if let (Some(target_item), Some(source_item)) = (target.get_mut(&key), source.get(&key)) {
-            remove_toml_item(target_item, source_item);
-            remove_key = target_item.is_none()
-                || target_item
-                    .as_table_like()
-                    .is_some_and(|table_like| table_like.is_empty());
-        }
-
-        if remove_key {
-            target.remove(&key);
-        }
-    }
-}
-
-/// 前端表单勾选/取消"使用通用配置"时，对编辑器里的 config.toml 文本做
-/// 结构化合并/剥离。必须在后端用 toml_edit 做：前端 smol-toml 只能
-/// parse → merge → 整文档重序列化，注释全丢、键序重排，还会生成多余的
-/// 空父表头（如 `[model_providers]`）。
-pub fn update_toml_common_config_snippet(
-    config_toml: &str,
-    snippet_toml: &str,
-    enabled: bool,
-) -> Result<String, AppError> {
-    let trimmed = snippet_toml.trim();
-    if trimmed.is_empty() {
-        return Ok(config_toml.to_string());
-    }
-
-    let mut target_doc = if config_toml.trim().is_empty() {
-        DocumentMut::new()
-    } else {
-        config_toml
-            .parse::<DocumentMut>()
-            .map_err(|e| AppError::Message(format!("Invalid Codex config.toml: {e}")))?
-    };
-    let source_doc = trimmed
-        .parse::<DocumentMut>()
-        .map_err(|e| AppError::Message(format!("Invalid Codex common config snippet: {e}")))?;
-
-    if enabled {
-        merge_toml_table_like(target_doc.as_table_mut(), source_doc.as_table());
-    } else {
-        remove_toml_table_like(target_doc.as_table_mut(), source_doc.as_table());
-    }
-
-    Ok(target_doc.to_string())
-}
-
 fn settings_contain_common_config(app_type: &AppType, settings: &Value, snippet: &str) -> bool {
     let trimmed = snippet.trim();
     if trimmed.is_empty() {
@@ -239,27 +40,8 @@ fn settings_contain_common_config(app_type: &AppType, settings: &Value, snippet:
             .is_some_and(|common| common.contains(settings, trimmed));
     }
 
-    match app_type {
-        AppType::Codex => {
-            let config_toml = settings.get("config").and_then(Value::as_str).unwrap_or("");
-            if config_toml.trim().is_empty() {
-                return false;
-            }
-
-            let target_doc = match config_toml.parse::<DocumentMut>() {
-                Ok(doc) => doc,
-                Err(_) => return false,
-            };
-            let source_doc = match trimmed.parse::<DocumentMut>() {
-                Ok(doc) => doc,
-                Err(_) => return false,
-            };
-
-            toml_item_is_subset(target_doc.as_item(), source_doc.as_item())
-        }
-        // 其余应用不支持通用配置片段（已迁移到 AppAdapter 的应用在上方分派）
-        _ => false,
-    }
+    // 其余应用不支持通用配置片段
+    false
 }
 
 pub(crate) fn provider_uses_common_config(
@@ -296,32 +78,8 @@ pub(crate) fn remove_common_config_from_settings(
         };
     }
 
-    match app_type {
-        AppType::Codex => {
-            let mut result = settings.clone();
-            let config_toml = settings.get("config").and_then(Value::as_str).unwrap_or("");
-            let mut target_doc = if config_toml.trim().is_empty() {
-                DocumentMut::new()
-            } else {
-                config_toml.parse::<DocumentMut>().map_err(|e| {
-                    AppError::Message(format!(
-                        "Invalid Codex config.toml while removing common config: {e}"
-                    ))
-                })?
-            };
-            let source_doc = trimmed.parse::<DocumentMut>().map_err(|e| {
-                AppError::Message(format!("Invalid Codex common config snippet: {e}"))
-            })?;
-
-            remove_toml_table_like(target_doc.as_table_mut(), source_doc.as_table());
-            if let Some(obj) = result.as_object_mut() {
-                obj.insert("config".to_string(), Value::String(target_doc.to_string()));
-            }
-            Ok(result)
-        }
-        // 其余应用不支持通用配置片段（已迁移到 AppAdapter 的应用在上方分派）
-        _ => Ok(settings.clone()),
-    }
+    // 其余应用不支持通用配置片段
+    Ok(settings.clone())
 }
 
 fn apply_common_config_to_settings(
@@ -341,32 +99,8 @@ fn apply_common_config_to_settings(
         };
     }
 
-    match app_type {
-        AppType::Codex => {
-            let mut result = settings.clone();
-            let config_toml = settings.get("config").and_then(Value::as_str).unwrap_or("");
-            let mut target_doc = if config_toml.trim().is_empty() {
-                DocumentMut::new()
-            } else {
-                config_toml.parse::<DocumentMut>().map_err(|e| {
-                    AppError::Message(format!(
-                        "Invalid Codex config.toml while applying common config: {e}"
-                    ))
-                })?
-            };
-            let source_doc = trimmed.parse::<DocumentMut>().map_err(|e| {
-                AppError::Message(format!("Invalid Codex common config snippet: {e}"))
-            })?;
-
-            merge_toml_table_like(target_doc.as_table_mut(), source_doc.as_table());
-            if let Some(obj) = result.as_object_mut() {
-                obj.insert("config".to_string(), Value::String(target_doc.to_string()));
-            }
-            Ok(result)
-        }
-        // 其余应用不支持通用配置片段（已迁移到 AppAdapter 的应用在上方分派）
-        _ => Ok(settings.clone()),
-    }
+    // 其余应用不支持通用配置片段
+    Ok(settings.clone())
 }
 
 pub(crate) fn build_effective_settings_with_common_config(
@@ -470,63 +204,7 @@ fn restore_live_settings_for_provider_backfill(
     if let Some(adapter) = crate::apps::adapter(app_type) {
         return adapter.backfill_live_settings(provider, live_settings);
     }
-    if !matches!(app_type, AppType::Codex) {
-        return live_settings;
-    }
-
-    let mut settings = live_settings;
-    let restore_provider_token =
-        crate::codex_config::should_restore_codex_provider_token_for_backfill(
-            provider.category.as_deref(),
-            &provider.settings_config,
-        );
-    if let Err(err) = crate::codex_config::restore_codex_settings_for_backfill(
-        &mut settings,
-        &provider.settings_config,
-        restore_provider_token,
-    ) {
-        log::warn!(
-            "Failed to restore Codex settings while backfilling '{}': {err}",
-            provider.id
-        );
-    }
-
-    // MCP 服务器归 DB mcp_servers 表所有，live 里的 [mcp_servers] 是同步投影；
-    // 回填时剥掉，否则已删除的服务器会随供应商快照复活（逐条 reconcile 清不掉孤儿）。
-    if let Err(err) = crate::codex_config::strip_codex_mcp_servers_from_settings(&mut settings) {
-        log::warn!(
-            "Failed to strip mcp_servers while backfilling '{}': {err}",
-            provider.id
-        );
-    }
-
-    // 统一会话开关注入的共享 `custom` 路由只属于 live 配置；切换回填时
-    // 必须剥掉，否则官方供应商的存储配置被污染，关闭开关后无法还原。
-    if provider.category.as_deref() == Some("official") {
-        if let Err(err) =
-            crate::codex_config::strip_codex_unified_session_bucket_from_settings(&mut settings)
-        {
-            log::warn!(
-                "Failed to strip unified session bucket while backfilling '{}': {err}",
-                provider.id
-            );
-        }
-    }
-
-    // `modelCatalog` is a cc-switch–private field whose SSOT is the DB. Live's
-    // `config.toml` only carries a lossy projection (`model_catalog_json` →
-    // generated catalog file) that proxy takeover/restore cycles and Codex.app
-    // config rewrites can drop, so `read_live_settings` may reconstruct it as
-    // absent. Never let a switch-away backfill from Live erase the stored
-    // mapping: prefer the DB provider's `modelCatalog`, falling back to whatever
-    // Live reconstructed only when the DB has none.
-    if let Some(stored_catalog) = provider.settings_config.get("modelCatalog") {
-        if let Some(obj) = settings.as_object_mut() {
-            obj.insert("modelCatalog".to_string(), stored_catalog.clone());
-        }
-    }
-
-    settings
+    live_settings
 }
 
 pub(crate) fn normalize_provider_common_config_for_storage(
@@ -566,40 +244,6 @@ pub(crate) fn normalize_provider_common_config_for_storage(
     Ok(())
 }
 
-/// Live configuration snapshot for backup/restore
-#[derive(Clone)]
-#[allow(dead_code)]
-pub(crate) enum LiveSnapshot {
-    Codex {
-        auth: Option<Value>,
-        config: Option<String>,
-    },
-}
-
-impl LiveSnapshot {
-    #[allow(dead_code)]
-    pub(crate) fn restore(&self) -> Result<(), AppError> {
-        match self {
-            LiveSnapshot::Codex { auth, config } => {
-                let auth_path = get_codex_auth_path();
-                let config_path = get_codex_config_path();
-                if let Some(value) = auth {
-                    write_json_file(&auth_path, value)?;
-                } else if auth_path.exists() {
-                    delete_file(&auth_path)?;
-                }
-
-                if let Some(text) = config {
-                    crate::config::write_text_file(&config_path, text)?;
-                } else if config_path.exists() {
-                    delete_file(&config_path)?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
 /// Write live configuration snapshot for a provider
 pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Result<(), AppError> {
     if let Some(adapter) = crate::apps::adapter(app_type) {
@@ -607,30 +251,6 @@ pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Re
     }
 
     match app_type {
-        AppType::Codex => {
-            let obj = provider
-                .settings_config
-                .as_object()
-                .ok_or_else(|| AppError::Config("Codex 供应商配置必须是 JSON 对象".to_string()))?;
-            let auth = obj
-                .get("auth")
-                .ok_or_else(|| AppError::Config("Codex 供应商配置缺少 'auth' 字段".to_string()))?;
-            let config_str = obj.get("config").and_then(|v| v.as_str());
-
-            // Native (direct) Responses and Anthropic providers must suppress Codex's
-            // freeform apply_patch custom tool via the generated catalog; chat/proxy
-            // providers keep the default tool set. Uses the same Anthropic detection as
-            // the proxy router (apiFormat meta/settings + TOML wire_api).
-            let profile = crate::proxy::providers::resolve_codex_catalog_tool_profile(provider);
-
-            crate::codex_config::write_codex_provider_live_with_catalog(
-                &provider.settings_config,
-                provider.category.as_deref(),
-                auth,
-                config_str,
-                profile,
-            )?;
-        }
         AppType::OpenCode => {
             // OpenCode uses additive mode - write provider to config
             use crate::opencode_config;
@@ -887,22 +507,6 @@ pub fn read_live_settings(app_type: AppType) -> Result<Value, AppError> {
     }
 
     match app_type {
-        AppType::Codex => {
-            let mut result = crate::codex_config::read_codex_live_settings()?;
-            // `modelCatalog` is a cc-switch private field that lives only in
-            // the DB SSOT plus the `cc-switch-model-catalog.json` projection
-            // file — it is never inlined into `auth.json` or `config.toml`.
-            // Reverse-parse the projection so the edit form for the active
-            // Codex provider doesn't see an empty mapping table.
-            if let Ok(Some(model_catalog)) =
-                crate::codex_config::read_codex_model_catalog_simplified_from_live()
-            {
-                if let Some(obj) = result.as_object_mut() {
-                    obj.insert("modelCatalog".to_string(), model_catalog);
-                }
-            }
-            Ok(result)
-        }
         AppType::OpenCode => {
             use crate::opencode_config::{get_opencode_config_path, read_opencode_config};
 
@@ -986,19 +590,11 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
         ));
     }
 
-    let settings_config = if let Some(adapter) = crate::apps::adapter(&app_type) {
-        adapter.import_live()?
-    } else {
-        match app_type {
-            AppType::Codex => crate::codex_config::read_codex_live_settings()?,
-            // OpenCode, OpenClaw and Hermes use additive mode and are handled by early return above
-            AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => {
-                unreachable!("additive mode apps are handled by early return")
-            }
-            // 已迁移到 AppAdapter 的应用在上方分派
-            _ => unreachable!("adapter-backed apps are handled above"),
-        }
+    // 累加模式应用（OpenCode / OpenClaw / Hermes）已在上方提前返回
+    let Some(adapter) = crate::apps::adapter(&app_type) else {
+        unreachable!("additive mode apps are handled by early return")
     };
+    let settings_config = adapter.import_live()?;
 
     let mut provider = Provider::with_id(
         "default".to_string(),
@@ -1007,30 +603,9 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
         None,
     );
     provider.category = Some(
-        if matches!(app_type, AppType::Codex) {
-            let config_text = provider
-                .settings_config
-                .get("config")
-                .and_then(Value::as_str);
-            let has_provider_key = crate::codex_config::extract_codex_api_key(
-                provider.settings_config.get("auth"),
-                config_text,
-            )
-            .is_some();
-            let has_login_material = provider
-                .settings_config
-                .get("auth")
-                .is_some_and(crate::codex_config::codex_auth_has_login_material);
-
-            if has_login_material && !has_provider_key {
-                "official"
-            } else {
-                "custom"
-            }
-        } else {
-            "custom"
-        }
-        .to_string(),
+        adapter
+            .import_category(&provider.settings_config)
+            .to_string(),
     );
 
     state.db.save_provider(app_type.as_str(), &provider)?;
@@ -1350,6 +925,7 @@ pub fn remove_openclaw_provider_from_live(provider_id: &str) -> Result<(), AppEr
 mod tests {
     use super::*;
     use serde_json::json;
+    use toml_edit::DocumentMut;
 
     #[test]
     fn kimi_for_coding_effective_settings_backfill_256k_context() {

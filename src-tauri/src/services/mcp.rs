@@ -125,10 +125,6 @@ impl McpService {
         }
 
         match app {
-            AppType::Codex => {
-                // Codex uses TOML format, must use the correct function
-                mcp::sync_single_server_to_codex(&Default::default(), &server.id, &server.server)?;
-            }
             AppType::OpenCode => {
                 mcp::sync_single_server_to_opencode(
                     &Default::default(),
@@ -175,7 +171,6 @@ impl McpService {
         }
 
         match app {
-            AppType::Codex => mcp::remove_server_from_codex(id)?,
             AppType::OpenCode => {
                 mcp::remove_server_from_opencode(id)?;
             }

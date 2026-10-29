@@ -508,11 +508,6 @@ impl SkillService {
 
         // 目录覆盖：优先使用用户在 settings.json 中配置的 override 目录
         match app {
-            AppType::Codex => {
-                if let Some(custom) = crate::settings::get_codex_override_dir() {
-                    return Ok(Some(custom.join("skills")));
-                }
-            }
             AppType::OpenCode => {
                 if let Some(custom) = crate::settings::get_opencode_override_dir() {
                     return Ok(Some(custom.join("skills")));
@@ -538,7 +533,6 @@ impl SkillService {
         let home = crate::config::get_home_dir();
 
         Ok(Some(match app {
-            AppType::Codex => home.join(".codex").join("skills"),
             AppType::OpenCode => home.join(".config").join("opencode").join("skills"),
             AppType::OpenClaw => home.join(".openclaw").join("skills"),
             AppType::Hermes => crate::hermes_config::get_hermes_dir().join("skills"),

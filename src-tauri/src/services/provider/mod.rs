@@ -2,12 +2,12 @@
 //!
 //! Handles provider CRUD operations, switching, and configuration management.
 
+mod codex_official;
 mod endpoints;
 mod live;
 mod usage;
 
 use indexmap::IndexMap;
-use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -20,6 +20,7 @@ use crate::settings::CustomEndpoint;
 use crate::store::AppState;
 
 // Re-export sub-module functions for external access
+pub use codex_official::reapply_current_codex_official_live;
 pub use live::{
     import_default_config, import_hermes_providers_from_live, import_openclaw_providers_from_live,
     import_opencode_providers_from_live, read_live_settings,
@@ -47,62 +48,9 @@ use usage::validate_usage_script;
 /// Codex keeps ownership of its ChatGPT login and the proxy only forwards the
 /// authenticated request. Other official providers retain the existing block.
 pub fn official_provider_supports_proxy_takeover(app_type: &AppType, provider: &Provider) -> bool {
-    matches!(app_type, AppType::Codex)
-        && crate::proxy::providers::is_codex_official_provider(provider)
-}
-
-/// 统一会话开关变更后，立即按新开关状态重写当前官方 Codex 供应商的
-/// live 配置，使开关即时生效（无需等下一次切换）。
-/// 当前供应商非官方（或不存在）时为 no-op：注入只作用于官方配置，
-/// 第三方 live 配置不受开关影响。
-pub fn reapply_current_codex_official_live(state: &AppState) -> Result<bool, AppError> {
-    let current_id = ProviderService::current(state, AppType::Codex)?;
-    if current_id.is_empty() {
-        return Ok(false);
-    }
-    let providers = state.db.get_all_providers(AppType::Codex.as_str())?;
-    let Some(provider) = providers.get(&current_id) else {
-        return Ok(false);
-    };
-    if provider.category.as_deref() != Some("official") {
-        return Ok(false);
-    }
-
-    // 代理接管期间 live 归代理所有（开启代理时官方供应商只警告不拦截，
-    // 二者可以共存）。与切换/保存路径一致：以 backup/占位符为所有权信号，
-    // 只更新备份，注入后的配置由接管释放时的恢复路径落盘。
-    let has_live_backup =
-        futures::executor::block_on(state.db.get_live_backup(AppType::Codex.as_str()))
-            .ok()
-            .flatten()
-            .is_some();
-    let live_taken_over = state
-        .proxy_service
-        .detect_takeover_in_live_config_for_app(&AppType::Codex);
-    if has_live_backup || live_taken_over {
-        futures::executor::block_on(
-            state
-                .proxy_service
-                .update_live_backup_from_provider(AppType::Codex.as_str(), provider),
-        )
-        .map_err(|e| AppError::Message(format!("更新 Live 备份失败: {e}")))?;
-        return Ok(true);
-    }
-
-    live::write_live_with_common_config(&state.db, &AppType::Codex, provider)?;
-    // 重写 live 会整体替换 config.toml（有意设计），[mcp_servers] 随之丢失，
-    // 写完必须立刻从 DB 重新投影启用的 MCP。只投影 Codex 而非
-    // sync_all_enabled：后者按 AppType::all() 顺序逐应用短路，排在 Codex
-    // 前面的无关应用 live 损坏（如 ~/.claude.json 坏 JSON）会阻断 Codex
-    // 的重投影，让刚被清掉的 [mcp_servers] 无人补回。
-    // 投影失败降级为警告：走到这里 live 已按新开关状态落盘，开关事实上
-    // 已生效；若把错误上抛，save_settings 会回滚开关设置，制造"设置=旧值、
-    // live=新桶"的会话分裂——正是该回滚要防止的状态。MCP 投影可自愈
-    // （下次切换 / 任一 MCP 启停操作都会重新投影）。
-    if let Err(err) = McpService::sync_enabled_for_app(state, &AppType::Codex) {
-        log::warn!("统一会话开关重写 live 后重投影 Codex MCP 失败（将在下次同步时自愈）: {err}");
-    }
-    Ok(true)
+    crate::apps::adapter(app_type)
+        .and_then(|adapter| adapter.takeover())
+        .is_some_and(|takeover| takeover.official_provider_supported(provider))
 }
 
 /// Provider business logic service
@@ -916,8 +864,9 @@ command = "legacy-cmd"
 "#;
 
         let settings = json!({ "config": config_toml });
-        let extracted = ProviderService::extract_codex_common_config(&settings)
-            .expect("extract_codex_common_config should succeed");
+        let extracted =
+            ProviderService::extract_common_config_snippet_from_settings(AppType::Codex, &settings)
+                .expect("Codex common config extraction should succeed");
 
         assert!(
             !extracted
@@ -975,8 +924,9 @@ command = "legacy-cmd"
     fn extract_codex_common_config_keeps_user_set_web_search() {
         let config_toml = "web_search = \"enabled\"\ndisable_response_storage = true\n";
         let settings = json!({ "config": config_toml });
-        let extracted = ProviderService::extract_codex_common_config(&settings)
-            .expect("extract should succeed");
+        let extracted =
+            ProviderService::extract_common_config_snippet_from_settings(AppType::Codex, &settings)
+                .expect("extract should succeed");
         assert!(
             extracted.contains("web_search = \"enabled\""),
             "a user-set web_search value is a shareable preference, got: {extracted}"
@@ -3128,7 +3078,7 @@ impl ProviderService {
             Some(adapter) => adapter
                 .common_snippet()
                 .is_some_and(|common| common.sync_from_live()),
-            None => matches!(app_type, AppType::Codex),
+            None => false,
         };
         if !in_scope {
             return;
@@ -3230,95 +3180,11 @@ impl ProviderService {
         }
 
         match app_type {
-            AppType::Codex => Self::extract_codex_common_config(settings_config),
             AppType::OpenCode => Self::extract_opencode_common_config(settings_config),
             AppType::OpenClaw => Self::extract_openclaw_common_config(settings_config),
             // Hermes doesn't use common config snippets; adapter-backed apps are handled above
             _ => Ok(String::new()),
         }
-    }
-
-    /// Extract common config for Codex (TOML format)
-    fn extract_codex_common_config(settings: &Value) -> Result<String, AppError> {
-        // Codex config is stored as { "auth": {...}, "config": "toml string" }
-        let config_toml = settings
-            .get("config")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        if config_toml.is_empty() {
-            return Ok(String::new());
-        }
-
-        let mut doc = config_toml
-            .parse::<toml_edit::DocumentMut>()
-            .map_err(|e| AppError::Message(format!("TOML parse error: {e}")))?;
-
-        // Remove provider-specific fields.
-        let root = doc.as_table_mut();
-        root.remove("model");
-        root.remove("model_provider");
-        // Legacy/alt formats might use a top-level base_url.
-        root.remove("base_url");
-        // wire_api 与 base_url 同属供应商路由语义：无 model_provider 时
-        // update_codex_toml_field / 前端 setCodexWireApi 都会把它落在顶层，
-        // 进了片段会改写其它供应商的协议选择（chat vs responses）。
-        root.remove("wire_api");
-
-        // Remove entire model_providers table (provider-specific configuration)
-        root.remove("model_providers");
-
-        // MCP 服务器归 DB mcp_servers 表所有：进了共享片段会绕过按应用的
-        // 启用状态被合并进所有勾选通用配置的供应商，且在通用配置编辑框里
-        // 显示为一份"重复"的 MCP 配置。
-        root.remove("mcp_servers");
-        // 历史错误格式 [mcp.servers] 一并剥离（与 strip_codex_mcp_servers_from_settings
-        // 一致）：sync_all_enabled 只管理 [mcp_servers.*]，legacy 形态一旦进了
-        // 片段就会被合并进所有供应商，且没有任何同步路径能清掉这个孤儿。
-        if let Some(mcp_tbl) = root
-            .get_mut("mcp")
-            .and_then(|item| item.as_table_like_mut())
-        {
-            mcp_tbl.remove("servers");
-            if mcp_tbl.is_empty() {
-                root.remove("mcp");
-            }
-        }
-
-        // cc-switch 写 live 时注入的产物一律不进共享片段：
-        // - experimental_bearer_token 正常写在 [model_providers.<id>] 内（上面
-        //   整表已剥），但无活跃路由 / 内建保留 id / 路由表缺失三种 fallback
-        //   会落在顶层——不剥等于把 API 密钥写进共享片段。
-        root.remove("experimental_bearer_token");
-        // - model_catalog_json 指向按供应商生成的 catalog 投影文件（DB 为 SSOT）。
-        root.remove("model_catalog_json");
-        // - web_search 只剥 cc-switch 注入的 "disabled" 哨兵；用户手设的其它值
-        //   属于可共享偏好，保留。
-        if root
-            .get(crate::codex_config::CODEX_WEB_SEARCH_FIELD)
-            .and_then(|item| item.as_str())
-            == Some(crate::codex_config::CODEX_WEB_SEARCH_DISABLED)
-        {
-            root.remove(crate::codex_config::CODEX_WEB_SEARCH_FIELD);
-        }
-
-        // Clean up multiple empty lines (keep at most one blank line).
-        let mut cleaned = String::new();
-        let mut blank_run = 0usize;
-        for line in doc.to_string().lines() {
-            if line.trim().is_empty() {
-                blank_run += 1;
-                if blank_run <= 1 {
-                    cleaned.push('\n');
-                }
-                continue;
-            }
-            blank_run = 0;
-            cleaned.push_str(line);
-            cleaned.push('\n');
-        }
-
-        Ok(cleaned.trim().to_string())
     }
 
     /// Extract common config for OpenCode (JSON format)
@@ -3488,46 +3354,6 @@ impl ProviderService {
             adapter.validate_provider(provider)?;
         } else {
             match app_type {
-                AppType::Codex => {
-                    let settings = provider.settings_config.as_object().ok_or_else(|| {
-                        AppError::localized(
-                            "provider.codex.settings.not_object",
-                            "Codex 配置必须是 JSON 对象",
-                            "Codex configuration must be a JSON object",
-                        )
-                    })?;
-
-                    let auth = settings.get("auth").ok_or_else(|| {
-                        AppError::localized(
-                            "provider.codex.auth.missing",
-                            format!("供应商 {} 缺少 auth 配置", provider.id),
-                            format!("Provider {} is missing auth configuration", provider.id),
-                        )
-                    })?;
-                    if !auth.is_object() {
-                        return Err(AppError::localized(
-                            "provider.codex.auth.not_object",
-                            format!("供应商 {} 的 auth 配置必须是 JSON 对象", provider.id),
-                            format!(
-                                "Provider {} auth configuration must be a JSON object",
-                                provider.id
-                            ),
-                        ));
-                    }
-
-                    if let Some(config_value) = settings.get("config") {
-                        if !(config_value.is_string() || config_value.is_null()) {
-                            return Err(AppError::localized(
-                                "provider.codex.config.invalid_type",
-                                "Codex config 字段必须是字符串",
-                                "Codex config field must be a string",
-                            ));
-                        }
-                        if let Some(cfg_text) = config_value.as_str() {
-                            crate::codex_config::validate_config_toml(cfg_text)?;
-                        }
-                    }
-                }
                 AppType::OpenCode => {
                     // OpenCode uses a different config structure: { npm, options, models }
                     // Basic validation - must be an object
@@ -3592,65 +3418,6 @@ impl ProviderService {
         }
 
         match app_type {
-            AppType::Codex => {
-                let _auth = provider
-                    .settings_config
-                    .get("auth")
-                    .and_then(|v| v.as_object())
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.codex.auth.missing",
-                            "配置格式错误: 缺少 auth",
-                            "Invalid configuration: missing auth section",
-                        )
-                    })?;
-
-                let config_toml = provider
-                    .settings_config
-                    .get("config")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-
-                let api_key = crate::codex_config::extract_codex_api_key(
-                    provider.settings_config.get("auth"),
-                    Some(config_toml),
-                )
-                .ok_or_else(|| {
-                    AppError::localized(
-                        "provider.codex.api_key.missing",
-                        "缺少 API Key",
-                        "API key is missing",
-                    )
-                })?;
-
-                let base_url = if config_toml.contains("base_url") {
-                    let re = Regex::new(r#"base_url\s*=\s*["']([^"']+)["']"#).map_err(|e| {
-                        AppError::localized(
-                            "provider.regex_init_failed",
-                            format!("正则初始化失败: {e}"),
-                            format!("Failed to initialize regex: {e}"),
-                        )
-                    })?;
-                    re.captures(config_toml)
-                        .and_then(|caps| caps.get(1))
-                        .map(|m| m.as_str().to_string())
-                        .ok_or_else(|| {
-                            AppError::localized(
-                                "provider.codex.base_url.invalid",
-                                "config.toml 中 base_url 格式错误",
-                                "base_url in config.toml has invalid format",
-                            )
-                        })?
-                } else {
-                    return Err(AppError::localized(
-                        "provider.codex.base_url.missing",
-                        "config.toml 中缺少 base_url 配置",
-                        "base_url is missing from config.toml",
-                    ));
-                };
-
-                Ok((api_key, base_url))
-            }
             AppType::OpenCode => {
                 // OpenCode uses options.apiKey and options.baseURL
                 let options = provider

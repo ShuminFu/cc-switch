@@ -7,9 +7,6 @@ mod apps;
 mod auto_launch;
 #[cfg(test)]
 mod bindings;
-mod codex_config;
-mod codex_history_migration;
-mod codex_state_db;
 mod commands;
 mod config;
 mod database;
@@ -53,6 +50,9 @@ mod usage_script;
 use apps::claude::claude_json as claude_mcp;
 use apps::claude::plugin as claude_plugin;
 use apps::claude_desktop::config as claude_desktop_config;
+use apps::codex::config as codex_config;
+use apps::codex::history_migration as codex_history_migration;
+use apps::codex::state_db as codex_state_db;
 use apps::gemini::config as gemini_config;
 use apps::grok::config as grok_config;
 

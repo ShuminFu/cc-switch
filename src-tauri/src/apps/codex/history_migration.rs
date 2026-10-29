@@ -25,10 +25,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use toml_edit::DocumentMut;
 
-const MIGRATION_NAME: &str = "codex-history-provider-migration-v1";
-const OFFICIAL_UNIFY_MIGRATION_NAME: &str = "codex-official-history-unify-v1";
+pub(super) const MIGRATION_NAME: &str = "codex-history-provider-migration-v1";
+pub(super) const OFFICIAL_UNIFY_MIGRATION_NAME: &str = "codex-official-history-unify-v1";
 /// 还原操作自身的备份目录（与迁移备份分开，保持迁移账本目录纯净）。
-const OFFICIAL_UNIFY_RESTORE_BACKUP_NAME: &str = "codex-official-history-unify-restore-v1";
+pub(super) const OFFICIAL_UNIFY_RESTORE_BACKUP_NAME: &str =
+    "codex-official-history-unify-restore-v1";
 /// SQLite 变量上限保守值，IN 列表按此分块。
 const STATE_DB_ID_CHUNK: usize = 500;
 
@@ -43,8 +44,8 @@ fn lock_codex_official_history_op() -> std::sync::MutexGuard<'static, ()> {
 }
 /// Codex 内建默认 provider id：config.toml 没有 `model_provider` 键时会话归入此桶。
 /// 官方订阅（ChatGPT OAuth / OpenAI API key）的历史会话都记录这个 id。
-const OFFICIAL_OPENAI_CODEX_MODEL_PROVIDER_ID: &str = "openai";
-const LEGACY_CC_SWITCH_CODEX_MODEL_PROVIDER_ID: &str = "ccswitch";
+pub(super) const OFFICIAL_OPENAI_CODEX_MODEL_PROVIDER_ID: &str = "openai";
+pub(super) const LEGACY_CC_SWITCH_CODEX_MODEL_PROVIDER_ID: &str = "ccswitch";
 // If a Codex preset ever used a temporary routing key, keep that old key here
 // so local history can be bucketed under the current custom provider id.
 const CC_SWITCH_LEGACY_CODEX_MODEL_PROVIDER_IDS: &[&str] = &[

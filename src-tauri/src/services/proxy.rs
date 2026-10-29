@@ -2300,30 +2300,8 @@ impl ProxyService {
         Self::adapter_live_has_placeholder(&AppType::Claude, config)
     }
 
-    fn codex_live_has_proxy_placeholder(config: &Value) -> bool {
-        if config
-            .get("auth")
-            .and_then(|v| v.as_object())
-            .and_then(|auth| auth.get("OPENAI_API_KEY"))
-            .and_then(|v| v.as_str())
-            .is_some_and(is_proxy_token)
-        {
-            return true;
-        }
-
-        config
-            .get("config")
-            .and_then(|v| v.as_str())
-            .and_then(crate::codex_config::extract_codex_experimental_bearer_token)
-            .is_some_and(|token| is_proxy_token(&token))
-    }
-
     fn is_codex_live_taken_over(config: &Value) -> bool {
-        Self::codex_live_has_proxy_placeholder(config)
-            || config
-                .get("config")
-                .and_then(|v| v.as_str())
-                .is_some_and(crate::codex_config::codex_config_has_official_proxy_route)
+        Self::adapter_live_has_placeholder(&AppType::Codex, config)
     }
 
     fn is_gemini_live_taken_over(config: &Value) -> bool {

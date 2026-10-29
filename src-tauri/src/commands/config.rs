@@ -3,7 +3,6 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::app_config::AppType;
-use crate::codex_config;
 use crate::config::{self, get_claude_settings_path};
 use crate::error::{AppError, IpcError};
 use crate::settings;
@@ -68,7 +67,6 @@ fn app_config_dir(app: &AppType) -> Result<PathBuf, AppError> {
     }
 
     Ok(match app {
-        AppType::Codex => codex_config::get_codex_config_dir(),
         AppType::OpenCode => crate::opencode_config::get_opencode_dir(),
         AppType::OpenClaw => crate::openclaw_config::get_openclaw_dir(),
         AppType::Hermes => crate::hermes_config::get_hermes_dir(),

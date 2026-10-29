@@ -41,6 +41,11 @@ pub trait AppAdapter: Debug + Sync {
     /// 首次导入时读取 live 配置作为 `default` 供应商的 `settings_config`
     fn import_live(&self) -> Result<Value, AppError>;
 
+    /// 首次导入的 `default` 供应商分类（`provider.category`）
+    fn import_category(&self, _settings: &Value) -> &'static str {
+        "custom"
+    }
+
     /// 把供应商配置写入 live 文件
     fn write_provider(&self, provider: &Provider) -> Result<(), AppError>;
 
@@ -146,6 +151,11 @@ pub trait McpProjector {
 pub trait ProxyTakeover {
     /// live / 备份配置是否带有代理接管占位符
     fn has_placeholder(&self, settings: &Value) -> bool;
+
+    /// 官方供应商在接管期间是否仍可选用（默认拦截）
+    fn official_provider_supported(&self, _provider: &Provider) -> bool {
+        false
+    }
 }
 
 /// 会话历史扫描入口

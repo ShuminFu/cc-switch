@@ -7,6 +7,7 @@
 pub mod adapter;
 pub mod claude;
 pub mod claude_desktop;
+pub mod codex;
 pub mod gemini;
 pub mod grok;
 mod json_snippet;
@@ -26,9 +27,10 @@ pub fn adapter(app: &AppType) -> Option<&'static dyn AppAdapter> {
     match app {
         AppType::Claude => Some(&claude::ClaudeAdapter),
         AppType::ClaudeDesktop => Some(&claude_desktop::ClaudeDesktopAdapter),
+        AppType::Codex => Some(&codex::CodexAdapter),
         AppType::Gemini => Some(&gemini::GeminiAdapter),
         AppType::GrokBuild => Some(&grok::GrokAdapter),
-        AppType::Codex | AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => None,
+        AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => None,
     }
 }
 
@@ -110,6 +112,7 @@ mod tests {
             vec![
                 AppType::Claude,
                 AppType::ClaudeDesktop,
+                AppType::Codex,
                 AppType::Gemini,
                 AppType::GrokBuild
             ]
@@ -176,6 +179,28 @@ mod tests {
         assert!(desktop.common_snippet().is_none());
         assert!(!desktop.takeover_uses_live_backup());
         assert!(claude.takeover_uses_live_backup());
+
+        let codex = adapter(&AppType::Codex).expect("codex adapter");
+        let codex_dir = codex.config_dir().unwrap();
+        assert_eq!(codex_dir, crate::codex_config::get_codex_config_dir());
+        assert_eq!(
+            codex.prompt_file(),
+            Some(
+                crate::codex_config::get_codex_auth_path()
+                    .parent()
+                    .unwrap()
+                    .join("AGENTS.md")
+            )
+        );
+        assert_eq!(codex.skills_dir().unwrap().file_name().unwrap(), "skills");
+        assert_eq!(
+            codex
+                .session_source()
+                .expect("codex sessions")
+                .session_roots(),
+            crate::session_manager::providers::codex::session_roots()
+        );
+        assert!(codex.takeover_uses_live_backup());
     }
 
     #[test]
