@@ -38,3 +38,4 @@ pub use hermes::{import_from_hermes, remove_server_from_hermes, sync_single_serv
 pub use opencode::{
     import_from_opencode, remove_server_from_opencode, sync_single_server_to_opencode,
 };
+pub use validation::validate_server_spec;

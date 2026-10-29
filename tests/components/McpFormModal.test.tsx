@@ -271,6 +271,24 @@ describe("McpFormModal", () => {
     expect(message).toBe("mcp.error.commandRequired");
   });
 
+  it("缺少 type 时按 stdio 处理并在无命令时阻止提交", async () => {
+    renderForm();
+
+    fireEvent.change(screen.getByPlaceholderText("mcp.form.titlePlaceholder"), {
+      target: { value: "no-type" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("mcp.form.jsonPlaceholder"), {
+      target: { value: '{"args":[]}' },
+    });
+
+    fireEvent.click(screen.getByText("common.add"));
+
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    expect(upsertMock).not.toHaveBeenCalled();
+    const [message] = toastErrorMock.mock.calls.at(-1) ?? [];
+    expect(message).toBe("mcp.error.commandRequired");
+  });
+
   it("支持向导生成配置并自动填充 ID", async () => {
     renderForm();
     fireEvent.click(screen.getByText("mcp.form.useWizard"));

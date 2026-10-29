@@ -72,7 +72,8 @@ export function useMcpValidation() {
             return t("mcp.error.singleServerObjectRequired");
           }
 
-          const typ = (obj as any)?.type;
+          // A missing type means stdio, matching the backend validator
+          const typ = (obj as any)?.type ?? "stdio";
           if (typ === "stdio" && !(obj as any)?.command?.trim()) {
             return t("mcp.error.commandRequired");
           }

@@ -1077,3 +1077,55 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
         "live entries unknown to DB should be preserved"
     );
 }
+
+#[test]
+fn upsert_mcp_server_rejects_stdio_spec_without_command_before_saving() {
+    let _test_env = TestEnv::new();
+    let state = create_test_state().expect("create test state");
+
+    let make_server = |id: &str, server: serde_json::Value| McpServer {
+        id: id.to_string(),
+        name: id.to_string(),
+        server,
+        apps: McpApps {
+            claude: false,
+            codex: false,
+            gemini: false,
+            grokbuild: false,
+            opencode: false,
+            hermes: false,
+        },
+        description: None,
+        homepage: None,
+        docs: None,
+        tags: Vec::new(),
+    };
+
+    McpService::upsert_server(
+        &state,
+        make_server("existing", json!({ "type": "stdio", "command": "echo" })),
+    )
+    .expect("insert valid server");
+    let before = McpService::get_all_servers(&state).expect("read servers");
+
+    // 缺省 type 视为 stdio：缺少 command 时必须拒绝，且不写入数据库
+    for spec in [json!({ "args": [] }), json!({})] {
+        for id in ["existing", "new-server"] {
+            let err = McpService::upsert_server(&state, make_server(id, spec.clone()))
+                .expect_err("spec without command should be rejected");
+            assert!(
+                matches!(err, AppError::McpValidation(_)),
+                "expected McpValidation error, got {err:?}"
+            );
+        }
+    }
+
+    let after = McpService::get_all_servers(&state).expect("read servers");
+    assert_eq!(after.len(), before.len(), "no server should be added");
+    assert!(!after.contains_key("new-server"));
+    assert_eq!(
+        after.get("existing").map(|s| s.server.clone()),
+        before.get("existing").map(|s| s.server.clone()),
+        "existing server spec should be unchanged"
+    );
+}

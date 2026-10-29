@@ -139,6 +139,15 @@ describe("useMcpValidation", () => {
       );
     });
 
+    it("treats a missing type as stdio and requires command", () => {
+      const { validateJsonConfig } = getHookResult();
+      expect(validateJsonConfig('{"args":[]}')).toBe(
+        "mcp.error.commandRequired",
+      );
+      expect(validateJsonConfig("{}")).toBe("mcp.error.commandRequired");
+      expect(validateJsonConfig('{"command":"node"}')).toBe("");
+    });
+
     it("requires url for http type", () => {
       const { validateJsonConfig } = getHookResult();
       expect(validateJsonConfig('{"type":"http","url":""}')).toBe(
