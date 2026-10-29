@@ -5,6 +5,7 @@
 pub mod calculator;
 #[cfg(test)]
 mod cost_golden;
+pub mod ir;
 pub mod logger;
 pub mod parser;
 

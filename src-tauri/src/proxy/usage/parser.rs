@@ -9,23 +9,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-fn openai_cache_read_tokens(usage: &Value) -> u32 {
-    usage
-        .get("cache_read_input_tokens")
-        .or_else(|| usage.pointer("/input_tokens_details/cached_tokens"))
-        .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as u32
-}
-
-fn openai_cache_write_tokens(usage: &Value) -> u32 {
-    usage
-        .get("cache_creation_input_tokens")
-        .or_else(|| usage.pointer("/input_tokens_details/cache_write_tokens"))
-        .or_else(|| usage.pointer("/prompt_tokens_details/cache_write_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as u32
-}
+use super::ir::UsageIR;
 
 /// Session 日志 request_id 前缀，与 `session_usage.rs` 中的格式保持一致
 pub const SESSION_REQUEST_ID_PREFIX: &str = "session:";
@@ -83,19 +67,14 @@ impl TokenUsage {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        // input/output 字段必须存在（哪怕为 0），否则视为无 usage
+        usage.get("input_tokens")?.as_u64()?;
+        usage.get("output_tokens")?.as_u64()?;
+
         Some(Self {
-            input_tokens: usage.get("input_tokens")?.as_u64()? as u32,
-            output_tokens: usage.get("output_tokens")?.as_u64()? as u32,
-            cache_read_tokens: usage
-                .get("cache_read_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            cache_creation_tokens: usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
             model,
             message_id,
+            ..UsageIR::from_anthropic(usage).to_token_usage()
         })
     }
 
@@ -243,16 +222,9 @@ impl TokenUsage {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let cached_tokens = openai_cache_read_tokens(usage);
-        let cache_write_tokens = openai_cache_write_tokens(usage);
-
         Some(Self {
-            input_tokens: input_tokens? as u32,
-            output_tokens: output_tokens? as u32,
-            cache_read_tokens: cached_tokens,
-            cache_creation_tokens: cache_write_tokens,
             model,
-            message_id: None,
+            ..UsageIR::from_responses(usage).to_token_usage()
         })
     }
 
@@ -305,13 +277,9 @@ impl TokenUsage {
     pub fn from_openai_response(body: &Value) -> Option<Self> {
         let usage = body.get("usage")?;
 
-        // OpenAI 使用 prompt_tokens 和 completion_tokens
-        let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64())?;
-        let completion_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64())?;
-
-        // 获取 cached_tokens (可能在 prompt_tokens_details 中)
-        let cached_tokens = openai_cache_read_tokens(usage);
-        let cache_write_tokens = openai_cache_write_tokens(usage);
+        // OpenAI 使用 prompt_tokens 和 completion_tokens，两者必须存在
+        usage.get("prompt_tokens").and_then(|v| v.as_u64())?;
+        usage.get("completion_tokens").and_then(|v| v.as_u64())?;
 
         // 提取响应中的模型名称
         let model = body
@@ -320,12 +288,8 @@ impl TokenUsage {
             .map(|s| s.to_string());
 
         Some(Self {
-            input_tokens: prompt_tokens as u32,
-            output_tokens: completion_tokens as u32,
-            cache_read_tokens: cached_tokens,
-            cache_creation_tokens: cache_write_tokens,
             model,
-            message_id: None,
+            ..UsageIR::from_chat_completions(usage).to_token_usage()
         })
     }
 
@@ -354,52 +318,26 @@ impl TokenUsage {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let prompt_tokens = usage.get("promptTokenCount")?.as_u64()? as u32;
-        let total_tokens = usage.get("totalTokenCount")?.as_u64()? as u32;
-
-        // 输出 tokens = 总 tokens - 输入 tokens
-        // 这包含了 candidatesTokenCount + thoughtsTokenCount
-        let output_tokens = total_tokens.saturating_sub(prompt_tokens);
+        // promptTokenCount/totalTokenCount 必须存在；输出 = 总 tokens - 输入 tokens
+        // （包含 candidatesTokenCount + thoughtsTokenCount）
+        usage.get("promptTokenCount")?.as_u64()?;
+        usage.get("totalTokenCount")?.as_u64()?;
 
         Some(Self {
-            input_tokens: prompt_tokens,
-            output_tokens,
-            cache_read_tokens: usage
-                .get("cachedContentTokenCount")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            cache_creation_tokens: 0,
             model,
-            message_id: None,
+            ..UsageIR::from_gemini(usage).to_token_usage()
         })
     }
 
     /// 从 Gemini API 流式响应解析
     pub fn from_gemini_stream_chunks(chunks: &[Value]) -> Option<Self> {
-        let mut total_input = 0u32;
-        let mut total_tokens = 0u32;
-        let mut total_cache_read = 0u32;
+        let mut usage = UsageIR::default();
         let mut model: Option<String> = None;
 
         for chunk in chunks {
-            if let Some(usage) = chunk.get("usageMetadata") {
-                // 输入 tokens (通常在所有 chunk 中保持不变)
-                total_input = usage
-                    .get("promptTokenCount")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-
-                // 总 tokens (包含输入 + 输出 + 思考)
-                total_tokens = usage
-                    .get("totalTokenCount")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-
-                // 缓存读取 tokens
-                total_cache_read = usage
-                    .get("cachedContentTokenCount")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
+            // usageMetadata 为累计值（输入通常在所有 chunk 中保持不变），取最后一个
+            if let Some(metadata) = chunk.get("usageMetadata") {
+                usage = UsageIR::from_gemini(metadata);
             }
 
             // 提取实际使用的模型名称（modelVersion 字段）
@@ -410,18 +348,9 @@ impl TokenUsage {
             }
         }
 
-        // 输出 tokens = 总 tokens - 输入 tokens
-        let total_output = total_tokens.saturating_sub(total_input);
-
-        if total_input > 0 || total_output > 0 {
-            Some(Self {
-                input_tokens: total_input,
-                output_tokens: total_output,
-                cache_read_tokens: total_cache_read,
-                cache_creation_tokens: 0,
-                model,
-                message_id: None,
-            })
+        let usage = usage.to_token_usage();
+        if usage.input_tokens > 0 || usage.output_tokens > 0 {
+            Some(Self { model, ..usage })
         } else {
             None
         }

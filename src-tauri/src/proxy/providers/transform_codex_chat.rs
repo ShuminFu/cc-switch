@@ -10,6 +10,7 @@ use super::codex_chat_common::{
     split_leading_think_block,
 };
 use crate::provider::CodexChatReasoningConfig;
+use crate::proxy::usage::ir::UsageIR;
 use crate::proxy::{
     error::ProxyError,
     json_canonical::{
@@ -1671,56 +1672,23 @@ pub(crate) fn custom_tool_input_from_chat_arguments(arguments: &str) -> String {
 
 pub(crate) fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Value {
     let Some(usage) = usage.filter(|value| value.is_object() && !value.is_null()) else {
-        return json!({
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "output_tokens_details": { "reasoning_tokens": 0 }
-        });
+        return UsageIR::default().to_responses();
     };
 
-    let input_tokens = usage
-        .get("prompt_tokens")
-        .or_else(|| usage.get("input_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("completion_tokens")
-        .or_else(|| usage.get("output_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let total_tokens = usage
-        .get("total_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(input_tokens + output_tokens);
-
+    let ir_usage = UsageIR::from_chat_completions(usage).to_responses();
+    // 按既有字段顺序重组（客户端快照依赖顺序）；上游明确给出的 total_tokens 优先于 IR 推导值
     let mut result = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens
+        "input_tokens": ir_usage["input_tokens"],
+        "output_tokens": ir_usage["output_tokens"],
+        "total_tokens": usage
+            .get("total_tokens")
+            .and_then(|v| v.as_u64())
+            .map_or_else(|| ir_usage["total_tokens"].clone(), |total| json!(total))
     });
-
-    let cached = usage
-        .pointer("/prompt_tokens_details/cached_tokens")
-        .or_else(|| usage.pointer("/input_tokens_details/cached_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_write = usage
-        .pointer("/prompt_tokens_details/cache_write_tokens")
-        .or_else(|| usage.pointer("/input_tokens_details/cache_write_tokens"))
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-        })
-        .unwrap_or(0);
-    if cached > 0 || cache_write > 0 {
-        result["input_tokens_details"] = json!({
-            "cached_tokens": cached,
-            "cache_write_tokens": cache_write
-        });
+    if let Some(details) = ir_usage.get("input_tokens_details") {
+        result["input_tokens_details"] = details.clone();
     }
+    result["output_tokens_details"] = ir_usage["output_tokens_details"].clone();
 
     if let Some(details) = usage
         .get("completion_tokens_details")
@@ -1731,15 +1699,13 @@ pub(crate) fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Value {
             details["reasoning_tokens"] = json!(0);
         }
         result["output_tokens_details"] = details;
-    } else {
-        result["output_tokens_details"] = json!({ "reasoning_tokens": 0 });
     }
 
     if let Some(cache_read) = usage.get("cache_read_input_tokens") {
         result["cache_read_input_tokens"] = cache_read.clone();
     }
-    if cache_write > 0 {
-        result["cache_creation_input_tokens"] = json!(cache_write);
+    if let Some(cache_write) = ir_usage.get("cache_creation_input_tokens") {
+        result["cache_creation_input_tokens"] = cache_write.clone();
     }
 
     result
@@ -2986,6 +2952,21 @@ mod tests {
             result["usage"]["input_tokens_details"]["cache_write_tokens"],
             2
         );
+    }
+
+    #[test]
+    fn chat_usage_direct_cache_read_field_reaches_responses_details() {
+        // 兼容上游只给 Anthropic 风格直传字段：与计费解析（UsageIR）同源，
+        // Responses 客户端也必须在 input_tokens_details 中看到这部分缓存。
+        let usage = chat_usage_to_responses_usage(Some(&json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 5,
+            "cache_read_input_tokens": 40
+        })));
+        assert_eq!(usage["input_tokens"], 100);
+        assert_eq!(usage["input_tokens_details"]["cached_tokens"], 40);
+        assert_eq!(usage["input_tokens_details"]["cache_write_tokens"], 0);
+        assert_eq!(usage["cache_read_input_tokens"], 40);
     }
 
     #[test]

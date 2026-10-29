@@ -117,6 +117,7 @@ serial_test = "3"
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
 insta = "1"
+proptest = { version = "1", default-features = false, features = ["std"] }
 # Self dev-dependency: integration tests (tests/proxy_golden.rs) link the lib with `testkit` enabled.
 cc-switch = { path = ".", features = ["testkit"] }
 # CCS-116 bindings spike: only linked into test builds; see docs/dev/adr/bindings.md.

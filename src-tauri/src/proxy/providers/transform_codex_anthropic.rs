@@ -18,6 +18,7 @@ use super::transform_responses::{sanitize_anthropic_tool_use_input, TOOL_RESULT_
 use crate::proxy::error::ProxyError;
 use crate::proxy::json_canonical::canonical_json_string;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
+use crate::proxy::usage::ir::UsageIR;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -134,64 +135,17 @@ pub(crate) fn map_anthropic_stop_reason_to_status(
 /// Builds Responses usage from Anthropic usage.
 ///
 /// Anthropic's `input_tokens` is the cache-excluded fresh input. OpenAI Responses
-/// reports total input and exposes cache reads/writes as subsets:
-///   input_tokens = fresh + cache_read + cache_creation
-///   input_tokens_details.cached_tokens = cache_read
-///   input_tokens_details.cache_write_tokens = cache_creation
+/// reports total input (fresh + cache_read + cache_creation) and exposes cache
+/// reads/writes as `input_tokens_details` subsets; see [`UsageIR::to_responses`].
 ///
 /// The internal billing parser subtracts both subsets before charging the normal
 /// input rate, then prices cache reads and writes separately.
 pub(crate) fn build_responses_usage_from_anthropic(usage: Option<&Value>) -> Value {
-    let u = match usage {
-        Some(v) if v.is_object() => v,
-        _ => {
-            return json!({
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": 0,
-                "output_tokens_details": { "reasoning_tokens": 0 }
-            })
-        }
-    };
-
-    let fresh_input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let reasoning = u
-        .pointer("/output_tokens_details/thinking_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_read = u
-        .get("cache_read_input_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_creation = u
-        .get("cache_creation_input_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-
-    let input_tokens = fresh_input
-        .saturating_add(cache_read)
-        .saturating_add(cache_creation);
-    let total_tokens = input_tokens.saturating_add(output);
-
-    let mut result = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output,
-        "total_tokens": total_tokens,
-        "output_tokens_details": { "reasoning_tokens": reasoning }
-    });
-    if cache_read > 0 || cache_creation > 0 {
-        result["input_tokens_details"] = json!({
-            "cached_tokens": cache_read,
-            "cache_write_tokens": cache_creation
-        });
-    }
-    // Keep the legacy top-level alias for one compatibility window. New code reads
-    // the official nested cache_write_tokens field first.
-    if cache_creation > 0 {
-        result["cache_creation_input_tokens"] = json!(cache_creation);
-    }
-    result
+    usage
+        .filter(|v| v.is_object())
+        .map(UsageIR::from_anthropic)
+        .unwrap_or_default()
+        .to_responses()
 }
 
 /// OpenAI Responses request → Anthropic Messages request
