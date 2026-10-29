@@ -1,0 +1,14 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-live-old",
+    "ANTHROPIC_BASE_URL": "https://old.example.com"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status)"
+    ]
+  },
+  "futureClaudeKey": {
+    "nested": true
+  }
+}

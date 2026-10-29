@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "docs": {
+      "command": "uvx",
+      "args": [
+        "docs-mcp"
+      ]
+    }
+  },
+  "preferences": {
+    "futureDesktopPref": true
+  }
+}

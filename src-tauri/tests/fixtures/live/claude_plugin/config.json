@@ -1,0 +1,6 @@
+{
+  "primaryApiKey": "user-key",
+  "futurePluginKey": {
+    "nested": true
+  }
+}

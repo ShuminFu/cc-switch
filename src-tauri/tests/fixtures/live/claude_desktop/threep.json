@@ -1,0 +1,6 @@
+{
+  "deploymentMode": "1p",
+  "enterpriseConfig": {
+    "futureEnterpriseKey": "keep-me"
+  }
+}

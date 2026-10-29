@@ -1,0 +1,21 @@
+{
+  // OpenClaw config written by the user
+  agents: {
+    defaults: {
+      workspace: "~/work", // trailing comment
+    },
+  },
+  models: {
+    mode: "merge",
+    providers: {
+      existing: {
+        baseUrl: "https://existing.example.com/v1",
+        api: "openai-completions",
+      },
+    },
+  },
+  /* block comment before an unknown section */
+  futureOpenclawKey: {
+    nested: [1, 2],
+  },
+}

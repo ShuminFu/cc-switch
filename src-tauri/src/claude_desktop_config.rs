@@ -14,9 +14,9 @@ use crate::provider::{ClaudeDesktopMode, Provider};
 pub const PROFILE_ID: &str = "00000000-0000-4000-8000-000000157210";
 pub const PROFILE_NAME: &str = "CC Switch";
 
-#[cfg(any(target_os = "macos", windows, test))]
+#[cfg(any(target_os = "macos", windows, test, feature = "testkit"))]
 const CONFIG_FILE: &str = "claude_desktop_config.json";
-#[cfg(any(target_os = "macos", windows, test))]
+#[cfg(any(target_os = "macos", windows, test, feature = "testkit"))]
 const CONFIG_LIBRARY_DIR: &str = "configLibrary";
 const GATEWAY_TOKEN_SETTING_KEY: &str = "claude_desktop_gateway_token";
 const CLAUDE_DESKTOP_PROXY_PREFIX: &str = "/claude-desktop";
@@ -943,6 +943,18 @@ fn apply_provider_to_paths(
     })
 }
 
+/// Testkit entry: apply a provider to config files under explicit directories.
+#[cfg(any(test, feature = "testkit"))]
+pub(crate) fn apply_provider_at_dirs(
+    db: &Database,
+    provider: &Provider,
+    normal_dir: &Path,
+    threep_dir: &Path,
+) -> Result<(), AppError> {
+    let paths = paths_from_dirs(normal_dir.to_path_buf(), threep_dir.to_path_buf());
+    apply_provider_to_paths(db, provider, &paths)
+}
+
 fn restore_official_at_paths(paths: &ClaudeDesktopPaths) -> Result<(), AppError> {
     with_rollback(paths, restore_official_at_paths_inner)
 }
@@ -1276,7 +1288,7 @@ fn pick_windows_claude_dir(local_app_data: &Path, threep: bool) -> Option<PathBu
     candidates.into_iter().next()
 }
 
-#[cfg(any(target_os = "macos", windows, test))]
+#[cfg(any(target_os = "macos", windows, test, feature = "testkit"))]
 fn paths_from_dirs(normal_dir: PathBuf, threep_dir: PathBuf) -> ClaudeDesktopPaths {
     let config_library_path = threep_dir.join(CONFIG_LIBRARY_DIR);
     let profile_path = config_library_path.join(format!("{PROFILE_ID}.json"));

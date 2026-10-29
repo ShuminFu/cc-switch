@@ -1,0 +1,32 @@
+---
+source: tests/config_writers.rs
+description: "hermes writer, crlf input"
+---
+write: ok
+=== .hermes/config.yaml ===
+# Hermes config written by the user<CR>
+model:<CR>
+  default: gpt-5<CR>
+  provider: custom<CR>
+<CR>
+# A comment that belongs to the custom_providers section<CR>
+custom_providers:
+- name: existing
+  base_url: https://existing.example.com/v1
+  api_key: existing-key
+  rate_limit_delay: 0.5
+- base_url: https://relay.example.com/v1
+  api_key: sk-provider-new
+  api_mode: chat_completions
+  models:
+    gpt-5:
+      context_length: 400000
+  name: relay
+  model: gpt-5
+mcp_servers:<CR>
+  docs:<CR>
+    command: uvx<CR>
+    args: [docs-mcp]   # inline comment<CR>
+<CR>
+future_hermes_key:<CR>
+  nested: true<CR>

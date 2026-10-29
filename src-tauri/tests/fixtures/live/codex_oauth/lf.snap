@@ -1,0 +1,19 @@
+---
+source: tests/config_writers.rs
+description: "codex_oauth writer, lf input"
+---
+set_default_account: ok
+=== .cc-switch/codex_oauth_auth.json ===
+{
+  "version": 1,
+  "accounts": {
+    "acct-1": {
+      "account_id": "acct-1",
+      "email": "user@example.com",
+      "refresh_token": "rt_fixture_token",
+      "authenticated_at": 1700000000
+    }
+  },
+  "default_account_id": "acct-1"
+}
+<no newline at end of file>

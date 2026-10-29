@@ -1,0 +1,14 @@
+{
+  "fetch": {
+    "id": "fetch",
+    "name": "Fetch",
+    "enabled": true,
+    "description": "UI-only field",
+    "server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {"FETCH_TIMEOUT": "30"}
+    }
+  }
+}

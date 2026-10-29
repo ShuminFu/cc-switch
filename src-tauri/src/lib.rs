@@ -20,6 +20,9 @@ mod init_status;
 mod lightweight;
 #[cfg(target_os = "linux")]
 mod linux_fix;
+#[cfg(any(test, feature = "testkit"))]
+#[doc(hidden)]
+pub mod live_config_testkit;
 mod mcp;
 mod model_capabilities;
 mod openclaw_config;

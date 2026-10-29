@@ -1,0 +1,11 @@
+{
+  "baseUrl": "https://relay.example.com/v1",
+  "apiKey": "sk-provider-new",
+  "api": "openai-completions",
+  "models": [
+    {
+      "id": "gpt-5",
+      "name": "GPT-5"
+    }
+  ]
+}

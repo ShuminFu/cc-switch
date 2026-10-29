@@ -1,0 +1,4 @@
+# Gemini env written by the user
+GEMINI_API_KEY=old-key
+GOOGLE_GEMINI_BASE_URL=https://old.example.com
+FUTURE_GEMINI_VAR="quoted value"

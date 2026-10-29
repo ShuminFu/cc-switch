@@ -1,0 +1,43 @@
+---
+source: tests/config_writers.rs
+description: "openclaw writer, bom input"
+---
+write: error: 配置错误: Failed to parse newly written OpenClaw config as JSON5:   --> 28:3
+   |
+28 |   /* block comment before an unknown section *
+   |   ^---
+   |
+   = expected identifier or string
+=== .openclaw/openclaw.json ===
+<BOM>{
+  // OpenClaw config written by the user
+  agents: {
+    defaults: {
+      workspace: "~/work", // trailing comment
+    },
+  },
+  models: {
+    "mode": "merge",
+    "providers": {
+      "existing": {
+        "baseUrl": "https://existing.example.com/v1",
+        "api": "openai-completions"
+      },
+      "relay": {
+        "baseUrl": "https://relay.example.com/v1",
+        "apiKey": "sk-provider-new",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "gpt-5",
+            "name": "GPT-5"
+          }
+        ]
+      }
+    }
+  },
+  /* block comment before an unknown section *
+  futureOpenclawKey: {
+    nested: [1, 2],
+  },
+}

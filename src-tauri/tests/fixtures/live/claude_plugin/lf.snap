@@ -1,0 +1,19 @@
+---
+source: tests/config_writers.rs
+description: "claude_plugin writer, lf input"
+---
+write: ok
+=== .claude/config.json ===
+{
+  "primaryApiKey": "any",
+  "futurePluginKey": {
+    "nested": true
+  }
+}
+clear: ok
+=== .claude/config.json ===
+{
+  "futurePluginKey": {
+    "nested": true
+  }
+}

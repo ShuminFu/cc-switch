@@ -1,0 +1,3 @@
+{
+  "config": "# Provider template comment\n[models]\ndefault = \"grok-4.5\"\n\n[model.\"grok-4.5\"]\nmodel = \"grok-4.5\"\nbase_url = \"https://relay.example.com/v1\" # inline comment\nname = \"Relay\"\napi_key = \"sk-provider-new\"\napi_backend = \"responses\"\ncontext_window = 500000\nfuture_field = \"keep-me\"\n\n[future_table]\nanswer = 42\n"
+}

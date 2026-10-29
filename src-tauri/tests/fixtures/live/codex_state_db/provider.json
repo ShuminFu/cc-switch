@@ -1,0 +1,4 @@
+{
+  "auth": {},
+  "config": "model_provider = \"aihubmix\"\n\n[model_providers.aihubmix]\nname = \"AIHubMix\"\nbase_url = \"https://aihubmix.example/v1\"\n"
+}

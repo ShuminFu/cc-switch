@@ -1,0 +1,23 @@
+---
+source: tests/config_writers.rs
+description: "copilot_auth writer, lf input"
+---
+set_default_account: ok
+=== .cc-switch/copilot_auth.json ===
+{
+  "version": 3,
+  "accounts": {
+    "1001": {
+      "github_token": "gho_fixture_token",
+      "user": {
+        "login": "octocat",
+        "id": 1001,
+        "avatar_url": "https://avatars.example.com/u/1001"
+      },
+      "authenticated_at": 1700000000,
+      "github_domain": "github.com"
+    }
+  },
+  "default_account_id": "1001"
+}
+<no newline at end of file>

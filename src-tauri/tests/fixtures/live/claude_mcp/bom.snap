@@ -1,0 +1,34 @@
+---
+source: tests/config_writers.rs
+description: "claude_mcp writer, bom input"
+---
+write: error: JSON 解析错误: <HOME>/.claude.json: expected value at line 1 column 1
+=== .claude.json ===
+<BOM>{
+  "numStartups": 42,
+  "projects": {
+    "/work/repo": {
+      "allowedTools": [],
+      "mcpServers": {
+        "project-local": {
+          "command": "uvx",
+          "args": [
+            "project-local-mcp"
+          ]
+        }
+      }
+    }
+  },
+  "mcpServers": {
+    "stale-server": {
+      "command": "uvx",
+      "args": [
+        "stale"
+      ]
+    }
+  },
+  "futureClaudeJsonKey": "keep-me",
+  "oauthAccount": {
+    "emailAddress": "user@example.com"
+  }
+}

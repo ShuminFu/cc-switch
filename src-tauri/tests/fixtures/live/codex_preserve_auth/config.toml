@@ -1,0 +1,7 @@
+# Live Codex config written by the user.
+model_provider = "openai"
+model = "gpt-5"
+
+[mcp_servers.docs]
+command = "uvx"
+args = ["docs-mcp"]

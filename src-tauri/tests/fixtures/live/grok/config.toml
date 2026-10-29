@@ -1,0 +1,11 @@
+# Live Grok config written by the user.
+[models]
+default = "grok-4.5"
+
+[model."grok-4.5"]
+model = "grok-4.5"
+base_url = "https://old.example.com/v1"
+name = "Old"
+api_key = "old-key"
+api_backend = "responses"
+context_window = 500000

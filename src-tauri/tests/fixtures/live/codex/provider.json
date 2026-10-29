@@ -1,0 +1,6 @@
+{
+  "auth": {
+    "OPENAI_API_KEY": "sk-provider-new"
+  },
+  "config": "# Provider template comment\nmodel_provider = \"custom\"\nmodel = \"gpt-5-codex\"\nmodel_reasoning_effort = \"high\"\n\n[model_providers.custom]\nname = \"Relay\" # inline comment\nbase_url = \"https://relay.example.com/v1\"\nwire_api = \"responses\"\nfuture_provider_field = \"keep-me\"\n\n[future_table]\nanswer = 42\n"
+}

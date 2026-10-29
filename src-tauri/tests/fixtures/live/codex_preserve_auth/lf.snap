@@ -1,0 +1,29 @@
+---
+source: tests/config_writers.rs
+description: "codex_preserve_auth writer, lf input"
+---
+write: ok
+=== .codex/auth.json ===
+{
+  "OPENAI_API_KEY": "sk-live-old",
+  "tokens": {
+    "id_token": "live-id-token",
+    "refresh_token": "live-refresh-token"
+  },
+  "futureAuthKey": "keep-me"
+}
+=== .codex/config.toml ===
+# Provider template comment
+model_provider = "custom"
+model = "gpt-5-codex"
+model_reasoning_effort = "high"
+
+[model_providers.custom]
+name = "Relay" # inline comment
+base_url = "https://relay.example.com/v1"
+wire_api = "responses"
+future_provider_field = "keep-me"
+experimental_bearer_token = "sk-provider-new"
+
+[future_table]
+answer = 42

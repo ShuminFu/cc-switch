@@ -1,0 +1,38 @@
+---
+source: tests/config_writers.rs
+description: "claude_desktop writer, bom input"
+---
+apply: error: JSON 解析错误: <HOME>/Claude/claude_desktop_config.json: expected value at line 1 column 1
+=== Claude/claude_desktop_config.json ===
+<BOM>{
+  "mcpServers": {
+    "docs": {
+      "command": "uvx",
+      "args": [
+        "docs-mcp"
+      ]
+    }
+  },
+  "preferences": {
+    "futureDesktopPref": true
+  }
+}
+=== Claude-3p/claude_desktop_config.json ===
+<BOM>{
+  "deploymentMode": "1p",
+  "enterpriseConfig": {
+    "futureEnterpriseKey": "keep-me"
+  }
+}
+=== Claude-3p/configLibrary/_meta.json ===
+<BOM>{
+  "appliedId": "user-profile",
+  "entries": [
+    {
+      "id": "user-profile",
+      "name": "User Profile"
+    }
+  ]
+}
+=== Claude-3p/configLibrary/00000000-0000-4000-8000-000000157210.json ===
+<absent>

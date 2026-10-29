@@ -1,0 +1,20 @@
+{
+  // OpenCode config written by the user (JSONC comments are allowed)
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "opencode",
+  "provider": {
+    "existing": {
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "existing-key"
+      }
+    }
+  },
+  "mcp": {
+    "docs": {
+      "type": "local",
+      "command": ["uvx", "docs-mcp"]
+    }
+  },
+  "futureOpencodeKey": true,
+}

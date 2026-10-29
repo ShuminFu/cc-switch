@@ -1,0 +1,39 @@
+---
+source: tests/config_writers.rs
+description: "claude_mcp writer, crlf input"
+---
+write: ok
+=== .claude.json ===
+{
+  "numStartups": 42,
+  "projects": {
+    "/work/repo": {
+      "allowedTools": [],
+      "mcpServers": {
+        "project-local": {
+          "command": "uvx",
+          "args": [
+            "project-local-mcp"
+          ]
+        }
+      }
+    }
+  },
+  "mcpServers": {
+    "fetch": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ],
+      "env": {
+        "FETCH_TIMEOUT": "30"
+      }
+    }
+  },
+  "futureClaudeJsonKey": "keep-me",
+  "oauthAccount": {
+    "emailAddress": "user@example.com"
+  }
+}
+<no newline at end of file>

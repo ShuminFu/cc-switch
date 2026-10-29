@@ -1,0 +1,22 @@
+---
+source: tests/config_writers.rs
+description: "gemini writer, bom input"
+---
+write: ok
+=== .gemini/.env ===
+GEMINI_API_KEY=sk-provider-new
+GEMINI_MODEL=gemini-2.5-pro
+GOOGLE_GEMINI_BASE_URL=https://relay.example.com
+<no newline at end of file>
+=== .gemini/settings.json ===
+{
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  },
+  "ui": {
+    "hideBanner": true
+  }
+}
+<no newline at end of file>

@@ -1,0 +1,12 @@
+---
+source: tests/config_writers.rs
+description: "claude_plugin writer, bom input"
+---
+write: ok
+=== .claude/config.json ===
+{
+  "primaryApiKey": "any"
+}
+clear: ok
+=== .claude/config.json ===
+{}

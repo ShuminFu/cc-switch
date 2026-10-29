@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "docs": {
+      "command": "uvx",
+      "args": [
+        "docs-mcp"
+      ]
+    }
+  },
+  "security": {
+    "auth": {
+      "selectedType": "oauth-personal"
+    },
+    "futureSecurityKey": true
+  },
+  "theme": "GitHub",
+  "futureGeminiKey": {
+    "nested": [
+      1,
+      2
+    ]
+  }
+}

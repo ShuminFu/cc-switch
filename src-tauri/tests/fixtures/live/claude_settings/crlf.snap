@@ -1,0 +1,26 @@
+---
+source: tests/config_writers.rs
+description: "claude_settings writer, crlf input"
+---
+write: ok
+=== .claude/settings.json ===
+{
+  "apiKeyHelper": "echo sk-helper",
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "sk-provider-new",
+    "ANTHROPIC_BASE_URL": "https://relay.example.com",
+    "ANTHROPIC_MODEL": "claude-sonnet-4-5"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Read(//tmp/** // not a comment)"
+    ]
+  },
+  "zzUnknownProviderKey": [
+    1,
+    2,
+    3
+  ]
+}
+<no newline at end of file>

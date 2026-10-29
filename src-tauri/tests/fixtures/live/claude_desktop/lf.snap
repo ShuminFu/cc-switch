@@ -1,0 +1,56 @@
+---
+source: tests/config_writers.rs
+description: "claude_desktop writer, lf input"
+---
+apply: ok
+=== Claude/claude_desktop_config.json ===
+{
+  "deploymentMode": "3p",
+  "mcpServers": {
+    "docs": {
+      "args": [
+        "docs-mcp"
+      ],
+      "command": "uvx"
+    }
+  },
+  "preferences": {
+    "futureDesktopPref": true
+  }
+}
+<no newline at end of file>
+=== Claude-3p/claude_desktop_config.json ===
+{
+  "deploymentMode": "3p",
+  "enterpriseConfig": {
+    "futureEnterpriseKey": "keep-me"
+  }
+}
+<no newline at end of file>
+=== Claude-3p/configLibrary/_meta.json ===
+{
+  "appliedId": "00000000-0000-4000-8000-000000157210",
+  "entries": [
+    {
+      "id": "user-profile",
+      "name": "User Profile"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000157210",
+      "name": "CC Switch"
+    }
+  ]
+}
+<no newline at end of file>
+=== Claude-3p/configLibrary/00000000-0000-4000-8000-000000157210.json ===
+{
+  "coworkEgressAllowedHosts": [
+    "*"
+  ],
+  "disableDeploymentModeChooser": true,
+  "inferenceGatewayApiKey": "sk-provider-new",
+  "inferenceGatewayAuthScheme": "bearer",
+  "inferenceGatewayBaseUrl": "https://gateway.example.com",
+  "inferenceProvider": "gateway"
+}
+<no newline at end of file>

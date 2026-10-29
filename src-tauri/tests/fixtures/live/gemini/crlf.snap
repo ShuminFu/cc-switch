@@ -1,0 +1,38 @@
+---
+source: tests/config_writers.rs
+description: "gemini writer, crlf input"
+---
+write: ok
+=== .gemini/.env ===
+GEMINI_API_KEY=sk-provider-new
+GEMINI_MODEL=gemini-2.5-pro
+GOOGLE_GEMINI_BASE_URL=https://relay.example.com
+<no newline at end of file>
+=== .gemini/settings.json ===
+{
+  "futureGeminiKey": {
+    "nested": [
+      1,
+      2
+    ]
+  },
+  "mcpServers": {
+    "docs": {
+      "args": [
+        "docs-mcp"
+      ],
+      "command": "uvx"
+    }
+  },
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    },
+    "futureSecurityKey": true
+  },
+  "theme": "GitHub",
+  "ui": {
+    "hideBanner": true
+  }
+}
+<no newline at end of file>

@@ -1,0 +1,18 @@
+---
+source: tests/config_writers.rs
+description: file modes after every writer (seeded files are 0644)
+---
+644 .claude/settings.json
+644 .claude.json
+644 .codex/auth.json
+644 .codex/config.toml
+600 .gemini/.env
+644 .gemini/settings.json
+644 .grok/config.toml
+644 .config/opencode/opencode.json
+644 .openclaw/openclaw.json
+644 .hermes/config.yaml
+644 .claude/config.json
+600 .cc-switch/copilot_auth.json
+600 .cc-switch/codex_oauth_auth.json
+700 .gemini

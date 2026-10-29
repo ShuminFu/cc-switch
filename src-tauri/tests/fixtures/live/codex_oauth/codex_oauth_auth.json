@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "accounts": {
+    "acct-1": {
+      "account_id": "acct-1",
+      "email": "user@example.com",
+      "refresh_token": "rt_fixture_token",
+      "authenticated_at": 1700000000,
+      "future_account_field": "dropped?"
+    }
+  },
+  "future_store_field": "dropped?"
+}

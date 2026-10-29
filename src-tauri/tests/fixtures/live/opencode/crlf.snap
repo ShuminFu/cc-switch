@@ -1,0 +1,42 @@
+---
+source: tests/config_writers.rs
+description: "opencode writer, crlf input"
+---
+write: ok
+=== .config/opencode/opencode.json ===
+{
+  "$schema": "https://opencode.ai/config.json",
+  "futureOpencodeKey": true,
+  "mcp": {
+    "docs": {
+      "command": [
+        "uvx",
+        "docs-mcp"
+      ],
+      "type": "local"
+    }
+  },
+  "provider": {
+    "existing": {
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "apiKey": "existing-key"
+      }
+    },
+    "relay": {
+      "models": {
+        "gpt-5": {
+          "name": "GPT-5"
+        }
+      },
+      "name": "Relay",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "apiKey": "sk-provider-new",
+        "baseURL": "https://relay.example.com/v1"
+      }
+    }
+  },
+  "theme": "opencode"
+}
+<no newline at end of file>

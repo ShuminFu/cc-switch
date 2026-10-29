@@ -1,0 +1,17 @@
+{
+  "version": 3,
+  "accounts": {
+    "1001": {
+      "github_token": "gho_fixture_token",
+      "user": {
+        "login": "octocat",
+        "id": 1001,
+        "avatar_url": "https://avatars.example.com/u/1001"
+      },
+      "authenticated_at": 1700000000,
+      "github_domain": "github.com",
+      "future_account_field": "dropped?"
+    }
+  },
+  "future_store_field": "dropped?"
+}

@@ -1,0 +1,19 @@
+---
+source: tests/config_writers.rs
+description: "codex_oauth writer, bom input"
+---
+set_default_account: error: 账号不存在: acct-1
+=== .cc-switch/codex_oauth_auth.json ===
+<BOM>{
+  "version": 1,
+  "accounts": {
+    "acct-1": {
+      "account_id": "acct-1",
+      "email": "user@example.com",
+      "refresh_token": "rt_fixture_token",
+      "authenticated_at": 1700000000,
+      "future_account_field": "dropped?"
+    }
+  },
+  "future_store_field": "dropped?"
+}
