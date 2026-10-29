@@ -325,11 +325,16 @@ pub fn mask_url(url: &str) -> String {
             None => format!("{}://{}", parsed.scheme(), host),
         }
     } else {
-        // URL 解析失败，返回部分内容
-        if url.len() > 20 {
-            format!("{}...", &url[..20])
+        // URL 解析失败：丢弃最后一个 '@' 及之前的内容（可能含用户名/密码），
+        // 再按字符（而非字节）截断，避免多字节字符导致切片 panic
+        const MAX_CHARS: usize = 20;
+        let tail = url.rsplit('@').next().unwrap_or("");
+        let mut chars = tail.chars();
+        let head: String = chars.by_ref().take(MAX_CHARS).collect();
+        if chars.next().is_some() {
+            format!("{head}...")
         } else {
-            url.to_string()
+            head
         }
     }
 }
@@ -364,6 +369,34 @@ mod tests {
             mask_url("https://user:pass@proxy.example.com"),
             "https://proxy.example.com"
         );
+    }
+
+    #[test]
+    fn test_mask_url_multibyte_does_not_panic() {
+        let masked = mask_url("代理代理代理代理代理代理");
+        assert_eq!(masked, "代理代理代理代理代理代理");
+        let long = "代".repeat(30);
+        assert_eq!(mask_url(&long), format!("{}...", "代".repeat(20)));
+    }
+
+    #[test]
+    fn test_mask_url_unparseable_strips_userinfo() {
+        let masked = mask_url("http//user:pass@proxy.example.com");
+        assert!(!masked.contains("user"), "{masked}");
+        assert!(!masked.contains("pass"), "{masked}");
+        assert_eq!(masked, "proxy.example.com");
+
+        let masked = mask_url("http//user:p@ss@host");
+        assert!(!masked.contains("user"), "{masked}");
+        assert!(!masked.contains("p@ss"), "{masked}");
+    }
+
+    #[test]
+    fn test_build_client_invalid_url_does_not_leak_secret() {
+        let err = build_client(Some("http//user:secret@host")).unwrap_err();
+        assert!(err.contains("Invalid proxy URL"), "{err}");
+        assert!(!err.contains("secret"), "{err}");
+        assert!(!err.contains("user"), "{err}");
     }
 
     #[test]
