@@ -8,47 +8,47 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 
 | ID | Kind | Pri | Effort | Title | Depends on | Status |
 |---|---|---|---|---|---|---|
-| [CCS-008](P0-safety-net/CCS-008-p0-golden-testkit-chat-gemini.md) | chore | p1 | M | [proxy-tests] Add golden bridge testkit with chunk-split fuzzing, plus Chat and Gemini fixtures |  | Open |
-| [CCS-009](P0-safety-net/CCS-009-p0-golden-responses-fixtures.md) | chore | p1 | M | [proxy-tests] Add golden fixtures for the Responses bridges and recent regression commits | CCS-008 | Open |
-| [CCS-010](P0-safety-net/CCS-010-p0-cost-golden-table.md) | chore | p1 | S | [usage] Add a cost golden table that runs every cost path |  | Open |
-| [CCS-011](P0-safety-net/CCS-011-p0-migration-harness.md) | chore | p1 | M | [db] Add a migration equivalence harness from every released schema and from legacy config.json |  | Open |
-| [CCS-012](P0-safety-net/CCS-012-p0-config-writer-snapshots.md) | chore | p1 | M | [apps] Add round-trip snapshots for all live-config writers, OAuth token stores and the Codex state DB |  | Open |
-| [CCS-013](P0-safety-net/CCS-013-p0-testenv-paths.md) | refactor | p1 | L | [tests] Introduce a hermetic TestEnv with injected Paths and remove the global test_mutex |  | Open |
-| [CCS-014](P0-safety-net/CCS-014-p0-proxy-harness-e2e.md) | chore | p1 | L | [proxy-tests] Add ProxyHarness with a mock upstream and an end-to-end proxy suite with baselines | CCS-013 | Open |
-| [CCS-015](P0-safety-net/CCS-015-p0-untested-module-tests.md) | chore | p2 | S | [tests] Add unit tests for untested proxy helpers, failover switch and balance parsing |  | Open |
-| [CCS-016](P0-safety-net/CCS-016-p0-ci-clippy-all-targets.md) | chore | p2 | S | [ci] Run clippy with --all-targets |  | Open |
-| [CCS-017](P0-safety-net/CCS-017-p0-ci-eslint-prettier.md) | chore | p2 | M | [ci] Add ESLint with a baseline and extend Prettier to tests/ |  | Open |
-| [CCS-018](P0-safety-net/CCS-018-p0-ci-cargo-deny.md) | chore | p2 | S | [ci] Gate on dependency advisories with cargo-deny and pnpm audit |  | Open |
-| [CCS-019](P0-safety-net/CCS-019-p0-ci-coverage-report.md) | chore | p3 | S | [ci] Publish report-only coverage from cargo-llvm-cov and vitest |  | Open |
-| [CCS-020](P0-safety-net/CCS-020-p0-ci-i18n-parity.md) | chore | p2 | S | [i18n] Add a locale parity and used-key check to CI |  | Open |
-| [CCS-021](P0-safety-net/CCS-021-p0-i18n-missing-keys.md) | bug | p2 | S | [i18n] Add 10 keys that are used in code but missing from every locale |  | Open |
-| [CCS-022](P0-safety-net/CCS-022-p0-i18n-zhtw-keys.md) | bug | p3 | S | [i18n] Translate the 30 missing zh-TW keys and drop 2 unused zh-TW-only keys |  | Open |
-| [CCS-023](P0-safety-net/CCS-023-p0-ci-release-gated.md) | chore | p1 | S | [ci] Require green CI on the tag SHA before release builds |  | Open |
-| [CCS-024](P0-safety-net/CCS-024-p0-ci-build-smoke.md) | chore | p2 | S | [ci] Add a vite production build and a Linux tauri build smoke to PR CI |  | Open |
-| [CCS-025](P0-safety-net/CCS-025-p0-ci-toolchain-msrv.md) | chore | p2 | S | [ci] Use rust-toolchain.toml as the single toolchain source and fix the false MSRV |  | Open |
-| [CCS-026](P0-safety-net/CCS-026-p0-ci-node-version.md) | chore | p3 | S | [ci] Read the Node version from .node-version in CI and release |  | Open |
-| [CCS-027](P0-safety-net/CCS-027-p0-ci-permissions.md) | security | p3 | S | [ci] Add a minimal permissions block to ci.yml |  | Open |
-| [CCS-028](P0-safety-net/CCS-028-p0-ci-pin-actions.md) | security | p1 | S | [ci] Pin every GitHub Action to a commit SHA |  | Open |
-| [CCS-029](P0-safety-net/CCS-029-p0-ci-release-secrets-env.md) | security | p1 | S | [ci] Pass release secrets via env: and stop exporting signing material to GITHUB_ENV | CCS-028 | Open |
-| [CCS-030](P0-safety-net/CCS-030-p0-ci-updater-sig-fatal.md) | bug | p1 | S | [ci] Fail the release when an updater artifact or signature is missing and validate latest.json |  | Open |
-| [CCS-031](P0-safety-net/CCS-031-p0-ci-release-concurrency.md) | chore | p3 | S | [ci] Never cancel an in-progress release publish |  | Open |
-| [CCS-032](P0-safety-net/CCS-032-p0-ci-prerelease-promotion.md) | chore | p3 | S | [ci] Document or automate promoting a prerelease to latest for the updater |  | Open |
-| [CCS-033](P0-safety-net/CCS-033-p0-ci-release-hygiene.md) | chore | p3 | M | [ci] Add rust-cache, a version consistency check, provenance attestation and SHA256SUMS | CCS-028 | Open |
-| [CCS-034](P0-safety-net/CCS-034-p0-dev-acceptance-process.md) | chore | p2 | S | [process] Add the ACCEPTANCE playbook, the fixture-required PR rule and the fix-commit KPI | CCS-008 | Open |
-| [CCS-035](P0-safety-net/CCS-035-p0-hotfix-deeplink-redaction.md) | security | p1 | S | [deeplink] Stop leaking raw deeplink URLs to logs and to the webview console |  | Open |
-| [CCS-036](P0-safety-net/CCS-036-p0-hotfix-terminal-tempfiles.md) | security | p1 | S | [terminal] Write provider terminal config and launcher scripts as private, uniquely named temp files |  | Open |
-| [CCS-037](P0-safety-net/CCS-037-p0-hotfix-sync-skip-session-log.md) | bug | p2 | S | [sync] Preserve local session_log_sync cursors on WebDAV/S3 import |  | Open |
-| [CCS-038](P0-safety-net/CCS-038-p0-hotfix-session-sync-blocking.md) | bug | p1 | S | [usage] Move session-log sync off tokio workers and off the main thread |  | Open |
-| [CCS-039](P0-safety-net/CCS-039-p0-hotfix-providerform-parse.md) | bug | p0 | S | [provider-form] Block save when Codex or Gemini config fails to parse instead of silently saving the initial config |  | Open |
-| [CCS-040](P0-safety-net/CCS-040-p0-failure-threshold-const.md) | bug | p3 | S | [proxy] Use one shared default for the circuit-breaker failure_threshold |  | Open |
-| [CCS-041](P0-safety-net/CCS-041-p0-unused-tower-http.md) | chore | p3 | S | [deps] Remove the unused tower-http 0.5 dependency |  | Open |
-| [CCS-042](P0-safety-net/CCS-042-p0-icon-scripts-cjs.md) | bug | p3 | S | [tooling] Make the icon extract and filter scripts runnable under type: module |  | Open |
-| [CCS-043](P0-safety-net/CCS-043-p0-ci-stale-workflow.md) | bug | p3 | S | [ci] Remove the invalid stale.yml input and implement a real popular-issue exemption |  | Open |
-| [CCS-044](P0-safety-net/CCS-044-p0-flatpak-manifest.md) | chore | p3 | M | [packaging] Update the Flatpak manifest and either build it in CI or stop installing flatpak tools |  | Open |
-| [CCS-045](P0-safety-net/CCS-045-p0-docs-changelog-unreleased.md) | chore | p3 | S | [docs] Add an [Unreleased] CHANGELOG section that lists Grok Build and other post-3.17 changes |  | Open |
-| [CCS-046](P0-safety-net/CCS-046-p0-docs-readme-release-sync.md) | chore | p3 | S | [docs] Update the README release sections: release-notes links and Linux asset names |  | Open |
-| [CCS-047](P0-safety-net/CCS-047-p0-docs-package-description.md) | chore | p3 | S | [docs] Update the package description to cover all supported tools |  | Open |
-| [CCS-048](P0-safety-net/CCS-048-p0-docs-root-clutter.md) | chore | p3 | S | [docs] Move the session-manager PRD into docs/ and leave the Pages-served deplink.html alone |  | Open |
+| [CCS-008](P0-safety-net/CCS-008-p0-golden-testkit-chat-gemini.md) | chore | p1 | M | [proxy-tests] Add golden bridge testkit with chunk-split fuzzing, plus Chat and Gemini fixtures |  | Done |
+| [CCS-009](P0-safety-net/CCS-009-p0-golden-responses-fixtures.md) | chore | p1 | M | [proxy-tests] Add golden fixtures for the Responses bridges and recent regression commits | CCS-008 | Done |
+| [CCS-010](P0-safety-net/CCS-010-p0-cost-golden-table.md) | chore | p1 | S | [usage] Add a cost golden table that runs every cost path |  | Done |
+| [CCS-011](P0-safety-net/CCS-011-p0-migration-harness.md) | chore | p1 | M | [db] Add a migration equivalence harness from every released schema and from legacy config.json |  | Done |
+| [CCS-012](P0-safety-net/CCS-012-p0-config-writer-snapshots.md) | chore | p1 | M | [apps] Add round-trip snapshots for all live-config writers, OAuth token stores and the Codex state DB |  | Done |
+| [CCS-013](P0-safety-net/CCS-013-p0-testenv-paths.md) | refactor | p1 | L | [tests] Introduce a hermetic TestEnv with injected Paths and remove the global test_mutex |  | Done |
+| [CCS-014](P0-safety-net/CCS-014-p0-proxy-harness-e2e.md) | chore | p1 | L | [proxy-tests] Add ProxyHarness with a mock upstream and an end-to-end proxy suite with baselines | CCS-013 | Partial |
+| [CCS-015](P0-safety-net/CCS-015-p0-untested-module-tests.md) | chore | p2 | S | [tests] Add unit tests for untested proxy helpers, failover switch and balance parsing |  | Done |
+| [CCS-016](P0-safety-net/CCS-016-p0-ci-clippy-all-targets.md) | chore | p2 | S | [ci] Run clippy with --all-targets |  | Done |
+| [CCS-017](P0-safety-net/CCS-017-p0-ci-eslint-prettier.md) | chore | p2 | M | [ci] Add ESLint with a baseline and extend Prettier to tests/ |  | Done |
+| [CCS-018](P0-safety-net/CCS-018-p0-ci-cargo-deny.md) | chore | p2 | S | [ci] Gate on dependency advisories with cargo-deny and pnpm audit |  | Partial |
+| [CCS-019](P0-safety-net/CCS-019-p0-ci-coverage-report.md) | chore | p3 | S | [ci] Publish report-only coverage from cargo-llvm-cov and vitest |  | Partial |
+| [CCS-020](P0-safety-net/CCS-020-p0-ci-i18n-parity.md) | chore | p2 | S | [i18n] Add a locale parity and used-key check to CI |  | Done |
+| [CCS-021](P0-safety-net/CCS-021-p0-i18n-missing-keys.md) | bug | p2 | S | [i18n] Add 10 keys that are used in code but missing from every locale |  | Done |
+| [CCS-022](P0-safety-net/CCS-022-p0-i18n-zhtw-keys.md) | bug | p3 | S | [i18n] Translate the 30 missing zh-TW keys and drop 2 unused zh-TW-only keys |  | Done |
+| [CCS-023](P0-safety-net/CCS-023-p0-ci-release-gated.md) | chore | p1 | S | [ci] Require green CI on the tag SHA before release builds |  | Partial |
+| [CCS-024](P0-safety-net/CCS-024-p0-ci-build-smoke.md) | chore | p2 | S | [ci] Add a vite production build and a Linux tauri build smoke to PR CI |  | Done |
+| [CCS-025](P0-safety-net/CCS-025-p0-ci-toolchain-msrv.md) | chore | p2 | S | [ci] Use rust-toolchain.toml as the single toolchain source and fix the false MSRV |  | Done |
+| [CCS-026](P0-safety-net/CCS-026-p0-ci-node-version.md) | chore | p3 | S | [ci] Read the Node version from .node-version in CI and release |  | Partial |
+| [CCS-027](P0-safety-net/CCS-027-p0-ci-permissions.md) | security | p3 | S | [ci] Add a minimal permissions block to ci.yml |  | Partial |
+| [CCS-028](P0-safety-net/CCS-028-p0-ci-pin-actions.md) | security | p1 | S | [ci] Pin every GitHub Action to a commit SHA |  | Done |
+| [CCS-029](P0-safety-net/CCS-029-p0-ci-release-secrets-env.md) | security | p1 | S | [ci] Pass release secrets via env: and stop exporting signing material to GITHUB_ENV | CCS-028 | Partial |
+| [CCS-030](P0-safety-net/CCS-030-p0-ci-updater-sig-fatal.md) | bug | p1 | S | [ci] Fail the release when an updater artifact or signature is missing and validate latest.json |  | Done |
+| [CCS-031](P0-safety-net/CCS-031-p0-ci-release-concurrency.md) | chore | p3 | S | [ci] Never cancel an in-progress release publish |  | Partial |
+| [CCS-032](P0-safety-net/CCS-032-p0-ci-prerelease-promotion.md) | chore | p3 | S | [ci] Document or automate promoting a prerelease to latest for the updater |  | Partial |
+| [CCS-033](P0-safety-net/CCS-033-p0-ci-release-hygiene.md) | chore | p3 | M | [ci] Add rust-cache, a version consistency check, provenance attestation and SHA256SUMS | CCS-028 | Partial |
+| [CCS-034](P0-safety-net/CCS-034-p0-dev-acceptance-process.md) | chore | p2 | S | [process] Add the ACCEPTANCE playbook, the fixture-required PR rule and the fix-commit KPI | CCS-008 | Partial |
+| [CCS-035](P0-safety-net/CCS-035-p0-hotfix-deeplink-redaction.md) | security | p1 | S | [deeplink] Stop leaking raw deeplink URLs to logs and to the webview console |  | Done |
+| [CCS-036](P0-safety-net/CCS-036-p0-hotfix-terminal-tempfiles.md) | security | p1 | S | [terminal] Write provider terminal config and launcher scripts as private, uniquely named temp files |  | Partial |
+| [CCS-037](P0-safety-net/CCS-037-p0-hotfix-sync-skip-session-log.md) | bug | p2 | S | [sync] Preserve local session_log_sync cursors on WebDAV/S3 import |  | Done |
+| [CCS-038](P0-safety-net/CCS-038-p0-hotfix-session-sync-blocking.md) | bug | p1 | S | [usage] Move session-log sync off tokio workers and off the main thread |  | Partial |
+| [CCS-039](P0-safety-net/CCS-039-p0-hotfix-providerform-parse.md) | bug | p0 | S | [provider-form] Block save when Codex or Gemini config fails to parse instead of silently saving the initial config |  | Done |
+| [CCS-040](P0-safety-net/CCS-040-p0-failure-threshold-const.md) | bug | p3 | S | [proxy] Use one shared default for the circuit-breaker failure_threshold |  | Done |
+| [CCS-041](P0-safety-net/CCS-041-p0-unused-tower-http.md) | chore | p3 | S | [deps] Remove the unused tower-http 0.5 dependency |  | Done |
+| [CCS-042](P0-safety-net/CCS-042-p0-icon-scripts-cjs.md) | bug | p3 | S | [tooling] Make the icon extract and filter scripts runnable under type: module |  | Done |
+| [CCS-043](P0-safety-net/CCS-043-p0-ci-stale-workflow.md) | bug | p3 | S | [ci] Remove the invalid stale.yml input and implement a real popular-issue exemption |  | Partial |
+| [CCS-044](P0-safety-net/CCS-044-p0-flatpak-manifest.md) | chore | p3 | M | [packaging] Update the Flatpak manifest and either build it in CI or stop installing flatpak tools |  | Done |
+| [CCS-045](P0-safety-net/CCS-045-p0-docs-changelog-unreleased.md) | chore | p3 | S | [docs] Add an [Unreleased] CHANGELOG section that lists Grok Build and other post-3.17 changes |  | Done |
+| [CCS-046](P0-safety-net/CCS-046-p0-docs-readme-release-sync.md) | chore | p3 | S | [docs] Update the README release sections: release-notes links and Linux asset names |  | Done |
+| [CCS-047](P0-safety-net/CCS-047-p0-docs-package-description.md) | chore | p3 | S | [docs] Update the package description to cover all supported tools |  | Done |
+| [CCS-048](P0-safety-net/CCS-048-p0-docs-root-clutter.md) | chore | p3 | S | [docs] Move the session-manager PRD into docs/ and leave the Pages-served deplink.html alone |  | Done |
 
 ## P1: [P1 (v3.19): Trust release with security and correctness fixes, no structural change](P1-trust-release/CCS-002-epic-p1.md)
 
@@ -110,9 +110,9 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-102](P1-trust-release/CCS-102-p1-gemini-env-writer.md) | bug | p3 | S | [gemini] Validate .env keys and values, strip quotes when parsing, and keep unknown lines | CCS-012 | Open |
 | [CCS-103](P1-trust-release/CCS-103-p1-claude-json-optimistic.md) | bug | p3 | S | [claude] Use optimistic concurrency for read-modify-write of ~/.claude.json | CCS-079 | Open |
 | [CCS-104](P1-trust-release/CCS-104-p1-powershell-quote.md) | bug | p3 | S | [terminal] Escape apostrophes in PowerShell launch paths | CCS-036 | Open |
-| [CCS-105](P1-trust-release/CCS-105-p1-fe-jsoneditor-onchange.md) | bug | p2 | S | [editor] Stop JsonEditor capturing a stale onChange, which makes the MCP modal overwrite ID and name |  | Open |
-| [CCS-106](P1-trust-release/CCS-106-p1-fe-managed-auth-timers.md) | bug | p2 | S | [auth-ui] Prevent leaked and overlapping managed-auth polling timers |  | Open |
-| [CCS-107](P1-trust-release/CCS-107-p1-fe-edit-dialog-reset.md) | bug | p3 | S | [provider-form] Do not reset typed input when live settings finish loading in the edit dialog |  | Open |
+| [CCS-105](P1-trust-release/CCS-105-p1-fe-jsoneditor-onchange.md) | bug | p2 | S | [editor] Stop JsonEditor capturing a stale onChange, which makes the MCP modal overwrite ID and name |  | Done |
+| [CCS-106](P1-trust-release/CCS-106-p1-fe-managed-auth-timers.md) | bug | p2 | S | [auth-ui] Prevent leaked and overlapping managed-auth polling timers |  | Done |
+| [CCS-107](P1-trust-release/CCS-107-p1-fe-edit-dialog-reset.md) | bug | p3 | S | [provider-form] Do not reset typed input when live settings finish loading in the edit dialog |  | Done |
 | [CCS-108](P1-trust-release/CCS-108-p1-fe-mcp-stdio-validation.md) | bug | p3 | S | [mcp] Treat a missing type as stdio when validating MCP server specs, in the UI and the backend |  | Open |
 | [CCS-109](P1-trust-release/CCS-109-p1-fe-skills-cache-dedupe.md) | bug | p3 | S | [skills] Dedupe the installed-skills cache by id and skip same-name folders in one ZIP |  | Open |
 
