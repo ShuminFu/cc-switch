@@ -2104,6 +2104,14 @@ impl RequestForwarder {
         } else {
             self.non_streaming_timeout
         };
+        // 等待响应头的超时：流式请求使用首包超时（非 0 时），两条发送路径共用，
+        // 避免 raw hyper 路径按非流式超时（默认 600s）等待，拖慢故障转移。
+        let header_timeout = if request_is_streaming && !self.streaming_first_byte_timeout.is_zero()
+        {
+            self.streaming_first_byte_timeout
+        } else {
+            timeout
+        };
 
         // 获取全局代理 URL
         let upstream_proxy_url: Option<String> = super::http_client::get_current_proxy_url();
@@ -2142,11 +2150,6 @@ impl RequestForwarder {
             }
             let send = request.body(body_bytes).send();
             let send_result = if request_is_streaming {
-                let header_timeout = if self.streaming_first_byte_timeout.is_zero() {
-                    timeout
-                } else {
-                    self.streaming_first_byte_timeout
-                };
                 tokio::time::timeout(header_timeout, send)
                     .await
                     .map_err(|_| {
@@ -2172,7 +2175,7 @@ impl RequestForwarder {
                 ordered_headers,
                 extensions.clone(),
                 body_bytes,
-                timeout,
+                header_timeout,
                 upstream_proxy_url.as_deref(),
             )
             .await?
@@ -4874,6 +4877,88 @@ mod tests {
             "cancelling the probe must release the half-open permit"
         );
         assert!(next.used_half_open_permit());
+
+        upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn streaming_raw_path_uses_first_byte_timeout_for_headers() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        // 上游接受连接但从不返回响应头
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind silent upstream");
+        let addr = listener.local_addr().expect("silent upstream address");
+        let upstream = tokio::spawn(async move {
+            let mut open = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                open.push(stream);
+            }
+        });
+
+        let mut provider = Provider::with_id(
+            "raw".to_string(),
+            "Raw Claude".to_string(),
+            json!({
+                "env": {
+                    "ANTHROPIC_BASE_URL": format!("http://{addr}"),
+                    "ANTHROPIC_AUTH_TOKEN": "sk-test",
+                }
+            }),
+            None,
+        );
+        provider.meta = Some(crate::provider::ProviderMeta {
+            api_format: Some("anthropic".to_string()),
+            ..Default::default()
+        });
+        assert!(
+            should_preserve_exact_header_case("Claude", &provider, Some("anthropic"), false),
+            "an anthropic-format Claude provider must use the raw hyper path"
+        );
+
+        let forwarder = test_forwarder(Duration::from_secs(30), Duration::from_secs(1));
+        let adapter = get_adapter(&AppType::Claude);
+        let mut extensions = Extensions::new();
+        extensions.insert(
+            super::super::hyper_client::OriginalHeaderCases::from_raw_bytes(
+                b"POST /v1/messages HTTP/1.1\r\nContent-Type: application/json\r\n\r\n",
+            ),
+        );
+        let body = json!({
+            "model": "claude-sonnet-4-5",
+            "max_tokens": 16,
+            "stream": true,
+            "messages": [{ "role": "user", "content": "hi" }]
+        });
+
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            forwarder.forward(
+                &AppType::Claude,
+                &http::Method::POST,
+                &provider,
+                "/v1/messages",
+                &body,
+                &HeaderMap::new(),
+                &extensions,
+                adapter.as_ref(),
+            ),
+        )
+        .await
+        .expect("streaming header wait must be bounded by the first-byte timeout");
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(result, Err(ProxyError::Timeout(_))),
+            "expected ProxyError::Timeout, got {:?}",
+            result.err()
+        );
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "first-byte timeout must fire within about 2s, took {elapsed:?}"
+        );
 
         upstream.abort();
     }
