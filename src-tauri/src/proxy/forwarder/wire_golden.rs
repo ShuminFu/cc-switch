@@ -407,3 +407,79 @@ async fn upstream_request_bytes_match_golden() {
         panic!("upstream request bytes drifted from golden.\n--- expected\n{expected}\n--- actual\n{rendered}");
     }
 }
+
+/// OpenAI 兼容上游只收到端到端头：逐跳头、Connection 点名的头、cookie 与 OpenAI
+/// 账号身份头都被剔除，content-type 与 adapter 认证头保留
+#[tokio::test]
+async fn openai_compatible_upstream_never_sees_hop_by_hop_cookie_or_identity_headers() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let (addr, captured) = spawn_capture_upstream().await;
+    let provider = codex_provider(
+        addr,
+        "/v1",
+        ProviderMeta {
+            api_format: Some("openai_chat".to_string()),
+            ..Default::default()
+        },
+    );
+    let client_headers = headers(&[
+        ("connection", "keep-alive, x-foo"),
+        ("x-foo", "connection-scoped"),
+        ("keep-alive", "timeout=5"),
+        ("proxy-authorization", "Basic cHJveHk="),
+        ("cookie", "session=abc"),
+        ("chatgpt-account-id", "acct-1"),
+        ("openai-organization", "org-1"),
+        ("authorization", "Bearer client"),
+        ("content-type", "application/json"),
+        ("x-custom", "1"),
+    ]);
+    let adapter = get_adapter(&AppType::Codex);
+
+    forwarder(WireFormat::OpenAiResponses)
+        .forward_once(
+            &AppType::Codex,
+            &http::Method::POST,
+            &provider,
+            "/v1/responses",
+            &json!({ "model": "gpt-5", "input": "hi" }),
+            &client_headers,
+            &Extensions::new(),
+            adapter.as_ref(),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("forward failed: {error:?}"));
+
+    let raw = captured.lock().unwrap()[0].clone();
+    let text = String::from_utf8_lossy(&raw).to_ascii_lowercase();
+    let head = &text[..text.find("\r\n\r\n").expect("request head")];
+    let names: Vec<&str> = head
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':').map(|(name, _)| name.trim()))
+        .collect();
+
+    for forbidden in [
+        "connection",
+        "x-foo",
+        "keep-alive",
+        "proxy-authorization",
+        "cookie",
+        "chatgpt-account-id",
+        "openai-organization",
+    ] {
+        assert!(
+            !names.contains(&forbidden),
+            "{forbidden} leaked upstream:\n{head}"
+        );
+    }
+    assert!(
+        head.contains("\r\ncontent-type: application/json\r\n"),
+        "{head}"
+    );
+    assert!(
+        head.contains("\r\nauthorization: bearer sk-codex-upstream\r\n"),
+        "{head}"
+    );
+    assert!(head.contains("\r\nx-custom: 1\r\n"), "{head}");
+}

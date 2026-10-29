@@ -50,6 +50,30 @@ const HOP_AND_TRACE_HEADERS: &[&str] = &[
     "tracestate",
 ];
 
+/// RFC 9110 §7.6.1 逐跳头：只对客户端到本代理这一跳有效，不得转发给上游。
+/// `Connection` 中点名的扩展头在 [`HeaderPolicy::apply`] 中按请求动态剔除。
+const HOP_BY_HOP_REQUEST_HEADERS: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "proxy-connection",
+    "te",
+    "trailer",
+    "upgrade",
+];
+
+/// 客户端浏览器 / 会话 cookie：上游鉴权只走 adapter 认证头，无条件丢弃
+const CLIENT_COOKIE_HEADERS: &[&str] = &["cookie", "cookie2"];
+
+/// OpenAI / ChatGPT 账号身份头：只允许发往官方上游，其余上游一律丢弃，
+/// 避免把客户端的组织 / 项目 / ChatGPT 账号 ID 泄露给第三方
+const OPENAI_ACCOUNT_IDENTITY_HEADERS: &[&str] = &[
+    "chatgpt-account-id",
+    "openai-organization",
+    "openai-project",
+];
+
 /// 客户端凭据头：用 adapter 提供的认证头替换（在首个凭据头的位置）
 const CREDENTIAL_HEADERS: &[&str] = &["authorization", "x-api-key", "x-goog-api-key"];
 
@@ -171,6 +195,17 @@ impl HeaderPolicy {
             .and_then(|host| HeaderValue::from_str(host).ok());
         rules.push((Matcher::Exact("host"), HeaderAction::Rewrite(host)));
         rules.push((Matcher::AnyOf(HOP_AND_TRACE_HEADERS), HeaderAction::Drop));
+        rules.push((
+            Matcher::AnyOf(HOP_BY_HOP_REQUEST_HEADERS),
+            HeaderAction::Drop,
+        ));
+        rules.push((Matcher::AnyOf(CLIENT_COOKIE_HEADERS), HeaderAction::Drop));
+        if !is_official_openai_upstream(input.upstream_host.as_deref()) {
+            rules.push((
+                Matcher::AnyOf(OPENAI_ACCOUNT_IDENTITY_HEADERS),
+                HeaderAction::Drop,
+            ));
+        }
 
         // The built-in Codex official provider deliberately has no credential in
         // CC Switch. `requires_openai_auth = true` makes Codex send its native
@@ -319,12 +354,16 @@ impl HeaderPolicy {
     pub(crate) fn apply(&self, incoming: &HeaderMap) -> HeaderMap {
         let mut out = HeaderMap::new();
         let mut claimed: Vec<Slot> = Vec::new();
+        let connection_listed = connection_listed_headers(incoming);
 
         for (key, value) in incoming {
             match self.action_for(key.as_str()) {
                 HeaderAction::Drop => {}
                 HeaderAction::Pass => {
-                    out.append(key.clone(), value.clone());
+                    // `Connection` 点名的扩展头同属逐跳头；策略自己写入的头不受影响
+                    if !connection_listed.contains(key) {
+                        out.append(key.clone(), value.clone());
+                    }
                 }
                 HeaderAction::Rewrite(replacement) => {
                     if let Some(replacement) = replacement {
@@ -369,6 +408,30 @@ impl HeaderPolicy {
 
         out
     }
+}
+
+/// 客户端 `Connection` 头中点名的头名（逐跳扩展头）
+fn connection_listed_headers(incoming: &HeaderMap) -> Vec<HeaderName> {
+    incoming
+        .get_all(http::header::CONNECTION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .filter_map(|name| HeaderName::from_bytes(name.as_bytes()).ok())
+        .collect()
+}
+
+/// 官方 OpenAI API / ChatGPT 后端（authority 可带端口）
+fn is_official_openai_upstream(authority: Option<&str>) -> bool {
+    let Some(host) = authority
+        .and_then(|authority| authority.parse::<http::uri::Authority>().ok())
+        .map(|authority| authority.host().to_ascii_lowercase())
+    else {
+        return false;
+    };
+    host == "api.openai.com" || host == "chatgpt.com"
 }
 
 /// 上游 authority（用于在原位替换 host header）
@@ -800,6 +863,91 @@ mod tests {
             rendered(&out),
             ["accept: application/json", "authorization: Bearer upstream"]
         );
+    }
+
+    #[test]
+    fn hop_by_hop_cookie_and_connection_listed_headers_are_dropped() {
+        let policy = HeaderPolicy::for_route(input());
+        let out = policy.apply(&incoming(&[
+            ("connection", "keep-alive, X-Foo"),
+            ("keep-alive", "timeout=5"),
+            ("x-foo", "secret"),
+            ("proxy-connection", "keep-alive"),
+            ("proxy-authorization", "Basic cHJveHk="),
+            ("te", "trailers"),
+            ("trailer", "x-checksum"),
+            ("upgrade", "h2c"),
+            ("cookie", "session=abc"),
+            ("x-custom", "1"),
+            ("content-type", "application/json"),
+        ]));
+
+        assert_eq!(
+            rendered(&out),
+            [
+                "x-custom: 1",
+                "content-type: application/json",
+                "authorization: Bearer upstream",
+            ]
+        );
+    }
+
+    #[test]
+    fn connection_listed_names_do_not_remove_policy_written_headers() {
+        let policy = HeaderPolicy::for_route(input());
+        let out = policy.apply(&incoming(&[
+            ("connection", "host, authorization"),
+            ("host", "client.local"),
+            ("authorization", "Bearer client"),
+        ]));
+
+        assert_eq!(
+            rendered(&out),
+            ["host: upstream.example", "authorization: Bearer upstream"]
+        );
+    }
+
+    #[test]
+    fn openai_account_identity_headers_reach_only_official_upstreams() {
+        let client = incoming(&[
+            ("chatgpt-account-id", "acct-1"),
+            ("openai-organization", "org-1"),
+            ("openai-project", "proj-1"),
+            ("x-custom", "1"),
+        ]);
+
+        let third_party = HeaderPolicy::for_route(input());
+        assert_eq!(
+            rendered(&third_party.apply(&client)),
+            ["x-custom: 1", "authorization: Bearer upstream"]
+        );
+
+        for host in ["api.openai.com", "chatgpt.com", "API.OpenAI.com:443"] {
+            let official = HeaderPolicy::for_route(HeaderPolicyInput {
+                upstream_host: Some(host.to_string()),
+                ..input()
+            });
+            assert_eq!(
+                rendered(&official.apply(&client)),
+                [
+                    "chatgpt-account-id: acct-1",
+                    "openai-organization: org-1",
+                    "openai-project: proj-1",
+                    "x-custom: 1",
+                    "authorization: Bearer upstream",
+                ],
+                "{host} is an official OpenAI/ChatGPT upstream"
+            );
+        }
+
+        for host in [
+            "api.openai.com.evil.example",
+            "openai.example",
+            "chatgpt.co",
+        ] {
+            assert!(!is_official_openai_upstream(Some(host)), "{host}");
+        }
+        assert!(!is_official_openai_upstream(None));
     }
 
     #[test]
