@@ -1043,23 +1043,18 @@ mod tests {
                 token_count(100, 50, 10),
             ],
         );
+        let complete = fs::read_to_string(&file).unwrap();
         let second = token_count(200, 100, 20).to_string();
         let (head, tail) = second.split_at(second.len() / 2);
-        let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
-        std::io::Write::write_all(&mut handle, head.as_bytes()).unwrap();
-        drop(handle);
+        fs::write(&file, format!("{complete}{head}")).unwrap();
 
         assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
         let (first_mtime, offset) = get_sync_state(&db, &file.to_string_lossy())?;
         assert_eq!(offset, 3, "未写完的半行不能计入 offset");
 
-        let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
-        std::io::Write::write_all(&mut handle, format!("{tail}\n").as_bytes()).unwrap();
-        handle
-            .set_modified(SystemTime::now() + std::time::Duration::from_secs(5))
-            .unwrap();
-        drop(handle);
-        assert!(metadata_modified_nanos(&fs::metadata(&file).unwrap()) > first_mtime);
+        // 补全第二行；回拨已记录的 mtime 模拟文件更新（避免依赖时间戳精度）
+        fs::write(&file, format!("{complete}{head}{tail}\n")).unwrap();
+        update_sync_state(&db, &file.to_string_lossy(), first_mtime - 1, offset)?;
 
         assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
         assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 4);

@@ -927,14 +927,9 @@ mod tests {
         let (first_mtime, offset) = get_sync_state(&db, &file.to_string_lossy())?;
         assert_eq!(offset, 1, "未写完的半行不能计入 offset");
 
-        // 写入方补全第二行并更新 mtime
-        let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
-        std::io::Write::write_all(&mut handle, format!("{tail}\n").as_bytes()).unwrap();
-        handle
-            .set_modified(SystemTime::now() + std::time::Duration::from_secs(5))
-            .unwrap();
-        drop(handle);
-        assert!(metadata_modified_nanos(&fs::metadata(&file).unwrap()) > first_mtime);
+        // 写入方补全第二行；回拨已记录的 mtime 模拟文件更新（避免依赖时间戳精度）
+        fs::write(&file, format!("{first}\n{head}{tail}\n")).unwrap();
+        update_sync_state(&db, &file.to_string_lossy(), first_mtime - 1, offset)?;
 
         let (imported, _) = sync_single_file(&db, &file)?;
         assert_eq!(imported, 1, "补全后的第二行应被导入");
