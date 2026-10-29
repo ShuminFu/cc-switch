@@ -213,7 +213,9 @@ pub async fn pick_directory(
                 .simplified()
                 .into_path()
                 .map_err(|e| format!("解析选择的目录失败: {e}"))?;
-            Ok(Some(resolved.to_string_lossy().to_string()))
+            let resolved = resolved.to_string_lossy().to_string();
+            crate::picked_paths::register(crate::picked_paths::PickPurpose::Directory, &resolved);
+            Ok(Some(resolved))
         }
         None => Ok(None),
     }

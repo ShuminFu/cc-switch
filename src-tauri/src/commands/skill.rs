@@ -330,7 +330,66 @@ pub fn install_skills_from_zip(
     app_state: State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
     let app_type = parse_app_type(&current_app)?;
-    let path = std::path::Path::new(&file_path);
+    install_skills_from_picked_zip(&app_state.db, &file_path, &app_type)
+}
 
-    SkillService::install_from_zip(&app_state.db, path, &app_type).map_err(|e| e.to_string())
+/// 只接受由 `open_zip_file_dialog` 选出的 ZIP 路径
+fn install_skills_from_picked_zip(
+    db: &Arc<crate::database::Database>,
+    file_path: &str,
+    app_type: &AppType,
+) -> Result<Vec<InstalledSkill>, String> {
+    crate::picked_paths::require_picked(crate::picked_paths::PickPurpose::SkillZip, file_path)?;
+    let path = std::path::Path::new(file_path);
+
+    SkillService::install_from_zip(db, path, app_type).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod install_from_zip_path_tests {
+    use super::*;
+    use crate::database::Database;
+    use crate::picked_paths::{self, PickPurpose};
+    use std::io::Write;
+
+    fn write_zip_without_skills(path: &std::path::Path) {
+        let file = std::fs::File::create(path).expect("create zip");
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("README.txt", zip::write::SimpleFileOptions::default())
+            .expect("start file");
+        zip.write_all(b"no skills here").expect("write entry");
+        zip.finish().expect("finish zip");
+    }
+
+    #[test]
+    fn install_rejects_zip_path_not_chosen_by_dialog() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let zip_path = temp.path().join("attacker.zip");
+        write_zip_without_skills(&zip_path);
+        let zip_str = zip_path.to_string_lossy().to_string();
+        let db = Arc::new(Database::memory().expect("memory db"));
+
+        let err = install_skills_from_picked_zip(&db, &zip_str, &AppType::Claude).unwrap_err();
+        assert!(err.contains("file dialog"), "{err}");
+
+        // SQL 对话框选出的路径不能用于安装 Skills
+        picked_paths::register(PickPurpose::SqlImport, &zip_str);
+        let err = install_skills_from_picked_zip(&db, &zip_str, &AppType::Claude).unwrap_err();
+        assert!(err.contains("file dialog"), "{err}");
+    }
+
+    #[test]
+    fn install_accepts_zip_path_chosen_by_dialog() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let zip_path = temp.path().join("picked.zip");
+        write_zip_without_skills(&zip_path);
+        let zip_str = zip_path.to_string_lossy().to_string();
+        let db = Arc::new(Database::memory().expect("memory db"));
+
+        picked_paths::register(PickPurpose::SkillZip, &zip_str);
+        // 校验通过后进入解压流程；该 ZIP 不含 SKILL.md，因此报告 NO_SKILLS_IN_ZIP
+        let err = install_skills_from_picked_zip(&db, &zip_str, &AppType::Claude).unwrap_err();
+        assert!(!err.contains("file dialog"), "{err}");
+        assert!(err.contains("NO_SKILLS_IN_ZIP"), "{err}");
+    }
 }

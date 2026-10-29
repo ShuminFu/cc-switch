@@ -98,13 +98,11 @@ fn check_system_env(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
     Ok(conflicts)
 }
 
-/// Check shell configuration files for environment variable exports (Unix only)
+/// Shell rc files scanned for exports; also the only files the env manager may modify
 #[cfg(not(target_os = "windows"))]
-fn check_shell_configs(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
-    let mut conflicts = Vec::new();
-
+pub(crate) fn shell_config_files() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let config_files = vec![
+    vec![
         format!("{}/.bashrc", home),
         format!("{}/.bash_profile", home),
         format!("{}/.zshrc", home),
@@ -112,9 +110,15 @@ fn check_shell_configs(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
         format!("{}/.profile", home),
         "/etc/profile".to_string(),
         "/etc/bashrc".to_string(),
-    ];
+    ]
+}
 
-    for file_path in config_files {
+/// Check shell configuration files for environment variable exports (Unix only)
+#[cfg(not(target_os = "windows"))]
+fn check_shell_configs(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
+    let mut conflicts = Vec::new();
+
+    for file_path in shell_config_files() {
         if let Ok(content) = fs::read_to_string(&file_path) {
             // Parse lines for export statements
             for (line_num, line) in content.lines().enumerate() {

@@ -11,6 +11,7 @@ use crate::commands::sync_support::{
 use crate::database::backup::BackupEntry;
 use crate::database::Database;
 use crate::error::AppError;
+use crate::picked_paths::{self, PickPurpose};
 use crate::services::provider::ProviderService;
 use crate::store::AppState;
 
@@ -23,18 +24,23 @@ pub async fn export_config_to_file(
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let target_path = PathBuf::from(&filePath);
-        db.export_sql(&target_path)?;
-        Ok::<_, AppError>(json!({
-            "success": true,
-            "message": "SQL exported successfully",
-            "filePath": filePath
-        }))
-    })
-    .await
-    .map_err(|e| format!("导出配置失败: {e}"))?
-    .map_err(|e: AppError| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || export_sql_to_picked_path(&db, &filePath))
+        .await
+        .map_err(|e| format!("导出配置失败: {e}"))?
+        .map_err(|e: AppError| e.to_string())
+}
+
+/// 导出到 `save_file_dialog` 选出的路径；其他路径一律拒绝
+fn export_sql_to_picked_path(db: &Database, file_path: &str) -> Result<Value, AppError> {
+    picked_paths::require_picked(PickPurpose::SqlExport, file_path)
+        .map_err(AppError::InvalidInput)?;
+    let target_path = PathBuf::from(file_path);
+    db.export_sql(&target_path)?;
+    Ok(json!({
+        "success": true,
+        "message": "SQL exported successfully",
+        "filePath": file_path
+    }))
 }
 
 /// 从 SQL 备份导入数据库
@@ -46,8 +52,7 @@ pub async fn import_config_from_file(
     let db = state.db.clone();
     let db_for_sync = db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let path_buf = PathBuf::from(&filePath);
-        let backup_id = db.import_sql(&path_buf)?;
+        let backup_id = import_sql_from_picked_path(&db, &filePath)?;
         let warning = post_sync_warning_from_result(Ok(run_post_import_sync(db_for_sync)));
         if let Some(msg) = warning.as_ref() {
             log::warn!("[Import] post-import sync warning: {msg}");
@@ -57,6 +62,13 @@ pub async fn import_config_from_file(
     .await
     .map_err(|e| format!("导入配置失败: {e}"))?
     .map_err(|e: AppError| e.to_string())
+}
+
+/// 从 `open_file_dialog` 选出的路径导入；其他路径一律拒绝
+fn import_sql_from_picked_path(db: &Database, file_path: &str) -> Result<String, AppError> {
+    picked_paths::require_picked(PickPurpose::SqlImport, file_path)
+        .map_err(AppError::InvalidInput)?;
+    db.import_sql(&PathBuf::from(file_path))
 }
 
 #[tauri::command]
@@ -90,7 +102,7 @@ pub async fn save_file_dialog<R: tauri::Runtime>(
         .set_file_name(&defaultName)
         .blocking_save_file();
 
-    Ok(result.map(|p| p.to_string()))
+    Ok(result.map(|p| register_pick(PickPurpose::SqlExport, p.to_string())))
 }
 
 /// 打开文件对话框
@@ -104,7 +116,7 @@ pub async fn open_file_dialog<R: tauri::Runtime>(
         .add_filter("SQL", &["sql"])
         .blocking_pick_file();
 
-    Ok(result.map(|p| p.to_string()))
+    Ok(result.map(|p| register_pick(PickPurpose::SqlImport, p.to_string())))
 }
 
 /// 打开 ZIP 文件选择对话框
@@ -118,7 +130,13 @@ pub async fn open_zip_file_dialog<R: tauri::Runtime>(
         .add_filter("ZIP / Skill", &["zip", "skill"])
         .blocking_pick_file();
 
-    Ok(result.map(|p| p.to_string()))
+    Ok(result.map(|p| register_pick(PickPurpose::SkillZip, p.to_string())))
+}
+
+/// 登记对话框返回的路径，供后续命令校验
+fn register_pick(purpose: PickPurpose, path: String) -> String {
+    picked_paths::register(purpose, &path);
+    path
 }
 
 // ─── Database backup management ─────────────────────────────
@@ -173,4 +191,72 @@ pub fn rename_db_backup(
 #[tauri::command]
 pub fn delete_db_backup(filename: String) -> Result<(), String> {
     Database::delete_backup(&filename).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::paths::{self, Paths};
+    use tempfile::TempDir;
+
+    #[test]
+    fn export_rejects_path_not_chosen_by_save_dialog() {
+        let temp = TempDir::new().expect("tempdir");
+        let _paths = paths::scoped(Paths::with_home(temp.path()));
+        let db = Database::memory().expect("memory db");
+        let target = temp.path().join("not-picked.sql");
+        let target_str = target.to_string_lossy().to_string();
+
+        let err = export_sql_to_picked_path(&db, &target_str).unwrap_err();
+        assert!(err.to_string().contains("file dialog"), "{err}");
+        assert!(!target.exists());
+
+        // 由打开对话框选出的路径也不能用于导出
+        picked_paths::register(PickPurpose::SqlImport, &target_str);
+        assert!(export_sql_to_picked_path(&db, &target_str).is_err());
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn export_and_import_accept_dialog_picked_paths() {
+        let temp = TempDir::new().expect("tempdir");
+        let _paths = paths::scoped(Paths::with_home(temp.path()));
+        let db = Database::memory().expect("memory db");
+        let provider = crate::provider::Provider::with_id(
+            "ccs-075".to_string(),
+            "CCS 075".to_string(),
+            json!({"env": {}}),
+            None,
+        );
+        db.save_provider("claude", &provider)
+            .expect("save provider");
+        let target = temp.path().join("picked-export.sql");
+        let target_str = target.to_string_lossy().to_string();
+
+        picked_paths::register(PickPurpose::SqlExport, &target_str);
+        let result = export_sql_to_picked_path(&db, &target_str).expect("export");
+        assert_eq!(result["success"], json!(true));
+        assert!(target.exists());
+
+        picked_paths::register(PickPurpose::SqlImport, &target_str);
+        let other = Database::memory().expect("memory db");
+        import_sql_from_picked_path(&other, &target_str).expect("import");
+    }
+
+    #[test]
+    fn import_rejects_path_not_chosen_by_open_dialog() {
+        let temp = TempDir::new().expect("tempdir");
+        let _paths = paths::scoped(Paths::with_home(temp.path()));
+        let db = Database::memory().expect("memory db");
+        let source = temp.path().join("attacker.sql");
+        std::fs::write(&source, "-- not picked").expect("write");
+        let source_str = source.to_string_lossy().to_string();
+
+        let err = import_sql_from_picked_path(&db, &source_str).unwrap_err();
+        assert!(err.to_string().contains("file dialog"), "{err}");
+
+        picked_paths::register(PickPurpose::SqlExport, &source_str);
+        let err = import_sql_from_picked_path(&db, &source_str).unwrap_err();
+        assert!(err.to_string().contains("file dialog"), "{err}");
+    }
 }

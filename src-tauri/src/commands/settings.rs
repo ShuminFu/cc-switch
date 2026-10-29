@@ -297,8 +297,45 @@ pub async fn set_app_config_dir_override(
     app: AppHandle,
     path: Option<String>,
 ) -> Result<bool, String> {
+    if let Some(raw) = path.as_deref() {
+        validate_app_config_dir_override(
+            raw,
+            &crate::config::get_home_dir(),
+            crate::app_store::get_app_config_dir_override().as_deref(),
+        )?;
+    }
     crate::app_store::set_app_config_dir_to_store(&app, path.as_deref())?;
     Ok(true)
+}
+
+/// 校验 webview 传入的 app_config_dir 覆盖路径。
+///
+/// 允许：空值（清除覆盖）、由 `pick_directory` 选出的目录、与当前覆盖值相同的路径，
+/// 以及位于用户主目录下的绝对路径（支持 `~`）。其余路径（如 `/etc`、相对路径、含 `..`）
+/// 需通过目录选择器选择。
+fn validate_app_config_dir_override(
+    raw: &str,
+    home: &std::path::Path,
+    current: Option<&std::path::Path>,
+) -> Result<(), String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if crate::picked_paths::is_picked(crate::picked_paths::PickPurpose::Directory, trimmed) {
+        return Ok(());
+    }
+    let resolved = crate::app_store::resolve_path(trimmed);
+    if current == Some(resolved.as_path()) {
+        return Ok(());
+    }
+    if crate::picked_paths::is_within_root(&resolved, home) {
+        return Ok(());
+    }
+    Err(format!(
+        "配置目录必须位于用户主目录下，或通过目录选择器选择: {trimmed} \
+         (config directory must be inside the home directory or chosen with the directory picker)"
+    ))
 }
 
 /// 设置开机自启
@@ -314,7 +351,7 @@ pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::merge_settings_for_save;
+    use super::{merge_settings_for_save, validate_app_config_dir_override};
     use crate::settings::{
         AppSettings, CodexOfficialHistoryUnifyMigration, CodexProviderTemplateMigration,
         CodexThirdPartyHistoryProviderBucketMigration, LocalMigrations, S3SyncSettings,
@@ -617,6 +654,46 @@ mod tests {
         let merged = merge_settings_for_save(incoming, &existing);
 
         assert!(merged.local_migrations.is_none());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn app_config_dir_override_rejects_paths_outside_home() {
+        let home = std::path::Path::new("/home/ccs-075-user");
+        for raw in [
+            "/etc",
+            "/tmp/attacker",
+            "relative/dir",
+            "/home/ccs-075-user/../other",
+            "/home/ccs-075-userx",
+        ] {
+            assert!(
+                validate_app_config_dir_override(raw, home, None).is_err(),
+                "{raw} should be rejected"
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn app_config_dir_override_accepts_allowed_paths() {
+        let home = std::path::Path::new("/home/ccs-075-user");
+        assert!(validate_app_config_dir_override("", home, None).is_ok());
+        assert!(validate_app_config_dir_override("  ", home, None).is_ok());
+        assert!(
+            validate_app_config_dir_override("/home/ccs-075-user/.cc-switch-alt", home, None)
+                .is_ok()
+        );
+        // 当前已生效的覆盖值可以原样保存
+        let current = std::path::Path::new("/srv/ccs-075-current");
+        assert!(
+            validate_app_config_dir_override("/srv/ccs-075-current", home, Some(current)).is_ok()
+        );
+        // 目录选择器选出的路径即使不在主目录下也可以使用
+        let picked = "/mnt/ccs-075-picked";
+        assert!(validate_app_config_dir_override(picked, home, None).is_err());
+        crate::picked_paths::register(crate::picked_paths::PickPurpose::Directory, picked);
+        assert!(validate_app_config_dir_override(picked, home, None).is_ok());
     }
 }
 
