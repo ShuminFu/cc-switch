@@ -77,12 +77,12 @@ describe("useUpdateProviderMutation", () => {
   it("invalidates the updated provider usage query", async () => {
     const { wrapper, invalidateSpy } = createWrapper();
     const provider = createProvider({ id: "provider-b" });
-    const { result } = renderHook(() => useUpdateProviderMutation("codex"), {
+    const { result } = renderHook(() => useUpdateProviderMutation(), {
       wrapper,
     });
 
     await act(async () => {
-      await result.current.mutateAsync({ provider });
+      await result.current.mutateAsync({ appId: "codex", provider });
     });
 
     expect(apiMocks.update).toHaveBeenCalledWith(provider, "codex", undefined);
@@ -100,12 +100,13 @@ describe("useUpdateProviderMutation", () => {
   it("also invalidates the previous usage query when provider id changes", async () => {
     const { wrapper, invalidateSpy } = createWrapper();
     const provider = createProvider({ id: "provider-new" });
-    const { result } = renderHook(() => useUpdateProviderMutation("openclaw"), {
+    const { result } = renderHook(() => useUpdateProviderMutation(), {
       wrapper,
     });
 
     await act(async () => {
       await result.current.mutateAsync({
+        appId: "openclaw",
         provider,
         originalId: "provider-old",
       });

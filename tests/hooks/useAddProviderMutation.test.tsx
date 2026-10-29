@@ -71,16 +71,16 @@ beforeEach(() => {
 describe("useAddProviderMutation", () => {
   it("duplicates Claude Desktop official providers with a fresh id", async () => {
     const { wrapper } = createWrapper();
-    const { result } = renderHook(
-      () => useAddProviderMutation("claude-desktop"),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useAddProviderMutation(), { wrapper });
 
     const duplicatedProvider = await act(async () =>
       result.current.mutateAsync({
-        name: "Claude Desktop Official copy",
-        settingsConfig: { env: {} },
-        category: "official",
+        appId: "claude-desktop",
+        provider: {
+          name: "Claude Desktop Official copy",
+          settingsConfig: { env: {} },
+          category: "official",
+        },
       }),
     );
 
@@ -114,19 +114,19 @@ describe("useAddProviderMutation", () => {
       "claude-desktop-official": seedProvider,
     });
     const { wrapper } = createWrapper();
-    const { result } = renderHook(
-      () => useAddProviderMutation("claude-desktop"),
-      { wrapper },
-    );
+    const { result } = renderHook(() => useAddProviderMutation(), { wrapper });
 
     const persistedProvider = await act(async () =>
       result.current.mutateAsync({
-        name: "Renamed by form",
-        settingsConfig: { env: { ignored: true } },
-        websiteUrl: "https://example.invalid",
-        category: "official",
-        icon: "custom-icon",
-        ensureClaudeDesktopOfficialSeed: true,
+        appId: "claude-desktop",
+        provider: {
+          name: "Renamed by form",
+          settingsConfig: { env: { ignored: true } },
+          websiteUrl: "https://example.invalid",
+          category: "official",
+          icon: "custom-icon",
+          ensureClaudeDesktopOfficialSeed: true,
+        },
       }),
     );
 
@@ -149,16 +149,19 @@ describe("useAddProviderMutation", () => {
       "codex-official": seedProvider,
     });
     const { wrapper } = createWrapper();
-    const { result } = renderHook(() => useAddProviderMutation("codex"), {
+    const { result } = renderHook(() => useAddProviderMutation(), {
       wrapper,
     });
 
     const persistedProvider = await act(async () =>
       result.current.mutateAsync({
-        name: "OpenAI Official",
-        settingsConfig: { auth: {}, config: "" },
-        category: "official",
-        ensureCodexOfficialSeed: true,
+        appId: "codex",
+        provider: {
+          name: "OpenAI Official",
+          settingsConfig: { auth: {}, config: "" },
+          category: "official",
+          ensureCodexOfficialSeed: true,
+        },
       }),
     );
 

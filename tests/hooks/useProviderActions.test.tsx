@@ -152,7 +152,10 @@ describe("useProviderActions", () => {
     });
 
     expect(addProviderMutateAsync).toHaveBeenCalledTimes(1);
-    expect(addProviderMutateAsync).toHaveBeenCalledWith(providerInput);
+    expect(addProviderMutateAsync).toHaveBeenCalledWith({
+      appId: "claude",
+      provider: providerInput,
+    });
   });
 
   it("should update tray menu when calling updateProvider", async () => {
@@ -170,6 +173,7 @@ describe("useProviderActions", () => {
     });
 
     expect(updateProviderMutateAsync).toHaveBeenCalledWith({
+      appId: "claude",
       provider,
       originalId: undefined,
     });
@@ -189,7 +193,9 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: provider.id }),
+    );
     expect(settingsApiGetMock).not.toHaveBeenCalled();
     expect(settingsApiApplyMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith(
@@ -217,7 +223,9 @@ describe("useProviderActions", () => {
     });
 
     expect(toastWarningMock).toHaveBeenCalledTimes(1);
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: provider.id }),
+    );
   });
 
   it("warns but still switches Codex full URL providers when proxy is not running", async () => {
@@ -239,7 +247,9 @@ describe("useProviderActions", () => {
     });
 
     expect(toastWarningMock).toHaveBeenCalledTimes(1);
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: provider.id }),
+    );
   });
 
   it("warns when switching a Codex Anthropic-format provider without proxy", async () => {
@@ -261,7 +271,9 @@ describe("useProviderActions", () => {
     expect(toastWarningMock).toHaveBeenCalledWith(
       expect.stringContaining("Anthropic Messages"),
     );
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: provider.id }),
+    );
   });
 
   it("warns for Grok providers that require the Responses router", async () => {
@@ -317,7 +329,10 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith("codex-official");
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith({
+      appId: "codex",
+      providerId: "codex-official",
+    });
     expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
@@ -377,7 +392,9 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: provider.id }),
+    );
     expect(settingsApiGetMock).toHaveBeenCalledTimes(1);
     expect(settingsApiApplyMock).toHaveBeenCalledWith({ official: true });
   });
@@ -488,7 +505,10 @@ describe("useProviderActions", () => {
       await result.current.deleteProvider("provider-2");
     });
 
-    expect(deleteProviderMutateAsync).toHaveBeenCalledWith("provider-2");
+    expect(deleteProviderMutateAsync).toHaveBeenCalledWith({
+      appId: "claude",
+      providerId: "provider-2",
+    });
   });
 
   it("should update provider and refresh cache when saveUsageScript succeeds", async () => {

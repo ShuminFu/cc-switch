@@ -11,19 +11,43 @@ import { invalidateProviderGraph } from "@/entities/provider/invalidate";
 import { CODEX_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 import { appCaps } from "@/entities/app/registry";
 
-export const useAddProviderMutation = (appId: AppId) => {
+export type AddProviderInput = Omit<Provider, "id"> & {
+  providerKey?: string;
+  addToLive?: boolean;
+  ensureClaudeDesktopOfficialSeed?: boolean;
+  ensureCodexOfficialSeed?: boolean;
+};
+
+/**
+ * 供应商变更类 mutation 的目标应用必须随 variables 传入，而不是在 hook 创建时
+ * 绑定：TanStack Query v5 会把最新的 options 交给仍在进行中的 mutation，若绑定
+ * activeApp，切换标签后 onSuccess 会失效新应用的缓存，漏掉原应用的派生缓存。
+ */
+export interface AddProviderVariables {
+  appId: AppId;
+  provider: AddProviderInput;
+}
+
+export interface UpdateProviderVariables {
+  appId: AppId;
+  provider: Provider;
+  originalId?: string;
+}
+
+export interface ProviderIdVariables {
+  appId: AppId;
+  providerId: string;
+}
+
+export const useAddProviderMutation = () => {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
 
   return useMutation({
-    mutationFn: async (
-      providerInput: Omit<Provider, "id"> & {
-        providerKey?: string;
-        addToLive?: boolean;
-        ensureClaudeDesktopOfficialSeed?: boolean;
-        ensureCodexOfficialSeed?: boolean;
-      },
-    ) => {
+    mutationFn: async ({
+      appId,
+      provider: providerInput,
+    }: AddProviderVariables) => {
       const {
         providerKey: _providerKey,
         addToLive,
@@ -81,7 +105,7 @@ export const useAddProviderMutation = (appId: AppId) => {
       await providersApi.add(newProvider, appId, addToLive);
       return newProvider;
     },
-    onSuccess: async () => {
+    onSuccess: async (_provider, { appId }) => {
       await invalidateProviderGraph(queryClient, appId);
 
       try {
@@ -114,23 +138,21 @@ export const useAddProviderMutation = (appId: AppId) => {
   });
 };
 
-export const useUpdateProviderMutation = (appId: AppId) => {
+export const useUpdateProviderMutation = () => {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
 
   return useMutation({
     mutationFn: async ({
+      appId,
       provider,
       originalId,
-    }: {
-      provider: Provider;
-      originalId?: string;
-    }) => {
+    }: UpdateProviderVariables) => {
       await providersApi.update(provider, appId, originalId);
       return provider;
     },
     onSuccess: async (provider, variables) => {
-      await invalidateProviderGraph(queryClient, appId, {
+      await invalidateProviderGraph(queryClient, variables.appId, {
         providerIds: [provider.id, variables.originalId].filter(
           (id): id is string => !!id,
         ),
@@ -156,15 +178,15 @@ export const useUpdateProviderMutation = (appId: AppId) => {
   });
 };
 
-export const useDeleteProviderMutation = (appId: AppId) => {
+export const useDeleteProviderMutation = () => {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
 
   return useMutation({
-    mutationFn: async (providerId: string) => {
+    mutationFn: async ({ appId, providerId }: ProviderIdVariables) => {
       await providersApi.delete(providerId, appId);
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, { appId }) => {
       await invalidateProviderGraph(queryClient, appId);
 
       try {
@@ -197,15 +219,18 @@ export const useDeleteProviderMutation = (appId: AppId) => {
   });
 };
 
-export const useSwitchProviderMutation = (appId: AppId) => {
+export const useSwitchProviderMutation = () => {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
 
   return useMutation({
-    mutationFn: async (providerId: string): Promise<SwitchResult> => {
+    mutationFn: async ({
+      appId,
+      providerId,
+    }: ProviderIdVariables): Promise<SwitchResult> => {
       return await providersApi.switch(providerId, appId);
     },
-    onSuccess: async () => {
+    onSuccess: async (_result, { appId }) => {
       await invalidateProviderGraph(queryClient, appId);
 
       try {

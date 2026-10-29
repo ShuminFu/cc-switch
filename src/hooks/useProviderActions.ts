@@ -40,10 +40,10 @@ export function useProviderActions(
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
-  const addProviderMutation = useAddProviderMutation(activeApp);
-  const updateProviderMutation = useUpdateProviderMutation(activeApp);
-  const deleteProviderMutation = useDeleteProviderMutation(activeApp);
-  const switchProviderMutation = useSwitchProviderMutation(activeApp);
+  const addProviderMutation = useAddProviderMutation();
+  const updateProviderMutation = useUpdateProviderMutation();
+  const deleteProviderMutation = useDeleteProviderMutation();
+  const switchProviderMutation = useSwitchProviderMutation();
 
   // Claude 插件同步逻辑
   const syncClaudePlugin = useCallback(
@@ -84,7 +84,10 @@ export function useProviderActions(
       },
     ) => {
       const enhanced = injectCodingPlanUsageScript(activeApp, provider);
-      await addProviderMutation.mutateAsync(enhanced);
+      await addProviderMutation.mutateAsync({
+        appId: activeApp,
+        provider: enhanced,
+      });
 
       // OpenClaw: register models to allowlist after adding provider
       if (activeApp === "openclaw" && provider.suggestedDefaults) {
@@ -138,7 +141,11 @@ export function useProviderActions(
   // 更新供应商
   const updateProvider = useCallback(
     async (provider: Provider, originalId?: string) => {
-      await updateProviderMutation.mutateAsync({ provider, originalId });
+      await updateProviderMutation.mutateAsync({
+        appId: activeApp,
+        provider,
+        originalId,
+      });
 
       // 更新托盘菜单（失败不影响主操作）
       try {
@@ -150,7 +157,7 @@ export function useProviderActions(
         );
       }
     },
-    [updateProviderMutation],
+    [updateProviderMutation, activeApp],
   );
 
   // 切换供应商
@@ -263,7 +270,10 @@ export function useProviderActions(
       }
 
       try {
-        const result = await switchProviderMutation.mutateAsync(provider.id);
+        const result = await switchProviderMutation.mutateAsync({
+          appId: activeApp,
+          providerId: provider.id,
+        });
         await syncClaudePlugin(provider);
 
         // Show backfill warning if present
@@ -321,9 +331,12 @@ export function useProviderActions(
   // 删除供应商
   const deleteProvider = useCallback(
     async (id: string) => {
-      await deleteProviderMutation.mutateAsync(id);
+      await deleteProviderMutation.mutateAsync({
+        appId: activeApp,
+        providerId: id,
+      });
     },
-    [deleteProviderMutation],
+    [deleteProviderMutation, activeApp],
   );
 
   // 保存用量脚本
