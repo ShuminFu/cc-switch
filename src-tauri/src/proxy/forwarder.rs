@@ -25,6 +25,7 @@ use super::{
     ProxyError,
 };
 use crate::commands::{CodexOAuthState, CopilotAuthState};
+use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
 use crate::proxy::providers::copilot_auth::CopilotAuthManager;
 use crate::{
@@ -60,7 +61,7 @@ fn validate_codex_official_authorization(headers: &http::HeaderMap) -> Result<()
 pub struct ForwardResult {
     pub response: ProxyResponse,
     pub provider: Provider,
-    pub claude_api_format: Option<String>,
+    pub claude_api_format: Option<ClaudeApiFormat>,
     /// 实际发往上游的模型名（路由接管/模型映射后的真值）。
     ///
     /// usage 归因不能依赖 ctx.request_model（映射前的客户端别名）：上游响应
@@ -1129,7 +1130,7 @@ impl RequestForwarder {
         headers: &axum::http::HeaderMap,
         extensions: &Extensions,
         adapter: &dyn ProviderAdapter,
-    ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
+    ) -> Result<(ProxyResponse, Option<ClaudeApiFormat>, Option<String>), ProxyError> {
         // 使用适配器提取 base_url
         let mut base_url = adapter.extract_base_url(provider)?;
 
@@ -1249,38 +1250,7 @@ impl RequestForwarder {
             }
 
             // 预计算确定性 Request ID（在 body 被 move 之前）
-            // Session 提取优先级（与 session.rs extract_from_metadata 对齐）：
-            //   1. metadata.user_id 中的 _session_ 后缀
-            //   2. metadata.session_id（直接字段）
-            //   3. raw metadata.user_id（整串 fallback）
-            //   4. x-session-id header
-            let metadata = body.get("metadata");
-            let session_id = metadata
-                .and_then(|m| m.get("user_id"))
-                .and_then(|v| v.as_str())
-                .and_then(super::session::parse_session_from_user_id)
-                .or_else(|| {
-                    metadata
-                        .and_then(|m| m.get("session_id"))
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_string())
-                })
-                .or_else(|| {
-                    metadata
-                        .and_then(|m| m.get("user_id"))
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_string())
-                })
-                .or_else(|| {
-                    headers
-                        .get("x-session-id")
-                        .and_then(|v| v.to_str().ok())
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_string())
-                })
-                .unwrap_or_default();
+            let session_id = super::session::copilot_session_key(headers, body);
             let det_request_id = if self.copilot_optimizer_config.deterministic_request_id {
                 Some(super::copilot_optimizer::deterministic_request_id(
                     &mapped_body,
@@ -1337,7 +1307,7 @@ impl RequestForwarder {
             None
         };
         if adapter.name() == "Claude" {
-            if let Some(api_format) = resolved_claude_api_format.as_deref() {
+            if let Some(api_format) = resolved_claude_api_format {
                 super::providers::normalize_anthropic_messages_for_provider(
                     &mut mapped_body,
                     provider,
@@ -1346,7 +1316,7 @@ impl RequestForwarder {
                 self.apply_media_prevention(&mut mapped_body, provider);
             }
         }
-        let needs_transform = match resolved_claude_api_format.as_deref() {
+        let needs_transform = match resolved_claude_api_format {
             Some(api_format) => super::providers::claude_api_format_needs_transform(api_format),
             None => adapter.needs_transform(provider),
         };
@@ -1368,7 +1338,6 @@ impl RequestForwarder {
             rewrite_codex_responses_endpoint_to_anthropic(endpoint)
         } else if needs_transform && adapter.name() == "Claude" {
             let api_format = resolved_claude_api_format
-                .as_deref()
                 .unwrap_or_else(|| super::providers::get_claude_api_format(provider));
             rewrite_claude_transform_endpoint(endpoint, api_format, is_copilot, &mapped_body)
         } else {
@@ -1391,7 +1360,7 @@ impl RequestForwarder {
         let codex_anthropic_base_is_full_endpoint =
             codex_responses_to_anthropic && base_url_is_full_endpoint(&base_url, "/v1/messages");
 
-        let url = if matches!(resolved_claude_api_format.as_deref(), Some("gemini_native")) {
+        let url = if resolved_claude_api_format == Some(ClaudeApiFormat::GeminiNative) {
             super::gemini_url::resolve_gemini_native_url(
                 &base_url,
                 &effective_endpoint,
@@ -1509,7 +1478,6 @@ impl RequestForwarder {
         } else if needs_transform {
             if adapter.name() == "Claude" {
                 let api_format = resolved_claude_api_format
-                    .as_deref()
                     .unwrap_or_else(|| super::providers::get_claude_api_format(provider));
                 super::providers::transform_claude_request_for_api_format(
                     mapped_body,
@@ -1556,7 +1524,7 @@ impl RequestForwarder {
             app_type,
             provider,
             &effective_endpoint,
-            resolved_claude_api_format.as_deref(),
+            resolved_claude_api_format,
             &filtered_body,
             self.session_client_provided,
         );
@@ -1781,7 +1749,7 @@ impl RequestForwarder {
             .and_then(|u| u.authority().map(|a| a.to_string()));
 
         let should_send_anthropic_headers = adapter.name() == "Claude"
-            && matches!(resolved_claude_api_format.as_deref(), Some("anthropic"));
+            && resolved_claude_api_format == Some(ClaudeApiFormat::Anthropic);
 
         // 预计算 anthropic-beta 值（仅 Claude）
         let anthropic_beta_value = if should_send_anthropic_headers {
@@ -2126,7 +2094,7 @@ impl RequestForwarder {
         let preserve_exact_header_case = should_preserve_exact_header_case(
             adapter.name(),
             provider,
-            resolved_claude_api_format.as_deref(),
+            resolved_claude_api_format,
             is_copilot,
         );
 
@@ -2197,10 +2165,7 @@ impl RequestForwarder {
                 response = self
                     .validate_codex_anthropic_success_response(response)
                     .await?;
-            } else if matches!(
-                resolved_claude_api_format.as_deref(),
-                Some("openai_responses")
-            ) {
+            } else if resolved_claude_api_format == Some(ClaudeApiFormat::OpenAiResponses) {
                 if !request_is_streaming || response.is_json() {
                     // Claude→Responses gateways can also return a semantic failure in an
                     // HTTP 2xx Response object. Validate buffered/JSON bodies inside the
@@ -2466,9 +2431,9 @@ impl RequestForwarder {
         provider: &Provider,
         body: &Value,
         is_copilot: bool,
-    ) -> String {
+    ) -> ClaudeApiFormat {
         if !is_copilot {
-            return super::providers::get_claude_api_format(provider).to_string();
+            return super::providers::get_claude_api_format(provider);
         }
 
         let model = body.get("model").and_then(|value| value.as_str());
@@ -2477,11 +2442,11 @@ impl RequestForwarder {
                 .is_copilot_openai_vendor_model(provider, model_id)
                 .await
             {
-                return "openai_responses".to_string();
+                return ClaudeApiFormat::OpenAiResponses;
             }
         }
 
-        "openai_chat".to_string()
+        ClaudeApiFormat::OpenAiChat
     }
 
     /// 用 Copilot live `/models` 列表确认 model ID 真实可用，找不到时按 family 降级。
@@ -3015,7 +2980,7 @@ fn rewrite_codex_responses_endpoint_to_anthropic(endpoint: &str) -> (String, Opt
 
 fn rewrite_claude_transform_endpoint(
     endpoint: &str,
-    api_format: &str,
+    api_format: ClaudeApiFormat,
     is_copilot: bool,
     body: &Value,
 ) -> (String, Option<String>) {
@@ -3030,7 +2995,7 @@ fn rewrite_claude_transform_endpoint(
         return (endpoint.to_string(), passthrough_query);
     }
 
-    if api_format == "gemini_native" {
+    if api_format == ClaudeApiFormat::GeminiNative {
         let model =
             super::providers::transform_gemini::extract_gemini_model(body).unwrap_or("unknown");
         // Accept both bare ids (`gemini-2.5-pro`) and the resource-name
@@ -3060,14 +3025,10 @@ fn rewrite_claude_transform_endpoint(
         return (rewritten, rewritten_query);
     }
 
-    let target_path = if is_copilot && api_format == "openai_responses" {
-        "/v1/responses"
-    } else if is_copilot {
-        "/chat/completions"
-    } else if api_format == "openai_responses" {
-        "/v1/responses"
-    } else {
-        "/v1/chat/completions"
+    let target_path = match (api_format.wire_format(), is_copilot) {
+        (WireFormat::OpenAiResponses, _) => "/v1/responses",
+        (_, true) => "/chat/completions",
+        _ => "/v1/chat/completions",
     };
 
     let rewritten = match passthrough_query.as_deref() {
@@ -3173,7 +3134,7 @@ fn headers_contain_proxy_placeholder(headers: &http::HeaderMap) -> bool {
 fn should_preserve_exact_header_case(
     adapter_name: &str,
     provider: &Provider,
-    resolved_claude_api_format: Option<&str>,
+    resolved_claude_api_format: Option<ClaudeApiFormat>,
     is_copilot: bool,
 ) -> bool {
     if matches!(adapter_name, "Codex" | "Gemini") {
@@ -3184,7 +3145,10 @@ fn should_preserve_exact_header_case(
         return false;
     }
 
-    matches!(resolved_claude_api_format, None | Some("anthropic"))
+    matches!(
+        resolved_claude_api_format,
+        None | Some(ClaudeApiFormat::Anthropic)
+    )
 }
 
 fn is_streaming_request(endpoint: &str, body: &Value, headers: &axum::http::HeaderMap) -> bool {
@@ -3395,7 +3359,7 @@ fn log_prompt_cache_trace(
     app_type: &AppType,
     provider: &Provider,
     endpoint: &str,
-    api_format: Option<&str>,
+    api_format: Option<ClaudeApiFormat>,
     body: &Value,
     session_client_provided: bool,
 ) {
@@ -3423,7 +3387,7 @@ fn log_prompt_cache_trace(
         app_type.as_str(),
         provider.id,
         endpoint,
-        api_format.unwrap_or("native"),
+        api_format.map_or("native", ClaudeApiFormat::as_str),
         session_client_provided,
         prompt_cache_key,
         store,
@@ -4026,13 +3990,13 @@ mod tests {
         assert!(should_preserve_exact_header_case(
             "Claude",
             &provider,
-            Some("anthropic"),
+            Some(ClaudeApiFormat::Anthropic),
             false
         ));
         assert!(!should_preserve_exact_header_case(
             "Claude",
             &provider,
-            Some("openai_responses"),
+            Some(ClaudeApiFormat::OpenAiResponses),
             false
         ));
         assert!(!should_preserve_exact_header_case(
@@ -4051,13 +4015,13 @@ mod tests {
         assert!(!should_preserve_exact_header_case(
             "Claude",
             &codex_oauth,
-            Some("openai_responses"),
+            Some(ClaudeApiFormat::OpenAiResponses),
             false
         ));
         assert!(!should_preserve_exact_header_case(
             "Claude",
             &copilot,
-            Some("openai_chat"),
+            Some(ClaudeApiFormat::OpenAiChat),
             true
         ));
     }
@@ -4066,7 +4030,7 @@ mod tests {
     fn rewrite_claude_transform_endpoint_strips_beta_for_chat_completions() {
         let (endpoint, passthrough_query) = rewrite_claude_transform_endpoint(
             "/v1/messages?beta=true&foo=bar",
-            "openai_chat",
+            ClaudeApiFormat::OpenAiChat,
             false,
             &json!({ "model": "gpt-5.4" }),
         );
@@ -4079,7 +4043,7 @@ mod tests {
     fn rewrite_claude_transform_endpoint_strips_beta_for_responses() {
         let (endpoint, passthrough_query) = rewrite_claude_transform_endpoint(
             "/claude/v1/messages?beta=true&x-id=1",
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             false,
             &json!({ "model": "gpt-5.4" }),
         );
@@ -4403,7 +4367,7 @@ mod tests {
     fn rewrite_claude_transform_endpoint_uses_copilot_path() {
         let (endpoint, passthrough_query) = rewrite_claude_transform_endpoint(
             "/v1/messages?beta=true&x-id=1",
-            "anthropic",
+            ClaudeApiFormat::Anthropic,
             true,
             &json!({ "model": "claude-sonnet-4-6" }),
         );
@@ -4416,7 +4380,7 @@ mod tests {
     fn rewrite_claude_transform_endpoint_uses_copilot_responses_path() {
         let (endpoint, passthrough_query) = rewrite_claude_transform_endpoint(
             "/v1/messages?beta=true&x-id=1",
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             true,
             &json!({ "model": "gpt-5.4" }),
         );
@@ -4429,7 +4393,7 @@ mod tests {
     fn rewrite_claude_transform_endpoint_maps_gemini_generate_content() {
         let (endpoint, passthrough_query) = rewrite_claude_transform_endpoint(
             "/v1/messages?beta=true&x-id=1",
-            "gemini_native",
+            ClaudeApiFormat::GeminiNative,
             false,
             &json!({ "model": "gemini-2.5-pro" }),
         );
@@ -4448,7 +4412,7 @@ mod tests {
     fn rewrite_claude_transform_endpoint_strips_gemini_model_resource_prefix() {
         let (endpoint, _) = rewrite_claude_transform_endpoint(
             "/v1/messages",
-            "gemini_native",
+            ClaudeApiFormat::GeminiNative,
             false,
             &json!({ "model": "models/gemini-2.5-pro" }),
         );
@@ -4460,7 +4424,7 @@ mod tests {
     fn rewrite_claude_transform_endpoint_maps_gemini_streaming() {
         let (endpoint, passthrough_query) = rewrite_claude_transform_endpoint(
             "/v1/messages?beta=true",
-            "gemini_native",
+            ClaudeApiFormat::GeminiNative,
             false,
             &json!({ "model": "gemini-2.5-flash", "stream": true }),
         );
@@ -4985,7 +4949,12 @@ mod tests {
             ..Default::default()
         });
         assert!(
-            should_preserve_exact_header_case("Claude", &provider, Some("anthropic"), false),
+            should_preserve_exact_header_case(
+                "Claude",
+                &provider,
+                Some(ClaudeApiFormat::Anthropic),
+                false
+            ),
             "an anthropic-format Claude provider must use the raw hyper path"
         );
 

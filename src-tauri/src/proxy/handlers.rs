@@ -16,6 +16,7 @@ use super::{
         CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG, OPENAI_PARSER_CONFIG,
     },
     handler_context::RequestContext,
+    protocol::ClaudeApiFormat,
     providers::{
         codex_chat_common::extract_reasoning_field_text,
         codex_chat_history::record_responses_sse_stream,
@@ -255,9 +256,7 @@ async fn handle_messages_for_app(
     ctx.provider = result.provider;
     let api_format = result
         .claude_api_format
-        .as_deref()
-        .unwrap_or_else(|| get_claude_api_format(&ctx.provider))
-        .to_string();
+        .unwrap_or_else(|| get_claude_api_format(&ctx.provider));
     let response = result.response;
 
     // 检查是否需要格式转换（OpenRouter 等中转服务）
@@ -272,7 +271,7 @@ async fn handle_messages_for_app(
             &state,
             &body,
             is_stream,
-            &api_format,
+            api_format,
             connection_guard,
         )
         .await;
@@ -409,7 +408,7 @@ async fn handle_claude_transform(
     state: &ProxyState,
     original_body: &Value,
     is_stream: bool,
-    api_format: &str,
+    api_format: ClaudeApiFormat,
     connection_guard: Option<ActiveConnectionGuard>,
 ) -> Result<axum::response::Response, ProxyError> {
     let status = response.status();
@@ -425,7 +424,7 @@ async fn handle_claude_transform(
     // 这里为这个特定组合打开 override：把上游 SSE 聚合成 Anthropic JSON 回给客户端，其它
     // 场景（任意上游 is_sse、非 Codex OAuth 等）仍沿用原有流式兜底。
     let aggregate_codex_oauth_responses_sse =
-        !is_stream && is_codex_oauth && api_format == "openai_responses";
+        !is_stream && is_codex_oauth && api_format == ClaudeApiFormat::OpenAiResponses;
     let use_streaming = if aggregate_codex_oauth_responses_sse {
         false
     } else {
@@ -444,9 +443,9 @@ async fn handle_claude_transform(
         let stream = response.bytes_stream();
         let sse_stream: Box<
             dyn futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + Unpin,
-        > = if api_format == "openai_responses" {
+        > = if api_format == ClaudeApiFormat::OpenAiResponses {
             Box::new(Box::pin(create_anthropic_sse_stream_from_responses(stream)))
-        } else if api_format == "gemini_native" {
+        } else if api_format == ClaudeApiFormat::GeminiNative {
             Box::new(Box::pin(create_anthropic_sse_stream_from_gemini(
                 stream,
                 Some(state.gemini_shadow.clone()),
@@ -560,11 +559,14 @@ async fn handle_claude_transform(
             // Content-Type 标成 application/json 等，is_sse() 的 header 检查失效。
             // 此时按 SSE 聚合成单个 JSON 再走既有非流转换器，客户端仍收到
             // Anthropic JSON，非流语义不变。gemini_native 暂无聚合器，落诊断错误。
-            Err(_) if body_looks_like_sse(&body_str) && api_format != "gemini_native" => {
+            Err(_)
+                if body_looks_like_sse(&body_str)
+                    && api_format != ClaudeApiFormat::GeminiNative =>
+            {
                 log::warn!(
                     "[Claude] 上游对非流请求返回未标记的 SSE 体（api_format={api_format}），按 SSE 聚合兜底"
                 );
-                let aggregated = if api_format == "openai_responses" {
+                let aggregated = if api_format == ClaudeApiFormat::OpenAiResponses {
                     responses_sse_to_response_value(&body_str)
                 } else {
                     chat_sse_to_response_value(&body_str)
@@ -591,7 +593,7 @@ async fn handle_claude_transform(
 
     // Preserve raw Responses usage so a post-upstream conversion failure still
     // records the tokens already consumed by the successful upstream request.
-    let raw_usage_response = (api_format == "openai_responses").then(|| {
+    let raw_usage_response = (api_format == ClaudeApiFormat::OpenAiResponses).then(|| {
         json!({
             "id": upstream_response.get("id").cloned().unwrap_or(Value::Null),
             "model": upstream_response.get("model").cloned().unwrap_or(Value::Null),
@@ -602,9 +604,9 @@ async fn handle_claude_transform(
     });
 
     // 根据 api_format 选择非流式转换器
-    let transform_result = if api_format == "openai_responses" {
+    let transform_result = if api_format == ClaudeApiFormat::OpenAiResponses {
         transform_responses::responses_to_anthropic(upstream_response)
-    } else if api_format == "gemini_native" {
+    } else if api_format == ClaudeApiFormat::GeminiNative {
         transform_gemini::gemini_to_anthropic_with_shadow_and_hints(
             upstream_response,
             Some(state.gemini_shadow.as_ref()),
@@ -1797,10 +1799,12 @@ pub async fn handle_gemini(
 fn should_use_claude_transform_streaming(
     requested_streaming: bool,
     upstream_is_sse: bool,
-    api_format: &str,
+    api_format: ClaudeApiFormat,
     is_codex_oauth: bool,
 ) -> bool {
-    requested_streaming || upstream_is_sse || (is_codex_oauth && api_format == "openai_responses")
+    requested_streaming
+        || upstream_is_sse
+        || (is_codex_oauth && api_format == ClaudeApiFormat::OpenAiResponses)
 }
 
 /// 把 OpenAI Responses SSE 流聚合成一个完整的 Responses JSON 对象，供下游转成 Anthropic
@@ -2438,6 +2442,7 @@ mod tests {
         parse_request_json, read_request_body_with_limit, responses_sse_to_response_value,
         should_use_claude_transform_streaming, transform, upstream_body_parse_error,
     };
+    use crate::proxy::protocol::ClaudeApiFormat;
     use crate::proxy::ProxyError;
 
     /// 与生产 handler 同样接收原始 Request、走 read_request_body + parse_request_json，
@@ -3038,7 +3043,7 @@ data: [DONE]\n\n";
         assert!(should_use_claude_transform_streaming(
             false,
             false,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             true,
         ));
     }
@@ -3048,7 +3053,7 @@ data: [DONE]\n\n";
         assert!(should_use_claude_transform_streaming(
             false,
             true,
-            "openai_chat",
+            ClaudeApiFormat::OpenAiChat,
             false,
         ));
     }
@@ -3058,7 +3063,7 @@ data: [DONE]\n\n";
         assert!(!should_use_claude_transform_streaming(
             false,
             false,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             false,
         ));
     }

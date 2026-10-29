@@ -439,10 +439,8 @@ pub struct ProviderMeta {
     /// 每月消费限额（USD）
     #[serde(rename = "limitMonthlyUsd", skip_serializing_if = "Option::is_none")]
     pub limit_monthly_usd: Option<String>,
-    /// Claude API 格式（仅 Claude 供应商使用）
-    /// - "anthropic": 原生 Anthropic Messages API，直接透传
-    /// - "openai_chat": OpenAI Chat Completions 格式，需要转换
-    /// - "openai_responses": OpenAI Responses API 格式，需要转换
+    /// Claude API 格式（仅 Claude 供应商使用），取值见
+    /// [`crate::proxy::protocol::ClaudeApiFormat`]：`anthropic` 直接透传，其余需要格式转换
     #[serde(rename = "apiFormat", skip_serializing_if = "Option::is_none")]
     pub api_format: Option<String>,
     /// 通用认证绑定（provider_config / managed_account）

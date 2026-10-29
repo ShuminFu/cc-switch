@@ -125,7 +125,9 @@ impl ProviderType {
     pub fn from_app_type_and_config(app_type: &AppType, provider: &Provider) -> Self {
         match app_type {
             AppType::Claude | AppType::ClaudeDesktop => {
-                if get_claude_api_format(provider) == "gemini_native" {
+                if get_claude_api_format(provider)
+                    == crate::proxy::protocol::ClaudeApiFormat::GeminiNative
+                {
                     let adapter = ClaudeAdapter::new();
                     return match adapter.extract_auth(provider).map(|auth| auth.strategy) {
                         Some(AuthStrategy::GoogleOAuth) => ProviderType::GeminiCli,

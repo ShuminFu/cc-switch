@@ -8,6 +8,7 @@
 use super::{AuthInfo, AuthStrategy, ProviderAdapter};
 use crate::provider::{CodexChatReasoningConfig, Provider};
 use crate::proxy::error::ProxyError;
+use crate::proxy::protocol::WireFormat;
 use regex::Regex;
 use serde_json::Value as JsonValue;
 use std::collections::HashSet;
@@ -496,22 +497,11 @@ fn infer_aggregator_platform_config(
 }
 
 fn is_chat_wire_api(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "chat"
-            | "chat_completions"
-            | "chat-completions"
-            | "openai_chat"
-            | "openai-chat"
-            | "openai_chat_completions"
-    )
+    WireFormat::from_codex_wire_api(value) == Some(WireFormat::OpenAiChat)
 }
 
 fn is_anthropic_wire_api(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "anthropic" | "anthropic_messages" | "anthropic-messages" | "claude" | "messages"
-    )
+    WireFormat::from_codex_wire_api(value) == Some(WireFormat::AnthropicMessages)
 }
 
 fn is_chat_completions_url(value: &str) -> bool {
@@ -787,6 +777,7 @@ impl ProviderAdapter for CodexAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::protocol::ClaudeApiFormat;
     use serde_json::json;
 
     fn create_provider(config: serde_json::Value) -> Provider {
@@ -1054,9 +1045,10 @@ wire_api = "anthropic"
 
     #[test]
     fn test_anthropic_false_for_chat_and_responses() {
-        let chat = create_provider(json!({ "apiFormat": "openai_chat" }));
+        let chat = create_provider(json!({ "apiFormat": ClaudeApiFormat::OpenAiChat.as_str() }));
         assert!(!codex_provider_uses_anthropic(&chat));
-        let responses = create_provider(json!({ "apiFormat": "openai_responses" }));
+        let responses =
+            create_provider(json!({ "apiFormat": ClaudeApiFormat::OpenAiResponses.as_str() }));
         assert!(!codex_provider_uses_anthropic(&responses));
     }
 
@@ -1066,7 +1058,7 @@ wire_api = "anthropic"
         assert!(codex_provider_uses_anthropic(&anth));
         assert!(!codex_provider_uses_chat_completions(&anth));
 
-        let chat = create_provider(json!({ "apiFormat": "openai_chat" }));
+        let chat = create_provider(json!({ "apiFormat": ClaudeApiFormat::OpenAiChat.as_str() }));
         assert!(codex_provider_uses_chat_completions(&chat));
         assert!(!codex_provider_uses_anthropic(&chat));
     }
@@ -1121,7 +1113,7 @@ wire_api = "anthropic"
         // Native openai_responses (meta) → NativeResponses; chat → ProxyChat.
         let mut native = create_provider(json!({}));
         native.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_responses".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiResponses.to_string()),
             ..Default::default()
         });
         assert_eq!(
@@ -1129,7 +1121,7 @@ wire_api = "anthropic"
             CodexCatalogToolProfile::NativeResponses
         );
 
-        let chat = create_provider(json!({ "apiFormat": "openai_chat" }));
+        let chat = create_provider(json!({ "apiFormat": ClaudeApiFormat::OpenAiChat.as_str() }));
         assert_eq!(
             resolve_codex_catalog_tool_profile(&chat),
             CodexCatalogToolProfile::ProxyChat
@@ -1308,7 +1300,7 @@ wire_api = "chat"
             "base_url": "https://example.com/v1"
         }));
         provider.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_chat".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
             ..Default::default()
         });
 
@@ -1325,7 +1317,7 @@ wire_api = "chat"
             "base_url": "https://api.deepseek.com/v1"
         }));
         provider.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_chat".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
             ..Default::default()
         });
 
@@ -1349,7 +1341,7 @@ wire_api = "responses"
 "#
         }));
         provider.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_chat".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
             ..Default::default()
         });
         let mut body = json!({
@@ -1386,7 +1378,7 @@ wire_api = "responses"
             }
         }));
         provider.meta = Some(crate::provider::ProviderMeta {
-            api_format: Some("openai_chat".to_string()),
+            api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
             ..Default::default()
         });
         let mut body = json!({

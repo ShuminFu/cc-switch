@@ -9,6 +9,7 @@ use crate::provider::Provider;
 use crate::proxy::circuit_breaker::{
     AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
 };
+use crate::proxy::protocol::{AppRef, BreakerKey};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -18,8 +19,8 @@ use tokio::sync::RwLock;
 pub struct ProviderRouter {
     /// 数据库连接
     db: Arc<Database>,
-    /// 熔断器管理器 - key 格式: "app_type:provider_id"
-    circuit_breakers: Arc<RwLock<HashMap<String, Arc<CircuitBreaker>>>>,
+    /// 熔断器管理器 - 每个（应用, 供应商）一个熔断器
+    circuit_breakers: Arc<RwLock<HashMap<BreakerKey, Arc<CircuitBreaker>>>>,
 }
 
 impl ProviderRouter {
@@ -69,7 +70,7 @@ impl ProviderRouter {
                     continue;
                 };
 
-                let circuit_key = format!("{app_type}:{}", provider.id);
+                let circuit_key = BreakerKey::new(app_type, provider.id.as_str());
                 let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
                 if breaker.is_available().await {
@@ -119,7 +120,7 @@ impl ProviderRouter {
     /// 注意：调用方需持有返回的 `HalfOpenPermit` 直到请求结束，并通过 `record_result()`
     /// 或 `release_permit_neutral()` 释放；请求被取消时守卫 Drop 也会释放名额。
     pub async fn allow_provider_request(&self, provider_id: &str, app_type: &str) -> AllowResult {
-        let circuit_key = format!("{app_type}:{provider_id}");
+        let circuit_key = BreakerKey::new(app_type, provider_id);
         let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
         breaker.allow_request().await
     }
@@ -133,7 +134,7 @@ impl ProviderRouter {
         success: bool,
         error_msg: Option<String>,
     ) -> Result<(), AppError> {
-        let circuit_key = format!("{app_type}:{provider_id}");
+        let circuit_key = BreakerKey::new(app_type, provider_id);
         let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
         // 1. 按应用独立获取熔断器配置；读取失败时回退到熔断器自身的阈值，
@@ -170,7 +171,7 @@ impl ProviderRouter {
     }
 
     /// 重置熔断器（手动恢复）
-    pub async fn reset_circuit_breaker(&self, circuit_key: &str) {
+    pub async fn reset_circuit_breaker(&self, circuit_key: &BreakerKey) {
         let breakers = self.circuit_breakers.read().await;
         if let Some(breaker) = breakers.get(circuit_key) {
             breaker.reset().await;
@@ -179,7 +180,7 @@ impl ProviderRouter {
 
     /// 重置指定供应商的熔断器
     pub async fn reset_provider_breaker(&self, provider_id: &str, app_type: &str) {
-        let circuit_key = format!("{app_type}:{provider_id}");
+        let circuit_key = BreakerKey::new(app_type, provider_id);
         self.reset_circuit_breaker(&circuit_key).await;
     }
 
@@ -209,10 +210,10 @@ impl ProviderRouter {
 
     /// 更新指定应用已创建熔断器的配置（热更新）
     pub async fn update_app_configs(&self, app_type: &str, config: CircuitBreakerConfig) {
-        let prefix = format!("{app_type}:");
+        let app = AppRef::from(app_type);
         let breakers = self.circuit_breakers.read().await;
         for (key, breaker) in breakers.iter() {
-            if key.starts_with(&prefix) {
+            if key.app() == &app {
                 breaker.update_config(config.clone()).await;
             }
         }
@@ -225,7 +226,7 @@ impl ProviderRouter {
         provider_id: &str,
         app_type: &str,
     ) -> Option<crate::proxy::circuit_breaker::CircuitBreakerStats> {
-        let circuit_key = format!("{app_type}:{provider_id}");
+        let circuit_key = BreakerKey::new(app_type, provider_id);
         let breakers = self.circuit_breakers.read().await;
 
         if let Some(breaker) = breakers.get(&circuit_key) {
@@ -236,7 +237,7 @@ impl ProviderRouter {
     }
 
     /// 获取或创建熔断器
-    async fn get_or_create_circuit_breaker(&self, key: &str) -> Arc<CircuitBreaker> {
+    async fn get_or_create_circuit_breaker(&self, key: &BreakerKey) -> Arc<CircuitBreaker> {
         // 先尝试读锁获取
         {
             let breakers = self.circuit_breakers.read().await;
@@ -253,23 +254,19 @@ impl ProviderRouter {
             return breaker.clone();
         }
 
-        // 从 key 中提取 app_type (格式: "app_type:provider_id")
-        let app_type = key.split(':').next().unwrap_or("claude");
-
         // 按应用独立读取熔断器配置
-        let config = match self.db.get_proxy_config_for_app(app_type).await {
-            Ok(app_config) => crate::proxy::circuit_breaker::CircuitBreakerConfig {
-                failure_threshold: app_config.circuit_failure_threshold,
-                success_threshold: app_config.circuit_success_threshold,
-                timeout_seconds: app_config.circuit_timeout_seconds as u64,
-                error_rate_threshold: app_config.circuit_error_rate_threshold,
-                min_requests: app_config.circuit_min_requests,
-            },
-            Err(_) => crate::proxy::circuit_breaker::CircuitBreakerConfig::default(),
+        let config = match self.db.get_proxy_config_for_app(key.app().as_str()).await {
+            Ok(app_config) => CircuitBreakerConfig::from(&app_config),
+            Err(_) => CircuitBreakerConfig::default(),
         };
 
+        log::debug!(
+            "[{}] 创建熔断器: provider_id={}",
+            key.app(),
+            key.provider_id()
+        );
         let breaker = Arc::new(CircuitBreaker::new(config));
-        breakers.insert(key.to_string(), breaker.clone());
+        breakers.insert(key.clone(), breaker.clone());
 
         breaker
     }
@@ -339,7 +336,9 @@ mod tests {
         let db = Arc::new(Database::memory().unwrap());
         let router = ProviderRouter::new(db);
 
-        let breaker = router.get_or_create_circuit_breaker("claude:test").await;
+        let breaker = router
+            .get_or_create_circuit_breaker(&BreakerKey::new("claude", "test"))
+            .await;
         assert!(breaker.allow_request().await.allowed);
     }
 
@@ -575,6 +574,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stats.state, CircuitState::Open);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_update_app_configs_only_touches_that_app() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = ProviderRouter::new(db);
+
+        let claude = router
+            .get_or_create_circuit_breaker(&BreakerKey::new("claude", "shared:id"))
+            .await;
+        let codex = router
+            .get_or_create_circuit_breaker(&BreakerKey::new("codex", "shared:id"))
+            .await;
+        let claude_threshold = claude.failure_threshold().await;
+
+        router
+            .update_app_configs(
+                "codex",
+                CircuitBreakerConfig {
+                    failure_threshold: claude_threshold + 7,
+                    ..CircuitBreakerConfig::default()
+                },
+            )
+            .await;
+
+        assert_eq!(codex.failure_threshold().await, claude_threshold + 7);
+        assert_eq!(claude.failure_threshold().await, claude_threshold);
     }
 
     #[tokio::test]

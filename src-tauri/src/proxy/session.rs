@@ -352,10 +352,40 @@ fn extract_from_metadata(body: &serde_json::Value) -> Option<SessionIdResult> {
     None
 }
 
+/// 从请求体 metadata 提取会话标识（`metadata.user_id` 的 `_session_` 后缀 > `metadata.session_id`）
+///
+/// 供 Copilot prompt cache key 等只认可客户端 metadata 的场景使用。
+pub(crate) fn metadata_session_key(body: &serde_json::Value) -> Option<String> {
+    extract_from_metadata(body).map(|result| result.session_id)
+}
+
+/// Copilot 确定性 Request/Interaction ID 使用的会话标识
+///
+/// 优先级：[`metadata_session_key`] > 原始 `metadata.user_id`（整串兜底）>
+/// `x-session-id` header；都没有时返回空串。
+pub(crate) fn copilot_session_key(headers: &HeaderMap, body: &serde_json::Value) -> String {
+    metadata_session_key(body)
+        .or_else(|| {
+            body.get("metadata")
+                .and_then(|m| m.get("user_id"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        })
+        .or_else(|| {
+            headers
+                .get("x-session-id")
+                .and_then(|v| v.to_str().ok())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default()
+}
+
 /// 从 user_id 解析 session_id
 ///
 /// 格式: `user_identifier_session_actual_session_id`
-pub(super) fn parse_session_from_user_id(user_id: &str) -> Option<String> {
+fn parse_session_from_user_id(user_id: &str) -> Option<String> {
     // 查找 "_session_" 分隔符
     if let Some(pos) = user_id.find("_session_") {
         let session_id = &user_id[pos + 9..]; // "_session_" 长度为 9
@@ -602,6 +632,27 @@ mod tests {
         assert!(!result.session_id.is_empty());
         assert_eq!(result.source, SessionIdSource::Generated);
         assert!(!result.client_provided);
+    }
+
+    #[test]
+    fn test_copilot_session_key_priority() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-session-id", "header-session".parse().unwrap());
+
+        let body = json!({"metadata": {"user_id": "u_session_abc", "session_id": "meta"}});
+        assert_eq!(copilot_session_key(&headers, &body), "abc");
+        assert_eq!(metadata_session_key(&body).as_deref(), Some("abc"));
+
+        let body = json!({"metadata": {"user_id": "plain-user", "session_id": "meta"}});
+        assert_eq!(copilot_session_key(&headers, &body), "meta");
+
+        let body = json!({"metadata": {"user_id": "plain-user"}});
+        assert_eq!(copilot_session_key(&headers, &body), "plain-user");
+        assert_eq!(metadata_session_key(&body), None);
+
+        let body = json!({"metadata": {"user_id": "", "session_id": ""}});
+        assert_eq!(copilot_session_key(&headers, &body), "header-session");
+        assert_eq!(copilot_session_key(&HeaderMap::new(), &body), "");
     }
 
     #[test]

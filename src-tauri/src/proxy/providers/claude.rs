@@ -17,6 +17,7 @@
 use super::{AuthInfo, AuthStrategy, ProviderAdapter, ProviderType};
 use crate::provider::Provider;
 use crate::proxy::error::ProxyError;
+use crate::proxy::protocol::ClaudeApiFormat;
 use serde_json::{json, Value};
 
 const ANTHROPIC_THINKING_PLACEHOLDER: &str = "tool call";
@@ -34,24 +35,19 @@ const CODEX_OAUTH_CLIENT_VERSION: &str = "0.144.1";
 /// 获取 Claude 供应商的 API 格式
 ///
 /// 供 handler/forwarder 外部使用的公开函数。
-/// 优先级：meta.apiFormat > settings_config.api_format > openrouter_compat_mode > 默认 "anthropic"
-pub fn get_claude_api_format(provider: &Provider) -> &'static str {
-    // 0) Codex OAuth 强制使用 openai_responses（不可被覆盖）
+/// 优先级：meta.apiFormat > settings_config.api_format > openrouter_compat_mode > 默认 Anthropic
+pub fn get_claude_api_format(provider: &Provider) -> ClaudeApiFormat {
+    // 0) Codex OAuth 强制使用 OpenAI Responses（不可被覆盖）
     if let Some(meta) = provider.meta.as_ref() {
         if meta.provider_type.as_deref() == Some("codex_oauth") {
-            return "openai_responses";
+            return ClaudeApiFormat::OpenAiResponses;
         }
     }
 
     // 1) Preferred: meta.apiFormat (SSOT, never written to Claude Code config)
     if let Some(meta) = provider.meta.as_ref() {
         if let Some(api_format) = meta.api_format.as_deref() {
-            return match api_format {
-                "openai_chat" => "openai_chat",
-                "openai_responses" => "openai_responses",
-                "gemini_native" => "gemini_native",
-                _ => "anthropic",
-            };
+            return ClaudeApiFormat::from_config(api_format);
         }
     }
 
@@ -61,12 +57,7 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
         .get("api_format")
         .and_then(|v| v.as_str())
     {
-        return match api_format {
-            "openai_chat" => "openai_chat",
-            "openai_responses" => "openai_responses",
-            "gemini_native" => "gemini_native",
-            _ => "anthropic",
-        };
+        return ClaudeApiFormat::from_config(api_format);
     }
 
     // 3) Backward compatibility: legacy openrouter_compat_mode (bool/number/string)
@@ -82,17 +73,14 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
     };
 
     if enabled {
-        "openai_chat"
+        ClaudeApiFormat::OpenAiChat
     } else {
-        "anthropic"
+        ClaudeApiFormat::Anthropic
     }
 }
 
-pub fn claude_api_format_needs_transform(api_format: &str) -> bool {
-    matches!(
-        api_format,
-        "openai_chat" | "openai_responses" | "gemini_native"
-    )
+pub fn claude_api_format_needs_transform(api_format: ClaudeApiFormat) -> bool {
+    api_format.needs_transform()
 }
 
 fn is_reasoning_vendor_identifier(value: &str) -> bool {
@@ -105,9 +93,9 @@ fn is_reasoning_vendor_identifier(value: &str) -> bool {
 fn should_normalize_anthropic_tool_thinking_history(
     provider: &Provider,
     body: &Value,
-    api_format: &str,
+    api_format: ClaudeApiFormat,
 ) -> bool {
-    if api_format.trim() != "anthropic" {
+    if api_format != ClaudeApiFormat::Anthropic {
         return false;
     }
 
@@ -143,7 +131,7 @@ fn should_normalize_anthropic_tool_thinking_history(
 pub fn normalize_anthropic_tool_thinking_history_for_provider(
     body: &mut Value,
     provider: &Provider,
-    api_format: &str,
+    api_format: ClaudeApiFormat,
 ) -> bool {
     if !should_normalize_anthropic_tool_thinking_history(provider, body, api_format) {
         return false;
@@ -226,9 +214,9 @@ pub fn normalize_deepseek_thinking_disabled_strip_effort(
 pub fn normalize_anthropic_messages_for_provider(
     body: &mut Value,
     provider: &Provider,
-    api_format: &str,
+    api_format: ClaudeApiFormat,
 ) -> bool {
-    if api_format.trim() != "anthropic" {
+    if api_format != ClaudeApiFormat::Anthropic {
         return false;
     }
 
@@ -337,7 +325,7 @@ fn should_preserve_reasoning_content_for_openai_chat(provider: &Provider, body: 
 pub fn transform_claude_request_for_api_format(
     body: serde_json::Value,
     provider: &Provider,
-    api_format: &str,
+    api_format: ClaudeApiFormat,
     session_id: Option<&str>,
     shadow_store: Option<&super::gemini_shadow::GeminiShadowStore>,
 ) -> Result<serde_json::Value, ProxyError> {
@@ -357,21 +345,7 @@ pub fn transform_claude_request_for_api_format(
             .and_then(|v| v.as_str())
             .is_some_and(|u| u.contains("githubcopilot.com"));
     let session_cache_key: Option<String> = if is_copilot {
-        let metadata = body.get("metadata");
-        // Session 提取优先级（与 forwarder 和 session.rs 统一）：
-        //   1. metadata.user_id 中的 _session_ 后缀
-        //   2. metadata.session_id（直接字段）
-        metadata
-            .and_then(|m| m.get("user_id"))
-            .and_then(|v| v.as_str())
-            .and_then(super::super::session::parse_session_from_user_id)
-            .or_else(|| {
-                metadata
-                    .and_then(|m| m.get("session_id"))
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-            })
+        crate::proxy::session::metadata_session_key(&body)
     } else {
         session_id
             .map(str::trim)
@@ -391,7 +365,7 @@ pub fn transform_claude_request_for_api_format(
         (None, "none")
     };
     match api_format {
-        "openai_responses" => {
+        ClaudeApiFormat::OpenAiResponses => {
             log::debug!(
                 "[Cache] OpenAI Responses prompt_cache_key source={cache_key_source}, provider={}, codex_oauth={is_codex_oauth}, has_key={}",
                 provider.id,
@@ -407,7 +381,7 @@ pub fn transform_claude_request_for_api_format(
                 codex_fast_mode,
             )
         }
-        "openai_chat" => {
+        ClaudeApiFormat::OpenAiChat => {
             let preserve_reasoning_content =
                 should_preserve_reasoning_content_for_openai_chat(provider, &body);
             let mut result = super::transform::anthropic_to_openai_with_reasoning_content(
@@ -428,13 +402,13 @@ pub fn transform_claude_request_for_api_format(
             super::transform::inject_openai_stream_include_usage(&mut result);
             Ok(result)
         }
-        "gemini_native" => super::transform_gemini::anthropic_to_gemini_with_shadow(
+        ClaudeApiFormat::GeminiNative => super::transform_gemini::anthropic_to_gemini_with_shadow(
             body,
             shadow_store,
             Some(&provider.id),
             session_id,
         ),
-        _ => Ok(body),
+        ClaudeApiFormat::Anthropic => Ok(body),
     }
 }
 
@@ -456,7 +430,7 @@ impl ClaudeAdapter {
     /// - Claude: 默认 Anthropic 官方
     pub fn provider_type(&self, provider: &Provider) -> ProviderType {
         // 检测 Gemini Native 格式
-        if self.get_api_format(provider) == "gemini_native" {
+        if self.get_api_format(provider) == ClaudeApiFormat::GeminiNative {
             return match self.extract_key(provider) {
                 Some(key) if key.starts_with("ya29.") || key.starts_with('{') => {
                     ProviderType::GeminiCli
@@ -527,11 +501,8 @@ impl ClaudeAdapter {
 
     /// 获取 API 格式
     ///
-    /// 从 provider.meta.api_format 读取格式设置：
-    /// - "anthropic" (默认): Anthropic Messages API 格式，直接透传
-    /// - "openai_chat": OpenAI Chat Completions 格式，需要格式转换
-    /// - "openai_responses": OpenAI Responses API 格式，需要格式转换
-    fn get_api_format(&self, provider: &Provider) -> &'static str {
+    /// 从 provider.meta.api_format 读取格式设置，见 [`get_claude_api_format`]
+    fn get_api_format(&self, provider: &Provider) -> ClaudeApiFormat {
         get_claude_api_format(provider)
     }
 
@@ -919,14 +890,8 @@ impl ProviderAdapter for ClaudeAdapter {
             return true;
         }
 
-        // 根据 api_format 配置决定是否需要格式转换
-        // - "anthropic" (默认): 直接透传，无需转换
-        // - "openai_chat": 需要 Anthropic ↔ OpenAI Chat Completions 格式转换
-        // - "openai_responses": 需要 Anthropic ↔ OpenAI Responses API 格式转换
-        matches!(
-            self.get_api_format(provider),
-            "openai_chat" | "openai_responses" | "gemini_native"
-        )
+        // 根据 api_format 配置决定是否需要格式转换：仅 Anthropic 直接透传
+        self.get_api_format(provider).needs_transform()
     }
 
     fn transform_request(
@@ -1151,7 +1116,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("gemini_native".to_string()),
+                api_format: Some(ClaudeApiFormat::GeminiNative.to_string()),
                 ..Default::default()
             },
         );
@@ -1211,7 +1176,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("gemini_native".to_string()),
+                api_format: Some(ClaudeApiFormat::GeminiNative.to_string()),
                 ..Default::default()
             },
         );
@@ -1242,7 +1207,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("gemini_native".to_string()),
+                api_format: Some(ClaudeApiFormat::GeminiNative.to_string()),
                 ..Default::default()
             },
         );
@@ -1269,7 +1234,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("gemini_native".to_string()),
+                api_format: Some(ClaudeApiFormat::GeminiNative.to_string()),
                 ..Default::default()
             },
         );
@@ -1296,7 +1261,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("gemini_native".to_string()),
+                api_format: Some(ClaudeApiFormat::GeminiNative.to_string()),
                 ..Default::default()
             },
         );
@@ -1321,7 +1286,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("gemini_native".to_string()),
+                api_format: Some(ClaudeApiFormat::GeminiNative.to_string()),
                 ..Default::default()
             },
         );
@@ -1442,7 +1407,7 @@ mod tests {
             "env": {
                 "ANTHROPIC_BASE_URL": "https://api.example.com"
             },
-            "api_format": "openai_chat"
+            "api_format": ClaudeApiFormat::OpenAiChat.as_str()
         }));
         assert!(adapter.needs_transform(&legacy_settings_api_format));
 
@@ -1479,7 +1444,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_chat".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
                 ..Default::default()
             },
         );
@@ -1493,7 +1458,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_responses".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiResponses.to_string()),
                 ..Default::default()
             },
         );
@@ -1507,7 +1472,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("gemini_native".to_string()),
+                api_format: Some(ClaudeApiFormat::GeminiNative.to_string()),
                 ..Default::default()
             },
         );
@@ -1523,7 +1488,7 @@ mod tests {
                 "env": {
                     "ANTHROPIC_BASE_URL": "https://api.example.com"
                 },
-                "api_format": "openai_chat",
+                "api_format": ClaudeApiFormat::OpenAiChat.as_str(),
                 "openrouter_compat_mode": true
             }),
             ProviderMeta {
@@ -1627,7 +1592,7 @@ mod tests {
         let transformed = transform_claude_request_for_api_format(
             body,
             &provider,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             None,
             None,
         )
@@ -1651,9 +1616,14 @@ mod tests {
             "max_tokens": 128,
             "stream": true
         });
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(transformed["stream"], true);
         assert_eq!(transformed["stream_options"]["include_usage"], true);
     }
@@ -1669,9 +1639,14 @@ mod tests {
             "messages": [{ "role": "user", "content": "hello" }],
             "max_tokens": 128
         });
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(transformed.get("stream_options").is_none());
     }
 
@@ -1684,7 +1659,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_responses".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiResponses.to_string()),
                 provider_type: Some("codex_oauth".to_string()),
                 ..ProviderMeta::default()
             },
@@ -1698,7 +1673,7 @@ mod tests {
         let transformed = transform_claude_request_for_api_format(
             body,
             &provider,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             Some("session-123"),
             None,
         )
@@ -1716,7 +1691,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_responses".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiResponses.to_string()),
                 provider_type: Some("codex_oauth".to_string()),
                 ..ProviderMeta::default()
             },
@@ -1730,7 +1705,7 @@ mod tests {
         let transformed = transform_claude_request_for_api_format(
             body,
             &provider,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             None,
             None,
         )
@@ -1748,7 +1723,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_responses".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiResponses.to_string()),
                 ..ProviderMeta::default()
             },
         );
@@ -1761,7 +1736,7 @@ mod tests {
         let transformed = transform_claude_request_for_api_format(
             body,
             &provider,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             Some("claude-session-123"),
             None,
         )
@@ -1779,7 +1754,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_responses".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiResponses.to_string()),
                 ..ProviderMeta::default()
             },
         );
@@ -1792,7 +1767,7 @@ mod tests {
         let transformed = transform_claude_request_for_api_format(
             body,
             &provider,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             None,
             None,
         )
@@ -1810,7 +1785,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_responses".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiResponses.to_string()),
                 provider_type: Some("codex_oauth".to_string()),
                 prompt_cache_key: Some("explicit-cache-key".to_string()),
                 ..ProviderMeta::default()
@@ -1825,7 +1800,7 @@ mod tests {
         let transformed = transform_claude_request_for_api_format(
             body,
             &provider,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             Some("session-123"),
             None,
         )
@@ -1857,7 +1832,7 @@ mod tests {
         let transformed = transform_claude_request_for_api_format(
             body,
             &provider,
-            "openai_responses",
+            ClaudeApiFormat::OpenAiResponses,
             None,
             None,
         )
@@ -1881,7 +1856,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("gemini_native".to_string()),
+                api_format: Some(ClaudeApiFormat::GeminiNative.to_string()),
                 ..Default::default()
             },
         );
@@ -1892,9 +1867,14 @@ mod tests {
             "max_tokens": 64
         });
 
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "gemini_native", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::GeminiNative,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert!(transformed.get("contents").is_some());
         assert_eq!(
@@ -1915,7 +1895,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_chat".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
                 ..Default::default()
             },
         );
@@ -1925,9 +1905,14 @@ mod tests {
             "max_tokens": 64
         });
 
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert!(transformed.get("prompt_cache_key").is_none());
     }
@@ -1942,7 +1927,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_chat".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
                 prompt_cache_key: Some("claude-cache-route".to_string()),
                 ..Default::default()
             },
@@ -1953,9 +1938,14 @@ mod tests {
             "max_tokens": 64
         });
 
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(transformed["prompt_cache_key"], "claude-cache-route");
     }
@@ -1970,7 +1960,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_chat".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
                 ..Default::default()
             },
         );
@@ -1986,9 +1976,14 @@ mod tests {
             }]
         });
 
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+            None,
+            None,
+        )
+        .unwrap();
 
         let msg = &transformed["messages"][0];
         assert!(msg.get("tool_calls").is_some());
@@ -2005,7 +2000,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_chat".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
                 ..Default::default()
             },
         );
@@ -2021,9 +2016,14 @@ mod tests {
             }]
         });
 
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+            None,
+            None,
+        )
+        .unwrap();
 
         let msg = &transformed["messages"][0];
         assert_eq!(msg["reasoning_content"], "I should call the tool.");
@@ -2040,7 +2040,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_chat".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
                 ..Default::default()
             },
         );
@@ -2056,9 +2056,14 @@ mod tests {
             }]
         });
 
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+            None,
+            None,
+        )
+        .unwrap();
 
         let msg = &transformed["messages"][0];
         assert_eq!(msg["reasoning_content"], "I should call the tool.");
@@ -2075,7 +2080,7 @@ mod tests {
                 }
             }),
             ProviderMeta {
-                api_format: Some("openai_chat".to_string()),
+                api_format: Some(ClaudeApiFormat::OpenAiChat.to_string()),
                 ..Default::default()
             },
         );
@@ -2091,9 +2096,14 @@ mod tests {
             }]
         });
 
-        let transformed =
-            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
-                .unwrap();
+        let transformed = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+            None,
+            None,
+        )
+        .unwrap();
 
         let msg = &transformed["messages"][0];
         assert_eq!(msg["reasoning_content"], "I should call the tool.");
@@ -2122,7 +2132,7 @@ mod tests {
         let changed = normalize_anthropic_tool_thinking_history_for_provider(
             &mut body,
             &provider,
-            "anthropic",
+            ClaudeApiFormat::Anthropic,
         );
 
         assert!(changed);
@@ -2157,7 +2167,11 @@ mod tests {
             ]
         });
 
-        let changed = normalize_anthropic_messages_for_provider(&mut body, &provider, "anthropic");
+        let changed = normalize_anthropic_messages_for_provider(
+            &mut body,
+            &provider,
+            ClaudeApiFormat::Anthropic,
+        );
 
         assert!(!changed);
         let messages = body["messages"].as_array().unwrap();
@@ -2184,8 +2198,11 @@ mod tests {
             ]
         });
 
-        let changed =
-            normalize_anthropic_messages_for_provider(&mut body, &provider, "openai_chat");
+        let changed = normalize_anthropic_messages_for_provider(
+            &mut body,
+            &provider,
+            ClaudeApiFormat::OpenAiChat,
+        );
 
         assert!(!changed);
         assert!(body.get("system").is_none());
@@ -2213,7 +2230,7 @@ mod tests {
         let changed = normalize_anthropic_tool_thinking_history_for_provider(
             &mut body,
             &provider,
-            "anthropic",
+            ClaudeApiFormat::Anthropic,
         );
 
         assert!(changed);
@@ -2245,7 +2262,7 @@ mod tests {
         let changed = normalize_anthropic_tool_thinking_history_for_provider(
             &mut body,
             &provider,
-            "anthropic",
+            ClaudeApiFormat::Anthropic,
         );
 
         assert!(changed);
@@ -2280,7 +2297,7 @@ mod tests {
         let changed = normalize_anthropic_tool_thinking_history_for_provider(
             &mut body,
             &provider,
-            "anthropic",
+            ClaudeApiFormat::Anthropic,
         );
 
         assert!(changed);
@@ -2312,7 +2329,7 @@ mod tests {
         let changed = normalize_anthropic_tool_thinking_history_for_provider(
             &mut body,
             &provider,
-            "anthropic",
+            ClaudeApiFormat::Anthropic,
         );
 
         assert!(!changed);
@@ -2552,7 +2569,7 @@ mod tests {
         let changed = normalize_anthropic_messages_for_provider(
             &mut body,
             &deepseek_official_provider(),
-            "anthropic",
+            ClaudeApiFormat::Anthropic,
         );
 
         assert!(changed);
