@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./ipc";
 import type { AppId } from "./types";
 
 /** 后端 `get_app_registry` 返回的能力布尔表 */

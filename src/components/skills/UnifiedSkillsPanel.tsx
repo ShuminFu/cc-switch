@@ -31,6 +31,7 @@ import type { AppId } from "@/lib/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { settingsApi, skillsApi } from "@/lib/api";
 import { toast } from "sonner";
+import { formatSkillError } from "@/lib/errors/skillErrorParser";
 import { SKILLS_APP_IDS } from "@/config/appConfig";
 import { AppCountBar } from "@/components/common/AppCountBar";
 import { AppToggleGroup } from "@/components/common/AppToggleGroup";
@@ -225,7 +226,12 @@ const UnifiedSkillsPanel = React.forwardRef<
         );
       }
     } catch (error) {
-      toast.error(t("skills.installFailed"), { description: String(error) });
+      const { title, description } = formatSkillError(
+        error,
+        t,
+        "skills.installFailed",
+      );
+      toast.error(title, { description });
     }
   };
 
@@ -252,7 +258,12 @@ const UnifiedSkillsPanel = React.forwardRef<
         closeButton: true,
       });
     } catch (error) {
-      toast.error(t("skills.updateFailed"), { description: String(error) });
+      const { title, description } = formatSkillError(
+        error,
+        t,
+        "skills.updateFailed",
+      );
+      toast.error(title, { description });
     }
   };
 

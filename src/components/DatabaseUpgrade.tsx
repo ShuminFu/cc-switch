@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { exit } from "@tauri-apps/plugin-process";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import {
   Database,
   Download,
@@ -110,7 +111,7 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
     } catch (e) {
       unlistenRef.current?.();
       unlistenRef.current = null;
-      setErrorMsg(e instanceof Error ? e.message : String(e));
+      setErrorMsg(extractErrorMessage(e) || String(e));
       setPhase("error");
     }
   }, []);

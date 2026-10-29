@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./ipc";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
 

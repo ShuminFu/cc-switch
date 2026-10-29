@@ -2,7 +2,7 @@
 //!
 //! 提供前端调用的 API 接口
 
-use crate::error::AppError;
+use crate::error::{AppError, IpcError};
 use crate::proxy::types::*;
 use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
 use crate::store::AppState;
@@ -12,13 +12,13 @@ use std::str::FromStr;
 #[tauri::command]
 pub async fn start_proxy_server(
     state: tauri::State<'_, AppState>,
-) -> Result<ProxyServerInfo, String> {
-    state.proxy_service.start().await
+) -> Result<ProxyServerInfo, IpcError> {
+    state.proxy_service.start().await.map_err(IpcError::from)
 }
 
 /// 停止代理服务器（仅停止服务，不恢复/清理 Live 接管状态）
 #[tauri::command]
-pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), IpcError> {
     let takeover = state.proxy_service.get_takeover_status().await?;
     if takeover.claude
         || takeover.codex
@@ -28,25 +28,33 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
         || takeover.openclaw
     {
         return Err(
-            "仍有应用处于代理接管状态，请先在设置中关闭对应应用接管后再停止本地路由。".to_string(),
+            "仍有应用处于代理接管状态，请先在设置中关闭对应应用接管后再停止本地路由。".into(),
         );
     }
 
-    state.proxy_service.stop().await
+    state.proxy_service.stop().await.map_err(IpcError::from)
 }
 
 /// 停止代理服务器（恢复 Live 配置）
 #[tauri::command]
-pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.proxy_service.stop_with_restore().await
+pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Result<(), IpcError> {
+    state
+        .proxy_service
+        .stop_with_restore()
+        .await
+        .map_err(IpcError::from)
 }
 
 /// 获取各应用接管状态
 #[tauri::command]
 pub async fn get_proxy_takeover_status(
     state: tauri::State<'_, AppState>,
-) -> Result<ProxyTakeoverStatus, String> {
-    state.proxy_service.get_takeover_status().await
+) -> Result<ProxyTakeoverStatus, IpcError> {
+    state
+        .proxy_service
+        .get_takeover_status()
+        .await
+        .map_err(IpcError::from)
 }
 
 /// 为指定应用开启/关闭接管
@@ -55,23 +63,32 @@ pub async fn set_proxy_takeover_for_app(
     state: tauri::State<'_, AppState>,
     app_type: String,
     enabled: bool,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     state
         .proxy_service
         .set_takeover_for_app(&app_type, enabled)
         .await
+        .map_err(IpcError::from)
 }
 
 /// 获取代理服务器状态
 #[tauri::command]
-pub async fn get_proxy_status(state: tauri::State<'_, AppState>) -> Result<ProxyStatus, String> {
-    state.proxy_service.get_status().await
+pub async fn get_proxy_status(state: tauri::State<'_, AppState>) -> Result<ProxyStatus, IpcError> {
+    state
+        .proxy_service
+        .get_status()
+        .await
+        .map_err(IpcError::from)
 }
 
 /// 获取代理配置
 #[tauri::command]
-pub async fn get_proxy_config(state: tauri::State<'_, AppState>) -> Result<ProxyConfig, String> {
-    state.proxy_service.get_config().await
+pub async fn get_proxy_config(state: tauri::State<'_, AppState>) -> Result<ProxyConfig, IpcError> {
+    state
+        .proxy_service
+        .get_config()
+        .await
+        .map_err(IpcError::from)
 }
 
 /// 更新代理配置
@@ -79,8 +96,12 @@ pub async fn get_proxy_config(state: tauri::State<'_, AppState>) -> Result<Proxy
 pub async fn update_proxy_config(
     state: tauri::State<'_, AppState>,
     config: ProxyConfig,
-) -> Result<(), String> {
-    state.proxy_service.update_config(&config).await
+) -> Result<(), IpcError> {
+    state
+        .proxy_service
+        .update_config(&config)
+        .await
+        .map_err(IpcError::from)
 }
 
 // ==================== Global & Per-App Config ====================
@@ -91,11 +112,9 @@ pub async fn update_proxy_config(
 #[tauri::command]
 pub async fn get_global_proxy_config(
     state: tauri::State<'_, AppState>,
-) -> Result<GlobalProxyConfig, String> {
+) -> Result<GlobalProxyConfig, IpcError> {
     let db = &state.db;
-    db.get_global_proxy_config()
-        .await
-        .map_err(|e| e.to_string())
+    db.get_global_proxy_config().await.map_err(IpcError::from)
 }
 
 /// 更新全局代理配置
@@ -105,11 +124,11 @@ pub async fn get_global_proxy_config(
 pub async fn update_global_proxy_config(
     state: tauri::State<'_, AppState>,
     config: GlobalProxyConfig,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let db = &state.db;
     db.update_global_proxy_config(config)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// 获取指定应用的代理配置
@@ -119,11 +138,11 @@ pub async fn update_global_proxy_config(
 pub async fn get_proxy_config_for_app(
     state: tauri::State<'_, AppState>,
     app_type: String,
-) -> Result<AppProxyConfig, String> {
+) -> Result<AppProxyConfig, IpcError> {
     let db = &state.db;
     db.get_proxy_config_for_app(&app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// 更新指定应用的代理配置
@@ -133,19 +152,20 @@ pub async fn get_proxy_config_for_app(
 pub async fn update_proxy_config_for_app(
     state: tauri::State<'_, AppState>,
     config: AppProxyConfig,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let db = &state.db;
     let app_type = config.app_type.clone();
     let circuit_config = CircuitBreakerConfig::from(&config);
 
     db.update_proxy_config_for_app(config)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
 
     state
         .proxy_service
         .update_circuit_breaker_config_for_app(&app_type, circuit_config)
         .await
+        .map_err(IpcError::from)
 }
 
 async fn get_default_cost_multiplier_internal(
@@ -169,10 +189,10 @@ pub async fn get_default_cost_multiplier_test_hook(
 pub async fn get_default_cost_multiplier(
     state: tauri::State<'_, AppState>,
     app_type: String,
-) -> Result<String, String> {
+) -> Result<String, IpcError> {
     get_default_cost_multiplier_internal(&state, &app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 async fn set_default_cost_multiplier_internal(
@@ -199,10 +219,10 @@ pub async fn set_default_cost_multiplier(
     state: tauri::State<'_, AppState>,
     app_type: String,
     value: String,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     set_default_cost_multiplier_internal(&state, &app_type, &value)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 async fn get_pricing_model_source_internal(
@@ -226,10 +246,10 @@ pub async fn get_pricing_model_source_test_hook(
 pub async fn get_pricing_model_source(
     state: tauri::State<'_, AppState>,
     app_type: String,
-) -> Result<String, String> {
+) -> Result<String, IpcError> {
     get_pricing_model_source_internal(&state, &app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 async fn set_pricing_model_source_internal(
@@ -256,22 +276,26 @@ pub async fn set_pricing_model_source(
     state: tauri::State<'_, AppState>,
     app_type: String,
     value: String,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     set_pricing_model_source_internal(&state, &app_type, &value)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// 检查代理服务器是否正在运行
 #[tauri::command]
-pub async fn is_proxy_running(state: tauri::State<'_, AppState>) -> Result<bool, String> {
+pub async fn is_proxy_running(state: tauri::State<'_, AppState>) -> Result<bool, IpcError> {
     Ok(state.proxy_service.is_running().await)
 }
 
 /// 检查是否处于 Live 接管模式
 #[tauri::command]
-pub async fn is_live_takeover_active(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    state.proxy_service.is_takeover_active().await
+pub async fn is_live_takeover_active(state: tauri::State<'_, AppState>) -> Result<bool, IpcError> {
+    state
+        .proxy_service
+        .is_takeover_active()
+        .await
+        .map_err(IpcError::from)
 }
 
 /// 代理模式下切换供应商（热切换）
@@ -280,7 +304,7 @@ pub async fn switch_proxy_provider(
     state: tauri::State<'_, AppState>,
     app_type: String,
     provider_id: String,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     // Codex's built-in official provider can use the client's native OpenAI
     // login through takeover. Other official providers remain blocked.
     let provider = state
@@ -295,7 +319,7 @@ pub async fn switch_proxy_provider(
     {
         return Err(
             "代理接管模式下不能切换到官方供应商 (Cannot switch to official provider during proxy takeover)"
-                .to_string(),
+                .into(),
         );
     }
 
@@ -303,6 +327,7 @@ pub async fn switch_proxy_provider(
         .proxy_service
         .switch_proxy_target(&app_type, &provider_id)
         .await
+        .map_err(IpcError::from)
 }
 
 // ==================== 故障转移相关命令 ====================
@@ -313,11 +338,11 @@ pub async fn get_provider_health(
     state: tauri::State<'_, AppState>,
     provider_id: String,
     app_type: String,
-) -> Result<ProviderHealth, String> {
+) -> Result<ProviderHealth, IpcError> {
     let db = &state.db;
     db.get_provider_health(&provider_id, &app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// 重置熔断器
@@ -331,12 +356,12 @@ pub async fn reset_circuit_breaker(
     state: tauri::State<'_, AppState>,
     provider_id: String,
     app_type: String,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     // 1. 重置数据库健康状态
     let db = &state.db;
     db.update_provider_health(&provider_id, &app_type, true, None)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
 
     // 2. 如果代理正在运行，重置内存中的熔断器状态
     state
@@ -356,15 +381,11 @@ pub async fn reset_circuit_breaker(
 
     if app_enabled && auto_failover_enabled && state.proxy_service.is_running().await {
         // 获取当前供应商 ID
-        let current_id = db
-            .get_current_provider(&app_type)
-            .map_err(|e| e.to_string())?;
+        let current_id = db.get_current_provider(&app_type).map_err(IpcError::from)?;
 
         if let Some(current_id) = current_id {
             // 获取故障转移队列
-            let queue = db
-                .get_failover_queue(&app_type)
-                .map_err(|e| e.to_string())?;
+            let queue = db.get_failover_queue(&app_type).map_err(IpcError::from)?;
 
             // 找到恢复的供应商和当前供应商在队列中的位置（使用 sort_index）
             let restored_order = queue
@@ -412,11 +433,11 @@ pub async fn reset_circuit_breaker(
 #[tauri::command]
 pub async fn get_circuit_breaker_config(
     state: tauri::State<'_, AppState>,
-) -> Result<CircuitBreakerConfig, String> {
+) -> Result<CircuitBreakerConfig, IpcError> {
     let db = &state.db;
     db.get_circuit_breaker_config()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// 更新熔断器配置
@@ -424,13 +445,13 @@ pub async fn get_circuit_breaker_config(
 pub async fn update_circuit_breaker_config(
     state: tauri::State<'_, AppState>,
     config: CircuitBreakerConfig,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let db = &state.db;
 
     // 1. 更新数据库配置
     db.update_circuit_breaker_config(&config)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
 
     // 2. 如果代理正在运行，热更新内存中的熔断器配置
     state
@@ -447,7 +468,7 @@ pub async fn get_circuit_breaker_stats(
     state: tauri::State<'_, AppState>,
     provider_id: String,
     app_type: String,
-) -> Result<Option<CircuitBreakerStats>, String> {
+) -> Result<Option<CircuitBreakerStats>, IpcError> {
     // 这个功能需要访问运行中的代理服务器的内存状态
     // 目前先返回 None，后续可以通过 ProxyService 暴露接口来实现
     let _ = (state, provider_id, app_type);

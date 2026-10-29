@@ -18,7 +18,7 @@ use tokio::time::timeout;
 use crate::app_config::{AppType, InstalledSkill, SkillApps, UnmanagedSkill};
 use crate::config::get_app_config_dir;
 use crate::database::Database;
-use crate::error::format_skill_error;
+use crate::error::{ErrorCode, IpcError};
 
 // ========== 数据结构 ==========
 
@@ -576,8 +576,8 @@ impl SkillService {
 
         // 允许多级目录（如 a/b/c），但必须是安全的相对路径。
         let source_rel = Self::sanitize_skill_source_path(&skill.directory).ok_or_else(|| {
-            anyhow!(format_skill_error(
-                "INVALID_SKILL_DIRECTORY",
+            anyhow!(IpcError::skill(
+                ErrorCode::InvalidSkillDirectory,
                 &[("directory", &skill.directory)],
                 Some("checkZipContent"),
             ))
@@ -587,8 +587,8 @@ impl SkillService {
             .file_name()
             .and_then(|name| Self::sanitize_install_name(&name.to_string_lossy()))
             .ok_or_else(|| {
-                anyhow!(format_skill_error(
-                    "INVALID_SKILL_DIRECTORY",
+                anyhow!(IpcError::skill(
+                    ErrorCode::InvalidSkillDirectory,
                     &[("directory", &skill.directory)],
                     Some("checkZipContent"),
                 ))
@@ -615,8 +615,8 @@ impl SkillService {
                     return Ok(updated);
                 } else {
                     // 不同仓库的同名 skill，报错
-                    return Err(anyhow!(format_skill_error(
-                        "SKILL_DIRECTORY_CONFLICT",
+                    return Err(anyhow!(IpcError::skill(
+                        ErrorCode::SkillDirectoryConflict,
                         &[
                             ("directory", &install_name),
                             (
@@ -658,8 +658,8 @@ impl SkillService {
             )
             .await
             .map_err(|_| {
-                anyhow!(format_skill_error(
-                    "DOWNLOAD_TIMEOUT",
+                anyhow!(IpcError::skill(
+                    ErrorCode::DownloadTimeout,
                     &[
                         ("owner", &repo.owner),
                         ("name", &repo.name),
@@ -675,8 +675,8 @@ impl SkillService {
                 Self::resolve_skill_source_dir(&temp_dir, &skill.directory).ok_or_else(|| {
                     let missing = temp_dir.join(&source_rel).display().to_string();
                     let _ = fs::remove_dir_all(&temp_dir);
-                    anyhow!(format_skill_error(
-                        "SKILL_DIR_NOT_FOUND",
+                    anyhow!(IpcError::skill(
+                        ErrorCode::SkillDirNotFound,
                         &[("path", &missing)],
                         Some("checkRepoUrl"),
                     ))
@@ -684,16 +684,16 @@ impl SkillService {
 
             let canonical_temp = temp_dir.canonicalize().unwrap_or_else(|_| temp_dir.clone());
             let canonical_source = source.canonicalize().map_err(|_| {
-                anyhow!(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
+                anyhow!(IpcError::skill(
+                    ErrorCode::SkillDirNotFound,
                     &[("path", &source.display().to_string())],
                     Some("checkRepoUrl"),
                 ))
             })?;
             if !canonical_source.starts_with(&canonical_temp) || !canonical_source.is_dir() {
                 let _ = fs::remove_dir_all(&temp_dir);
-                return Err(anyhow!(format_skill_error(
-                    "INVALID_SKILL_DIRECTORY",
+                return Err(anyhow!(IpcError::skill(
+                    ErrorCode::InvalidSkillDirectory,
                     &[("directory", &skill.directory)],
                     Some("checkZipContent"),
                 )));
@@ -1017,8 +1017,8 @@ impl SkillService {
         )
         .await
         .map_err(|_| {
-            anyhow!(format_skill_error(
-                "DOWNLOAD_TIMEOUT",
+            anyhow!(IpcError::skill(
+                ErrorCode::DownloadTimeout,
                 &[("owner", &owner), ("name", &name), ("timeout", "60")],
                 Some("checkNetwork"),
             ))
@@ -1036,8 +1036,8 @@ impl SkillService {
             })
             .ok_or_else(|| {
                 let _ = fs::remove_dir_all(&temp_dir);
-                anyhow!(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
+                anyhow!(IpcError::skill(
+                    ErrorCode::SkillDirNotFound,
                     &[("path", &skill.directory)],
                     Some("checkRepoUrl"),
                 ))
@@ -1047,8 +1047,8 @@ impl SkillService {
             .ok_or_else(|| {
                 let missing = temp_dir.join(&remote_match.directory).display().to_string();
                 let _ = fs::remove_dir_all(&temp_dir);
-                anyhow!(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
+                anyhow!(IpcError::skill(
+                    ErrorCode::SkillDirNotFound,
                     &[("path", &missing)],
                     Some("checkRepoUrl"),
                 ))
@@ -1925,8 +1925,8 @@ impl SkillService {
             timeout(std::time::Duration::from_secs(60), self.download_repo(repo))
                 .await
                 .map_err(|_| {
-                    anyhow!(format_skill_error(
-                        "DOWNLOAD_TIMEOUT",
+                    anyhow!(IpcError::skill(
+                        ErrorCode::DownloadTimeout,
                         &[
                             ("owner", &repo.owner),
                             ("name", &repo.name),
@@ -2248,8 +2248,8 @@ impl SkillService {
         let response = client.get(url).send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16().to_string();
-            return Err(anyhow::anyhow!(format_skill_error(
-                "DOWNLOAD_FAILED",
+            return Err(anyhow::anyhow!(IpcError::skill(
+                ErrorCode::DownloadFailed,
                 &[("status", &status)],
                 match status.as_str() {
                     "403" => Some("http403"),
@@ -2269,8 +2269,8 @@ impl SkillService {
             let name = first_file.name();
             name.split('/').next().unwrap_or("").to_string()
         } else {
-            return Err(anyhow::anyhow!(format_skill_error(
-                "EMPTY_ARCHIVE",
+            return Err(anyhow::anyhow!(IpcError::skill(
+                ErrorCode::EmptyArchive,
                 &[],
                 Some("checkRepoUrl"),
             )));
@@ -2549,8 +2549,8 @@ impl SkillService {
 
         if skill_dirs.is_empty() {
             let _ = fs::remove_dir_all(&temp_dir);
-            return Err(anyhow!(format_skill_error(
-                "NO_SKILLS_IN_ZIP",
+            return Err(anyhow!(IpcError::skill(
+                ErrorCode::NoSkillsInZip,
                 &[],
                 Some("checkZipContent"),
             )));
@@ -2602,8 +2602,8 @@ impl SkillService {
                 Some(name) => name,
                 None => {
                     let _ = fs::remove_dir_all(&temp_dir);
-                    return Err(anyhow!(format_skill_error(
-                        "INVALID_SKILL_DIRECTORY",
+                    return Err(anyhow!(IpcError::skill(
+                        ErrorCode::InvalidSkillDirectory,
                         &[("zip", &zip_path.display().to_string())],
                         Some("checkZipContent"),
                     )));
@@ -2687,8 +2687,8 @@ impl SkillService {
             .with_context(|| format!("Failed to read ZIP file: {}", zip_path.display()))?;
 
         if archive.is_empty() {
-            return Err(anyhow!(format_skill_error(
-                "EMPTY_ARCHIVE",
+            return Err(anyhow!(IpcError::skill(
+                ErrorCode::EmptyArchive,
                 &[],
                 Some("checkZipContent"),
             )));

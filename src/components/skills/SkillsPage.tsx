@@ -226,10 +226,8 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
           closeButton: true,
         });
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
         const { title, description } = formatSkillError(
-          errorMessage,
+          error,
           t,
           "skills.installFailed",
         );

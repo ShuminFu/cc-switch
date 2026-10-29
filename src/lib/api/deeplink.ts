@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./ipc";
 
 export type ResourceType = "provider" | "prompt" | "mcp" | "skill";
 
