@@ -1,7 +1,7 @@
 //! 代理运行时配置快照
 //!
 //! 请求路径上需要的配置（per-app 代理配置、整流器/优化器配置、供应商列表、
-//! 计费默认值、模型定价）缓存在一个 [`ArcSwap`] 快照里，稳态下单个请求不再读数据库。
+//! 计费默认值、模型定价、Claude Desktop gateway token）缓存在一个 [`ArcSwap`] 快照里，稳态下单个请求不再读数据库。
 //!
 //! 失效规则：快照记录构建时的 [`Database::config_generation`]。任何配置类表的写入
 //! （由 SQLite update hook 统计）或 [`RuntimeConfigStore::invalidate`] 都会推进代数，
@@ -69,6 +69,7 @@ pub struct RuntimeConfigSnapshot {
     default_cost_multipliers: Mutex<HashMap<String, String>>,
     pricing_model_sources: Mutex<HashMap<String, String>>,
     model_pricing: Mutex<HashMap<String, Option<ModelPricing>>>,
+    claude_desktop_gateway_token: Mutex<Option<String>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -230,6 +231,17 @@ impl RuntimeConfigStore {
         let snapshot = self.snapshot();
         cached(&snapshot.model_pricing, model_id, load)
     }
+
+    /// Claude Desktop gateway 鉴权 token（等价于 `get_or_create_gateway_token`）
+    pub fn claude_desktop_gateway_token(&self) -> Result<String, AppError> {
+        let snapshot = self.snapshot();
+        if let Some(token) = lock(&snapshot.claude_desktop_gateway_token).as_ref() {
+            return Ok(token.clone());
+        }
+        let token = crate::claude_desktop_config::get_or_create_gateway_token(&self.db)?;
+        *lock(&snapshot.claude_desktop_gateway_token) = Some(token.clone());
+        Ok(token)
+    }
 }
 
 #[cfg(test)]
@@ -313,6 +325,21 @@ mod tests {
             &providers,
             &store.app_providers("claude").expect("providers")
         ));
+    }
+
+    #[test]
+    fn claude_desktop_gateway_token_is_cached_until_settings_change() {
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let store = RuntimeConfigStore::new(db.clone());
+        let token = store.claude_desktop_gateway_token().expect("token");
+        assert_eq!(store.claude_desktop_gateway_token().expect("token"), token);
+
+        db.set_setting("claude_desktop_gateway_token", "ccs-rotated")
+            .expect("rotate token");
+        assert_eq!(
+            store.claude_desktop_gateway_token().expect("token"),
+            "ccs-rotated"
+        );
     }
 
     #[test]

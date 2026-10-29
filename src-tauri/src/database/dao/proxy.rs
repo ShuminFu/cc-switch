@@ -977,4 +977,49 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn provider_health_upsert_accumulates_and_resets() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        for id in ["p1", "p2"] {
+            let provider = crate::provider::Provider::with_id(
+                id.to_string(),
+                id.to_uppercase(),
+                serde_json::json!({}),
+                None,
+            );
+            db.save_provider("claude", &provider)?;
+        }
+
+        db.update_provider_health_with_threshold("p1", "claude", false, Some("e1".into()), 2)
+            .await?;
+        let health = db.get_provider_health("p1", "claude").await?;
+        assert_eq!(health.consecutive_failures, 1);
+        assert!(health.is_healthy);
+
+        db.update_provider_health_with_threshold("p1", "claude", false, Some("e2".into()), 2)
+            .await?;
+        let health = db.get_provider_health("p1", "claude").await?;
+        assert_eq!(health.consecutive_failures, 2);
+        assert!(!health.is_healthy);
+        assert_eq!(health.last_error.as_deref(), Some("e2"));
+        let last_failure_at = health.last_failure_at.clone();
+        assert!(last_failure_at.is_some());
+
+        db.update_provider_health_with_threshold("p1", "claude", true, None, 2)
+            .await?;
+        let health = db.get_provider_health("p1", "claude").await?;
+        assert_eq!(health.consecutive_failures, 0);
+        assert!(health.is_healthy);
+        assert!(health.last_success_at.is_some());
+        // 成功写入不覆盖上一次失败时间
+        assert_eq!(health.last_failure_at, last_failure_at);
+
+        // 阈值为 1 时首次失败即不健康
+        db.update_provider_health_with_threshold("p2", "claude", false, None, 1)
+            .await?;
+        assert!(!db.get_provider_health("p2", "claude").await?.is_healthy);
+
+        Ok(())
+    }
 }

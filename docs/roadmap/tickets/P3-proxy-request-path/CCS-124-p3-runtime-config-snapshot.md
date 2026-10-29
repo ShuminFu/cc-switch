@@ -47,3 +47,18 @@ p3-endpoint-table
 - `cargo fmt --check` clean; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` clean.
 - Full suite `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast`: 2395 passed / 0 failed (lib 2235 passed, 3 ignored), across repeated runs. One run hit `tests/migrations.rs::every_released_schema_migrates_to_current` ("row not preserved in proxy_request_logs"). That flake also reproduces about 4 times in 30 runs on a build of the pre-change HEAD, so this change did not introduce it.
 - `pnpm format:check` clean (no frontend changes).
+
+**Review.** I checked each acceptance criterion against the code and they hold. The proxy_e2e perf test fails if any SELECT runs on a warm request, and a rerun gave `db_reads_per_request: 0.0`. Invalidation covers every config write: the update hook bumps the generation on writes to any table that is not exempt, Backup-API restores bump it explicitly, and `apply_runtime_config` calls `invalidate()`. No config table is `WITHOUT ROWID`, and the only unconditional `DELETE FROM` (the truncate path, which the hook does not see) on a cached table is in the `model_pricing` migrations, which reseed straight after.
+
+Gap fixed in the follow-up:
+- The Claude Desktop gateway routes still read the database on every request: `validate_claude_desktop_gateway_auth` called `get_or_create_gateway_token`, which runs a `settings` SELECT.
+  - The token is now cached in the snapshot (`RuntimeConfigStore::claude_desktop_gateway_token`). Rotating it writes to `settings`, which invalidates the cache.
+  - New unit test for this.
+
+Added tests:
+- A DAO unit test for the single-statement provider-health UPSERT. It checks the failure count increments, `is_healthy` follows the threshold (including threshold 1 on a new row), and a success resets the count without overwriting `last_failure_at`.
+
+Re-verified:
+- fmt and clippy are clean.
+- `--test proxy_e2e`: 16 passed.
+- Full `cargo test --no-fail-fast`: 2397 passed / 0 failed.
