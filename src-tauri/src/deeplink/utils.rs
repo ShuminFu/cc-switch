@@ -21,6 +21,19 @@ pub fn validate_url(url_str: &str, field_name: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Reject values carrying control characters (e.g. a `%0A` line break)
+///
+/// API keys and model names end up verbatim in line-based live configs such
+/// as Gemini's `.env`, where an embedded newline would inject extra entries.
+pub fn validate_no_control_chars(value: &str, field_name: &str) -> Result<(), AppError> {
+    if value.chars().any(char::is_control) {
+        return Err(AppError::InvalidInput(format!(
+            "Invalid '{field_name}': control characters are not allowed"
+        )));
+    }
+    Ok(())
+}
+
 /// Decode a Base64 parameter from deep link URL
 ///
 /// This function handles common issues with Base64 in URLs:
