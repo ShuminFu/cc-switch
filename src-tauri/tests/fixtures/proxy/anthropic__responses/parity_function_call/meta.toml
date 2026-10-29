@@ -1,0 +1,6 @@
+intent = "A completed Responses reply with a function_call maps to tool_use on both the stream and non-stream paths."
+source_commit = "a738206"
+
+[parity]
+expected_diff = [
+]

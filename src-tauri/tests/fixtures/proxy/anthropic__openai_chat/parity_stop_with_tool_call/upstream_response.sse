@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl_pst","created":123,"model":"gpt-4o","choices":[{"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_p","type":"function","function":{"name":"get_weather","arguments":""}}]}}]}
+
+data: {"id":"chatcmpl_pst","created":123,"model":"gpt-4o","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":\"Tokyo\"}"}}]}}]}
+
+data: {"id":"chatcmpl_pst","created":123,"model":"gpt-4o","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}
+
+data: [DONE]
+

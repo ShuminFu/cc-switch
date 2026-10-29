@@ -1,0 +1,6 @@
+intent = "The same Chat text reply converts to the same Anthropic content, stop_reason and usage in stream and non-stream mode."
+source_commit = "a738206"
+
+[parity]
+expected_diff = [
+]

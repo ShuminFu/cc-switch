@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: finish_reason stop alongside tool_calls (Gemini-compatible/Ollama/vLLM) maps to tool_use on both the stream and non-stream paths.
+---
+# stream
+{
+  "input_tokens": 9,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_pst",
+  "billable": true
+}
+
+# non-stream
+{
+  "input_tokens": 9,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_pst",
+  "billable": true
+}

@@ -8,6 +8,7 @@
 //! - system prompt 使用 `instructions` 字段而非 system role message
 //! - usage 字段命名与 Anthropic 一致 (input_tokens/output_tokens)
 
+use crate::proxy::protocol::StopReason;
 use crate::proxy::usage::ir::UsageIR;
 use crate::proxy::{error::ProxyError, json_canonical::canonical_json_string};
 use serde_json::{json, Value};
@@ -361,18 +362,8 @@ pub(crate) fn map_responses_stop_reason(
     has_tool_use: bool,
     incomplete_reason: Option<&str>,
 ) -> Option<&'static str> {
-    status.map(|s| match s {
-        "completed" if has_tool_use => "tool_use",
-        "incomplete"
-            if matches!(
-                incomplete_reason,
-                Some("max_output_tokens") | Some("max_tokens")
-            ) || incomplete_reason.is_none() =>
-        {
-            "max_tokens"
-        }
-        "incomplete" => "end_turn",
-        _ => "end_turn",
+    status.map(|s| {
+        StopReason::from_responses_status(s, has_tool_use, incomplete_reason).as_anthropic_str()
     })
 }
 

@@ -1,0 +1,21 @@
+{
+  "id": "msg_ptu",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_p",
+      "name": "get_weather",
+      "input": {
+        "city": "Tokyo"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "usage": {
+    "input_tokens": 5,
+    "output_tokens": 4
+  }
+}

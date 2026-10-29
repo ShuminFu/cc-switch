@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl_par","created":123,"model":"gpt-4o","choices":[{"delta":{"role":"assistant","content":"Hi "}}]}
+
+data: {"id":"chatcmpl_par","created":123,"model":"gpt-4o","choices":[{"delta":{"content":"there"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4,"total_tokens":13}}
+
+data: [DONE]
+

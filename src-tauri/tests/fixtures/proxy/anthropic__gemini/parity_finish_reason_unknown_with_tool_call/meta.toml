@@ -1,0 +1,6 @@
+intent = "An unrecognised finishReason (here MALFORMED_FUNCTION_CALL) with a tool call maps to tool_use on both the stream and non-stream paths via the shared StopReason table (formerly a pinned drift: non-stream fell back to end_turn)."
+source_commit = "6330783"
+
+[parity]
+expected_diff = [
+]

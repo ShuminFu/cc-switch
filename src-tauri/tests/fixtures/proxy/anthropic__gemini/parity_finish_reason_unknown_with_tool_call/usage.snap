@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: "An unrecognised finishReason (here MALFORMED_FUNCTION_CALL) with a tool call maps to tool_use on both the stream and non-stream paths via the shared StopReason table (formerly a pinned drift: non-stream fell back to end_turn)."
+---
+# stream
+{
+  "input_tokens": 7,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "r_drift",
+  "billable": true
+}
+
+# non-stream
+{
+  "input_tokens": 7,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gemini-2.5-pro",
+  "message_id": "r_drift",
+  "billable": true
+}

@@ -8,6 +8,7 @@ use super::transform_gemini::{
     build_anthropic_usage, is_synthesized_tool_call_id, rectify_tool_call_parts,
     synthesize_tool_call_id, AnthropicToolSchemaHints,
 };
+use crate::proxy::protocol::StopReason;
 use crate::proxy::sse::{append_utf8_safe, strip_sse_field, take_sse_block};
 use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
@@ -15,21 +16,12 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// 提示被拦截时固定为 refusal，其余走与非流式共用的 StopReason 表。
 fn map_finish_reason(reason: Option<&str>, has_tool_use: bool, blocked: bool) -> &'static str {
     if blocked {
         return "refusal";
     }
-
-    match reason {
-        Some("MAX_TOKENS") => "max_tokens",
-        Some("SAFETY")
-        | Some("RECITATION")
-        | Some("SPII")
-        | Some("BLOCKLIST")
-        | Some("PROHIBITED_CONTENT") => "refusal",
-        _ if has_tool_use => "tool_use",
-        _ => "end_turn",
-    }
+    StopReason::from_gemini_finish_reason(reason, has_tool_use).as_anthropic_str()
 }
 
 fn extract_visible_text(parts: &[Value]) -> String {

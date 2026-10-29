@@ -3,6 +3,7 @@
 //! 实现 Anthropic ↔ OpenAI 格式转换，用于 OpenRouter 支持
 //! 参考: anthropic-proxy-rs
 
+use crate::proxy::protocol::StopReason;
 use crate::proxy::usage::ir::UsageIR;
 use crate::proxy::{error::ProxyError, json_canonical::canonical_json_string};
 use serde_json::{json, Value};
@@ -808,25 +809,13 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, ProxyError> {
         }
     }
 
-    // 映射 finish_reason → stop_reason
+    // 映射 finish_reason → stop_reason（与流式路径共用 StopReason 表）
     // Gemini 兼容层 / Ollama / vLLM 会在携带 tool_calls 时返回 "stop"，
     // 此时同样映射为 tool_use，否则 Claude Code 会结束回合而不执行工具。
     let stop_reason = choice
         .get("finish_reason")
         .and_then(|r| r.as_str())
-        .map(|r| match r {
-            "stop" if has_tool_use => "tool_use",
-            "stop" => "end_turn",
-            "length" => "max_tokens",
-            "tool_calls" | "function_call" => "tool_use",
-            "content_filter" => "end_turn",
-            other => {
-                log::warn!(
-                    "[Claude/OpenAI] Unknown finish_reason in non-streaming response: {other}"
-                );
-                "end_turn"
-            }
-        })
+        .map(|r| StopReason::from_chat_finish_reason(r, has_tool_use).as_anthropic_str())
         .or(if has_tool_use { Some("tool_use") } else { None });
 
     // usage — map cache tokens from OpenAI format to Anthropic format

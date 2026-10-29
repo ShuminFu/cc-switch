@@ -128,6 +128,15 @@ fn golden_fixture_inventory() {
             "{} needs at least one non-stream fixture",
             bridge.dir_name()
         );
+        // Stream vs non-stream parity (incl. stop_reason) is only checked on
+        // fixtures that carry both upstream bodies.
+        assert!(
+            fixtures
+                .iter()
+                .any(|fixture| fixture.has_stream() && fixture.has_non_stream()),
+            "{} needs at least one stream/non-stream parity fixture",
+            bridge.dir_name()
+        );
         for fixture in &fixtures {
             assert!(
                 !fixture.meta.intent.trim().is_empty() && !fixture.meta.source_commit.is_empty(),

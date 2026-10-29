@@ -2,6 +2,7 @@
 //!
 //! 实现 OpenAI SSE → Anthropic SSE 格式转换
 
+use crate::proxy::protocol::StopReason;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 use crate::proxy::usage::ir::UsageIR;
 use bytes::Bytes;
@@ -695,7 +696,6 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         // （第一个 usage 为 null，后续才补全）。此处只做缓存，不立即发送，
                                         // 等到 [DONE] 或流末尾再统一发出，确保 usage 完整且只发一次。
                                         if let Some(finish_reason) = &choice.finish_reason {
-                                            let mut stop_reason = map_stop_reason(Some(finish_reason));
                                             let usage_json =
                                                 chunk_usage_json.clone().or_else(|| latest_usage.clone());
 
@@ -718,13 +718,15 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             }
 
                                             // Gemini 兼容层 / Ollama / vLLM 会在携带 tool_calls 时返回
-                                            // finish_reason "stop"；若映射为 end_turn，Claude Code 会直接结束
-                                            // 回合而不执行工具。已发出工具块时改为 tool_use（length 保持 max_tokens）。
-                                            if stop_reason.as_deref() == Some("end_turn")
-                                                && tool_blocks_by_index.values().any(|state| state.started)
-                                            {
-                                                stop_reason = Some("tool_use".to_string());
-                                            }
+                                            // finish_reason "stop"；StopReason 表在已发出工具块时把 end_turn
+                                            // 改为 tool_use（length 保持 max_tokens），与非流式路径一致。
+                                            let has_tool_use =
+                                                tool_blocks_by_index.values().any(|state| state.started);
+                                            let stop_reason = Some(
+                                                StopReason::from_chat_finish_reason(finish_reason, has_tool_use)
+                                                    .as_anthropic_str()
+                                                    .to_string(),
+                                            );
 
                                             // 缓存 message_delta，等到 [DONE] 时发送（以便收集完整的 usage）
                                             pending_message_delta = Some((stop_reason, usage_json));
@@ -808,23 +810,6 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
     }
 }
 
-/// 映射停止原因
-fn map_stop_reason(finish_reason: Option<&str>) -> Option<String> {
-    finish_reason.map(|r| {
-        match r {
-            "tool_calls" | "function_call" => "tool_use",
-            "stop" => "end_turn",
-            "length" => "max_tokens",
-            "content_filter" => "end_turn",
-            other => {
-                log::warn!("[Claude/OpenRouter] Unknown finish_reason in streaming: {other}");
-                "end_turn"
-            }
-        }
-        .to_string()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -862,12 +847,12 @@ mod tests {
     #[test]
     fn test_map_stop_reason_legacy_and_filtered_values() {
         assert_eq!(
-            map_stop_reason(Some("function_call")),
-            Some("tool_use".to_string())
+            StopReason::from_chat_finish_reason("function_call", false).as_anthropic_str(),
+            "tool_use"
         );
         assert_eq!(
-            map_stop_reason(Some("content_filter")),
-            Some("end_turn".to_string())
+            StopReason::from_chat_finish_reason("content_filter", false).as_anthropic_str(),
+            "end_turn"
         );
     }
 

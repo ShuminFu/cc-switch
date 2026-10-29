@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl_par",
+  "object": "chat.completion",
+  "created": 123,
+  "model": "gpt-4o",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hi there"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 9,
+    "completion_tokens": 4,
+    "total_tokens": 13
+  }
+}

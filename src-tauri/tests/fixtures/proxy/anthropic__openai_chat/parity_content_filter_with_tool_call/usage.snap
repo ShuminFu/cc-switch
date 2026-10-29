@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: finish_reason content_filter after a tool call maps to the same stop_reason (tool_use) on both paths; the non-stream path used to return end_turn.
+---
+# stream
+{
+  "input_tokens": 9,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_pcf",
+  "billable": true
+}
+
+# non-stream
+{
+  "input_tokens": 9,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_pcf",
+  "billable": true
+}
