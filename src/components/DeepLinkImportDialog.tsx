@@ -20,6 +20,7 @@ import { ProviderIcon } from "./ProviderIcon";
 import { invalidateProviderGraph } from "@/entities/provider/invalidate";
 import { providerKeys } from "@/entities/provider/keys";
 import { classifyClaudeEnvKey } from "@/lib/deeplink/envKeys";
+import { maskSecret, maskValue } from "@/lib/deeplink/mask";
 
 interface DeeplinkError {
   url: string;
@@ -250,11 +251,7 @@ export function DeepLinkImportDialog() {
     setIsOpen(false);
   };
 
-  // Mask API key for display (show first 4 chars + ***)
-  const maskedApiKey =
-    request?.apiKey && request.apiKey.length > 4
-      ? `${request.apiKey.substring(0, 4)}${"*".repeat(20)}`
-      : "****";
+  const maskedApiKey = maskSecret(request?.apiKey);
 
   // Check if config file is present
   const hasConfigFile = !!(request?.config || request?.configUrl);
@@ -320,18 +317,6 @@ export function DeepLinkImportDialog() {
       return null;
     }
   }, [request?.config, request?.app]);
-
-  // Helper to mask sensitive values
-  const maskValue = (key: string, value: string): string => {
-    const sensitiveKeys = ["TOKEN", "KEY", "SECRET", "PASSWORD"];
-    const isSensitive = sensitiveKeys.some((k) =>
-      key.toUpperCase().includes(k),
-    );
-    if (isSensitive && value.length > 8) {
-      return `${value.substring(0, 8)}${"*".repeat(12)}`;
-    }
-    return value;
-  };
 
   // Split Claude env keys by how the backend treats them on import
   const claudeEnvGroups = useMemo(() => {

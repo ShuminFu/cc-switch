@@ -137,6 +137,19 @@ describe("DeepLinkImportDialog", () => {
     expect(screen.queryByTestId("deeplink-denied-env")).toBeNull();
   });
 
+  it("masks short and long env secrets to at most 4 characters", async () => {
+    await renderWithClaudeConfig({
+      ANTHROPIC_AUTH_TOKEN: "sk-abcdefghijk",
+      ANTHROPIC_API_KEY: "abcdefgh",
+      ANTHROPIC_BASE_URL: "https://api.example.com",
+    });
+
+    expect(screen.getByText(`sk-a${"*".repeat(20)}`)).toBeInTheDocument();
+    expect(screen.queryByText(/sk-abcd/)).toBeNull();
+    expect(screen.queryByText(/abcdefgh/)).toBeNull();
+    expect(screen.getAllByText("****").length).toBeGreaterThan(0);
+  });
+
   const providerRequest = (name: string, apiKey: string) => ({
     version: "v1",
     resource: "provider",
