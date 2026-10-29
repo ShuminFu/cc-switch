@@ -1,6 +1,6 @@
 # CCS-061: [proxy] Strip IPv6 brackets before TCP connect and TLS server-name parsing
 
-**Status:** Open · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p3-low`, `area:proxy`
+**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p3-low`, `area:proxy`
 
 > **Ticket key:** `p1-proxy-connect-ipv6` · **Phase:** P1 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -21,3 +21,45 @@ Parse the host as an IpAddr (stripping the brackets) and connect with SocketAddr
 
 ## Dependencies
 None.
+
+## Implementation notes
+
+**Summary.** `src-tauri/src/proxy/hyper_client.rs` gained three helpers:
+`unbracket_host` (strips `[...]` from URI hosts), `tcp_connect` (IP literals
+connect via `SocketAddr`, other hosts resolve by name) and `tls_server_name`
+(`ServerName::IpAddress` for IP literals, `DnsName` otherwise). Both the
+direct raw path in `send_raw_request` and the proxy connection plus proxy TLS
+in `connect_via_proxy` use them now. The `CONNECT host:port` line and the
+`Host` header still carry the bracketed form.
+
+**Tests added** (in `proxy::hyper_client::tests`):
+- `unbracket_host_strips_only_ipv6_brackets`
+- `tls_server_name_uses_ip_address_for_literals`: the regression test that
+  runs everywhere. `ServerName::try_from("[::1]")` was rejected before this
+  change.
+- `connect_via_proxy_reaches_ipv6_literal_proxy`: a CONNECT responder on
+  `[::1]:0`. It checks that the tunnel is established and that the CONNECT
+  line and Host header keep the brackets.
+- `send_raw_request_reaches_ipv6_literal_upstream`: calls the raw path
+  directly against `http://[::1]:<port>/`, so it cannot pass through the
+  fallback, and expects `Ok`.
+
+**Files:** `src-tauri/src/proxy/hyper_client.rs`
+
+**Commits:** `2b6910a` (code + tests)
+
+**Verification:**
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`: clean
+- `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`: clean
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib proxy::hyper_client`:
+  14 passed, 0 failed
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2131 passed,
+  0 failed, 3 ignored
+
+**Remaining (why Partial):** this sandbox's kernel has no IPv6 support:
+binding `[::1]` fails with `EAFNOSUPPORT`, os error 97. The two
+`[::1]`-listener tests detect that, print `skipping: IPv6 loopback
+unavailable`, and return early. They compile and run here, but their IPv6
+assertions have not run yet. They need one run on a host that has IPv6
+loopback (any standard CI runner or dev machine) to tick the first two
+acceptance boxes.
