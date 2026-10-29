@@ -116,4 +116,27 @@ describe("useProxyStatus", () => {
       { closeButton: true },
     );
   });
+
+  it.each([
+    ["hermes", "Hermes"],
+    ["openclaw", "OpenClaw"],
+    ["claude-desktop", "Claude Desktop"],
+    ["opencode", "OpenCode"],
+  ])("labels the takeover toast for %s as %s", async (appType, label) => {
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProxyStatus(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.setTakeoverForApp({ appType, enabled: true });
+    });
+
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      `已接管 ${label} 配置（请求将走本地代理）`,
+      { closeButton: true },
+    );
+  });
 });

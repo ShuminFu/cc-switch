@@ -97,6 +97,7 @@ import AgentsDefaultsPanel from "@/components/openclaw/AgentsDefaultsPanel";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import HermesMemoryPanel from "@/components/hermes/HermesMemoryPanel";
 import { safeStorageGet, safeStorageSet } from "@/lib/storage";
+import { isAppId, useAppCaps } from "@/entities/app/registry";
 
 type View =
   | "providers"
@@ -124,20 +125,10 @@ const DEFAULT_DRAG_BAR_HEIGHT = isWindows() || isLinux() ? 0 : 28; // px
 const HEADER_HEIGHT = 64; // px
 
 const STORAGE_KEY = "cc-switch-last-app";
-const VALID_APPS: AppId[] = [
-  "claude",
-  "claude-desktop",
-  "codex",
-  "gemini",
-  "grokbuild",
-  "opencode",
-  "openclaw",
-  "hermes",
-];
 
 const getInitialApp = (): AppId => {
-  const saved = safeStorageGet(STORAGE_KEY) as AppId | null;
-  if (saved && VALID_APPS.includes(saved)) {
+  const saved = safeStorageGet(STORAGE_KEY);
+  if (isAppId(saved)) {
     return saved;
   }
   return "claude";
@@ -176,6 +167,7 @@ function App() {
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp: AppId =
     activeApp === "claude-desktop" ? "claude" : activeApp;
+  const sharedFeatureCaps = useAppCaps(sharedFeatureApp);
   const [currentView, setCurrentView] = useState<View>(getInitialView);
   const [skillsDiscoverySource, setSkillsDiscoverySource] =
     useState<SkillsPageSource>("repos");
@@ -223,19 +215,10 @@ function App() {
 
   // Fallback from sessions view when switching to an app without session support
   useEffect(() => {
-    if (
-      currentView === "sessions" &&
-      sharedFeatureApp !== "claude" &&
-      sharedFeatureApp !== "codex" &&
-      sharedFeatureApp !== "grokbuild" &&
-      sharedFeatureApp !== "opencode" &&
-      sharedFeatureApp !== "openclaw" &&
-      sharedFeatureApp !== "gemini" &&
-      sharedFeatureApp !== "hermes"
-    ) {
+    if (currentView === "sessions" && !sharedFeatureCaps.sessions) {
       setCurrentView("providers");
     }
-  }, [sharedFeatureApp, currentView]);
+  }, [sharedFeatureCaps.sessions, currentView]);
 
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [usageProvider, setUsageProvider] = useState<Provider | null>(null);
@@ -293,15 +276,8 @@ function App() {
       currentView === "openclawAgents");
   const { data: openclawHealthWarnings = [] } =
     useOpenClawHealth(isOpenClawView);
-  const hasSkillsSupport = sharedFeatureApp !== "openclaw";
-  const hasSessionSupport =
-    sharedFeatureApp === "claude" ||
-    sharedFeatureApp === "codex" ||
-    sharedFeatureApp === "grokbuild" ||
-    sharedFeatureApp === "opencode" ||
-    sharedFeatureApp === "openclaw" ||
-    sharedFeatureApp === "gemini" ||
-    sharedFeatureApp === "hermes";
+  const hasSkillsSupport = sharedFeatureCaps.skills;
+  const hasSessionSupport = sharedFeatureCaps.sessions;
 
   const {
     addProvider,

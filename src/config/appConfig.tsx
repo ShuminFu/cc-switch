@@ -7,6 +7,7 @@ import {
   OpenClawIcon,
 } from "@/components/BrandIcons";
 import { ProviderIcon } from "@/components/ProviderIcon";
+import { ALL_APP_IDS, appsWithCap } from "@/entities/app/registry";
 
 export interface AppConfig {
   label: string;
@@ -15,29 +16,13 @@ export interface AppConfig {
   badgeClass: string;
 }
 
-export const APP_IDS: AppId[] = [
-  "claude",
-  "claude-desktop",
-  "codex",
-  "gemini",
-  "grokbuild",
-  "opencode",
-  "openclaw",
-  "hermes",
-];
+export const APP_IDS: AppId[] = [...ALL_APP_IDS];
 
 /** App IDs shown in Skills panels (excludes OpenClaw — it doesn't support Skills) */
-export const SKILLS_APP_IDS: AppId[] = [
-  "claude",
-  "codex",
-  "gemini",
-  "grokbuild",
-  "opencode",
-  "hermes",
-];
+export const SKILLS_APP_IDS: AppId[] = appsWithCap("skills");
 
 /** App IDs shown in MCP panels (excludes OpenClaw) */
-export const MCP_APP_IDS: AppId[] = [...SKILLS_APP_IDS];
+export const MCP_APP_IDS: AppId[] = appsWithCap("mcp");
 
 export const APP_ICON_MAP: Record<AppId, AppConfig> = {
   claude: {
