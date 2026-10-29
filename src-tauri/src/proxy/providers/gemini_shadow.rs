@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{RwLock, RwLockWriteGuard};
 
 /// Composite key for a Gemini shadow session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -121,7 +121,7 @@ impl Default for GeminiShadowStore {
 }
 
 impl GeminiShadowStore {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -164,7 +164,7 @@ impl GeminiShadowStore {
     }
 
     /// Get the latest assistant content for a provider/session pair.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn latest_assistant_content(&self, provider_id: &str, session_id: &str) -> Option<Value> {
         self.get_session(provider_id, session_id)
             .and_then(|snapshot| {
@@ -176,7 +176,7 @@ impl GeminiShadowStore {
     }
 
     /// Get the latest tool calls for a provider/session pair.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn latest_tool_calls(
         &self,
         provider_id: &str,
@@ -205,7 +205,7 @@ impl GeminiShadowStore {
     }
 
     /// Remove a single session from the store.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn clear_session(&self, provider_id: &str, session_id: &str) -> bool {
         let key = GeminiShadowKey::new(provider_id, session_id);
         let mut inner = self.write_inner();
@@ -217,7 +217,7 @@ impl GeminiShadowStore {
     }
 
     /// Remove all sessions for a provider.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn clear_provider(&self, provider_id: &str) -> usize {
         let mut inner = self.write_inner();
         let keys: Vec<_> = inner
@@ -234,12 +234,13 @@ impl GeminiShadowStore {
     }
 
     /// Number of tracked sessions.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn session_count(&self) -> usize {
         self.read_inner().sessions.len()
     }
 
-    fn read_inner(&self) -> RwLockReadGuard<'_, GeminiShadowInner> {
+    #[cfg(test)]
+    fn read_inner(&self) -> std::sync::RwLockReadGuard<'_, GeminiShadowInner> {
         self.inner.read().unwrap_or_else(|poisoned| {
             log::warn!("[GeminiShadow] recovering poisoned read lock");
             poisoned.into_inner()
@@ -271,7 +272,7 @@ impl GeminiShadowStore {
         order.push_back(key.clone());
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn remove_key_from_order(order: &mut VecDeque<GeminiShadowKey>, key: &GeminiShadowKey) {
         if let Some(pos) = order.iter().position(|existing| existing == key) {
             order.remove(pos);

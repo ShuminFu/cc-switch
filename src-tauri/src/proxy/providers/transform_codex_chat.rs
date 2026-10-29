@@ -250,7 +250,7 @@ pub(crate) fn build_codex_tool_context_from_request(body: &Value) -> CodexToolCo
 }
 
 /// Convert an OpenAI Responses request into an OpenAI Chat Completions request.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn responses_to_chat_completions(body: Value) -> Result<Value, ProxyError> {
     responses_to_chat_completions_with_reasoning(body, None)
 }
@@ -1303,7 +1303,7 @@ fn responses_tool_choice_to_chat(tool_choice: &Value, tool_context: &CodexToolCo
 }
 
 /// Convert a non-streaming Chat Completions response into a Responses response.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn chat_completion_to_response(body: Value) -> Result<Value, ProxyError> {
     chat_completion_to_response_with_context(body, &CodexToolContext::default())
 }

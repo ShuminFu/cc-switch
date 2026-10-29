@@ -220,7 +220,7 @@ impl ProviderRouter {
     }
 
     /// 获取熔断器状态
-    #[allow(dead_code)]
+    #[allow(dead_code)] // reserved for the breaker UI probe (p3-breaker-ui-probe)
     pub async fn get_circuit_breaker_stats(
         &self,
         provider_id: &str,
@@ -282,8 +282,8 @@ mod tests {
     use tempfile::TempDir;
 
     struct TempHome {
-        #[allow(dead_code)]
-        dir: TempDir,
+        /// Held only so the temp directory lives as long as the guard.
+        _dir: TempDir,
         original_home: Option<String>,
         original_userprofile: Option<String>,
         original_test_home: Option<String>,
@@ -302,7 +302,7 @@ mod tests {
             crate::settings::reload_settings().expect("reload settings");
 
             Self {
-                dir,
+                _dir: dir,
                 original_home,
                 original_userprofile,
                 original_test_home,

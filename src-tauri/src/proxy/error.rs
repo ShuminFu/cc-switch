@@ -51,11 +51,9 @@ pub enum ProxyError {
     #[error("配置错误: {0}")]
     ConfigError(String),
 
-    #[allow(dead_code)]
     #[error("格式转换错误: {0}")]
     TransformError(String),
 
-    #[allow(dead_code)]
     #[error("无效的请求: {0}")]
     InvalidRequest(String),
 
@@ -75,7 +73,6 @@ pub enum ProxyError {
     #[error("认证失败: {0}")]
     AuthError(String),
 
-    #[allow(dead_code)]
     #[error("内部错误: {0}")]
     Internal(String),
 }
@@ -190,24 +187,4 @@ pub enum ErrorCategory {
     NonRetryable, // 认证失败、参数错误、4xx 错误
     #[allow(dead_code)]
     ClientAbort, // 客户端主动中断
-}
-
-/// 判断错误是否可重试
-#[allow(dead_code)]
-pub fn categorize_error(error: &reqwest::Error) -> ErrorCategory {
-    if error.is_timeout() || error.is_connect() {
-        return ErrorCategory::Retryable;
-    }
-
-    if let Some(status) = error.status() {
-        if status.is_server_error() {
-            ErrorCategory::Retryable
-        } else if status.is_client_error() {
-            ErrorCategory::NonRetryable
-        } else {
-            ErrorCategory::Retryable
-        }
-    } else {
-        ErrorCategory::Retryable
-    }
 }

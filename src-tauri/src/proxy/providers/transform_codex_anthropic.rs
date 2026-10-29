@@ -1131,7 +1131,7 @@ fn document_block_from_input_file(part: &Value) -> Option<Value> {
 }
 
 /// Anthropic Messages response → OpenAI Responses response (non-streaming)
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn anthropic_response_to_responses(body: Value) -> Result<Value, ProxyError> {
     anthropic_response_to_responses_with_context(body, &CodexToolContext::default())
 }
