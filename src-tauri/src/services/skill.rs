@@ -266,6 +266,13 @@ struct SkillBackupMetadata {
 
 const SKILL_BACKUP_RETAIN_COUNT: usize = 20;
 
+/// 远程仓库 ZIP 下载大小上限
+const MAX_REPO_ARCHIVE_BYTES: u64 = 200 * 1024 * 1024;
+/// 远程仓库 ZIP 条目数上限
+const MAX_EXTRACT_ENTRIES: usize = 50_000;
+/// 远程仓库 ZIP 解压后总字节数上限
+const MAX_EXTRACT_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
+
 /// 技能元数据 (从 SKILL.md 解析)
 #[derive(Debug, Clone, Deserialize)]
 pub struct SkillMetadata {
@@ -2237,7 +2244,7 @@ impl SkillService {
     /// 下载并解压 ZIP
     async fn download_and_extract(&self, url: &str, dest: &Path) -> Result<()> {
         let client = crate::proxy::http_client::get();
-        let response = client.get(url).send().await?;
+        let mut response = client.get(url).send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16().to_string();
             return Err(anyhow::anyhow!(format_skill_error(
@@ -2252,46 +2259,106 @@ impl SkillService {
             )));
         }
 
-        let bytes = response.bytes().await?;
-        let cursor = std::io::Cursor::new(bytes);
-        let mut archive = zip::ZipArchive::new(cursor)?;
+        // 先查 Content-Length，再边下载边计数，避免把超大归档整体读进内存
+        if let Some(len) = response.content_length() {
+            if len > MAX_REPO_ARCHIVE_BYTES {
+                return Err(anyhow!(
+                    "Repository archive too large ({len} bytes), limit is {MAX_REPO_ARCHIVE_BYTES} bytes"
+                ));
+            }
+        }
 
-        let root_name = if !archive.is_empty() {
-            let first_file = archive.by_index(0)?;
-            let name = first_file.name();
-            name.split('/').next().unwrap_or("").to_string()
-        } else {
-            return Err(anyhow::anyhow!(format_skill_error(
+        let mut archive_file = tempfile::tempfile()?;
+        let mut downloaded: u64 = 0;
+        while let Some(chunk) = response.chunk().await? {
+            downloaded += chunk.len() as u64;
+            if downloaded > MAX_REPO_ARCHIVE_BYTES {
+                return Err(anyhow!(
+                    "Repository archive exceeds {MAX_REPO_ARCHIVE_BYTES} bytes"
+                ));
+            }
+            std::io::Write::write_all(&mut archive_file, &chunk)?;
+        }
+        std::io::Seek::seek(&mut archive_file, std::io::SeekFrom::Start(0))?;
+
+        Self::extract_repo_archive(
+            archive_file,
+            dest,
+            MAX_EXTRACT_ENTRIES,
+            MAX_EXTRACT_TOTAL_BYTES,
+        )
+    }
+
+    /// 解压 GitHub 仓库归档：去掉顶层 `<repo>-<branch>/` 目录后写入 dest
+    ///
+    /// 条目路径一律经 `enclosed_name()` 校验（拒绝 `..`、绝对路径等），
+    /// 并限制条目数与解压后总字节数，防止 zip-slip 与解压炸弹。
+    fn extract_repo_archive<R: std::io::Read + std::io::Seek>(
+        reader: R,
+        dest: &Path,
+        max_entries: usize,
+        max_total_bytes: u64,
+    ) -> Result<()> {
+        let mut archive = zip::ZipArchive::new(reader)?;
+
+        if archive.is_empty() {
+            return Err(anyhow!(format_skill_error(
                 "EMPTY_ARCHIVE",
                 &[],
                 Some("checkRepoUrl"),
             )));
+        }
+        if archive.len() > max_entries {
+            return Err(anyhow!(
+                "Repository archive has too many entries ({}), limit is {max_entries}",
+                archive.len()
+            ));
+        }
+
+        let root: PathBuf = {
+            let first_file = archive.by_index(0)?;
+            first_file
+                .enclosed_name()
+                .and_then(|p| p.components().next().map(|c| PathBuf::from(c.as_os_str())))
+                .ok_or_else(|| anyhow!("Repository archive has an invalid root entry"))?
         };
 
         // 第一遍：解压普通文件和目录，收集 symlink 条目
         let mut symlinks: Vec<(PathBuf, String)> = Vec::new();
+        let mut total_bytes: u64 = 0;
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
-            let file_path = file.name().to_string();
+            let Some(enclosed) = file.enclosed_name() else {
+                log::warn!("跳过不安全的 ZIP 条目: {}", file.name());
+                continue;
+            };
 
-            let relative_path =
-                if let Some(stripped) = file_path.strip_prefix(&format!("{root_name}/")) {
-                    stripped
-                } else {
-                    continue;
-                };
+            let relative_path = match enclosed.strip_prefix(&root) {
+                Ok(stripped) => stripped.to_path_buf(),
+                Err(_) => continue,
+            };
 
-            if relative_path.is_empty() {
+            if relative_path.as_os_str().is_empty() {
                 continue;
             }
 
-            let outpath = dest.join(relative_path);
+            let outpath = dest.join(&relative_path);
+            let remaining = max_total_bytes.saturating_sub(total_bytes);
 
             if file.is_symlink() {
                 // 读取 symlink 目标路径
                 let mut target = String::new();
-                std::io::Read::read_to_string(&mut file, &mut target)?;
+                let read = std::io::Read::read_to_string(
+                    &mut std::io::Read::take(&mut file, remaining.saturating_add(1)),
+                    &mut target,
+                )? as u64;
+                total_bytes += read;
+                if total_bytes > max_total_bytes {
+                    return Err(anyhow!(
+                        "Repository archive exceeds {max_total_bytes} bytes when extracted"
+                    ));
+                }
                 symlinks.push((outpath, target.trim().to_string()));
             } else if file.is_dir() {
                 fs::create_dir_all(&outpath)?;
@@ -2300,7 +2367,17 @@ impl SkillService {
                     fs::create_dir_all(parent)?;
                 }
                 let mut outfile = fs::File::create(&outpath)?;
-                std::io::copy(&mut file, &mut outfile)?;
+                // 不信任 header 中声明的大小，按实际读出的字节计数
+                let written = std::io::copy(
+                    &mut std::io::Read::take(&mut file, remaining.saturating_add(1)),
+                    &mut outfile,
+                )?;
+                total_bytes += written;
+                if total_bytes > max_total_bytes {
+                    return Err(anyhow!(
+                        "Repository archive exceeds {max_total_bytes} bytes when extracted"
+                    ));
+                }
             }
         }
 
@@ -3145,6 +3222,118 @@ mod tests {
         assert!(
             dest.join("SKILL.md").is_file(),
             "existing destination skill should be preserved"
+        );
+    }
+
+    fn build_zip(entries: &[(&str, ZipTestEntry)]) -> std::io::Cursor<Vec<u8>> {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, entry) in entries {
+            match entry {
+                ZipTestEntry::Dir => writer.add_directory(*name, options).expect("add dir"),
+                ZipTestEntry::File(content) => {
+                    writer.start_file(*name, options).expect("start file");
+                    writer.write_all(content).expect("write file");
+                }
+                ZipTestEntry::Symlink(target) => writer
+                    .add_symlink(*name, *target, options)
+                    .expect("add symlink"),
+            }
+        }
+        let mut cursor = writer.finish().expect("finish zip");
+        cursor.set_position(0);
+        cursor
+    }
+
+    enum ZipTestEntry {
+        Dir,
+        File(&'static [u8]),
+        Symlink(&'static str),
+    }
+
+    #[test]
+    fn extract_repo_archive_skips_entries_escaping_dest() {
+        let temp = tempdir().expect("tempdir");
+        let dest = temp.path().join("x").join("y").join("dest");
+        fs::create_dir_all(&dest).expect("create dest");
+        let zip = build_zip(&[
+            ("repo-main/", ZipTestEntry::Dir),
+            (
+                "repo-main/SKILL.md",
+                ZipTestEntry::File(b"---\nname: ok\n---\n"),
+            ),
+            ("repo-main/../../escape.txt", ZipTestEntry::File(b"pwned")),
+            ("/abs-escape.txt", ZipTestEntry::File(b"pwned")),
+        ]);
+
+        SkillService::extract_repo_archive(zip, &dest, 100, 1024 * 1024)
+            .expect("unsafe entries should be skipped, not abort extraction");
+
+        assert!(dest.join("SKILL.md").is_file());
+        assert!(!temp.path().join("x").join("escape.txt").exists());
+        assert!(!dest.join("escape.txt").exists());
+        assert!(!dest.parent().unwrap().join("escape.txt").exists());
+    }
+
+    #[test]
+    fn extract_repo_archive_rejects_too_many_entries() {
+        let temp = tempdir().expect("tempdir");
+        let zip = build_zip(&[
+            ("repo-main/", ZipTestEntry::Dir),
+            ("repo-main/a.txt", ZipTestEntry::File(b"a")),
+            ("repo-main/b.txt", ZipTestEntry::File(b"b")),
+        ]);
+
+        let err = SkillService::extract_repo_archive(zip, temp.path(), 2, 1024 * 1024)
+            .expect_err("archive over the entry limit must fail");
+        assert!(err.to_string().contains("too many entries"), "{err:#}");
+    }
+
+    #[test]
+    fn extract_repo_archive_rejects_archive_over_byte_limit() {
+        let temp = tempdir().expect("tempdir");
+        let zip = build_zip(&[
+            ("repo-main/", ZipTestEntry::Dir),
+            ("repo-main/a.txt", ZipTestEntry::File(&[b'a'; 40])),
+            ("repo-main/b.txt", ZipTestEntry::File(&[b'b'; 40])),
+        ]);
+
+        let err = SkillService::extract_repo_archive(zip, temp.path(), 100, 64)
+            .expect_err("archive over the byte limit must fail");
+        assert!(err.to_string().contains("exceeds"), "{err:#}");
+    }
+
+    #[test]
+    fn extract_repo_archive_resolves_internal_symlinks_and_skips_escaping_ones() {
+        let temp = tempdir().expect("tempdir");
+        let dest = temp.path().join("dest");
+        fs::create_dir_all(&dest).expect("create dest");
+        fs::write(temp.path().join("outside.txt"), "secret").expect("write outside");
+        let zip = build_zip(&[
+            ("repo-main/", ZipTestEntry::Dir),
+            ("repo-main/shared.md", ZipTestEntry::File(b"shared")),
+            ("repo-main/skill/", ZipTestEntry::Dir),
+            (
+                "repo-main/skill/inner.md",
+                ZipTestEntry::Symlink("../shared.md"),
+            ),
+            (
+                "repo-main/skill/leak.txt",
+                ZipTestEntry::Symlink("../../outside.txt"),
+            ),
+        ]);
+
+        SkillService::extract_repo_archive(zip, &dest, 100, 1024 * 1024)
+            .expect("extract archive with symlinks");
+
+        assert_eq!(
+            fs::read_to_string(dest.join("skill").join("inner.md")).expect("read inner"),
+            "shared"
+        );
+        assert!(
+            !dest.join("skill").join("leak.txt").exists(),
+            "symlink pointing outside the repo must not be materialized"
         );
     }
 }
