@@ -125,7 +125,8 @@ fn import_mcp_from_claude_creates_config_and_enables_servers() {
     let config = MultiAppConfig::default();
     let state = create_test_state_with_config(&config).expect("create test state");
 
-    let changed = McpService::import_from_claude(&state).expect("import mcp from claude succeeds");
+    let changed = McpService::import_from_app(&state, &AppType::Claude)
+        .expect("import mcp from claude succeeds");
     assert!(
         changed > 0,
         "import should report inserted or normalized entries"
@@ -170,7 +171,7 @@ command = "echo"
     fs::write(&config_path, original).expect("seed codex config");
 
     let state = create_test_state().expect("create test state");
-    let changed = McpService::import_from_codex(&state).expect("import from codex");
+    let changed = McpService::import_from_app(&state, &AppType::Codex).expect("import from codex");
     assert!(changed > 0, "should import servers from Codex config");
 
     let after = fs::read_to_string(&config_path).expect("read codex config");
@@ -233,7 +234,8 @@ command = "echo"
         })
         .expect("seed existing mcp server");
 
-    let changed = McpService::import_from_claude(&state).expect("import from claude");
+    let changed =
+        McpService::import_from_app(&state, &AppType::Claude).expect("import from claude");
     assert_eq!(changed, 0, "existing server should not count as new");
 
     let after = fs::read_to_string(&codex_config_path).expect("read codex config");
@@ -263,8 +265,8 @@ fn import_mcp_from_claude_invalid_json_preserves_state() {
 
     let state = create_test_state().expect("create test state");
 
-    let err =
-        McpService::import_from_claude(&state).expect_err("invalid json should bubble up error");
+    let err = McpService::import_from_app(&state, &AppType::Claude)
+        .expect_err("invalid json should bubble up error");
     match err {
         AppError::McpValidation(msg) => assert!(
             msg.contains("解析 ~/.claude.json 失败"),
@@ -563,13 +565,81 @@ command = "echo"
 
     let state = support::create_test_state().expect("create test state");
 
-    McpService::import_from_claude(&state).expect("import from claude");
-    McpService::import_from_codex(&state).expect("import from codex");
+    McpService::import_from_app(&state, &AppType::Claude).expect("import from claude");
+    McpService::import_from_app(&state, &AppType::Codex).expect("import from codex");
 
     let servers = state.db.get_all_mcp_servers().expect("get all mcp servers");
     let entry = servers.get("shared").expect("shared server exists");
     assert!(entry.apps.claude, "shared should enable Claude");
     assert!(entry.apps.codex, "shared should enable Codex");
+}
+
+#[test]
+fn import_from_all_apps_loops_over_every_mcp_capable_app() {
+    let test_env = TestEnv::new();
+    let home = test_env.home();
+
+    fs::write(
+        get_claude_mcp_path(),
+        serde_json::to_string_pretty(&json!({
+            "mcpServers": { "shared": { "type": "stdio", "command": "echo" } }
+        }))
+        .expect("serialize claude mcp"),
+    )
+    .expect("seed ~/.claude.json");
+
+    let grok_dir = home.join(".grok");
+    fs::create_dir_all(&grok_dir).expect("create grok dir");
+    fs::write(
+        grok_dir.join("config.toml"),
+        r#"[mcp_servers.shared]
+command = "echo"
+
+[mcp_servers.grok-only]
+url = "https://grok.example.com/mcp"
+"#,
+    )
+    .expect("seed ~/.grok/config.toml");
+
+    let hermes_path = cc_switch_lib::hermes_config::get_hermes_config_path();
+    fs::create_dir_all(hermes_path.parent().expect("hermes dir")).expect("create hermes dir");
+    fs::write(
+        &hermes_path,
+        "mcp_servers:\n  hermes-only:\n    command: uvx\n    args: [\"mcp-server-fetch\"]\n",
+    )
+    .expect("seed hermes config.yaml");
+
+    let state = support::create_test_state().expect("create test state");
+
+    // OpenClaw 没有 MCP 投影：直接按 0 处理，不读任何文件
+    assert_eq!(
+        McpService::import_from_app(&state, &AppType::OpenClaw).expect("openclaw import"),
+        0
+    );
+
+    let imported = McpService::import_from_all_apps(&state).expect("import from all apps");
+    assert_eq!(imported, 3, "shared + grok-only + hermes-only are new");
+
+    let servers = state.db.get_all_mcp_servers().expect("get all mcp servers");
+    let shared = servers.get("shared").expect("shared server exists");
+    assert_eq!(
+        shared.apps.enabled_apps(),
+        vec![AppType::Claude, AppType::GrokBuild]
+    );
+    assert_eq!(
+        servers["grok-only"].apps.enabled_apps(),
+        vec![AppType::GrokBuild]
+    );
+    assert_eq!(
+        servers["hermes-only"].apps.enabled_apps(),
+        vec![AppType::Hermes]
+    );
+
+    // 重复导入：没有新服务器，也不改动已有的启用状态
+    assert_eq!(
+        McpService::import_from_all_apps(&state).expect("re-import"),
+        0
+    );
 }
 
 #[test]
@@ -597,7 +667,8 @@ fn import_mcp_from_gemini_sse_url_only_is_valid() {
     .expect("seed ~/.gemini/settings.json");
 
     let state = support::create_test_state().expect("create test state");
-    let changed = McpService::import_from_gemini(&state).expect("import from gemini");
+    let changed =
+        McpService::import_from_app(&state, &AppType::Gemini).expect("import from gemini");
     assert!(changed > 0, "should import at least 1 server");
 
     let servers = state.db.get_all_mcp_servers().expect("get all mcp servers");

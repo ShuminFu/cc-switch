@@ -189,6 +189,10 @@ impl CommonSnippet for ClaudeAdapter {
 }
 
 impl McpProjector for ClaudeAdapter {
+    fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
+        crate::mcp::read_servers_from_claude()
+    }
+
     fn upsert(&self, id: &str, spec: &Value) -> Result<(), AppError> {
         crate::mcp::sync_single_server_to_claude(&Default::default(), id, spec)
     }

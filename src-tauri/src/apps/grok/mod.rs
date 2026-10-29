@@ -106,6 +106,10 @@ impl AppAdapter for GrokAdapter {
 }
 
 impl McpProjector for GrokAdapter {
+    fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
+        crate::mcp::read_servers_from_grokbuild()
+    }
+
     fn upsert(&self, id: &str, spec: &Value) -> Result<(), AppError> {
         crate::mcp::sync_single_server_to_grokbuild(&Default::default(), id, spec)
     }

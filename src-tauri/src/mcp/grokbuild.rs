@@ -5,11 +5,11 @@
 
 use serde_json::{json, Value};
 
-use crate::app_config::{McpApps, McpServer, MultiAppConfig};
+use crate::app_config::{AppType, MultiAppConfig};
 use crate::error::AppError;
 
 use super::codex::json_server_to_toml_table;
-use super::validation::validate_server_spec;
+use super::common::import_into_config;
 
 fn should_sync_grokbuild_mcp() -> bool {
     crate::grok_config::get_grok_config_dir().exists()
@@ -72,58 +72,31 @@ fn toml_server_to_json(entry: &toml::value::Table) -> Value {
     Value::Object(spec)
 }
 
-pub fn import_from_grokbuild(config: &mut MultiAppConfig) -> Result<usize, AppError> {
+/// 读取 ~/.grok/config.toml 的 `[mcp_servers]`（统一结构，尚未校验）
+pub(crate) fn read_servers_from_grokbuild() -> Result<Vec<(String, Value)>, AppError> {
     let text = read_config_text()?;
     if text.trim().is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
     let root: toml::Table = toml::from_str(&text)
         .map_err(|e| AppError::McpValidation(format!("解析 ~/.grok/config.toml 失败: {e}")))?;
     let Some(entries) = root.get("mcp_servers").and_then(toml::Value::as_table) else {
-        return Ok(0);
+        return Ok(Vec::new());
     };
 
-    let servers = config
-        .mcp
-        .servers
-        .get_or_insert_with(std::collections::HashMap::new);
-    let mut changed = 0;
-    for (id, entry) in entries {
-        let Some(entry) = entry.as_table() else {
-            continue;
-        };
-        let spec = toml_server_to_json(entry);
-        if let Err(error) = validate_server_spec(&spec) {
-            log::warn!("跳过无效 Grok Build MCP 项 '{id}': {error}");
-            continue;
-        }
+    Ok(entries
+        .iter()
+        .filter_map(|(id, entry)| {
+            entry
+                .as_table()
+                .map(|entry| (id.clone(), toml_server_to_json(entry)))
+        })
+        .collect())
+}
 
-        if let Some(existing) = servers.get_mut(id) {
-            if !existing.apps.grokbuild {
-                existing.apps.grokbuild = true;
-                changed += 1;
-            }
-        } else {
-            servers.insert(
-                id.clone(),
-                McpServer {
-                    id: id.clone(),
-                    name: id.clone(),
-                    server: spec,
-                    apps: McpApps {
-                        grokbuild: true,
-                        ..Default::default()
-                    },
-                    description: None,
-                    homepage: None,
-                    docs: None,
-                    tags: Vec::new(),
-                },
-            );
-            changed += 1;
-        }
-    }
-    Ok(changed)
+pub fn import_from_grokbuild(config: &mut MultiAppConfig) -> Result<usize, AppError> {
+    let entries = read_servers_from_grokbuild()?;
+    Ok(import_into_config(config, &AppType::GrokBuild, entries))
 }
 
 pub fn sync_single_server_to_grokbuild(

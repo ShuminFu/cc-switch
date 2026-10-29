@@ -188,6 +188,10 @@ impl CommonSnippet for GeminiAdapter {
 }
 
 impl McpProjector for GeminiAdapter {
+    fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
+        crate::mcp::read_servers_from_gemini()
+    }
+
     fn upsert(&self, id: &str, spec: &Value) -> Result<(), AppError> {
         crate::mcp::sync_single_server_to_gemini(&Default::default(), id, spec)
     }

@@ -219,8 +219,12 @@ impl CommonSnippet for ExtractOnlySnippet {
     }
 }
 
-/// 把 CC Switch 的 MCP 服务器写入 / 移出应用自己的配置
+/// 把 CC Switch 的 MCP 服务器写入 / 移出应用自己的配置，并从中读回
 pub trait McpProjector {
+    /// 读取应用 live 配置中的 MCP 服务器，已转换为统一 JSON 规范（尚未校验）。
+    /// 配置文件缺失时返回空列表；文件损坏时报错。
+    fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError>;
+
     fn upsert(&self, id: &str, spec: &Value) -> Result<(), AppError>;
 
     fn remove(&self, id: &str) -> Result<(), AppError>;

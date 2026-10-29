@@ -704,6 +704,35 @@ url = "https://example.com"
 }
 
 #[test]
+fn import_from_codex_skips_unknown_type_without_dropping_later_servers() {
+    let _test_env = TestEnv::new();
+    let path = cc_switch_lib::get_codex_config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create codex dir");
+    }
+    fs::write(
+        &path,
+        r#"[mcp_servers.a_websocket]
+type = "ws"
+url = "wss://example.com"
+
+[mcp_servers.b_echo]
+type = "stdio"
+command = "echo"
+"#,
+    )
+    .expect("write codex config");
+
+    let mut config = MultiAppConfig::default();
+    let changed = cc_switch_lib::import_from_codex(&mut config).expect("import codex");
+    assert_eq!(changed, 1, "only the stdio server is importable");
+
+    let servers = config.mcp.servers.as_ref().expect("unified servers");
+    assert!(!servers.contains_key("a_websocket"));
+    assert!(servers.get("b_echo").expect("b_echo imported").apps.codex);
+}
+
+#[test]
 fn import_from_codex_merges_into_existing_entries() {
     let _test_env = TestEnv::new();
     let path = cc_switch_lib::get_codex_config_path();

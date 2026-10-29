@@ -319,6 +319,10 @@ impl CommonSnippet for CodexAdapter {
 }
 
 impl McpProjector for CodexAdapter {
+    fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
+        crate::mcp::read_servers_from_codex()
+    }
+
     fn upsert(&self, id: &str, spec: &Value) -> Result<(), AppError> {
         // Codex uses TOML format, must use the correct function
         crate::mcp::sync_single_server_to_codex(&Default::default(), id, spec)

@@ -6,12 +6,11 @@
 //! - JSON 到 TOML 的转换逻辑
 
 use serde_json::{json, Value};
-use std::collections::HashMap;
 
-use crate::app_config::{McpApps, McpConfig, McpServer, MultiAppConfig};
+use crate::app_config::{AppType, MultiAppConfig};
 use crate::error::AppError;
 
-use super::validation::{extract_server_spec, validate_server_spec};
+use super::common::{collect_enabled_servers, import_into_config};
 
 fn should_sync_codex_mcp() -> bool {
     // Codex 未安装/未初始化时：~/.codex 目录不存在。
@@ -19,258 +18,191 @@ fn should_sync_codex_mcp() -> bool {
     crate::codex_config::get_codex_config_dir().exists()
 }
 
-/// 返回已启用的 MCP 服务器（过滤 enabled==true）
-fn collect_enabled_servers(cfg: &McpConfig) -> HashMap<String, Value> {
-    let mut out = HashMap::new();
-    for (id, entry) in cfg.servers.iter() {
-        let enabled = entry
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if !enabled {
-            continue;
+/// 把 Codex TOML 中的单个服务器表转换为统一 JSON 规范；未知类型返回 `None`
+fn toml_entry_to_json(id: &str, entry_tbl: &toml::value::Table) -> Option<Value> {
+    // type 缺省为 stdio
+    let typ = entry_tbl
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("stdio");
+
+    // 构建 JSON 规范
+    let mut spec = serde_json::Map::new();
+    spec.insert("type".into(), json!(typ));
+
+    // 核心字段（需要手动处理的字段）
+    let core_fields = match typ {
+        "stdio" => vec!["type", "command", "args", "env", "cwd"],
+        "http" | "sse" => vec!["type", "url", "http_headers"],
+        _ => vec!["type"],
+    };
+
+    // 1. 处理核心字段（强类型）
+    match typ {
+        "stdio" => {
+            if let Some(cmd) = entry_tbl.get("command").and_then(|v| v.as_str()) {
+                spec.insert("command".into(), json!(cmd));
+            }
+            if let Some(args) = entry_tbl.get("args").and_then(|v| v.as_array()) {
+                let arr = args
+                    .iter()
+                    .filter_map(|x| x.as_str())
+                    .map(|s| json!(s))
+                    .collect::<Vec<_>>();
+                if !arr.is_empty() {
+                    spec.insert("args".into(), serde_json::Value::Array(arr));
+                }
+            }
+            if let Some(cwd) = entry_tbl.get("cwd").and_then(|v| v.as_str()) {
+                if !cwd.trim().is_empty() {
+                    spec.insert("cwd".into(), json!(cwd));
+                }
+            }
+            if let Some(env_tbl) = entry_tbl.get("env").and_then(|v| v.as_table()) {
+                let mut env_json = serde_json::Map::new();
+                for (k, v) in env_tbl.iter() {
+                    if let Some(sv) = v.as_str() {
+                        env_json.insert(k.clone(), json!(sv));
+                    }
+                }
+                if !env_json.is_empty() {
+                    spec.insert("env".into(), serde_json::Value::Object(env_json));
+                }
+            }
         }
-        match extract_server_spec(entry) {
-            Ok(spec) => {
-                out.insert(id.clone(), spec);
+        "http" | "sse" => {
+            if let Some(url) = entry_tbl.get("url").and_then(|v| v.as_str()) {
+                spec.insert("url".into(), json!(url));
             }
-            Err(err) => {
-                log::warn!("跳过无效的 MCP 条目 '{id}': {err}");
+            // Read from http_headers (correct Codex format) or headers (legacy) with priority to http_headers
+            let headers_tbl = entry_tbl
+                .get("http_headers")
+                .and_then(|v| v.as_table())
+                .or_else(|| entry_tbl.get("headers").and_then(|v| v.as_table()));
+
+            if let Some(headers_tbl) = headers_tbl {
+                let mut headers_json = serde_json::Map::new();
+                for (k, v) in headers_tbl.iter() {
+                    if let Some(sv) = v.as_str() {
+                        headers_json.insert(k.clone(), json!(sv));
+                    }
+                }
+                if !headers_json.is_empty() {
+                    spec.insert("headers".into(), serde_json::Value::Object(headers_json));
+                }
             }
+        }
+        _ => {
+            log::warn!("跳过未知类型 '{typ}' 的 Codex MCP 项 '{id}'");
+            return None;
         }
     }
-    out
+
+    // 2. 处理扩展字段和其他未知字段（通用 TOML → JSON 转换）
+    for (key, toml_val) in entry_tbl.iter() {
+        // 跳过已处理的核心字段
+        if core_fields.contains(&key.as_str()) {
+            continue;
+        }
+
+        // 通用 TOML 值到 JSON 值转换
+        let json_val = match toml_val {
+            toml::Value::String(s) => Some(json!(s)),
+            toml::Value::Integer(i) => Some(json!(i)),
+            toml::Value::Float(f) => Some(json!(f)),
+            toml::Value::Boolean(b) => Some(json!(b)),
+            toml::Value::Array(arr) => {
+                // 只支持简单类型数组
+                let json_arr: Vec<serde_json::Value> = arr
+                    .iter()
+                    .filter_map(|item| match item {
+                        toml::Value::String(s) => Some(json!(s)),
+                        toml::Value::Integer(i) => Some(json!(i)),
+                        toml::Value::Float(f) => Some(json!(f)),
+                        toml::Value::Boolean(b) => Some(json!(b)),
+                        _ => None,
+                    })
+                    .collect();
+                if !json_arr.is_empty() {
+                    Some(serde_json::Value::Array(json_arr))
+                } else {
+                    log::debug!("跳过复杂数组字段 '{key}' (TOML → JSON)");
+                    None
+                }
+            }
+            toml::Value::Table(tbl) => {
+                // 浅层表转为 JSON 对象（仅支持字符串值）
+                let mut json_obj = serde_json::Map::new();
+                for (k, v) in tbl.iter() {
+                    if let Some(s) = v.as_str() {
+                        json_obj.insert(k.clone(), json!(s));
+                    }
+                }
+                if !json_obj.is_empty() {
+                    Some(serde_json::Value::Object(json_obj))
+                } else {
+                    log::debug!("跳过复杂对象字段 '{key}' (TOML → JSON)");
+                    None
+                }
+            }
+            toml::Value::Datetime(_) => {
+                log::debug!("跳过日期时间字段 '{key}' (TOML → JSON)");
+                None
+            }
+        };
+
+        if let Some(val) = json_val {
+            spec.insert(key.clone(), val);
+            log::debug!("导入扩展字段 '{key}' = {toml_val:?}");
+        }
+    }
+
+    Some(serde_json::Value::Object(spec))
 }
 
-/// 从 ~/.codex/config.toml 导入 MCP 到统一结构（v3.7.0+）
+/// 读取 ~/.codex/config.toml 中的 MCP 服务器（统一结构，尚未校验）
 ///
 /// 格式支持：
 /// - 正确格式：[mcp_servers.*]（Codex 官方标准）
 /// - 错误格式：[mcp.servers.*]（容错读取，用于迁移错误写入的配置）
 ///
-/// 已存在的服务器将启用 Codex 应用，不覆盖其他字段和应用状态
-pub fn import_from_codex(config: &mut MultiAppConfig) -> Result<usize, AppError> {
+/// 先返回 [mcp.servers]，再返回 [mcp_servers]；同名项以先出现者为准。
+pub(crate) fn read_servers_from_codex() -> Result<Vec<(String, Value)>, AppError> {
     let text = crate::codex_config::read_and_validate_codex_config_text()?;
     if text.trim().is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
 
     let root: toml::Table = toml::from_str(&text)
         .map_err(|e| AppError::McpValidation(format!("解析 ~/.codex/config.toml 失败: {e}")))?;
 
-    // 确保新结构存在
-    let servers = config.mcp.servers.get_or_insert_with(HashMap::new);
+    let legacy_tbl = root
+        .get("mcp")
+        .and_then(|v| v.as_table())
+        .and_then(|mcp_tbl| mcp_tbl.get("servers"))
+        .and_then(|v| v.as_table());
+    let servers_tbl = root.get("mcp_servers").and_then(|v| v.as_table());
 
-    let mut changed_total = 0usize;
-
-    // helper：处理一组 servers 表
-    let mut import_servers_tbl = |servers_tbl: &toml::value::Table| {
-        let mut changed = 0usize;
-        for (id, entry_val) in servers_tbl.iter() {
+    let mut out = Vec::new();
+    for tbl in [legacy_tbl, servers_tbl].into_iter().flatten() {
+        for (id, entry_val) in tbl.iter() {
             let Some(entry_tbl) = entry_val.as_table() else {
                 continue;
             };
-
-            // type 缺省为 stdio
-            let typ = entry_tbl
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("stdio");
-
-            // 构建 JSON 规范
-            let mut spec = serde_json::Map::new();
-            spec.insert("type".into(), json!(typ));
-
-            // 核心字段（需要手动处理的字段）
-            let core_fields = match typ {
-                "stdio" => vec!["type", "command", "args", "env", "cwd"],
-                "http" | "sse" => vec!["type", "url", "http_headers"],
-                _ => vec!["type"],
-            };
-
-            // 1. 处理核心字段（强类型）
-            match typ {
-                "stdio" => {
-                    if let Some(cmd) = entry_tbl.get("command").and_then(|v| v.as_str()) {
-                        spec.insert("command".into(), json!(cmd));
-                    }
-                    if let Some(args) = entry_tbl.get("args").and_then(|v| v.as_array()) {
-                        let arr = args
-                            .iter()
-                            .filter_map(|x| x.as_str())
-                            .map(|s| json!(s))
-                            .collect::<Vec<_>>();
-                        if !arr.is_empty() {
-                            spec.insert("args".into(), serde_json::Value::Array(arr));
-                        }
-                    }
-                    if let Some(cwd) = entry_tbl.get("cwd").and_then(|v| v.as_str()) {
-                        if !cwd.trim().is_empty() {
-                            spec.insert("cwd".into(), json!(cwd));
-                        }
-                    }
-                    if let Some(env_tbl) = entry_tbl.get("env").and_then(|v| v.as_table()) {
-                        let mut env_json = serde_json::Map::new();
-                        for (k, v) in env_tbl.iter() {
-                            if let Some(sv) = v.as_str() {
-                                env_json.insert(k.clone(), json!(sv));
-                            }
-                        }
-                        if !env_json.is_empty() {
-                            spec.insert("env".into(), serde_json::Value::Object(env_json));
-                        }
-                    }
-                }
-                "http" | "sse" => {
-                    if let Some(url) = entry_tbl.get("url").and_then(|v| v.as_str()) {
-                        spec.insert("url".into(), json!(url));
-                    }
-                    // Read from http_headers (correct Codex format) or headers (legacy) with priority to http_headers
-                    let headers_tbl = entry_tbl
-                        .get("http_headers")
-                        .and_then(|v| v.as_table())
-                        .or_else(|| entry_tbl.get("headers").and_then(|v| v.as_table()));
-
-                    if let Some(headers_tbl) = headers_tbl {
-                        let mut headers_json = serde_json::Map::new();
-                        for (k, v) in headers_tbl.iter() {
-                            if let Some(sv) = v.as_str() {
-                                headers_json.insert(k.clone(), json!(sv));
-                            }
-                        }
-                        if !headers_json.is_empty() {
-                            spec.insert("headers".into(), serde_json::Value::Object(headers_json));
-                        }
-                    }
-                }
-                _ => {
-                    log::warn!("跳过未知类型 '{typ}' 的 Codex MCP 项 '{id}'");
-                    return changed;
-                }
-            }
-
-            // 2. 处理扩展字段和其他未知字段（通用 TOML → JSON 转换）
-            for (key, toml_val) in entry_tbl.iter() {
-                // 跳过已处理的核心字段
-                if core_fields.contains(&key.as_str()) {
-                    continue;
-                }
-
-                // 通用 TOML 值到 JSON 值转换
-                let json_val = match toml_val {
-                    toml::Value::String(s) => Some(json!(s)),
-                    toml::Value::Integer(i) => Some(json!(i)),
-                    toml::Value::Float(f) => Some(json!(f)),
-                    toml::Value::Boolean(b) => Some(json!(b)),
-                    toml::Value::Array(arr) => {
-                        // 只支持简单类型数组
-                        let json_arr: Vec<serde_json::Value> = arr
-                            .iter()
-                            .filter_map(|item| match item {
-                                toml::Value::String(s) => Some(json!(s)),
-                                toml::Value::Integer(i) => Some(json!(i)),
-                                toml::Value::Float(f) => Some(json!(f)),
-                                toml::Value::Boolean(b) => Some(json!(b)),
-                                _ => None,
-                            })
-                            .collect();
-                        if !json_arr.is_empty() {
-                            Some(serde_json::Value::Array(json_arr))
-                        } else {
-                            log::debug!("跳过复杂数组字段 '{key}' (TOML → JSON)");
-                            None
-                        }
-                    }
-                    toml::Value::Table(tbl) => {
-                        // 浅层表转为 JSON 对象（仅支持字符串值）
-                        let mut json_obj = serde_json::Map::new();
-                        for (k, v) in tbl.iter() {
-                            if let Some(s) = v.as_str() {
-                                json_obj.insert(k.clone(), json!(s));
-                            }
-                        }
-                        if !json_obj.is_empty() {
-                            Some(serde_json::Value::Object(json_obj))
-                        } else {
-                            log::debug!("跳过复杂对象字段 '{key}' (TOML → JSON)");
-                            None
-                        }
-                    }
-                    toml::Value::Datetime(_) => {
-                        log::debug!("跳过日期时间字段 '{key}' (TOML → JSON)");
-                        None
-                    }
-                };
-
-                if let Some(val) = json_val {
-                    spec.insert(key.clone(), val);
-                    log::debug!("导入扩展字段 '{key}' = {toml_val:?}");
-                }
-            }
-
-            let spec_v = serde_json::Value::Object(spec);
-
-            // 校验：单项失败继续处理
-            if let Err(e) = validate_server_spec(&spec_v) {
-                log::warn!("跳过无效 Codex MCP 项 '{id}': {e}");
-                continue;
-            }
-
-            if let Some(existing) = servers.get_mut(id) {
-                // 已存在：仅启用 Codex 应用
-                if !existing.apps.codex {
-                    existing.apps.codex = true;
-                    changed += 1;
-                    log::info!("MCP 服务器 '{id}' 已启用 Codex 应用");
-                }
-            } else {
-                // 新建服务器：默认仅启用 Codex
-                servers.insert(
-                    id.clone(),
-                    McpServer {
-                        id: id.clone(),
-                        name: id.clone(),
-                        server: spec_v,
-                        apps: McpApps {
-                            claude: false,
-                            codex: true,
-                            gemini: false,
-                            grokbuild: false,
-                            opencode: false,
-                            hermes: false,
-                        },
-                        description: None,
-                        homepage: None,
-                        docs: None,
-                        tags: Vec::new(),
-                    },
-                );
-                changed += 1;
-                log::info!("导入新 MCP 服务器 '{id}'");
-            }
-        }
-        changed
-    };
-
-    // 1) 处理 mcp.servers
-    if let Some(mcp_val) = root.get("mcp") {
-        if let Some(mcp_tbl) = mcp_val.as_table() {
-            if let Some(servers_val) = mcp_tbl.get("servers") {
-                if let Some(servers_tbl) = servers_val.as_table() {
-                    changed_total += import_servers_tbl(servers_tbl);
-                }
+            if let Some(spec) = toml_entry_to_json(id, entry_tbl) {
+                out.push((id.clone(), spec));
             }
         }
     }
+    Ok(out)
+}
 
-    // 2) 处理 mcp_servers
-    if let Some(servers_val) = root.get("mcp_servers") {
-        if let Some(servers_tbl) = servers_val.as_table() {
-            changed_total += import_servers_tbl(servers_tbl);
-        }
-    }
-
-    Ok(changed_total)
+/// 从 ~/.codex/config.toml 导入 MCP 到统一结构（v3.7.0+）
+///
+/// 已存在的服务器将启用 Codex 应用，不覆盖其他字段和应用状态
+pub fn import_from_codex(config: &mut MultiAppConfig) -> Result<usize, AppError> {
+    let entries = read_servers_from_codex()?;
+    Ok(import_into_config(config, &AppType::Codex, entries))
 }
 
 /// 将 config.json 中 Codex 的 enabled==true 项以 TOML 形式写入 ~/.codex/config.toml

@@ -203,6 +203,10 @@ impl AppAdapter for OpenCodeAdapter {
 }
 
 impl McpProjector for OpenCodeAdapter {
+    fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
+        crate::mcp::read_servers_from_opencode()
+    }
+
     fn upsert(&self, id: &str, spec: &Value) -> Result<(), AppError> {
         crate::mcp::sync_single_server_to_opencode(&Default::default(), id, spec)
     }
