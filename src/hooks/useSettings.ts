@@ -13,6 +13,7 @@ import {
   type ResolvedDirectories,
 } from "./useDirectorySettings";
 import { useSettingsMetadata } from "./useSettingsMetadata";
+import { safeStorageSet } from "@/lib/storage";
 
 interface SaveResult {
   requiresRestart: boolean;
@@ -276,7 +277,7 @@ export function useSettings(): UseSettingsResult {
         // 持久化语言偏好
         try {
           if (typeof window !== "undefined" && updates.language) {
-            window.localStorage.setItem("language", updates.language);
+            safeStorageSet("language", updates.language);
           }
         } catch (error) {
           console.warn(
@@ -413,7 +414,7 @@ export function useSettings(): UseSettingsResult {
 
         try {
           if (typeof window !== "undefined" && payload.language) {
-            window.localStorage.setItem("language", payload.language);
+            safeStorageSet("language", payload.language);
           }
         } catch (error) {
           console.warn(

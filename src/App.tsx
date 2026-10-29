@@ -96,6 +96,7 @@ import ToolsPanel from "@/components/openclaw/ToolsPanel";
 import AgentsDefaultsPanel from "@/components/openclaw/AgentsDefaultsPanel";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import HermesMemoryPanel from "@/components/hermes/HermesMemoryPanel";
+import { safeStorageGet, safeStorageSet } from "@/lib/storage";
 
 type View =
   | "providers"
@@ -135,7 +136,7 @@ const VALID_APPS: AppId[] = [
 ];
 
 const getInitialApp = (): AppId => {
-  const saved = localStorage.getItem(STORAGE_KEY) as AppId | null;
+  const saved = safeStorageGet(STORAGE_KEY) as AppId | null;
   if (saved && VALID_APPS.includes(saved)) {
     return saved;
   }
@@ -161,7 +162,7 @@ const VALID_VIEWS: View[] = [
 ];
 
 const getInitialView = (): View => {
-  const saved = localStorage.getItem(VIEW_STORAGE_KEY) as View | null;
+  const saved = safeStorageGet(VIEW_STORAGE_KEY) as View | null;
   if (saved && VALID_VIEWS.includes(saved)) {
     return saved;
   }
@@ -183,7 +184,7 @@ function App() {
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem(VIEW_STORAGE_KEY, currentView);
+    safeStorageSet(VIEW_STORAGE_KEY, currentView);
   }, [currentView]);
 
   const { data: settingsData } = useSettingsQuery();

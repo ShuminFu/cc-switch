@@ -5,6 +5,7 @@ import en from "./locales/en.json";
 import ja from "./locales/ja.json";
 import zh from "./locales/zh.json";
 import zhTW from "./locales/zh-TW.json";
+import { safeStorageGet } from "@/lib/storage";
 
 type Language = "zh" | "zh-TW" | "en" | "ja";
 
@@ -13,7 +14,7 @@ const DEFAULT_LANGUAGE: Language = "zh";
 const getInitialLanguage = (): Language => {
   if (typeof window !== "undefined") {
     try {
-      const stored = window.localStorage.getItem("language");
+      const stored = safeStorageGet("language");
       if (
         stored === "zh" ||
         stored === "zh-TW" ||

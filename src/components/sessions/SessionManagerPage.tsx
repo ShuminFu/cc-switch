@@ -74,6 +74,7 @@ import {
   type SessionProviderGroup,
   shouldHideCodexMessageFromToc,
 } from "./utils";
+import { safeStorageGet, safeStorageSet } from "@/lib/storage";
 
 const SESSION_LIST_VIEW_MODE_STORAGE_KEY =
   "cc-switch.sessionManager.listViewMode";
@@ -106,9 +107,7 @@ type SessionGroupExpansionState = {
 
 const readInitialSessionListViewMode = (): SessionListViewMode => {
   if (typeof window === "undefined") return "flat";
-  const stored = window.localStorage.getItem(
-    SESSION_LIST_VIEW_MODE_STORAGE_KEY,
-  );
+  const stored = safeStorageGet(SESSION_LIST_VIEW_MODE_STORAGE_KEY);
   return stored === "grouped" || stored === "flat" ? stored : "flat";
 };
 
@@ -122,9 +121,7 @@ const readInitialSessionGroupExpansionState =
     }
 
     try {
-      const stored = window.localStorage.getItem(
-        SESSION_GROUP_EXPANSION_STORAGE_KEY,
-      );
+      const stored = safeStorageGet(SESSION_GROUP_EXPANSION_STORAGE_KEY);
       const parsed = stored ? JSON.parse(stored) : null;
 
       if (!parsed || typeof parsed !== "object") {
@@ -260,14 +257,11 @@ export function SessionManagerPage({ appId }: { appId: string }) {
   );
 
   useEffect(() => {
-    window.localStorage.setItem(
-      SESSION_LIST_VIEW_MODE_STORAGE_KEY,
-      listViewMode,
-    );
+    safeStorageSet(SESSION_LIST_VIEW_MODE_STORAGE_KEY, listViewMode);
   }, [listViewMode]);
 
   useEffect(() => {
-    window.localStorage.setItem(
+    safeStorageSet(
       SESSION_GROUP_EXPANSION_STORAGE_KEY,
       serializeSessionGroupExpansionState(
         expandedProviderGroups,

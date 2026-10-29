@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsQuery } from "@/lib/query";
 import type { Settings } from "@/types";
+import { safeStorageGet } from "@/lib/storage";
 
 type Language = "zh" | "zh-TW" | "en" | "ja";
 
@@ -81,7 +82,7 @@ export function useSettingsForm(): UseSettingsFormResult {
 
   const readPersistedLanguage = useCallback((): Language => {
     if (typeof window !== "undefined") {
-      const stored = window.localStorage.getItem("language");
+      const stored = safeStorageGet("language");
       if (isSupportedLanguage(stored)) {
         return normalizeLanguage(stored);
       }

@@ -352,4 +352,63 @@ describe("App integration with MSW", () => {
 
     liveIdsSpy.mockRestore();
   });
+
+  it("renders with defaults when localStorage getItem and setItem throw", async () => {
+    const storageError = () => {
+      throw new DOMException("storage disabled", "SecurityError");
+    };
+    const getItemSpy = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(storageError);
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(storageError);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // jsdom has no matchMedia; ThemeProvider needs it for the "system" theme.
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+
+    try {
+      // Guard: the spies must actually reach window.localStorage.
+      expect(() => window.localStorage.getItem("probe")).toThrow();
+
+      vi.resetModules();
+      const { default: App } = await import("@/App");
+      const { ThemeProvider } = await import("@/components/theme-provider");
+      const client = new QueryClient();
+      render(
+        <QueryClientProvider client={client}>
+          <ThemeProvider>
+            <Suspense fallback={<div data-testid="loading">loading</div>}>
+              <App />
+            </Suspense>
+          </ThemeProvider>
+        </QueryClientProvider>,
+      );
+
+      // Default app is claude and the default view is the provider list.
+      await waitFor(() =>
+        expect(screen.getByTestId("provider-list").textContent).toContain(
+          "claude-1",
+        ),
+      );
+      expect(screen.getByTestId("app-switcher").textContent).toContain(
+        "claude",
+      );
+      expect(getItemSpy).toHaveBeenCalled();
+      expect(setItemSpy).toHaveBeenCalled();
+      expect(document.documentElement.classList.contains("dark")).toBe(false);
+    } finally {
+      getItemSpy.mockRestore();
+      setItemSpy.mockRestore();
+      warnSpy.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
 });
