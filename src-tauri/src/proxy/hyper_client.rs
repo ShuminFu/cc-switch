@@ -481,7 +481,6 @@ async fn connect_via_proxy(
     target_host: &str,
     target_port: u16,
 ) -> Result<ProxyStream, ProxyError> {
-    use base64::Engine;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let parsed = url::Url::parse(proxy_url)
@@ -495,14 +494,8 @@ async fn connect_via_proxy(
         .unwrap_or(if parsed.scheme() == "https" { 443 } else { 80 });
 
     // Build Proxy-Authorization header if credentials are present
-    let proxy_auth = if !parsed.username().is_empty() {
-        let password = parsed.password().unwrap_or("");
-        let credentials = format!("{}:{}", parsed.username(), password);
-        let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
-        Some(format!("Proxy-Authorization: Basic {encoded}\r\n"))
-    } else {
-        None
-    };
+    let proxy_auth =
+        proxy_auth_header(&parsed).map(|value| format!("Proxy-Authorization: {value}\r\n"));
 
     // Connect to the proxy
     let tcp = tokio::net::TcpStream::connect((proxy_host, proxy_port))
@@ -588,6 +581,26 @@ async fn connect_via_proxy(
     );
 
     Ok(stream)
+}
+
+/// Build the `Proxy-Authorization` header value (`Basic ...`) from the proxy
+/// URL's userinfo, or `None` when the URL carries no username.
+///
+/// `Url::username()` / `Url::password()` return the percent-encoded form, so
+/// both parts are decoded first; otherwise credentials containing characters
+/// such as `@ : # % / ?` or non-ASCII would be sent still encoded.
+fn proxy_auth_header(url: &url::Url) -> Option<String> {
+    use base64::Engine;
+    use percent_encoding::percent_decode_str;
+
+    if url.username().is_empty() {
+        return None;
+    }
+    let mut credentials: Vec<u8> = percent_decode_str(url.username()).collect();
+    credentials.push(b':');
+    credentials.extend(percent_decode_str(url.password().unwrap_or("")));
+    let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
+    Some(format!("Basic {encoded}"))
 }
 
 /// Parse the status code from a CONNECT response status line.
@@ -983,6 +996,47 @@ mod tests {
         assert_eq!(parse_connect_status("HTTP/1.1\r\n"), None);
         assert_eq!(parse_connect_status("HTTP/1.1 20 short\r\n"), None);
         assert_eq!(parse_connect_status("HTTP/1.1 abc\r\n"), None);
+    }
+
+    fn auth_header_for(raw: &str) -> Option<String> {
+        proxy_auth_header(&url::Url::parse(raw).unwrap())
+    }
+
+    fn basic(credentials: &[u8]) -> String {
+        use base64::Engine;
+        format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode(credentials)
+        )
+    }
+
+    #[test]
+    fn proxy_auth_header_percent_decodes_userinfo() {
+        assert_eq!(
+            auth_header_for("http://us%40er:p%40ss%3Aw0rd@127.0.0.1:8080"),
+            Some(basic(b"us@er:p@ss:w0rd"))
+        );
+        assert_eq!(
+            auth_header_for("http://user:a%23b%25c%2Fd%3Fe@127.0.0.1:8080"),
+            Some(basic(b"user:a#b%c/d?e"))
+        );
+        assert_eq!(
+            auth_header_for("http://%E7%94%A8%E6%88%B7:%C3%A9t%C3%A9@127.0.0.1:8080"),
+            Some(basic("用户:été".as_bytes()))
+        );
+    }
+
+    #[test]
+    fn proxy_auth_header_handles_missing_parts() {
+        assert_eq!(auth_header_for("http://127.0.0.1:8080"), None);
+        assert_eq!(
+            auth_header_for("http://user@127.0.0.1:8080"),
+            Some(basic(b"user:"))
+        );
+        assert_eq!(
+            auth_header_for("http://user:plain@127.0.0.1:8080"),
+            Some(basic(b"user:plain"))
+        );
     }
 
     /// Spawn a fake CONNECT proxy that answers with `response` and return its URL.
