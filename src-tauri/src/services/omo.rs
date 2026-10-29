@@ -62,6 +62,26 @@ pub const SLIM: OmoVariant = OmoVariant {
     import_label: "Imported Slim",
 };
 
+impl OmoVariant {
+    /// 按供应商分类查找变体（`omo` / `omo-slim`）
+    pub fn for_category(category: Option<&str>) -> Option<&'static OmoVariant> {
+        match category {
+            Some(c) if c == STANDARD.category => Some(&STANDARD),
+            Some(c) if c == SLIM.category => Some(&SLIM),
+            _ => None,
+        }
+    }
+
+    /// 与之互斥的另一个变体：OMO 与 OMO Slim 同时只能启用一个
+    pub fn counterpart(&self) -> &'static OmoVariant {
+        if self.category == STANDARD.category {
+            &SLIM
+        } else {
+            &STANDARD
+        }
+    }
+}
+
 // ── Service ────────────────────────────────────────────────────
 
 pub struct OmoService;

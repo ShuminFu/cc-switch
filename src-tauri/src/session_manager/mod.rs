@@ -373,25 +373,14 @@ fn delete_session_sqlite_with_db(
 }
 
 fn provider_roots(provider_id: &str) -> Result<Vec<PathBuf>, String> {
-    if let Some(source) = provider_id
+    provider_id
         .parse::<AppType>()
         .ok()
         // 只认规范 slug，别名不是会话来源标识
         .filter(|app| app.as_str() == provider_id)
-        .and_then(|app| crate::apps::adapter(&app))
-        .and_then(|adapter| adapter.session_source())
-    {
-        return Ok(source.session_roots());
-    }
-
-    let roots = match provider_id {
-        "opencode" => vec![opencode::get_opencode_data_dir()],
-        "openclaw" => vec![crate::openclaw_config::get_openclaw_dir().join("agents")],
-        "hermes" => vec![crate::hermes_config::get_hermes_dir().join("sessions")],
-        _ => return Err(format!("Unsupported provider: {provider_id}")),
-    };
-
-    Ok(roots)
+        .and_then(|app| crate::apps::adapter(&app).session_source())
+        .map(|source| source.session_roots())
+        .ok_or_else(|| format!("Unsupported provider: {provider_id}"))
 }
 
 fn canonicalize_existing_path(path: &Path, label: &str) -> Result<PathBuf, String> {

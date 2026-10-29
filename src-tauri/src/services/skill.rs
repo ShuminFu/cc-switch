@@ -502,43 +502,7 @@ impl SkillService {
     ///
     /// Claude Desktop 没有 skills 目录，返回 `Ok(None)`。
     pub fn get_app_skills_dir(app: &AppType) -> Result<Option<PathBuf>> {
-        if let Some(adapter) = crate::apps::adapter(app) {
-            return Ok(adapter.skills_dir());
-        }
-
-        // 目录覆盖：优先使用用户在 settings.json 中配置的 override 目录
-        match app {
-            AppType::OpenCode => {
-                if let Some(custom) = crate::settings::get_opencode_override_dir() {
-                    return Ok(Some(custom.join("skills")));
-                }
-            }
-            AppType::OpenClaw => {
-                if let Some(custom) = crate::settings::get_openclaw_override_dir() {
-                    return Ok(Some(custom.join("skills")));
-                }
-            }
-            AppType::Hermes => {
-                if let Some(custom) = crate::settings::get_hermes_override_dir() {
-                    return Ok(Some(custom.join("skills")));
-                }
-            }
-            // 已迁移到 AppAdapter 的应用在上方分派
-            _ => {}
-        }
-
-        // 默认路径：回退到用户主目录下的标准位置。
-        // 必须走 get_home_dir()（可被 CC_SWITCH_TEST_HOME 覆盖）：Windows 上 dirs::home_dir()
-        // 走 Known Folder API，测试无法隔离真实用户目录。
-        let home = crate::config::get_home_dir();
-
-        Ok(Some(match app {
-            AppType::OpenCode => home.join(".config").join("opencode").join("skills"),
-            AppType::OpenClaw => home.join(".openclaw").join("skills"),
-            AppType::Hermes => crate::hermes_config::get_hermes_dir().join("skills"),
-            // 已迁移到 AppAdapter 的应用在上方分派
-            _ => return Ok(None),
-        }))
+        Ok(crate::apps::adapter(app).skills_dir())
     }
 
     // ========== 统一管理方法 ==========

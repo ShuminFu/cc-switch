@@ -1,7 +1,6 @@
 use crate::config::write_json_file;
 use crate::error::AppError;
 use crate::provider::OpenCodeProviderConfig;
-use crate::settings::get_opencode_override_dir;
 use indexmap::IndexMap;
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
@@ -33,7 +32,8 @@ fn canonicalize_plugin_name(plugin_name: &str) -> String {
 }
 
 pub fn get_opencode_dir() -> PathBuf {
-    if let Some(override_dir) = get_opencode_override_dir() {
+    if let Some(override_dir) = crate::settings::override_dir(&crate::app_config::AppType::OpenCode)
+    {
         return override_dir;
     }
 

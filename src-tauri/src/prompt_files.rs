@@ -3,8 +3,6 @@ use std::path::PathBuf;
 use crate::app_config::AppType;
 use crate::apps::AppCaps;
 use crate::error::AppError;
-use crate::openclaw_config::get_openclaw_dir;
-use crate::opencode_config::get_opencode_dir;
 
 /// 返回指定应用所使用的提示词文件路径。
 ///
@@ -15,21 +13,9 @@ pub fn prompt_file_path(app: &AppType) -> Result<PathBuf, AppError> {
         return Err(AppError::unsupported(app, "Prompts"));
     }
 
-    if let Some(adapter) = crate::apps::adapter(app) {
-        return adapter
-            .prompt_file()
-            .ok_or_else(|| AppError::unsupported(app, "Prompts"));
-    }
-
-    let (base_dir, filename): (PathBuf, &str) = match app {
-        AppType::OpenCode => (get_opencode_dir(), "AGENTS.md"),
-        AppType::OpenClaw => (get_openclaw_dir(), "AGENTS.md"),
-        AppType::Hermes => (crate::hermes_config::get_hermes_dir(), "AGENTS.md"),
-        // 已迁移到 AppAdapter 的应用在上方分派
-        _ => return Err(AppError::unsupported(app, "Prompts")),
-    };
-
-    Ok(base_dir.join(filename))
+    crate::apps::adapter(app)
+        .prompt_file()
+        .ok_or_else(|| AppError::unsupported(app, "Prompts"))
 }
 
 #[cfg(test)]

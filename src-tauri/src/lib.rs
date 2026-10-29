@@ -13,7 +13,6 @@ mod database;
 mod deeplink;
 mod error;
 mod gemini_mcp;
-pub mod hermes_config;
 mod init_status;
 mod lightweight;
 #[cfg(target_os = "linux")]
@@ -23,8 +22,6 @@ mod linux_fix;
 pub mod live_config_testkit;
 mod mcp;
 mod model_capabilities;
-mod openclaw_config;
-mod opencode_config;
 mod panic_hook;
 pub mod paths;
 mod picked_paths;
@@ -55,6 +52,9 @@ use apps::codex::history_migration as codex_history_migration;
 use apps::codex::state_db as codex_state_db;
 use apps::gemini::config as gemini_config;
 use apps::grok::config as grok_config;
+pub use apps::hermes::config as hermes_config;
+use apps::openclaw::config as openclaw_config;
+use apps::opencode::config as opencode_config;
 
 pub use app_config::{AppType, InstalledSkill, McpApps, McpServer, MultiAppConfig, SkillApps};
 pub use codex_config::{get_codex_auth_path, get_codex_config_path, write_codex_live_atomic};

@@ -209,6 +209,17 @@ impl AppAdapter for CodexAdapter {
         settings
     }
 
+    /// key 在 `auth.OPENAI_API_KEY`，base URL 在 TOML `config` 字符串里
+    fn usage_credentials(&self, settings: &Value) -> (String, String) {
+        let auth = settings.get("auth");
+        let config_text = settings.get("config").and_then(|v| v.as_str());
+        let api_key = config::extract_codex_api_key(auth, config_text).unwrap_or_default();
+        let base_url = config_text
+            .and_then(config::extract_codex_base_url)
+            .unwrap_or_default();
+        (base_url, api_key)
+    }
+
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {
         let _auth = provider
             .settings_config

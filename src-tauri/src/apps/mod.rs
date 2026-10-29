@@ -10,7 +10,10 @@ pub mod claude_desktop;
 pub mod codex;
 pub mod gemini;
 pub mod grok;
+pub mod hermes;
 mod json_snippet;
+pub mod openclaw;
+pub mod opencode;
 pub mod registry;
 
 pub(crate) use json_snippet::{json_deep_merge, json_deep_remove, json_is_subset};
@@ -22,15 +25,17 @@ use crate::app_config::AppType;
 
 /// 返回应用的配置适配器。
 ///
-/// 尚未迁移到 [`AppAdapter`] 的应用返回 `None`，调用方继续走原有的按应用分派。
-pub fn adapter(app: &AppType) -> Option<&'static dyn AppAdapter> {
+/// 每个应用都有适配器；match 是穷尽的，新增 [`AppType`] 必须在这里接入。
+pub fn adapter(app: &AppType) -> &'static dyn AppAdapter {
     match app {
-        AppType::Claude => Some(&claude::ClaudeAdapter),
-        AppType::ClaudeDesktop => Some(&claude_desktop::ClaudeDesktopAdapter),
-        AppType::Codex => Some(&codex::CodexAdapter),
-        AppType::Gemini => Some(&gemini::GeminiAdapter),
-        AppType::GrokBuild => Some(&grok::GrokAdapter),
-        AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => None,
+        AppType::Claude => &claude::ClaudeAdapter,
+        AppType::ClaudeDesktop => &claude_desktop::ClaudeDesktopAdapter,
+        AppType::Codex => &codex::CodexAdapter,
+        AppType::Gemini => &gemini::GeminiAdapter,
+        AppType::GrokBuild => &grok::GrokAdapter,
+        AppType::OpenCode => &opencode::OpenCodeAdapter,
+        AppType::OpenClaw => &openclaw::OpenClawAdapter,
+        AppType::Hermes => &hermes::HermesAdapter,
     }
 }
 
@@ -76,15 +81,9 @@ mod tests {
             ("prompt_files.rs", include_str!("../prompt_files.rs")),
             ("commands/config.rs", include_str!("../commands/config.rs")),
         ];
-        let migrated: Vec<&AppDescriptor> = APPS
-            .iter()
-            .filter(|descriptor| adapter(&descriptor.app).is_some())
-            .collect();
-        assert!(!migrated.is_empty());
-
         for (name, src) in sources {
             let production = production_source(src);
-            for descriptor in &migrated {
+            for descriptor in APPS {
                 let pattern = format!("AppType::{:?}", descriptor.app);
                 let hits: Vec<_> = production
                     .lines()
@@ -100,28 +99,137 @@ mod tests {
         }
     }
 
+    /// apps/** 之外的生产代码里以 `AppType::` 变体做分支的 `match`。
+    ///
+    /// 返回 `(相对 src 的路径, match 所在行)`。测试模块、注释与 apps/** 不计入。
+    fn match_app_sites() -> Vec<(String, String)> {
+        fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
+            let mut entries: Vec<_> = std::fs::read_dir(dir)
+                .expect("read src dir")
+                .map(|entry| entry.expect("dir entry").path())
+                .collect();
+            entries.sort();
+            for path in entries {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if path.is_dir() {
+                    if rel != "apps" {
+                        walk(&path, root, out);
+                    }
+                    continue;
+                }
+                if path.extension().is_none_or(|ext| ext != "rs") {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&path).expect("read source");
+                let production = production_source(&src);
+                let lines: Vec<&str> = production.lines().map(str::trim).collect();
+                for (i, line) in lines.iter().enumerate() {
+                    let is_match = !line.starts_with("//")
+                        && line.ends_with('{')
+                        && line
+                            .split(|c: char| !c.is_alphanumeric() && c != '_')
+                            .any(|word| word == "match");
+                    if !is_match {
+                        continue;
+                    }
+                    let first_arm = lines[i + 1..]
+                        .iter()
+                        .find(|next| {
+                            !next.is_empty() && !next.starts_with("//") && !next.starts_with('#')
+                        })
+                        .copied()
+                        .unwrap_or("");
+                    if first_arm.starts_with("AppType::")
+                        || first_arm.starts_with("crate::app_config::AppType::")
+                    {
+                        out.push((rel.clone(), line.to_string()));
+                    }
+                }
+            }
+        }
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sites = Vec::new();
+        walk(&root, &root, &mut sites);
+        sites
+    }
+
+    /// match-app 站点计数（CI 通过 `cargo test` 执行）。
+    ///
+    /// CCS-149 前为 56 处（同一统计口径），之后的上限见 [`MATCH_APP_SITE_BUDGET`]，只允许下降。
+    /// P4 退出目标是 15 处以内，剩余站点集中在接管引擎（services/proxy.rs，
+    /// CCS-153/154）和按应用状态（settings.rs / app_config.rs，CCS-155）。
+    const MATCH_APP_SITE_BUDGET: usize = 40;
+
     #[test]
-    fn migrated_apps_have_adapters() {
-        let migrated: Vec<AppType> = APPS
+    fn match_app_sites_outside_apps_stay_within_budget() {
+        let sites = match_app_sites();
+        let listing = sites
             .iter()
-            .map(|descriptor| descriptor.app.clone())
-            .filter(|app| adapter(app).is_some())
-            .collect();
-        assert_eq!(
-            migrated,
-            vec![
-                AppType::Claude,
-                AppType::ClaudeDesktop,
-                AppType::Codex,
-                AppType::Gemini,
-                AppType::GrokBuild
-            ]
+            .map(|(file, line)| format!("{file}: {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for file in [
+            "services/provider/live.rs",
+            "services/provider/mod.rs",
+            "prompt_files.rs",
+            "services/skill.rs",
+            "commands/config.rs",
+        ] {
+            assert!(
+                sites.iter().all(|(site_file, _)| site_file != file),
+                "{file} must not match on AppType; dispatch through apps::adapter():\n{listing}"
+            );
+        }
+
+        assert!(
+            sites.len() <= MATCH_APP_SITE_BUDGET,
+            "{} match-app sites outside apps/** (budget {MATCH_APP_SITE_BUDGET}); \
+             dispatch through apps::adapter() instead:\n{listing}",
+            sites.len()
         );
     }
 
     #[test]
+    fn adapter_capabilities_match_registry() {
+        for descriptor in APPS {
+            let adapter = adapter(&descriptor.app);
+            assert_eq!(
+                adapter.prompt_file().is_some(),
+                descriptor.has(AppCaps::PROMPTS),
+                "{} prompt file vs PROMPTS cap",
+                descriptor.slug
+            );
+            assert_eq!(
+                adapter.mcp().is_some(),
+                descriptor.has(AppCaps::MCP),
+                "{} MCP projector vs MCP cap",
+                descriptor.slug
+            );
+            assert_eq!(
+                adapter.takeover().is_some(),
+                descriptor.has(AppCaps::PROXY_TAKEOVER),
+                "{} takeover vs PROXY_TAKEOVER cap",
+                descriptor.slug
+            );
+            if descriptor.sync_mode == SyncMode::Additive {
+                assert!(
+                    adapter.import_live().is_err(),
+                    "{} imports per provider, not as `default`",
+                    descriptor.slug
+                );
+            }
+        }
+    }
+
+    #[test]
     fn adapter_paths_match_legacy_layout() {
-        let gemini = adapter(&AppType::Gemini).expect("gemini adapter");
+        let gemini = adapter(&AppType::Gemini);
         let gemini_dir = gemini.config_dir().unwrap();
         assert_eq!(gemini_dir, crate::gemini_config::get_gemini_dir());
         assert_eq!(gemini.prompt_file(), Some(gemini_dir.join("GEMINI.md")));
@@ -134,7 +242,7 @@ mod tests {
             vec![gemini_dir.join("tmp")]
         );
 
-        let grok = adapter(&AppType::GrokBuild).expect("grok adapter");
+        let grok = adapter(&AppType::GrokBuild);
         let grok_dir = grok.config_dir().unwrap();
         assert_eq!(grok_dir, crate::grok_config::get_grok_config_dir());
         assert_eq!(grok.prompt_file(), Some(grok_dir.join("AGENTS.md")));
@@ -149,7 +257,7 @@ mod tests {
             ]
         );
 
-        let claude = adapter(&AppType::Claude).expect("claude adapter");
+        let claude = adapter(&AppType::Claude);
         let claude_dir = claude.config_dir().unwrap();
         assert_eq!(claude_dir, crate::config::get_claude_config_dir());
         assert_eq!(
@@ -170,7 +278,7 @@ mod tests {
             vec![claude_dir.join("projects")]
         );
 
-        let desktop = adapter(&AppType::ClaudeDesktop).expect("claude desktop adapter");
+        let desktop = adapter(&AppType::ClaudeDesktop);
         assert_eq!(desktop.prompt_file(), None);
         assert_eq!(desktop.skills_dir(), None);
         assert!(desktop.mcp().is_none());
@@ -180,7 +288,7 @@ mod tests {
         assert!(!desktop.takeover_uses_live_backup());
         assert!(claude.takeover_uses_live_backup());
 
-        let codex = adapter(&AppType::Codex).expect("codex adapter");
+        let codex = adapter(&AppType::Codex);
         let codex_dir = codex.config_dir().unwrap();
         assert_eq!(codex_dir, crate::codex_config::get_codex_config_dir());
         assert_eq!(
@@ -201,11 +309,99 @@ mod tests {
             crate::session_manager::providers::codex::session_roots()
         );
         assert!(codex.takeover_uses_live_backup());
+
+        let opencode = adapter(&AppType::OpenCode);
+        let opencode_dir = opencode.config_dir().unwrap();
+        assert_eq!(opencode_dir, crate::opencode_config::get_opencode_dir());
+        assert_eq!(opencode.prompt_file(), Some(opencode_dir.join("AGENTS.md")));
+        assert_eq!(
+            opencode.skills_dir(),
+            Some(
+                crate::config::get_home_dir()
+                    .join(".config")
+                    .join("opencode")
+                    .join("skills")
+            )
+        );
+        assert_eq!(
+            opencode
+                .session_source()
+                .expect("opencode sessions")
+                .session_roots(),
+            vec![crate::session_manager::providers::opencode::get_opencode_data_dir()]
+        );
+
+        let openclaw = adapter(&AppType::OpenClaw);
+        let openclaw_dir = openclaw.config_dir().unwrap();
+        assert_eq!(openclaw_dir, crate::openclaw_config::get_openclaw_dir());
+        assert_eq!(openclaw.prompt_file(), Some(openclaw_dir.join("AGENTS.md")));
+        assert_eq!(
+            openclaw.skills_dir(),
+            Some(
+                crate::config::get_home_dir()
+                    .join(".openclaw")
+                    .join("skills")
+            )
+        );
+        assert_eq!(
+            openclaw
+                .session_source()
+                .expect("openclaw sessions")
+                .session_roots(),
+            vec![openclaw_dir.join("agents")]
+        );
+
+        let hermes = adapter(&AppType::Hermes);
+        let hermes_dir = hermes.config_dir().unwrap();
+        assert_eq!(hermes_dir, crate::hermes_config::get_hermes_dir());
+        assert_eq!(hermes.prompt_file(), Some(hermes_dir.join("AGENTS.md")));
+        assert_eq!(hermes.skills_dir(), Some(hermes_dir.join("skills")));
+        assert_eq!(
+            hermes
+                .session_source()
+                .expect("hermes sessions")
+                .session_roots(),
+            vec![hermes_dir.join("sessions")]
+        );
+    }
+
+    #[test]
+    fn usage_credentials_follow_each_app_shape() {
+        let cases = [
+            (
+                AppType::OpenCode,
+                json!({ "options": { "baseURL": "https://a", "apiKey": "k1" } }),
+            ),
+            (
+                AppType::OpenClaw,
+                json!({ "baseUrl": "https://a", "apiKey": "k1" }),
+            ),
+            (
+                AppType::Hermes,
+                json!({ "base_url": "https://a", "api_key": "k1" }),
+            ),
+            (
+                AppType::Claude,
+                json!({ "env": { "ANTHROPIC_BASE_URL": "https://a", "ANTHROPIC_AUTH_TOKEN": "", "ANTHROPIC_API_KEY": "k1" } }),
+            ),
+        ];
+        for (app, settings) in cases {
+            assert_eq!(
+                adapter(&app).usage_credentials(&settings),
+                ("https://a".to_string(), "k1".to_string()),
+                "{app:?}"
+            );
+            assert_eq!(
+                adapter(&app).usage_credentials(&json!({})),
+                (String::new(), String::new()),
+                "{app:?}"
+            );
+        }
     }
 
     #[test]
     fn gemini_credentials_default_base_url() {
-        let gemini = adapter(&AppType::Gemini).unwrap();
+        let gemini = adapter(&AppType::Gemini);
         let provider = Provider::with_id(
             "p".to_string(),
             "P".to_string(),
@@ -225,7 +421,7 @@ mod tests {
 
     #[test]
     fn grok_credentials_come_from_config_toml() {
-        let grok = adapter(&AppType::GrokBuild).unwrap();
+        let grok = adapter(&AppType::GrokBuild);
         let provider = Provider::with_id(
             "p".to_string(),
             "P".to_string(),
@@ -243,7 +439,6 @@ mod tests {
     #[test]
     fn gemini_common_snippet_round_trips_env() {
         let common = adapter(&AppType::Gemini)
-            .unwrap()
             .common_snippet()
             .expect("gemini common snippet");
         let settings = json!({
@@ -268,12 +463,12 @@ mod tests {
     #[test]
     fn takeover_placeholder_detection() {
         let token = crate::proxy::inbound_auth::LEGACY_PROXY_TOKEN;
-        let gemini = adapter(&AppType::Gemini).unwrap().takeover().unwrap();
+        let gemini = adapter(&AppType::Gemini).takeover().unwrap();
         assert!(gemini.has_placeholder(&json!({ "env": { "GEMINI_API_KEY": token } })));
         assert!(!gemini.has_placeholder(&json!({ "env": { "GEMINI_API_KEY": "sk-real" } })));
         assert!(!gemini.has_placeholder(&json!({})));
 
-        let claude = adapter(&AppType::Claude).unwrap().takeover().unwrap();
+        let claude = adapter(&AppType::Claude).takeover().unwrap();
         for key in [
             "ANTHROPIC_AUTH_TOKEN",
             "ANTHROPIC_API_KEY",
@@ -288,7 +483,7 @@ mod tests {
         assert!(!claude.has_placeholder(&json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "sk-real" } })));
         assert!(!claude.has_placeholder(&json!({ "env": { "GOOGLE_API_KEY": token } })));
 
-        let grok = adapter(&AppType::GrokBuild).unwrap().takeover().unwrap();
+        let grok = adapter(&AppType::GrokBuild).takeover().unwrap();
         let config = |key: &str| {
             json!({
                 "config": format!(
@@ -302,7 +497,7 @@ mod tests {
 
     #[test]
     fn claude_credentials_prefer_auth_token() {
-        let claude = adapter(&AppType::Claude).unwrap();
+        let claude = adapter(&AppType::Claude);
         let provider = Provider::with_id(
             "p".to_string(),
             "P".to_string(),
@@ -328,12 +523,10 @@ mod tests {
     #[test]
     fn claude_common_snippet_round_trips_and_syncs_from_live() {
         let common = adapter(&AppType::Claude)
-            .unwrap()
             .common_snippet()
             .expect("claude common snippet");
         assert!(common.sync_from_live());
         assert!(!adapter(&AppType::Gemini)
-            .unwrap()
             .common_snippet()
             .unwrap()
             .sync_from_live());
@@ -360,7 +553,7 @@ mod tests {
 
     #[test]
     fn claude_normalizes_legacy_small_fast_model() {
-        let claude = adapter(&AppType::Claude).unwrap();
+        let claude = adapter(&AppType::Claude);
         let mut settings = json!({ "env": { "ANTHROPIC_SMALL_FAST_MODEL": "haiku" } });
         assert!(claude.normalize_settings(&mut settings));
         assert_eq!(settings["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "haiku");
@@ -368,14 +561,12 @@ mod tests {
         assert!(!claude.normalize_settings(&mut settings));
 
         let mut gemini_settings = json!({ "env": { "ANTHROPIC_SMALL_FAST_MODEL": "haiku" } });
-        assert!(!adapter(&AppType::Gemini)
-            .unwrap()
-            .normalize_settings(&mut gemini_settings));
+        assert!(!adapter(&AppType::Gemini).normalize_settings(&mut gemini_settings));
     }
 
     #[test]
     fn claude_desktop_live_io_requires_switch_flow() {
-        let desktop = adapter(&AppType::ClaudeDesktop).unwrap();
+        let desktop = adapter(&AppType::ClaudeDesktop);
         assert!(desktop.read_live().is_err());
         assert!(desktop.import_live().is_err());
         let provider = Provider::with_id("p".to_string(), "P".to_string(), json!({}), None);

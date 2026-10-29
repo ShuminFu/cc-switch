@@ -93,6 +93,11 @@ impl AppAdapter for ClaudeAdapter {
         settings
     }
 
+    /// Anthropic 风格的 env，保留 JS 脚本路径依赖的 OpenRouter / Google key 兜底
+    fn usage_credentials(&self, settings: &Value) -> (String, String) {
+        anthropic_usage_credentials(settings)
+    }
+
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {
         let env = provider
             .settings_config
@@ -240,4 +245,20 @@ fn read_settings() -> Result<Value, AppError> {
 fn parse_snippet(snippet: &str) -> Result<Value, AppError> {
     serde_json::from_str::<Value>(snippet)
         .map_err(|e| AppError::Message(format!("Invalid Claude common config: {e}")))
+}
+
+/// Claude 与 Claude Desktop 共用的 Anthropic 风格用量凭据
+pub(super) fn anthropic_usage_credentials(settings: &Value) -> (String, String) {
+    let env = settings.get("env");
+    let base_url = super::adapter::str_or_empty(env.and_then(|e| e.get("ANTHROPIC_BASE_URL")));
+    let api_key = super::adapter::first_non_empty_str(
+        env,
+        &[
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "OPENROUTER_API_KEY",
+            "GOOGLE_API_KEY",
+        ],
+    );
+    (base_url, api_key)
 }

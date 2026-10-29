@@ -2315,7 +2315,7 @@ impl ProxyService {
     /// 占位符判定已迁移到 `AppAdapter::takeover()` 的应用
     fn adapter_live_has_placeholder(app_type: &AppType, config: &Value) -> bool {
         crate::apps::adapter(app_type)
-            .and_then(|adapter| adapter.takeover())
+            .takeover()
             .is_some_and(|takeover| takeover.has_placeholder(config))
     }
 
@@ -3009,7 +3009,7 @@ impl ProxyService {
         // backup config), so the catalog tool profile can't be recovered here.
         // Default to ProxyChat: a restored native-direct backup keeps its inline
         // modelCatalog but would not get apply_patch re-stripped until the next
-        // provider switch rewrites it via write_live_snapshot. Acceptable known
+        // provider switch rewrites it via the Codex adapter. Acceptable known
         // limitation (restore-of-deleted-provider-backup only).
         let prepared_cfg = config_str
             .map(|cfg| {

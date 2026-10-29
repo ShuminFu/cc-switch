@@ -68,6 +68,14 @@ impl AppAdapter for GrokAdapter {
         settings
     }
 
+    fn usage_credentials(&self, settings: &Value) -> (String, String) {
+        settings
+            .get("config")
+            .and_then(Value::as_str)
+            .and_then(config::extract_credentials)
+            .unwrap_or_default()
+    }
+
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {
         let config_toml = provider
             .settings_config

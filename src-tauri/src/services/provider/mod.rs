@@ -37,11 +37,6 @@ pub(crate) use live::{
     write_live_with_common_config,
 };
 
-// Internal re-exports
-use live::{
-    remove_hermes_provider_from_live, remove_openclaw_provider_from_live,
-    remove_opencode_provider_from_live,
-};
 use usage::validate_usage_script;
 
 /// The built-in Codex official provider is safe to select during takeover:
@@ -49,7 +44,7 @@ use usage::validate_usage_script;
 /// authenticated request. Other official providers retain the existing block.
 pub fn official_provider_supports_proxy_takeover(app_type: &AppType, provider: &Provider) -> bool {
     crate::apps::adapter(app_type)
-        .and_then(|adapter| adapter.takeover())
+        .takeover()
         .is_some_and(|takeover| takeover.official_provider_supported(provider))
 }
 
@@ -2127,11 +2122,9 @@ requires_openai_auth = true
 
 impl ProviderService {
     fn normalize_provider_settings(app_type: &AppType, provider: &mut Provider) {
-        if let Some(adapter) = crate::apps::adapter(app_type) {
-            let mut v = provider.settings_config.clone();
-            if adapter.normalize_settings(&mut v) {
-                provider.settings_config = v;
-            }
+        let mut v = provider.settings_config.clone();
+        if crate::apps::adapter(app_type).normalize_settings(&mut v) {
+            provider.settings_config = v;
         }
     }
 
@@ -2154,6 +2147,14 @@ impl ProviderService {
             .meta
             .as_ref()
             .and_then(|meta| meta.live_config_managed)
+    }
+
+    /// OMO / OMO Slim 变体（只有 OpenCode 的对应分类返回 `Some`）
+    fn omo_variant(
+        app_type: &AppType,
+        provider: &Provider,
+    ) -> Option<&'static crate::services::omo::OmoVariant> {
+        crate::apps::adapter(app_type).omo_variant(provider.category.as_deref())
     }
 
     fn set_provider_live_config_managed(provider: &mut Provider, managed: bool) {
@@ -2289,9 +2290,7 @@ impl ProviderService {
         // Additive mode apps (OpenCode, OpenClaw): optionally write to live config.
         if app_type.is_additive_mode() {
             // OMO / OMO Slim providers use exclusive mode and write to dedicated config file.
-            if matches!(app_type, AppType::OpenCode)
-                && matches!(provider.category.as_deref(), Some("omo") | Some("omo-slim"))
-            {
+            if Self::omo_variant(&app_type, &provider).is_some() {
                 // Do not auto-enable newly added OMO / OMO Slim providers.
                 // Users must explicitly switch/apply an OMO provider to activate it.
                 return Ok(true);
@@ -2354,12 +2353,7 @@ impl ProviderService {
             // (set_omo_provider_current) that is NOT captured by provider_exists_in_live_config,
             // which only checks opencode.json. A rename would orphan that current-state marker
             // and silently break subsequent OMO file syncs. Block it unconditionally.
-            if matches!(app_type, AppType::OpenCode)
-                && matches!(
-                    existing_provider.category.as_deref(),
-                    Some("omo") | Some("omo-slim")
-                )
-            {
+            if Self::omo_variant(&app_type, &existing_provider).is_some() {
                 return Err(AppError::Message(
                     "Provider key cannot be changed for OMO/OMO Slim providers".to_string(),
                 ));
@@ -2409,16 +2403,7 @@ impl ProviderService {
         // Additive mode apps (OpenCode, OpenClaw): only sync to live when the provider
         // already exists in live config. Editing a DB-only provider must not auto-add it.
         if app_type.is_additive_mode() {
-            let omo_variant = if matches!(app_type, AppType::OpenCode) {
-                match provider.category.as_deref() {
-                    Some("omo") => Some(&crate::services::omo::STANDARD),
-                    Some("omo-slim") => Some(&crate::services::omo::SLIM),
-                    _ => None,
-                }
-            } else {
-                None
-            };
-            if let Some(variant) = omo_variant {
+            if let Some(variant) = Self::omo_variant(&app_type, &provider) {
                 let is_current = state.db.is_omo_provider_current(
                     app_type.as_str(),
                     &provider.id,
@@ -2539,28 +2524,22 @@ impl ProviderService {
             // Single DB read shared across all additive-mode sub-paths below.
             let existing = state.db.get_provider_by_id(id, app_type.as_str())?;
 
-            if matches!(app_type, AppType::OpenCode) {
-                let provider_category = existing.as_ref().and_then(|p| p.category.clone());
-                let omo_variant = match provider_category.as_deref() {
-                    Some("omo") => Some(&crate::services::omo::STANDARD),
-                    Some("omo-slim") => Some(&crate::services::omo::SLIM),
-                    _ => None,
-                };
-                if let Some(variant) = omo_variant {
-                    let was_current = state.db.is_omo_provider_current(
-                        app_type.as_str(),
-                        id,
-                        variant.category,
-                    )?;
-                    state.db.delete_provider(app_type.as_str(), id)?;
-                    if was_current {
-                        crate::services::OmoService::delete_config_file(variant)?;
-                    }
-                    return Ok(());
+            let omo_variant = existing
+                .as_ref()
+                .and_then(|p| Self::omo_variant(&app_type, p));
+            if let Some(variant) = omo_variant {
+                let was_current =
+                    state
+                        .db
+                        .is_omo_provider_current(app_type.as_str(), id, variant.category)?;
+                state.db.delete_provider(app_type.as_str(), id)?;
+                if was_current {
+                    crate::services::OmoService::delete_config_file(variant)?;
                 }
+                return Ok(());
             }
 
-            // Non-OMO path for both OpenCode and OpenClaw:
+            // Non-OMO path for every additive app:
             // remove from live first (atomicity), then DB.
             //
             // Use check_live_config_exists rather than trusting the flag alone: the flag
@@ -2571,16 +2550,7 @@ impl ProviderService {
                 .as_ref()
                 .and_then(Self::provider_live_config_managed);
             if Self::check_live_config_exists(&app_type, id, live_managed)? {
-                match app_type {
-                    AppType::OpenCode => remove_opencode_provider_from_live(id)?,
-                    AppType::OpenClaw => remove_openclaw_provider_from_live(id)?,
-                    AppType::Hermes => remove_hermes_provider_from_live(id)?,
-                    _ => {
-                        if let Some(adapter) = crate::apps::adapter(&app_type) {
-                            adapter.remove_provider(id)?;
-                        }
-                    }
-                }
+                crate::apps::adapter(&app_type).remove_provider(id)?;
             }
             state.db.delete_provider(app_type.as_str(), id)?;
             return Ok(());
@@ -2609,47 +2579,32 @@ impl ProviderService {
         app_type: AppType,
         id: &str,
     ) -> Result<(), AppError> {
-        match app_type {
-            AppType::OpenCode => {
-                let provider_category = state
-                    .db
-                    .get_provider_by_id(id, app_type.as_str())?
-                    .and_then(|p| p.category);
+        if !app_type.is_additive_mode() {
+            return Err(AppError::Message(format!(
+                "App {} does not support remove from live config",
+                app_type.as_str()
+            )));
+        }
 
-                let omo_variant = match provider_category.as_deref() {
-                    Some("omo") => Some(&crate::services::omo::STANDARD),
-                    Some("omo-slim") => Some(&crate::services::omo::SLIM),
-                    _ => None,
-                };
-                if let Some(variant) = omo_variant {
-                    state
-                        .db
-                        .clear_omo_provider_current(app_type.as_str(), id, variant.category)?;
-                    let still_has_current = state
-                        .db
-                        .get_current_omo_provider("opencode", variant.category)?
-                        .is_some();
-                    if still_has_current {
-                        crate::services::OmoService::write_config_to_file(state, variant)?;
-                    } else {
-                        crate::services::OmoService::delete_config_file(variant)?;
-                    }
-                } else {
-                    remove_opencode_provider_from_live(id)?;
-                }
+        let omo_variant = state
+            .db
+            .get_provider_by_id(id, app_type.as_str())?
+            .and_then(|p| Self::omo_variant(&app_type, &p));
+        if let Some(variant) = omo_variant {
+            state
+                .db
+                .clear_omo_provider_current(app_type.as_str(), id, variant.category)?;
+            let still_has_current = state
+                .db
+                .get_current_omo_provider(app_type.as_str(), variant.category)?
+                .is_some();
+            if still_has_current {
+                crate::services::OmoService::write_config_to_file(state, variant)?;
+            } else {
+                crate::services::OmoService::delete_config_file(variant)?;
             }
-            AppType::OpenClaw => {
-                remove_openclaw_provider_from_live(id)?;
-            }
-            AppType::Hermes => {
-                remove_hermes_provider_from_live(id)?;
-            }
-            _ => {
-                return Err(AppError::Message(format!(
-                    "App {} does not support remove from live config",
-                    app_type.as_str()
-                )));
-            }
+        } else {
+            crate::apps::adapter(&app_type).remove_provider(id)?;
         }
 
         if let Some(mut provider) = state.db.get_provider_by_id(id, app_type.as_str())? {
@@ -2689,15 +2644,8 @@ impl ProviderService {
             .get(id)
             .ok_or_else(|| AppError::Message(format!("供应商 {id} 不存在")))?;
 
-        // OMO providers are switched through their own exclusive path.
-        if matches!(app_type, AppType::OpenCode) && _provider.category.as_deref() == Some("omo") {
-            return Self::switch_normal(state, app_type, id, &providers);
-        }
-
-        // OMO Slim providers are switched through their own exclusive path.
-        if matches!(app_type, AppType::OpenCode)
-            && _provider.category.as_deref() == Some("omo-slim")
-        {
+        // OMO / OMO Slim providers are switched through their own exclusive path.
+        if Self::omo_variant(&app_type, _provider).is_some() {
             return Self::switch_normal(state, app_type, id, &providers);
         }
 
@@ -2771,22 +2719,13 @@ impl ProviderService {
             .ok_or_else(|| AppError::Message(format!("供应商 {id} 不存在")))?;
 
         // OMO ↔ OMO Slim are mutually exclusive; activating one removes the other's config file.
-        if matches!(app_type, AppType::OpenCode) {
-            let omo_pair = match provider.category.as_deref() {
-                Some("omo") => Some((&crate::services::omo::STANDARD, &crate::services::omo::SLIM)),
-                Some("omo-slim") => {
-                    Some((&crate::services::omo::SLIM, &crate::services::omo::STANDARD))
-                }
-                _ => None,
-            };
-            if let Some((enable, disable)) = omo_pair {
-                state
-                    .db
-                    .set_omo_provider_current(app_type.as_str(), id, enable.category)?;
-                crate::services::OmoService::write_config_to_file(state, enable)?;
-                let _ = crate::services::OmoService::delete_config_file(disable);
-                return Ok(SwitchResult::default());
-            }
+        if let Some(enable) = Self::omo_variant(&app_type, provider) {
+            state
+                .db
+                .set_omo_provider_current(app_type.as_str(), id, enable.category)?;
+            crate::services::OmoService::write_config_to_file(state, enable)?;
+            let _ = crate::services::OmoService::delete_config_file(enable.counterpart());
+            return Ok(SwitchResult::default());
         }
 
         let mut result = SwitchResult::default();
@@ -2847,23 +2786,20 @@ impl ProviderService {
         // Sync to live (write_gemini_live handles security flag internally for Gemini)
         write_live_with_common_config(state.db.as_ref(), &app_type, provider)?;
 
-        // Hermes is additive, so "switching" doesn't overwrite a live config file
-        // — we instead update the top-level `model:` section to point at this
-        // provider's first declared model. Without this, clicking "switch" would
-        // only shuffle entries in custom_providers[] while Hermes keeps using
-        // whatever `model.provider` was set before.
-        if matches!(app_type, AppType::Hermes) {
-            if let Err(e) =
-                crate::hermes_config::apply_switch_defaults(&provider.id, &provider.settings_config)
-            {
-                log::warn!(
-                    "Failed to update Hermes model defaults after switching to '{}': {e}",
-                    provider.id
-                );
-                result
-                    .warnings
-                    .push(format!("hermes_model_defaults_failed:{}", provider.id));
-            }
+        // Additive apps keep every provider in the live file, so writing the entry does
+        // not change which one the app uses. Hermes points its top-level `model:`
+        // section at this provider here (see AppAdapter::apply_switch_defaults).
+        if let Err(e) = crate::apps::adapter(&app_type).apply_switch_defaults(provider) {
+            log::warn!(
+                "Failed to update {} model defaults after switching to '{}': {e}",
+                app_type.as_str(),
+                provider.id
+            );
+            result.warnings.push(format!(
+                "{}_model_defaults_failed:{}",
+                app_type.as_str(),
+                provider.id
+            ));
         }
 
         // For additive-mode providers that were DB-only (live_config_managed == Some(false)),
@@ -2877,12 +2813,7 @@ impl ProviderService {
             let mut updated = provider.clone();
             Self::set_provider_live_config_managed(&mut updated, true);
             if let Err(e) = state.db.save_provider(app_type.as_str(), &updated) {
-                let rollback_result = match app_type {
-                    AppType::OpenCode => remove_opencode_provider_from_live(&provider.id),
-                    AppType::OpenClaw => remove_openclaw_provider_from_live(&provider.id),
-                    AppType::Hermes => remove_hermes_provider_from_live(&provider.id),
-                    _ => Ok(()),
-                };
+                let rollback_result = crate::apps::adapter(&app_type).remove_provider(&provider.id);
 
                 match rollback_result {
                     Ok(()) => {
@@ -3074,12 +3005,9 @@ impl ProviderService {
         result: &mut SwitchResult,
     ) {
         // 作用域限定 Claude + Codex（见函数文档）。
-        let in_scope = match crate::apps::adapter(app_type) {
-            Some(adapter) => adapter
-                .common_snippet()
-                .is_some_and(|common| common.sync_from_live()),
-            None => false,
-        };
+        let in_scope = crate::apps::adapter(app_type)
+            .common_snippet()
+            .is_some_and(|common| common.sync_from_live());
         if !in_scope {
             return;
         }
@@ -3172,63 +3100,11 @@ impl ProviderService {
         app_type: AppType,
         settings_config: &Value,
     ) -> Result<String, AppError> {
-        if let Some(adapter) = crate::apps::adapter(&app_type) {
-            return match adapter.common_snippet() {
-                Some(common) => common.extract(settings_config),
-                None => Ok(String::new()),
-            };
+        match crate::apps::adapter(&app_type).common_snippet() {
+            Some(common) => common.extract(settings_config),
+            // Hermes doesn't use common config snippets
+            None => Ok(String::new()),
         }
-
-        match app_type {
-            AppType::OpenCode => Self::extract_opencode_common_config(settings_config),
-            AppType::OpenClaw => Self::extract_openclaw_common_config(settings_config),
-            // Hermes doesn't use common config snippets; adapter-backed apps are handled above
-            _ => Ok(String::new()),
-        }
-    }
-
-    /// Extract common config for OpenCode (JSON format)
-    fn extract_opencode_common_config(settings: &Value) -> Result<String, AppError> {
-        // OpenCode uses a different config structure with npm, options, models
-        // For common config, we exclude provider-specific fields like apiKey
-        let mut config = settings.clone();
-
-        // Remove provider-specific fields
-        if let Some(obj) = config.as_object_mut() {
-            if let Some(options) = obj.get_mut("options").and_then(|v| v.as_object_mut()) {
-                options.remove("apiKey");
-                options.remove("baseURL");
-            }
-            // Keep npm and models as they might be common
-        }
-
-        if config.is_null() || (config.is_object() && config.as_object().unwrap().is_empty()) {
-            return Ok("{}".to_string());
-        }
-
-        serde_json::to_string_pretty(&config)
-            .map_err(|e| AppError::Message(format!("Serialization failed: {e}")))
-    }
-
-    /// Extract common config for OpenClaw (JSON format)
-    fn extract_openclaw_common_config(settings: &Value) -> Result<String, AppError> {
-        // OpenClaw uses a different config structure with baseUrl, apiKey, api, models
-        // For common config, we exclude provider-specific fields like apiKey
-        let mut config = settings.clone();
-
-        // Remove provider-specific fields
-        if let Some(obj) = config.as_object_mut() {
-            obj.remove("apiKey");
-            obj.remove("baseUrl");
-            // Keep api and models as they might be common
-        }
-
-        if config.is_null() || (config.is_object() && config.as_object().unwrap().is_empty()) {
-            return Ok("{}".to_string());
-        }
-
-        serde_json::to_string_pretty(&config)
-            .map_err(|e| AppError::Message(format!("Serialization failed: {e}")))
     }
 
     /// Import default configuration from live files (re-export)
@@ -3350,46 +3226,7 @@ impl ProviderService {
     }
 
     fn validate_provider_settings(app_type: &AppType, provider: &Provider) -> Result<(), AppError> {
-        if let Some(adapter) = crate::apps::adapter(app_type) {
-            adapter.validate_provider(provider)?;
-        } else {
-            match app_type {
-                AppType::OpenCode => {
-                    // OpenCode uses a different config structure: { npm, options, models }
-                    // Basic validation - must be an object
-                    if !provider.settings_config.is_object() {
-                        return Err(AppError::localized(
-                            "provider.opencode.settings.not_object",
-                            "OpenCode 配置必须是 JSON 对象",
-                            "OpenCode configuration must be a JSON object",
-                        ));
-                    }
-                }
-                AppType::OpenClaw => {
-                    // OpenClaw uses config structure: { baseUrl, apiKey, api, models }
-                    // Basic validation - must be an object
-                    if !provider.settings_config.is_object() {
-                        return Err(AppError::localized(
-                            "provider.openclaw.settings.not_object",
-                            "OpenClaw 配置必须是 JSON 对象",
-                            "OpenClaw configuration must be a JSON object",
-                        ));
-                    }
-                }
-                AppType::Hermes => {
-                    // Hermes: accept any JSON object for now
-                    if !provider.settings_config.is_object() {
-                        return Err(AppError::localized(
-                            "provider.hermes.settings.not_object",
-                            "Hermes 配置必须是 JSON 对象",
-                            "Hermes configuration must be a JSON object",
-                        ));
-                    }
-                }
-                // 已迁移到 AppAdapter 的应用在上方分派
-                other => return Err(AppError::unsupported(other, "validate_provider_settings")),
-            }
-        }
+        crate::apps::adapter(app_type).validate_provider(provider)?;
 
         // Validate and clean UsageScript configuration (common for all app types)
         if let Some(meta) = &provider.meta {
@@ -3412,73 +3249,8 @@ impl ProviderService {
         provider: &Provider,
         app_type: &AppType,
     ) -> Result<(String, String), AppError> {
-        if let Some(adapter) = crate::apps::adapter(app_type) {
-            let credentials = adapter.credentials(provider)?;
-            return Ok((credentials.api_key, credentials.base_url));
-        }
-
-        match app_type {
-            AppType::OpenCode => {
-                // OpenCode uses options.apiKey and options.baseURL
-                let options = provider
-                    .settings_config
-                    .get("options")
-                    .and_then(|v| v.as_object())
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.opencode.options.missing",
-                            "配置格式错误: 缺少 options",
-                            "Invalid configuration: missing options section",
-                        )
-                    })?;
-
-                let api_key = options
-                    .get("apiKey")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.opencode.api_key.missing",
-                            "缺少 API Key",
-                            "API key is missing",
-                        )
-                    })?
-                    .to_string();
-
-                let base_url = options
-                    .get("baseURL")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                Ok((api_key, base_url))
-            }
-            AppType::OpenClaw | AppType::Hermes => {
-                // OpenClaw/Hermes use apiKey and baseUrl directly on the object
-                let api_key = provider
-                    .settings_config
-                    .get("apiKey")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        AppError::localized(
-                            "provider.openclaw.api_key.missing",
-                            "缺少 API Key",
-                            "API key is missing",
-                        )
-                    })?
-                    .to_string();
-
-                let base_url = provider
-                    .settings_config
-                    .get("baseUrl")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                Ok((api_key, base_url))
-            }
-            // 已迁移到 AppAdapter 的应用在上方分派
-            other => Err(AppError::unsupported(other, "credentials")),
-        }
+        let credentials = crate::apps::adapter(app_type).credentials(provider)?;
+        Ok((credentials.api_key, credentials.base_url))
     }
 }
 

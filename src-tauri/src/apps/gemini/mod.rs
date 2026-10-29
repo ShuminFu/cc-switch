@@ -14,7 +14,8 @@ use self::config::{
     write_gemini_env_atomic,
 };
 use super::adapter::{
-    AppAdapter, CommonSnippet, Credentials, McpProjector, ProxyTakeover, SessionSource,
+    first_non_empty_str, str_or_empty, AppAdapter, CommonSnippet, Credentials, McpProjector,
+    ProxyTakeover, SessionSource,
 };
 use super::{json_deep_merge, json_deep_remove, json_is_subset};
 use crate::app_config::AppType;
@@ -71,6 +72,14 @@ impl AppAdapter for GeminiAdapter {
 
     fn validate_provider(&self, provider: &Provider) -> Result<(), AppError> {
         validate_gemini_settings(&provider.settings_config)
+    }
+
+    /// Google 专用 env 键（含旧版 GOOGLE_API_KEY 兜底）
+    fn usage_credentials(&self, settings: &Value) -> (String, String) {
+        let env = settings.get("env");
+        let base_url = str_or_empty(env.and_then(|e| e.get("GOOGLE_GEMINI_BASE_URL")));
+        let api_key = first_non_empty_str(env, &["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
+        (base_url, api_key)
     }
 
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {

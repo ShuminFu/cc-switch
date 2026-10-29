@@ -114,36 +114,13 @@ impl McpService {
     }
 
     fn sync_server_to_app_no_config(server: &McpServer, app: &AppType) -> Result<(), AppError> {
-        if let Some(adapter) = crate::apps::adapter(app) {
-            return match adapter.mcp() {
-                Some(projector) => projector.upsert(&server.id, &server.server),
-                None => {
-                    log::debug!("{app:?} does not use CC Switch MCP sync, skipping");
-                    Ok(())
-                }
-            };
+        match crate::apps::adapter(app).mcp() {
+            Some(projector) => projector.upsert(&server.id, &server.server),
+            None => {
+                log::debug!("{app:?} does not use CC Switch MCP sync, skipping");
+                Ok(())
+            }
         }
-
-        match app {
-            AppType::OpenCode => {
-                mcp::sync_single_server_to_opencode(
-                    &Default::default(),
-                    &server.id,
-                    &server.server,
-                )?;
-            }
-            AppType::OpenClaw => {
-                // OpenClaw MCP support is still in development (Issue #4834)
-                // Skip for now
-                log::debug!("OpenClaw MCP support is still in development, skipping sync");
-            }
-            AppType::Hermes => {
-                mcp::sync_single_server_to_hermes(&Default::default(), &server.id, &server.server)?;
-            }
-            // 已迁移到 AppAdapter 的应用在上方分派
-            _ => {}
-        }
-        Ok(())
     }
 
     /// 从所有曾启用过该服务器的应用中移除
@@ -160,31 +137,13 @@ impl McpService {
     }
 
     fn remove_server_from_app(_state: &AppState, id: &str, app: &AppType) -> Result<(), AppError> {
-        if let Some(adapter) = crate::apps::adapter(app) {
-            return match adapter.mcp() {
-                Some(projector) => projector.remove(id),
-                None => {
-                    log::debug!("{app:?} does not use CC Switch MCP sync, skipping");
-                    Ok(())
-                }
-            };
+        match crate::apps::adapter(app).mcp() {
+            Some(projector) => projector.remove(id),
+            None => {
+                log::debug!("{app:?} does not use CC Switch MCP sync, skipping");
+                Ok(())
+            }
         }
-
-        match app {
-            AppType::OpenCode => {
-                mcp::remove_server_from_opencode(id)?;
-            }
-            AppType::OpenClaw => {
-                // OpenClaw MCP support is still in development
-                log::debug!("OpenClaw MCP support is still in development, skipping remove");
-            }
-            AppType::Hermes => {
-                mcp::remove_server_from_hermes(id)?;
-            }
-            // 已迁移到 AppAdapter 的应用在上方分派
-            _ => {}
-        }
-        Ok(())
     }
 
     /// 手动同步所有启用的 MCP 服务器到对应的应用。

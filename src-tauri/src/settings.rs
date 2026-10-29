@@ -1113,42 +1113,6 @@ pub fn override_dir(app: &AppType) -> Option<PathBuf> {
     raw.map(|p| resolve_override_path(p))
 }
 
-pub fn get_codex_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .codex_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_opencode_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .opencode_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_openclaw_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .openclaw_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_hermes_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .hermes_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
 pub fn preserve_codex_official_auth_on_switch() -> bool {
     settings_store()
         .read()

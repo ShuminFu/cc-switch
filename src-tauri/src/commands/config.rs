@@ -60,19 +60,9 @@ pub async fn get_claude_code_config_path() -> Result<String, IpcError> {
     Ok(get_claude_settings_path().to_string_lossy().to_string())
 }
 
-/// 应用配置目录：已迁移到 AppAdapter 的应用走适配器，其余按应用分派
+/// 应用配置目录（由各应用的 AppAdapter 解析）
 fn app_config_dir(app: &AppType) -> Result<PathBuf, AppError> {
-    if let Some(adapter) = crate::apps::adapter(app) {
-        return adapter.config_dir();
-    }
-
-    Ok(match app {
-        AppType::OpenCode => crate::opencode_config::get_opencode_dir(),
-        AppType::OpenClaw => crate::openclaw_config::get_openclaw_dir(),
-        AppType::Hermes => crate::hermes_config::get_hermes_dir(),
-        // 已迁移到 AppAdapter 的应用在上方分派
-        other => return Err(AppError::unsupported(other, "config_dir")),
-    })
+    crate::apps::adapter(app).config_dir()
 }
 
 #[tauri::command]

@@ -2555,12 +2555,12 @@ pub async fn probe_tool_installations(
 fn wsl_distro_for_tool(tool: &str) -> Option<String> {
     let override_dir = match tool {
         "claude" => crate::settings::override_dir(&crate::app_config::AppType::Claude),
-        "codex" => crate::settings::get_codex_override_dir(),
+        "codex" => crate::settings::override_dir(&crate::app_config::AppType::Codex),
         "gemini" => crate::settings::override_dir(&crate::app_config::AppType::Gemini),
         "grok" => crate::settings::override_dir(&crate::app_config::AppType::GrokBuild),
-        "opencode" => crate::settings::get_opencode_override_dir(),
-        "openclaw" => crate::settings::get_openclaw_override_dir(),
-        "hermes" => crate::settings::get_hermes_override_dir(),
+        "opencode" => crate::settings::override_dir(&crate::app_config::AppType::OpenCode),
+        "openclaw" => crate::settings::override_dir(&crate::app_config::AppType::OpenClaw),
+        "hermes" => crate::settings::override_dir(&crate::app_config::AppType::Hermes),
         _ => None,
     }?;
 

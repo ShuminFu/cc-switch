@@ -1,6 +1,7 @@
 //! Live configuration operations
 //!
-//! Handles reading and writing live configuration files for Claude, Codex, and Gemini.
+//! Handles reading and writing live configuration files. Per-app file formats live in
+//! the [`crate::apps::AppAdapter`] implementations; this module only orchestrates.
 
 use serde_json::Value;
 
@@ -17,15 +18,7 @@ pub(crate) fn provider_exists_in_live_config(
     app_type: &AppType,
     provider_id: &str,
 ) -> Result<bool, AppError> {
-    match app_type {
-        AppType::OpenCode => crate::opencode_config::get_providers()
-            .map(|providers| providers.contains_key(provider_id)),
-        AppType::OpenClaw => crate::openclaw_config::get_providers()
-            .map(|providers| providers.contains_key(provider_id)),
-        AppType::Hermes => crate::hermes_config::get_providers()
-            .map(|providers| providers.contains_key(provider_id)),
-        _ => Ok(false),
-    }
+    crate::apps::adapter(app_type).live_has_provider(provider_id)
 }
 
 fn settings_contain_common_config(app_type: &AppType, settings: &Value, snippet: &str) -> bool {
@@ -34,14 +27,9 @@ fn settings_contain_common_config(app_type: &AppType, settings: &Value, snippet:
         return false;
     }
 
-    if let Some(adapter) = crate::apps::adapter(app_type) {
-        return adapter
-            .common_snippet()
-            .is_some_and(|common| common.contains(settings, trimmed));
-    }
-
-    // 其余应用不支持通用配置片段
-    false
+    crate::apps::adapter(app_type)
+        .common_snippet()
+        .is_some_and(|common| common.contains(settings, trimmed))
 }
 
 pub(crate) fn provider_uses_common_config(
@@ -71,15 +59,10 @@ pub(crate) fn remove_common_config_from_settings(
         return Ok(settings.clone());
     }
 
-    if let Some(adapter) = crate::apps::adapter(app_type) {
-        return match adapter.common_snippet() {
-            Some(common) => common.remove(settings, trimmed),
-            None => Ok(settings.clone()),
-        };
+    match crate::apps::adapter(app_type).common_snippet() {
+        Some(common) => common.remove(settings, trimmed),
+        None => Ok(settings.clone()),
     }
-
-    // 其余应用不支持通用配置片段
-    Ok(settings.clone())
 }
 
 fn apply_common_config_to_settings(
@@ -92,15 +75,10 @@ fn apply_common_config_to_settings(
         return Ok(settings.clone());
     }
 
-    if let Some(adapter) = crate::apps::adapter(app_type) {
-        return match adapter.common_snippet() {
-            Some(common) => common.apply(settings, trimmed),
-            None => Ok(settings.clone()),
-        };
+    match crate::apps::adapter(app_type).common_snippet() {
+        Some(common) => common.apply(settings, trimmed),
+        None => Ok(settings.clone()),
     }
-
-    // 其余应用不支持通用配置片段
-    Ok(settings.clone())
 }
 
 pub(crate) fn build_effective_settings_with_common_config(
@@ -126,9 +104,7 @@ pub(crate) fn build_effective_settings_with_common_config(
         }
     }
 
-    if let Some(adapter) = crate::apps::adapter(app_type) {
-        adapter.apply_live_defaults(provider, &mut effective_settings);
-    }
+    crate::apps::adapter(app_type).apply_live_defaults(provider, &mut effective_settings);
 
     Ok(effective_settings)
 }
@@ -142,16 +118,12 @@ pub(crate) fn write_live_with_common_config(
     effective_provider.settings_config =
         build_effective_settings_with_common_config(db, app_type, provider)?;
 
-    if let Some(adapter) = crate::apps::adapter(app_type) {
-        return adapter.write_effective_provider(db, &effective_provider);
-    }
-
-    write_live_snapshot(app_type, &effective_provider)
+    crate::apps::adapter(app_type).write_effective_provider(db, &effective_provider)
 }
 
 /// 代理接管期间该应用的 live 是否由接管备份托管（见 [`crate::apps::AppAdapter::takeover_uses_live_backup`]）
 pub(crate) fn takeover_uses_live_backup(app_type: &AppType) -> bool {
-    crate::apps::adapter(app_type).is_none_or(|adapter| adapter.takeover_uses_live_backup())
+    crate::apps::adapter(app_type).takeover_uses_live_backup()
 }
 
 pub(crate) fn strip_common_config_from_live_settings(
@@ -201,10 +173,7 @@ fn restore_live_settings_for_provider_backfill(
     provider: &Provider,
     live_settings: Value,
 ) -> Value {
-    if let Some(adapter) = crate::apps::adapter(app_type) {
-        return adapter.backfill_live_settings(provider, live_settings);
-    }
-    live_settings
+    crate::apps::adapter(app_type).backfill_live_settings(provider, live_settings)
 }
 
 pub(crate) fn normalize_provider_common_config_for_storage(
@@ -241,123 +210,6 @@ pub(crate) fn normalize_provider_common_config_for_storage(
         }
     }
 
-    Ok(())
-}
-
-/// Write live configuration snapshot for a provider
-pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Result<(), AppError> {
-    if let Some(adapter) = crate::apps::adapter(app_type) {
-        return adapter.write_provider(provider);
-    }
-
-    match app_type {
-        AppType::OpenCode => {
-            // OpenCode uses additive mode - write provider to config
-            use crate::opencode_config;
-            use crate::provider::OpenCodeProviderConfig;
-
-            // Defensive check: if settings_config is a full config structure, extract provider fragment
-            let config_to_write = if let Some(obj) = provider.settings_config.as_object() {
-                // Detect full config structure (has $schema or top-level provider field)
-                if obj.contains_key("$schema") || obj.contains_key("provider") {
-                    log::warn!(
-                        "OpenCode provider '{}' has full config structure in settings_config, attempting to extract fragment",
-                        provider.id
-                    );
-                    // Try to extract from provider.{id}
-                    obj.get("provider")
-                        .and_then(|p| p.get(&provider.id))
-                        .cloned()
-                        .unwrap_or_else(|| provider.settings_config.clone())
-                } else {
-                    provider.settings_config.clone()
-                }
-            } else {
-                provider.settings_config.clone()
-            };
-
-            // Convert settings_config to OpenCodeProviderConfig
-            let opencode_config_result =
-                serde_json::from_value::<OpenCodeProviderConfig>(config_to_write.clone());
-
-            match opencode_config_result {
-                Ok(config) => {
-                    opencode_config::set_typed_provider(&provider.id, &config)?;
-                    log::info!("OpenCode provider '{}' written to live config", provider.id);
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to parse OpenCode provider config for '{}': {}",
-                        provider.id,
-                        e
-                    );
-                    // Only write if config looks like a valid provider fragment
-                    if config_to_write.get("npm").is_some()
-                        || config_to_write.get("options").is_some()
-                    {
-                        opencode_config::set_provider(&provider.id, config_to_write)?;
-                        log::info!(
-                            "OpenCode provider '{}' written as raw JSON to live config",
-                            provider.id
-                        );
-                    } else {
-                        return Err(AppError::Message(format!(
-                            "OpenCode provider '{}' has invalid config structure for live config (must contain 'npm' or 'options')",
-                            provider.id
-                        )));
-                    }
-                }
-            }
-        }
-        AppType::OpenClaw => {
-            // OpenClaw uses additive mode - write provider to config
-            use crate::openclaw_config;
-            use crate::openclaw_config::OpenClawProviderConfig;
-
-            // Convert settings_config to OpenClawProviderConfig
-            let openclaw_config_result =
-                serde_json::from_value::<OpenClawProviderConfig>(provider.settings_config.clone());
-
-            match openclaw_config_result {
-                Ok(config) => {
-                    openclaw_config::set_typed_provider(&provider.id, &config)?;
-                    log::info!("OpenClaw provider '{}' written to live config", provider.id);
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to parse OpenClaw provider config for '{}': {}",
-                        provider.id,
-                        e
-                    );
-                    // Try to write as raw JSON if it looks valid
-                    if provider.settings_config.get("baseUrl").is_some()
-                        || provider.settings_config.get("api").is_some()
-                        || provider.settings_config.get("models").is_some()
-                    {
-                        openclaw_config::set_provider(
-                            &provider.id,
-                            provider.settings_config.clone(),
-                        )?;
-                        log::info!(
-                            "OpenClaw provider '{}' written as raw JSON to live config",
-                            provider.id
-                        );
-                    } else {
-                        return Err(AppError::Message(format!(
-                            "OpenClaw provider '{}' has invalid config structure for live config (must contain 'baseUrl', 'api', or 'models')",
-                            provider.id
-                        )));
-                    }
-                }
-            }
-        }
-        AppType::Hermes => {
-            crate::hermes_config::set_provider(&provider.id, provider.settings_config.clone())?;
-            log::debug!("Hermes provider '{}' written to live config", provider.id);
-        }
-        // 已迁移到 AppAdapter 的应用在上方分派
-        other => return Err(AppError::unsupported(other, "write_live_snapshot")),
-    }
     Ok(())
 }
 
@@ -502,57 +354,7 @@ pub fn sync_current_to_live(state: &AppState) -> Result<(), AppError> {
 
 /// Read current live settings for an app type
 pub fn read_live_settings(app_type: AppType) -> Result<Value, AppError> {
-    if let Some(adapter) = crate::apps::adapter(&app_type) {
-        return adapter.read_live();
-    }
-
-    match app_type {
-        AppType::OpenCode => {
-            use crate::opencode_config::{get_opencode_config_path, read_opencode_config};
-
-            let config_path = get_opencode_config_path();
-            if !config_path.exists() {
-                return Err(AppError::localized(
-                    "opencode.config.missing",
-                    "OpenCode 配置文件不存在",
-                    "OpenCode configuration file not found",
-                ));
-            }
-
-            let config = read_opencode_config()?;
-            Ok(config)
-        }
-        AppType::OpenClaw => {
-            use crate::openclaw_config::{get_openclaw_config_path, read_openclaw_config};
-
-            let config_path = get_openclaw_config_path();
-            if !config_path.exists() {
-                return Err(AppError::localized(
-                    "openclaw.config.missing",
-                    "OpenClaw 配置文件不存在",
-                    "OpenClaw configuration file not found",
-                ));
-            }
-
-            let config = read_openclaw_config()?;
-            Ok(config)
-        }
-        AppType::Hermes => {
-            let config_path = crate::hermes_config::get_hermes_config_path();
-            if !config_path.exists() {
-                return Err(AppError::localized(
-                    "hermes.config.missing",
-                    "Hermes 配置文件不存在",
-                    "Hermes configuration file not found",
-                ));
-            }
-            let yaml_config = crate::hermes_config::read_hermes_config()?;
-            let config = crate::hermes_config::yaml_to_json(&yaml_config)?;
-            Ok(config)
-        }
-        // 已迁移到 AppAdapter 的应用在上方分派
-        other => Err(AppError::unsupported(&other, "read_live_settings")),
-    }
+    crate::apps::adapter(&app_type).read_live()
 }
 
 /// Import default configuration from live files
@@ -590,10 +392,7 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
         ));
     }
 
-    // 累加模式应用（OpenCode / OpenClaw / Hermes）已在上方提前返回
-    let Some(adapter) = crate::apps::adapter(&app_type) else {
-        unreachable!("additive mode apps are handled by early return")
-    };
+    let adapter = crate::apps::adapter(&app_type);
     let settings_config = adapter.import_live()?;
 
     let mut provider = Provider::with_id(
@@ -631,25 +430,6 @@ pub fn should_import_default_config_on_startup(
     }
 
     Ok(!state.db.has_any_provider_for_app(app_type.as_str())?)
-}
-
-/// Remove an OpenCode provider from the live configuration
-///
-/// This is specific to OpenCode's additive mode - removing a provider
-/// from the opencode.json file.
-pub(crate) fn remove_opencode_provider_from_live(provider_id: &str) -> Result<(), AppError> {
-    use crate::opencode_config;
-
-    // Check if OpenCode config directory exists
-    if !opencode_config::get_opencode_dir().exists() {
-        log::debug!("OpenCode config directory doesn't exist, skipping removal of '{provider_id}'");
-        return Ok(());
-    }
-
-    opencode_config::remove_provider(provider_id)?;
-    log::info!("OpenCode provider '{provider_id}' removed from live config");
-
-    Ok(())
 }
 
 /// Import all providers from OpenCode live config to database
@@ -881,44 +661,6 @@ pub fn import_hermes_providers_from_live(state: &AppState) -> Result<usize, AppE
     }
 
     Ok(imported + updated)
-}
-
-/// Remove a Hermes provider from live config
-///
-/// This removes a specific provider from ~/.hermes/config.yaml
-/// without affecting other providers in the file.
-pub fn remove_hermes_provider_from_live(provider_id: &str) -> Result<(), AppError> {
-    use crate::hermes_config;
-
-    // Check if Hermes config directory exists
-    if !hermes_config::get_hermes_dir().exists() {
-        log::debug!("Hermes config directory doesn't exist, skipping removal of '{provider_id}'");
-        return Ok(());
-    }
-
-    hermes_config::remove_provider(provider_id)?;
-    log::info!("Hermes provider '{provider_id}' removed from live config");
-
-    Ok(())
-}
-
-/// Remove an OpenClaw provider from live config
-///
-/// This removes a specific provider from ~/.openclaw/openclaw.json
-/// without affecting other providers in the file.
-pub fn remove_openclaw_provider_from_live(provider_id: &str) -> Result<(), AppError> {
-    use crate::openclaw_config;
-
-    // Check if OpenClaw config directory exists
-    if !openclaw_config::get_openclaw_dir().exists() {
-        log::debug!("OpenClaw config directory doesn't exist, skipping removal of '{provider_id}'");
-        return Ok(());
-    }
-
-    openclaw_config::remove_provider(provider_id)?;
-    log::info!("OpenClaw provider '{provider_id}' removed from live config");
-
-    Ok(())
 }
 
 #[cfg(test)]

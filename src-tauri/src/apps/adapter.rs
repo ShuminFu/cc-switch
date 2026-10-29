@@ -16,12 +16,37 @@ use serde_json::Value;
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
+use crate::services::omo::OmoVariant;
 
 /// 供应商直连凭据
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Credentials {
     pub api_key: String,
     pub base_url: String,
+}
+
+/// `value` 为字符串时取其内容，否则返回空串
+pub(crate) fn str_or_empty(value: Option<&Value>) -> String {
+    value.and_then(Value::as_str).unwrap_or("").to_string()
+}
+
+/// `keys` 中第一个存在且非空的字符串。
+///
+/// 对齐前端的 `a || b || c`：JS 的 `||` 会跳过空串，而预设会把
+/// `ANTHROPIC_AUTH_TOKEN` 之类的字段写成"存在但为空"的占位，所以只跳过缺失键的
+/// `.get().or_else()` 链会提前停下。
+pub(crate) fn first_non_empty_str(env: Option<&Value>, keys: &[&str]) -> String {
+    let Some(env) = env else {
+        return String::new();
+    };
+    for key in keys {
+        if let Some(s) = env.get(key).and_then(Value::as_str) {
+            if !s.is_empty() {
+                return s.to_string();
+            }
+        }
+    }
+    String::new()
 }
 
 /// 单个应用的 live 配置适配器
@@ -78,6 +103,29 @@ pub trait AppAdapter: Debug + Sync {
         Ok(())
     }
 
+    /// live 配置里是否已有该供应商。
+    ///
+    /// 只有累加模式应用的 live 同时承载多个供应商；切换模式应用默认返回 `false`。
+    fn live_has_provider(&self, _provider_id: &str) -> Result<bool, AppError> {
+        Ok(false)
+    }
+
+    /// 切换到该供应商后更新 live 里的默认选择（Hermes 的顶层 `model:`）。
+    ///
+    /// 累加模式应用写入供应商条目并不会改变应用当前使用的供应商，需要的应用覆盖
+    /// 此方法；失败由调用方降级为警告。
+    fn apply_switch_defaults(&self, _provider: &Provider) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    /// 按分类独占写入专用配置文件的供应商变体（OpenCode 的 OMO / OMO Slim）。
+    ///
+    /// 返回 `Some` 的供应商不写入应用主配置，而是通过 [`crate::services::OmoService`]
+    /// 激活 / 清除对应文件。
+    fn omo_variant(&self, _category: Option<&str>) -> Option<&'static OmoVariant> {
+        None
+    }
+
     /// 校验供应商 `settings_config` 的结构
     fn validate_provider(&self, provider: &Provider) -> Result<(), AppError>;
 
@@ -96,6 +144,13 @@ pub trait AppAdapter: Debug + Sync {
 
     /// 从供应商配置中提取直连凭据
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError>;
+
+    /// 用量查询（原生余额 / coding plan、JS 脚本的 `{{apiKey}}` / `{{baseUrl}}`）
+    /// 使用的 `(base_url, api_key)`，缺失的字段为空串。
+    ///
+    /// 与 [`AppAdapter::credentials`] 不同，这里从不报错，并与前端
+    /// `UsageScriptModal.tsx` 的 `getProviderCredentials` 保持一致。
+    fn usage_credentials(&self, settings: &Value) -> (String, String);
 
     /// 通用配置片段支持；不支持的应用返回 `None`
     fn common_snippet(&self) -> Option<&dyn CommonSnippet> {
@@ -137,6 +192,30 @@ pub trait CommonSnippet {
     /// 切走供应商时是否从 live 重新提取片段，捕获用户在应用里直接做的改动
     fn sync_from_live(&self) -> bool {
         false
+    }
+}
+
+/// 只支持提取、不参与合并的通用配置片段（OpenCode / OpenClaw）。
+///
+/// 这些累加模式应用可以从编辑器内容里提取片段，但写 live 时不合并片段：
+/// `contains` 恒为 `false`，`apply` / `remove` 原样返回。
+pub struct ExtractOnlySnippet(pub fn(&Value) -> Result<String, AppError>);
+
+impl CommonSnippet for ExtractOnlySnippet {
+    fn extract(&self, settings: &Value) -> Result<String, AppError> {
+        (self.0)(settings)
+    }
+
+    fn contains(&self, _settings: &Value, _snippet: &str) -> bool {
+        false
+    }
+
+    fn apply(&self, settings: &Value, _snippet: &str) -> Result<Value, AppError> {
+        Ok(settings.clone())
+    }
+
+    fn remove(&self, settings: &Value, _snippet: &str) -> Result<Value, AppError> {
+        Ok(settings.clone())
     }
 }
 

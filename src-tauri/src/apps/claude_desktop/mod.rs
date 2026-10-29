@@ -73,6 +73,11 @@ impl AppAdapter for ClaudeDesktopAdapter {
         false
     }
 
+    /// Anthropic 风格的 env，保留 JS 脚本路径依赖的 OpenRouter / Google key 兜底
+    fn usage_credentials(&self, settings: &Value) -> (String, String) {
+        super::claude::anthropic_usage_credentials(settings)
+    }
+
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {
         let credentials = config::direct_gateway_credentials(provider)?;
         Ok(Credentials {
