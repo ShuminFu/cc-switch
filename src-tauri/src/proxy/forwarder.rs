@@ -28,6 +28,7 @@ use crate::commands::{CodexOAuthState, CopilotAuthState};
 use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
 use crate::proxy::providers::copilot_auth::CopilotAuthManager;
+use crate::proxy::routing::{RoutePlan, SideStores, VendorQuirks};
 use crate::{
     app_config::AppType,
     provider::{LocalProxyRequestOverrides, Provider},
@@ -61,7 +62,8 @@ fn validate_codex_official_authorization(headers: &http::HeaderMap) -> Result<()
 pub struct ForwardResult {
     pub response: ProxyResponse,
     pub provider: Provider,
-    pub claude_api_format: Option<ClaudeApiFormat>,
+    /// 成功那次尝试的路由计划；handler 只按它解码响应，不再按 provider 重新推导
+    pub plan: RoutePlan,
     /// 实际发往上游的模型名（路由接管/模型映射后的真值）。
     ///
     /// usage 归因不能依赖 ctx.request_model（映射前的客户端别名）：上游响应
@@ -131,6 +133,8 @@ pub struct ForwarderDeps {
 
 /// 单个请求的 forwarder 参数（来自请求上下文与运行时配置快照）
 pub struct RequestScope {
+    /// 客户端说的线协议（来自端点表）
+    pub client_format: WireFormat,
     /// 请求开始时的"当前供应商 ID"（用于判断是否需要同步 UI/托盘）
     pub current_provider_id_at_start: String,
     /// 代理会话 ID（用于 Gemini Native shadow replay）
@@ -477,7 +481,7 @@ impl RequestForwarder {
                 )
                 .await
             {
-                Ok((response, claude_api_format, outbound_model)) => {
+                Ok((response, plan, outbound_model)) => {
                     // 成功：普通闭合熔断状态异步记录，避免阻塞流式首包返回；
                     // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
                     self.record_success_result(
@@ -528,7 +532,7 @@ impl RequestForwarder {
                     return Ok(ForwardResult {
                         response,
                         provider: provider.clone(),
-                        claude_api_format,
+                        plan,
                         outbound_model,
                         connection_guard: None,
                     });
@@ -580,7 +584,7 @@ impl RequestForwarder {
                                 )
                                 .await
                             {
-                                Ok((response, claude_api_format, outbound_model)) => {
+                                Ok((response, plan, outbound_model)) => {
                                     log::info!(
                                         "[{app_type_str}] [Media] Unsupported-image retry succeeded"
                                     );
@@ -631,7 +635,7 @@ impl RequestForwarder {
                                     return Ok(ForwardResult {
                                         response,
                                         provider: provider.clone(),
-                                        claude_api_format,
+                                        plan,
                                         outbound_model,
                                         connection_guard: None,
                                     });
@@ -727,7 +731,7 @@ impl RequestForwarder {
                                     )
                                     .await
                                 {
-                                    Ok((response, claude_api_format, outbound_model)) => {
+                                    Ok((response, plan, outbound_model)) => {
                                         log::info!("[{app_type_str}] [RECT-002] 整流重试成功");
                                         self.record_success_result(
                                             &provider.id,
@@ -781,7 +785,7 @@ impl RequestForwarder {
                                         return Ok(ForwardResult {
                                             response,
                                             provider: provider.clone(),
-                                            claude_api_format,
+                                            plan,
                                             outbound_model,
                                             connection_guard: None,
                                         });
@@ -895,7 +899,7 @@ impl RequestForwarder {
                                 )
                                 .await
                             {
-                                Ok((response, claude_api_format, outbound_model)) => {
+                                Ok((response, plan, outbound_model)) => {
                                     log::info!("[{app_type_str}] [RECT-011] budget 整流重试成功");
                                     self.record_success_result(
                                         &provider.id,
@@ -943,7 +947,7 @@ impl RequestForwarder {
                                     return Ok(ForwardResult {
                                         response,
                                         provider: provider.clone(),
-                                        claude_api_format,
+                                        plan,
                                         outbound_model,
                                         connection_guard: None,
                                     });
@@ -1106,7 +1110,7 @@ impl RequestForwarder {
 
     /// 转发单个请求（使用适配器）
     ///
-    /// 成功时返回 `(response, claude_api_format, outbound_model)`，其中
+    /// 成功时返回 `(response, plan, outbound_model)`，其中 `plan` 是本次尝试的路由计划，
     /// `outbound_model` 是最终发往上游的模型名（所有映射/改写之后）。
     #[allow(clippy::too_many_arguments)]
     async fn forward(
@@ -1119,7 +1123,7 @@ impl RequestForwarder {
         headers: &axum::http::HeaderMap,
         extensions: &Extensions,
         adapter: &dyn ProviderAdapter,
-    ) -> Result<(ProxyResponse, Option<ClaudeApiFormat>, Option<String>), ProxyError> {
+    ) -> Result<(ProxyResponse, RoutePlan, Option<String>), ProxyError> {
         // 使用适配器提取 base_url
         let mut base_url = adapter.extract_base_url(provider)?;
 
@@ -1531,8 +1535,41 @@ impl RequestForwarder {
         let mut codex_oauth_account_id: Option<String> = None;
         let mut should_send_codex_oauth_session_headers = false;
 
+        let auth_info = adapter.extract_auth(provider);
+
+        // 本次尝试的路由计划：上游格式、URL、认证与供应商特性在此定稿，
+        // 随响应交给 handler 作为解码依据。
+        let plan = RoutePlan {
+            provider_id: provider.id.clone(),
+            client: self.req.client_format,
+            upstream: if codex_responses_to_chat {
+                WireFormat::OpenAiChat
+            } else if codex_responses_to_anthropic {
+                WireFormat::AnthropicMessages
+            } else if let Some(api_format) = resolved_claude_api_format {
+                api_format.wire_format()
+            } else {
+                self.req.client_format
+            },
+            claude_api_format: resolved_claude_api_format,
+            url: url.clone(),
+            auth: auth_info.as_ref().map(|auth| auth.strategy),
+            quirks: VendorQuirks {
+                copilot: is_copilot,
+                codex_oauth: provider.is_codex_oauth(),
+                full_url: is_full_url,
+                codex_official_auth_passthrough,
+                impersonate_claude_code: codex_impersonate_claude_code,
+            },
+            side_stores: SideStores {
+                codex_chat_history: codex_responses_to_chat,
+                gemini_shadow: resolved_claude_api_format == Some(ClaudeApiFormat::GeminiNative),
+            },
+        };
+        log::info!("[{}] 路由计划: {plan}", adapter.name());
+
         // 获取认证头（提前准备，用于内联替换）
-        let mut auth_headers = if let Some(mut auth) = adapter.extract_auth(provider) {
+        let mut auth_headers = if let Some(mut auth) = auth_info {
             // GitHub Copilot 特殊处理：从 CopilotAuthManager 获取真实 token
             if auth.strategy == AuthStrategy::GitHubCopilot {
                 if let Some(app_handle) = &self.shared.app_handle {
@@ -1741,7 +1778,7 @@ impl RequestForwarder {
             .and_then(|u| u.authority().map(|a| a.to_string()));
 
         let should_send_anthropic_headers = adapter.name() == "Claude"
-            && resolved_claude_api_format == Some(ClaudeApiFormat::Anthropic);
+            && plan.claude_api_format == Some(ClaudeApiFormat::Anthropic);
 
         // 预计算 anthropic-beta 值（仅 Claude）
         let anthropic_beta_value = if should_send_anthropic_headers {
@@ -2086,7 +2123,7 @@ impl RequestForwarder {
         let preserve_exact_header_case = should_preserve_exact_header_case(
             adapter.name(),
             provider,
-            resolved_claude_api_format,
+            plan.claude_api_format,
             is_copilot,
         );
 
@@ -2157,7 +2194,7 @@ impl RequestForwarder {
                 response = self
                     .validate_codex_anthropic_success_response(response)
                     .await?;
-            } else if resolved_claude_api_format == Some(ClaudeApiFormat::OpenAiResponses) {
+            } else if plan.claude_api_format == Some(ClaudeApiFormat::OpenAiResponses) {
                 if !request_is_streaming || response.is_json() {
                     // Claude→Responses gateways can also return a semantic failure in an
                     // HTTP 2xx Response object. Validate buffered/JSON bodies inside the
@@ -2170,7 +2207,7 @@ impl RequestForwarder {
                     response = self.validate_responses_stream_start(response).await?;
                 }
             }
-            Ok((response, resolved_claude_api_format, outbound_model))
+            Ok((response, plan, outbound_model))
         } else {
             let status_code = status.as_u16();
             // 错误响应同样可能被上游压缩（content-encoding）。reqwest 未启用任何
@@ -3494,6 +3531,7 @@ mod tests {
                 app_handle: None,
             }),
             RequestScope {
+                client_format: WireFormat::AnthropicMessages,
                 current_provider_id_at_start: String::new(),
                 session_id: String::new(),
                 session_client_provided: false,

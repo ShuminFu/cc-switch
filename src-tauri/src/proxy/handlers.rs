@@ -23,7 +23,6 @@ use super::{
     providers::{
         codex_chat_common::extract_reasoning_field_text,
         codex_chat_history::record_responses_sse_stream,
-        get_adapter, get_claude_api_format,
         streaming::create_anthropic_sse_stream,
         streaming_codex_anthropic::{
             create_responses_sse_stream_from_anthropic_with_context,
@@ -40,6 +39,7 @@ use super::{
         strip_entity_headers_for_rebuilt_body, strip_hop_by_hop_response_headers,
         usage_logging_enabled, SseUsageCollector,
     },
+    routing::{ResponseDecode, RoutePlan},
     server::{ProxyState, MAX_REQUEST_BODY_BYTES},
     sse::{strip_sse_field, take_sse_block},
     types::*,
@@ -215,7 +215,7 @@ pub(crate) async fn handle_proxied(
         body.take()
     };
 
-    let forwarder = ctx.create_forwarder(&state);
+    let forwarder = ctx.create_forwarder(&state, client.client_format);
     let mut result = match forwarder
         .forward_with_retry(
             app_type,
@@ -241,59 +241,52 @@ pub(crate) async fn handle_proxied(
     let connection_guard = result.connection_guard.take();
     ctx.outbound_model = result.outbound_model.take();
     ctx.provider = result.provider;
-    let claude_api_format = result.claude_api_format;
+    // 响应解码只读成功那次尝试的路由计划，不再按最终 provider 重新推导格式
+    let plan = result.plan;
     let response = result.response;
 
-    let parser_config = match client.client_format {
-        WireFormat::AnthropicMessages => {
-            // 检查是否需要格式转换（OpenRouter 等中转服务）
-            if get_adapter(app_type).needs_transform(&ctx.provider) {
-                let api_format =
-                    claude_api_format.unwrap_or_else(|| get_claude_api_format(&ctx.provider));
-                return handle_claude_transform(
-                    response,
-                    &ctx,
-                    &state,
-                    &body,
-                    is_stream,
-                    api_format,
-                    connection_guard,
-                )
-                .await;
-            }
-            &CLAUDE_PARSER_CONFIG
+    let parser_config = match plan.response_decode() {
+        ResponseDecode::AnthropicFrom(api_format) => {
+            return handle_claude_transform(
+                response,
+                &ctx,
+                &state,
+                &body,
+                is_stream,
+                api_format,
+                &plan,
+                connection_guard,
+            )
+            .await;
         }
-        WireFormat::OpenAiChat => &OPENAI_PARSER_CONFIG,
-        WireFormat::OpenAiResponses => {
-            let tool_context = codex_tool_context.unwrap_or_default();
-            if super::providers::should_convert_codex_responses_to_anthropic(
-                &ctx.provider,
-                &endpoint,
-            ) {
-                return handle_codex_anthropic_to_responses_transform(
-                    response,
-                    &ctx,
-                    &state,
-                    is_stream,
-                    connection_guard,
-                    tool_context,
-                )
-                .await;
-            }
-            if super::providers::should_convert_codex_responses_to_chat(&ctx.provider, &endpoint) {
-                return handle_codex_chat_to_responses_transform(
-                    response,
-                    &ctx,
-                    &state,
-                    is_stream,
-                    connection_guard,
-                    tool_context,
-                )
-                .await;
-            }
-            &CODEX_PARSER_CONFIG
+        ResponseDecode::ResponsesFromAnthropic => {
+            return handle_codex_anthropic_to_responses_transform(
+                response,
+                &ctx,
+                &state,
+                is_stream,
+                connection_guard,
+                codex_tool_context.unwrap_or_default(),
+            )
+            .await;
         }
-        WireFormat::GeminiNative => &GEMINI_PARSER_CONFIG,
+        ResponseDecode::ResponsesFromChat => {
+            return handle_codex_chat_to_responses_transform(
+                response,
+                &ctx,
+                &state,
+                is_stream,
+                connection_guard,
+                codex_tool_context.unwrap_or_default(),
+            )
+            .await;
+        }
+        ResponseDecode::Passthrough => match plan.client {
+            WireFormat::AnthropicMessages => &CLAUDE_PARSER_CONFIG,
+            WireFormat::OpenAiChat => &OPENAI_PARSER_CONFIG,
+            WireFormat::OpenAiResponses => &CODEX_PARSER_CONFIG,
+            WireFormat::GeminiNative => &GEMINI_PARSER_CONFIG,
+        },
     };
 
     // 通用响应处理（透传模式）
@@ -453,6 +446,7 @@ fn spawn_claude_usage_log(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_claude_transform(
     response: super::hyper_client::ProxyResponse,
     ctx: &RequestContext,
@@ -460,15 +454,11 @@ async fn handle_claude_transform(
     original_body: &Value,
     is_stream: bool,
     api_format: ClaudeApiFormat,
+    plan: &RoutePlan,
     connection_guard: Option<ActiveConnectionGuard>,
 ) -> Result<axum::response::Response, ProxyError> {
     let status = response.status();
-    let is_codex_oauth = ctx
-        .provider
-        .meta
-        .as_ref()
-        .and_then(|meta| meta.provider_type.as_deref())
-        == Some("codex_oauth");
+    let is_codex_oauth = plan.quirks.codex_oauth;
     // Codex OAuth 会把 openai_responses 响应强制升级为 SSE，即使客户端发的是 stream:false。
     // should_use_claude_transform_streaming 默认会把这个组合路由到流式转换器——虽然能避免
     // JSON parse 报 422，但会让非流客户端收到 text/event-stream，违反 Anthropic 非流语义。

@@ -155,6 +155,127 @@ async fn failover_moves_to_second_provider_when_first_returns_5xx() {
     harness.shutdown().await;
 }
 
+/// A successful non-streaming OpenAI Responses reply.
+fn responses_reply(text: &str) -> MockReply {
+    MockReply::json(
+        200,
+        json!({
+            "id": "resp_harness",
+            "status": "completed",
+            "model": "gpt-5.6",
+            "output": [{
+                "type": "message",
+                "id": "msg_1",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": text }]
+            }],
+            "usage": { "input_tokens": 12, "output_tokens": 4 }
+        }),
+    )
+}
+
+/// The response is decoded with the route plan of the attempt that succeeded,
+/// not with the plan of the provider tried first (CCS-126).
+#[tokio::test]
+async fn failover_from_copilot_responses_to_anthropic_decodes_with_the_anthropic_plan() {
+    let _env = TestEnv::new();
+    let copilot = MockUpstream::always(responses_reply("from copilot")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider_with_meta(
+            "copilot",
+            &copilot,
+            json!({ "providerType": "github_copilot", "apiFormat": "openai_responses" }),
+        )
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    let body = json_body(response).await;
+    // Anthropic passthrough: the upstream message reaches the client untouched
+    // instead of being run through the Responses → Anthropic converter.
+    assert_eq!(body["id"], "msg_harness");
+    assert_eq!(body["type"], "message");
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(body["usage"]["input_tokens"], 10);
+
+    // The harness has no Copilot token source, so the Copilot attempt fails
+    // before sending and the request fails over to the Anthropic provider.
+    assert_eq!(copilot.hits(), 0);
+    assert_eq!(b.hits(), 1);
+    assert_eq!(b.requests()[0].path, "/v1/messages");
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs[0].provider_id, "b");
+    assert_eq!(logs[0].status_code, 200);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn failover_from_responses_provider_to_anthropic_passes_the_message_through() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(503, "overloaded")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider_with_meta("a", &a, json!({ "apiFormat": "openai_responses" }))
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    let body = json_body(response).await;
+    assert_eq!(body["id"], "msg_harness");
+    assert_eq!(first_text(&body), "from b");
+
+    assert_eq!(a.hits(), 1);
+    assert!(
+        a.requests()[0].path.ends_with("/responses"),
+        "first attempt is sent in the Responses format: {}",
+        a.requests()[0].path
+    );
+    assert!(a.requests()[0].json().get("input").is_some());
+    assert_eq!(b.requests()[0].path, "/v1/messages");
+    assert!(b.requests()[0].json().get("messages").is_some());
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn failover_from_anthropic_to_responses_provider_converts_the_response() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(503, "overloaded")).await;
+    let b = MockUpstream::always(responses_reply("from responses")).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider_with_meta("b", &b, json!({ "apiFormat": "openai_responses" }))
+        .failover(true)
+        .spawn()
+        .await;
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    let body = json_body(response).await;
+    // Decoded with the Responses plan of the second attempt.
+    assert_eq!(body["id"], "resp_harness");
+    assert_eq!(body["type"], "message");
+    assert_eq!(first_text(&body), "from responses");
+    assert_eq!(body["stop_reason"], "end_turn");
+
+    assert_eq!(a.requests()[0].path, "/v1/messages");
+    assert!(b.requests()[0].path.ends_with("/responses"));
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs[0].provider_id, "b");
+
+    harness.shutdown().await;
+}
+
 #[tokio::test]
 async fn non_retryable_client_error_does_not_fail_over() {
     let _env = TestEnv::new();

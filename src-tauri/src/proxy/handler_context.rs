@@ -7,6 +7,7 @@ use crate::provider::Provider;
 use crate::proxy::{
     extract_session_id,
     forwarder::{RequestForwarder, RequestScope},
+    protocol::WireFormat,
     server::ProxyState,
     types::{AppProxyConfig, CopilotOptimizerConfig, OptimizerConfig, RectifierConfig},
     ProxyError,
@@ -213,7 +214,11 @@ impl RequestContext {
     /// 配置生效规则：
     /// - 故障转移开启：超时配置正常生效（0 表示禁用超时）
     /// - 故障转移关闭：超时配置不生效（全部传入 0）
-    pub fn create_forwarder(&self, state: &ProxyState) -> RequestForwarder {
+    pub fn create_forwarder(
+        &self,
+        state: &ProxyState,
+        client_format: WireFormat,
+    ) -> RequestForwarder {
         // 流式静默期超时由响应流自行处理（见 streaming_timeout_config），不传入 forwarder
         let (non_streaming_timeout, first_byte_timeout) = if self.app_config.auto_failover_enabled {
             // 故障转移开启：使用配置的值（0 = 禁用超时）
@@ -240,6 +245,7 @@ impl RequestContext {
         RequestForwarder::new(
             state.forwarder_deps.clone(),
             RequestScope {
+                client_format,
                 current_provider_id_at_start: self.current_provider_id.clone(),
                 session_id: self.session_id.clone(),
                 session_client_provided: self.session_client_provided,

@@ -28,6 +28,7 @@ pub mod protocol;
 pub mod provider_router;
 pub mod providers;
 pub mod response_processor;
+pub(crate) mod routing;
 pub(crate) mod runtime_config;
 pub(crate) mod server;
 pub mod session;
