@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::State;
@@ -20,11 +18,11 @@ use crate::store::AppState;
 /// 导出数据库为 SQL 备份
 #[tauri::command]
 pub async fn export_config_to_file(
-    #[allow(non_snake_case)] filePath: String,
+    file_path: String,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || export_sql_to_picked_path(&db, &filePath))
+    tauri::async_runtime::spawn_blocking(move || export_sql_to_picked_path(&db, &file_path))
         .await
         .map_err(|e| format!("导出配置失败: {e}"))?
         .map_err(|e: AppError| e.to_string())
@@ -46,13 +44,13 @@ fn export_sql_to_picked_path(db: &Database, file_path: &str) -> Result<Value, Ap
 /// 从 SQL 备份导入数据库
 #[tauri::command]
 pub async fn import_config_from_file(
-    #[allow(non_snake_case)] filePath: String,
+    file_path: String,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     let db = state.db.clone();
     let db_for_sync = db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let backup_id = import_sql_from_picked_path(&db, &filePath)?;
+        let backup_id = import_sql_from_picked_path(&db, &file_path)?;
         let warning = post_sync_warning_from_result(Ok(run_post_import_sync(db_for_sync)));
         if let Some(msg) = warning.as_ref() {
             log::warn!("[Import] post-import sync warning: {msg}");
@@ -93,13 +91,13 @@ pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<V
 #[tauri::command]
 pub async fn save_file_dialog<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-    #[allow(non_snake_case)] defaultName: String,
+    default_name: String,
 ) -> Result<Option<String>, String> {
     let dialog = app.dialog();
     let result = dialog
         .file()
         .add_filter("SQL", &["sql"])
-        .set_file_name(&defaultName)
+        .set_file_name(&default_name)
         .blocking_save_file();
 
     Ok(result.map(|p| register_pick(PickPurpose::SqlExport, p.to_string())))
@@ -180,11 +178,8 @@ pub async fn restore_db_backup(
 
 /// Rename a database backup file
 #[tauri::command]
-pub fn rename_db_backup(
-    #[allow(non_snake_case)] oldFilename: String,
-    #[allow(non_snake_case)] newName: String,
-) -> Result<String, String> {
-    Database::rename_backup(&oldFilename, &newName).map_err(|e| e.to_string())
+pub fn rename_db_backup(old_filename: String, new_name: String) -> Result<String, String> {
+    Database::rename_backup(&old_filename, &new_name).map_err(|e| e.to_string())
 }
 
 /// Delete a database backup file

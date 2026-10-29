@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -84,9 +82,9 @@ where
 #[tauri::command]
 pub async fn webdav_test_connection(
     settings: WebDavSyncSettings,
-    #[allow(non_snake_case)] preserveEmptyPassword: Option<bool>,
+    preserve_empty_password: Option<bool>,
 ) -> Result<Value, String> {
-    let preserve_empty = preserveEmptyPassword.unwrap_or(true);
+    let preserve_empty = preserve_empty_password.unwrap_or(true);
     let resolved = resolve_password_for_request(
         settings,
         settings::get_webdav_sync_settings(),
@@ -141,9 +139,9 @@ pub async fn webdav_sync_download(state: State<'_, AppState>) -> Result<Value, S
 #[tauri::command]
 pub async fn webdav_sync_save_settings(
     settings: WebDavSyncSettings,
-    #[allow(non_snake_case)] passwordTouched: Option<bool>,
+    password_touched: Option<bool>,
 ) -> Result<Value, String> {
-    let password_touched = passwordTouched.unwrap_or(false);
+    let password_touched = password_touched.unwrap_or(false);
     let existing = settings::get_webdav_sync_settings();
     let mut sync_settings =
         resolve_password_for_request(settings, existing.clone(), !password_touched);

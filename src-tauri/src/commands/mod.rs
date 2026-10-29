@@ -1,4 +1,6 @@
-#![allow(non_snake_case)]
+//! Tauri 命令。参数与命令名一律 snake_case（Tauri 将参数映射为前端的 camelCase 键）；
+//! 用 forbid 而非 deny，子模块无法再用 `allow(non_snake_case)` 绕过（CCS-118）。
+#![forbid(non_snake_case)]
 
 mod apps;
 mod auth;
@@ -30,7 +32,6 @@ mod stream_check;
 mod subscription;
 mod sync_support;
 
-mod lightweight;
 mod s3_sync;
 mod usage;
 mod webdav_sync;
@@ -65,7 +66,6 @@ pub use skill::*;
 pub use stream_check::*;
 pub use subscription::*;
 
-pub use lightweight::*;
 pub use s3_sync::*;
 pub use usage::*;
 pub use webdav_sync::*;

@@ -1083,7 +1083,7 @@ pub(crate) async fn refresh_all_usage_in_tray(app: &tauri::AppHandle) {
             let provider_id = current_id.clone();
             let app_str = app_type_str.to_string();
             script_futures.push(async move {
-                if let Err(e) = crate::commands::queryProviderUsage(
+                if let Err(e) = crate::commands::query_provider_usage(
                     app_clone,
                     state,
                     copilot_state,

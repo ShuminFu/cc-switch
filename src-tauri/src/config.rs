@@ -472,6 +472,23 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
     fs::File::open(dir)?.sync_all()
 }
 
+/// 复制文件
+pub fn copy_file(from: &Path, to: &Path) -> Result<(), AppError> {
+    fs::copy(from, to).map_err(|e| AppError::IoContext {
+        context: format!("复制文件失败 ({} -> {})", from.display(), to.display()),
+        source: e,
+    })?;
+    Ok(())
+}
+
+/// 删除文件
+pub fn delete_file(path: &Path) -> Result<(), AppError> {
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| AppError::io(path, e))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -824,38 +841,5 @@ mod tests {
             serde_json::to_string(&sorted_a).unwrap(),
             serde_json::to_string(&sorted_b).unwrap(),
         );
-    }
-}
-
-/// 复制文件
-pub fn copy_file(from: &Path, to: &Path) -> Result<(), AppError> {
-    fs::copy(from, to).map_err(|e| AppError::IoContext {
-        context: format!("复制文件失败 ({} -> {})", from.display(), to.display()),
-        source: e,
-    })?;
-    Ok(())
-}
-
-/// 删除文件
-pub fn delete_file(path: &Path) -> Result<(), AppError> {
-    if path.exists() {
-        fs::remove_file(path).map_err(|e| AppError::io(path, e))?;
-    }
-    Ok(())
-}
-
-/// 检查 Claude Code 配置状态
-#[derive(Serialize, Deserialize)]
-pub struct ConfigStatus {
-    pub exists: bool,
-    pub path: String,
-}
-
-/// 获取 Claude Code 配置状态
-pub fn get_claude_config_status() -> ConfigStatus {
-    let path = get_claude_settings_path();
-    ConfigStatus {
-        exists: path.exists(),
-        path: path.to_string_lossy().to_string(),
     }
 }

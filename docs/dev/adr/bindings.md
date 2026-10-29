@@ -112,6 +112,6 @@ How we run it for now:
 
 1. Roll `Type`/`specta::specta` out to the remaining domains (CCS-117 covered the Provider, AppType and ProxyStatus DTOs, but not their commands). Then grow `src/shared/bindings.ts` from a single builder that lists every command (Phase 5 `collect_commands!` split).
 2. ~~Run the bindings dirty check in CI as its own step.~~ Done in CCS-117.
-3. Decide whether to switch the runtime handler to `Builder::invoke_handler()` and use the generated `commands` with an `IpcError`-normalising `typed_error_impl`. Normalise the camelCase command names (`queryProviderUsage`, `testUsageScript`) first.
+3. Decide whether to switch the runtime handler to `Builder::invoke_handler()` and use the generated `commands` with an `IpcError`-normalising `typed_error_impl`. The camelCase command names were normalised to `query_provider_usage` and `test_usage_script` in CCS-118; `scripts/check-ipc-orphans.mjs` keeps command names snake_case.
 4. Bump Tauri to a version whose `tauri-macros` emits `__tauri_command_name_*`, then move to tauri-specta rc.26+.
 5. ~~Type `tests/msw/handlers.ts` against the generated types.~~ Done in CCS-117. The remaining step is to add `#[specta::specta]` to the provider and proxy commands so `ResultOverrides` in `tests/msw/commands.ts` can go away.

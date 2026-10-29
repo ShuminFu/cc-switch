@@ -1,20 +1,12 @@
-#![allow(non_snake_case)]
-
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::app_config::AppType;
 use crate::codex_config;
-use crate::config::{self, get_claude_settings_path, ConfigStatus};
+use crate::config::{self, get_claude_settings_path};
 use crate::error::IpcError;
 use crate::settings;
-use crate::store::AppState;
-
-#[tauri::command]
-pub async fn get_claude_config_status() -> Result<ConfigStatus, IpcError> {
-    Ok(config::get_claude_config_status())
-}
 
 use std::str::FromStr;
 
@@ -61,82 +53,6 @@ fn validate_common_config_snippet(app_type: &str, snippet: &str) -> Result<(), S
     }
 
     Ok(())
-}
-
-#[tauri::command]
-pub async fn get_config_status(
-    state: State<'_, AppState>,
-    app: String,
-) -> Result<ConfigStatus, IpcError> {
-    match AppType::from_str(&app).map_err(IpcError::from)? {
-        AppType::Claude => Ok(config::get_claude_config_status()),
-        AppType::ClaudeDesktop => {
-            let status = crate::claude_desktop_config::get_status(
-                state.db.as_ref(),
-                state.proxy_service.is_running().await,
-            )
-            .map_err(IpcError::from)?;
-            Ok(ConfigStatus {
-                exists: status.configured,
-                path: status.config_library_path.unwrap_or_default(),
-            })
-        }
-        AppType::Codex => {
-            let auth_path = codex_config::get_codex_auth_path();
-            let config_text = codex_config::read_codex_config_text().unwrap_or_default();
-            let exists = auth_path.exists() || !config_text.trim().is_empty();
-            let path = codex_config::get_codex_config_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::Gemini => {
-            let env_path = crate::gemini_config::get_gemini_env_path();
-            let exists = env_path.exists();
-            let path = crate::gemini_config::get_gemini_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::GrokBuild => {
-            let config_path = crate::grok_config::get_grok_config_path();
-            let exists = config_path.exists();
-            let path = crate::grok_config::get_grok_config_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::OpenCode => {
-            let config_path = crate::opencode_config::get_opencode_config_path();
-            let exists = config_path.exists();
-            let path = crate::opencode_config::get_opencode_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::OpenClaw => {
-            let config_path = crate::openclaw_config::get_openclaw_config_path();
-            let exists = config_path.exists();
-            let path = crate::openclaw_config::get_openclaw_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-        AppType::Hermes => {
-            let config_path = crate::hermes_config::get_hermes_config_path();
-            let exists = config_path.exists();
-            let path = crate::hermes_config::get_hermes_dir()
-                .to_string_lossy()
-                .to_string();
-
-            Ok(ConfigStatus { exists, path })
-        }
-    }
 }
 
 #[tauri::command]
@@ -192,9 +108,9 @@ pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, 
 #[tauri::command]
 pub async fn pick_directory(
     app: AppHandle,
-    #[allow(non_snake_case)] defaultPath: Option<String>,
+    default_path: Option<String>,
 ) -> Result<Option<String>, IpcError> {
-    let initial = defaultPath
+    let initial = default_path
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
 
@@ -407,13 +323,13 @@ mod tests {
 
 #[tauri::command]
 pub async fn extract_common_config_snippet(
-    appType: String,
-    settingsConfig: Option<String>,
+    app_type: String,
+    settings_config: Option<String>,
     state: tauri::State<'_, crate::store::AppState>,
 ) -> Result<String, IpcError> {
-    let app = AppType::from_str(&appType).map_err(IpcError::from)?;
+    let app = AppType::from_str(&app_type).map_err(IpcError::from)?;
 
-    if let Some(settings_config) = settingsConfig.filter(|s| !s.trim().is_empty()) {
+    if let Some(settings_config) = settings_config.filter(|s| !s.trim().is_empty()) {
         let settings: serde_json::Value =
             serde_json::from_str(&settings_config).map_err(invalid_json_format_error)?;
 

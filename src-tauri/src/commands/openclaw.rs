@@ -30,9 +30,9 @@ pub fn get_openclaw_live_provider_ids() -> Result<Vec<String>, IpcError> {
 /// Get a single OpenClaw provider fragment from live config.
 #[tauri::command]
 pub fn get_openclaw_live_provider(
-    #[allow(non_snake_case)] providerId: String,
+    provider_id: String,
 ) -> Result<Option<serde_json::Value>, IpcError> {
-    openclaw_config::get_provider(&providerId).map_err(IpcError::from)
+    openclaw_config::get_provider(&provider_id).map_err(IpcError::from)
 }
 
 /// Scan openclaw.json for known configuration hazards.

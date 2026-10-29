@@ -20,7 +20,7 @@ import type { TemplateType } from "@/config/constants";
 export const usageApi = {
   // Provider usage script methods
   query: async (providerId: string, appId: AppId): Promise<UsageResult> => {
-    return invoke("queryProviderUsage", { providerId, app: appId });
+    return invoke("query_provider_usage", { providerId, app: appId });
   },
 
   testScript: async (
@@ -34,7 +34,7 @@ export const usageApi = {
     userId?: string,
     templateType?: TemplateType,
   ): Promise<UsageResult> => {
-    return invoke("testUsageScript", {
+    return invoke("test_usage_script", {
       providerId,
       app: appId,
       scriptCode,

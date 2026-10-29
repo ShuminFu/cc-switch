@@ -39,11 +39,16 @@ pub fn add_provider(
     state: State<'_, AppState>,
     app: String,
     provider: Provider,
-    #[allow(non_snake_case)] addToLive: Option<bool>,
+    add_to_live: Option<bool>,
 ) -> Result<bool, IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
-    ProviderService::add(state.inner(), app_type, provider, addToLive.unwrap_or(true))
-        .map_err(IpcError::from)
+    ProviderService::add(
+        state.inner(),
+        app_type,
+        provider,
+        add_to_live.unwrap_or(true),
+    )
+    .map_err(IpcError::from)
 }
 
 #[tauri::command]
@@ -51,10 +56,10 @@ pub fn update_provider(
     state: State<'_, AppState>,
     app: String,
     provider: Provider,
-    #[allow(non_snake_case)] originalId: Option<String>,
+    original_id: Option<String>,
 ) -> Result<bool, IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
-    ProviderService::update(state.inner(), app_type, originalId.as_deref(), provider)
+    ProviderService::update(state.inner(), app_type, original_id.as_deref(), provider)
         .map_err(IpcError::from)
 }
 
@@ -380,13 +385,12 @@ pub(crate) fn suggested_claude_desktop_routes(
     (!routes.is_empty()).then_some(routes)
 }
 
-#[allow(non_snake_case)]
 #[tauri::command]
-pub async fn queryProviderUsage(
+pub async fn query_provider_usage(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
     copilot_state: State<'_, CopilotAuthState>,
-    #[allow(non_snake_case)] providerId: String, // 使用 camelCase 匹配前端
+    provider_id: String, // 前端键为 providerId，由 Tauri 映射
     app: String,
 ) -> Result<crate::provider::UsageResult, IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
@@ -399,12 +403,12 @@ pub async fn queryProviderUsage(
     //      保留上次 data 的语义一致；否则失败快照会经 useUsageCacheBridge 盲写
     //      回 query 缓存，抹掉 reject 本该保留的旧值。
     let inner =
-        query_provider_usage_inner(&state, &copilot_state, app_type.clone(), &providerId).await;
+        query_provider_usage_inner(&state, &copilot_state, app_type.clone(), &provider_id).await;
     if let Ok(snapshot) = &inner {
         let payload = serde_json::json!({
             "kind": "script",
             "appType": app_type.as_str(),
-            "providerId": &providerId,
+            "providerId": &provider_id,
             "data": snapshot,
         });
         if let Err(e) = app_handle.emit("usage-cache-updated", payload) {
@@ -412,7 +416,7 @@ pub async fn queryProviderUsage(
         }
         state
             .usage_cache
-            .put_script(app_type, providerId, snapshot.clone());
+            .put_script(app_type, provider_id, snapshot.clone());
         crate::tray::schedule_tray_refresh(&app_handle);
     }
     inner.map_err(IpcError::from)
@@ -673,33 +677,32 @@ async fn query_provider_usage_inner(
         .map_err(|e| e.to_string())
 }
 
-#[allow(non_snake_case)]
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub async fn testUsageScript(
+pub async fn test_usage_script(
     state: State<'_, AppState>,
-    #[allow(non_snake_case)] providerId: String,
+    provider_id: String,
     app: String,
-    #[allow(non_snake_case)] scriptCode: String,
+    script_code: String,
     timeout: Option<u64>,
-    #[allow(non_snake_case)] apiKey: Option<String>,
-    #[allow(non_snake_case)] baseUrl: Option<String>,
-    #[allow(non_snake_case)] accessToken: Option<String>,
-    #[allow(non_snake_case)] userId: Option<String>,
-    #[allow(non_snake_case)] templateType: Option<String>,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    access_token: Option<String>,
+    user_id: Option<String>,
+    template_type: Option<String>,
 ) -> Result<crate::provider::UsageResult, IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
     ProviderService::test_usage_script(
         state.inner(),
         app_type,
-        &providerId,
-        &scriptCode,
+        &provider_id,
+        &script_code,
         timeout.unwrap_or(10),
-        apiKey.as_deref(),
-        baseUrl.as_deref(),
-        accessToken.as_deref(),
-        userId.as_deref(),
-        templateType.as_deref(),
+        api_key.as_deref(),
+        base_url.as_deref(),
+        access_token.as_deref(),
+        user_id.as_deref(),
+        template_type.as_deref(),
     )
     .await
     .map_err(IpcError::from)
@@ -714,9 +717,9 @@ pub fn read_live_provider_settings(app: String) -> Result<serde_json::Value, Ipc
 #[tauri::command]
 pub async fn test_api_endpoints(
     urls: Vec<String>,
-    #[allow(non_snake_case)] timeoutSecs: Option<u64>,
+    timeout_secs: Option<u64>,
 ) -> Result<Vec<EndpointLatency>, IpcError> {
-    SpeedtestService::test_endpoints(urls, timeoutSecs)
+    SpeedtestService::test_endpoints(urls, timeout_secs)
         .await
         .map_err(IpcError::from)
 }
@@ -725,10 +728,10 @@ pub async fn test_api_endpoints(
 pub fn get_custom_endpoints(
     state: State<'_, AppState>,
     app: String,
-    #[allow(non_snake_case)] providerId: String,
+    provider_id: String,
 ) -> Result<Vec<crate::settings::CustomEndpoint>, IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
-    ProviderService::get_custom_endpoints(state.inner(), app_type, &providerId)
+    ProviderService::get_custom_endpoints(state.inner(), app_type, &provider_id)
         .map_err(IpcError::from)
 }
 
@@ -736,11 +739,11 @@ pub fn get_custom_endpoints(
 pub fn add_custom_endpoint(
     state: State<'_, AppState>,
     app: String,
-    #[allow(non_snake_case)] providerId: String,
+    provider_id: String,
     url: String,
 ) -> Result<(), IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
-    ProviderService::add_custom_endpoint(state.inner(), app_type, &providerId, url)
+    ProviderService::add_custom_endpoint(state.inner(), app_type, &provider_id, url)
         .map_err(IpcError::from)
 }
 
@@ -748,11 +751,11 @@ pub fn add_custom_endpoint(
 pub fn remove_custom_endpoint(
     state: State<'_, AppState>,
     app: String,
-    #[allow(non_snake_case)] providerId: String,
+    provider_id: String,
     url: String,
 ) -> Result<(), IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
-    ProviderService::remove_custom_endpoint(state.inner(), app_type, &providerId, url)
+    ProviderService::remove_custom_endpoint(state.inner(), app_type, &provider_id, url)
         .map_err(IpcError::from)
 }
 
@@ -760,11 +763,11 @@ pub fn remove_custom_endpoint(
 pub fn update_endpoint_last_used(
     state: State<'_, AppState>,
     app: String,
-    #[allow(non_snake_case)] providerId: String,
+    provider_id: String,
     url: String,
 ) -> Result<(), IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
-    ProviderService::update_endpoint_last_used(state.inner(), app_type, &providerId, url)
+    ProviderService::update_endpoint_last_used(state.inner(), app_type, &provider_id, url)
         .map_err(IpcError::from)
 }
 

@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use crate::app_config::AppType;
 use crate::init_status::{InitErrorPayload, SkillsMigrationPayload};
 use crate::services::ProviderService;
@@ -2597,12 +2595,11 @@ fn wsl_distro_from_path(path: &Path) -> Option<String> {
 ///
 /// 根据提供商配置的环境变量启动一个带有该提供商特定设置的终端
 /// 无需检查是否为当前激活的提供商，任何提供商都可以打开终端
-#[allow(non_snake_case)]
 #[tauri::command]
 pub async fn open_provider_terminal(
     state: State<'_, crate::store::AppState>,
     app: String,
-    #[allow(non_snake_case)] providerId: String,
+    provider_id: String,
     cwd: Option<String>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
@@ -2613,15 +2610,15 @@ pub async fn open_provider_terminal(
         .map_err(|e| format!("获取提供商列表失败: {e}"))?;
 
     let provider = providers
-        .get(&providerId)
-        .ok_or_else(|| format!("提供商 {providerId} 不存在"))?;
+        .get(&provider_id)
+        .ok_or_else(|| format!("提供商 {provider_id} 不存在"))?;
 
     // 从提供商配置中提取环境变量
     let config = &provider.settings_config;
     let env_vars = extract_env_vars_from_config(config, &app_type);
 
     // 根据平台启动终端，传入提供商ID用于生成唯一的配置文件名
-    launch_terminal_with_env(env_vars, &providerId, launch_cwd.as_deref())
+    launch_terminal_with_env(env_vars, &provider_id, launch_cwd.as_deref())
         .map_err(|e| format!("启动终端失败: {e}"))?;
 
     Ok(true)

@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use tauri::{AppHandle, Emitter};
 
 use crate::error::IpcError;
@@ -744,30 +742,6 @@ pub async fn set_optimizer_config(
     state
         .db
         .set_optimizer_config(&config)
-        .map_err(IpcError::from)?;
-    Ok(true)
-}
-
-/// 获取 Copilot 优化器配置
-#[tauri::command]
-pub async fn get_copilot_optimizer_config(
-    state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::CopilotOptimizerConfig, IpcError> {
-    state
-        .db
-        .get_copilot_optimizer_config()
-        .map_err(IpcError::from)
-}
-
-/// 设置 Copilot 优化器配置
-#[tauri::command]
-pub async fn set_copilot_optimizer_config(
-    state: tauri::State<'_, crate::AppState>,
-    config: crate::proxy::types::CopilotOptimizerConfig,
-) -> Result<bool, IpcError> {
-    state
-        .db
-        .set_copilot_optimizer_config(&config)
         .map_err(IpcError::from)?;
     Ok(true)
 }

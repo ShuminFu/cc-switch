@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use crate::session_manager;
 
 #[tauri::command]
@@ -12,11 +10,9 @@ pub async fn list_sessions() -> Result<Vec<session_manager::SessionMeta>, String
 
 #[tauri::command]
 pub async fn get_session_messages(
-    providerId: String,
-    sourcePath: String,
+    provider_id: String,
+    source_path: String,
 ) -> Result<Vec<session_manager::SessionMessage>, String> {
-    let provider_id = providerId.clone();
-    let source_path = sourcePath.clone();
     tauri::async_runtime::spawn_blocking(move || {
         session_manager::load_messages(&provider_id, &source_path)
     })
@@ -24,13 +20,13 @@ pub async fn get_session_messages(
     .map_err(|e| format!("Failed to load session messages: {e}"))?
 }
 
-/// 在终端中恢复会话。webview 只能指定 `{providerId, sessionId}`：
+/// 在终端中恢复会话。webview 只能指定 `{provider_id, session_id}`：
 /// 恢复命令与工作目录都由后端根据扫描到的会话元数据和固定模板生成，
 /// 任何 IPC 参数都不会被当作 shell 字符串执行。
 #[tauri::command]
 pub async fn launch_session_terminal(
-    providerId: String,
-    sessionId: String,
+    provider_id: String,
+    session_id: String,
 ) -> Result<bool, String> {
     // Read preferred terminal from global settings
     let preferred = crate::settings::get_preferred_terminal();
@@ -43,7 +39,7 @@ pub async fn launch_session_terminal(
     };
 
     tauri::async_runtime::spawn_blocking(move || {
-        let resume = session_manager::resolve_resume_target(&providerId, &sessionId)?;
+        let resume = session_manager::resolve_resume_target(&provider_id, &session_id)?;
         session_manager::terminal::launch_terminal(
             &target,
             &resume.command,
@@ -59,14 +55,10 @@ pub async fn launch_session_terminal(
 
 #[tauri::command]
 pub async fn delete_session(
-    providerId: String,
-    sessionId: String,
-    sourcePath: String,
+    provider_id: String,
+    session_id: String,
+    source_path: String,
 ) -> Result<bool, String> {
-    let provider_id = providerId.clone();
-    let session_id = sessionId.clone();
-    let source_path = sourcePath.clone();
-
     tauri::async_runtime::spawn_blocking(move || {
         session_manager::delete_session(&provider_id, &session_id, &source_path)
     })

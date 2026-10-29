@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
