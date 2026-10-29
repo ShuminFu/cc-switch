@@ -17,6 +17,7 @@ use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{
     effective_usage_log_filter, find_model_pricing, should_skip_session_insert, DedupKey,
 };
+use rusqlite::OptionalExtension;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -450,7 +451,14 @@ pub(crate) fn update_sync_state(
     Ok(())
 }
 
-/// 插入单条会话日志到 proxy_request_logs，返回是否成功插入 (true=新插入, false=已存在)
+/// 插入单条会话日志到 proxy_request_logs，返回是否写入了数据
+/// (true=新插入或升级了已有的流式快照行, false=已存在/跳过)
+///
+/// 去重只在单次解析内按 message.id 进行；若上一轮同步已导入了同一 message 的
+/// 早期流式快照（stop_reason 为空、output_tokens 偏小），本轮读到最终条目时
+/// 不能被 `should_skip_session_insert` / `INSERT OR IGNORE` 丢弃，否则 output
+/// 与费用会被永久低估。表中没有保存 stop_reason 的列，因此按 output_tokens
+/// 更大来判定是否为更新的快照，并重写 token 与费用列。
 fn insert_session_log_entry(
     db: &Database,
     request_id: &str,
@@ -482,7 +490,23 @@ fn insert_session_log_entry(
         cache_creation_tokens: msg.cache_creation_tokens,
         created_at,
     };
-    if should_skip_session_insert(&conn, request_id, &dedup_key)? {
+    // 已有同 message 的会话日志行：仅当新条目 output 更大时升级（见函数注释）
+    let existing_output: Option<i64> = conn
+        .query_row(
+            "SELECT output_tokens FROM proxy_request_logs
+             WHERE request_id = ?1 AND data_source = 'session_log'",
+            rusqlite::params![request_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| AppError::Database(format!("查询会话日志失败: {e}")))?;
+    let upgrade_existing = match existing_output {
+        Some(old_output) if i64::from(msg.output_tokens) > old_output => true,
+        Some(_) => return Ok(false),
+        None => false,
+    };
+
+    if !upgrade_existing && should_skip_session_insert(&conn, request_id, &dedup_key)? {
         return Ok(false);
     }
 
@@ -518,6 +542,34 @@ fn insert_session_log_entry(
             "0".to_string(),
         ),
     };
+
+    if upgrade_existing {
+        let updated_rows = conn
+            .execute(
+                "UPDATE proxy_request_logs SET
+                input_tokens = ?2, output_tokens = ?3, cache_read_tokens = ?4, cache_creation_tokens = ?5,
+                input_cost_usd = ?6, output_cost_usd = ?7, cache_read_cost_usd = ?8,
+                cache_creation_cost_usd = ?9, total_cost_usd = ?10
+             WHERE request_id = ?1 AND data_source = 'session_log' AND output_tokens < ?3",
+                rusqlite::params![
+                    request_id,
+                    msg.input_tokens,
+                    msg.output_tokens,
+                    msg.cache_read_tokens,
+                    msg.cache_creation_tokens,
+                    input_cost,
+                    output_cost,
+                    cache_read_cost,
+                    cache_creation_cost,
+                    total_cost,
+                ],
+            )
+            .map_err(|e| AppError::Database(format!("更新会话日志失败: {e}")))?;
+        if updated_rows > 0 {
+            crate::usage_events::notify_log_recorded();
+        }
+        return Ok(updated_rows > 0);
+    }
 
     let inserted_rows = conn
         .execute(
@@ -943,6 +995,79 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_sync_upgrades_partial_snapshot_when_final_entry_arrives() -> Result<(), AppError> {
+        // 回归：上一轮同步已导入流式早期快照（output=1、stop_reason=null），
+        // 本轮读到同一 message 的最终条目时必须升级该行，而不是被去重丢弃。
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("streaming.jsonl");
+        let partial = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}},"timestamp":"2026-06-07T13:01:23Z","sessionId":"session-stream"}"#;
+        let final_entry = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":500,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}},"timestamp":"2026-06-07T13:01:25Z","sessionId":"session-stream"}"#;
+        let path_str = file.to_string_lossy().to_string();
+
+        fs::write(&file, format!("{partial}\n")).unwrap();
+        let (imported, _) = sync_single_file(&db, &file)?;
+        assert_eq!(imported, 1);
+        let read_row = |db: &Database| -> Result<(i64, String, String, i64), AppError> {
+            let conn = lock_conn!(db.conn);
+            Ok(conn.query_row(
+                "SELECT output_tokens, output_cost_usd, total_cost_usd,
+                        (SELECT COUNT(*) FROM proxy_request_logs WHERE request_id = 'session:msg_1')
+                 FROM proxy_request_logs WHERE request_id = 'session:msg_1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?)
+        };
+        let (output, _, partial_total, _) = read_row(&db)?;
+        assert_eq!(output, 1);
+
+        // 写入方追加最终条目；回拨已记录的 mtime 模拟文件更新
+        fs::write(&file, format!("{partial}\n{final_entry}\n")).unwrap();
+        let (mtime, offset) = get_sync_state(&db, &path_str)?;
+        update_sync_state(&db, &path_str, mtime - 1, offset)?;
+        let (imported, _) = sync_single_file(&db, &file)?;
+        assert_eq!(imported, 1, "最终条目应升级已有快照行");
+
+        let (output, output_cost, total_cost, count) = read_row(&db)?;
+        assert_eq!(output, 500);
+        assert_eq!(count, 1, "同一 message 只能有一行");
+
+        let expected = {
+            let conn = lock_conn!(db.conn);
+            let pricing = find_model_pricing_for_session(&conn, "claude-sonnet-4-5")
+                .expect("seeded pricing for claude-sonnet-4-5");
+            let usage = TokenUsage {
+                input_tokens: 10,
+                output_tokens: 500,
+                cache_read_tokens: 100,
+                cache_creation_tokens: 50,
+                model: Some("claude-sonnet-4-5".to_string()),
+                message_id: None,
+            };
+            CostCalculator::calculate(&usage, &pricing, Decimal::from(1))
+        };
+        assert_eq!(output_cost, expected.output_cost.to_string());
+        assert_eq!(total_cost, expected.total_cost.to_string());
+        assert_ne!(total_cost, partial_total, "费用必须按最终条目重算");
+
+        // 再次读到更小 output 的旧快照时不能降级
+        let stale = ParsedAssistantUsage {
+            message_id: "msg_1".to_string(),
+            model: "claude-sonnet-4-5".to_string(),
+            input_tokens: 10,
+            output_tokens: 1,
+            cache_read_tokens: 100,
+            cache_creation_tokens: 50,
+            stop_reason: None,
+            timestamp: Some("2026-06-07T13:01:23Z".to_string()),
+            session_id: Some("session-stream".to_string()),
+        };
+        assert!(!insert_session_log_entry(&db, "session:msg_1", &stale)?);
+        assert_eq!(read_row(&db)?.0, 500);
         Ok(())
     }
 
