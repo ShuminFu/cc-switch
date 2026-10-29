@@ -199,6 +199,38 @@ fn v16_repairs_dev_global_profile_marker() -> Result<(), AppError> {
 }
 
 #[test]
+fn v16_restores_v2_objects_missing_from_beta_v2() -> Result<(), AppError> {
+    let conn = Connection::open_in_memory()?;
+    // 模拟测试版 v2：user_version=2，但缺少 v2 引入的 failover 列和代理状态表
+    // （原先由每次启动的 create_tables 补建，v2 步骤不会对已是 v2 的库重跑）
+    Database::apply_schema_migrations_up_to(&conn, 2)?;
+    conn.execute_batch(
+        "DROP INDEX idx_providers_failover;
+         ALTER TABLE providers DROP COLUMN in_failover_queue;
+         DROP TABLE provider_health;
+         DROP TABLE stream_check_logs;
+         DROP TABLE proxy_live_backup;
+         DROP INDEX idx_request_logs_model;",
+    )?;
+
+    Database::apply_schema_migrations_on_conn(&conn)?;
+
+    assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+    assert!(Database::has_column(
+        &conn,
+        "providers",
+        "in_failover_queue"
+    )?);
+    assert!(index_exists(&conn, "idx_providers_failover")?);
+    for table in ["provider_health", "stream_check_logs", "proxy_live_backup"] {
+        assert!(Database::table_exists(&conn, table)?, "{table} missing");
+    }
+    assert!(index_exists(&conn, "idx_stream_check_logs_provider")?);
+    assert!(index_exists(&conn, "idx_request_logs_model")?);
+    Ok(())
+}
+
+#[test]
 fn v14_converts_singleton_proxy_config_left_by_beta_v2() -> Result<(), AppError> {
     let conn = Connection::open_in_memory()?;
     // 模拟测试版 v2：user_version=2，但 proxy_config 仍是单例结构（无 app_type）

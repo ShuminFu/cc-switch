@@ -88,3 +88,7 @@ p0-migration-harness, p1-db-compat-policy
 - Before the v16 fixture was added, the harness failed only on `db_fixtures_cover_every_schema_version` (`missing DB fixtures for schema versions [16]`). Every older fixture already matched the fresh v16 schema built by the new chain.
 
 **Compatibility note.** v16 is additive, but by policy an older v15 build will refuse a v16 database. Downgrading goes through the CCS-091 restore flow, which uses the pre-migration backup.
+
+**Review**
+
+An independent review checked every acceptance criterion against the code and found them met. It found one regression. `create_tables` used to re-create, on every start, the objects that v2 introduced: `providers.in_failover_queue`, `idx_providers_failover`, `provider_health`, `stream_check_logs`, `proxy_live_backup` and the base `proxy_request_logs` indexes. The new v2 step only runs for databases below v2, so a beta v2 database that lacks any of these never got it back. The old code comments name beta v2 databases with no `in_failover_queue`. The v2 DDL is now in shared helpers in `legacy.rs`. The v16 step calls them idempotently, guarded on the tables and columns existing. The change is still additive and the fresh schema is unchanged, so the v16 fixture still matches. The regression test is `v16_restores_v2_objects_missing_from_beta_v2`. After the fix: `--test migrations` 9/9, `--lib database::` 70/70, full suite 2496 passed / 0 failed, and fmt and clippy (`--all-targets -D warnings`) are clean.

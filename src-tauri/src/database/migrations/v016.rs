@@ -5,7 +5,9 @@
 //! - 使用量查询索引（v8 引入，但 v8/v9 发布版尚未创建）；
 //! - 额度窗口索引 `idx_request_logs_provider_created_at`（CCS-095，v15 之后新增）；
 //! - 未发布开发版遗留的全局 `current_profile_id` 标记改为按应用分组；
-//! - proxy_config 每应用默认行。
+//! - proxy_config 每应用默认行；
+//! - 随 v2 引入的 failover 列/索引、代理状态表与请求日志索引（测试版 v2 数据库可能缺失，
+//!   原先由 `create_tables` 每次启动补建，v2 步骤不会对已是 v2+ 的库重跑）。
 //!
 //! 全部为增量变更，不影响 `DB_COMPAT_VERSION`。
 
@@ -14,7 +16,34 @@ use crate::error::AppError;
 use rusqlite::Connection;
 
 pub(super) fn apply(conn: &Connection) -> Result<(), AppError> {
+    if Database::table_exists(conn, "providers")? {
+        Database::add_column_if_missing(
+            conn,
+            "providers",
+            "in_failover_queue",
+            "BOOLEAN NOT NULL DEFAULT 0",
+        )?;
+        if Database::has_column(conn, "providers", "sort_index")? {
+            Database::create_providers_failover_index(conn)?;
+        }
+        Database::create_v2_proxy_state_tables(conn)?;
+    }
+
     if Database::table_exists(conn, "proxy_request_logs")? {
+        let mut has_base_index_columns = true;
+        for column in [
+            "provider_id",
+            "app_type",
+            "created_at",
+            "model",
+            "session_id",
+            "status_code",
+        ] {
+            has_base_index_columns &= Database::has_column(conn, "proxy_request_logs", column)?;
+        }
+        if has_base_index_columns {
+            Database::create_request_logs_base_indexes(conn)?;
+        }
         Database::create_request_logs_usage_indexes_if_supported(conn)?;
         // 额度检查按 provider 查 [start, end) 时间窗：三列索引让 created_at 范围走索引 seek
         let mut has_window_columns = true;

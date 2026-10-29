@@ -62,12 +62,7 @@ impl Database {
             .map_err(|e| AppError::Database(format!("删除 failover_queue 表失败: {e}")))?;
 
         // 创建 failover 索引
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_providers_failover
-             ON providers(app_type, in_failover_queue, sort_index)",
-            [],
-        )
-        .map_err(|e| AppError::Database(format!("创建 failover 索引失败: {e}")))?;
+        Self::create_providers_failover_index(conn)?;
 
         // proxy_request_logs 表
         conn.execute("CREATE TABLE IF NOT EXISTS proxy_request_logs (
@@ -100,39 +95,10 @@ impl Database {
         )?;
         Self::add_column_if_missing(conn, "proxy_request_logs", "first_token_ms", "INTEGER")?;
         Self::add_column_if_missing(conn, "proxy_request_logs", "duration_ms", "INTEGER")?;
-        conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_request_logs_provider
-                 ON proxy_request_logs(provider_id, app_type);
-             CREATE INDEX IF NOT EXISTS idx_request_logs_created_at
-                 ON proxy_request_logs(created_at);
-             CREATE INDEX IF NOT EXISTS idx_request_logs_model ON proxy_request_logs(model);
-             CREATE INDEX IF NOT EXISTS idx_request_logs_session ON proxy_request_logs(session_id);
-             CREATE INDEX IF NOT EXISTS idx_request_logs_status ON proxy_request_logs(status_code);",
-        )
-        .map_err(|e| AppError::Database(format!("创建 proxy_request_logs 索引失败: {e}")))?;
+        Self::create_request_logs_base_indexes(conn)?;
 
         // provider_health / stream_check_logs / proxy_live_backup 表（随 v2 引入）
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS provider_health (
-                provider_id TEXT NOT NULL, app_type TEXT NOT NULL, is_healthy INTEGER NOT NULL DEFAULT 1,
-                consecutive_failures INTEGER NOT NULL DEFAULT 0, last_success_at TEXT, last_failure_at TEXT,
-                last_error TEXT, updated_at TEXT NOT NULL,
-                PRIMARY KEY (provider_id, app_type),
-                FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
-             );
-             CREATE TABLE IF NOT EXISTS stream_check_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id TEXT NOT NULL, provider_name TEXT NOT NULL,
-                app_type TEXT NOT NULL, status TEXT NOT NULL, success INTEGER NOT NULL, message TEXT NOT NULL,
-                response_time_ms INTEGER, http_status INTEGER, model_used TEXT,
-                retry_count INTEGER DEFAULT 0, tested_at INTEGER NOT NULL
-             );
-             CREATE INDEX IF NOT EXISTS idx_stream_check_logs_provider
-                 ON stream_check_logs(app_type, provider_id, tested_at DESC);
-             CREATE TABLE IF NOT EXISTS proxy_live_backup (
-                app_type TEXT PRIMARY KEY, original_config TEXT NOT NULL, backed_up_at TEXT NOT NULL
-             );",
-        )
-        .map_err(|e| AppError::Database(format!("创建 v2 代理状态表失败: {e}")))?;
+        Self::create_v2_proxy_state_tables(conn)?;
 
         // model_pricing 表
         conn.execute(
@@ -167,6 +133,58 @@ impl Database {
         )?;
         Self::seed_proxy_config_rows(conn)?;
 
+        Ok(())
+    }
+
+    /// v2 引入的 failover 索引（基于 providers.in_failover_queue）
+    pub(super) fn create_providers_failover_index(conn: &Connection) -> Result<(), AppError> {
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_providers_failover
+             ON providers(app_type, in_failover_queue, sort_index)",
+            [],
+        )
+        .map_err(|e| AppError::Database(format!("创建 failover 索引失败: {e}")))?;
+        Ok(())
+    }
+
+    /// v2 引入的 proxy_request_logs 基础索引
+    pub(super) fn create_request_logs_base_indexes(conn: &Connection) -> Result<(), AppError> {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_request_logs_provider
+                 ON proxy_request_logs(provider_id, app_type);
+             CREATE INDEX IF NOT EXISTS idx_request_logs_created_at
+                 ON proxy_request_logs(created_at);
+             CREATE INDEX IF NOT EXISTS idx_request_logs_model ON proxy_request_logs(model);
+             CREATE INDEX IF NOT EXISTS idx_request_logs_session ON proxy_request_logs(session_id);
+             CREATE INDEX IF NOT EXISTS idx_request_logs_status ON proxy_request_logs(status_code);",
+        )
+        .map_err(|e| AppError::Database(format!("创建 proxy_request_logs 索引失败: {e}")))?;
+        Ok(())
+    }
+
+    /// v2 引入的代理状态表：provider_health / stream_check_logs / proxy_live_backup
+    pub(super) fn create_v2_proxy_state_tables(conn: &Connection) -> Result<(), AppError> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS provider_health (
+                provider_id TEXT NOT NULL, app_type TEXT NOT NULL, is_healthy INTEGER NOT NULL DEFAULT 1,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0, last_success_at TEXT, last_failure_at TEXT,
+                last_error TEXT, updated_at TEXT NOT NULL,
+                PRIMARY KEY (provider_id, app_type),
+                FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
+             );
+             CREATE TABLE IF NOT EXISTS stream_check_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id TEXT NOT NULL, provider_name TEXT NOT NULL,
+                app_type TEXT NOT NULL, status TEXT NOT NULL, success INTEGER NOT NULL, message TEXT NOT NULL,
+                response_time_ms INTEGER, http_status INTEGER, model_used TEXT,
+                retry_count INTEGER DEFAULT 0, tested_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_stream_check_logs_provider
+                 ON stream_check_logs(app_type, provider_id, tested_at DESC);
+             CREATE TABLE IF NOT EXISTS proxy_live_backup (
+                app_type TEXT PRIMARY KEY, original_config TEXT NOT NULL, backed_up_at TEXT NOT NULL
+             );",
+        )
+        .map_err(|e| AppError::Database(format!("创建 v2 代理状态表失败: {e}")))?;
         Ok(())
     }
 
