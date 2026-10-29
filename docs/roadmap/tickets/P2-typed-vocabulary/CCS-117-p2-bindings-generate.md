@@ -66,3 +66,13 @@ p2-bindings-spike
 **Remaining (follow-ups, not blocking):**
 - The provider and proxy commands do not carry `#[specta::specta]` yet, so their result types are mapped by hand in `ResultOverrides` in `tests/msw/commands.ts`.
 - The rest of the hand-written frontend `Provider` type is not replaced yet.
+
+**Review.** An independent review checked both acceptance criteria against 2f148da and found them met. Regenerating three times gave byte-identical output. A probe doc-comment change on `ActiveTarget` made `bindings_are_up_to_date` fail, and reverting it made the test pass again. No frontend `invoke("…")` call names a command missing from the generated `COMMANDS`. Re-run results:
+- `cargo fmt --check`: clean.
+- `cargo clippy --all-targets -- -D warnings`: clean.
+- `cargo test --lib`: 2224 passed.
+- `cargo test --no-fail-fast`: 0 failures.
+- `pnpm typecheck`, `pnpm test:unit` (1457 tests) and `pnpm format:check`: all pass.
+- `ci.yml` parses as valid YAML.
+
+The one follow-up fixed: the `.prettierignore` comment still named the removed `usage_bindings` test, and now names the `bindings` test.
