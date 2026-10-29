@@ -347,9 +347,21 @@ fn cases(addr: SocketAddr) -> Vec<Case> {
     ]
 }
 
+/// 抓到的请求只用 CRLF 换行（JSON body 不含换行），这里把 CRLF 写成 LF，
+/// 使期望文件经 git 换行归一化后仍可逐字节比对；任何裸 CR / LF 都会让断言失败
 fn render(case_name: &str, raw: &[u8], addr: SocketAddr) -> String {
     let text = String::from_utf8_lossy(raw).replace(&addr.port().to_string(), "<PORT>");
-    format!("===== {case_name} =====\n{text}\n")
+    let normalized = text.replace("\r\n", "\n");
+    assert_eq!(
+        normalized.matches('\n').count(),
+        text.matches("\r\n").count(),
+        "{case_name}: request must use CRLF line endings only"
+    );
+    assert!(
+        !normalized.contains('\r'),
+        "{case_name}: stray CR in request"
+    );
+    format!("===== {case_name} =====\n{normalized}\n")
 }
 
 #[tokio::test]
