@@ -13,7 +13,7 @@ import { useEnvConflicts } from "@/hooks/useEnvConflicts";
 import { useWindowChrome } from "@/hooks/useWindowChrome";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import { safeStorageSet } from "@/lib/storage";
-import { ALL_APP_IDS, useAppCaps } from "@/entities/app/registry";
+import { ALL_APP_IDS, appCaps, useAppCaps } from "@/entities/app/registry";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { LazyMount, lazyNamed } from "@/components/common/LazyMount";
 import type { SkillsPageSource } from "@/components/skills/skillsPageHeaderActions";
@@ -31,6 +31,10 @@ import {
 } from "@/components/app-shell/AppConfirmDialogs";
 import { useShellPanelRefs } from "@/components/app-shell/panelRefs";
 import { useViewShortcuts } from "@/components/app-shell/useViewShortcuts";
+import {
+  CommandPalette,
+  useCommandPaletteShortcut,
+} from "@/components/app-shell/CommandPalette";
 import {
   VIEW_STORAGE_KEY,
   getInitialApp,
@@ -85,6 +89,12 @@ function App() {
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [usageProvider, setUsageProvider] = useState<Provider | null>(null);
   const [launchDashboardOpen, setLaunchDashboardOpen] = useState(false);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  // 命令面板跨应用切换：先切换 activeApp，待 useProviderActions 绑定到目标应用后再执行
+  const [pendingSwitch, setPendingSwitch] = useState<{
+    appId: AppId;
+    provider: Provider;
+  } | null>(null);
   const effectiveEditingProvider = useLastValidValue(editingProvider);
   const effectiveUsageProvider = useLastValidValue(usageProvider);
   const panelRefs = useShellPanelRefs();
@@ -112,11 +122,13 @@ function App() {
 
   useUsageCacheBridge();
   useViewShortcuts(currentView, setCurrentView);
+  useCommandPaletteShortcut(isPaletteOpen, setIsPaletteOpen);
 
   const {
     isRunning: isProxyRunning,
     takeoverStatus,
     status: proxyStatus,
+    setTakeoverForApp,
   } = useProxyStatus();
   const isCurrentAppTakeoverActive = takeoverStatus?.[activeApp] || false;
   const activeProviderId = useMemo(() => {
@@ -158,6 +170,29 @@ function App() {
   const providerConfirm = useProviderConfirm(activeApp, deleteProvider);
   const env = useEnvConflicts(activeApp);
   useAppShellEvents(activeApp, refetch);
+
+  useEffect(() => {
+    if (!pendingSwitch) return;
+    setPendingSwitch(null);
+    // 与 setActiveApp 同批提交，此时 activeApp 应已是目标应用；
+    // 若被可见性回退等逻辑改写则放弃，避免切换到错误应用
+    if (pendingSwitch.appId === activeApp) {
+      void switchProvider(pendingSwitch.provider);
+    }
+  }, [pendingSwitch, activeApp, switchProvider]);
+
+  const selectAppFromPalette = (appId: AppId) => {
+    setActiveApp(appId);
+    setCurrentView("providers");
+  };
+
+  const switchProviderFromPalette = (appId: AppId, provider: Provider) => {
+    selectAppFromPalette(appId);
+    // 累加模式应用没有“当前供应商”，只跳转到列表
+    if (!appCaps(appId).additive) {
+      setPendingSwitch({ appId, provider });
+    }
+  };
 
   const openHermesWebUI = useOpenHermesWebUI(() =>
     setLaunchDashboardOpen(true),
@@ -297,6 +332,32 @@ function App() {
       <HermesLaunchConfirmDialog
         isOpen={launchDashboardOpen}
         onClose={() => setLaunchDashboardOpen(false)}
+      />
+
+      <CommandPalette
+        open={isPaletteOpen}
+        onOpenChange={setIsPaletteOpen}
+        visibleApps={visibleApps}
+        activeApp={activeApp}
+        onSwitchProvider={switchProviderFromPalette}
+        onSelectApp={selectAppFromPalette}
+        onOpenSettings={() => openSettings("general")}
+        onAddProvider={() => setIsAddOpen(true)}
+        onToggleTakeover={
+          settingsData?.enableLocalProxy && activeApp !== "claude-desktop"
+            ? () =>
+                void setTakeoverForApp({
+                  appType: activeApp,
+                  enabled: !isCurrentAppTakeoverActive,
+                }).catch((error) => {
+                  console.error(
+                    "[CommandPalette] Toggle takeover failed:",
+                    error,
+                  );
+                })
+            : undefined
+        }
+        isTakeoverActive={isCurrentAppTakeoverActive}
       />
 
       <DeepLinkImportDialog />

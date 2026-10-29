@@ -106,6 +106,18 @@
     "windowRestore": "还原窗口",
     "windowClose": "关闭窗口"
   },
+  "commandPalette": {
+    "title": "命令面板",
+    "description": "搜索各应用的供应商并执行常用操作",
+    "placeholder": "搜索供应商和操作...",
+    "empty": "没有匹配的结果",
+    "current": "当前",
+    "actions": "操作",
+    "addProvider": "为 {{app}} 添加供应商",
+    "enableTakeover": "为 {{app}} 开启代理接管",
+    "disableTakeover": "为 {{app}} 关闭代理接管",
+    "openSettings": "打开设置"
+  },
   "provider": {
     "connectivityCheck": "检测连通",
     "tabProvider": "供应商",

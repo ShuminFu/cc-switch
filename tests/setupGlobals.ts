@@ -45,3 +45,8 @@ if (!Element.prototype.setPointerCapture) {
 if (!Element.prototype.releasePointerCapture) {
   Element.prototype.releasePointerCapture = () => {};
 }
+
+// cmdk 在选中项变化时调用 scrollIntoView，jsdom 未实现
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}

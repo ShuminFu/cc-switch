@@ -106,6 +106,18 @@
     "windowRestore": "還原視窗",
     "windowClose": "關閉視窗"
   },
+  "commandPalette": {
+    "title": "命令面板",
+    "description": "搜尋各應用的供應商並執行常用操作",
+    "placeholder": "搜尋供應商和操作...",
+    "empty": "沒有符合的結果",
+    "current": "目前",
+    "actions": "操作",
+    "addProvider": "為 {{app}} 新增供應商",
+    "enableTakeover": "為 {{app}} 開啟代理接管",
+    "disableTakeover": "為 {{app}} 關閉代理接管",
+    "openSettings": "開啟設定"
+  },
   "provider": {
     "connectivityCheck": "檢測連通",
     "tabProvider": "供應商",

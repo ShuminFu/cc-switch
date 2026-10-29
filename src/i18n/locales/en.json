@@ -106,6 +106,18 @@
     "windowRestore": "Restore window",
     "windowClose": "Close window"
   },
+  "commandPalette": {
+    "title": "Command palette",
+    "description": "Search providers across apps and run common actions",
+    "placeholder": "Search providers and actions...",
+    "empty": "No results",
+    "current": "Current",
+    "actions": "Actions",
+    "addProvider": "Add provider to {{app}}",
+    "enableTakeover": "Enable proxy takeover for {{app}}",
+    "disableTakeover": "Disable proxy takeover for {{app}}",
+    "openSettings": "Open settings"
+  },
   "provider": {
     "connectivityCheck": "Connectivity check",
     "tabProvider": "Provider",

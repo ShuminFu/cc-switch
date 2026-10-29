@@ -451,6 +451,60 @@ describe("App integration with MSW", () => {
     liveIdsSpy.mockRestore();
   });
 
+  it("opens the command palette with Ctrl-K, filters and switches a provider in another app", async () => {
+    const switchSpy = vi.spyOn(providersApi, "switch");
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("current-provider").textContent).toBe(
+        "claude-1",
+      ),
+    );
+    // 首次运行提示弹窗打开时不响应 Ctrl-K
+    const notice = await screen.findByTestId("first-run-notice-confirm");
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(
+      screen.queryByPlaceholderText("commandPalette.placeholder"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(notice);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const input = await screen.findByPlaceholderText(
+      "commandPalette.placeholder",
+    );
+    // 所有可见应用的供应商都会列出
+    expect(await screen.findByText("Codex Secondary")).toBeInTheDocument();
+    expect(screen.getByText("Claude Custom")).toBeInTheDocument();
+    expect(screen.getByText("Gemini Default")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "codex second" } });
+    await waitFor(() =>
+      expect(screen.queryByText("Claude Custom")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Gemini Default")).not.toBeInTheDocument();
+    expect(screen.getByText("Codex Secondary")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(switchSpy).toHaveBeenCalledWith("codex-2", "codex"),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("current-provider").textContent).toBe(
+        "codex-2",
+      ),
+    );
+    expect(screen.getByTestId("app-switcher").textContent).toContain("codex");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+
+    switchSpy.mockRestore();
+  });
+
   it("renders with defaults when localStorage getItem and setItem throw", async () => {
     const storageError = () => {
       throw new DOMException("storage disabled", "SecurityError");

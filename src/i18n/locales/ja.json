@@ -106,6 +106,18 @@
     "windowRestore": "ウィンドウを元に戻す",
     "windowClose": "ウィンドウを閉じる"
   },
+  "commandPalette": {
+    "title": "コマンドパレット",
+    "description": "各アプリのプロバイダーを検索し、よく使う操作を実行します",
+    "placeholder": "プロバイダーと操作を検索...",
+    "empty": "一致する結果がありません",
+    "current": "現在",
+    "actions": "操作",
+    "addProvider": "{{app}} にプロバイダーを追加",
+    "enableTakeover": "{{app}} のプロキシ引き継ぎを有効化",
+    "disableTakeover": "{{app}} のプロキシ引き継ぎを無効化",
+    "openSettings": "設定を開く"
+  },
   "provider": {
     "connectivityCheck": "接続チェック",
     "tabProvider": "プロバイダー",
