@@ -21,6 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { IpcError } from "@/lib/api/ipc";
 import { getIpcErrorAction } from "@/lib/errors/errorActions";
 import { useSwitchProviderMutation } from "@/lib/query/mutations";
+import { queryClient } from "@/lib/query/queryClient";
 import { createTestQueryClient } from "../utils/testQueryClient";
 
 const t = ((key: string, opts?: Record<string, string>) =>
@@ -151,6 +152,19 @@ describe("getIpcErrorAction", () => {
         filename: "newest.db",
       }),
     );
+  });
+
+  it("refreshes cached queries and confirms after a successful action", async () => {
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    await renderAndClick(
+      ipcError("TAKEOVER_ACTIVE", { appType: "claude" }),
+      "errors.actions.stopTakeover",
+    );
+    expect(
+      await screen.findByText(/errors\.actions\.succeeded/),
+    ).toBeInTheDocument();
+    expect(invalidateSpy).toHaveBeenCalledWith();
+    invalidateSpy.mockRestore();
   });
 
   it("reports a failed action in a follow-up toast", async () => {

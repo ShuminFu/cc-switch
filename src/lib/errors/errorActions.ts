@@ -4,6 +4,7 @@ import { backupsApi, settingsApi } from "@/lib/api/settings";
 import { failoverApi } from "@/lib/api/failover";
 import { proxyApi } from "@/lib/api/proxy";
 import { IpcError, toIpcError } from "@/lib/api/ipc";
+import { queryClient } from "@/lib/query/queryClient";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
 /** 与 sonner `toast(..., { action })` 的形态一致 */
@@ -52,6 +53,8 @@ const withFeedback =
   (label: string, run: () => Promise<void>, t: TFunction) => (): void => {
     void run().then(
       () => {
+        // 修复操作绕过了各自的 mutation hook，这里统一失效缓存，让界面反映新状态
+        void queryClient.invalidateQueries();
         toast.success(t("errors.actions.succeeded", { action: label }));
       },
       (error: unknown) => {
