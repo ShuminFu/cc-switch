@@ -63,3 +63,17 @@ unavailable`, and return early. They compile and run here, but their IPv6
 assertions have not run yet. They need one run on a host that has IPv6
 loopback (any standard CI runner or dev machine) to tick the first two
 acceptance boxes.
+
+**Review.** The fix is correct: `http::Uri::host` and `url::Url::host_str`
+both return bracketed IPv6 hosts, and every connect/server-name site in
+`hyper_client.rs` (direct TCP, proxy TCP, proxy TLS, target TLS) now goes
+through `tcp_connect` / `tls_server_name`, while the CONNECT line and `Host`
+header keep the brackets. One gap was in the tests: the "IPv6 https upstream
+through a proxy" path had no end-to-end test that runs without IPv6 loopback.
+`send_raw_request_through_proxy_builds_tls_name_for_ipv6_target` now sends
+`https://[::1]:8443/` through an IPv4 fake CONNECT proxy and expects the
+request to reach the TLS handshake. It fails on the old code with "Invalid
+server name" and passes here. Verified: fmt and clippy clean,
+`proxy::hyper_client` 15 passed, full `cargo test --no-fail-fast` 2288 passed
+and 0 failed. Status stays Partial until the two `[::1]`-listener tests run
+on a host with IPv6 loopback.

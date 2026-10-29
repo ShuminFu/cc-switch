@@ -1217,4 +1217,33 @@ mod tests {
             Err(e) => panic!("raw path to [::1] must succeed, got: {e:?}"),
         }
     }
+
+    #[tokio::test]
+    async fn send_raw_request_through_proxy_builds_tls_name_for_ipv6_target() {
+        // IPv4 proxy, IPv6 https target: needs no IPv6 on the host. The fake
+        // proxy drops the tunnel after the ClientHello, so the handshake fails,
+        // but it must get that far instead of rejecting "[::1]" as a name.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let proxy = fake_connect_proxy("HTTP/1.1 200 OK\r\n\r\n").await;
+        let uri: http::Uri = "https://[::1]:8443/v1/messages".parse().unwrap();
+        let cases =
+            OriginalHeaderCases::from_raw_bytes(b"POST /v1/messages HTTP/1.1\r\nHost: x\r\n\r\n");
+        let result = send_raw_request(
+            &uri,
+            &http::Method::POST,
+            &http::HeaderMap::new(),
+            &cases,
+            b"{}",
+            Some(&proxy),
+        )
+        .await;
+        match result {
+            Err(RawSendError::PreWrite(ProxyError::ForwardFailed(msg))) => assert!(
+                msg.contains("TLS handshake failed"),
+                "expected a TLS handshake attempt, got: {msg}"
+            ),
+            Err(e) => panic!("expected PreWrite TLS handshake failure, got: {e:?}"),
+            Ok(_) => panic!("fake proxy cannot complete a TLS handshake"),
+        }
+    }
 }
