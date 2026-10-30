@@ -321,6 +321,11 @@ Wenn Sie über ein Desktop-Symbol starten, fügen Sie es der `Exec=`-Zeile der `
 
 Ausführliche Anleitungen zu jeder Funktion finden Sie im **[Benutzerhandbuch](docs/user-manual/en/README.md)** — es deckt Anbieterverwaltung, MCP/Prompts/Skills, Proxy & Failover und mehr ab.
 
+- **[Datenschutz & Datenflüsse](PRIVACY.md)** (Englisch) — was lokal gespeichert wird und welche Netzwerkanfragen die App stellt
+- **[Deep-Link-Spezifikation](docs/deeplink-spec.md)** (Englisch) — das `ccswitch://`-Importprotokoll für Link-Ersteller
+- **[Release Notes](docs/release-notes/README.md)** — Notizen pro Version auf Englisch, Chinesisch und Japanisch
+- **[Sponsoren-Richtlinie (Vorschlag)](docs/sponsor-policy.md)** (Englisch) — wie gesponserte Presets aufgenommen, geprüft und entfernt werden
+
 ## Schnellstart
 
 ### Grundlegende Verwendung

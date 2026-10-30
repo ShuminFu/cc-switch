@@ -321,6 +321,11 @@ CC_SWITCH_GDK_BACKEND=wayland ./CC-Switch-*.AppImage
 
 各機能の詳しい使い方については、**[ユーザーマニュアル](docs/user-manual/ja/README.md)** をご覧ください。プロバイダ管理、MCP/Prompts/Skills、プロキシとフェイルオーバーなど、すべての機能を網羅しています。
 
+- **[プライバシーとデータの流れ](PRIVACY.md)**（英語）— ローカルに保存される内容と、アプリが行うすべてのネットワークリクエスト
+- **[ディープリンク仕様](docs/deeplink-spec.md)**（英語）— リンク作成者向けの `ccswitch://` インポートプロトコル
+- **[リリースノート](docs/release-notes/README.md)** — バージョンごとの英語・中国語・日本語のリリースノート
+- **[スポンサーポリシー（提案）](docs/sponsor-policy.md)**（英語）— スポンサープリセットの掲載・審査・削除のルール
+
 ## クイックスタート
 
 ### 基本的な使い方

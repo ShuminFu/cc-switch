@@ -321,6 +321,11 @@ If you launch from a desktop icon, add it to the `.desktop` `Exec=` line (e.g. `
 
 For detailed guides on every feature, check out the **[User Manual](docs/user-manual/en/README.md)** — covering provider management, MCP/Prompts/Skills, proxy & failover, and more.
 
+- **[Privacy & Data Flows](PRIVACY.md)** — what is stored locally and every network request the app makes
+- **[Deep Link Specification](docs/deeplink-spec.md)** — the `ccswitch://` import protocol for link authors
+- **[Release Notes](docs/release-notes/README.md)** — per-version notes in English, Chinese and Japanese
+- **[Sponsor Policy (proposal)](docs/sponsor-policy.md)** — how sponsored presets are listed, reviewed and removed
+
 ## Quick Start
 
 ### Basic Usage
