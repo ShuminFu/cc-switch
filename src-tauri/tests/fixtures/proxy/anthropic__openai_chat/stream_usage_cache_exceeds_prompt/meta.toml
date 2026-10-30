@@ -5,3 +5,7 @@ ported_from = "src/proxy/providers/streaming.rs::tests::test_usage_chunk_clamps_
 [invariants]
 skip = ["usage_conservation"]
 skip_reason = "Upstream reports cache_read+cache_creation (130) > prompt_tokens (100); the bridge clamps fresh input to 0, so the sum cannot add back up."
+
+[usage_parity]
+expected_issue = "cache_exceeds_input"
+reason = "The upstream's own usage block is inconsistent (cache 130 > prompt_tokens 100); the proxy logs it with the cache_exceeds_input flag."

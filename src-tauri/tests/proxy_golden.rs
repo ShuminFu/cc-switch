@@ -268,6 +268,39 @@ fn codec_parity_responses_anthropic() {
     assert_codec_parity(Bridge::ResponsesAnthropic);
 }
 
+/// Minimum number of upstream bodies with a raw usage block that the usage
+/// parity checker must cover, so the check cannot pass vacuously.
+const MIN_USAGE_PARITY_BODIES: usize = 100;
+
+/// Usage parity over the whole corpus (CCS-186): for every fixture and both
+/// conversion engines, the UsageIR-normalized usage and the recorded usage
+/// must match the raw upstream usage block and price identically in every row
+/// of the per-semantics cost table. Any mismatch fails CI.
+#[test]
+fn usage_parity_golden_corpus() {
+    for engine in [CodecEngine::Legacy, CodecEngine::Ir] {
+        let mut checked = 0;
+        let mut failures = Vec::new();
+        for bridge in Bridge::ALL {
+            for fixture in &load(bridge) {
+                let outcome = testkit::usage_parity_with(fixture, engine);
+                checked += outcome.checked;
+                failures.extend(outcome.failures);
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} usage parity mismatch(es) ({engine:?} engine):\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+        assert!(
+            checked >= MIN_USAGE_PARITY_BODIES,
+            "usage parity checked only {checked} upstream bodies with usage ({engine:?} engine)"
+        );
+    }
+}
+
 #[test]
 fn golden_fixture_inventory() {
     let mut total = 0;

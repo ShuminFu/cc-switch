@@ -31,18 +31,24 @@
 use super::transform::inject_openai_stream_include_usage;
 use super::transform_codex_chat::{build_codex_tool_context_from_request, CodexToolContext};
 use super::transform_gemini::{extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints};
+use crate::pricing::engine::{self, InputBasis, TokenCounts};
 use crate::proxy::codec::bridge;
 pub use crate::proxy::codec::CodecEngine;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
+use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
+use crate::proxy::usage::ir::UsageIR;
+use crate::proxy::usage::parity::{check_usage_parity, raw_usage_block, UsageParityIssue};
 use crate::proxy::usage::parser::TokenUsage;
 use bytes::Bytes;
 use futures::StreamExt;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 /// Stream inputs up to this size are split at every byte offset.
 pub const EXHAUSTIVE_SPLIT_LIMIT: usize = 4 * 1024;
@@ -159,6 +165,8 @@ pub struct CaseMeta {
     pub invariants: InvariantConfig,
     #[serde(default)]
     pub parity: ParityConfig,
+    #[serde(default)]
+    pub usage_parity: UsageParityConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -215,6 +223,21 @@ pub struct ParityConfig {
     /// line per field as produced by [`parity_diff`]. Empty means "identical".
     #[serde(default)]
     pub expected_diff: Vec<String>,
+}
+
+/// Usage parity against the raw upstream usage block (see
+/// [`check_usage_parity_case`]).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageParityConfig {
+    /// The parity flag the raw upstream usage is known to raise (an
+    /// upstream whose own usage block is inconsistent). The checker then
+    /// requires exactly this flag instead of no flag.
+    #[serde(default)]
+    pub expected_issue: Option<UsageParityIssue>,
+    /// Required with `expected_issue`: why the upstream usage is inconsistent.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// Structural invariants checked on every client output.
@@ -360,6 +383,11 @@ pub fn load_fixture(bridge: Bridge, dir: &Path) -> Result<Fixture, String> {
     }
     if !meta.invariants.skip.is_empty() && meta.invariants.skip_reason.is_none() {
         return Err(format!("{id}: invariants.skip requires skip_reason"));
+    }
+    if meta.usage_parity.expected_issue.is_some() && meta.usage_parity.reason.is_none() {
+        return Err(format!(
+            "{id}: usage_parity.expected_issue requires a reason"
+        ));
     }
 
     let read_json = |file: &str| -> Result<Option<Value>, String> {
@@ -658,19 +686,27 @@ fn usage_to_value(usage: Option<TokenUsage>) -> Value {
 
 /// Usage the proxy records for a converted client stream.
 pub fn client_stream_usage(client: Protocol, events: &[ClientEvent]) -> Value {
-    let data: Vec<Value> = events.iter().map(|event| event.data.clone()).collect();
-    usage_to_value(match client {
-        Protocol::Responses => TokenUsage::from_codex_stream_events_auto(&data),
-        _ => TokenUsage::from_claude_stream_events(&data),
-    })
+    usage_to_value(recorded_stream_usage(client, events))
 }
 
 /// Usage the proxy records for a converted non-stream client response.
 pub fn client_response_usage(client: Protocol, response: &Value) -> Value {
-    usage_to_value(match client {
+    usage_to_value(recorded_response_usage(client, response))
+}
+
+fn recorded_stream_usage(client: Protocol, events: &[ClientEvent]) -> Option<TokenUsage> {
+    let data: Vec<Value> = events.iter().map(|event| event.data.clone()).collect();
+    match client {
+        Protocol::Responses => TokenUsage::from_codex_stream_events_auto(&data),
+        _ => TokenUsage::from_claude_stream_events(&data),
+    }
+}
+
+fn recorded_response_usage(client: Protocol, response: &Value) -> Option<TokenUsage> {
+    match client {
         Protocol::Responses => TokenUsage::from_codex_response_auto(response),
         _ => TokenUsage::from_claude_response(response),
-    })
+    }
 }
 
 /// Usage as reported by the upstream itself, parsed in its native format.
@@ -759,6 +795,310 @@ fn check_usage_conservation(
     } else {
         Err(problems.join("; "))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Usage parity (CCS-186)
+// ---------------------------------------------------------------------------
+
+/// Per-million prices of the usage parity cost table. Every bucket has its
+/// own price, so a token billed in the wrong bucket changes the total.
+const PARITY_PRICING: [&str; 4] = ["3", "15", "0.3", "3.75"];
+
+/// Usage parity results for the fixtures of a corpus.
+#[derive(Debug, Default)]
+pub struct UsageParityOutcome {
+    /// Upstream bodies whose raw usage block was checked.
+    pub checked: usize,
+    /// One line per mismatch, prefixed with the fixture id and body kind.
+    pub failures: Vec<String>,
+}
+
+/// The raw usage block of a non-stream upstream body, as the upstream sent it.
+fn raw_response_usage_block(body: &Value) -> Option<Value> {
+    raw_usage_block(body).cloned()
+}
+
+/// The raw usage block of a stream upstream body: the last block the proxy
+/// would bill from (last Chat usage chunk, last Gemini `usageMetadata`, last
+/// Responses object with usage). Anthropic splits usage across
+/// `message_start` and `message_delta`, so their fields are merged with the
+/// later value winning.
+fn raw_stream_usage_block(protocol: Protocol, input: &[u8]) -> Option<Value> {
+    let payloads = upstream_sse_payloads(input);
+    if payloads.is_empty() {
+        // Some gateways answer a stream request with one whole JSON body.
+        let body = serde_json::from_slice::<Value>(input).ok()?;
+        return raw_response_usage_block(&body);
+    }
+    if protocol != Protocol::Anthropic {
+        return payloads
+            .iter()
+            .rev()
+            .find_map(|payload| raw_usage_block(payload).cloned());
+    }
+    let mut merged = Map::new();
+    for payload in &payloads {
+        let usage = match payload.get("type").and_then(Value::as_str) {
+            Some("message_start") => payload.pointer("/message/usage"),
+            Some("message_delta") => payload.get("usage"),
+            _ => None,
+        };
+        if let Some(Value::Object(fields)) = usage {
+            for (key, value) in fields {
+                if !value.is_null() {
+                    merged.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+    (!merged.is_empty()).then_some(Value::Object(merged))
+}
+
+/// The upstream's raw usage block read into the canonical IR.
+fn upstream_usage_ir(protocol: Protocol, raw: &Value) -> UsageIR {
+    match protocol {
+        Protocol::Anthropic => UsageIR::from_anthropic(raw),
+        Protocol::OpenAiChat => UsageIR::from_chat_completions(raw),
+        Protocol::Gemini => UsageIR::from_gemini(raw),
+        Protocol::Responses => UsageIR::from_responses(raw),
+    }
+}
+
+/// App type whose input semantics match how `protocol` counts input tokens.
+fn parity_app_type(protocol: Protocol) -> &'static str {
+    match protocol {
+        Protocol::Anthropic => "claude",
+        Protocol::Gemini => "gemini",
+        Protocol::OpenAiChat | Protocol::Responses => "codex",
+    }
+}
+
+/// Compare one upstream body's usage across every path that bills it.
+///
+/// - `raw` is the upstream's raw usage block, `recorded` the usage the proxy
+///   logs for the converted client output.
+/// - The UsageIR-normalized usage and the recorded usage must both re-sum to
+///   the raw block's own totals ([`check_usage_parity`]); an all-zero usage is
+///   fine only when the raw block is all zero too. With `expected_issue` both
+///   must raise exactly that flag instead.
+/// - The recorded usage must hold the same prompt total, cache read, cache
+///   write and output buckets as the IR.
+/// - Cost table: the IR priced bucket by bucket must equal the pricing
+///   engine's cost of the IR under every stored input semantics (fresh,
+///   total, legacy cache-read-only), of the IR's usage under the upstream's
+///   app type, and of the recorded usage under the client's app type.
+///
+/// A client stream that never completed (`complete == false`) is billed for
+/// what reached the client: Anthropic usage takes the output from
+/// `message_delta`, which an aborted stream never sends. Its recorded usage
+/// only has to stay within the IR bucket by bucket; the IR checks still apply.
+pub fn check_usage_parity_case(
+    bridge: Bridge,
+    raw: Option<&Value>,
+    recorded: Option<&TokenUsage>,
+    complete: bool,
+    expected_issue: Option<UsageParityIssue>,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    let Some(raw) = raw else {
+        if recorded.is_some_and(TokenUsage::has_billable_tokens) {
+            problems.push(format!(
+                "upstream sent no usage block but the recorded usage is billable: {recorded:?}"
+            ));
+        }
+        return problems;
+    };
+
+    let (client, upstream) = (bridge.client(), bridge.upstream());
+    let ir = upstream_usage_ir(upstream, raw);
+    let ir_usage = ir.to_token_usage();
+    let recorded = recorded.cloned().unwrap_or_default();
+
+    let mut paths = vec![("usage_ir", &ir_usage, upstream.input_includes_cache())];
+    if complete {
+        paths.push(("recorded", &recorded, client.input_includes_cache()));
+    }
+    for (path, usage, input_includes_cache) in paths {
+        let parity = check_usage_parity(usage, input_includes_cache, Some(raw));
+        if let Some(expected) = expected_issue {
+            if parity.map(|parity| parity.issue) != Some(expected) {
+                problems.push(format!(
+                    "{path}: expected parity flag {expected:?} but got {parity:?}; raw usage {raw}"
+                ));
+            }
+            continue;
+        }
+        match parity {
+            None => {}
+            Some(parity)
+                if parity.issue == UsageParityIssue::ZeroUsage && parity.raw_total == Some(0) => {}
+            Some(parity) => problems.push(format!(
+                "{path}: {:?}, normalized total {} vs raw total {:?} (raw input {:?}, raw cache {:?}); raw usage {raw}",
+                parity.issue,
+                parity.normalized_total,
+                parity.raw_total,
+                parity.raw_input,
+                parity.raw_cache
+            )),
+        }
+    }
+
+    let recorded_prompt = if client.input_includes_cache() {
+        u64::from(recorded.input_tokens)
+    } else {
+        u64::from(recorded.input_tokens)
+            + u64::from(recorded.cache_read_tokens)
+            + u64::from(recorded.cache_creation_tokens)
+    };
+    for (bucket, recorded_value, ir_value) in [
+        ("prompt total", recorded_prompt, ir.total_input()),
+        (
+            "cache_read",
+            u64::from(recorded.cache_read_tokens),
+            ir.cache_read,
+        ),
+        (
+            "cache_creation",
+            u64::from(recorded.cache_creation_tokens),
+            ir.cache_write,
+        ),
+        ("output", u64::from(recorded.output_tokens), ir.output),
+    ] {
+        let mismatch = if complete {
+            recorded_value != ir_value
+        } else {
+            recorded_value > ir_value
+        };
+        if mismatch {
+            problems.push(format!(
+                "recorded {bucket}={recorded_value} but UsageIR {bucket}={ir_value}"
+            ));
+        }
+    }
+
+    let [input, output, cache_read, cache_creation] = PARITY_PRICING;
+    let pricing = ModelPricing::from_strings(input, output, cache_read, cache_creation)
+        .expect("valid parity pricing");
+    // Priced here from the price strings, independently of the engine.
+    let price = |text: &str| Decimal::from_str(text).expect("valid parity price");
+    let expected = (Decimal::from(ir.fresh_input) * price(input)
+        + Decimal::from(ir.output) * price(output)
+        + Decimal::from(ir.cache_read) * price(cache_read)
+        + Decimal::from(ir.cache_write) * price(cache_creation))
+        / Decimal::from(1_000_000u64);
+    let counts = |input| TokenCounts {
+        input,
+        output: ir.output,
+        cache_read: ir.cache_read,
+        cache_creation: ir.cache_write,
+    };
+    let mut rows = vec![
+        (
+            "fresh".to_string(),
+            engine::cost(
+                &counts(ir.fresh_input),
+                InputBasis::Fresh,
+                &pricing,
+                Decimal::ONE,
+            ),
+        ),
+        (
+            "total".to_string(),
+            engine::cost(
+                &counts(ir.total_input()),
+                InputBasis::IncludesCache,
+                &pricing,
+                Decimal::ONE,
+            ),
+        ),
+        (
+            "legacy".to_string(),
+            engine::cost(
+                &counts(ir.fresh_input + ir.cache_read),
+                InputBasis::IncludesCacheRead,
+                &pricing,
+                Decimal::ONE,
+            ),
+        ),
+        (
+            format!("usage_ir as {}", parity_app_type(upstream)),
+            CostCalculator::calculate_for_app(
+                parity_app_type(upstream),
+                &ir_usage,
+                &pricing,
+                Decimal::ONE,
+            ),
+        ),
+    ];
+    if complete {
+        rows.push((
+            format!("recorded as {}", parity_app_type(client)),
+            CostCalculator::calculate_for_app(
+                parity_app_type(client),
+                &recorded,
+                &pricing,
+                Decimal::ONE,
+            ),
+        ));
+    }
+    for (row, cost) in rows {
+        if cost.total_cost != expected {
+            problems.push(format!(
+                "cost table row `{row}`: {} but UsageIR prices at {expected}",
+                cost.total_cost
+            ));
+        }
+    }
+    problems
+}
+
+/// Run [`check_usage_parity_case`] on every upstream body of `fixture`: the
+/// unsplit stream body and the non-stream body. A body whose conversion fails
+/// is left to the golden tests, which already report it.
+pub fn usage_parity_with(fixture: &Fixture, engine: CodecEngine) -> UsageParityOutcome {
+    let mut outcome = UsageParityOutcome::default();
+    let (bridge, client) = (fixture.bridge, fixture.bridge.client());
+    let expected_issue = fixture.meta.usage_parity.expected_issue;
+    let mut check = |kind: &str, raw: Option<Value>, recorded: Option<TokenUsage>, complete| {
+        if raw.is_some() {
+            outcome.checked += 1;
+        }
+        for problem in check_usage_parity_case(
+            bridge,
+            raw.as_ref(),
+            recorded.as_ref(),
+            complete,
+            expected_issue,
+        ) {
+            outcome
+                .failures
+                .push(format!("{} ({kind}): {problem}", fixture.id()));
+        }
+    };
+
+    if let Some(input) = &fixture.upstream_sse {
+        if let Ok(events) = run_stream_with(fixture, &[input.as_slice()], engine) {
+            check(
+                "stream",
+                raw_stream_usage_block(bridge.upstream(), input),
+                recorded_stream_usage(client, &events),
+                events.iter().any(ClientEvent::is_completion),
+            );
+        }
+    }
+    if let (Some(body), Some(Ok(response))) = (
+        &fixture.upstream_json,
+        convert_non_stream_with(fixture, engine),
+    ) {
+        check(
+            "non-stream",
+            raw_response_usage_block(body),
+            recorded_response_usage(client, &response),
+            true,
+        );
+    }
+    outcome
 }
 
 // ---------------------------------------------------------------------------
@@ -2054,6 +2394,175 @@ pub fn run_fixture_with(fixture: &Fixture, engine: CodecEngine) -> FixtureOutcom
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn token_usage(input: u32, output: u32, cache_read: u32, cache_creation: u32) -> TokenUsage {
+        TokenUsage {
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: cache_read,
+            cache_creation_tokens: cache_creation,
+            model: None,
+            message_id: None,
+        }
+    }
+
+    #[test]
+    fn usage_parity_case_accepts_consistent_usage() {
+        // Chat upstream (input includes cache) -> Anthropic client (fresh input).
+        let raw = json!({
+            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 40}
+        });
+        let recorded = token_usage(60, 20, 40, 0);
+        assert_eq!(
+            check_usage_parity_case(
+                Bridge::AnthropicOpenAiChat,
+                Some(&raw),
+                Some(&recorded),
+                true,
+                None
+            ),
+            Vec::<String>::new()
+        );
+        // No usage block and nothing billed.
+        assert!(check_usage_parity_case(Bridge::ResponsesChat, None, None, true, None).is_empty());
+    }
+
+    #[test]
+    fn usage_parity_case_flags_cache_double_count() {
+        // cached_tokens exceeds prompt_tokens: the normalized total overshoots
+        // the upstream total.
+        let raw = json!({
+            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 150}
+        });
+        let recorded = token_usage(0, 20, 150, 0);
+        let problems = check_usage_parity_case(
+            Bridge::AnthropicOpenAiChat,
+            Some(&raw),
+            Some(&recorded),
+            true,
+            None,
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("usage_ir: CacheExceedsInput")),
+            "{problems:#?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("recorded: CacheExceedsInput")),
+            "{problems:#?}"
+        );
+        // Declared as a known upstream inconsistency, the same case passes,
+        // and a missing flag would fail.
+        assert!(check_usage_parity_case(
+            Bridge::AnthropicOpenAiChat,
+            Some(&raw),
+            Some(&recorded),
+            true,
+            Some(UsageParityIssue::CacheExceedsInput)
+        )
+        .is_empty());
+        assert!(!check_usage_parity_case(
+            Bridge::AnthropicOpenAiChat,
+            Some(&json!({"prompt_tokens": 1, "completion_tokens": 1})),
+            Some(&token_usage(1, 1, 0, 0)),
+            true,
+            Some(UsageParityIssue::CacheExceedsInput)
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn usage_parity_case_flags_bucket_and_cost_drift() {
+        // Totals agree, but the cache read was recorded as cache creation:
+        // the bucket check and the client's cost row both catch it.
+        let raw = json!({
+            "input_tokens": 100, "output_tokens": 10,
+            "input_tokens_details": {"cached_tokens": 30}
+        });
+        let recorded = token_usage(70, 10, 0, 30);
+        let problems = check_usage_parity_case(
+            Bridge::AnthropicResponses,
+            Some(&raw),
+            Some(&recorded),
+            true,
+            None,
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("recorded cache_read=0 but UsageIR cache_read=30")),
+            "{problems:#?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("cost table row `recorded as claude`")),
+            "{problems:#?}"
+        );
+    }
+
+    #[test]
+    fn usage_parity_case_flags_missing_or_invented_usage() {
+        let raw = json!({"promptTokenCount": 3, "candidatesTokenCount": 2, "totalTokenCount": 5});
+        let problems =
+            check_usage_parity_case(Bridge::AnthropicGemini, Some(&raw), None, true, None);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("recorded: ZeroUsage")),
+            "{problems:#?}"
+        );
+        let problems = check_usage_parity_case(
+            Bridge::AnthropicGemini,
+            None,
+            Some(&token_usage(3, 2, 0, 0)),
+            true,
+            None,
+        );
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+    }
+
+    #[test]
+    fn usage_parity_case_bounds_aborted_streams_by_the_ir() {
+        let raw = json!({"promptTokenCount": 3, "totalTokenCount": 4});
+        // The output never reached the client: within the IR, so accepted.
+        assert!(check_usage_parity_case(
+            Bridge::AnthropicGemini,
+            Some(&raw),
+            Some(&token_usage(3, 0, 0, 0)),
+            false,
+            None
+        )
+        .is_empty());
+        // Recording more than the upstream reported is still a mismatch.
+        assert!(!check_usage_parity_case(
+            Bridge::AnthropicGemini,
+            Some(&raw),
+            Some(&token_usage(3, 5, 0, 0)),
+            false,
+            None
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn usage_parity_merges_anthropic_stream_usage() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":7,\"cache_read_input_tokens\":5,\"output_tokens\":1}}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":9}}\n\n",
+        );
+        assert_eq!(
+            raw_stream_usage_block(Protocol::Anthropic, sse.as_bytes()),
+            Some(json!({"input_tokens": 7, "cache_read_input_tokens": 5, "output_tokens": 9}))
+        );
+    }
 
     fn event(name: &str, data: Value) -> ClientEvent {
         ClientEvent {
