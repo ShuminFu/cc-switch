@@ -25,6 +25,9 @@ pub const DEFAULT_TOOL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(20 * 60
 /// 失败时错误详情保留的末尾行数（与旧的静默执行一致）。
 const ERROR_TAIL_LINES: usize = 8;
 
+/// 读管道任务与主循环之间的行缓冲上限。
+const OUTPUT_CHANNEL_CAPACITY: usize = 256;
+
 /// 子进程退出后等待输出管道排空的宽限期：被脚本放到后台的孙进程可能一直持有管道。
 const DRAIN_GRACE: Duration = Duration::from_secs(2);
 
@@ -138,7 +141,8 @@ where
         .spawn()
         .map_err(|e| format!("启动安装进程失败: {e}"))?;
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<(LifecycleStream, String)>();
+    // 有界通道：转发跟不上时反压到管道，避免刷屏的安装器把输出堆在内存里。
+    let (tx, mut rx) = mpsc::channel::<(LifecycleStream, String)>(OUTPUT_CHANNEL_CAPACITY);
     let mut readers = Vec::new();
     if let Some(stdout) = child.stdout.take() {
         readers.push(tokio::spawn(forward_lines(
@@ -172,7 +176,19 @@ where
             break Ok(());
         }
         tokio::select! {
+            // 取消 / 超时 / 排空宽限排在最前：输出不停的安装器会让 rx 一直就绪，放在后面会被饿死。
             biased;
+            changed = cancel.changed(), if !cancel_closed => {
+                if changed.is_err() {
+                    cancel_closed = true;
+                } else if *cancel.borrow() {
+                    break Err(cancelled_message());
+                }
+            }
+            _ = &mut deadline => {
+                break Err(format!("安装/更新超时（{} 秒），已终止进程", timeout.as_secs()));
+            }
+            _ = &mut drain, if status.is_some() => break Ok(()),
             msg = rx.recv(), if !readers_done => match msg {
                 Some((stream, line)) => {
                     let tail = match stream {
@@ -192,17 +208,6 @@ where
                 drain
                     .as_mut()
                     .reset(tokio::time::Instant::now() + DRAIN_GRACE);
-            }
-            _ = &mut drain, if status.is_some() => break Ok(()),
-            changed = cancel.changed(), if !cancel_closed => {
-                if changed.is_err() {
-                    cancel_closed = true;
-                } else if *cancel.borrow() {
-                    break Err(cancelled_message());
-                }
-            }
-            _ = &mut deadline => {
-                break Err(format!("安装/更新超时（{} 秒），已终止进程", timeout.as_secs()));
             }
         }
     };
@@ -241,7 +246,7 @@ fn cancelled_message() -> String {
 async fn forward_lines<R>(
     reader: R,
     stream: LifecycleStream,
-    tx: mpsc::UnboundedSender<(LifecycleStream, String)>,
+    tx: mpsc::Sender<(LifecycleStream, String)>,
 ) where
     R: AsyncRead + Unpin,
 {
@@ -254,7 +259,7 @@ async fn forward_lines<R>(
             Ok(_) => {
                 let line = decode_command_output(&buf);
                 let line = line.trim_end_matches(['\r', '\n']).to_string();
-                if tx.send((stream, line)).is_err() {
+                if tx.send((stream, line)).await.is_err() {
                     break;
                 }
             }
@@ -429,6 +434,37 @@ mod tests {
             wait_until_dead(child_pid).await,
             "grandchild {child_pid} survived cancel"
         );
+    }
+
+    #[tokio::test]
+    async fn cancel_and_timeout_win_over_a_flood_of_output() {
+        let dir = tempfile::tempdir().unwrap();
+        // 输出不停的安装器：管道里始终有待读的行，取消 / 超时也必须及时生效。
+        let args = fake_installer(&dir, "yes 'npm http fetch GET 200'\n");
+        let begin = Instant::now();
+        let err = run_streaming(
+            "bash",
+            &args,
+            Duration::from_millis(500),
+            never_cancelled(),
+            |_, _| {},
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("超时"), "unexpected error: {err}");
+        assert!(begin.elapsed() < Duration::from_secs(10));
+
+        let run_id = "test-cancel-flood";
+        let (_guard, cancel) = register_run(run_id);
+        let canceller = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            cancel_run(Some(run_id))
+        });
+        let begin = Instant::now();
+        let result = run_streaming("bash", &args, Duration::from_secs(60), cancel, |_, _| {}).await;
+        assert!(canceller.await.unwrap());
+        assert_eq!(result, Err("安装/更新已取消".to_string()));
+        assert!(begin.elapsed() < Duration::from_secs(10));
     }
 
     #[tokio::test]
