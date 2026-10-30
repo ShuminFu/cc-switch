@@ -145,6 +145,7 @@ impl HalfOpenPermit {
     }
 
     /// Whether the guard still holds an unreleased permit.
+    #[allow(dead_code)]
     pub fn is_held(&self) -> bool {
         self.slot.is_some()
     }

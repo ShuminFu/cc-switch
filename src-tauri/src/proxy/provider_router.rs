@@ -117,7 +117,9 @@ impl ProviderRouter {
     /// - HalfOpen：按限流规则放行探测
     ///
     /// 注意：调用方必须在请求结束后通过 `record_result()` 释放 HalfOpen 名额，
-    /// 否则会导致该 Provider 长时间无法进入探测状态。
+    /// 否则会导致该 Provider 长时间无法进入探测状态。生产路径请使用
+    /// `allow_provider_request_guarded()`，它在请求被取消时也会释放名额。
+    #[allow(dead_code)]
     pub async fn allow_provider_request(&self, provider_id: &str, app_type: &str) -> AllowResult {
         let circuit_key = format!("{app_type}:{provider_id}");
         let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
