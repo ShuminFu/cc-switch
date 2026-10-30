@@ -77,6 +77,11 @@ jobs:
       - name: Check thin command bodies
         run: node scripts/check-command-bodies.mjs
 
+      # cached_tokens / cache_creation_input_tokens stay in proxy/codec/ and
+      # proxy/usage/, apart from an explicit legacy allowlist (CCS-243).
+      - name: Check usage token names
+        run: node scripts/check-usage-token-names.mjs
+
       - name: Check IpcError coverage
         run: node scripts/count-ipc-error-commands.mjs --min 100
 
