@@ -627,7 +627,10 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
                         event.stopPropagation();
                         handleRemoveEndpoint(entry);
                       }}
-                      className="opacity-0 transition hover:text-red-600 group-hover:opacity-100 dark:hover:text-red-400"
+                      aria-label={t("endpointTest.removeEndpoint", {
+                        defaultValue: "Remove endpoint",
+                      })}
+                      className="[@media(hover:hover)]:opacity-0 transition hover:text-red-600 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 dark:hover:text-red-400"
                     >
                       <X className="h-4 w-4" />
                     </button>

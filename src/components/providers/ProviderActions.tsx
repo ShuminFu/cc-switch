@@ -302,7 +302,10 @@ export function ProviderActions({
         </Button>
       </span>
 
-      <div className="flex items-center gap-1">
+      {/* Secondary actions: revealed on hover/focus where hover exists,
+          always visible on touch; the main button is always shown
+          (FE-PROV-29). */}
+      <div className="flex items-center gap-1 duration-200 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity">
         <Button
           size="icon"
           variant="ghost"
