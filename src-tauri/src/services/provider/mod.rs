@@ -38,10 +38,8 @@ pub(crate) use live::{
 };
 
 // Internal re-exports
-use live::{
-    remove_hermes_provider_from_live, remove_openclaw_provider_from_live,
-    remove_opencode_provider_from_live, write_gemini_live,
-};
+use live::remove_provider_from_live;
+pub(crate) use live::{strip_injected_claude_defaults, write_gemini_live};
 use usage::validate_usage_script;
 
 pub(crate) use async_bridge::block_on_async;
@@ -2406,12 +2404,7 @@ impl ProviderService {
                 .as_ref()
                 .and_then(Self::provider_live_config_managed);
             if Self::check_live_config_exists(&app_type, id, live_managed)? {
-                match app_type {
-                    AppType::OpenCode => remove_opencode_provider_from_live(id)?,
-                    AppType::OpenClaw => remove_openclaw_provider_from_live(id)?,
-                    AppType::Hermes => remove_hermes_provider_from_live(id)?,
-                    _ => {}
-                }
+                remove_provider_from_live(&app_type, id)?;
             }
             state.db.delete_provider(app_type.as_str(), id)?;
             return Ok(());
@@ -2466,21 +2459,12 @@ impl ProviderService {
                         crate::services::OmoService::delete_config_file(variant)?;
                     }
                 } else {
-                    remove_opencode_provider_from_live(id)?;
+                    remove_provider_from_live(&app_type, id)?;
                 }
             }
-            AppType::OpenClaw => {
-                remove_openclaw_provider_from_live(id)?;
-            }
-            AppType::Hermes => {
-                remove_hermes_provider_from_live(id)?;
-            }
-            _ => {
-                return Err(AppError::Message(format!(
-                    "App {} does not support remove from live config",
-                    app_type.as_str()
-                )));
-            }
+            // other additive apps go through their adapter; exclusive apps
+            // report "does not support remove from live config"
+            _ => remove_provider_from_live(&app_type, id)?,
         }
 
         if let Some(mut provider) = state.db.get_provider_by_id(id, app_type.as_str())? {
@@ -2784,12 +2768,8 @@ impl ProviderService {
             let mut updated = provider.clone();
             Self::set_provider_live_config_managed(&mut updated, true);
             if let Err(e) = state.db.save_provider(app_type.as_str(), &updated) {
-                let rollback_result = match app_type {
-                    AppType::OpenCode => remove_opencode_provider_from_live(&provider.id),
-                    AppType::OpenClaw => remove_openclaw_provider_from_live(&provider.id),
-                    AppType::Hermes => remove_hermes_provider_from_live(&provider.id),
-                    _ => Ok(()),
-                };
+                // only additive-mode apps reach this branch
+                let rollback_result = remove_provider_from_live(&app_type, &provider.id);
 
                 match rollback_result {
                     Ok(()) => {
