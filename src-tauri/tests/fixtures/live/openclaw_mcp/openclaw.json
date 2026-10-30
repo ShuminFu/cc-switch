@@ -1,0 +1,27 @@
+{
+  // OpenClaw config written by the user
+  agents: {
+    defaults: {
+      workspace: "~/work", // trailing comment
+    },
+  },
+  mcp: {
+    servers: {
+      remote: {
+        url: "https://old.example.com/sse",
+        transport: "sse",
+        connectionTimeoutMs: 5000,
+      },
+      stale: {
+        command: "stale-mcp",
+      },
+      "user-owned": {
+        command: "uvx",
+        args: ["user-owned-mcp"],
+      },
+    },
+  },
+  futureOpenclawKey: {
+    nested: [1, 2],
+  },
+}

@@ -21,7 +21,7 @@ export const APP_IDS: AppId[] = [...ALL_APP_IDS];
 /** App IDs shown in Skills panels (excludes OpenClaw — it doesn't support Skills) */
 export const SKILLS_APP_IDS: AppId[] = appsWithCap("skills");
 
-/** App IDs shown in MCP panels (excludes OpenClaw) */
+/** App IDs shown in MCP panels */
 export const MCP_APP_IDS: AppId[] = appsWithCap("mcp");
 
 export const APP_ICON_MAP: Record<AppId, AppConfig> = {

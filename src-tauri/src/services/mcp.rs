@@ -173,7 +173,7 @@ impl McpService {
         servers: &IndexMap<String, McpServer>,
         app: &AppType,
     ) -> Result<(), AppError> {
-        if matches!(app, AppType::OpenClaw | AppType::ClaudeDesktop) {
+        if crate::apps::adapter(app).mcp().is_none() {
             return Ok(());
         }
 

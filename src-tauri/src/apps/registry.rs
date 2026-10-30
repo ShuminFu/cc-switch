@@ -177,7 +177,7 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.openclaw",
         display_name: "OpenClaw",
         sync_mode: SyncMode::Additive,
-        caps: AppCaps::PROMPTS,
+        caps: AppCaps::MCP.union(AppCaps::PROMPTS),
         proxy_route: None,
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
@@ -372,16 +372,29 @@ mod tests {
                 "hermes"
             ]
         );
-        let mcp = vec![
-            "claude",
-            "codex",
-            "gemini",
-            "grokbuild",
-            "opencode",
-            "hermes",
-        ];
-        assert_eq!(slugs(AppCaps::MCP), mcp);
-        assert_eq!(slugs(AppCaps::SKILLS), mcp);
+        assert_eq!(
+            slugs(AppCaps::MCP),
+            vec![
+                "claude",
+                "codex",
+                "gemini",
+                "grokbuild",
+                "opencode",
+                "openclaw",
+                "hermes"
+            ]
+        );
+        assert_eq!(
+            slugs(AppCaps::SKILLS),
+            vec![
+                "claude",
+                "codex",
+                "gemini",
+                "grokbuild",
+                "opencode",
+                "hermes"
+            ]
+        );
     }
 
     #[test]
@@ -390,17 +403,11 @@ mod tests {
         let all: Vec<AppType> = AppType::all().collect();
         let set = AppSet::from_apps(&all);
         for d in APPS {
-            // AppSet 同时承载 MCP 与 Skills 的启用状态：两者能力位不一致的应用需要先让
-            // AppSet 按能力区分可接纳的应用，否则会把只支持其一的应用当作另一种也支持
-            assert_eq!(
-                d.has(AppCaps::MCP),
-                d.has(AppCaps::SKILLS),
-                "{}: MCP and SKILLS caps differ",
-                d.slug
-            );
+            // AppSet 同时承载 MCP 与 Skills 的启用状态，接纳具备其一的应用；
+            // 只支持其一的应用（OpenClaw 只有 MCP）由关联表按各自能力位过滤持久化
             assert_eq!(
                 set.is_enabled_for(&d.app),
-                d.has(AppCaps::MCP),
+                d.has(AppCaps::MCP) || d.has(AppCaps::SKILLS),
                 "{}",
                 d.slug
             );

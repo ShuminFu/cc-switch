@@ -1,0 +1,13 @@
+{
+  "fetch": {
+    "type": "stdio",
+    "command": "uvx",
+    "args": ["mcp-server-fetch"],
+    "env": {"FETCH_TIMEOUT": "30"}
+  },
+  "remote": {
+    "type": "http",
+    "url": "https://new.example.com/mcp",
+    "headers": {"Authorization": "Bearer token"}
+  }
+}

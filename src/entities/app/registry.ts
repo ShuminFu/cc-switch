@@ -85,7 +85,7 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
     label: "OpenClaw",
     caps: caps({
       skills: false,
-      mcp: false,
+      mcp: true,
       additive: true,
       proxyTakeover: false,
       healthCheck: true,

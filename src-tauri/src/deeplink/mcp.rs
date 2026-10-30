@@ -161,10 +161,7 @@ pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<AppSet, AppError> {
             "gemini" => apps.set_enabled_for(&AppType::Gemini, true),
             "grokbuild" | "grok" => apps.set_enabled_for(&AppType::GrokBuild, true),
             "opencode" => apps.set_enabled_for(&AppType::OpenCode, true),
-            "openclaw" => {
-                // OpenClaw doesn't support MCP, ignore silently
-                log::debug!("OpenClaw doesn't support MCP, ignoring in apps parameter");
-            }
+            "openclaw" => apps.set_enabled_for(&AppType::OpenClaw, true),
             "hermes" => apps.set_enabled_for(&AppType::Hermes, true),
             other => {
                 return Err(AppError::InvalidInput(format!(
@@ -199,6 +196,7 @@ mod tests {
             AppType::Gemini,
             AppType::GrokBuild,
             AppType::OpenCode,
+            AppType::OpenClaw,
             AppType::Hermes,
         ]);
         let merged = merge_mcp_apps(&existing, &target);

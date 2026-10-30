@@ -583,22 +583,42 @@ url = "https://grok.example.com/mcp"
     )
     .expect("seed hermes config.yaml");
 
+    let openclaw_dir = home.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).expect("create openclaw dir");
+    fs::write(
+        openclaw_dir.join("openclaw.json"),
+        "{\n  // user comment\n  mcp: {\n    servers: {\n      shared: { command: 'echo' },\n      'openclaw-only': { url: 'https://openclaw.example.com/mcp', transport: 'streamable-http' },\n    },\n  },\n}\n",
+    )
+    .expect("seed openclaw.json");
+
     let state = support::create_test_state().expect("create test state");
 
-    // OpenClaw 没有 MCP 投影：直接按 0 处理，不读任何文件
+    // Claude Desktop 没有 MCP 投影：直接按 0 处理，不读任何文件
     assert_eq!(
-        McpService::import_from_app(&state, &AppType::OpenClaw).expect("openclaw import"),
+        McpService::import_from_app(&state, &AppType::ClaudeDesktop)
+            .expect("claude desktop import"),
         0
     );
 
     let imported = McpService::import_from_all_apps(&state).expect("import from all apps");
-    assert_eq!(imported, 3, "shared + grok-only + hermes-only are new");
+    assert_eq!(
+        imported, 4,
+        "shared + grok-only + openclaw-only + hermes-only are new"
+    );
 
     let servers = state.db.get_all_mcp_servers().expect("get all mcp servers");
     let shared = servers.get("shared").expect("shared server exists");
     assert_eq!(
         shared.apps.enabled_apps(),
-        vec![AppType::Claude, AppType::GrokBuild]
+        vec![AppType::Claude, AppType::GrokBuild, AppType::OpenClaw]
+    );
+    assert_eq!(
+        servers["openclaw-only"].apps.enabled_apps(),
+        vec![AppType::OpenClaw]
+    );
+    assert_eq!(
+        servers["openclaw-only"].server,
+        json!({ "type": "http", "url": "https://openclaw.example.com/mcp" })
     );
     assert_eq!(
         servers["grok-only"].apps.enabled_apps(),
@@ -1120,4 +1140,63 @@ fn upsert_mcp_server_rejects_stdio_spec_without_command_before_saving() {
         before.get("existing").map(|s| s.server.clone()),
         "existing server spec should be unchanged"
     );
+}
+
+#[test]
+fn toggle_openclaw_projects_server_into_openclaw_json() {
+    let test_env = TestEnv::new();
+    let home = test_env.home();
+
+    let openclaw_dir = home.join(".openclaw");
+    fs::create_dir_all(&openclaw_dir).expect("create openclaw dir");
+    let config_path = openclaw_dir.join("openclaw.json");
+    fs::write(
+        &config_path,
+        "{\n  // user comment\n  models: { mode: 'merge', providers: {} },\n  mcp: {\n    servers: {\n      'user-owned': { command: 'uvx', connectionTimeoutMs: 5000 },\n    },\n  },\n}\n",
+    )
+    .expect("seed openclaw.json");
+
+    let state = create_test_state().expect("create test state");
+    McpService::upsert_server(
+        &state,
+        McpServer {
+            id: "fetch".to_string(),
+            name: "Fetch".to_string(),
+            server: json!({ "type": "http", "url": "https://fetch.example.com/mcp" }),
+            apps: AppSet::default(),
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        },
+    )
+    .expect("insert server without syncing");
+
+    McpService::toggle_app(&state, "fetch", AppType::OpenClaw, true).expect("enable openclaw");
+    assert!(state.db.get_all_mcp_servers().expect("servers")["fetch"]
+        .apps
+        .is_enabled_for(&AppType::OpenClaw));
+
+    let written = fs::read_to_string(&config_path).expect("read openclaw.json");
+    assert!(
+        written.contains("// user comment"),
+        "comment kept:\n{written}"
+    );
+    let config: serde_json::Value = json_five::from_str(&written).expect("valid JSON5");
+    assert_eq!(
+        config["mcp"]["servers"]["fetch"],
+        json!({ "url": "https://fetch.example.com/mcp", "transport": "streamable-http" })
+    );
+    assert_eq!(
+        config["mcp"]["servers"]["user-owned"],
+        json!({ "command": "uvx", "connectionTimeoutMs": 5000 }),
+        "servers CC Switch does not manage are untouched"
+    );
+
+    McpService::toggle_app(&state, "fetch", AppType::OpenClaw, false).expect("disable openclaw");
+    let config: serde_json::Value =
+        json_five::from_str(&fs::read_to_string(&config_path).expect("read openclaw.json"))
+            .expect("valid JSON5");
+    assert!(config["mcp"]["servers"].get("fetch").is_none());
+    assert!(config["mcp"]["servers"].get("user-owned").is_some());
 }

@@ -1007,6 +1007,49 @@ pub fn set_tools_config(tools: &OpenClawToolsConfig) -> Result<OpenClawWriteOutc
     write_root_section("tools", &value)
 }
 
+// ============================================================================
+// MCP Configuration
+// ============================================================================
+
+/// 读取 MCP 服务器（`mcp.servers`，原始 JSON）
+///
+/// 配置文件缺失或没有该段时返回空表
+pub fn get_mcp_servers() -> Result<Map<String, Value>, AppError> {
+    let config = read_openclaw_config()?;
+    Ok(config
+        .get("mcp")
+        .and_then(|mcp| mcp.get("servers"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// 修改 `mcp.servers` 后写回 `mcp` 段（`mcp` 下的其他键原样保留）
+///
+/// `mutate` 返回 `false` 表示没有改动，此时不写文件
+pub fn update_mcp_servers(
+    mutate: impl FnOnce(&mut Map<String, Value>) -> Result<bool, AppError>,
+) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut config = read_openclaw_config()?;
+    let root = ensure_object(&mut config);
+    let mcp = root
+        .entry("mcp".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let servers = ensure_object(mcp)
+        .entry("servers".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+
+    if !mutate(ensure_object(servers))? {
+        return Ok(OpenClawWriteOutcome::default());
+    }
+
+    let mcp_value = root
+        .get("mcp")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    write_root_section("mcp", &mcp_value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

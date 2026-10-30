@@ -12,7 +12,8 @@ use self::config::{
     get_openclaw_config_path, get_openclaw_dir, read_openclaw_config, OpenClawProviderConfig,
 };
 use super::adapter::{
-    str_or_empty, AppAdapter, CommonSnippet, Credentials, ExtractOnlySnippet, SessionSource,
+    str_or_empty, AppAdapter, CommonSnippet, Credentials, ExtractOnlySnippet, McpProjector,
+    SessionSource,
 };
 use crate::app_config::AppType;
 use crate::config::get_home_dir;
@@ -137,10 +138,27 @@ impl AppAdapter for OpenClawAdapter {
         Some(&COMMON_SNIPPET)
     }
 
-    // OpenClaw MCP support is still in development (Issue #4834)
+    fn mcp(&self) -> Option<&dyn McpProjector> {
+        Some(self)
+    }
 
     fn session_source(&self) -> Option<&dyn SessionSource> {
         Some(self)
+    }
+}
+
+/// MCP 服务器投影到 openclaw.json 的 `mcp.servers` 段（Issue #4834）
+impl McpProjector for OpenClawAdapter {
+    fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
+        crate::mcp::read_servers_from_openclaw()
+    }
+
+    fn upsert(&self, id: &str, spec: &Value) -> Result<(), AppError> {
+        crate::mcp::sync_single_server_to_openclaw(id, spec)
+    }
+
+    fn remove(&self, id: &str) -> Result<(), AppError> {
+        crate::mcp::remove_server_from_openclaw(id)
     }
 }
 
@@ -231,8 +249,8 @@ mod tests {
     }
 
     #[test]
-    fn has_no_mcp_or_takeover() {
-        assert!(OpenClawAdapter.mcp().is_none());
+    fn has_mcp_but_no_takeover() {
+        assert!(OpenClawAdapter.mcp().is_some());
         assert!(OpenClawAdapter.takeover().is_none());
         assert!(OpenClawAdapter.omo_variant(Some("omo")).is_none());
     }

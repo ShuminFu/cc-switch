@@ -102,7 +102,15 @@ describe("app registry", () => {
       "hermes",
     ]);
     expect(SKILLS_APP_IDS).toEqual(appsWithCap("skills"));
-    expect(MCP_APP_IDS).toEqual(appsWithCap("skills"));
+    expect(MCP_APP_IDS).toEqual([
+      "claude",
+      "codex",
+      "gemini",
+      "grokbuild",
+      "opencode",
+      "openclaw",
+      "hermes",
+    ]);
     expect(appsWithCap("sessions")).toEqual(
       ALL_APP_IDS.filter((id) => id !== "claude-desktop"),
     );

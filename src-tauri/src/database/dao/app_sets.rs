@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use rusqlite::{params, params_from_iter, types::Value, Connection};
 
 use crate::app_config::{AppSet, AppType};
+use crate::apps::registry::{descriptor, with_caps};
+use crate::apps::AppCaps;
 use crate::error::AppError;
 
 /// v17 之前主表上每应用一列的旧启用列 `enabled_<slug>`（冻结，新增应用不再加列）
@@ -31,36 +33,42 @@ pub(crate) struct AppJoinTable {
     pub(crate) owner_column: &'static str,
     /// 主表名（`id` 为主键，带旧的 `enabled_<slug>` 列）
     pub(crate) owner_table: &'static str,
+    /// 应用必须具备的能力位：`AppSet` 由 MCP 与 Skills 共用，没有该能力的应用
+    ///（例如只有 MCP 能力的 OpenClaw 之于 `skill_apps`）在本表中视为本版本不认识
+    pub(crate) cap: AppCaps,
 }
 
 pub(crate) const MCP_SERVER_APPS: AppJoinTable = AppJoinTable {
     table: "mcp_server_apps",
     owner_column: "server_id",
     owner_table: "mcp_servers",
+    cap: AppCaps::MCP,
 };
 
 pub(crate) const SKILL_APPS: AppJoinTable = AppJoinTable {
     table: "skill_apps",
     owner_column: "skill_id",
     owner_table: "skills",
+    cap: AppCaps::SKILLS,
 };
 
 fn db_err(e: rusqlite::Error) -> AppError {
     AppError::Database(e.to_string())
 }
 
-/// 关联表中的 app_type 解析为应用；本版本不认识的应用（更新版本写入）跳过
-fn parse_app(table: &str, slug: &str) -> Option<AppType> {
-    match slug.parse::<AppType>() {
-        Ok(app) => Some(app),
-        Err(_) => {
-            log::debug!("{table}: 忽略未知应用 '{slug}'");
-            None
+impl AppJoinTable {
+    /// 关联表中的 app_type 解析为应用；本版本不认识的应用（更新版本写入）或
+    /// 不具备本表能力的应用跳过
+    fn parse_app(&self, slug: &str) -> Option<AppType> {
+        match slug.parse::<AppType>() {
+            Ok(app) if descriptor(&app).has(self.cap) => Some(app),
+            _ => {
+                log::debug!("{}: 忽略未知应用 '{slug}'", self.table);
+                None
+            }
         }
     }
-}
 
-impl AppJoinTable {
     /// 读取全部主表行的启用集合（没有任何关联行的 id 不出现在结果中）
     pub(crate) fn read_all(&self, conn: &Connection) -> Result<HashMap<String, AppSet>, AppError> {
         let mut stmt = conn
@@ -82,7 +90,7 @@ impl AppJoinTable {
         let mut sets: HashMap<String, AppSet> = HashMap::new();
         for row in rows {
             let (id, slug) = row.map_err(db_err)?;
-            if let Some(app) = parse_app(self.table, &slug) {
+            if let Some(app) = self.parse_app(&slug) {
                 sets.entry(id).or_default().set_enabled_for(&app, true);
             }
         }
@@ -104,7 +112,7 @@ impl AppJoinTable {
 
         let mut apps = AppSet::default();
         for slug in rows {
-            if let Some(app) = parse_app(self.table, &slug.map_err(db_err)?) {
+            if let Some(app) = self.parse_app(&slug.map_err(db_err)?) {
                 apps.set_enabled_for(&app, true);
             }
         }
@@ -113,11 +121,12 @@ impl AppJoinTable {
 
     /// 用 `apps` 替换主表行 `id` 的启用集合，并双写旧的 `enabled_<slug>` 列
     ///
-    /// 只替换 `AppSet` 在本版本能表示的应用的行：同一 Schema 版本下更新的构建可能已为
-    /// 新应用（或新获得 MCP / Skills 能力的已有应用）写入行（不需要迁移），这些行必须原样保留。
+    /// 只替换本版本具备本表能力的应用的行：同一 Schema 版本下更新的构建可能已为
+    /// 新应用（或新获得 MCP / Skills 能力的已有应用）写入行（不需要迁移），这些行必须原样保留；
+    /// `apps` 中不具备本表能力的应用不写入。
     /// 调用方负责主表行已存在，并把本调用与主表写入放在同一事务中。
     pub(crate) fn write(&self, conn: &Connection, id: &str, apps: &AppSet) -> Result<(), AppError> {
-        let known: Vec<&str> = AppSet::supported_apps().map(|d| d.slug).collect();
+        let known: Vec<&str> = with_caps(self.cap).map(|d| d.slug).collect();
         let placeholders = (0..known.len())
             .map(|i| format!("?{}", i + 2))
             .collect::<Vec<_>>()
@@ -141,7 +150,7 @@ impl AppJoinTable {
                 table = self.table
             ))
             .map_err(db_err)?;
-        for app in apps.iter() {
+        for app in apps.iter().filter(|app| descriptor(app).has(self.cap)) {
             insert.execute(params![id, app.as_str()]).map_err(db_err)?;
         }
 
@@ -337,9 +346,9 @@ mod tests {
                 "INSERT INTO skill_apps (skill_id, app_type) VALUES ('s1', 'ninth')",
                 [],
             )?;
-            // 本版本认识但 AppSet 不接纳的应用（例如 OpenClaw 在更新的构建中获得 MCP 能力）
+            // 本版本认识但本表能力不接纳的应用（例如 OpenClaw 在更新的构建中获得 Skills 能力）
             conn.execute(
-                "INSERT INTO mcp_server_apps (server_id, app_type) VALUES ('echo', 'openclaw')",
+                "INSERT INTO skill_apps (skill_id, app_type) VALUES ('s1', 'openclaw')",
                 [],
             )?;
         }
@@ -351,12 +360,39 @@ mod tests {
         db.save_mcp_server(&server("echo", AppSet::only(&AppType::Codex)))?;
         assert_eq!(
             join_rows(&db, &MCP_SERVER_APPS, "echo")?,
-            ["codex", "ninth", "openclaw"]
+            ["codex", "ninth"]
         );
 
+        assert_eq!(
+            db.get_installed_skill("s1")?.expect("s1").apps,
+            AppSet::only(&AppType::Claude)
+        );
         db.update_skill_apps("s1", &AppSet::default())?;
-        assert_eq!(join_rows(&db, &SKILL_APPS, "s1")?, ["ninth"]);
+        assert_eq!(join_rows(&db, &SKILL_APPS, "s1")?, ["ninth", "openclaw"]);
         assert!(db.get_installed_skill("s1")?.expect("s1").apps.is_empty());
+        Ok(())
+    }
+
+    /// OpenClaw 只有 MCP 能力（CCS-164）：MCP 关联表存取它，Skill 关联表不写入它
+    #[test]
+    fn each_join_table_only_stores_apps_with_its_capability() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let apps = AppSet::from_apps(&[AppType::Claude, AppType::OpenClaw]);
+        assert!(apps.is_enabled_for(&AppType::OpenClaw));
+
+        db.save_mcp_server(&server("echo", apps.clone()))?;
+        assert_eq!(
+            join_rows(&db, &MCP_SERVER_APPS, "echo")?,
+            ["claude", "openclaw"]
+        );
+        assert_eq!(db.get_all_mcp_servers()?["echo"].apps, apps);
+
+        db.save_skill(&skill("s1", apps))?;
+        assert_eq!(join_rows(&db, &SKILL_APPS, "s1")?, ["claude"]);
+        assert_eq!(
+            db.get_installed_skill("s1")?.expect("s1").apps,
+            AppSet::only(&AppType::Claude)
+        );
         Ok(())
     }
 }

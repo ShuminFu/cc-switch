@@ -1,0 +1,44 @@
+---
+source: tests/config_writers.rs
+description: "openclaw_mcp writer, crlf input"
+---
+write: ok
+=== .openclaw/openclaw.json ===
+{<CR>
+  // OpenClaw config written by the user<CR>
+  agents: {<CR>
+    defaults: {<CR>
+      workspace: "~/work", // trailing comment<CR>
+    },<CR>
+  },<CR>
+  mcp: {
+    "servers": {
+      "remote": {
+        "connectionTimeoutMs": 5000,
+        "url": "https://new.example.com/mcp",
+        "headers": {
+          "Authorization": "Bearer token"
+        },
+        "transport": "streamable-http"
+      },
+      "user-owned": {
+        "command": "uvx",
+        "args": [
+          "user-owned-mcp"
+        ]
+      },
+      "fetch": {
+        "command": "uvx",
+        "args": [
+          "mcp-server-fetch"
+        ],
+        "env": {
+          "FETCH_TIMEOUT": "30"
+        }
+      }
+    }
+  },<CR>
+  futureOpenclawKey: {<CR>
+    nested: [1, 2],<CR>
+  },<CR>
+}<CR>

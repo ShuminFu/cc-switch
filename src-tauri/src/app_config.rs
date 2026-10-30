@@ -6,7 +6,7 @@ use crate::services::skill::SkillStore;
 
 /// 应用集合：MCP 服务器 / Skill 启用到哪些客户端（取代原先每应用一个字段的 McpApps / SkillApps）
 ///
-/// - 只接纳注册表中具备 MCP 或 Skills 能力的应用，其余应用（OpenClaw、Claude Desktop）
+/// - 只接纳注册表中具备 MCP 或 Skills 能力的应用，其余应用（Claude Desktop）
 ///   恒为未启用；新增应用只需在 [`APPS`] 中声明能力位，无需改这里，也无需数据库迁移
 ///   （持久化在 `mcp_server_apps` / `skill_apps` 关联表中）。
 /// - 序列化为扁平对象 `{ "claude": true, "codex": false, ... }`，键为每个可接纳应用的
@@ -841,7 +841,7 @@ impl MultiAppConfig {
                 AppType::Gemini => &self.mcp.gemini.servers,
                 AppType::GrokBuild => continue,
                 AppType::OpenCode => &self.mcp.opencode.servers,
-                AppType::OpenClaw => continue, // OpenClaw MCP is still in development, skip
+                AppType::OpenClaw => continue, // OpenClaw MCP didn't exist in v3.6.x, skip
                 AppType::Hermes => continue,   // Hermes didn't exist in v3.6.x, skip
             };
 
@@ -974,9 +974,10 @@ mod tests {
                 "gemini": false,
                 "grokbuild": false,
                 "opencode": false,
+                "openclaw": false,
                 "hermes": false
             }),
-            "same keys as the old McpApps / SkillApps structs"
+            "same keys as the old McpApps struct (OpenClaw included since it gained MCP)"
         );
 
         // 旧结构写出的 JSON：别名可用，未知键忽略，缺失键为 false
@@ -997,9 +998,12 @@ mod tests {
     #[test]
     fn app_set_ignores_apps_without_mcp_or_skills() {
         let mut apps = AppSet::default();
-        apps.set_enabled_for(&AppType::OpenClaw, true);
         apps.set_enabled_for(&AppType::ClaudeDesktop, true);
         assert!(apps.is_empty());
+        // OpenClaw 只有 MCP 能力，仍可接纳（skill_apps 关联表不持久化它）
+        apps.set_enabled_for(&AppType::OpenClaw, true);
+        assert_eq!(apps.enabled_apps(), vec![AppType::OpenClaw]);
+        apps.set_enabled_for(&AppType::OpenClaw, false);
         apps.set_enabled_for(&AppType::Gemini, true);
         apps.set_enabled_for(&AppType::Gemini, true);
         assert_eq!(apps.enabled_apps(), vec![AppType::Gemini]);

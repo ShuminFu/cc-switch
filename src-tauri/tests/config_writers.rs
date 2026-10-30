@@ -421,6 +421,37 @@ fn openclaw_json5() {
 }
 
 #[test]
+fn openclaw_mcp_json5() {
+    const W: &str = "openclaw_mcp";
+    // An IndexMap keeps the fixture order, so the upserts (and the snapshot)
+    // are deterministic.
+    let servers: indexmap::IndexMap<String, Value> =
+        serde_json::from_value(fixture_json(W, "servers.json")).expect("servers map");
+    for variant in VARIANTS {
+        let env = LiveEnv::new();
+        let input = variant.apply(&fixture(W, "openclaw.json"));
+        env.seed(".openclaw/openclaw.json", &input);
+        let mcp = kit::adapter(&AppType::OpenClaw)
+            .mcp()
+            .expect("OpenClaw projects MCP servers");
+        let result = servers
+            .iter()
+            .try_for_each(|(id, spec)| mcp.upsert(id, spec))
+            .and_then(|()| mcp.remove("stale"));
+        let text =
+            env.render_result("write", &result) + &env.render_files(&[".openclaw/openclaw.json"]);
+        assert_snapshot(W, variant, &text);
+        let output = env.read(".openclaw/openclaw.json");
+        for chunk in [
+            "  // OpenClaw config written by the user\n  agents: {\n    defaults: {\n      workspace: \"~/work\", // trailing comment\n    },\n  },\n",
+            "  futureOpenclawKey: {\n    nested: [1, 2],\n  },\n",
+        ] {
+            assert_preserved(W, variant, &input, &output, chunk);
+        }
+    }
+}
+
+#[test]
 fn hermes_config_yaml() {
     const W: &str = "hermes";
     for variant in VARIANTS {
@@ -769,8 +800,10 @@ fn state_db_backup_exists(env: &LiveEnv) -> bool {
 /// snapshot per variant, so a writer cannot silently drop out of coverage.
 #[test]
 fn every_writer_has_fixtures_and_snapshots() {
-    const WRITERS: [&str; 14] = [
-        // 11 live-config writers (Codex and Gemini each write two files)
+    const WRITERS: [&str; 15] = [
+        // 11 live-config writers (Codex and Gemini each write two files),
+        // plus the OpenClaw MCP section
+        "openclaw_mcp",
         "claude_settings",
         "claude_mcp",
         "codex",
