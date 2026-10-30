@@ -9,6 +9,7 @@ import {
   Loader2,
   Zap,
   Power,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -30,6 +31,76 @@ import type { ProxyStatus } from "@/types/proxy";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { copyText } from "@/lib/clipboard";
+import { isLoopbackListenAddress } from "./listenAddress";
+
+interface LanExposureNoticeProps {
+  accessToken?: string;
+}
+
+function LanExposureNotice({ accessToken }: LanExposureNoticeProps) {
+  const { t } = useTranslation();
+
+  const handleCopy = async () => {
+    if (!accessToken) return;
+    try {
+      await copyText(accessToken);
+      toast.success(
+        t("proxy.settings.lanExposure.tokenCopied", {
+          defaultValue: "Access token copied",
+        }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      toast.error(extractErrorMessage(error) || String(error));
+    }
+  };
+
+  return (
+    <div
+      role="alert"
+      className="rounded-md border border-red-500/40 bg-red-500/10 p-3 space-y-2"
+    >
+      <div className="flex items-start gap-2 text-red-600 dark:text-red-400">
+        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+        <div className="space-y-1">
+          <p className="text-sm font-semibold">
+            {t("proxy.settings.lanExposure.title", {
+              defaultValue: "This address exposes the proxy to other devices",
+            })}
+          </p>
+          <p className="text-xs">
+            {t("proxy.settings.lanExposure.description", {
+              defaultValue:
+                'Anyone who can reach this address could spend your provider credits. Requests from other devices must send the access token below as "Authorization: Bearer <token>" (or x-api-key / x-goog-api-key). Apps on this computer keep working without it. Only use this on networks you trust.',
+            })}
+          </p>
+        </div>
+      </div>
+      {accessToken ? (
+        <div className="space-y-1">
+          <Label htmlFor="proxy-access-token" className="text-xs">
+            {t("proxy.settings.lanExposure.tokenLabel", {
+              defaultValue: "Access token",
+            })}
+          </Label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              id="proxy-access-token"
+              readOnly
+              value={accessToken}
+              className="flex-1 font-mono text-xs"
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <Button size="sm" variant="outline" onClick={handleCopy}>
+              {t("common.copy")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 interface ProxyPanelProps {
   enableLocalProxy: boolean;
@@ -52,7 +123,11 @@ export function ProxyPanel({
   const setTakeoverForApp = useSetProxyTakeoverForApp();
 
   // 获取全局代理配置
-  const { data: globalConfig } = useGlobalProxyConfig();
+  const { data: globalConfigData } = useGlobalProxyConfig();
+  // `accessToken` is returned by the backend alongside the global config.
+  const globalConfig = globalConfigData as
+    | (typeof globalConfigData & { accessToken?: string })
+    | undefined;
   const updateGlobalConfig = useUpdateGlobalProxyConfig();
 
   // 监听地址/端口的本地状态（端口用字符串以支持完全清空）
@@ -349,6 +424,13 @@ export function ProxyPanel({
                     defaultValue: "修改监听地址/端口需要先停止代理服务",
                   })}
                 </p>
+                {!isLoopbackListenAddress(status.address) && (
+                  <div className="mt-3">
+                    <LanExposureNotice
+                      accessToken={globalConfig?.accessToken}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 border-t border-border space-y-2">
@@ -580,6 +662,10 @@ export function ProxyPanel({
                   </p>
                 </div>
               </div>
+
+              {!isLoopbackListenAddress(listenAddress) && (
+                <LanExposureNotice accessToken={globalConfig?.accessToken} />
+              )}
 
               <div className="flex justify-end">
                 <Button
