@@ -234,7 +234,11 @@ pub fn anthropic_to_responses(
     if let Some(model_name) = body.get("model").and_then(|m| m.as_str()) {
         if super::transform::supports_reasoning_effort(model_name) {
             if let Some(effort) = super::transform::resolve_reasoning_effort(&body) {
-                result["reasoning"] = json!({ "effort": effort });
+                // PROV-12: OpenAI only returns reasoning summary parts when
+                // `reasoning.summary` is requested (the official Codex CLI sends
+                // "auto"); without it encrypted-only items surface as
+                // redacted_thinking and the user never sees the reasoning.
+                result["reasoning"] = json!({ "effort": effort, "summary": "auto" });
             }
         }
     }
@@ -265,6 +269,10 @@ pub fn anthropic_to_responses(
 
     if let Some(v) = body.get("tool_choice") {
         result["tool_choice"] = map_tool_choice_to_responses(v);
+        // PROV-26: Anthropic disable_parallel_tool_use → parallel_tool_calls:false.
+        if super::transform::tool_choice_disables_parallel(v) {
+            result["parallel_tool_calls"] = json!(false);
+        }
     }
 
     // Inject prompt_cache_key for improved cache routing on OpenAI-compatible endpoints
@@ -335,6 +343,8 @@ pub fn anthropic_to_responses(
 
 fn map_tool_choice_to_responses(tool_choice: &Value) -> Value {
     match tool_choice {
+        // Responses has no "any"; it means "required" (PROV-26, same as Chat).
+        Value::String(s) if s == "any" => json!("required"),
         Value::String(_) => tool_choice.clone(),
         Value::Object(obj) => match obj.get("type").and_then(|t| t.as_str()) {
             // Anthropic "any" means at least one tool call is required
@@ -370,6 +380,8 @@ pub(crate) fn map_responses_stop_reason(
         {
             "max_tokens"
         }
+        // PROV-24: content filtering is a refusal, not a normal end of turn.
+        "incomplete" if incomplete_reason == Some("content_filter") => "refusal",
         "incomplete" => "end_turn",
         _ => "end_turn",
     })
@@ -843,7 +855,7 @@ pub fn responses_to_anthropic(body: Value) -> Result<Value, ProxyError> {
     let usage_json = build_anthropic_usage_from_responses(body.get("usage"));
 
     let result = json!({
-        "id": body.get("id").and_then(|i| i.as_str()).unwrap_or(""),
+        "id": super::transform::anthropic_message_id(body.get("id").and_then(|i| i.as_str())),
         "type": "message",
         "role": "assistant",
         "content": content,
@@ -1059,6 +1071,31 @@ mod tests {
 
         let result = anthropic_to_responses(input, None, false, false).unwrap();
         assert_eq!(result["tool_choice"], "required");
+    }
+
+    #[test]
+    fn test_anthropic_to_responses_tool_choice_string_any_and_parallel_flag() {
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "Hello"}],
+            "tools": [{"name": "t", "input_schema": {"type": "object"}}],
+            "tool_choice": "any"
+        });
+        let result = anthropic_to_responses(input, None, false, false).unwrap();
+        assert_eq!(result["tool_choice"], "required");
+        assert!(result.get("parallel_tool_calls").is_none());
+
+        let input = json!({
+            "model": "gpt-4o",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "Hello"}],
+            "tools": [{"name": "t", "input_schema": {"type": "object"}}],
+            "tool_choice": {"type": "auto", "disable_parallel_tool_use": true}
+        });
+        let result = anthropic_to_responses(input, None, false, false).unwrap();
+        assert_eq!(result["tool_choice"], "auto");
+        assert_eq!(result["parallel_tool_calls"], false);
     }
 
     #[test]
@@ -1578,7 +1615,7 @@ mod tests {
         });
 
         let result = responses_to_anthropic(input).unwrap();
-        assert_eq!(result["stop_reason"], "end_turn");
+        assert_eq!(result["stop_reason"], "refusal");
     }
 
     #[test]
@@ -1705,6 +1742,27 @@ mod tests {
         let result = anthropic_to_responses(input, None, false, false).unwrap();
         assert_eq!(result["max_output_tokens"], 4096);
         assert!(result.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn test_responses_reasoning_requests_auto_summary() {
+        let input = json!({
+            "model": "gpt-5.4",
+            "max_tokens": 1024,
+            "thinking": {"type": "enabled", "budget_tokens": 10000},
+            "messages": [{"role": "user", "content": "Hello"}]
+        });
+        let result = anthropic_to_responses(input, None, true, false).unwrap();
+        assert_eq!(result["reasoning"]["summary"], "auto");
+
+        // No reasoning requested → no reasoning object at all.
+        let input = json!({
+            "model": "gpt-5.4",
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "Hello"}]
+        });
+        let result = anthropic_to_responses(input, None, false, false).unwrap();
+        assert!(result.get("reasoning").is_none());
     }
 
     #[test]

@@ -286,6 +286,52 @@ fn resolve_content_index(
     }
 }
 
+/// Text to emit for a Responses `*.done` event when no text delta was streamed
+/// for that message item (PROV-39). Returns `None` when deltas already carried
+/// the text or the event has no text.
+fn done_only_text_fallback(
+    event_name: &str,
+    data: &Value,
+    streamed_text_item_ids: &HashSet<String>,
+    any_text_streamed: bool,
+) -> Option<String> {
+    let already_streamed = |item_id: Option<&str>| match item_id {
+        // Deltas without `item_id` cannot be attributed: assume they covered it.
+        Some(id) => {
+            streamed_text_item_ids.contains(id)
+                || (any_text_streamed && streamed_text_item_ids.is_empty())
+        }
+        None => any_text_streamed,
+    };
+    let text = match event_name {
+        "response.output_text.done" => {
+            if already_streamed(data.get("item_id").and_then(Value::as_str)) {
+                return None;
+            }
+            data.get("text").and_then(Value::as_str)?.to_string()
+        }
+        "response.output_item.done" => {
+            let item = data.get("item")?;
+            if item.get("type").and_then(Value::as_str) != Some("message")
+                || already_streamed(item.get("id").and_then(Value::as_str))
+            {
+                return None;
+            }
+            item.get("content")?
+                .as_array()?
+                .iter()
+                .filter_map(|part| match part.get("type").and_then(Value::as_str) {
+                    Some("output_text") => part.get("text").and_then(Value::as_str),
+                    Some("refusal") => part.get("refusal").and_then(Value::as_str),
+                    _ => None,
+                })
+                .collect::<String>()
+        }
+        _ => return None,
+    };
+    (!text.is_empty()).then_some(text)
+}
+
 /// 创建从 Responses API SSE 到 Anthropic SSE 的转换流
 ///
 /// 状态机跟踪: message_id, current_model, has_sent_message_start, item/content index map
@@ -316,6 +362,10 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
         let mut legacy_reasoning_index: Option<u32> = None;
         let mut has_substantive_output = false;
         let mut terminated = false;
+        // PROV-39: which message items already streamed text deltas, so the
+        // done-only fallback never duplicates text.
+        let mut streamed_text_item_ids: HashSet<String> = HashSet::new();
+        let mut any_text_streamed = false;
 
         // Append an EOF sentinel so the same parser handles a final SSE event that
         // omitted its trailing blank line. The boolean distinguishes the sentinel
@@ -426,6 +476,26 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 | "response.reasoning_text.delta"
                                 | "response.reasoning.delta"
                         );
+                        if matches!(event_name, "response.output_text.delta" | "response.refusal.delta") {
+                            any_text_streamed = true;
+                            if let Some(item_id) = data.get("item_id").and_then(Value::as_str) {
+                                streamed_text_item_ids.insert(item_id.to_string());
+                            }
+                        }
+                        // PROV-39: gateways that skip the delta events deliver the answer
+                        // only in `output_text.done.text` or the completed `message` item.
+                        let done_fallback_text = if terminated {
+                            None
+                        } else {
+                            done_only_text_fallback(
+                                event_name,
+                                &data,
+                                &streamed_text_item_ids,
+                                any_text_streamed,
+                            )
+                        };
+                        let delta_requires_message_start =
+                            delta_requires_message_start || done_fallback_text.is_some();
                         if delta_requires_message_start {
                             has_substantive_output = true;
                         }
@@ -435,7 +505,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 &json!({
                                     "type":"message_start",
                                     "message":{
-                                        "id":message_id.clone().unwrap_or_default(),
+                                        "id":super::transform::ensure_message_id(&mut message_id),
                                         "type":"message",
                                         "role":"assistant",
                                         "model":current_model.clone().unwrap_or_default(),
@@ -444,6 +514,59 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 }),
                             ));
                             has_sent_message_start = true;
+                        }
+
+                        if let Some(text) = done_fallback_text {
+                            let is_item_done = event_name == "response.output_item.done";
+                            let index = if is_item_done {
+                                let assigned = next_content_index;
+                                next_content_index += 1;
+                                assigned
+                            } else if let Some(index) = current_text_index {
+                                index
+                            } else {
+                                let index = resolve_content_index(
+                                    &data,
+                                    &mut next_content_index,
+                                    &mut index_by_key,
+                                    &mut fallback_open_index,
+                                );
+                                // The output_text.done arm below closes it.
+                                current_text_index = Some(index);
+                                index
+                            };
+                            if open_indices.insert(index) {
+                                yield Ok(anthropic_sse(
+                                    "content_block_start",
+                                    &json!({
+                                        "type": "content_block_start",
+                                        "index": index,
+                                        "content_block": {"type": "text", "text": ""}
+                                    }),
+                                ));
+                            }
+                            yield Ok(anthropic_sse(
+                                "content_block_delta",
+                                &json!({
+                                    "type": "content_block_delta",
+                                    "index": index,
+                                    "delta": {"type": "text_delta", "text": text}
+                                }),
+                            ));
+                            if is_item_done && open_indices.remove(&index) {
+                                yield Ok(anthropic_sse(
+                                    "content_block_stop",
+                                    &json!({"type": "content_block_stop", "index": index}),
+                                ));
+                            }
+                            any_text_streamed = true;
+                            let item_id = data
+                                .get("item_id")
+                                .or_else(|| data.pointer("/item/id"))
+                                .and_then(Value::as_str);
+                            if let Some(item_id) = item_id {
+                                streamed_text_item_ids.insert(item_id.to_string());
+                            }
                         }
 
                         match event_name {
@@ -473,7 +596,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                 let event = json!({
                                     "type": "message_start",
                                     "message": {
-                                        "id": message_id.clone().unwrap_or_default(),
+                                        "id": super::transform::ensure_message_id(&mut message_id),
                                         "type": "message",
                                         "role": "assistant",
                                         "model": current_model.clone().unwrap_or_default(),
@@ -495,7 +618,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                     let start_event = json!({
                                         "type": "message_start",
                                         "message": {
-                                            "id": message_id.clone().unwrap_or_default(),
+                                            "id": super::transform::ensure_message_id(&mut message_id),
                                             "type": "message",
                                             "role": "assistant",
                                             "model": current_model.clone().unwrap_or_default(),
@@ -670,7 +793,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                             let start_event = json!({
                                                 "type": "message_start",
                                                 "message": {
-                                                    "id": message_id.clone().unwrap_or_default(),
+                                                    "id": super::transform::ensure_message_id(&mut message_id),
                                                     "type": "message",
                                                     "role": "assistant",
                                                     "model": current_model.clone().unwrap_or_default(),
@@ -733,7 +856,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                             let start_event = json!({
                                                 "type": "message_start",
                                                 "message": {
-                                                    "id": message_id.clone().unwrap_or_default(),
+                                                    "id": super::transform::ensure_message_id(&mut message_id),
                                                     "type": "message",
                                                     "role": "assistant",
                                                     "model": current_model.clone().unwrap_or_default(),
@@ -1180,7 +1303,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                                         &json!({
                                             "type":"message_start",
                                             "message":{
-                                                "id":message_id.clone().unwrap_or_default(),
+                                                "id":super::transform::ensure_message_id(&mut message_id),
                                                 "type":"message",
                                                 "role":"assistant",
                                                 "model":current_model.clone().unwrap_or_default(),
@@ -1505,7 +1628,7 @@ pub fn create_anthropic_sse_stream_from_responses<E: std::error::Error + Send + 
                         &json!({
                             "type":"message_start",
                             "message":{
-                                "id":message_id.clone().unwrap_or_default(),
+                                "id":super::transform::ensure_message_id(&mut message_id),
                                 "type":"message",
                                 "role":"assistant",
                                 "model":current_model.clone().unwrap_or_default(),
@@ -1568,7 +1691,7 @@ mod tests {
         );
         assert_eq!(
             map_responses_stop_reason(Some("incomplete"), false, Some("content_filter")),
-            Some("end_turn")
+            Some("refusal")
         );
     }
 
@@ -1584,6 +1707,56 @@ mod tests {
         let obj = response_object_from_event(&data);
         assert_eq!(obj["id"], "resp_1");
         assert_eq!(obj["model"], "gpt-4o");
+    }
+
+    #[tokio::test]
+    async fn test_text_delivered_only_in_output_text_done_is_emitted() {
+        let input = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5\"}}\n\n",
+            "event: response.output_text.done\n",
+            "data: {\"type\":\"response.output_text.done\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"text\":\"Hello\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello\"}]}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+        );
+        let merged = convert_stream_text(input).await;
+        assert_eq!(merged.matches("\"text\":\"Hello\"").count(), 1, "{merged}");
+        assert!(merged.contains("event: content_block_stop"));
+        assert!(merged.contains("event: message_stop"));
+    }
+
+    #[tokio::test]
+    async fn test_text_delivered_only_in_output_item_done_is_emitted() {
+        let input = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5\"}}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hi there\"}]}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+        );
+        let merged = convert_stream_text(input).await;
+        assert_eq!(merged.matches("Hi there").count(), 1, "{merged}");
+    }
+
+    #[tokio::test]
+    async fn test_streamed_text_is_not_duplicated_by_done_events() {
+        let input = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5\"}}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"Streamed\"}\n\n",
+            "event: response.output_text.done\n",
+            "data: {\"type\":\"response.output_text.done\",\"item_id\":\"msg_1\",\"text\":\"Streamed\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Streamed\"}]}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
+        );
+        let merged = convert_stream_text(input).await;
+        assert_eq!(merged.matches("Streamed").count(), 1, "{merged}");
     }
 
     #[tokio::test]
