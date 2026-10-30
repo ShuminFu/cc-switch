@@ -19,6 +19,8 @@ import {
   setSettings,
   getAppConfigDirOverride,
   setAppConfigDirOverrideState,
+  getSyncSnapshotKeyStatus,
+  setSyncSnapshotKeyState,
   getMcpConfig,
   setMcpServerEnabled,
   upsertMcpServer,
@@ -247,6 +249,24 @@ export const handlers = [
   }),
 
   command("get_app_config_dir_override", () => getAppConfigDirOverride()),
+
+  command("get_sync_snapshot_key_status", () => getSyncSnapshotKeyStatus()),
+
+  command("set_sync_snapshot_key", async (request) => {
+    const { key } = await withJson<{ key: string | null }>(request);
+    if (key && Array.from(key.trim()).length < 8) {
+      return HttpResponse.json(
+        {
+          code: "LOCALIZED",
+          message: "The sync key must be at least 8 characters.",
+          details: null,
+          i18nKey: "sync.key_too_short",
+        },
+        { status: 400 },
+      );
+    }
+    return setSyncSnapshotKeyState(key ?? null);
+  }),
 
   command("apply_claude_plugin_config", async (request) => {
     const { official } = await withJson<{ official: boolean }>(request);

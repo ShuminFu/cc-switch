@@ -74,7 +74,7 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogTitle: ({ children }: any) => <h2>{children}</h2>,
 }));
 
-const { settingsApiMock } = vi.hoisted(() => ({
+const { settingsApiMock, invokeMock } = vi.hoisted(() => ({
   settingsApiMock: {
     webdavTestConnection: vi.fn(),
     webdavSyncSaveSettings: vi.fn(),
@@ -82,11 +82,29 @@ const { settingsApiMock } = vi.hoisted(() => ({
     webdavSyncUpload: vi.fn(),
     webdavSyncDownload: vi.fn(),
   },
+  invokeMock: vi.fn(),
 }));
 
-vi.mock("@/lib/api", () => ({
-  settingsApi: settingsApiMock,
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
 }));
+
+// 同步密钥字段走真实的 settingsApi 包装，断言实际发出的 invoke 命令与参数
+vi.mock("@/lib/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/api/settings")>(
+      "@/lib/api/settings",
+    );
+  return {
+    settingsApi: {
+      ...settingsApiMock,
+      getSyncSnapshotKeyStatus: actual.settingsApi.getSyncSnapshotKeyStatus,
+      setSyncSnapshotKey: actual.settingsApi.setSyncSnapshotKey,
+    },
+  };
+});
+
+let syncKeyStatus: { configured: boolean; keyId: string | null };
 
 const baseConfig: WebDavSyncSettings = {
   enabled: true,
@@ -143,6 +161,21 @@ describe("WebdavSyncSection", () => {
     settingsApiMock.webdavSyncDownload.mockResolvedValue({
       status: "downloaded",
     });
+
+    syncKeyStatus = { configured: false, keyId: null };
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(
+      async (command: string, args?: { key?: string | null }) => {
+        if (command === "get_sync_snapshot_key_status") return syncKeyStatus;
+        if (command === "set_sync_snapshot_key") {
+          syncKeyStatus = args?.key
+            ? { configured: true, keyId: "a1b2c3d4" }
+            : { configured: false, keyId: null };
+          return syncKeyStatus;
+        }
+        throw new Error(`unexpected invoke: ${command}`);
+      },
+    );
   });
 
   it("shows auto sync error callout when last auto sync failed", () => {
@@ -586,6 +619,116 @@ describe("WebdavSyncSection", () => {
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith(
         "settings.webdavSync.downloadFailed",
+      );
+    });
+  });
+
+  describe("sync snapshot key field (CCS-237)", () => {
+    it("renders the not-set status", async () => {
+      renderSection(baseConfig);
+
+      expect(
+        await screen.findByText("settings.webdavSync.syncKey.statusNotSet"),
+      ).toBeInTheDocument();
+      expect(invokeMock).toHaveBeenCalledWith("get_sync_snapshot_key_status");
+      expect(
+        screen.getByRole("button", {
+          name: "settings.webdavSync.syncKey.clear",
+        }),
+      ).toBeDisabled();
+    });
+
+    it("renders the configured status with the key id", async () => {
+      syncKeyStatus = { configured: true, keyId: "deadbeef" };
+      renderSection(baseConfig);
+
+      expect(
+        await screen.findByText("settings.webdavSync.syncKey.statusConfigured"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("deadbeef")).toBeInTheDocument();
+    });
+
+    it("rejects keys shorter than 8 characters without invoking", async () => {
+      renderSection(baseConfig);
+      await screen.findByText("settings.webdavSync.syncKey.statusNotSet");
+
+      fireEvent.change(
+        screen.getByLabelText("settings.webdavSync.syncKey.title"),
+        { target: { value: "short" } },
+      );
+
+      expect(
+        screen.getByText("settings.webdavSync.syncKey.tooShort"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "settings.webdavSync.syncKey.set" }),
+      ).toBeDisabled();
+      expect(invokeMock).not.toHaveBeenCalledWith(
+        "set_sync_snapshot_key",
+        expect.anything(),
+      );
+    });
+
+    it("sets the key via set_sync_snapshot_key", async () => {
+      renderSection(baseConfig);
+      await screen.findByText("settings.webdavSync.syncKey.statusNotSet");
+
+      fireEvent.change(
+        screen.getByLabelText("settings.webdavSync.syncKey.title"),
+        { target: { value: "correct horse battery" } },
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "settings.webdavSync.syncKey.set" }),
+      );
+
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("set_sync_snapshot_key", {
+          key: "correct horse battery",
+        });
+      });
+      expect(await screen.findByText("a1b2c3d4")).toBeInTheDocument();
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        "settings.webdavSync.syncKey.setSuccess",
+      );
+      expect(
+        screen.getByLabelText("settings.webdavSync.syncKey.title"),
+      ).toHaveValue("");
+    });
+
+    it("clears the key with null after confirmation", async () => {
+      syncKeyStatus = { configured: true, keyId: "deadbeef" };
+      renderSection(baseConfig);
+      await screen.findByText("deadbeef");
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "settings.webdavSync.syncKey.clear",
+        }),
+      );
+      expect(
+        screen.getByText("settings.webdavSync.syncKey.clearConfirm.message"),
+      ).toBeInTheDocument();
+      expect(invokeMock).not.toHaveBeenCalledWith(
+        "set_sync_snapshot_key",
+        expect.anything(),
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "settings.webdavSync.syncKey.clearConfirm.confirm",
+        }),
+      );
+
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("set_sync_snapshot_key", {
+          key: null,
+        });
+      });
+      expect(
+        await screen.findByText("settings.webdavSync.syncKey.statusNotSet"),
+      ).toBeInTheDocument();
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        "settings.webdavSync.syncKey.clearSuccess",
       );
     });
   });

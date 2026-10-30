@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { settingsApi } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { SyncSnapshotKeyField } from "@/components/settings/SyncSnapshotKeyField";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import type {
   RemoteSnapshotInfo,
@@ -969,6 +970,9 @@ export function WebdavSyncSection({
           {t("settings.webdavSync.description")}
         </p>
       </header>
+
+      {/* ─── Snapshot signing key (shared by WebDAV and S3) ─ */}
+      <SyncSnapshotKeyField />
 
       {/* ─── Sync type selector ───────────────────────────── */}
       <div className="flex items-center gap-4">

@@ -6,6 +6,7 @@ import {
 } from "@/shared/bindings";
 import type { AppId } from "@/lib/api/types";
 import type { CommandName, CommandResult } from "./commands";
+import { settingsApi } from "@/lib/api/settings";
 import { handlers } from "./handlers";
 import { UNMOCKED_COMMANDS } from "./unmockedCommands";
 
@@ -47,5 +48,32 @@ describe("MSW handlers vs generated command list (CCS-117)", () => {
     expectTypeOf<"get_providers">().toMatchTypeOf<CommandName>();
     // @ts-expect-error 未注册的命令名不是 CommandName
     expectTypeOf<"not_a_command">().toMatchTypeOf<CommandName>();
+  });
+});
+
+describe("sync snapshot key handlers (CCS-237)", () => {
+  it("sets, reports and clears the key", async () => {
+    await expect(settingsApi.getSyncSnapshotKeyStatus()).resolves.toEqual({
+      configured: false,
+      keyId: null,
+    });
+
+    const set = await settingsApi.setSyncSnapshotKey("correct horse battery");
+    expect(set.configured).toBe(true);
+    expect(set.keyId).toMatch(/^[0-9a-f]{8}$/);
+    await expect(settingsApi.getSyncSnapshotKeyStatus()).resolves.toEqual(set);
+
+    await expect(settingsApi.setSyncSnapshotKey(null)).resolves.toEqual({
+      configured: false,
+      keyId: null,
+    });
+  });
+
+  it("rejects keys shorter than 8 characters", async () => {
+    await expect(settingsApi.setSyncSnapshotKey("short")).rejects.toThrow();
+    await expect(settingsApi.getSyncSnapshotKeyStatus()).resolves.toEqual({
+      configured: false,
+      keyId: null,
+    });
   });
 });

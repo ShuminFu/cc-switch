@@ -63,6 +63,13 @@ export interface SettingsLoadFailure {
 
 export interface WebDavSyncResult {
   status: string;
+  /** 下载结果：导入的快照是否带有效签名（上传结果不含此字段） */
+  signed?: boolean;
+}
+
+export interface SyncDownloadOptions {
+  /** 确认来源可信后一次性导入未签名的远端快照 */
+  allowUnsigned?: boolean;
 }
 
 export interface SkillsMigrationResult {
@@ -213,8 +220,12 @@ export const settingsApi = {
     return await invoke("webdav_sync_upload");
   },
 
-  async webdavSyncDownload(): Promise<WebDavSyncResult> {
-    return await invoke("webdav_sync_download");
+  async webdavSyncDownload(
+    options: SyncDownloadOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await invoke("webdav_sync_download", {
+      allowUnsigned: options.allowUnsigned ?? false,
+    });
   },
 
   async webdavSyncSaveSettings(
@@ -249,8 +260,12 @@ export const settingsApi = {
     return await invoke("s3_sync_upload");
   },
 
-  async s3SyncDownload(): Promise<WebDavSyncResult> {
-    return await invoke("s3_sync_download");
+  async s3SyncDownload(
+    options: SyncDownloadOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await invoke("s3_sync_download", {
+      allowUnsigned: options.allowUnsigned ?? false,
+    });
   },
 
   async s3SyncSaveSettings(

@@ -655,6 +655,27 @@
         "warning": "將覆寫雲端已有的同步資料",
         "legacyNotice": "檢測到舊版雲端路徑資料。本次上傳將寫入新路徑 v2/db-v6，不會覆寫舊路徑。",
         "confirm": "確認上傳"
+      },
+      "syncKey": {
+        "title": "快照簽章金鑰",
+        "description": "WebDAV 與 S3 共用。上傳時簽章、下載時驗證；每台裝置需輸入相同的金鑰。",
+        "statusLoading": "正在讀取金鑰狀態...",
+        "statusFailed": "讀取金鑰狀態失敗：{{error}}",
+        "statusConfigured": "已設定，金鑰 ID：",
+        "statusNotSet": "未設定：快照將以未簽章方式上傳",
+        "placeholder": "同步金鑰（至少 {{min}} 個字元）",
+        "tooShort": "同步金鑰至少需要 {{min}} 個字元",
+        "set": "設定金鑰",
+        "setSuccess": "同步金鑰已儲存",
+        "setFailed": "設定同步金鑰失敗：{{error}}",
+        "clear": "清除金鑰",
+        "clearSuccess": "同步金鑰已清除",
+        "clearFailed": "清除同步金鑰失敗：{{error}}",
+        "clearConfirm": {
+          "title": "清除同步金鑰",
+          "message": "清除後上傳將不再簽章，也無法驗證已簽章的遠端快照。同時會重設 WebDAV 與 S3 的簽章同步狀態，之後將重新接受未簽章的遠端快照。",
+          "confirm": "清除金鑰"
+        }
       }
     },
     "syncType": {

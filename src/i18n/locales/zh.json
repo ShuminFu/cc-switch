@@ -655,6 +655,27 @@
         "warning": "将覆盖云端已有的同步数据",
         "legacyNotice": "检测到旧版云端路径数据。本次上传将写入新路径 v2/db-v6，不会覆盖旧路径。",
         "confirm": "确认上传"
+      },
+      "syncKey": {
+        "title": "快照签名密钥",
+        "description": "WebDAV 与 S3 共用。上传时签名、下载时校验；每台设备需输入相同的密钥。",
+        "statusLoading": "正在读取密钥状态...",
+        "statusFailed": "读取密钥状态失败：{{error}}",
+        "statusConfigured": "已设置，密钥 ID：",
+        "statusNotSet": "未设置：快照将以未签名方式上传",
+        "placeholder": "同步密钥（至少 {{min}} 个字符）",
+        "tooShort": "同步密钥至少需要 {{min}} 个字符",
+        "set": "设置密钥",
+        "setSuccess": "同步密钥已保存",
+        "setFailed": "设置同步密钥失败：{{error}}",
+        "clear": "清除密钥",
+        "clearSuccess": "同步密钥已清除",
+        "clearFailed": "清除同步密钥失败：{{error}}",
+        "clearConfirm": {
+          "title": "清除同步密钥",
+          "message": "清除后上传将不再签名，也无法校验已签名的远端快照。同时会复位 WebDAV 与 S3 的签名同步状态，之后将重新接受未签名的远端快照。",
+          "confirm": "清除密钥"
+        }
       }
     },
     "syncType": {

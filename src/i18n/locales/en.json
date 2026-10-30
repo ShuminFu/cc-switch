@@ -655,6 +655,27 @@
         "warning": "This will overwrite existing sync data on the remote server",
         "legacyNotice": "Legacy remote data was detected. This upload will write to the new v2/db-v6 path and will not overwrite the legacy path.",
         "confirm": "Confirm Upload"
+      },
+      "syncKey": {
+        "title": "Snapshot signing key",
+        "description": "Shared by WebDAV and S3. Uploads are signed and downloads are verified; enter the same key on every device.",
+        "statusLoading": "Loading key status...",
+        "statusFailed": "Failed to read key status: {{error}}",
+        "statusConfigured": "Configured, key ID:",
+        "statusNotSet": "Not set: snapshots are uploaded unsigned",
+        "placeholder": "Sync key (at least {{min}} characters)",
+        "tooShort": "The sync key must be at least {{min}} characters",
+        "set": "Set key",
+        "setSuccess": "Sync key saved",
+        "setFailed": "Failed to set sync key: {{error}}",
+        "clear": "Clear key",
+        "clearSuccess": "Sync key cleared",
+        "clearFailed": "Failed to clear sync key: {{error}}",
+        "clearConfirm": {
+          "title": "Clear sync key",
+          "message": "After clearing, uploads are no longer signed and signed remote snapshots cannot be verified. This also resets the signed-sync state of WebDAV and S3, so unsigned remote snapshots will be accepted again.",
+          "confirm": "Clear key"
+        }
       }
     },
     "syncType": {
