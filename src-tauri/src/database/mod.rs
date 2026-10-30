@@ -53,7 +53,7 @@ use std::time::Duration;
 
 /// 当前 Schema 版本号
 /// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-pub(crate) const SCHEMA_VERSION: i32 = 15;
+pub(crate) const SCHEMA_VERSION: i32 = 16;
 
 /// 主库连接的 busy_timeout：其它进程/连接（备份、外部工具）短暂持有写锁时等待而不是立即报错。
 pub(crate) const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
