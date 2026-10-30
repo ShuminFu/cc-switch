@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 
 /** Where the sync encryption passphrase is stored on this device. */
 export type SyncSecretStorage = "keychain" | "settingsFile" | "none";

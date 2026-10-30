@@ -411,7 +411,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
       await onSave();
     } catch (error: any) {
       const detail = extractErrorMessage(error);
-      const mapped = translateMcpBackendError(detail, t);
+      const mapped = translateMcpBackendError(error, t);
       const msg = mapped || detail || t("mcp.error.saveFailed");
       toast.error(msg, { duration: mapped || detail ? 6000 : 4000 });
     } finally {

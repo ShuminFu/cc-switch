@@ -12,16 +12,22 @@ use crate::error::AppError;
 /// - http/sse：`url` 必须是 scheme 为 http/https 的合法 URL；
 ///   `headers`（可选）必须是值为字符串的对象
 pub fn validate_server_spec(spec: &Value) -> Result<(), AppError> {
-    let obj = spec
-        .as_object()
-        .ok_or_else(|| AppError::McpValidation("MCP 服务器连接定义必须为 JSON 对象".into()))?;
+    let obj = spec.as_object().ok_or_else(|| {
+        AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器连接定义必须为 JSON 对象",
+            "The MCP server definition must be a JSON object",
+        )
+    })?;
 
     let t_opt = match obj.get("type") {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) => Some(s.as_str()),
         Some(_) => {
-            return Err(AppError::McpValidation(
-                "MCP 服务器 type 字段必须为字符串".into(),
+            return Err(AppError::localized(
+                "mcp.error.jsonInvalid",
+                "MCP 服务器 type 字段必须为字符串",
+                "The MCP server type field must be a string",
             ))
         }
     };
@@ -31,16 +37,20 @@ pub fn validate_server_spec(spec: &Value) -> Result<(), AppError> {
     let is_sse = t_opt.map(|t| t == "sse").unwrap_or(false);
 
     if !(is_stdio || is_http || is_sse) {
-        return Err(AppError::McpValidation(
-            "MCP 服务器 type 必须是 'stdio'、'http' 或 'sse'（或省略表示 stdio）".into(),
+        return Err(AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器 type 必须是 'stdio'、'http' 或 'sse'（或省略表示 stdio）",
+            "The MCP server type must be 'stdio', 'http' or 'sse' (omit it for stdio)",
         ));
     }
 
     if is_stdio {
         let cmd = obj.get("command").and_then(|x| x.as_str()).unwrap_or("");
         if cmd.trim().is_empty() {
-            return Err(AppError::McpValidation(
-                "stdio 类型的 MCP 服务器缺少 command 字段".into(),
+            return Err(AppError::localized(
+                "mcp.error.commandRequired",
+                "stdio 类型的 MCP 服务器缺少 command 字段",
+                "A stdio MCP server needs a command",
             ));
         }
         if let Some(args) = obj.get("args") {
@@ -68,9 +78,11 @@ pub fn validate_server_spec(spec: &Value) -> Result<(), AppError> {
         let kind = if is_http { "http" } else { "sse" };
         let url = obj.get("url").and_then(|x| x.as_str()).unwrap_or("");
         if url.trim().is_empty() {
-            return Err(AppError::McpValidation(format!(
-                "{kind} 类型的 MCP 服务器缺少 url 字段"
-            )));
+            return Err(AppError::localized(
+                "mcp.wizard.urlRequired",
+                format!("{kind} 类型的 MCP 服务器缺少 url 字段"),
+                format!("A {kind} MCP server needs a URL"),
+            ));
         }
         let parsed = url::Url::parse(url.trim()).map_err(|e| {
             AppError::McpValidation(format!("{kind} 类型的 MCP 服务器 url 无效: {e}"))
@@ -159,16 +171,26 @@ pub fn find_cmd_wrap_unsafe_arg(spec: &Value) -> Option<String> {
 
 /// 从 MCP 条目中提取服务器规范
 pub fn extract_server_spec(entry: &Value) -> Result<Value, AppError> {
-    let obj = entry
-        .as_object()
-        .ok_or_else(|| AppError::McpValidation("MCP 服务器条目必须为 JSON 对象".into()))?;
-    let server = obj
-        .get("server")
-        .ok_or_else(|| AppError::McpValidation("MCP 服务器条目缺少 server 字段".into()))?;
+    let obj = entry.as_object().ok_or_else(|| {
+        AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器条目必须为 JSON 对象",
+            "The MCP server entry must be a JSON object",
+        )
+    })?;
+    let server = obj.get("server").ok_or_else(|| {
+        AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器条目缺少 server 字段",
+            "The MCP server entry has no server field",
+        )
+    })?;
 
     if !server.is_object() {
-        return Err(AppError::McpValidation(
-            "MCP 服务器 server 字段必须为 JSON 对象".into(),
+        return Err(AppError::localized(
+            "mcp.error.jsonInvalid",
+            "MCP 服务器 server 字段必须为 JSON 对象",
+            "The MCP server field must be a JSON object",
         ));
     }
 

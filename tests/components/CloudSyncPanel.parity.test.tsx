@@ -10,6 +10,7 @@ import {
   webdavAdapter,
 } from "@/components/settings/cloudSync/webdavAdapter";
 import { detectSyncConflict } from "@/lib/errors/syncConflict";
+import { BackendError } from "@/lib/errors/appError";
 import type { S3SyncSettings, WebDavSyncSettings } from "@/types";
 
 const toast = vi.hoisted(() => ({
@@ -88,10 +89,19 @@ const api = vi.hoisted(() => ({
 
 vi.mock("@/lib/api", () => ({ settingsApi: api }));
 
-const REMOTE_CHANGED =
-  '同步冲突：远端数据自上次同步后已被其他设备更新（来自设备「Laptop」）。 (Sync conflict: the remote data changed since the last sync (from device "Laptop" at 2026-02-01). Upload was cancelled to avoid overwriting it.)';
-const LOCAL_CHANGED =
-  "同步冲突：本地数据自上次同步后已修改，下载将覆盖这些修改。 (Sync conflict: local data changed since the last sync and downloading would overwrite it.)";
+// The sync commands reject with a structured AppError (`{ code, message, params }`);
+// the API layer turns it into a BackendError carrying the code.
+const REMOTE_CHANGED = new BackendError({
+  code: "sync.conflict.remote_changed",
+  message:
+    '同步冲突：远端数据自上次同步后已被其他设备更新（来自设备「Laptop」）。 (Sync conflict: the remote data changed since the last sync (from device "Laptop" at 2026-02-01). Upload was cancelled to avoid overwriting it.)',
+});
+// A raw payload (not yet wrapped) is recognised as well.
+const LOCAL_CHANGED = {
+  code: "sync.conflict.local_changed",
+  message:
+    "同步冲突：本地数据自上次同步后已修改，下载将覆盖这些修改。 (Sync conflict: local data changed since the last sync and downloading would overwrite it.)",
+};
 
 interface BackendCase {
   name: string;
@@ -289,7 +299,9 @@ describe.each(cases)("CloudSyncPanel parity: $name", (c) => {
   });
 
   it("asks before a download overwrites changed local data", async () => {
-    api[c.calls.download].mockRejectedValueOnce(new Error(LOCAL_CHANGED));
+    api[c.calls.download].mockRejectedValueOnce(
+      new BackendError(LOCAL_CHANGED),
+    );
     renderPanel();
     click(`${c.prefix}.download`);
     await waitFor(() => expect(api[c.calls.fetch]).toHaveBeenCalled());
@@ -403,7 +415,15 @@ describe("cloud sync helpers", () => {
 
   it("recognises both conflict kinds and ignores other errors", () => {
     expect(detectSyncConflict(REMOTE_CHANGED)).toBe("remote_changed");
-    expect(detectSyncConflict(new Error(LOCAL_CHANGED))).toBe("local_changed");
+    expect(detectSyncConflict(LOCAL_CHANGED)).toBe("local_changed");
+    expect(detectSyncConflict(new BackendError(LOCAL_CHANGED))).toBe(
+      "local_changed",
+    );
+    // Matching is by code, not by message text.
+    expect(detectSyncConflict(new Error(LOCAL_CHANGED.message))).toBeNull();
+    expect(
+      detectSyncConflict({ code: "errors.config", message: "x" }),
+    ).toBeNull();
     expect(detectSyncConflict("sync.conflict.remote_changed")).toBe(
       "remote_changed",
     );
