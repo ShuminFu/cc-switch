@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
 use crate::error::AppError;
+use crate::settings::WebDavSyncStatus;
 
 // Re-export archive functions for use by transport layers.
 pub(crate) use super::webdav_sync::archive::{
@@ -393,18 +394,287 @@ pub(crate) fn normalize_device_name(raw: &str) -> Option<String> {
     }
 }
 
+// ─── Conflict detection (SEC-28 / SVC-02) ────────────────────
+//
+// Sync is whole-snapshot, so every write must prove it is based on the remote
+// state this device last saw. The baseline lives in `WebDavSyncStatus`:
+//
+// - `last_remote_manifest_hash` / `last_remote_etag`: the remote manifest seen
+//   at the last successful upload/download. Before uploading, the current
+//   remote manifest is compared with it; a mismatch is a "remote changed"
+//   conflict. The manifest PUT additionally carries `If-Match: <etag>` of the
+//   manifest that was just checked, closing the read-then-write race on
+//   servers that support conditional writes.
+// - `last_local_manifest_hash`: a content fingerprint of the local snapshot
+//   (prefixed with [`LOCAL_FINGERPRINT_PREFIX`]) taken right after the last
+//   successful sync. Before downloading, the current local fingerprint is
+//   compared with it; a mismatch means local edits would be overwritten.
+//
+// No baseline (fresh install, or status written by an older version) means
+// "unknown" and the operation is allowed, so existing users' first sync keeps
+// working. `force = true` skips both checks for explicit user overwrites.
+
+/// Error key of the distinct "remote changed since last sync" conflict.
+pub(crate) const SYNC_REMOTE_CHANGED_KEY: &str = "sync.conflict.remote_changed";
+/// Error key of the distinct "local data changed since last sync" conflict.
+pub(crate) const SYNC_LOCAL_CHANGED_KEY: &str = "sync.conflict.local_changed";
+/// Marks a `last_local_manifest_hash` value as a content fingerprint.
+/// Values without this prefix were written by older versions (they held the
+/// manifest hash) and are treated as "no baseline".
+pub(crate) const LOCAL_FINGERPRINT_PREFIX: &str = "content-v1:";
+
+/// The remote manifest as observed right before an upload.
+pub(crate) struct RemoteManifestView<'a> {
+    pub bytes: &'a [u8],
+    pub etag: Option<&'a str>,
+    /// Parsed manifest, used only to describe the conflict to the user.
+    pub manifest: Option<&'a SyncManifest>,
+}
+
+/// Returns `true` when the error is a sync conflict (remote or local changed).
+pub(crate) fn is_sync_conflict(err: &AppError) -> bool {
+    matches!(
+        err,
+        AppError::Localized { key, .. }
+            if *key == SYNC_REMOTE_CHANGED_KEY || *key == SYNC_LOCAL_CHANGED_KEY
+    )
+}
+
+pub(crate) fn remote_changed_error(manifest: Option<&SyncManifest>) -> AppError {
+    let (zh_detail, en_detail) = match manifest {
+        Some(m) => (
+            format!("（来自设备「{}」，时间 {}）", m.device_name, m.created_at),
+            format!(" (from device \"{}\" at {})", m.device_name, m.created_at),
+        ),
+        None => (String::new(), String::new()),
+    };
+    localized(
+        SYNC_REMOTE_CHANGED_KEY,
+        format!(
+            "同步冲突：远端数据自上次同步后已被其他设备更新{zh_detail}。为避免覆盖，已取消上传。请先下载远端数据，或在手动上传时确认覆盖。"
+        ),
+        format!(
+            "Sync conflict: the remote data changed since the last sync{en_detail}. Upload was cancelled to avoid overwriting it. Download the remote data first, or confirm an overwrite with a manual upload."
+        ),
+    )
+}
+
+pub(crate) fn local_changed_error() -> AppError {
+    localized(
+        SYNC_LOCAL_CHANGED_KEY,
+        "同步冲突：本地数据自上次同步后已修改，下载将覆盖这些修改。请先上传本地数据，或确认强制下载。",
+        "Sync conflict: local data changed since the last sync and downloading would overwrite it. Upload first, or confirm a forced download.",
+    )
+}
+
+/// Weak ETags (`W/"..."`) never match `If-Match` (strong comparison), so they
+/// must not be used as a write precondition.
+fn strong_etag(etag: Option<&str>) -> Option<String> {
+    let etag = etag?.trim();
+    if etag.is_empty() || etag.starts_with("W/") {
+        return None;
+    }
+    Some(etag.to_string())
+}
+
+/// Decide whether an upload may overwrite the remote snapshot.
+///
+/// Returns the ETag to send as `If-Match` on the manifest PUT (if any), or the
+/// distinct remote-changed conflict error.
+pub(crate) fn evaluate_upload_precondition(
+    status: &WebDavSyncStatus,
+    remote: Option<&RemoteManifestView<'_>>,
+    force: bool,
+) -> Result<Option<String>, AppError> {
+    // Nothing on the remote yet: nothing to protect.
+    let Some(remote) = remote else {
+        return Ok(None);
+    };
+    let if_match = strong_etag(remote.etag);
+    if force {
+        return Ok(if_match);
+    }
+
+    let stored_hash = status.last_remote_manifest_hash.as_deref();
+    let stored_etag = status.last_remote_etag.as_deref();
+    if stored_hash.is_none() && stored_etag.is_none() {
+        // First sync from this device (or status from an older version).
+        return Ok(if_match);
+    }
+
+    let hash_matches = stored_hash.is_some_and(|h| h == sha256_hex(remote.bytes));
+    let etag_matches = matches!((stored_etag, remote.etag), (Some(a), Some(b)) if a == b);
+    if hash_matches || etag_matches {
+        Ok(if_match)
+    } else {
+        Err(remote_changed_error(remote.manifest))
+    }
+}
+
+/// Fingerprint of local sync content, independent of export time.
+///
+/// The SQL dump starts with `--` comment lines that include the export
+/// timestamp; they are skipped so unchanged data yields the same fingerprint.
+pub(crate) fn local_content_fingerprint(db_sql: &[u8], skills_zip: &[u8]) -> String {
+    let mut body = db_sql;
+    while body.starts_with(b"--") {
+        match body.iter().position(|b| *b == b'\n') {
+            Some(pos) => body = &body[pos + 1..],
+            None => {
+                body = &[];
+                break;
+            }
+        }
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(sha256_hex(body).as_bytes());
+    hasher.update(b"|");
+    hasher.update(sha256_hex(skills_zip).as_bytes());
+    format!("{LOCAL_FINGERPRINT_PREFIX}{:x}", hasher.finalize())
+}
+
+/// Stored fingerprint of the local snapshot at the last sync, if any.
+fn stored_local_fingerprint(status: &WebDavSyncStatus) -> Option<&str> {
+    status
+        .last_local_manifest_hash
+        .as_deref()
+        .filter(|v| v.starts_with(LOCAL_FINGERPRINT_PREFIX))
+}
+
+/// Decide whether a download may overwrite local data.
+pub(crate) fn evaluate_download_precondition(
+    status: &WebDavSyncStatus,
+    current_fingerprint: Option<&str>,
+    force: bool,
+) -> Result<(), AppError> {
+    if force {
+        return Ok(());
+    }
+    match (stored_local_fingerprint(status), current_fingerprint) {
+        (Some(stored), Some(current)) if stored != current => Err(local_changed_error()),
+        _ => Ok(()),
+    }
+}
+
+/// Refuse a download that would overwrite local changes made since the last
+/// sync, unless `force`. Only builds a local snapshot when a baseline exists.
+pub(crate) fn ensure_local_unchanged(
+    db: &crate::database::Database,
+    status: &WebDavSyncStatus,
+    force: bool,
+) -> Result<(), AppError> {
+    if force || stored_local_fingerprint(status).is_none() {
+        return Ok(());
+    }
+    let current = capture_local_fingerprint(db);
+    evaluate_download_precondition(status, current.as_deref(), force)
+}
+
+/// Best-effort fingerprint of the current local state (e.g. after a download).
+pub(crate) fn capture_local_fingerprint(db: &crate::database::Database) -> Option<String> {
+    match build_local_snapshot(db) {
+        Ok(snapshot) => Some(local_content_fingerprint(
+            &snapshot.db_sql,
+            &snapshot.skills_zip,
+        )),
+        Err(err) => {
+            log::warn!("[Sync] Failed to fingerprint local snapshot: {err}");
+            None
+        }
+    }
+}
+
+// ─── Plain-HTTP transport warning (SEC-17) ───────────────────
+
+/// Returns `true` for `http://` URLs that leave the local network.
+///
+/// Credentials and the full config snapshot (including API keys) travel in
+/// clear text over such endpoints. Loopback, private (RFC 1918 / ULA),
+/// link-local, CGNAT/Tailscale ranges, single-label hosts (`nas`, `minio`)
+/// and `.local`/`.lan`/`.home.arpa`/`.internal`/`localhost` names are treated
+/// as local and not flagged. Sync is not refused (that would break existing
+/// setups); callers log a warning and return an `insecureTransport` flag.
+pub(crate) fn is_insecure_remote_url(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if !trimmed
+        .get(..7)
+        .is_some_and(|p| p.eq_ignore_ascii_case("http://"))
+    {
+        return false;
+    }
+    let Ok(url) = url::Url::parse(trimmed) else {
+        return true;
+    };
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => {
+            let [a, b, ..] = ip.octets();
+            let cgnat = a == 100 && (64..128).contains(&b);
+            !(ip.is_loopback() || ip.is_private() || ip.is_link_local() || cgnat)
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            let first = ip.segments()[0];
+            let unique_local = (first & 0xfe00) == 0xfc00;
+            let link_local = (first & 0xffc0) == 0xfe80;
+            !(ip.is_loopback() || unique_local || link_local)
+        }
+        Some(url::Host::Domain(domain)) => {
+            let d = domain.trim_end_matches('.').to_ascii_lowercase();
+            let local = !d.contains('.')
+                || d == "localhost"
+                || [".localhost", ".local", ".lan", ".home.arpa", ".internal"]
+                    .iter()
+                    .any(|suffix| d.ends_with(suffix));
+            !local
+        }
+        None => true,
+    }
+}
+
+/// Log a warning when syncing over plain HTTP to a non-local host.
+/// Returns the `insecureTransport` flag reported back to the caller.
+pub(crate) fn warn_if_insecure(transport: &str, raw_url: &str) -> bool {
+    let insecure = is_insecure_remote_url(raw_url);
+    if insecure {
+        log::warn!(
+            "[{transport}] Sync endpoint uses plain http:// to a non-local host; credentials and synced data (including API keys) are sent unencrypted. Use https://."
+        );
+    }
+    insecure
+}
+
 // ─── Sync status persistence ─────────────────────────────────
+
+/// What a successful sync records as the baseline for the next one.
+#[derive(Debug, Clone)]
+pub(crate) struct SyncBaseline {
+    /// SHA-256 of the manifest bytes now on the remote.
+    pub manifest_hash: String,
+    /// ETag of the remote manifest, when the server returned one.
+    pub etag: Option<String>,
+    /// Fingerprint of local content right after the sync.
+    pub local_fingerprint: Option<String>,
+}
+
+pub(crate) fn sync_status_from_baseline(baseline: SyncBaseline) -> WebDavSyncStatus {
+    WebDavSyncStatus {
+        last_sync_at: Some(Utc::now().timestamp()),
+        last_error: None,
+        last_error_source: None,
+        last_local_manifest_hash: baseline.local_fingerprint,
+        last_remote_manifest_hash: Some(baseline.manifest_hash),
+        last_remote_etag: baseline.etag,
+    }
+}
 
 pub(crate) fn persist_sync_success_best_effort<S, F>(
     settings: &mut S,
-    manifest_hash: String,
-    etag: Option<String>,
+    baseline: SyncBaseline,
     persist_fn: F,
 ) -> bool
 where
-    F: FnOnce(&mut S, String, Option<String>) -> Result<(), AppError>,
+    F: FnOnce(&mut S, SyncBaseline) -> Result<(), AppError>,
 {
-    match persist_fn(settings, manifest_hash, etag) {
+    match persist_fn(settings, baseline) {
         Ok(()) => true,
         Err(err) => {
             log::warn!("[Sync] Persist sync status failed, keep operation success: {err}");
@@ -462,9 +732,8 @@ mod tests {
         let mut dummy = ();
         let ok = persist_sync_success_best_effort(
             &mut dummy,
-            "hash".to_string(),
-            Some("etag".to_string()),
-            |_settings, _hash, _etag| Ok(()),
+            baseline("hash", Some("etag")),
+            |_settings, _baseline| Ok(()),
         );
         assert!(ok);
     }
@@ -474,11 +743,205 @@ mod tests {
         let mut dummy = ();
         let ok = persist_sync_success_best_effort(
             &mut dummy,
-            "hash".to_string(),
-            None,
-            |_settings, _hash, _etag| Err(AppError::Config("boom".to_string())),
+            baseline("hash", None),
+            |_settings, _baseline| Err(AppError::Config("boom".to_string())),
         );
         assert!(!ok);
+    }
+
+    fn baseline(hash: &str, etag: Option<&str>) -> SyncBaseline {
+        SyncBaseline {
+            manifest_hash: hash.to_string(),
+            etag: etag.map(str::to_string),
+            local_fingerprint: None,
+        }
+    }
+
+    // ── Upload precondition (SEC-28 / SVC-02) ──
+
+    fn status_with(hash: Option<&str>, etag: Option<&str>) -> WebDavSyncStatus {
+        WebDavSyncStatus {
+            last_remote_manifest_hash: hash.map(str::to_string),
+            last_remote_etag: etag.map(str::to_string),
+            ..WebDavSyncStatus::default()
+        }
+    }
+
+    fn view<'a>(bytes: &'a [u8], etag: Option<&'a str>) -> RemoteManifestView<'a> {
+        RemoteManifestView {
+            bytes,
+            etag,
+            manifest: None,
+        }
+    }
+
+    #[test]
+    fn upload_allowed_when_remote_is_empty() {
+        let status = status_with(Some("stale"), Some("\"e1\""));
+        assert_eq!(
+            evaluate_upload_precondition(&status, None, false).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn upload_allowed_on_first_sync_without_baseline() {
+        let status = WebDavSyncStatus::default();
+        let remote = view(b"remote manifest", Some("\"e1\""));
+        assert_eq!(
+            evaluate_upload_precondition(&status, Some(&remote), false).unwrap(),
+            Some("\"e1\"".to_string())
+        );
+    }
+
+    #[test]
+    fn upload_allowed_when_remote_hash_matches_baseline() {
+        let bytes = b"manifest A";
+        let status = status_with(Some(&sha256_hex(bytes)), Some("\"old-etag\""));
+        let remote = view(bytes, Some("\"new-etag\""));
+        assert_eq!(
+            evaluate_upload_precondition(&status, Some(&remote), false).unwrap(),
+            Some("\"new-etag\"".to_string())
+        );
+    }
+
+    #[test]
+    fn upload_allowed_when_remote_etag_matches_baseline() {
+        let status = status_with(Some("other-hash"), Some("\"e1\""));
+        let remote = view(b"manifest A", Some("\"e1\""));
+        assert!(evaluate_upload_precondition(&status, Some(&remote), false).is_ok());
+    }
+
+    #[test]
+    fn upload_refused_with_conflict_when_remote_changed() {
+        let status = status_with(Some(&sha256_hex(b"manifest A")), Some("\"e1\""));
+        let mut manifest =
+            manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(DB_COMPAT_VERSION));
+        manifest.device_name = "Laptop B".to_string();
+        let remote = RemoteManifestView {
+            bytes: b"manifest B",
+            etag: Some("\"e2\""),
+            manifest: Some(&manifest),
+        };
+        let err = evaluate_upload_precondition(&status, Some(&remote), false)
+            .expect_err("changed remote must be a conflict");
+        assert!(is_sync_conflict(&err));
+        assert!(err.to_string().contains("Laptop B"), "{err}");
+    }
+
+    #[test]
+    fn forced_upload_ignores_baseline_but_keeps_if_match() {
+        let status = status_with(Some("stale"), Some("\"e1\""));
+        let remote = view(b"manifest B", Some("\"e2\""));
+        assert_eq!(
+            evaluate_upload_precondition(&status, Some(&remote), true).unwrap(),
+            Some("\"e2\"".to_string())
+        );
+    }
+
+    #[test]
+    fn weak_etag_is_not_used_for_if_match() {
+        let status = WebDavSyncStatus::default();
+        let remote = view(b"m", Some("W/\"weak\""));
+        assert_eq!(
+            evaluate_upload_precondition(&status, Some(&remote), false).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn non_conflict_errors_are_not_reported_as_conflicts() {
+        assert!(!is_sync_conflict(&AppError::Config("boom".to_string())));
+        assert!(is_sync_conflict(&local_changed_error()));
+        assert!(is_sync_conflict(&remote_changed_error(None)));
+    }
+
+    // ── Download precondition ──
+
+    #[test]
+    fn local_fingerprint_ignores_export_header_comments() {
+        let a = local_content_fingerprint(
+            b"-- CC Switch\n-- time: 1\nINSERT INTO t VALUES (1);\n",
+            b"zip",
+        );
+        let b = local_content_fingerprint(
+            b"-- CC Switch\n-- time: 2\nINSERT INTO t VALUES (1);\n",
+            b"zip",
+        );
+        let c = local_content_fingerprint(
+            b"-- CC Switch\n-- time: 2\nINSERT INTO t VALUES (2);\n",
+            b"zip",
+        );
+        let d = local_content_fingerprint(
+            b"-- CC Switch\n-- time: 2\nINSERT INTO t VALUES (1);\n",
+            b"zip2",
+        );
+        assert!(a.starts_with(LOCAL_FINGERPRINT_PREFIX));
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+    }
+
+    #[test]
+    fn download_refused_when_local_changed_since_last_sync() {
+        let stored = local_content_fingerprint(b"A", b"z");
+        let current = local_content_fingerprint(b"B", b"z");
+        let status = WebDavSyncStatus {
+            last_local_manifest_hash: Some(stored.clone()),
+            ..WebDavSyncStatus::default()
+        };
+        let err = evaluate_download_precondition(&status, Some(&current), false)
+            .expect_err("dirty local must be refused");
+        assert!(is_sync_conflict(&err));
+        assert!(evaluate_download_precondition(&status, Some(&current), true).is_ok());
+        assert!(evaluate_download_precondition(&status, Some(&stored), false).is_ok());
+    }
+
+    #[test]
+    fn download_allowed_without_fingerprint_baseline() {
+        // Older versions stored the manifest hash here (no prefix): unknown, allow.
+        let status = WebDavSyncStatus {
+            last_local_manifest_hash: Some(sha256_hex(b"legacy manifest")),
+            ..WebDavSyncStatus::default()
+        };
+        let current = local_content_fingerprint(b"B", b"z");
+        assert!(evaluate_download_precondition(&status, Some(&current), false).is_ok());
+        assert!(evaluate_download_precondition(&WebDavSyncStatus::default(), None, false).is_ok());
+    }
+
+    // ── Plain-HTTP detection (SEC-17) ──
+
+    #[test]
+    fn insecure_url_flags_public_http_only() {
+        for url in [
+            "http://dav.example.com/dav",
+            "http://8.8.8.8:5005/",
+            "HTTP://storage.example.org",
+            "http://[2001:db8::1]/",
+        ] {
+            assert!(is_insecure_remote_url(url), "{url} should be insecure");
+        }
+        for url in [
+            "https://dav.example.com/dav",
+            "minio.example.com:9000",
+            "",
+            "http://localhost:8080/dav",
+            "http://127.0.0.1:9000",
+            "http://[::1]:9000",
+            "http://192.168.1.10/dav",
+            "http://10.0.0.5",
+            "http://172.20.1.1",
+            "http://169.254.1.1",
+            "http://100.101.102.103",
+            "http://[fd00::1]/",
+            "http://nas:5005/",
+            "http://minio:9000",
+            "http://nas.local/dav",
+            "http://box.lan",
+            "http://dav.home.arpa",
+        ] {
+            assert!(!is_insecure_remote_url(url), "{url} should not be flagged");
+        }
     }
 
     fn manifest_with(format: &str, version: u32, db_compat_version: Option<u32>) -> SyncManifest {

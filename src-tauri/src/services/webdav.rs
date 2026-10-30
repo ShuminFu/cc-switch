@@ -221,6 +221,15 @@ pub async fn ensure_remote_directories(
     Ok(())
 }
 
+/// Result of a conditional PUT.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PutOutcome {
+    Stored,
+    /// The server answered `412 Precondition Failed`: the resource changed
+    /// since the ETag passed as `If-Match` was observed.
+    PreconditionFailed,
+}
+
 /// PUT bytes to a remote WebDAV URL.
 pub async fn put_bytes(
     url: &str,
@@ -228,23 +237,46 @@ pub async fn put_bytes(
     bytes: Vec<u8>,
     content_type: &str,
 ) -> Result<(), AppError> {
-    let client = http_client::get();
-    let resp = apply_auth(
-        client
-            .put(url)
-            .header("Content-Type", content_type)
-            .body(bytes)
-            .timeout(Duration::from_secs(TRANSFER_TIMEOUT_SECS)),
-        auth,
-    )
-    .send()
-    .await
-    .map_err(|e| webdav_transport_error("webdav.put_failed", "PUT 请求", "PUT request", url, &e))?;
-
-    if resp.status().is_success() {
-        return Ok(());
+    match put_bytes_if_match(url, auth, bytes, content_type, None).await? {
+        PutOutcome::Stored => Ok(()),
+        PutOutcome::PreconditionFailed => Err(webdav_status_error(
+            "PUT",
+            StatusCode::PRECONDITION_FAILED,
+            url,
+        )),
     }
-    Err(webdav_status_error("PUT", resp.status(), url))
+}
+
+/// PUT bytes, sending `If-Match: <etag>` when `if_match` is set so the write
+/// only succeeds if the remote resource is still the one that was checked.
+pub async fn put_bytes_if_match(
+    url: &str,
+    auth: &WebDavAuth,
+    bytes: Vec<u8>,
+    content_type: &str,
+    if_match: Option<&str>,
+) -> Result<PutOutcome, AppError> {
+    let client = http_client::get();
+    let mut builder = client
+        .put(url)
+        .header("Content-Type", content_type)
+        .body(bytes)
+        .timeout(Duration::from_secs(TRANSFER_TIMEOUT_SECS));
+    if let Some(etag) = if_match {
+        builder = builder.header(reqwest::header::IF_MATCH, etag);
+    }
+    let resp = apply_auth(builder, auth).send().await.map_err(|e| {
+        webdav_transport_error("webdav.put_failed", "PUT 请求", "PUT request", url, &e)
+    })?;
+
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(PutOutcome::Stored);
+    }
+    if if_match.is_some() && status == StatusCode::PRECONDITION_FAILED {
+        return Ok(PutOutcome::PreconditionFailed);
+    }
+    Err(webdav_status_error("PUT", status, url))
 }
 
 /// GET bytes from a remote WebDAV URL. Returns `None` on 404.

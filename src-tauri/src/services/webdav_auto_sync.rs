@@ -9,6 +9,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::error::AppError;
+use crate::services::sync_protocol::is_sync_conflict;
 use crate::services::webdav_sync as webdav_sync_service;
 use crate::settings::{self, WebDavSyncSettings};
 
@@ -85,12 +86,13 @@ fn persist_auto_sync_error(settings: &mut WebDavSyncSettings, error: &AppError) 
     let _ = settings::update_webdav_sync_status(settings.status.clone());
 }
 
-fn emit_auto_sync_status_updated(app: &AppHandle, status: &str, error: Option<&str>) {
+fn emit_auto_sync_status_updated(app: &AppHandle, status: &str, error: Option<&AppError>) {
     let payload = match error {
-        Some(message) => json!({
+        Some(err) => json!({
             "source": "auto",
             "status": status,
-            "error": message,
+            "error": err.to_string(),
+            "conflict": is_sync_conflict(err),
         }),
         None => json!({
             "source": "auto",
@@ -117,9 +119,12 @@ async fn run_auto_sync_upload(
         None => return Ok(()),
     };
 
+    // Auto-sync never forces: if another device uploaded since our last sync,
+    // the upload is refused with a conflict instead of overwriting its data.
     let result = webdav_sync_service::run_with_sync_lock(webdav_sync_service::upload(
         db,
         &mut sync_settings,
+        false,
     ))
     .await;
     match result {
@@ -129,7 +134,7 @@ async fn run_auto_sync_upload(
         }
         Err(err) => {
             persist_auto_sync_error(&mut sync_settings, &err);
-            emit_auto_sync_status_updated(app, "error", Some(&err.to_string()));
+            emit_auto_sync_status_updated(app, "error", Some(&err));
             Err(err)
         }
     }

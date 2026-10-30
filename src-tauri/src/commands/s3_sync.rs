@@ -8,6 +8,7 @@ use crate::commands::sync_support::{
 };
 use crate::error::AppError;
 use crate::services::s3_sync as s3_sync_service;
+use crate::services::sync_protocol::is_insecure_remote_url;
 use crate::settings::{self, S3SyncSettings};
 use crate::store::AppState;
 
@@ -89,29 +90,55 @@ pub async fn s3_test_connection(
         .map_err(|e| e.to_string())?;
     Ok(json!({
         "success": true,
-        "message": "S3 connection ok"
+        "message": "S3 connection ok",
+        "insecureTransport": is_insecure_remote_url(&resolved.endpoint),
     }))
 }
 
+/// Manual sync commands: `force` defaults to `true` because the settings UI
+/// only calls them after showing the remote snapshot (device/time) or the
+/// "overwrite all local data" warning and getting explicit confirmation.
+/// Callers that want conflict detection pass `force: false` and receive a
+/// distinct "remote changed" / "local changed" conflict error instead.
+fn manual_force(force: Option<bool>) -> bool {
+    force.unwrap_or(true)
+}
+
 #[tauri::command]
-pub async fn s3_sync_upload(state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn s3_sync_upload(
+    state: State<'_, AppState>,
+    force: Option<bool>,
+) -> Result<Value, String> {
     let db = state.db.clone();
     let mut settings = require_enabled_s3_settings()?;
 
-    let result = run_with_s3_lock(s3_sync_service::upload(&db, &mut settings)).await;
+    let result = run_with_s3_lock(s3_sync_service::upload(
+        &db,
+        &mut settings,
+        manual_force(force),
+    ))
+    .await;
     map_sync_result(result, |error| {
         persist_sync_error(&mut settings, error, "manual")
     })
 }
 
 #[tauri::command]
-pub async fn s3_sync_download(state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn s3_sync_download(
+    state: State<'_, AppState>,
+    force: Option<bool>,
+) -> Result<Value, String> {
     let db = state.db.clone();
     let db_for_sync = db.clone();
     let mut settings = require_enabled_s3_settings()?;
     let _auto_sync_suppression = crate::services::s3_auto_sync::AutoSyncSuppressionGuard::new();
 
-    let sync_result = run_with_s3_lock(s3_sync_service::download(&db, &mut settings)).await;
+    let sync_result = run_with_s3_lock(s3_sync_service::download(
+        &db,
+        &mut settings,
+        manual_force(force),
+    ))
+    .await;
     let mut result = map_sync_result(sync_result, |error| {
         persist_sync_error(&mut settings, error, "manual")
     })?;
