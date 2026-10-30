@@ -7,6 +7,7 @@ pub mod calculator;
 mod cost_golden;
 pub mod ir;
 pub mod logger;
+pub mod parity;
 pub mod parser;
 
 // 仅导出内部使用的类型,避免未使用警告

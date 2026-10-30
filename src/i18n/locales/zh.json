@@ -1650,6 +1650,16 @@
         "missing": "缺失"
       }
     },
+    "parity": {
+      "badge": "用量不一致",
+      "detail": "计费 {{normalized}} tokens，上游报告 {{raw}}（输入 {{input}}，缓存 {{cache}}）",
+      "detailNoRaw": "计费 {{normalized}} tokens，上游未返回 usage",
+      "issue": {
+        "zero_usage": "成功的请求没有可计费用量",
+        "cache_exceeds_input": "缓存 token 超过上游报告的输入（可能重复计数）",
+        "total_mismatch": "上游总量与计费总量不一致"
+      }
+    },
     "basicInfo": "基本信息",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "缓存写入成本",

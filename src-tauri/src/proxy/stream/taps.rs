@@ -241,6 +241,9 @@ pub struct UsageTap {
     format: StreamUsageFormat,
     fold: Fold,
     events: u64,
+    /// 与 `usage()` 同源的上游原始 usage 块（仅保留一个，供 usage parity 检查）；
+    /// Anthropic 的 usage 分散在 message_start/message_delta 中，不保留。
+    raw_usage: Option<Value>,
 }
 
 impl UsageTap {
@@ -255,6 +258,7 @@ impl UsageTap {
             format,
             fold,
             events: 0,
+            raw_usage: None,
         }
     }
 
@@ -278,12 +282,43 @@ impl UsageTap {
     /// 折叠一个已解析的 SSE `data:` JSON 事件
     pub fn push(&mut self, event: &Value) {
         self.events += 1;
+        self.capture_raw_usage(event);
         match &mut self.fold {
             Fold::Anthropic(fold) => fold.push(event),
             Fold::OpenAiChat(fold) => fold.push(event),
             Fold::CodexAuto(fold) => fold.push(event),
             Fold::Gemini(fold) => fold.push(event),
         }
+    }
+
+    /// 按各格式 `usage()` 的取值规则记下对应的原始 usage 块（需在折叠前调用）
+    fn capture_raw_usage(&mut self, event: &Value) {
+        let raw = match &self.fold {
+            Fold::Anthropic(_) => return,
+            // response.completed 一经出现即锁定，其后的 Chat chunk 不再覆盖
+            Fold::CodexAuto(fold) if fold.completed.is_some() => return,
+            Fold::CodexAuto(_)
+                if event.get("type").and_then(|v| v.as_str()) == Some("response.completed") =>
+            {
+                if event.get("response").is_some() {
+                    self.raw_usage = event
+                        .pointer("/response/usage")
+                        .filter(|usage| usage.is_object())
+                        .cloned();
+                }
+                return;
+            }
+            Fold::OpenAiChat(_) | Fold::CodexAuto(_) => event.get("usage"),
+            Fold::Gemini(_) => event.get("usageMetadata"),
+        };
+        if let Some(raw) = raw.filter(|usage| usage.is_object()) {
+            self.raw_usage = Some(raw.clone());
+        }
+    }
+
+    /// 上游原始 usage 块（Anthropic 格式恒为 None）
+    pub fn raw_usage(&self) -> Option<&Value> {
+        self.raw_usage.as_ref()
     }
 
     /// 已折叠的事件数
@@ -428,6 +463,46 @@ mod tests {
             .usage()
             .unwrap();
         assert_eq!((usage.input_tokens, usage.output_tokens), (3, 4));
+    }
+
+    #[test]
+    fn raw_usage_tracks_the_block_usage_is_read_from() {
+        let events = vec![
+            json!({"usage": {"prompt_tokens": 5, "completion_tokens": 6}}),
+            json!({"usage": null}),
+        ];
+        let tap = UsageTap::from_events(StreamUsageFormat::OpenAiChat, &events);
+        assert_eq!(
+            tap.raw_usage(),
+            Some(&json!({"prompt_tokens": 5, "completion_tokens": 6}))
+        );
+
+        // Codex：首个 response.completed 锁定，其后的 Chat chunk 不覆盖
+        let events = vec![
+            json!({"usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
+            json!({"type": "response.completed", "response": {"usage": {"input_tokens": 7, "output_tokens": 8}}}),
+            json!({"usage": {"prompt_tokens": 9, "completion_tokens": 9}}),
+        ];
+        let tap = UsageTap::from_events(StreamUsageFormat::CodexAuto, &events);
+        assert_eq!(
+            tap.raw_usage(),
+            Some(&json!({"input_tokens": 7, "output_tokens": 8}))
+        );
+
+        let events = vec![
+            json!({"usageMetadata": {"promptTokenCount": 1, "totalTokenCount": 2}}),
+            json!({"usageMetadata": {"promptTokenCount": 1, "totalTokenCount": 5}}),
+        ];
+        let tap = UsageTap::from_events(StreamUsageFormat::Gemini, &events);
+        assert_eq!(
+            tap.raw_usage(),
+            Some(&json!({"promptTokenCount": 1, "totalTokenCount": 5}))
+        );
+
+        let events =
+            vec![json!({"type": "message_start", "message": {"usage": {"input_tokens": 3}}})];
+        let tap = UsageTap::from_events(StreamUsageFormat::Anthropic, &events);
+        assert_eq!(tap.raw_usage(), None);
     }
 
     #[test]

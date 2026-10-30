@@ -1650,6 +1650,16 @@
         "missing": "Missing"
       }
     },
+    "parity": {
+      "badge": "Usage mismatch",
+      "detail": "billed {{normalized}} tokens, upstream reported {{raw}} (input {{input}}, cache {{cache}})",
+      "detailNoRaw": "billed {{normalized}} tokens, upstream sent no usage block",
+      "issue": {
+        "zero_usage": "No billable usage on a successful request",
+        "cache_exceeds_input": "Cached tokens exceed the reported input (possible double count)",
+        "total_mismatch": "Upstream total differs from the billed total"
+      }
+    },
     "basicInfo": "Basic Info",
     "tokenUsage": "Token Usage",
     "cacheCreationCost": "Cache Creation Cost",

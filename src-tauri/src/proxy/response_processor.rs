@@ -15,7 +15,7 @@ use super::{
     server::ProxyState,
     stream::{SseDecoder, SseEvent, StreamUsageFormat, TimingTap, UsageTap},
     trace::{TraceHandle, UsageSource},
-    usage::parser::TokenUsage,
+    usage::{parity::raw_usage_block, parser::TokenUsage},
     ProxyError,
 };
 use crate::database::PRICING_SOURCE_REQUEST;
@@ -241,6 +241,7 @@ pub async fn handle_non_streaming(
             // 解析使用量
             let parsed = (parser_config.response_parser)(&json_value);
             set_usage_source(ctx, parsed.is_some(), UsageSource::ResponseBody);
+            let raw_usage = raw_usage_block(&json_value).cloned();
             if let Some(usage) = parsed {
                 // 归因优先级：usage 解析出的模型 → 响应 model 字段 → 映射后的出站
                 // 模型（路由接管真值）→ 客户端请求模型。空字符串视为缺失。
@@ -262,6 +263,7 @@ pub async fn handle_non_streaming(
                     state,
                     ctx,
                     usage,
+                    raw_usage,
                     &model,
                     &ctx.request_model,
                     status.as_u16(),
@@ -279,6 +281,7 @@ pub async fn handle_non_streaming(
                     state,
                     ctx,
                     TokenUsage::default(),
+                    raw_usage,
                     &model,
                     &ctx.request_model,
                     status.as_u16(),
@@ -300,6 +303,7 @@ pub async fn handle_non_streaming(
                 state,
                 ctx,
                 TokenUsage::default(),
+                None,
                 ctx.outbound_model.as_deref().unwrap_or(&ctx.request_model),
                 &ctx.request_model,
                 status.as_u16(),
@@ -600,6 +604,7 @@ pub(crate) fn create_usage_collector(
                 }
             };
             let model = usage_tap.model(&fallback_model);
+            let raw_usage = usage_tap.raw_usage().cloned();
             let latency_ms = start_time.elapsed().as_millis() as u64;
             log::debug!(
                 "[{tag}] 流式 usage 汇总: events={}, ttfb_ms={:?}, first_token_ms={:?}",
@@ -625,6 +630,7 @@ pub(crate) fn create_usage_collector(
                     &request_model,
                     &outbound_model,
                     usage,
+                    raw_usage,
                     latency_ms,
                     timing.first_token_ms(),
                     true, // is_streaming
@@ -647,11 +653,14 @@ pub(crate) fn create_usage_collector(
 /// 非流式响应（转换路径）的 usage 记录任务：logging 关闭、解析失败或全 0 时为 None。
 ///
 /// 归因优先级：响应 model 字段 → 映射后的出站模型 → 客户端请求模型，空字符串视为缺失。
+///
+/// `raw_usage` 是转换前的上游原始 usage 块，供 usage parity 检查。
 pub(crate) fn response_usage_log_task(
     state: &ProxyState,
     ctx: &RequestContext,
     parser: ResponseUsageParser,
     response: &Value,
+    raw_usage: Option<Value>,
     status_code: u16,
 ) -> Option<impl std::future::Future<Output = ()> + Send + 'static> {
     if !usage_logging_enabled(state) {
@@ -665,6 +674,7 @@ pub(crate) fn response_usage_log_task(
         state,
         ctx,
         usage,
+        raw_usage,
         &model,
         &ctx.request_model,
         status_code,
@@ -678,9 +688,12 @@ pub(crate) fn spawn_response_usage_log(
     ctx: &RequestContext,
     parser: ResponseUsageParser,
     response: &Value,
+    raw_usage: Option<Value>,
     status_code: u16,
 ) {
-    if let Some(task) = response_usage_log_task(state, ctx, parser, response, status_code) {
+    if let Some(task) =
+        response_usage_log_task(state, ctx, parser, response, raw_usage, status_code)
+    {
         tokio::spawn(task);
     }
 }
@@ -697,10 +710,12 @@ fn response_model(ctx: &RequestContext, response: &Value) -> String {
 }
 
 /// 构造一条 usage 记录任务（不检查 usage logging 开关）
+#[allow(clippy::too_many_arguments)]
 fn usage_log_task(
     state: &ProxyState,
     ctx: &RequestContext,
     usage: TokenUsage,
+    raw_usage: Option<Value>,
     model: &str,
     request_model: &str,
     status_code: u16,
@@ -730,6 +745,7 @@ fn usage_log_task(
             &request_model,
             &outbound_model,
             usage,
+            raw_usage,
             latency_ms,
             None,
             is_streaming,
@@ -769,10 +785,12 @@ fn link_capture(capture: Option<&CaptureHandle>, request_id: Option<String>) {
 }
 
 /// 异步记录使用量
+#[allow(clippy::too_many_arguments)]
 fn spawn_log_usage(
     state: &ProxyState,
     ctx: &RequestContext,
     usage: TokenUsage,
+    raw_usage: Option<Value>,
     model: &str,
     request_model: &str,
     status_code: u16,
@@ -789,6 +807,7 @@ fn spawn_log_usage(
         state,
         ctx,
         usage,
+        raw_usage,
         model,
         request_model,
         status_code,
@@ -811,6 +830,8 @@ pub(crate) fn usage_logging_enabled(state: &ProxyState) -> bool {
 /// 「按代理发出的请求计价、不信任上游回显」，接管场景下发出的请求模型是
 /// 映射后的 Y 而非客户端别名 X，按 X 计价会用错定价表行。
 ///
+/// `raw_usage` 为上游原始 usage 块，与规范化后的 `usage` 做 parity 检查。
+///
 /// 返回写入的 request_id；写入失败时为 None。
 #[allow(clippy::too_many_arguments)]
 async fn log_usage_internal(
@@ -821,6 +842,7 @@ async fn log_usage_internal(
     request_model: &str,
     outbound_model: &str,
     usage: TokenUsage,
+    raw_usage: Option<Value>,
     latency_ms: u64,
     first_token_ms: Option<u64>,
     is_streaming: bool,
@@ -829,7 +851,9 @@ async fn log_usage_internal(
 ) -> Option<String> {
     use super::usage::logger::UsageLogger;
 
-    let logger = UsageLogger::new(&state.db).with_runtime_config(&state.runtime_config);
+    let logger = UsageLogger::new(&state.db)
+        .with_runtime_config(&state.runtime_config)
+        .with_usage_parity(raw_usage);
     let (multiplier, pricing_model_source) =
         logger.resolve_pricing_config(provider_id, app_type).await;
     let pricing_model = if pricing_model_source == PRICING_SOURCE_REQUEST {
@@ -1332,6 +1356,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_log_usage_flags_inconsistent_upstream_usage() -> Result<(), AppError> {
+        let db = Arc::new(Database::memory()?);
+        let state = build_state(db.clone());
+        // 上游 total_tokens 与各字段之和不一致
+        let raw = serde_json::json!({
+            "prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 90
+        });
+        let usage = TokenUsage::from_openai_response(&serde_json::json!({ "usage": raw }))
+            .expect("parsed usage");
+
+        let request_id = log_usage_internal(
+            &state,
+            "provider-1",
+            "codex",
+            "resp-model",
+            "req-model",
+            "req-model",
+            usage,
+            Some(raw),
+            10,
+            None,
+            false,
+            200,
+            None,
+        )
+        .await
+        .expect("row written");
+
+        let row = db
+            .get_request_logs(&Default::default(), 0, 10)?
+            .data
+            .into_iter()
+            .find(|log| log.request_id == request_id)
+            .expect("logged row");
+        let parity = row.usage_parity.expect("parity flag");
+        assert_eq!(
+            parity.issue,
+            crate::proxy::usage::parity::UsageParityIssue::TotalMismatch
+        );
+        assert_eq!((parity.normalized_total, parity.raw_total), (60, Some(90)));
+        assert_eq!(row.error_message, None);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_log_usage_uses_provider_override_config() -> Result<(), AppError> {
         let db = Arc::new(Database::memory()?);
         let app_type = "claude";
@@ -1365,6 +1434,7 @@ mod tests {
             "req-model",
             "req-model",
             usage,
+            None,
             10,
             None,
             false,
@@ -1435,6 +1505,7 @@ mod tests {
             "req-model",
             "outbound-model",
             usage,
+            None,
             10,
             None,
             false,
@@ -1515,6 +1586,7 @@ mod tests {
             "req-model",
             "req-model",
             usage,
+            None,
             10,
             None,
             false,

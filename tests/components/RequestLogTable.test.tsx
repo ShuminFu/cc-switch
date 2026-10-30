@@ -401,4 +401,85 @@ describe("RequestLogTable", () => {
       ).toBeInTheDocument();
     });
   });
+
+  describe("usage parity badge (CCS-140)", () => {
+    const row = (requestId: string, usageParity?: unknown) => ({
+      requestId,
+      providerId: "p1",
+      providerName: "Provider",
+      appType: "codex",
+      model: "gpt-5",
+      requestModel: "gpt-5",
+      costMultiplier: "1",
+      inputTokens: 150,
+      outputTokens: 20,
+      cacheReadTokens: 150,
+      cacheCreationTokens: 0,
+      inputCostUsd: "0",
+      outputCostUsd: "0",
+      cacheReadCostUsd: "0",
+      cacheCreationCostUsd: "0",
+      totalCostUsd: "0.0001",
+      isStreaming: false,
+      latencyMs: 60,
+      firstTokenMs: null,
+      statusCode: 200,
+      createdAt: 1_710_000_000,
+      dataSource: "proxy",
+      ...(usageParity ? { usageParity } : {}),
+    });
+
+    const renderWith = (rows: unknown[]) => {
+      useRequestLogsMock.mockReturnValue({
+        data: { data: rows, total: rows.length, page: 0, pageSize: 20 },
+        isLoading: false,
+      });
+      render(
+        <RequestLogTable
+          range={{ preset: "today" }}
+          rangeLabel="Today"
+          appType="all"
+          refreshIntervalMs={0}
+        />,
+      );
+    };
+
+    it("renders a badge with details only on mismatched rows", () => {
+      renderWith([
+        row("req-bad", {
+          issue: "cache_exceeds_input",
+          normalizedTotal: 170,
+          rawTotal: 120,
+          rawInput: 100,
+          rawCache: 150,
+        }),
+        row("req-ok"),
+      ]);
+
+      const badges = screen.getAllByRole("status");
+      expect(badges).toHaveLength(1);
+      expect(badges[0]).toHaveTextContent("usage.parity.badge");
+      expect(badges[0]).toHaveAttribute(
+        "title",
+        "usage.parity.issue.cache_exceeds_input: usage.parity.detail",
+      );
+    });
+
+    it("explains a zero-usage row without a raw usage block", () => {
+      renderWith([
+        row("req-zero", {
+          issue: "zero_usage",
+          normalizedTotal: 0,
+          rawTotal: null,
+          rawInput: null,
+          rawCache: null,
+        }),
+      ]);
+
+      expect(screen.getByRole("status")).toHaveAttribute(
+        "title",
+        "usage.parity.issue.zero_usage: usage.parity.detailNoRaw",
+      );
+    });
+  });
 });

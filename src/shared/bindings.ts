@@ -46,6 +46,8 @@ export const commands = {
 	dataSource?: string | null,
 	/**  写入时实际用于计价的模型名。None = v11 前的历史行，"" = 未计价的错误行。 */
 	pricingModel?: string | null,
+	/**  规范化 usage 与上游原始 usage 不一致时的标记（拆自成功行的 JSON 元数据） */
+	usageParity?: UsageParity | null,
 } | null>("get_request_detail", { requestId }),
 	/**  获取模型定价列表 */
 	getModelPricing: () => __TAURI_INVOKE<ModelPricingInfo[]>("get_model_pricing"),
@@ -638,6 +640,8 @@ export type RequestLogDetail_Deserialize = {
 	dataSource: string | null,
 	/**  写入时实际用于计价的模型名。None = v11 前的历史行，"" = 未计价的错误行。 */
 	pricingModel: string | null,
+	/**  规范化 usage 与上游原始 usage 不一致时的标记（拆自成功行的 JSON 元数据） */
+	usageParity?: UsageParity | null,
 };
 
 /**  请求日志详情 */
@@ -668,6 +672,8 @@ export type RequestLogDetail_Serialize = {
 	dataSource?: string | null,
 	/**  写入时实际用于计价的模型名。None = v11 前的历史行，"" = 未计价的错误行。 */
 	pricingModel?: string | null,
+	/**  规范化 usage 与上游原始 usage 不一致时的标记（拆自成功行的 JSON 元数据） */
+	usageParity?: UsageParity | null,
 };
 
 /**  同步结果 */
@@ -677,6 +683,28 @@ export type SessionSyncResult = {
 	filesScanned: number,
 	errors: string[],
 };
+
+/**  请求日志行上的 parity 标记 */
+export type UsageParity = {
+	issue: UsageParityIssue,
+	/**  规范化后的计费总量（输入三桶 + 输出） */
+	normalizedTotal: number,
+	/**  上游原始 usage 块自身的总量（`total_tokens` / `totalTokenCount` 或各字段之和） */
+	rawTotal: number | null,
+	/**  上游原始 usage 块报告的总输入（含缓存） */
+	rawInput: number | null,
+	/**  上游原始 usage 块报告的缓存读写之和 */
+	rawCache: number | null,
+};
+
+/**  规范化 usage 与上游原始 usage 不一致的类型 */
+export type UsageParityIssue = 
+/**  成功的请求计费 token 全 0（上游缺 usage 或 usage 块全 0） */
+"zero_usage" | 
+/**  上游缓存读写 token 超过其报告的总输入（缓存被重复计数） */
+"cache_exceeds_input" | 
+/**  上游报告的总 token 与规范化后的计费总量不一致 */
+"total_mismatch";
 
 /**  用量查询脚本配置 */
 export type UsageScript = UsageScript_Serialize | UsageScript_Deserialize;

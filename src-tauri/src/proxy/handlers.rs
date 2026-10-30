@@ -36,6 +36,7 @@ use super::{
         },
     },
     types::*,
+    usage::parity::raw_usage_block,
     ProxyError,
 };
 use axum::{extract::State, http::StatusCode, Json};
@@ -472,6 +473,9 @@ async fn handle_claude_transform(
         )?
     };
 
+    // 转换前的上游原始 usage 块，供 usage parity 检查
+    let upstream_usage = raw_usage_block(&upstream_response).cloned();
+
     // Preserve raw Responses usage so a post-upstream conversion failure still
     // records the tokens already consumed by the successful upstream request.
     let raw_usage_response = (api_format == ClaudeApiFormat::OpenAiResponses).then(|| {
@@ -508,6 +512,7 @@ async fn handle_claude_transform(
                     ctx,
                     CLAUDE_PARSER_CONFIG.response_parser,
                     response,
+                    upstream_usage.clone(),
                     status.as_u16(),
                 )
             }) {
@@ -527,6 +532,7 @@ async fn handle_claude_transform(
         ctx,
         CLAUDE_PARSER_CONFIG.response_parser,
         &anthropic_response,
+        upstream_usage,
         status.as_u16(),
     );
 
@@ -646,6 +652,7 @@ async fn handle_codex_chat_to_responses_transform(
         Some(SseAggregator::Chat),
         "Failed to parse upstream chat response",
     )?;
+    let upstream_usage = raw_usage_block(&chat_response).cloned();
     let responses_response = transform_codex_chat::chat_completion_to_response_with_context(
         chat_response,
         &tool_context,
@@ -667,6 +674,7 @@ async fn handle_codex_chat_to_responses_transform(
         ctx,
         CODEX_PARSER_CONFIG.response_parser,
         &responses_response,
+        upstream_usage,
         status.as_u16(),
     );
 
@@ -753,6 +761,7 @@ async fn handle_codex_anthropic_to_responses_transform(
     }
 
     let _connection_guard = connection_guard;
+    let upstream_usage = raw_usage_block(&anthropic_response).cloned();
     let responses_response =
         transform_codex_anthropic::anthropic_response_to_responses_with_context(
             anthropic_response,
@@ -768,6 +777,7 @@ async fn handle_codex_anthropic_to_responses_transform(
         ctx,
         CODEX_PARSER_CONFIG.response_parser,
         &responses_response,
+        upstream_usage,
         status.as_u16(),
     );
 

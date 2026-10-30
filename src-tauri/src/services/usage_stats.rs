@@ -5,6 +5,7 @@
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::proxy::usage::calculator::ModelPricing;
+use crate::proxy::usage::parity::{decode_log_metadata, UsageParity};
 use crate::services::sql_helpers::{
     fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL,
 };
@@ -169,6 +170,9 @@ pub struct RequestLogDetail {
     /// 写入时实际用于计价的模型名。None = v11 前的历史行，"" = 未计价的错误行。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing_model: Option<String>,
+    /// 规范化 usage 与上游原始 usage 不一致时的标记（拆自成功行的 JSON 元数据）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_parity: Option<UsageParity>,
 }
 
 /// 把 26 列的查询结果映射为 `RequestLogDetail`。
@@ -183,6 +187,8 @@ pub struct RequestLogDetail {
 ///
 /// 不需要 provider_name 时（如 backfill）SELECT `NULL AS provider_name` 占位即可。
 fn row_to_request_log_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestLogDetail> {
+    let status_code = row.get::<_, i64>(20)? as u16;
+    let (error_message, usage_parity) = decode_log_metadata(status_code, row.get(21)?);
     Ok(RequestLogDetail {
         request_id: row.get(0)?,
         provider_id: row.get(1)?,
@@ -206,12 +212,13 @@ fn row_to_request_log_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reques
         latency_ms: row.get::<_, i64>(17)? as u64,
         first_token_ms: row.get::<_, Option<i64>>(18)?.map(|v| v as u64),
         duration_ms: row.get::<_, Option<i64>>(19)?.map(|v| v as u64),
-        status_code: row.get::<_, i64>(20)? as u16,
-        error_message: row.get(21)?,
+        status_code,
+        error_message,
         created_at: row.get(22)?,
         data_source: row.get(23)?,
         pricing_model: row.get(24)?,
         input_token_semantics: row.get::<_, i64>(25)?,
+        usage_parity,
     })
 }
 

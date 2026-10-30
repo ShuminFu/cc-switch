@@ -1650,6 +1650,16 @@
         "missing": "なし"
       }
     },
+    "parity": {
+      "badge": "使用量の不一致",
+      "detail": "課金 {{normalized}} トークン、上流の報告 {{raw}}（入力 {{input}}、キャッシュ {{cache}}）",
+      "detailNoRaw": "課金 {{normalized}} トークン、上流から usage が返されていません",
+      "issue": {
+        "zero_usage": "成功したリクエストに課金対象の使用量がありません",
+        "cache_exceeds_input": "キャッシュトークンが報告された入力を超えています（二重計上の可能性）",
+        "total_mismatch": "上流の合計が課金合計と一致しません"
+      }
+    },
     "basicInfo": "基本情報",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "キャッシュ作成コスト",

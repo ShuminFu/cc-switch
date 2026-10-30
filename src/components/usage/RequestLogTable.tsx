@@ -28,6 +28,7 @@ import {
 import { ChevronLeft, ChevronRight, Route } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import { RequestTracePanel } from "./RequestTracePanel";
+import { UsageParityBadge } from "./UsageParityBadge";
 import {
   BugReportCaptureToggle,
   ExportBugReportButton,
@@ -324,6 +325,9 @@ export function RequestLogTable({
                           >
                             {log.statusCode}
                           </span>
+                          {log.usageParity && (
+                            <UsageParityBadge parity={log.usageParity} />
+                          )}
                           {(log.dataSource || "proxy") === "proxy" && (
                             <span className="ml-1 inline-flex align-middle">
                               <Button

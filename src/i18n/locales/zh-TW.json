@@ -1650,6 +1650,16 @@
         "missing": "缺失"
       }
     },
+    "parity": {
+      "badge": "用量不一致",
+      "detail": "計費 {{normalized}} tokens，上游回報 {{raw}}（輸入 {{input}}，快取 {{cache}}）",
+      "detailNoRaw": "計費 {{normalized}} tokens，上游未回傳 usage",
+      "issue": {
+        "zero_usage": "成功的請求沒有可計費用量",
+        "cache_exceeds_input": "快取 token 超過上游回報的輸入（可能重複計數）",
+        "total_mismatch": "上游總量與計費總量不一致"
+      }
+    },
     "basicInfo": "基本資訊",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "快取寫入成本",

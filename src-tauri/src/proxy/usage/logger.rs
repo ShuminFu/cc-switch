@@ -1,6 +1,7 @@
 //! Usage Logger - 记录 API 请求使用情况
 
 use super::calculator::{CostBreakdown, CostCalculator, ModelPricing};
+use super::parity::{check_usage_parity, encode_log_metadata};
 use super::parser::TokenUsage;
 use crate::database::{Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 use crate::error::AppError;
@@ -43,6 +44,8 @@ pub struct UsageLogger<'a> {
     db: &'a Database,
     /// 代理请求路径上使用运行时配置快照读取计费配置与定价，避免每个请求查库
     runtime_config: Option<&'a RuntimeConfigStore>,
+    /// 代理请求路径上开启 usage parity 检查：`Some(raw)` 为上游原始 usage 块（可缺失）
+    parity_raw_usage: Option<Option<serde_json::Value>>,
 }
 
 impl<'a> UsageLogger<'a> {
@@ -50,12 +53,20 @@ impl<'a> UsageLogger<'a> {
         Self {
             db,
             runtime_config: None,
+            parity_raw_usage: None,
         }
     }
 
     /// 计费配置、供应商与模型定价改从运行时配置快照读取（快照随配置写入自动失效）
     pub fn with_runtime_config(mut self, runtime_config: &'a RuntimeConfigStore) -> Self {
         self.runtime_config = Some(runtime_config);
+        self
+    }
+
+    /// 对成功行做 usage parity 检查（规范化 usage 对比上游原始 usage 块），
+    /// 不一致时把标记写入该行的 JSON 元数据，见 [`super::parity`]
+    pub fn with_usage_parity(mut self, raw_usage: Option<serde_json::Value>) -> Self {
+        self.parity_raw_usage = Some(raw_usage);
         self
     }
 
@@ -89,6 +100,25 @@ impl<'a> UsageLogger<'a> {
             } else {
                 INPUT_TOKEN_SEMANTICS_FRESH
             };
+        let error_message = match &self.parity_raw_usage {
+            Some(raw_usage)
+                if log.error_message.is_none() && (200..300).contains(&log.status_code) =>
+            {
+                check_usage_parity(
+                    &log.usage,
+                    input_token_semantics == INPUT_TOKEN_SEMANTICS_TOTAL,
+                    raw_usage.as_ref(),
+                )
+                .map(|parity| {
+                    log::warn!(
+                        "[USG-004] usage 与上游原始 usage 不一致: id={}, {parity:?}",
+                        log.request_id
+                    );
+                    encode_log_metadata(&parity)
+                })
+            }
+            _ => log.error_message.clone(),
+        };
 
         conn.execute(
             "INSERT OR REPLACE INTO proxy_request_logs (
@@ -119,7 +149,7 @@ impl<'a> UsageLogger<'a> {
                 log.latency_ms as i64,
                 log.first_token_ms.map(|v| v as i64),
                 log.status_code as i64,
-                log.error_message,
+                error_message,
                 log.session_id,
                 log.provider_type,
                 log.is_streaming as i64,
@@ -530,6 +560,114 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(semantics, INPUT_TOKEN_SEMANTICS_TOTAL);
+        Ok(())
+    }
+
+    fn parity_log(request_id: &str, app_type: &str, usage: TokenUsage) -> RequestLog {
+        RequestLog {
+            request_id: request_id.to_string(),
+            provider_id: "provider-1".to_string(),
+            app_type: app_type.to_string(),
+            model: "test-model".to_string(),
+            request_model: "test-model".to_string(),
+            pricing_model: "test-model".to_string(),
+            usage,
+            cost: None,
+            latency_ms: 1,
+            first_token_ms: None,
+            status_code: 200,
+            error_message: None,
+            session_id: None,
+            provider_type: None,
+            is_streaming: false,
+            cost_multiplier: "1".to_string(),
+        }
+    }
+
+    fn logged_row(
+        db: &Database,
+        request_id: &str,
+    ) -> Result<crate::services::usage_stats::RequestLogDetail, AppError> {
+        let logs = db.get_request_logs(&Default::default(), 0, 100)?;
+        Ok(logs
+            .data
+            .into_iter()
+            .find(|log| log.request_id == request_id)
+            .expect("logged row"))
+    }
+
+    #[test]
+    fn inconsistent_upstream_usage_sets_parity_flag_on_log_row() -> Result<(), AppError> {
+        use crate::proxy::usage::ir::UsageIR;
+        use crate::proxy::usage::parity::UsageParityIssue;
+
+        let db = Database::memory()?;
+        // 故意不一致的上游 usage：cached_tokens 大于 prompt_tokens（缓存被重复计数）
+        let inconsistent = serde_json::json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 150}
+        });
+        let usage = UsageIR::from_chat_completions(&inconsistent).to_token_usage();
+        UsageLogger::new(&db)
+            .with_usage_parity(Some(inconsistent))
+            .log_request(&parity_log("parity-bad", "codex", usage))?;
+
+        let consistent = serde_json::json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 40}
+        });
+        let usage = UsageIR::from_chat_completions(&consistent).to_token_usage();
+        UsageLogger::new(&db)
+            .with_usage_parity(Some(consistent))
+            .log_request(&parity_log("parity-ok", "codex", usage))?;
+
+        // 未开启 parity 检查（如会话导入）时全 0 也不打标
+        UsageLogger::new(&db).log_request(&parity_log(
+            "parity-off",
+            "claude",
+            TokenUsage::default(),
+        ))?;
+        // 代理路径上成功但 usage 全 0 的流
+        UsageLogger::new(&db)
+            .with_usage_parity(None)
+            .log_request(&parity_log("parity-zero", "claude", TokenUsage::default()))?;
+
+        let bad = logged_row(&db, "parity-bad")?;
+        let parity = bad
+            .usage_parity
+            .expect("inconsistent usage must be flagged");
+        assert_eq!(parity.issue, UsageParityIssue::CacheExceedsInput);
+        assert_eq!(parity.normalized_total, 170);
+        assert_eq!(parity.raw_total, Some(120));
+        assert_eq!(bad.error_message, None);
+
+        assert_eq!(logged_row(&db, "parity-ok")?.usage_parity, None);
+        assert_eq!(logged_row(&db, "parity-off")?.usage_parity, None);
+        assert_eq!(
+            logged_row(&db, "parity-zero")?
+                .usage_parity
+                .map(|p| p.issue),
+            Some(UsageParityIssue::ZeroUsage)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parity_check_never_overwrites_error_rows() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let mut log = parity_log("parity-error", "claude", TokenUsage::default());
+        log.status_code = 500;
+        log.error_message = Some("boom".to_string());
+        UsageLogger::new(&db)
+            .with_usage_parity(None)
+            .log_request(&log)?;
+        let detail = logged_row(&db, "parity-error")?;
+        assert_eq!(detail.error_message.as_deref(), Some("boom"));
+        assert_eq!(detail.usage_parity, None);
         Ok(())
     }
 }
