@@ -2415,6 +2415,18 @@ impl RequestForwarder {
                 None => raw.to_vec(),
             };
             let body_text = String::from_utf8(decoded).ok();
+            if let (true, Some(app)) = (is_copilot, &self.app_handle) {
+                let account = provider
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.managed_account_id_for("github_copilot"));
+                app.state::<CopilotAuthState>()
+                    .0
+                    .read()
+                    .await
+                    .note_upstream_error(account.as_deref(), status_code, body_text.as_deref())
+                    .await;
+            }
 
             Err(ProxyError::UpstreamError {
                 status: status_code,

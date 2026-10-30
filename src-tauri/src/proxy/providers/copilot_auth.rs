@@ -121,6 +121,12 @@ fn is_ghes(domain: &str) -> bool {
     domain != DEFAULT_GITHUB_DOMAIN
 }
 
+/// Whether an upstream Copilot error is a 400 `model_not_supported` (the
+/// error code appears in the JSON body as `error.code`).
+fn is_model_not_supported_error(status: u16, body: Option<&str>) -> bool {
+    status == 400 && body.is_some_and(|b| b.contains("model_not_supported"))
+}
+
 /// 归一化 GitHub 域名（SSOT）：
 /// - 小写化
 /// - 剥离协议（https:// http://）
@@ -890,9 +896,36 @@ impl CopilotAuthManager {
 
     /// Drop the cached `/models` list so the next lookup refetches it, e.g.
     /// after an upstream `model_not_supported` error (PROV-41).
-    #[allow(dead_code)] // wired by the forwarder's error path
     pub async fn invalidate_models_cache(&self, account_id: &str) {
         self.copilot_models.write().await.remove(account_id);
+    }
+
+    /// React to a failed upstream Copilot response: an HTTP 400
+    /// `model_not_supported` means the cached `/models` list (used for live
+    /// model resolution) is stale, so drop it for the provider's account
+    /// (`None` = the default account) and let the next request refetch it.
+    /// Returns whether the cache was invalidated.
+    pub async fn note_upstream_error(
+        &self,
+        account_id: Option<&str>,
+        status: u16,
+        body: Option<&str>,
+    ) -> bool {
+        if !is_model_not_supported_error(status, body) {
+            return false;
+        }
+        let account_id = match account_id {
+            Some(id) => Some(id.to_string()),
+            None => self.resolve_default_account_id().await,
+        };
+        let Some(account_id) = account_id else {
+            return false;
+        };
+        log::info!(
+            "[Copilot] upstream model_not_supported, refreshing model list for {account_id}"
+        );
+        self.invalidate_models_cache(&account_id).await;
+        true
     }
 
     async fn fetch_models_for_account_uncached(
@@ -1886,6 +1919,48 @@ mod tests {
 
         manager.invalidate_models_cache("fresh").await;
         assert!(manager.cached_models_for_account("fresh").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn model_not_supported_upstream_error_invalidates_models_cache() {
+        let temp_dir = tempdir().unwrap();
+        let manager = CopilotAuthManager::new(temp_dir.path().to_path_buf());
+        let model = CopilotModel {
+            id: "gpt-5.4".to_string(),
+            name: "GPT-5.4".to_string(),
+            vendor: "OpenAI".to_string(),
+            model_picker_enabled: true,
+        };
+        manager
+            .copilot_models
+            .write()
+            .await
+            .insert("acct".to_string(), CachedCopilotModels::new(vec![model]));
+        let body = r#"{"error":{"message":"The requested model is not supported.","code":"model_not_supported"}}"#;
+
+        // Unrelated errors keep the cache.
+        assert!(
+            !manager
+                .note_upstream_error(
+                    Some("acct"),
+                    400,
+                    Some(r#"{"error":{"code":"invalid_request"}}"#)
+                )
+                .await
+        );
+        assert!(
+            !manager
+                .note_upstream_error(Some("acct"), 500, Some(body))
+                .await
+        );
+        assert!(manager.cached_models_for_account("acct").await.is_some());
+
+        assert!(
+            manager
+                .note_upstream_error(Some("acct"), 400, Some(body))
+                .await
+        );
+        assert!(manager.cached_models_for_account("acct").await.is_none());
     }
 
     #[tokio::test]
