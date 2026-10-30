@@ -12,8 +12,8 @@ use crate::{
 };
 
 use super::utils::{
-    extract_text, parse_timestamp_to_ms, path_basename, read_head_tail_lines, truncate_summary,
-    TITLE_MAX_CHARS,
+    extract_text, file_mtime_ms, parse_timestamp_to_ms, path_basename, read_head_tail_lines,
+    truncate_summary, TITLE_MAX_CHARS,
 };
 
 const PROVIDER_ID: &str = "openclaw";
@@ -293,7 +293,9 @@ fn parse_session(
         summary,
         project_dir: cwd,
         created_at,
-        last_active_at,
+        // A tail without timestamps (e.g. a final line beyond the tail cap)
+        // falls back to the file modification time.
+        last_active_at: last_active_at.or_else(|| file_mtime_ms(path)),
         source_path: Some(path.to_string_lossy().to_string()),
         resume_command: None, // OpenClaw sessions are gateway-managed, no CLI resume
     })

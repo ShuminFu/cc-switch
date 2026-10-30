@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{extract_text, parse_timestamp_to_ms, truncate_summary, TITLE_MAX_CHARS};
@@ -189,7 +190,7 @@ fn parse_summary(path: &Path) -> Option<SessionMeta> {
         created_at,
         last_active_at,
         source_path: Some(path.to_string_lossy().to_string()),
-        resume_command: Some(format!("grok --resume {session_id}")),
+        resume_command: resume_command("grokbuild", &session_id),
     })
 }
 

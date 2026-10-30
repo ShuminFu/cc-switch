@@ -24,16 +24,15 @@ pub async fn get_session_messages(
     .map_err(|e| format!("Failed to load session messages: {e}"))?
 }
 
+/// Open a terminal that resumes a session. The resume command is rebuilt in
+/// Rust from the provider/session identifiers; the webview never supplies a
+/// command string.
 #[tauri::command]
 pub async fn launch_session_terminal(
-    command: String,
+    providerId: String,
+    sessionId: String,
     cwd: Option<String>,
-    custom_config: Option<String>,
 ) -> Result<bool, String> {
-    let command = command.clone();
-    let cwd = cwd.clone();
-    let custom_config = custom_config.clone();
-
     // Read preferred terminal from global settings
     let preferred = crate::settings::get_preferred_terminal();
     // Map global setting terminal names to session terminal names
@@ -45,11 +44,11 @@ pub async fn launch_session_terminal(
     };
 
     tauri::async_runtime::spawn_blocking(move || {
-        session_manager::terminal::launch_terminal(
+        session_manager::terminal::launch_session_terminal(
             &target,
-            &command,
+            &providerId,
+            &sessionId,
             cwd.as_deref(),
-            custom_config.as_deref(),
         )
     })
     .await

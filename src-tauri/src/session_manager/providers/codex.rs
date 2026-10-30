@@ -12,11 +12,12 @@ use serde_json::Value;
 
 use crate::codex_config::{get_codex_config_dir, read_codex_config_text};
 use crate::codex_state_db::codex_state_db_paths;
+use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{
-    extract_text, parse_timestamp_to_ms, path_basename, read_head_tail_lines, truncate_summary,
-    TITLE_MAX_CHARS,
+    extract_text, file_mtime_ms, parse_timestamp_to_ms, path_basename, read_head_tail_lines,
+    truncate_summary, TITLE_MAX_CHARS,
 };
 
 const PROVIDER_ID: &str = "codex";
@@ -409,9 +410,11 @@ fn parse_session_with_titles(
         summary,
         project_dir,
         created_at,
-        last_active_at,
+        // A tail without timestamps (e.g. a final line beyond the tail cap)
+        // falls back to the file modification time.
+        last_active_at: last_active_at.or_else(|| file_mtime_ms(path)),
         source_path: Some(path.to_string_lossy().to_string()),
-        resume_command: Some(format!("codex resume {session_id}")),
+        resume_command: resume_command("codex", &session_id),
     })
 }
 
