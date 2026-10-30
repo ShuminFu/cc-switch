@@ -859,8 +859,9 @@ impl Database {
             let name: String = row.get(1).map_err(|e| AppError::Database(e.to_string()))?;
             let sql: String = row.get(3).map_err(|e| AppError::Database(e.to_string()))?;
 
-            // 跳过 SQLite 内部对象（如 sqlite_sequence）
-            if name.starts_with("sqlite_") {
+            // 跳过 SQLite 内部对象（如 sqlite_sequence）；迁移台账描述的是本地数据库文件的
+            // 历史，不导出（导入时由迁移框架按 user_version 回填）
+            if name.starts_with("sqlite_") || name == super::schema::MIGRATION_LEDGER_TABLE {
                 continue;
             }
 
@@ -1265,7 +1266,11 @@ mod tests {
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         assert!(!tables.is_empty());
-        for table in &tables {
+        // The migration ledger is never exported (see dump_sql).
+        for table in tables
+            .iter()
+            .filter(|t| t.as_str() != crate::database::schema::MIGRATION_LEDGER_TABLE)
+        {
             let synced = SYNC_SYNCED_TABLES.contains(&table.as_str());
             let skipped = SYNC_SKIP_TABLES.contains(&table.as_str());
             assert!(

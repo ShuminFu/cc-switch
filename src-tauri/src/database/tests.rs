@@ -187,10 +187,12 @@ fn existing_skill_repo_selection_is_not_supplemented() {
 fn schema_migration_sets_user_version_when_missing() {
     let conn = Connection::open_in_memory().expect("open memory db");
 
+    // A brand-new database is created directly at the current version (it used to be
+    // left at user_version=0 until apply_schema_migrations ran the whole chain).
     Database::create_tables_on_conn(&conn).expect("create tables");
     assert_eq!(
         Database::get_user_version(&conn).expect("read version before"),
-        0
+        SCHEMA_VERSION
     );
 
     Database::apply_schema_migrations_on_conn(&conn).expect("apply migration");
@@ -459,7 +461,7 @@ fn migration_v10_to_v11_rebuilds_rollups_with_request_model_dimension() {
 }
 
 #[test]
-fn schema_create_tables_repairs_dev_global_profile_marker() {
+fn schema_migration_repairs_dev_global_profile_marker() {
     let conn = Connection::open_in_memory().expect("open memory db");
 
     // 模拟跑过未发布开发版的库：user_version 已是 12（迁移不会再跑），
@@ -482,7 +484,9 @@ fn schema_create_tables_repairs_dev_global_profile_marker() {
     .expect("seed dev v12 shape");
     Database::set_user_version(&conn, 12).expect("set user_version=12");
 
-    Database::create_tables_on_conn(&conn).expect("create tables should repair marker");
+    // Formerly repaired by create_tables on every start; now by the v16 -> v17 migration.
+    Database::create_tables_on_conn(&conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("migration should repair marker");
 
     // 全局 current 标记改名为 claude 组标记，旧 key 删除
     let claude_marker: String = conn
@@ -503,7 +507,8 @@ fn schema_create_tables_repairs_dev_global_profile_marker() {
     assert_eq!(old_marker, 0);
 
     // 修复必须幂等：再跑一遍不应破坏已迁移的标记
-    Database::create_tables_on_conn(&conn).expect("repair is idempotent");
+    Database::create_tables_on_conn(&conn).expect("create tables again");
+    Database::apply_schema_migrations_on_conn(&conn).expect("repair is idempotent");
     let claude_marker: String = conn
         .query_row(
             "SELECT value FROM settings WHERE key = 'current_profile_id_claude'",
@@ -515,7 +520,7 @@ fn schema_create_tables_repairs_dev_global_profile_marker() {
 }
 
 #[test]
-fn schema_create_tables_repairs_legacy_proxy_config_singleton_to_per_app() {
+fn schema_migration_repairs_legacy_proxy_config_singleton_to_per_app() {
     let conn = Connection::open_in_memory().expect("open memory db");
 
     // 模拟测试版 v2：user_version=2，但 proxy_config 仍是单例结构（无 app_type）
@@ -539,7 +544,10 @@ fn schema_create_tables_repairs_legacy_proxy_config_singleton_to_per_app() {
     )
     .expect("seed legacy proxy_config");
 
-    Database::create_tables_on_conn(&conn).expect("create tables should repair proxy_config");
+    // Formerly repaired by create_tables on every start; now by the one-time pre-v17
+    // preflight that runs before the migration chain.
+    Database::create_tables_on_conn(&conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("migration should repair proxy_config");
 
     assert!(
         Database::has_column(&conn, "proxy_config", "app_type").expect("check app_type"),
@@ -559,6 +567,17 @@ fn schema_create_tables_repairs_legacy_proxy_config_singleton_to_per_app() {
             |r| r.get(0),
         )
         .expect("query by app_type");
+
+    // The legacy columns are added before the conversion reads the singleton row, so the
+    // old listen port (5000) survives instead of falling back to defaults.
+    let port: i64 = conn
+        .query_row(
+            "SELECT listen_port FROM proxy_config WHERE app_type = 'codex'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("listen port");
+    assert_eq!(port, 5000);
 }
 
 #[test]
@@ -1275,4 +1294,554 @@ mod backup_restore {
         );
         assert_eq!(BackupKind::from_filename("before-big-change.db"), None);
     }
+}
+
+// ─── Fresh schema vs. migrated historical schemas (DB-07 / DB-08) ───────────
+
+use std::collections::BTreeMap;
+
+fn normalize_sql(sql: &str) -> String {
+    let collapsed = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed
+        .replace("( ", "(")
+        .replace(" )", ")")
+        .replace(" ,", ",")
+}
+
+fn query_strings(conn: &Connection, sql: &str) -> Vec<Vec<String>> {
+    let mut stmt = conn.prepare(sql).expect("prepare schema query");
+    let width = stmt.column_count();
+    stmt.query_map([], |row| {
+        (0..width)
+            .map(|i| {
+                let value: rusqlite::types::Value = row.get(i)?;
+                Ok(match value {
+                    rusqlite::types::Value::Null => "NULL".to_string(),
+                    rusqlite::types::Value::Integer(v) => v.to_string(),
+                    rusqlite::types::Value::Real(v) => v.to_string(),
+                    rusqlite::types::Value::Text(v) => v,
+                    rusqlite::types::Value::Blob(_) => "<blob>".to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .expect("run schema query")
+    .collect::<Result<Vec<_>, _>>()
+    .expect("read schema rows")
+}
+
+/// Structural snapshot of a database schema: every table's columns (name, declared type,
+/// NOT NULL, default, primary-key position) and foreign keys, every index (explicit ones
+/// by normalized SQL, automatic ones by table/columns/uniqueness) and every trigger.
+/// Column order is ignored: `ALTER TABLE ADD COLUMN` always appends, so a migrated table
+/// legitimately lists its columns in a different order than a freshly created one.
+fn schema_snapshot(conn: &Connection) -> BTreeMap<String, String> {
+    let mut snapshot = BTreeMap::new();
+    let objects = query_strings(
+        conn,
+        "SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_master
+         WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY type, name",
+    );
+    for object in objects {
+        let (kind, name, table, sql) = (&object[0], &object[1], &object[2], &object[3]);
+        match kind.as_str() {
+            "table" => {
+                let mut columns = query_strings(
+                    conn,
+                    &format!(
+                        "SELECT name, upper(type), \"notnull\", dflt_value, pk
+                         FROM pragma_table_info('{name}')"
+                    ),
+                )
+                .into_iter()
+                .map(|c| c.join("|"))
+                .collect::<Vec<_>>();
+                columns.sort();
+                let mut fks = query_strings(
+                    conn,
+                    &format!(
+                        "SELECT \"table\", \"from\", \"to\", on_update, on_delete
+                         FROM pragma_foreign_key_list('{name}')"
+                    ),
+                )
+                .into_iter()
+                .map(|c| c.join("|"))
+                .collect::<Vec<_>>();
+                fks.sort();
+                snapshot.insert(
+                    format!("table {name}"),
+                    format!("columns: {columns:?}; foreign keys: {fks:?}"),
+                );
+                for index in query_strings(
+                    conn,
+                    &format!(
+                        "SELECT name, \"unique\", origin FROM pragma_index_list('{name}')
+                         WHERE origin != 'c'"
+                    ),
+                ) {
+                    let cols = query_strings(
+                        conn,
+                        &format!("SELECT name FROM pragma_index_info('{}')", index[0]),
+                    )
+                    .into_iter()
+                    .map(|c| c.join(""))
+                    .collect::<Vec<_>>();
+                    snapshot.insert(
+                        format!("auto-index {name}({})", cols.join(",")),
+                        format!("unique={} origin={}", index[1], index[2]),
+                    );
+                }
+            }
+            "index" if !sql.is_empty() => {
+                snapshot.insert(format!("index {name} on {table}"), normalize_sql(sql));
+            }
+            "index" => {}
+            other => {
+                snapshot.insert(format!("{other} {name} on {table}"), normalize_sql(sql));
+            }
+        }
+    }
+    snapshot
+}
+
+fn assert_same_schema(
+    expected: &BTreeMap<String, String>,
+    actual: &BTreeMap<String, String>,
+    label: &str,
+) {
+    let mut diffs = Vec::new();
+    for (key, value) in expected {
+        match actual.get(key) {
+            None => diffs.push(format!("missing {key}: {value}")),
+            Some(other) if other != value => diffs.push(format!(
+                "differs {key}:\n  fresh:    {value}\n  migrated: {other}"
+            )),
+            _ => {}
+        }
+    }
+    for (key, value) in actual {
+        if !expected.contains_key(key) {
+            diffs.push(format!("unexpected {key}: {value}"));
+        }
+    }
+    assert!(
+        diffs.is_empty(),
+        "{label}: migrated schema differs from fresh schema:\n{}",
+        diffs.join("\n")
+    );
+}
+
+fn fresh_schema() -> BTreeMap<String, String> {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("create fresh schema");
+    schema_snapshot(&conn)
+}
+
+/// Startup order: create_tables (a no-op for existing databases apart from the app's
+/// triggers), then the migration chain.
+fn upgrade_like_startup(conn: &Connection) {
+    Database::create_tables_on_conn(conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(conn).expect("apply migrations");
+    assert_eq!(
+        Database::get_user_version(conn).expect("user_version"),
+        SCHEMA_VERSION
+    );
+}
+
+fn ledger_sources(conn: &Connection) -> Vec<(i64, String)> {
+    query_strings(
+        conn,
+        "SELECT version, source FROM schema_migrations ORDER BY version",
+    )
+    .into_iter()
+    .map(|r| (r[0].parse().expect("version"), r[1].clone()))
+    .collect()
+}
+
+fn assert_ledger(conn: &Connection, migrated_from: i64) {
+    let expected: Vec<(i64, String)> = (1..=SCHEMA_VERSION as i64)
+        .map(|v| {
+            let source = if v <= migrated_from {
+                "backfilled"
+            } else {
+                "migrated"
+            };
+            (v, source.to_string())
+        })
+        .collect();
+    assert_eq!(ledger_sources(conn), expected);
+    for (version, name, checksum) in Database::read_migration_ledger(conn).expect("ledger") {
+        let registered = schema::MIGRATIONS
+            .iter()
+            .find(|m| m.version == version)
+            .expect("registered");
+        assert_eq!(
+            (name.as_str(), checksum.as_str()),
+            (registered.name, registered.checksum)
+        );
+    }
+}
+
+fn drop_columns(conn: &Connection, table: &str, columns: &[&str]) {
+    for column in columns {
+        conn.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), [])
+            .unwrap_or_else(|e| panic!("drop {table}.{column}: {e}"));
+    }
+}
+
+/// Undo the schema effect of migration `version` on a database that is at `version`,
+/// reproducing the shape a database had when it was last opened by an app at
+/// `version - 1` (tables that were only ever created by the old every-start
+/// `create_tables` stay in place, as they did in real installations).
+fn undo_migration(conn: &Connection, version: i32) {
+    match version {
+        17 => conn
+            .execute_batch("DROP TABLE schema_migrations;")
+            .expect("undo v17"),
+        16 => {
+            conn.execute_batch(
+                "DROP TRIGGER trg_request_logs_dedup_session_insert;
+                 DROP TRIGGER trg_request_logs_dedup_proxy_insert;
+                 DROP INDEX idx_request_logs_provider_created_at;
+                 DROP INDEX idx_request_logs_zero_cost;",
+            )
+            .expect("undo v16 objects");
+            drop_columns(conn, "proxy_request_logs", &["dedup_hidden"]);
+            conn.execute_batch(
+                "CREATE INDEX idx_request_logs_provider ON proxy_request_logs(provider_id, app_type);
+                 CREATE INDEX idx_request_logs_model ON proxy_request_logs(model);",
+            )
+            .expect("undo v16 indexes");
+        }
+        15 => {
+            drop_columns(conn, "mcp_servers", &["enabled_grokbuild"]);
+            drop_columns(conn, "skills", &["enabled_grokbuild"]);
+        }
+        14 => {
+            let sql: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name = 'proxy_config'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("proxy_config sql");
+            let old = sql
+                .replacen("proxy_config", "proxy_config_v13", 1)
+                .replace(",'grokbuild'", "");
+            assert_ne!(old, sql);
+            conn.execute_batch(&format!(
+                "{old};
+                 INSERT INTO proxy_config_v13 SELECT * FROM proxy_config WHERE app_type != 'grokbuild';
+                 DROP TABLE proxy_config;
+                 ALTER TABLE proxy_config_v13 RENAME TO proxy_config;"
+            ))
+            .expect("undo v14");
+        }
+        13 => {
+            drop_columns(conn, "proxy_request_logs", &["input_token_semantics"]);
+            drop_columns(conn, "usage_daily_rollups", &["input_token_semantics"]);
+        }
+        12 => conn
+            .execute_batch("DROP TABLE profiles;")
+            .expect("undo v12"),
+        11 => {
+            drop_columns(conn, "proxy_request_logs", &["pricing_model"]);
+            conn.execute_batch(
+                "CREATE TABLE usage_daily_rollups_v10 (
+                    date TEXT NOT NULL,
+                    app_type TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    request_count INTEGER NOT NULL DEFAULT 0,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_cost_usd TEXT NOT NULL DEFAULT '0',
+                    avg_latency_ms INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (date, app_type, provider_id, model)
+                );
+                INSERT INTO usage_daily_rollups_v10
+                    SELECT date, app_type, provider_id, model, request_count, success_count,
+                           input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                           total_cost_usd, avg_latency_ms
+                    FROM usage_daily_rollups;
+                DROP TABLE usage_daily_rollups;
+                ALTER TABLE usage_daily_rollups_v10 RENAME TO usage_daily_rollups;",
+            )
+            .expect("undo v11");
+        }
+        10 => {
+            drop_columns(conn, "mcp_servers", &["enabled_hermes"]);
+            drop_columns(conn, "skills", &["enabled_hermes"]);
+        }
+        9 => {}
+        8 => {
+            conn.execute_batch(
+                "DROP INDEX idx_request_logs_dedup_lookup_expr;
+                 DROP INDEX idx_request_logs_app_created_at;
+                 DROP TABLE session_log_sync;",
+            )
+            .expect("undo v8");
+            drop_columns(conn, "proxy_request_logs", &["data_source"]);
+        }
+        7 => drop_columns(conn, "skills", &["content_hash", "updated_at"]),
+        6 => conn
+            .execute_batch("DROP TABLE usage_daily_rollups;")
+            .expect("undo v6"),
+        5 => {
+            drop_columns(
+                conn,
+                "proxy_config",
+                &["default_cost_multiplier", "pricing_model_source"],
+            );
+            drop_columns(conn, "proxy_request_logs", &["request_model"]);
+        }
+        4 => {
+            drop_columns(conn, "mcp_servers", &["enabled_opencode"]);
+            drop_columns(conn, "skills", &["enabled_opencode"]);
+        }
+        3 => conn
+            .execute_batch(
+                "DROP TABLE skills;
+                 CREATE TABLE skills (
+                     directory TEXT NOT NULL,
+                     app_type TEXT NOT NULL,
+                     installed BOOLEAN NOT NULL DEFAULT 0,
+                     installed_at INTEGER NOT NULL DEFAULT 0,
+                     PRIMARY KEY (directory, app_type)
+                 );
+                 INSERT INTO skills (directory, app_type, installed, installed_at)
+                 VALUES ('demo-skill', 'claude', 1, 1700000000);",
+            )
+            .expect("undo v3"),
+        other => panic!("no synthetic shape for undoing v{other}"),
+    }
+}
+
+/// A database shaped like one last opened by an app at schema `version` (2..=16), with
+/// a little data in it.
+fn database_at_version(version: i32) -> Connection {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("create fresh schema");
+    conn.execute_batch(
+        "INSERT INTO providers (id, app_type, name, settings_config, meta, is_current)
+             VALUES ('p1', 'claude', 'Provider', '{}', '{}', 1);
+         INSERT INTO mcp_servers (id, name, server_config, enabled_claude)
+             VALUES ('m1', 'MCP', '{}', 1);
+         INSERT INTO proxy_request_logs
+             (request_id, provider_id, app_type, model, input_tokens, output_tokens,
+              latency_ms, status_code, created_at)
+             VALUES ('r1', 'p1', 'claude', 'claude-sonnet-4', 10, 20, 100, 200, 1700000000);
+         UPDATE proxy_config SET max_retries = 9 WHERE app_type = 'codex';",
+    )
+    .expect("seed data");
+    for undo in ((version + 1)..=SCHEMA_VERSION).rev() {
+        undo_migration(&conn, undo);
+    }
+    Database::set_user_version(&conn, version).expect("set user_version");
+    conn
+}
+
+#[test]
+fn fresh_database_is_created_at_current_version_with_baseline_ledger() {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("create fresh schema");
+    assert_eq!(
+        Database::get_user_version(&conn).expect("user_version"),
+        SCHEMA_VERSION
+    );
+    let ledger = ledger_sources(&conn);
+    assert_eq!(ledger.len(), SCHEMA_VERSION as usize);
+    assert!(ledger.iter().all(|(_, source)| source == "baseline"));
+    let proxy_rows: i64 = conn
+        .query_row("SELECT COUNT(*) FROM proxy_config", [], |row| row.get(0))
+        .expect("count proxy_config");
+    assert_eq!(proxy_rows, 4);
+
+    // Re-running both entry points on the now-existing database changes nothing.
+    let before = schema_snapshot(&conn);
+    upgrade_like_startup(&conn);
+    assert_eq!(schema_snapshot(&conn), before);
+    assert_eq!(ledger_sources(&conn), ledger);
+}
+
+#[test]
+fn memory_database_is_fully_migrated() {
+    let db = Database::memory().expect("memory db");
+    let conn = db.conn.lock().expect("lock");
+    assert_eq!(
+        Database::get_user_version(&conn).expect("user_version"),
+        SCHEMA_VERSION
+    );
+    assert_same_schema(
+        &fresh_schema(),
+        &schema_snapshot(&conn),
+        "Database::memory()",
+    );
+}
+
+#[test]
+fn empty_database_migrated_through_full_chain_matches_fresh_schema() {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    // Bypass the fresh path: run the legacy preflight and v1..vN on an empty database.
+    Database::apply_schema_migrations_on_conn(&conn).expect("apply migrations");
+    assert_same_schema(&fresh_schema(), &schema_snapshot(&conn), "empty v0");
+    assert_ledger(&conn, 0);
+}
+
+#[test]
+fn v3_8_database_upgrade_matches_fresh_schema() {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    conn.execute_batch(V3_8_SCHEMA_V1_SQL)
+        .expect("seed v3.8 schema");
+    conn.execute(
+        "INSERT INTO skills (key, installed, installed_at) VALUES ('claude:demo', 1, 1)",
+        [],
+    )
+    .expect("seed legacy skill");
+    Database::set_user_version(&conn, 1).expect("set user_version");
+    upgrade_like_startup(&conn);
+    assert_same_schema(&fresh_schema(), &schema_snapshot(&conn), "v3.8 (v1)");
+    assert_ledger(&conn, 1);
+}
+
+#[test]
+fn every_historical_version_upgrades_to_the_fresh_schema() {
+    let fresh = fresh_schema();
+    for version in 2..SCHEMA_VERSION {
+        let conn = database_at_version(version);
+        upgrade_like_startup(&conn);
+        assert_same_schema(&fresh, &schema_snapshot(&conn), &format!("v{version}"));
+        assert_ledger(&conn, version as i64);
+
+        // Data survives the upgrade.
+        let providers: i64 = conn
+            .query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0))
+            .expect("count providers");
+        assert_eq!(providers, 1, "v{version}: provider kept");
+        let logs: i64 = conn
+            .query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| {
+                row.get(0)
+            })
+            .expect("count logs");
+        assert_eq!(logs, 1, "v{version}: request log kept");
+        let codex_retries: i64 = conn
+            .query_row(
+                "SELECT max_retries FROM proxy_config WHERE app_type = 'codex'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("codex proxy config");
+        assert_eq!(codex_retries, 9, "v{version}: proxy_config values kept");
+        let proxy_rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM proxy_config", [], |row| row.get(0))
+            .expect("count proxy_config");
+        assert_eq!(proxy_rows, 4, "v{version}: one proxy_config row per app");
+
+        // A second start is a no-op.
+        upgrade_like_startup(&conn);
+        assert_same_schema(
+            &fresh,
+            &schema_snapshot(&conn),
+            &format!("v{version} (rerun)"),
+        );
+    }
+}
+
+#[test]
+fn beta_v2_singleton_proxy_config_upgrade_matches_fresh_schema() {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    conn.execute_batch(
+        r#"
+        CREATE TABLE proxy_config (
+            id INTEGER PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
+            listen_port INTEGER NOT NULL DEFAULT 5000,
+            max_retries INTEGER NOT NULL DEFAULT 3,
+            request_timeout INTEGER NOT NULL DEFAULT 300,
+            enable_logging INTEGER NOT NULL DEFAULT 1,
+            target_app TEXT NOT NULL DEFAULT 'claude',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO proxy_config (id, enabled) VALUES (1, 1);
+        "#,
+    )
+    .expect("seed legacy proxy_config");
+    Database::set_user_version(&conn, 2).expect("set user_version");
+    upgrade_like_startup(&conn);
+    assert_same_schema(
+        &fresh_schema(),
+        &schema_snapshot(&conn),
+        "beta v2 singleton",
+    );
+}
+
+#[test]
+fn imported_dump_without_ledger_is_backfilled() {
+    // SQL exports never contain the ledger; importing a current dump must rebuild it.
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("create fresh schema");
+    conn.execute_batch(
+        "DROP TABLE schema_migrations;
+         DROP TRIGGER trg_request_logs_dedup_session_insert;
+         DROP TRIGGER trg_request_logs_dedup_proxy_insert;",
+    )
+    .expect("simulate imported dump");
+    upgrade_like_startup(&conn);
+    assert_same_schema(&fresh_schema(), &schema_snapshot(&conn), "imported dump");
+    assert_ledger(&conn, SCHEMA_VERSION as i64);
+}
+
+#[test]
+fn failed_migration_rolls_back_schema_and_ledger() {
+    let conn = database_at_version(15);
+    // v16 -> v17 drops the legacy failover_queue *table*; a view with that name makes
+    // the DROP fail after the preflight and v15 -> v16 have already run. The error used
+    // to be swallowed (its result was discarded); now it aborts the whole upgrade.
+    conn.execute_batch("CREATE VIEW failover_queue AS SELECT 1 AS x;")
+        .expect("seed blocking view");
+    let before = schema_snapshot(&conn);
+    let err = Database::apply_schema_migrations_on_conn(&conn).expect_err("migration must fail");
+    assert!(
+        err.to_string().contains("failover_queue"),
+        "unexpected error: {err}"
+    );
+    assert_eq!(Database::get_user_version(&conn).expect("user_version"), 15);
+    assert_eq!(
+        schema_snapshot(&conn),
+        before,
+        "failed migration must roll back"
+    );
+}
+
+#[test]
+fn baseline_schema_checksum_is_pinned() {
+    use sha2::{Digest, Sha256};
+    // Hash of the frozen baseline DDL as SQLite stores it (tables + indexes, excluding the
+    // dedup triggers whose SQL lives in services::usage_stats). The baseline is shared by
+    // fresh databases and the pre-v17 upgrade path, so it must never change: add a
+    // migration instead.
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("create fresh schema");
+    let objects = query_strings(
+        &conn,
+        "SELECT type, name, sql FROM sqlite_master
+         WHERE type IN ('table', 'index') AND sql IS NOT NULL ORDER BY type, name",
+    );
+    let text = objects
+        .iter()
+        .map(|o| format!("{} {} {}", o[0], o[1], normalize_sql(&o[2])))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let checksum = format!("{:x}", Sha256::digest(text.as_bytes()));
+    assert_eq!(
+        checksum,
+        "ceeeda1a4bb8e81897d3fa7c1f89b2c0267b5b7941370bf265153f2720e8f1fc",
+        "baseline schema changed; it is frozen at v{}:\n{text}",
+        schema::BASELINE_SCHEMA_VERSION
+    );
 }
