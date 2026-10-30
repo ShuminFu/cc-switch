@@ -17,7 +17,7 @@ use crate::pricing::resolver::{
 use crate::services::sql_helpers::{fresh_input_sql, input_token_semantics_for_app_type};
 use crate::services::usage_stats::{
     DailyStats, LogFilters, ModelStats, PaginatedLogs, ProviderLimitStatus, ProviderStats,
-    RequestLogDetail, UsageSummary, UsageSummaryByApp,
+    RequestLogDetail, UnpricedModelStats, UsageSummary, UsageSummaryByApp,
 };
 use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -192,6 +192,28 @@ fn push_provider_model_filters(
         conditions.push(format!("{} = ?", effective_model_sql(log_alias)));
         params.push(Box::new(m.to_string()));
     }
+}
+
+/// 未计价请求：2xx、有 token、总成本为 0，且倍率不是显式的 0（倍率 0 是
+/// 用户有意免费，不算缺定价）。与前端 `isUnpricedUsage` 同口径。
+fn unpriced_log_filter(log_alias: &str) -> String {
+    format!(
+        "({log_alias}.status_code >= 200 AND {log_alias}.status_code < 300
+          AND ({log_alias}.input_tokens > 0 OR {log_alias}.output_tokens > 0
+               OR {log_alias}.cache_read_tokens > 0 OR {log_alias}.cache_creation_tokens > 0)
+          AND CAST({log_alias}.total_cost_usd AS REAL) = 0
+          AND (CAST({log_alias}.cost_multiplier AS REAL) <> 0
+               OR {log_alias}.cost_multiplier NOT GLOB '*[0-9]*'))"
+    )
+}
+
+/// 补价时应填写的模型 ID：与回填查价同序，落库的计价模型优先，占位符时退回 model 列
+fn unpriced_model_id(log: &RequestLogDetail) -> String {
+    log.pricing_model
+        .as_deref()
+        .filter(|pm| !is_placeholder_pricing_model(pm))
+        .unwrap_or(&log.model)
+        .to_string()
 }
 
 pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
@@ -1391,6 +1413,10 @@ impl Database {
         let query = UsageQuery::from_filters(filters)
             .limit(page_size)
             .offset(page.saturating_mul(page_size));
+        if query.unpriced {
+            // 先把已补上定价的候选行回填掉，总数与分页才只剩真正缺定价的行
+            Self::backfill_unpriced_candidates(&conn, &query)?;
+        }
         let total = query.count(&conn)?;
         let page_rows = query.fetch(&conn)?;
 
@@ -1407,6 +1433,77 @@ impl Database {
             page,
             page_size,
         })
+    }
+
+    /// 按有效计价模型汇总未计价的成功请求（导出 CSV 用）。
+    ///
+    /// 与 `get_request_logs` 的 `unpriced` 筛选同口径：先尝试按当前定价回填，
+    /// 回填后仍为 0 成本的行才计入；按 `request_count` 降序、模型名升序排列。
+    pub fn get_unpriced_model_stats(
+        &self,
+        filters: &LogFilters,
+    ) -> Result<Vec<UnpricedModelStats>, AppError> {
+        let conn = lock_conn!(self.conn);
+
+        let query = UsageQuery::from_filters(filters).unpriced();
+        let rows = Self::backfill_unpriced_candidates(&conn, &query)?;
+
+        let mut by_model: HashMap<String, UnpricedModelStats> = HashMap::new();
+        for log in rows {
+            let model = unpriced_model_id(&log);
+            let entry = by_model
+                .entry(model.clone())
+                .or_insert_with(|| UnpricedModelStats {
+                    model,
+                    request_count: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_creation_tokens: 0,
+                    first_seen_at: log.created_at,
+                    last_seen_at: log.created_at,
+                });
+            entry.request_count += 1;
+            entry.input_tokens += u64::from(log.input_tokens);
+            entry.output_tokens += u64::from(log.output_tokens);
+            entry.cache_read_tokens += u64::from(log.cache_read_tokens);
+            entry.cache_creation_tokens += u64::from(log.cache_creation_tokens);
+            entry.first_seen_at = entry.first_seen_at.min(log.created_at);
+            entry.last_seen_at = entry.last_seen_at.max(log.created_at);
+        }
+
+        let mut stats: Vec<_> = by_model.into_values().collect();
+        stats.sort_by(|a, b| {
+            b.request_count
+                .cmp(&a.request_count)
+                .then_with(|| a.model.cmp(&b.model))
+        });
+        Ok(stats)
+    }
+
+    /// 对满足 `query` 筛选（须带 `unpriced`）的全部候选行尝试回填成本，
+    /// 返回回填后仍未计价的行（忽略 `query` 的分页设置）。
+    fn backfill_unpriced_candidates(
+        conn: &Connection,
+        query: &UsageQuery,
+    ) -> Result<Vec<RequestLogDetail>, AppError> {
+        let candidates = UsageQuery {
+            after: None,
+            offset: None,
+            limit: u32::MAX - 1,
+            ..query.clone()
+        }
+        .unpriced()
+        .fetch(conn)?;
+
+        let mut pricing_cache = HashMap::new();
+        let mut still_unpriced = Vec::with_capacity(candidates.rows.len());
+        for mut log in candidates.rows {
+            if !Self::maybe_backfill_log_costs(conn, &mut log, &mut pricing_cache)? {
+                still_unpriced.push(log);
+            }
+        }
+        Ok(still_unpriced)
     }
 
     /// 获取单个请求详情
@@ -1899,6 +1996,7 @@ pub struct UsageQuery {
     since: Option<i64>,
     until: Option<i64>,
     source: Option<UsageSource>,
+    unpriced: bool,
     after: Option<UsageCursor>,
     offset: Option<u32>,
     limit: u32,
@@ -1926,6 +2024,7 @@ impl UsageQuery {
             since: None,
             until: None,
             source: None,
+            unpriced: false,
             after: None,
             offset: None,
             limit: Self::DEFAULT_LIMIT,
@@ -1941,6 +2040,7 @@ impl UsageQuery {
             status_code: filters.status_code,
             since: filters.start_date,
             until: filters.end_date,
+            unpriced: filters.unpriced.unwrap_or(false),
             ..Self::new()
         }
     }
@@ -1983,6 +2083,12 @@ impl UsageQuery {
     /// 只看某个数据来源
     pub fn source(mut self, source: UsageSource) -> Self {
         self.source = Some(source);
+        self
+    }
+
+    /// 只看未计价的成功请求，见 [`unpriced_log_filter`]
+    pub fn unpriced(mut self) -> Self {
+        self.unpriced = true;
         self
     }
 
@@ -2040,6 +2146,9 @@ impl UsageQuery {
         if let Some(source) = self.source {
             conditions.push(format!("{} = ?", data_source_expr("l")));
             params.push(Box::new(source.as_str()));
+        }
+        if self.unpriced {
+            conditions.push(unpriced_log_filter("l"));
         }
         if include_cursor {
             if let Some(ref cursor) = self.after {

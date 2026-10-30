@@ -49,6 +49,7 @@ describe("generated usage bindings (CCS-116)", () => {
       () => usageApi.getProviderStats(),
       () => usageApi.getModelStats(),
       () => usageApi.getRequestLogs({}),
+      () => usageApi.getUnpricedModelStats({}),
       () => usageApi.getRequestDetail("req"),
       () => usageApi.getModelPricing(),
       () => usageApi.updateModelPricing("m", "M", "0", "0", "0", "0"),
@@ -59,6 +60,6 @@ describe("generated usage bindings (CCS-116)", () => {
     ]);
 
     expect(handWritten).toEqual(generated);
-    expect(generated).toHaveLength(13);
+    expect(generated).toHaveLength(14);
   });
 });

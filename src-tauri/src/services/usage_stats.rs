@@ -83,6 +83,22 @@ pub struct ModelStats {
     pub avg_cost_per_request: String,
 }
 
+/// 未计价模型统计（按有效计价模型分组），供"导出未计价请求"使用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct UnpricedModelStats {
+    /// 补价时应填写的模型 ID（落库的计价模型，缺失时为 model 列）
+    pub model: String,
+    pub request_count: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub first_seen_at: i64,
+    pub last_seen_at: i64,
+}
+
 /// 请求日志过滤器
 #[derive(Debug, Clone, Default, Deserialize)]
 #[cfg_attr(test, derive(specta::Type))]
@@ -95,6 +111,8 @@ pub struct LogFilters {
     pub status_code: Option<u16>,
     pub start_date: Option<i64>,
     pub end_date: Option<i64>,
+    /// 只看未计价的成功请求（有 token、成本为 0、倍率非 0）
+    pub unpriced: Option<bool>,
 }
 
 /// 分页请求日志响应

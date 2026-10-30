@@ -1663,7 +1663,12 @@
     "modelsDevDefaultHint": "預設展示最新發布的 {{shown}} 個模型（共 {{total}} 個），輸入關鍵字可全量搜尋",
     "cacheReadCostPerMillion": "快取讀取成本 (每百萬 tokens, USD)",
     "cacheCreationCostPerMillion": "快取寫入成本 (每百萬 tokens, USD)",
-    "unpriced": "未定價"
+    "unpriced": "未定價",
+    "unpricedOnly": "僅看未定價",
+    "exportUnpriced": "匯出未定價 CSV",
+    "exportUnpricedEmpty": "目前範圍內沒有未定價請求",
+    "exportUnpricedSuccess": "已匯出 {{count}} 個未定價模型",
+    "exportUnpricedFailed": "匯出未定價請求失敗：{{detail}}"
   },
   "usageScript": {
     "title": "設定用量查詢",

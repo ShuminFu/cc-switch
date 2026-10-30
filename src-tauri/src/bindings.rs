@@ -42,6 +42,7 @@ fn builder() -> Builder<tauri::Wry> {
             get_provider_stats,
             get_model_stats,
             get_request_logs,
+            get_unpriced_model_stats,
             get_request_detail,
             get_model_pricing,
             update_model_pricing,

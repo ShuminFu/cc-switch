@@ -135,6 +135,19 @@ pub fn get_request_logs(
         .map_err(IpcError::from)
 }
 
+/// 按模型汇总未计价请求（导出 CSV 用）
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub fn get_unpriced_model_stats(
+    state: State<'_, AppState>,
+    filters: LogFilters,
+) -> Result<Vec<UnpricedModelStats>, IpcError> {
+    state
+        .db
+        .get_unpriced_model_stats(&filters)
+        .map_err(IpcError::from)
+}
+
 /// 获取单个请求详情
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]

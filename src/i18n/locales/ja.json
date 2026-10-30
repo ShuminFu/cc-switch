@@ -1663,7 +1663,12 @@
     "modelsDevDefaultHint": "最新リリース順に {{shown}} 件を表示しています（全 {{total}} 件）。キーワード入力で全件検索できます",
     "cacheReadCostPerMillion": "キャッシュ読み取りコスト（100万トークンあたり、USD）",
     "cacheCreationCostPerMillion": "キャッシュ書き込みコスト（100万トークンあたり、USD）",
-    "unpriced": "価格未設定"
+    "unpriced": "価格未設定",
+    "unpricedOnly": "価格未設定のみ",
+    "exportUnpriced": "価格未設定を CSV 出力",
+    "exportUnpricedEmpty": "現在の範囲に価格未設定のリクエストはありません",
+    "exportUnpricedSuccess": "価格未設定のモデル {{count}} 件をエクスポートしました",
+    "exportUnpricedFailed": "価格未設定リクエストのエクスポートに失敗しました: {{detail}}"
   },
   "usageScript": {
     "title": "利用状況を設定",

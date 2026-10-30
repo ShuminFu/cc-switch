@@ -12,6 +12,7 @@ import type {
   PaginatedLogs,
   SessionSyncResult,
   DataSourceSummary,
+  UnpricedModelStats,
 } from "@/types/usage";
 import type { UsageResult } from "@/types";
 import type { AppId } from "./types";
@@ -136,6 +137,22 @@ export const usageApi = {
       page,
       pageSize,
     });
+  },
+
+  getUnpricedModelStats: async (
+    filters: LogFilters,
+  ): Promise<UnpricedModelStats[]> => {
+    return invoke("get_unpriced_model_stats", { filters });
+  },
+
+  /** 选择 CSV 保存路径；取消时返回 null */
+  saveCsvFileDialog: async (defaultName: string): Promise<string | null> => {
+    return invoke("save_csv_file_dialog", { defaultName });
+  },
+
+  /** 写入由 `saveCsvFileDialog` 选出的路径（其他路径会被后端拒绝） */
+  writeCsvExport: async (filePath: string, content: string): Promise<void> => {
+    return invoke("write_csv_export", { filePath, content });
   },
 
   getRequestDetail: async (requestId: string): Promise<RequestLog | null> => {

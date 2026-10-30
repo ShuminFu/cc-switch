@@ -22,6 +22,7 @@ export type {
   ModelStats,
   ProviderStats,
   SessionSyncResult,
+  UnpricedModelStats,
   UsageSummary,
   UsageSummaryByApp,
 } from "@/shared/bindings";
@@ -169,6 +170,29 @@ export function isUnpricedUsage(log: UsageCostLog): boolean {
     (!Number.isFinite(multiplier) || multiplier !== 0) &&
     totalCost === 0
   );
+}
+
+/** 与后端 `is_placeholder_pricing_model` 同口径的占位模型名 */
+function isPlaceholderPricingModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return (
+    normalized === "" ||
+    normalized === "unknown" ||
+    normalized === "null" ||
+    normalized === "none"
+  );
+}
+
+/**
+ * 补价时应填写的模型 ID：落库的计价模型优先，占位符时退回 model 列
+ * （与后端回填查价、未计价导出的分组键一致）。
+ */
+export function getPricingModelId(
+  log: Pick<RequestLog, "model" | "pricingModel">,
+): string {
+  return log.pricingModel && !isPlaceholderPricingModel(log.pricingModel)
+    ? log.pricingModel
+    : log.model;
 }
 
 export interface StatsFilters {

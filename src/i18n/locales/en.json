@@ -1663,7 +1663,12 @@
     "modelsDevDefaultHint": "Showing the {{shown}} most recently released models (of {{total}}) — type to search all",
     "cacheReadCostPerMillion": "Cache Read Cost (per million tokens, USD)",
     "cacheCreationCostPerMillion": "Cache Write Cost (per million tokens, USD)",
-    "unpriced": "Unpriced"
+    "unpriced": "Unpriced",
+    "unpricedOnly": "Unpriced only",
+    "exportUnpriced": "Export unpriced CSV",
+    "exportUnpricedEmpty": "No unpriced requests in the current range",
+    "exportUnpricedSuccess": "Exported {{count}} unpriced models",
+    "exportUnpricedFailed": "Failed to export unpriced requests: {{detail}}"
   },
   "usageScript": {
     "title": "Configure Usage Query",

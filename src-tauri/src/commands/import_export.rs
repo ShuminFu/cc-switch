@@ -131,6 +131,38 @@ pub async fn open_zip_file_dialog<R: tauri::Runtime>(
     Ok(result.map(|p| register_pick(PickPurpose::SkillZip, p.to_string())))
 }
 
+/// 保存 CSV 文件对话框
+#[tauri::command]
+pub async fn save_csv_file_dialog<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    default_name: String,
+) -> Result<Option<String>, String> {
+    let dialog = app.dialog();
+    let result = dialog
+        .file()
+        .add_filter("CSV", &["csv"])
+        .set_file_name(&default_name)
+        .blocking_save_file();
+
+    Ok(result.map(|p| register_pick(PickPurpose::CsvExport, p.to_string())))
+}
+
+/// 把前端生成的 CSV 写到 `save_csv_file_dialog` 选出的路径
+#[tauri::command]
+pub async fn write_csv_export(file_path: String, content: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || write_csv_to_picked_path(&file_path, &content))
+        .await
+        .map_err(|e| format!("导出 CSV 失败: {e}"))?
+        .map_err(|e: AppError| e.to_string())
+}
+
+/// 只写入 CSV 对话框选出的路径；其他路径一律拒绝
+fn write_csv_to_picked_path(file_path: &str, content: &str) -> Result<(), AppError> {
+    picked_paths::require_picked(PickPurpose::CsvExport, file_path)
+        .map_err(AppError::InvalidInput)?;
+    crate::config::atomic_write(&PathBuf::from(file_path), content.as_bytes())
+}
+
 /// 登记对话框返回的路径，供后续命令校验
 fn register_pick(purpose: PickPurpose, path: String) -> String {
     picked_paths::register(purpose, &path);
@@ -255,6 +287,29 @@ mod tests {
         picked_paths::register(PickPurpose::SqlImport, &target_str);
         let other = Database::memory().expect("memory db");
         import_sql_from_picked_path(&other, &target_str).expect("import");
+    }
+
+    #[test]
+    fn csv_export_only_writes_csv_dialog_picked_paths() {
+        let temp = TempDir::new().expect("tempdir");
+        let target = temp.path().join("unpriced.csv");
+        let target_str = target.to_string_lossy().to_string();
+
+        let err = write_csv_to_picked_path(&target_str, "model\n").unwrap_err();
+        assert!(err.to_string().contains("file dialog"), "{err}");
+        assert!(!target.exists());
+
+        // SQL 导出对话框选出的路径不能拿来写 CSV
+        picked_paths::register(PickPurpose::SqlExport, &target_str);
+        assert!(write_csv_to_picked_path(&target_str, "model\n").is_err());
+        assert!(!target.exists());
+
+        picked_paths::register(PickPurpose::CsvExport, &target_str);
+        write_csv_to_picked_path(&target_str, "model\nfoo\n").expect("write csv");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read csv"),
+            "model\nfoo\n"
+        );
     }
 
     #[test]

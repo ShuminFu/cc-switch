@@ -203,6 +203,96 @@ fn usage_query_offset_matches_request_logs_ipc() -> Result<(), AppError> {
     Ok(())
 }
 
+fn unpriced_row<'a>(request_id: &'a str, model: &'a str, created_at: i64) -> ProxyUsageRow<'a> {
+    ProxyUsageRow {
+        model,
+        request_model: model,
+        pricing_model: model,
+        ..proxy_row(request_id, "claude", created_at)
+    }
+}
+
+#[test]
+fn unpriced_filter_and_model_stats_only_cover_unpriced_rows() -> Result<(), AppError> {
+    let db = Database::memory()?;
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        insert_proxy_row(&conn, &unpriced_row("u1", "mystery-a", 10))?;
+        insert_proxy_row(&conn, &unpriced_row("u2", "mystery-a", 30))?;
+        insert_proxy_row(&conn, &unpriced_row("u3", "mystery-b", 20))?;
+        // 有成本：已计价
+        insert_proxy_row(
+            &conn,
+            &ProxyUsageRow {
+                costs: UsageCosts {
+                    total: "0.01".to_string(),
+                    ..UsageCosts::zero()
+                },
+                ..unpriced_row("priced", "mystery-a", 40)
+            },
+        )?;
+        // 失败请求 / 无 token / 倍率 0（有意免费）都不算缺定价
+        insert_proxy_row(
+            &conn,
+            &ProxyUsageRow {
+                status_code: 500,
+                ..unpriced_row("failed", "mystery-c", 50)
+            },
+        )?;
+        insert_proxy_row(
+            &conn,
+            &ProxyUsageRow {
+                input_tokens: 0,
+                output_tokens: 0,
+                ..unpriced_row("empty", "mystery-c", 60)
+            },
+        )?;
+        insert_proxy_row(
+            &conn,
+            &ProxyUsageRow {
+                cost_multiplier: "0",
+                ..unpriced_row("free", "mystery-c", 70)
+            },
+        )?;
+        // 回填时能查到定价的零成本行：读取时被补价，不再算未计价
+        conn.execute(
+            "INSERT INTO model_pricing (model_id, display_name, input_cost_per_million, output_cost_per_million)
+             VALUES ('late-priced', 'Late Priced', '1', '2')",
+            [],
+        )?;
+        insert_proxy_row(&conn, &unpriced_row("late", "late-priced", 80))?;
+    }
+
+    let filters = crate::services::usage_stats::LogFilters {
+        unpriced: Some(true),
+        ..Default::default()
+    };
+    let page = db.get_request_logs(&filters, 0, 2)?;
+    assert_eq!(page.total, 3, "{:?}", ids(&page.data));
+    assert_eq!(ids(&page.data), ["u2", "u3"]);
+
+    let stats = db.get_unpriced_model_stats(&filters)?;
+    let models: Vec<_> = stats.iter().map(|s| s.model.as_str()).collect();
+    assert_eq!(models, ["mystery-a", "mystery-b"]);
+    assert_eq!(stats[0].request_count, 2);
+    assert_eq!(stats[0].input_tokens, 20);
+    assert_eq!(stats[0].output_tokens, 10);
+    assert_eq!((stats[0].first_seen_at, stats[0].last_seen_at), (10, 30));
+
+    // 与其他筛选叠加
+    let only_b = db.get_unpriced_model_stats(&crate::services::usage_stats::LogFilters {
+        model: Some("mystery-b".to_string()),
+        ..filters.clone()
+    })?;
+    assert_eq!(only_b.len(), 1);
+    assert_eq!(only_b[0].model, "mystery-b");
+
+    // 不带 unpriced 时行为不变
+    let all = db.get_request_logs(&Default::default(), 0, 50)?;
+    assert_eq!(all.total, 8);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // 会话导入：一个文件一个事务
 // ---------------------------------------------------------------------------
