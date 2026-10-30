@@ -450,6 +450,27 @@
           "trace": "全部日志，最详细"
         }
       },
+      "retention": {
+        "title": "数据保留",
+        "description": "数据库大小、各表行数以及使用数据的保留时长",
+        "detailDaysLabel": "请求明细保留",
+        "detailDaysHint": "更早的请求明细会汇总为每日统计后删除",
+        "rollupDaysLabel": "每日统计保留",
+        "rollupDaysHint": "不会短于请求明细的保留期",
+        "keepForever": "永久",
+        "days": "{{days}} 天",
+        "storageTitle": "数据库存储",
+        "dbSize": "数据库大小：{{size}}（可回收 {{free}}）",
+        "table": "表",
+        "rows": "行数",
+        "runNow": "立即执行维护",
+        "running": "执行中...",
+        "maintenanceHint": "启动时及每天也会自动执行维护；备份数量按“备份与恢复”中的保留数量清理",
+        "maintenanceDone": "维护完成",
+        "maintenanceSummary": "汇总 {{detail}} 条请求明细，删除 {{rollups}} 条每日统计、{{checks}} 条检测记录和 {{backups}} 个备份",
+        "maintenanceFailed": "维护失败",
+        "loadFailed": "加载数据库统计失败"
+      },
       "capabilityMatrix": {
         "title": "能力矩阵",
         "description": "查看各应用支持的功能，可复制用于反馈问题",

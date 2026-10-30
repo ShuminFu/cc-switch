@@ -1352,6 +1352,8 @@ pub fn run() {
             commands::restore_backup_over_newer_db,
             commands::rename_db_backup,
             commands::delete_db_backup,
+            commands::get_db_storage_stats,
+            commands::run_db_maintenance,
             commands::sync_current_providers_live,
             // Deep link import
             commands::merge_deeplink_config,

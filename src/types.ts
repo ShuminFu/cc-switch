@@ -432,6 +432,12 @@ export interface Settings {
   // Maximum backup files to retain (default 10)
   backupRetainCount?: number;
 
+  // ===== 数据保留策略 =====
+  // Days of per-request usage detail kept before it is rolled up (default 30, min 1)
+  usageDetailRetentionDays?: number;
+  // Days of daily usage rollups to keep (unset / 0 = keep forever)
+  usageRollupRetentionDays?: number;
+
   // ===== 终端设置 =====
   // 首选终端应用（可选，默认使用系统默认终端）
   // macOS: "terminal" | "iterm2" | "warp" | "alacritty" | "kitty" | "ghostty" | "wezterm" | "kaku"

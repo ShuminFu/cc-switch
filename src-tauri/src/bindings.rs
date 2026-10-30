@@ -58,6 +58,8 @@ fn builder() -> Builder<tauri::Wry> {
         .typ::<crate::services::provider::LiveWritePreview>()
         .typ::<crate::services::drift::DriftReport>()
         .typ::<crate::services::drift::DriftResolution>()
+        .typ::<crate::database::DbStorageStats>()
+        .typ::<crate::database::MaintenanceReport>()
         .typ::<crate::error::IpcError>()
         .constant("COMMANDS", registered_commands())
         // 现有前端 `invoke` 封装在失败时抛出归一化的 IpcError

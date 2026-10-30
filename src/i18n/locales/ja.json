@@ -450,6 +450,27 @@
           "trace": "すべてのログ、最も詳細"
         }
       },
+      "retention": {
+        "title": "データ保持",
+        "description": "データベースのサイズ、テーブルごとの行数、使用データの保持期間",
+        "detailDaysLabel": "リクエスト詳細の保持期間",
+        "detailDaysHint": "古いリクエストログは日次集計にまとめてから削除されます",
+        "rollupDaysLabel": "日次集計の保持期間",
+        "rollupDaysHint": "リクエスト詳細の保持期間より短くはなりません",
+        "keepForever": "無期限",
+        "days": "{{days}} 日",
+        "storageTitle": "データベースストレージ",
+        "dbSize": "データベースサイズ: {{size}}（回収可能 {{free}}）",
+        "table": "テーブル",
+        "rows": "行数",
+        "runNow": "今すぐメンテナンスを実行",
+        "running": "実行中...",
+        "maintenanceHint": "メンテナンスは起動時と1日1回も自動実行されます。バックアップは「バックアップと復元」の保持数に従って整理されます",
+        "maintenanceDone": "メンテナンスが完了しました",
+        "maintenanceSummary": "リクエストログ {{detail}} 件を集計し、日次集計 {{rollups}} 件、チェック記録 {{checks}} 件、バックアップ {{backups}} 件を削除しました",
+        "maintenanceFailed": "メンテナンスに失敗しました",
+        "loadFailed": "データベース統計の読み込みに失敗しました"
+      },
       "capabilityMatrix": {
         "title": "機能マトリクス",
         "description": "各アプリが対応する機能を確認し、サポート依頼用にコピーできます",

@@ -7,7 +7,7 @@ use crate::commands::sync_support::{
     post_sync_warning_from_result, run_post_import_sync, success_payload_with_warning,
 };
 use crate::database::backup::BackupEntry;
-use crate::database::Database;
+use crate::database::{Database, DbStorageStats, Maintenance, MaintenanceReport};
 use crate::error::AppError;
 use crate::picked_paths::{self, PickPurpose};
 use crate::services::provider::ProviderService;
@@ -239,6 +239,32 @@ pub fn delete_db_backup(filename: String) -> Result<(), String> {
     Database::delete_backup(&filename).map_err(|e| e.to_string())
 }
 
+// ─── Database retention / maintenance ───────────────────────
+
+/// Database size and per-table row counts for the retention panel
+#[tauri::command]
+pub async fn get_db_storage_stats(state: State<'_, AppState>) -> Result<DbStorageStats, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || Maintenance::storage_stats(&db))
+        .await
+        .map_err(|e| format!("Failed to read database stats: {e}"))?
+        .map_err(|e: AppError| e.to_string())
+}
+
+/// Run database maintenance now with the retention policy from the current settings
+#[tauri::command]
+pub async fn run_db_maintenance(state: State<'_, AppState>) -> Result<MaintenanceReport, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || run_maintenance_with_current_policy(&db))
+        .await
+        .map_err(|e| format!("Maintenance failed: {e}"))
+}
+
+/// 读取当前设置中的保留策略（每次调用重新解析，保存设置后立即生效）并执行一次维护
+fn run_maintenance_with_current_policy(db: &Database) -> MaintenanceReport {
+    Maintenance::run(db, &crate::settings::effective_retention_policy())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +353,56 @@ mod tests {
         picked_paths::register(PickPurpose::SqlExport, &source_str);
         let err = import_sql_from_picked_path(&db, &source_str).unwrap_err();
         assert!(err.to_string().contains("file dialog"), "{err}");
+    }
+
+    fn insert_detail_row(db: &Database, id: &str, days_ago: i64) {
+        let created_at = chrono::Utc::now().timestamp() - days_ago * 86400;
+        let conn = db.conn.lock().expect("lock conn");
+        conn.execute(
+            "INSERT INTO proxy_request_logs (
+                request_id, provider_id, app_type, model,
+                input_tokens, output_tokens, total_cost_usd,
+                latency_ms, status_code, created_at
+            ) VALUES (?1, 'p1', 'claude', 'claude-3', 10, 5, '0.01', 100, 200, ?2)",
+            rusqlite::params![id, created_at],
+        )
+        .expect("insert detail row");
+    }
+
+    fn detail_rows(db: &Database) -> i64 {
+        let conn = db.conn.lock().expect("lock conn");
+        conn.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| {
+            row.get(0)
+        })
+        .expect("count detail rows")
+    }
+
+    #[test]
+    fn run_maintenance_uses_the_retention_policy_saved_in_settings() {
+        let temp = TempDir::new().expect("tempdir");
+        let _paths = paths::scoped(Paths::with_home(temp.path()));
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::memory().expect("memory db");
+        insert_detail_row(&db, "detail-40d", 40);
+
+        // 默认只保留 30 天明细；保存 60 天后，40 天前的明细必须保留
+        crate::settings::update_settings(crate::settings::AppSettings {
+            usage_detail_retention_days: Some(60),
+            ..crate::settings::get_settings()
+        })
+        .expect("save settings");
+        let report = run_maintenance_with_current_policy(&db);
+        assert_eq!(report.detail_rows_rolled_up, 0);
+        assert_eq!(detail_rows(&db), 1);
+
+        // 改为 20 天后再次运行，同一条明细被汇总并删除
+        crate::settings::update_settings(crate::settings::AppSettings {
+            usage_detail_retention_days: Some(20),
+            ..crate::settings::get_settings()
+        })
+        .expect("save settings");
+        let report = run_maintenance_with_current_policy(&db);
+        assert_eq!(report.detail_rows_rolled_up, 1);
+        assert_eq!(detail_rows(&db), 0);
     }
 }

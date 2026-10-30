@@ -450,6 +450,27 @@
           "trace": "All logs, most verbose"
         }
       },
+      "retention": {
+        "title": "Data Retention",
+        "description": "Database size, row counts and how long usage data is kept",
+        "detailDaysLabel": "Keep request details for",
+        "detailDaysHint": "Older per-request logs are rolled up into daily totals, then deleted",
+        "rollupDaysLabel": "Keep daily totals for",
+        "rollupDaysHint": "Never shorter than the request detail period",
+        "keepForever": "Forever",
+        "days": "{{days}} days",
+        "storageTitle": "Database storage",
+        "dbSize": "Database size: {{size}} ({{free}} reclaimable)",
+        "table": "Table",
+        "rows": "Rows",
+        "runNow": "Run maintenance now",
+        "running": "Running...",
+        "maintenanceHint": "Maintenance also runs at startup and once a day; backups follow the retention count in Backup & Restore",
+        "maintenanceDone": "Maintenance finished",
+        "maintenanceSummary": "Rolled up {{detail}} request logs, deleted {{rollups}} daily totals, {{checks}} check logs and {{backups}} backups",
+        "maintenanceFailed": "Maintenance failed",
+        "loadFailed": "Failed to load database stats"
+      },
       "capabilityMatrix": {
         "title": "Capability Matrix",
         "description": "Which features each app supports; copy it for support requests",

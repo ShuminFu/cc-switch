@@ -13,7 +13,9 @@ use crate::settings::RetentionPolicy;
 use std::path::Path;
 
 /// 一次维护运行的结果（各步骤删除 / 汇总的行数与文件数；失败的步骤计 0）
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
 pub struct MaintenanceReport {
     /// 删除的过期 `stream_check_logs` 行数
     pub stream_check_logs_deleted: u64,
@@ -30,6 +32,28 @@ impl MaintenanceReport {
     pub fn reclaimed_rows(&self) -> u64 {
         self.stream_check_logs_deleted + self.detail_rows_rolled_up + self.rollup_rows_deleted
     }
+}
+
+/// 单张表的行数（设置页"数据保留"面板展示，CCS-169）
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct TableRowCount {
+    pub name: String,
+    pub rows: u64,
+}
+
+/// 数据库占用概况：主库大小（page_count × page_size）、其中的空闲页大小与各表行数
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct DbStorageStats {
+    /// 主数据库文件大小（字节，不含 WAL）
+    pub size_bytes: u64,
+    /// 其中空闲页占用的字节数（incremental vacuum 可回收）
+    pub free_bytes: u64,
+    /// 各用户表的行数，按表名排序
+    pub tables: Vec<TableRowCount>,
 }
 
 /// 数据库维护入口
@@ -84,6 +108,52 @@ impl Maintenance {
         }
 
         report
+    }
+
+    /// 读取数据库大小与各表行数
+    pub fn storage_stats(db: &Database) -> Result<DbStorageStats, AppError> {
+        let conn = lock_conn!(db.conn);
+        let pragma = |name: &str| -> Result<u64, AppError> {
+            let value: i64 = conn
+                .query_row(&format!("PRAGMA {name};"), [], |row| row.get(0))
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            Ok(value.max(0) as u64)
+        };
+        let page_size = pragma("page_size")?;
+        let size_bytes = pragma("page_count")? * page_size;
+        let free_bytes = pragma("freelist_count")? * page_size;
+
+        let names: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT name FROM sqlite_master
+                     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+                     ORDER BY name",
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let rows = stmt
+                .query_map([], |row| row.get(0))
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            rows.collect::<Result<_, _>>()
+                .map_err(|e| AppError::Database(e.to_string()))?
+        };
+        let mut tables = Vec::with_capacity(names.len());
+        for name in names {
+            let sql = format!("SELECT COUNT(*) FROM \"{}\"", name.replace('"', "\"\""));
+            let rows: i64 = conn
+                .query_row(&sql, [], |row| row.get(0))
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            tables.push(TableRowCount {
+                name,
+                rows: rows.max(0) as u64,
+            });
+        }
+
+        Ok(DbStorageStats {
+            size_bytes,
+            free_bytes,
+            tables,
+        })
     }
 
     fn incremental_vacuum(db: &Database) -> Result<(), AppError> {
@@ -264,6 +334,27 @@ mod tests {
             Maintenance::run_with_backup_dir(&db, &RetentionPolicy::default(), backups.path());
         assert_eq!(report.detail_rows_rolled_up, 1, "40 > 30 days: rolled up");
         assert_eq!(count(&db, "SELECT COUNT(*) FROM proxy_request_logs")?, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn storage_stats_reports_size_and_row_counts() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let now = chrono::Utc::now().timestamp();
+        insert_log(&db, "a", now)?;
+        insert_log(&db, "b", now)?;
+        insert_rollup(&db, 1)?;
+
+        let stats = Maintenance::storage_stats(&db)?;
+        assert!(stats.size_bytes > 0);
+        assert!(stats.free_bytes <= stats.size_bytes);
+        let rows = |name: &str| stats.tables.iter().find(|t| t.name == name).map(|t| t.rows);
+        assert_eq!(rows("proxy_request_logs"), Some(2));
+        assert_eq!(rows("usage_daily_rollups"), Some(1));
+        assert!(stats.tables.iter().all(|t| !t.name.starts_with("sqlite_")));
+        let mut sorted = stats.tables.clone();
+        sorted.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(sorted, stats.tables, "tables are sorted by name");
         Ok(())
     }
 }

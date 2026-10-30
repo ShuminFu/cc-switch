@@ -1,7 +1,9 @@
 import type {
   COMMANDS,
   commands,
+  DbStorageStats,
   LiveWritePreview,
+  MaintenanceReport,
   Provider_Serialize,
   ProxyStatus,
 } from "@/shared/bindings";
@@ -24,6 +26,8 @@ interface ResultOverrides {
   get_current_provider: string;
   get_proxy_status: ProxyStatus;
   preview_live_write: LiveWritePreview;
+  get_db_storage_stats: DbStorageStats;
+  run_db_maintenance: MaintenanceReport;
 }
 
 /** 命令的返回值类型；没有生成类型的命令为 `unknown`。 */

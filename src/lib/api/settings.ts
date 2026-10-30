@@ -6,6 +6,7 @@ import type {
   RemoteSnapshotInfo,
 } from "@/types";
 import type { AppId } from "./types";
+import type { DbStorageStats, MaintenanceReport } from "@/shared/bindings";
 
 export interface ConfigTransferResult {
   success: boolean;
@@ -398,5 +399,18 @@ export const backupsApi = {
 
   async deleteDbBackup(filename: string): Promise<void> {
     await invoke("delete_db_backup", { filename });
+  },
+};
+
+export type { DbStorageStats, MaintenanceReport };
+
+export const maintenanceApi = {
+  async getDbStorageStats(): Promise<DbStorageStats> {
+    return await invoke("get_db_storage_stats");
+  },
+
+  /** 按当前设置中的保留策略立即执行一次数据库维护 */
+  async runDbMaintenance(): Promise<MaintenanceReport> {
+    return await invoke("run_db_maintenance");
   },
 };

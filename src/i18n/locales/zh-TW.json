@@ -450,6 +450,27 @@
           "trace": "全部日誌，最詳細"
         }
       },
+      "retention": {
+        "title": "資料保留",
+        "description": "資料庫大小、各表列數以及使用資料的保留時長",
+        "detailDaysLabel": "請求明細保留",
+        "detailDaysHint": "更早的請求明細會彙總為每日統計後刪除",
+        "rollupDaysLabel": "每日統計保留",
+        "rollupDaysHint": "不會短於請求明細的保留期",
+        "keepForever": "永久",
+        "days": "{{days}} 天",
+        "storageTitle": "資料庫儲存",
+        "dbSize": "資料庫大小：{{size}}（可回收 {{free}}）",
+        "table": "表",
+        "rows": "列數",
+        "runNow": "立即執行維護",
+        "running": "執行中...",
+        "maintenanceHint": "啟動時及每天也會自動執行維護；備份數量依「備份與還原」中的保留數量清理",
+        "maintenanceDone": "維護完成",
+        "maintenanceSummary": "彙總 {{detail}} 筆請求明細，刪除 {{rollups}} 筆每日統計、{{checks}} 筆檢測記錄和 {{backups}} 個備份",
+        "maintenanceFailed": "維護失敗",
+        "loadFailed": "載入資料庫統計失敗"
+      },
       "capabilityMatrix": {
         "title": "能力矩陣",
         "description": "檢視各應用支援的功能，可複製用於回報問題",

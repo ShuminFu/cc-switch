@@ -94,6 +94,8 @@ export const UNMOCKED_COMMANDS = [
   "restore_backup_over_newer_db",
   "rename_db_backup",
   "delete_db_backup",
+  "get_db_storage_stats",
+  "run_db_maintenance",
   "merge_deeplink_config",
   "preview_deeplink_import",
   "import_from_deeplink_unified",
