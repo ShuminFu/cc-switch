@@ -64,6 +64,7 @@ fn builder() -> Builder<tauri::Wry> {
         .typ::<crate::database::MaintenanceReport>()
         .typ::<crate::services::session_usage::SessionRescanProgress>()
         .typ::<crate::error::IpcError>()
+        .typ::<crate::app_shell::bootstrap::StartupReport>()
         .constant("COMMANDS", registered_commands())
         // 现有前端 `invoke` 封装在失败时抛出归一化的 IpcError
         .error_handling(ErrorHandlingMode::Throw)

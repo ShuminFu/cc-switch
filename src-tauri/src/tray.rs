@@ -828,7 +828,7 @@ pub fn create_tray_menu(
         "lightweight_mode",
         tray_texts.lightweight_mode,
         true,
-        crate::lightweight::is_lightweight_mode(),
+        app_state.is_lightweight_mode(),
         None::<&str>,
     )
     .map_err(|e| AppError::Message(format!("创建轻量模式菜单失败: {e}")))?;
@@ -943,7 +943,7 @@ pub fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
                 {
                     apply_tray_policy(app, true);
                 }
-            } else if crate::lightweight::is_lightweight_mode() {
+            } else if crate::lightweight::is_lightweight_mode(app) {
                 if let Err(e) = crate::lightweight::exit_lightweight_mode(app) {
                     log::error!("退出轻量模式重建窗口失败: {e}");
                 }
@@ -955,7 +955,7 @@ pub fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
             }
         }
         "lightweight_mode" => {
-            if crate::lightweight::is_lightweight_mode() {
+            if crate::lightweight::is_lightweight_mode(app) {
                 if let Err(e) = crate::lightweight::exit_lightweight_mode(app) {
                     log::error!("退出轻量模式失败: {e}");
                 }

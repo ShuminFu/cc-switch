@@ -494,6 +494,20 @@
           "usage": "使用量統計",
           "sessionResume": "セッション再開"
         }
+      },
+      "startupReport": {
+        "title": "起動診断",
+        "description": "各起動ステップ（移行、live 設定のインポートなど）の結果とエラーコード",
+        "allOk": "すべての起動ステップがエラーなく完了しました",
+        "failedSummary": "{{count}} 件の起動ステップが失敗しました",
+        "loadFailed": "起動レポートの読み込みに失敗しました",
+        "status": {
+          "ok": "成功",
+          "skipped": "スキップ",
+          "failed": "失敗"
+        },
+        "toastTitle": "{{count}} 件の起動ステップが失敗しました",
+        "toastDescription": "一部のデータが欠落している可能性があります。詳細は 設定 → 詳細 → 起動診断 を参照してください。"
       }
     },
     "language": "言語",

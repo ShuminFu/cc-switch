@@ -19,6 +19,8 @@ const DYNAMIC_KEY_PREFIXES: Record<string, string> = {
     "providerForm.partnerPromotion",
   "settings.advanced.logConfig.levels.${level}":
     "settings.advanced.logConfig.levels",
+  "settings.advanced.startupReport.status.${step.status}":
+    "settings.advanced.startupReport.status",
   "usage.appFilter.${appType}": "usage.appFilter",
   "usage.appFilter.${type}": "usage.appFilter",
   "usage.trace.status.${attempt.status}": "usage.trace.status",

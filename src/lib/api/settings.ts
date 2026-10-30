@@ -6,7 +6,11 @@ import type {
   RemoteSnapshotInfo,
 } from "@/types";
 import type { AppId } from "./types";
-import type { DbStorageStats, MaintenanceReport } from "@/shared/bindings";
+import type {
+  DbStorageStats,
+  MaintenanceReport,
+  StartupReport,
+} from "@/shared/bindings";
 
 export interface ConfigTransferResult {
   success: boolean;
@@ -86,6 +90,11 @@ export const settingsApi = {
   /** Skills SSOT 迁移结果；仅首次调用返回结果，之后为 null */
   async getSkillsMigrationResult(): Promise<SkillsMigrationResult | null> {
     return await invoke("get_skills_migration_result");
+  },
+
+  /** 启动诊断报告：各启动步骤（迁移、live 导入等）的状态与错误码，可重复读取 */
+  async getStartupReport(): Promise<StartupReport> {
+    return await invoke("get_startup_report");
   },
 
   async restart(): Promise<boolean> {

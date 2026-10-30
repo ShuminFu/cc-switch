@@ -494,6 +494,20 @@
           "usage": "用量統計",
           "sessionResume": "會話恢復"
         }
+      },
+      "startupReport": {
+        "title": "啟動診斷",
+        "description": "各啟動步驟（遷移、live 設定匯入等）的執行結果與錯誤碼",
+        "allOk": "所有啟動步驟均已完成，沒有錯誤",
+        "failedSummary": "{{count}} 個啟動步驟失敗",
+        "loadFailed": "載入啟動報告失敗",
+        "status": {
+          "ok": "成功",
+          "skipped": "已略過",
+          "failed": "失敗"
+        },
+        "toastTitle": "{{count}} 個啟動步驟失敗",
+        "toastDescription": "部分資料可能缺失，詳情見 設定 → 進階 → 啟動診斷。"
       }
     },
     "language": "介面語言",

@@ -1,5 +1,6 @@
 //! 应用级杂项命令：外链、剪贴板、更新入口、便携模式、启动期状态与窗口主题。
 
+use crate::app_shell::bootstrap::StartupReport;
 use crate::init_status::{InitErrorPayload, SkillsMigrationPayload};
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
@@ -80,6 +81,13 @@ pub async fn get_migration_result() -> Result<bool, String> {
 #[tauri::command]
 pub async fn get_skills_migration_result() -> Result<Option<SkillsMigrationPayload>, String> {
     Ok(crate::init_status::take_skills_migration_result())
+}
+
+/// 获取启动诊断报告：各启动步骤（迁移、live 导入等）的状态与错误码。
+/// 可重复读取；后台步骤完成后会追加到报告中。
+#[tauri::command]
+pub async fn get_startup_report() -> Result<StartupReport, String> {
+    Ok(crate::app_shell::bootstrap::startup_report())
 }
 
 /// 设置窗口主题（Windows/macOS 标题栏颜色）
