@@ -69,32 +69,6 @@ export function useResetCircuitBreaker() {
 }
 
 /**
- * 获取熔断器配置
- */
-export function useCircuitBreakerConfig() {
-  return useQuery({
-    queryKey: queryKeys.failover.circuitBreakerConfig,
-    queryFn: () => failoverApi.getCircuitBreakerConfig(),
-  });
-}
-
-/**
- * 更新熔断器配置
- */
-export function useUpdateCircuitBreakerConfig() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: failoverApi.updateCircuitBreakerConfig,
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.failover.circuitBreakerConfig,
-      });
-    },
-  });
-}
-
-/**
  * 获取熔断器统计信息
  */
 export function useCircuitBreakerStats(providerId: string, appType: string) {

@@ -10,6 +10,7 @@ import type { ProviderLimitStatus } from "@/types/usage";
 import { providersApi, type AppId } from "@/lib/api";
 import { usageApi } from "@/lib/api/usage";
 import { usageKeys } from "@/lib/query/usage";
+import { queryKeys } from "@/lib/query/keys";
 
 /**
  * Budget limits (PRODUCT-05).
@@ -150,9 +151,7 @@ export const budgetApi = {
     invoke("set_budget_enforcement", { enabled }),
 };
 
-export const budgetKeys = {
-  enforcement: ["budget", "enforcement"] as const,
-};
+export const budgetKeys = queryKeys.budget;
 
 const LIMITS_REFETCH_MS = 60_000;
 
@@ -196,7 +195,9 @@ export async function saveProviderLimits(
   const next = applyProviderLimits(provider, limits);
   await providersApi.update(next, appId);
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: ["providers", appId] }),
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.providers.byApp(appId),
+    }),
     queryClient.invalidateQueries({
       queryKey: usageKeys.limits(provider.id, appId),
     }),

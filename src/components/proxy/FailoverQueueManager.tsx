@@ -81,9 +81,9 @@ export function FailoverQueueManager({
         { closeButton: true },
       );
     } catch (error) {
-      toast.error(
-        t("proxy.failoverQueue.addFailed", "添加失败") + ": " + String(error),
-      );
+      toast.error(t("proxy.failoverQueue.addFailed", "添加失败"), {
+        description: String(error),
+      });
     }
   };
 
@@ -96,11 +96,9 @@ export function FailoverQueueManager({
         { closeButton: true },
       );
     } catch (error) {
-      toast.error(
-        t("proxy.failoverQueue.removeFailed", "移除失败") +
-          ": " +
-          String(error),
-      );
+      toast.error(t("proxy.failoverQueue.removeFailed", "移除失败"), {
+        description: String(error),
+      });
     }
   };
 

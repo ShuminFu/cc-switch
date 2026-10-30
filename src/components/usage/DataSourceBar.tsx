@@ -26,7 +26,7 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
   const [syncing, setSyncing] = useState(false);
 
   const { data: sources } = useQuery({
-    queryKey: [...usageKeys.all, "data-sources"],
+    queryKey: usageKeys.dataSources(),
     queryFn: usageApi.getDataSourceBreakdown,
     refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
     refetchIntervalInBackground: false,

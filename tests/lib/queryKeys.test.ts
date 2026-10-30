@@ -4,6 +4,7 @@ import { liveProviderIdsKey, queryKeys, usageKeys } from "@/lib/query/keys";
 import { usageKeys as reexportedUsageKeys } from "@/lib/query/usage";
 import { openclawKeys } from "@/hooks/useOpenClaw";
 import { hermesKeys } from "@/hooks/useHermes";
+import { budgetKeys } from "@/components/usage/budgetLimits";
 
 describe("query key registry", () => {
   it("keeps the usage-script key out of the usage dashboard namespace", () => {
@@ -47,5 +48,27 @@ describe("query key registry", () => {
     );
     expect(liveProviderIdsKey("hermes")).toBe(queryKeys.hermes.liveProviderIds);
     expect(liveProviderIdsKey("codex")).toBeNull();
+  });
+
+  it("nests per-app prompt keys under the prompts root", async () => {
+    const client = new QueryClient();
+    client.setQueryData(queryKeys.prompts.byApp("claude"), {});
+    client.setQueryData(queryKeys.prompts.currentFile("claude"), "x");
+    client.setQueryData(queryKeys.prompts.byApp("codex"), {});
+    await client.invalidateQueries({
+      queryKey: queryKeys.prompts.byApp("claude"),
+    });
+    expect(
+      client.getQueryState(queryKeys.prompts.currentFile("claude"))
+        ?.isInvalidated,
+    ).toBe(true);
+    expect(
+      client.getQueryState(queryKeys.prompts.byApp("codex"))?.isInvalidated,
+    ).toBe(false);
+  });
+
+  it("keeps component-local key factories backed by the registry", () => {
+    expect(budgetKeys).toBe(queryKeys.budget);
+    expect(usageKeys.dataSources()).toEqual(["usage", "data-sources"]);
   });
 });

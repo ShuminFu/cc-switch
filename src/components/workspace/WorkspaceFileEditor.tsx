@@ -4,7 +4,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import MarkdownEditor from "@/components/MarkdownEditor";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { workspaceApi } from "@/lib/api/workspace";
+import { useDarkMode } from "@/hooks/useDarkMode";
 
 interface WorkspaceFileEditorProps {
   filename: string;
@@ -26,19 +28,11 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
   const [loadError, setLoadError] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => observer.disconnect();
-  }, []);
+  // Last content read from / written to disk; drives the unsaved-changes
+  // guard on close (FE-UI-34).
+  const [savedContent, setSavedContent] = useState("");
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const isDarkMode = useDarkMode();
 
   useEffect(() => {
     if (!isOpen || !filename) return;
@@ -47,11 +41,13 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
     setLoading(true);
     setLoadError(false);
     setContent("");
+    setSavedContent("");
     workspaceApi
       .readFile(filename)
       .then((data) => {
         if (!active) return;
         setContent(data ?? "");
+        setSavedContent(data ?? "");
       })
       .catch((err) => {
         if (!active) return;
@@ -74,6 +70,7 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
     setSaving(true);
     try {
       await workspaceApi.writeFile(filename, content);
+      setSavedContent(content);
       toast.success(t("workspace.saveSuccess"));
     } catch (err) {
       console.error("Failed to save workspace file:", err);
@@ -83,41 +80,64 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
     }
   }, [filename, content, t, loading, loadError]);
 
+  const dirty = !loading && !loadError && content !== savedContent;
+  const handleClose = () => {
+    if (dirty) setConfirmDiscard(true);
+    else onClose();
+  };
+
   return (
-    <FullScreenPanel
-      isOpen={isOpen}
-      title={t("workspace.editing", { filename })}
-      onClose={onClose}
-      footer={
-        <Button onClick={handleSave} disabled={!canSave}>
-          {saving ? t("common.saving") : t("common.save")}
-        </Button>
-      }
-    >
-      {loading ? (
-        <div className="flex items-center justify-center h-64 text-muted-foreground">
-          {t("prompts.loading")}
-        </div>
-      ) : loadError ? (
-        <div className="flex flex-col items-center justify-center gap-3 h-64 text-muted-foreground">
-          <p>{t("workspace.loadFailed")}</p>
-          <Button
-            variant="outline"
-            onClick={() => setReloadToken((value) => value + 1)}
-          >
-            {t("common.retry", { defaultValue: "Retry" })}
+    <>
+      <FullScreenPanel
+        isOpen={isOpen}
+        title={t("workspace.editing", { filename })}
+        onClose={handleClose}
+        footer={
+          <Button onClick={handleSave} disabled={!canSave}>
+            {saving ? t("common.saving") : t("common.save")}
           </Button>
-        </div>
-      ) : (
-        <MarkdownEditor
-          value={content}
-          onChange={setContent}
-          darkMode={isDarkMode}
-          placeholder={`# ${filename}\n\n...`}
-          minHeight="calc(100vh - 240px)"
-        />
-      )}
-    </FullScreenPanel>
+        }
+      >
+        {loading ? (
+          <div className="flex items-center justify-center h-64 text-muted-foreground">
+            {t("prompts.loading")}
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center justify-center gap-3 h-64 text-muted-foreground">
+            <p>{t("workspace.loadFailed")}</p>
+            <Button
+              variant="outline"
+              onClick={() => setReloadToken((value) => value + 1)}
+            >
+              {t("common.retry", { defaultValue: "Retry" })}
+            </Button>
+          </div>
+        ) : (
+          <MarkdownEditor
+            value={content}
+            onChange={setContent}
+            darkMode={isDarkMode}
+            placeholder={`# ${filename}\n\n...`}
+            minHeight="calc(100vh - 240px)"
+          />
+        )}
+      </FullScreenPanel>
+      <ConfirmDialog
+        isOpen={confirmDiscard}
+        title={t("common.unsavedChangesTitle", {
+          defaultValue: "Discard unsaved changes?",
+        })}
+        message={t("common.unsavedChangesMessage", {
+          defaultValue: "Your edits have not been saved and will be lost.",
+        })}
+        confirmText={t("common.discard", { defaultValue: "Discard" })}
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          onClose();
+        }}
+        onCancel={() => setConfirmDiscard(false)}
+      />
+    </>
   );
 };
 

@@ -68,6 +68,7 @@ import {
   type ClaudeDesktopDefaultRoute,
 } from "@/lib/api/providers";
 import { resolveManagedAccountId } from "@/lib/authBinding";
+import { queryKeys } from "@/lib/query/keys";
 
 export type ClaudeDesktopProviderFormValues = ProviderFormData & {
   presetId?: string;
@@ -313,7 +314,7 @@ export function ClaudeDesktopProviderForm({
       Object.keys(initialData?.meta?.claudeDesktopModelRoutes ?? {}).length > 0,
   );
   const { data: defaultRoutes = [] } = useQuery({
-    queryKey: ["claudeDesktopDefaultRoutes"],
+    queryKey: queryKeys.providers.claudeDesktopDefaultRoutes,
     queryFn: () => providersApi.getClaudeDesktopDefaultRoutes(),
   });
   const defaultProxyRouteRows = useMemo(

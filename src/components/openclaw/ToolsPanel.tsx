@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Save, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -23,37 +23,73 @@ import {
   OPENCLAW_UNSET_PROFILE,
   OPENCLAW_UNSUPPORTED_PROFILE,
 } from "./utils";
+import { useEditableBuffer } from "./hooks/useEditableBuffer";
+import { ExternalChangeAlert } from "./ExternalChangeAlert";
 
 interface ListItem {
   id: string;
   value: string;
 }
 
+interface ToolsForm {
+  config: OpenClawToolsConfig;
+  allowList: ListItem[];
+  denyList: ListItem[];
+}
+
+const EMPTY_TOOLS_FORM: ToolsForm = { config: {}, allowList: [], denyList: [] };
+
+const toListItems = (values: string[] | undefined): ListItem[] =>
+  (values ?? []).map((value) => ({ id: crypto.randomUUID(), value }));
+
+const toolsToForm = (tools: OpenClawToolsConfig | null): ToolsForm =>
+  tools
+    ? {
+        config: tools,
+        allowList: toListItems(tools.allow),
+        denyList: toListItems(tools.deny),
+      }
+    : EMPTY_TOOLS_FORM;
+
+// Row ids are random per hydration; compare values only.
+const sameTools = (a: ToolsForm, b: ToolsForm) =>
+  JSON.stringify([
+    a.config.profile,
+    a.allowList.map((i) => i.value),
+    a.denyList.map((i) => i.value),
+  ]) ===
+  JSON.stringify([
+    b.config.profile,
+    b.allowList.map((i) => i.value),
+    b.denyList.map((i) => i.value),
+  ]);
+
 const ToolsPanel: React.FC = () => {
   const { t } = useTranslation();
   const { data: toolsData, isLoading } = useOpenClawTools();
   const saveToolsMutation = useSaveOpenClawTools();
-  const [config, setConfig] = useState<OpenClawToolsConfig>({});
-  const [allowList, setAllowList] = useState<ListItem[]>([]);
-  const [denyList, setDenyList] = useState<ListItem[]>([]);
-
-  useEffect(() => {
-    if (toolsData) {
-      setConfig(toolsData);
-      setAllowList(
-        (toolsData.allow ?? []).map((value) => ({
-          id: crypto.randomUUID(),
-          value,
-        })),
-      );
-      setDenyList(
-        (toolsData.deny ?? []).map((value) => ({
-          id: crypto.randomUUID(),
-          value,
-        })),
-      );
-    }
-  }, [toolsData]);
+  const { form, setForm, externalChange, reload, markSaved } =
+    useEditableBuffer(toolsData, toolsToForm, EMPTY_TOOLS_FORM, sameTools);
+  const { config, allowList, denyList } = form;
+  const setConfig = (update: React.SetStateAction<OpenClawToolsConfig>) =>
+    setForm((prev) => ({
+      ...prev,
+      config: typeof update === "function" ? update(prev.config) : update,
+    }));
+  const setAllowList: React.Dispatch<React.SetStateAction<ListItem[]>> = (
+    update,
+  ) =>
+    setForm((prev) => ({
+      ...prev,
+      allowList: typeof update === "function" ? update(prev.allowList) : update,
+    }));
+  const setDenyList: React.Dispatch<React.SetStateAction<ListItem[]>> = (
+    update,
+  ) =>
+    setForm((prev) => ({
+      ...prev,
+      denyList: typeof update === "function" ? update(prev.denyList) : update,
+    }));
 
   const unsupportedProfile = getOpenClawUnsupportedProfile(config.profile);
 
@@ -86,6 +122,7 @@ const ToolsPanel: React.FC = () => {
       };
 
       await saveToolsMutation.mutateAsync(newConfig);
+      markSaved();
       toast.success(t("openclaw.tools.saveSuccess"));
     } catch (error) {
       const detail = extractErrorMessage(error);
@@ -127,6 +164,8 @@ const ToolsPanel: React.FC = () => {
       <p className="text-sm text-muted-foreground mb-6">
         {t("openclaw.tools.description")}
       </p>
+
+      {externalChange && <ExternalChangeAlert onReload={reload} />}
 
       {unsupportedProfile && (
         <Alert className="mb-6 border-amber-500/30 bg-amber-500/5">

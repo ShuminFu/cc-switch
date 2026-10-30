@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ExternalLink } from "lucide-react";
@@ -21,30 +21,31 @@ interface MemoryTabPaneProps {
   kind: HermesMemoryKind;
   limit: number;
   enabled: boolean;
+  /**
+   * The unsaved buffer, owned by the panel so it survives the tab pane
+   * unmounting on tab switch (FE-UI-50). `undefined` = not edited yet.
+   */
+  draft: string | undefined;
+  onDraftChange: (kind: HermesMemoryKind, content: string) => void;
 }
 
 const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
   kind,
   limit,
   enabled,
+  draft,
+  onDraftChange,
 }) => {
   const { t } = useTranslation();
   const darkMode = useDarkMode();
   const { data, isLoading } = useHermesMemory(kind, true);
   const saveMutation = useSaveHermesMemory();
   const toggleMutation = useToggleHermesMemoryEnabled();
-  const [content, setContent] = useState("");
-  const [loaded, setLoaded] = useState(false);
-
-  // Hydrate local dirty buffer from query data only on first load. Later
-  // refetches (e.g. after a successful save) must not clobber in-flight user
-  // edits — the caller owns `content` until they click Save again.
-  useEffect(() => {
-    if (!loaded && data !== undefined) {
-      setContent(data);
-      setLoaded(true);
-    }
-  }, [data, loaded]);
+  // Until the user edits, show the stored content; afterwards the draft
+  // wins so refetches (e.g. after a save) never clobber in-flight edits.
+  const loaded = data !== undefined || draft !== undefined;
+  const content = draft ?? data ?? "";
+  const setContent = (next: string) => onDraftChange(kind, next);
 
   const handleSave = async () => {
     try {
@@ -116,7 +117,8 @@ const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
           </span>
           <Button
             onClick={handleSave}
-            disabled={saveMutation.isPending || !loaded}
+            // Hermes truncates over-limit memory; do not save it (FE-UI-50).
+            disabled={saveMutation.isPending || !loaded || isOver}
           >
             {saveMutation.isPending ? t("common.saving") : t("common.save")}
           </Button>
@@ -129,6 +131,26 @@ const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
 const HermesMemoryPanel: React.FC = () => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<HermesMemoryKind>("memory");
+  const [drafts, setDrafts] = useState<
+    Partial<Record<HermesMemoryKind, string>>
+  >({});
+  const { data: memoryData } = useHermesMemory("memory", true);
+  const { data: userData } = useHermesMemory("user", true);
+  const handleDraftChange = (kind: HermesMemoryKind, content: string) =>
+    setDrafts((prev) => ({ ...prev, [kind]: content }));
+  const isDirty = (kind: HermesMemoryKind, stored: string | undefined) =>
+    drafts[kind] !== undefined && drafts[kind] !== (stored ?? "");
+  const dirtyMarker = (dirty: boolean) =>
+    dirty ? (
+      <span
+        className="ml-1 text-amber-500"
+        aria-label={t("common.unsavedChanges", {
+          defaultValue: "Unsaved changes",
+        })}
+      >
+        •
+      </span>
+    ) : null;
   const openHermesWebUI = useOpenHermesWebUI();
   const { data: limits } = useHermesMemoryLimits(true);
 
@@ -148,8 +170,12 @@ const HermesMemoryPanel: React.FC = () => {
           <TabsList>
             <TabsTrigger value="memory">
               {t("hermes.memory.agentTab")}
+              {dirtyMarker(isDirty("memory", memoryData))}
             </TabsTrigger>
-            <TabsTrigger value="user">{t("hermes.memory.userTab")}</TabsTrigger>
+            <TabsTrigger value="user">
+              {t("hermes.memory.userTab")}
+              {dirtyMarker(isDirty("user", userData))}
+            </TabsTrigger>
           </TabsList>
           <Button
             variant="outline"
@@ -166,10 +192,18 @@ const HermesMemoryPanel: React.FC = () => {
             kind="memory"
             limit={memoryLimit}
             enabled={memoryEnabled}
+            draft={drafts.memory}
+            onDraftChange={handleDraftChange}
           />
         </TabsContent>
         <TabsContent value="user" className="flex-1 px-6 pb-4 mt-4">
-          <MemoryTabPane kind="user" limit={userLimit} enabled={userEnabled} />
+          <MemoryTabPane
+            kind="user"
+            limit={userLimit}
+            enabled={userEnabled}
+            draft={drafts.user}
+            onDraftChange={handleDraftChange}
+          />
         </TabsContent>
       </Tabs>
     </div>

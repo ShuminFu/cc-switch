@@ -29,8 +29,12 @@ export const AppToggleGroup: React.FC<AppToggleGroupProps> = ({
               <button
                 type="button"
                 onClick={() => onToggle(app, !enabled)}
+                aria-label={label}
+                aria-pressed={!!enabled}
                 className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-                  enabled ? activeClass : "opacity-35 hover:opacity-70"
+                  enabled
+                    ? activeClass
+                    : "opacity-35 hover:opacity-70 focus-visible:opacity-100"
                 }`}
               >
                 {icon}

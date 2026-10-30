@@ -1,5 +1,18 @@
-import { Toaster as SonnerToaster } from "sonner";
+import { Toaster as SonnerToaster, toast } from "sonner";
 import { useTheme } from "@/components/theme-provider";
+
+/** Error toasts often carry a description; give users time to read it. */
+export const ERROR_TOAST_DURATION_MS = 6000;
+
+// Raise the default duration of every `toast.error` call app-wide (FE-UI-13)
+// without touching each call site; an explicit `duration` still wins.
+const baseError = toast.error;
+if (!(baseError as { __ccSwitchPatched?: boolean }).__ccSwitchPatched) {
+  const patched: typeof toast.error = (message, data) =>
+    baseError(message, { duration: ERROR_TOAST_DURATION_MS, ...data });
+  (patched as { __ccSwitchPatched?: boolean }).__ccSwitchPatched = true;
+  toast.error = patched;
+}
 
 export function Toaster() {
   const { theme } = useTheme();

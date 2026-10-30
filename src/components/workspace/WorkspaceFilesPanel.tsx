@@ -20,6 +20,7 @@ import type { LucideIcon } from "lucide-react";
 import { workspaceApi } from "@/lib/api/workspace";
 import WorkspaceFileEditor from "./WorkspaceFileEditor";
 import DailyMemoryPanel from "./DailyMemoryPanel";
+import { useWorkspacePath } from "./useWorkspacePath";
 
 interface WorkspaceFile {
   filename: string;
@@ -57,6 +58,8 @@ const WorkspaceFilesPanel: React.FC = () => {
   const [fileExists, setFileExists] = useState<Record<string, boolean>>({});
   const [showDailyMemory, setShowDailyMemory] = useState(false);
 
+  const workspacePath = useWorkspacePath();
+
   const checkFileExistence = async () => {
     const results: Record<string, boolean> = {};
     await Promise.all(
@@ -84,14 +87,15 @@ const WorkspaceFilesPanel: React.FC = () => {
 
   return (
     <div className="px-6 pt-4 pb-8">
-      <p
+      <button
+        type="button"
         className="text-sm text-muted-foreground mb-6 cursor-pointer hover:text-foreground transition-colors inline-flex items-center gap-1"
         onClick={() => workspaceApi.openDirectory("workspace")}
         title={t("workspace.openDirectory")}
       >
-        ~/.openclaw/workspace/
+        {workspacePath}
         <FolderOpen className="w-3.5 h-3.5" />
-      </p>
+      </button>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {WORKSPACE_FILES.map((file) => {

@@ -17,13 +17,14 @@ import {
   type UpstreamProxyStatus,
   type DetectedProxy,
 } from "@/lib/api/globalProxy";
+import { queryKeys } from "@/lib/query/keys";
 
 /**
  * 获取全局代理 URL
  */
 export function useGlobalProxyUrl() {
   return useQuery({
-    queryKey: ["globalProxyUrl"],
+    queryKey: queryKeys.proxy.globalUrl,
     queryFn: getGlobalProxyUrl,
     staleTime: 30 * 1000, // 30秒内不重新获取，避免展开时闪烁
   });
@@ -40,8 +41,10 @@ export function useSetGlobalProxyUrl() {
     mutationFn: setGlobalProxyUrl,
     onSuccess: () => {
       toast.success(t("settings.globalProxy.saved"));
-      queryClient.invalidateQueries({ queryKey: ["globalProxyUrl"] });
-      queryClient.invalidateQueries({ queryKey: ["upstreamProxyStatus"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.globalUrl });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.proxy.upstreamStatus,
+      });
     },
     onError: (error: unknown) => {
       const message =
@@ -85,7 +88,7 @@ export function useTestProxy() {
  */
 export function useUpstreamProxyStatus() {
   return useQuery<UpstreamProxyStatus>({
-    queryKey: ["upstreamProxyStatus"],
+    queryKey: queryKeys.proxy.upstreamStatus,
     queryFn: getUpstreamProxyStatus,
   });
 }

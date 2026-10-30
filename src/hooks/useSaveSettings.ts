@@ -10,6 +10,7 @@ import {
   type SettingsFormState,
 } from "./settingsPayload";
 import { runSettingsSideEffects, type SaveScope } from "./settingsSideEffects";
+import { queryKeys } from "@/lib/query/keys";
 
 export interface SaveResult {
   requiresRestart: boolean;
@@ -47,7 +48,9 @@ export function useSaveSettings() {
         // Capture the persisted state from the live cache before mutating:
         // the closure's `data` can lag behind quick successive toggles.
         const prev =
-          queryClient.getQueryData<Settings>(["settings"]) ?? data ?? null;
+          queryClient.getQueryData<Settings>(queryKeys.settings.all) ??
+          data ??
+          null;
         // Autosave keeps the persisted directory overrides: the Advanced
         // tab's inputs are drafts until saved explicitly.
         const payload = buildSettingsPayload(

@@ -12,6 +12,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { McpServerSpec } from "@/types";
+import { maskEnvValue } from "@/components/env/maskEnvValue";
+import { parseEnvText, parseHeadersText } from "./wizardParsers";
 
 interface McpWizardModalProps {
   isOpen: boolean;
@@ -22,54 +24,6 @@ interface McpWizardModalProps {
   titleReadOnly?: boolean;
   initialServer?: McpServerSpec;
 }
-
-/**
- * 解析环境变量文本为对象
- */
-const parseEnvText = (text: string): Record<string, string> => {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  const env: Record<string, string> = {};
-  for (const l of lines) {
-    const idx = l.indexOf("=");
-    if (idx > 0) {
-      const k = l.slice(0, idx).trim();
-      const v = l.slice(idx + 1).trim();
-      if (k) env[k] = v;
-    }
-  }
-  return env;
-};
-
-/**
- * 解析headers文本为对象（支持 KEY: VALUE 或 KEY=VALUE）
- */
-const parseHeadersText = (text: string): Record<string, string> => {
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  const headers: Record<string, string> = {};
-  for (const l of lines) {
-    // 支持 KEY: VALUE 或 KEY=VALUE
-    const colonIdx = l.indexOf(":");
-    const equalIdx = l.indexOf("=");
-    let idx = -1;
-    if (colonIdx > 0 && (equalIdx === -1 || colonIdx < equalIdx)) {
-      idx = colonIdx;
-    } else if (equalIdx > 0) {
-      idx = equalIdx;
-    }
-    if (idx > 0) {
-      const k = l.slice(0, idx).trim();
-      const v = l.slice(idx + 1).trim();
-      if (k) headers[k] = v;
-    }
-  }
-  return headers;
-};
 
 /**
  * MCP 配置向导模态框
@@ -92,12 +46,19 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
   const [wizardCommand, setWizardCommand] = useState("");
   const [wizardArgs, setWizardArgs] = useState("");
   const [wizardEnv, setWizardEnv] = useState("");
+  const [wizardCwd, setWizardCwd] = useState("");
   // http 和 sse 字段
   const [wizardUrl, setWizardUrl] = useState("");
   const [wizardHeaders, setWizardHeaders] = useState("");
 
-  // 生成预览 JSON
-  const generatePreview = (): string => {
+  const envParse = parseEnvText(wizardEnv);
+  const headersParse = parseHeadersText(wizardHeaders);
+  const invalidEnvLines = wizardType === "stdio" ? envParse.invalidLines : [];
+  const invalidHeaderLines =
+    wizardType === "stdio" ? [] : headersParse.invalidLines;
+
+  // 生成配置（预览时可遮蔽密钥）
+  const buildConfig = (maskSecrets: boolean): McpServerSpec => {
     const config: McpServerSpec = {
       type: wizardType,
     };
@@ -114,27 +75,38 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
           .filter((s) => s.length > 0);
       }
 
-      if (wizardEnv.trim()) {
-        const env = parseEnvText(wizardEnv);
-        if (Object.keys(env).length > 0) {
-          config.env = env;
-        }
+      if (wizardCwd.trim()) {
+        config.cwd = wizardCwd.trim();
+      }
+
+      const env = envParse.values;
+      if (Object.keys(env).length > 0) {
+        config.env = maskSecrets
+          ? Object.fromEntries(
+              Object.entries(env).map(([k, v]) => [k, maskEnvValue(k, v)]),
+            )
+          : env;
       }
     } else {
       // http 和 sse 类型必需字段
       config.url = wizardUrl.trim();
 
       // 可选字段
-      if (wizardHeaders.trim()) {
-        const headers = parseHeadersText(wizardHeaders);
-        if (Object.keys(headers).length > 0) {
-          config.headers = headers;
-        }
+      const headers = headersParse.values;
+      if (Object.keys(headers).length > 0) {
+        config.headers = maskSecrets
+          ? Object.fromEntries(
+              Object.entries(headers).map(([k, v]) => [k, maskEnvValue(k, v)]),
+            )
+          : headers;
       }
     }
 
-    return JSON.stringify(config, null, 2);
+    return config;
   };
+
+  const generatePreview = (maskSecrets = false): string =>
+    JSON.stringify(buildConfig(maskSecrets), null, 2);
 
   const handleApply = () => {
     if (!wizardTitle.trim()) {
@@ -147,6 +119,15 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
     }
     if ((wizardType === "http" || wizardType === "sse") && !wizardUrl.trim()) {
       toast.error(t("mcp.wizard.urlRequired"), { duration: 3000 });
+      return;
+    }
+    if (invalidEnvLines.length > 0 || invalidHeaderLines.length > 0) {
+      toast.error(
+        t("mcp.wizard.invalidLines", {
+          defaultValue: "Some lines could not be parsed; fix them first.",
+        }),
+        { duration: 3000 },
+      );
       return;
     }
 
@@ -162,13 +143,15 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
     setWizardCommand("");
     setWizardArgs("");
     setWizardEnv("");
+    setWizardCwd("");
     setWizardUrl("");
     setWizardHeaders("");
     onClose();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && e.metaKey) {
+    // Cmd+Enter on macOS, Ctrl+Enter elsewhere (FE-UI-32).
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleApply();
     }
@@ -202,6 +185,7 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
       setWizardCommand("");
       setWizardArgs("");
       setWizardEnv("");
+      setWizardCwd("");
       return;
     }
 
@@ -220,11 +204,14 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
             .join("\n")
         : "",
     );
+    setWizardCwd(
+      typeof initialServer?.cwd === "string" ? initialServer.cwd : "",
+    );
     setWizardUrl("");
     setWizardHeaders("");
   }, [isOpen]);
 
-  const preview = generatePreview();
+  const preview = generatePreview(true);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
@@ -359,7 +346,30 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
                     onChange={(e) => setWizardEnv(e.target.value)}
                     placeholder={t("mcp.wizard.envPlaceholder")}
                     rows={3}
+                    aria-invalid={invalidEnvLines.length > 0}
                     className="w-full rounded-md border border-border-default bg-background px-3 py-2 text-sm font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-y"
+                  />
+                  <InvalidLines lines={invalidEnvLines} />
+                </div>
+
+                {/* Working directory */}
+                <div>
+                  <label
+                    htmlFor="mcp-wizard-cwd"
+                    className="mb-1 block text-sm font-medium text-foreground"
+                  >
+                    {t("mcp.wizard.cwd", {
+                      defaultValue: "Working directory",
+                    })}
+                  </label>
+                  <Input
+                    id="mcp-wizard-cwd"
+                    type="text"
+                    value={wizardCwd}
+                    onChange={(e) => setWizardCwd(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="/path/to/project"
+                    className="font-mono"
                   />
                 </div>
               </>
@@ -394,8 +404,10 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
                     onChange={(e) => setWizardHeaders(e.target.value)}
                     placeholder={t("mcp.wizard.headersPlaceholder")}
                     rows={3}
+                    aria-invalid={invalidHeaderLines.length > 0}
                     className="w-full rounded-md border border-border-default bg-background px-3 py-2 text-sm font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-y"
                   />
+                  <InvalidLines lines={invalidHeaderLines} />
                 </div>
               </>
             )}
@@ -405,6 +417,7 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
           {(wizardCommand ||
             wizardArgs ||
             wizardEnv ||
+            wizardCwd ||
             wizardUrl ||
             wizardHeaders) && (
             <div className="space-y-2 border-t border-border-default pt-4">
@@ -430,6 +443,19 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+};
+
+const InvalidLines: React.FC<{ lines: string[] }> = ({ lines }) => {
+  const { t } = useTranslation();
+  if (lines.length === 0) return null;
+  return (
+    <p className="mt-1 text-xs text-destructive" role="alert">
+      {t("mcp.wizard.unparsedLines", {
+        defaultValue: "Cannot parse: {{lines}}",
+        lines: lines.join(", "),
+      })}
+    </p>
   );
 };
 

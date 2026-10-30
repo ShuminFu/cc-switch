@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import WorkspaceFileEditor from "@/components/workspace/WorkspaceFileEditor";
 import DailyMemoryPanel from "@/components/workspace/DailyMemoryPanel";
@@ -15,6 +21,11 @@ const api = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/workspace", () => ({ workspaceApi: api }));
 
+// Settings with an OpenClaw directory override (FE-UI-35).
+vi.mock("@/lib/query/queries", () => ({
+  useSettingsQuery: () => ({ data: { openclawConfigDir: "/custom/oc/" } }),
+}));
+
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -30,9 +41,12 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/components/common/FullScreenPanel", () => ({
-  FullScreenPanel: ({ isOpen, children, footer }: any) =>
+  FullScreenPanel: ({ isOpen, children, footer, onClose }: any) =>
     isOpen ? (
       <div>
+        <button type="button" onClick={onClose}>
+          panel-back
+        </button>
         {children}
         <div>{footer}</div>
       </div>
@@ -149,5 +163,130 @@ describe("DailyMemoryPanel create today", () => {
 
     const editor = (await screen.findByTestId("editor")) as HTMLTextAreaElement;
     expect(editor.value).toBe("");
+  });
+});
+
+describe("DailyMemoryPanel search", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+    api.listDailyMemoryFiles.mockResolvedValue([
+      {
+        filename: "2026-01-01.md",
+        date: "2026-01-01",
+        sizeBytes: 10,
+        preview: "x",
+      },
+    ]);
+  });
+
+  const result = (filename: string) => ({
+    filename,
+    date: filename.replace(".md", ""),
+    sizeBytes: 1,
+    snippet: filename,
+    matchCount: 1,
+  });
+
+  it("ignores results that arrive for an older query (FE-UI-57)", async () => {
+    const pending: Array<(value: unknown) => void> = [];
+    api.searchDailyMemoryFiles.mockImplementation(
+      () => new Promise((resolve) => pending.push(resolve)),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
+      await waitFor(() => expect(api.listDailyMemoryFiles).toHaveBeenCalled());
+      fireEvent.click(
+        screen.getByTitle("workspace.dailyMemory.searchScopeHint"),
+      );
+      const input = await screen.findByPlaceholderText(
+        "workspace.dailyMemory.searchPlaceholder",
+      );
+
+      fireEvent.change(input, { target: { value: "ab" } });
+      await act(async () => {
+        vi.advanceTimersByTime(350);
+      });
+      fireEvent.change(input, { target: { value: "abc" } });
+      await act(async () => {
+        vi.advanceTimersByTime(350);
+      });
+      expect(pending).toHaveLength(2);
+
+      // Newer query resolves first, the stale one last.
+      await act(async () => {
+        pending[1]([result("new.md")]);
+      });
+      await act(async () => {
+        pending[0]([result("old.md")]);
+      });
+
+      expect(await screen.findByText("new")).toBeInTheDocument();
+      expect(screen.queryByText("old")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("delete is a separate, labelled button (FE-UI-11)", async () => {
+    render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
+    await screen.findByText("2026-01-01");
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    expect(
+      await screen.findByText("workspace.dailyMemory.confirmDeleteTitle"),
+    ).toBeInTheDocument();
+    // Opening the delete confirm did not open the file.
+    expect(api.readDailyMemoryFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkspaceFileEditor unsaved-changes guard (FE-UI-34)", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+  });
+
+  it("asks before discarding edits and closes directly when clean", async () => {
+    api.readFile.mockResolvedValue("hello");
+    const onClose = vi.fn();
+    render(
+      <WorkspaceFileEditor filename="AGENTS.md" isOpen onClose={onClose} />,
+    );
+
+    const editor = await screen.findByTestId("editor");
+    await waitFor(() => expect(editor).toHaveValue("hello"));
+    fireEvent.change(editor, { target: { value: "hello!" } });
+
+    fireEvent.click(screen.getByText("panel-back"));
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes without asking when nothing changed", async () => {
+    api.readFile.mockResolvedValue("hello");
+    const onClose = vi.fn();
+    render(
+      <WorkspaceFileEditor filename="AGENTS.md" isOpen onClose={onClose} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("editor")).toHaveValue("hello"),
+    );
+    fireEvent.click(screen.getByText("panel-back"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("workspace paths (FE-UI-35)", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+    api.listDailyMemoryFiles.mockResolvedValue([]);
+  });
+
+  it("shows the overridden OpenClaw directory instead of ~/.openclaw", async () => {
+    render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
+    expect(
+      await screen.findByText("/custom/oc/workspace/memory/"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/~\/\.openclaw/)).not.toBeInTheDocument();
   });
 });

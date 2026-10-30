@@ -274,11 +274,6 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
       }
     };
 
-    const handleUninstall = async (_directory: string) => {
-      // 在发现面板中，不支持卸载，需要在主面板中操作
-      toast.info(t("skills.uninstallInMainPanel"));
-    };
-
     const handleAddRepo = async (repo: SkillRepo) => {
       try {
         await addRepoMutation.mutateAsync(repo);
@@ -565,7 +560,6 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
                       key={skill.key}
                       skill={skill}
                       onInstall={handleInstall}
-                      onUninstall={handleUninstall}
                     />
                   ))}
                 </div>
@@ -609,7 +603,6 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
                             }}
                             installs={skill.installs}
                             onInstall={handleInstall}
-                            onUninstall={handleUninstall}
                           />
                         );
                       })}
