@@ -136,12 +136,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: '20'
+          node-version-file: .node-version
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
+      - name: Setup Rust (from rust-toolchain.toml)
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustc --version
 
       - name: Add Windows ARM64 target
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
@@ -189,7 +190,7 @@ jobs:
         if: runner.os != 'Windows' || matrix.arch != 'arm64'
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
-          version: 10.12.3
+          # Version comes from package.json "packageManager".
           run_install: false
 
       - name: Setup pnpm (Windows ARM64)
