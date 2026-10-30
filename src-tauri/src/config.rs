@@ -259,17 +259,32 @@ fn sort_json_keys(value: &Value) -> Value {
     }
 }
 
-/// 写入 JSON 配置文件（键按字母排序，确保确定性输出）
+/// 写入 JSON 配置文件（保留键的原有顺序）
+///
+/// 用于用户拥有的 live 配置（如 `~/.claude/settings.json`）：调用方采用
+/// 读-改-写合并，`serde_json` 已启用 `preserve_order`，因此用户手工排列的键
+/// 顺序在重写后保持不变，不会产生一次性的整文件重排 diff。
 pub fn write_json_file<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
+    let value = serde_json::to_value(data).map_err(|e| AppError::JsonSerialize { source: e })?;
+    write_json_value(path, &value)
+}
+
+/// 写入 JSON 配置文件（键按字母排序，确保确定性输出）
+///
+/// 仅用于 cc-switch 自身拥有、整文件生成的文件（如 `~/.cc-switch/config.json`）。
+pub fn write_json_file_sorted<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
+    let value = serde_json::to_value(data).map_err(|e| AppError::JsonSerialize { source: e })?;
+    write_json_value(path, &sort_json_keys(&value))
+}
+
+fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
     // 确保目录存在（预览捕获期间不落盘，也不建目录）
     if let Some(parent) = path.parent().filter(|_| !is_capturing_writes()) {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
-    let value = serde_json::to_value(data).map_err(|e| AppError::JsonSerialize { source: e })?;
-    let sorted_value = sort_json_keys(&value);
-    let json = serde_json::to_string_pretty(&sorted_value)
-        .map_err(|e| AppError::JsonSerialize { source: e })?;
+    let json =
+        serde_json::to_string_pretty(value).map_err(|e| AppError::JsonSerialize { source: e })?;
 
     atomic_write(path, json.as_bytes())
 }
@@ -1224,6 +1239,38 @@ mod tests {
     }
 
     #[test]
+    fn write_json_file_round_trips_user_key_order_unchanged() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let original = "{\n  \"z\": 1,\n  \"a\": {\n    \"y\": 2,\n    \"b\": 3\n  }\n}";
+        fs::write(&path, original).expect("seed");
+
+        let value: Value = read_json_file(&path).expect("read");
+        write_json_file(&path, &value).expect("write");
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        let compact: Value = read_json_file(&path).expect("reread");
+        assert_eq!(
+            serde_json::to_string(&compact).unwrap(),
+            r#"{"z":1,"a":{"y":2,"b":3}}"#
+        );
+    }
+
+    #[test]
+    fn write_json_file_sorted_sorts_keys_recursively() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.json");
+        let value = serde_json::json!({"z": 1, "a": {"y": 2, "b": 3}});
+
+        write_json_file_sorted(&path, &value).expect("write");
+
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "{\n  \"a\": {\n    \"b\": 3,\n    \"y\": 2\n  },\n  \"z\": 1\n}"
+        );
+    }
+
+    #[test]
     fn capture_writes_preview_records_writes_without_touching_disk() {
         let dir = tempfile::tempdir().expect("tempdir");
         let existing = dir.path().join("settings.json");
@@ -1254,7 +1301,8 @@ mod tests {
             vec![
                 CapturedWrite {
                     path: existing.clone(),
-                    contents: Some(b"{\n  \"a\": 2,\n  \"b\": 1\n}".to_vec()),
+                    // 用户文件写入器保留键的插入顺序（CCS-162）
+                    contents: Some(b"{\n  \"b\": 1,\n  \"a\": 2\n}".to_vec()),
                 },
                 CapturedWrite {
                     path: created,

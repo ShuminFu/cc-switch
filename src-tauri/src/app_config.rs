@@ -303,7 +303,7 @@ pub struct PromptRoot {
 }
 
 use crate::apps::{AppDescriptor, InputTokenSemantics, SyncMode, APPS};
-use crate::config::{copy_file, get_app_config_dir, get_app_config_path, write_json_file};
+use crate::config::{copy_file, get_app_config_dir, get_app_config_path, write_json_file_sorted};
 use crate::error::AppError;
 use crate::prompt_files::prompt_file_path;
 use crate::provider::ProviderManager;
@@ -629,7 +629,7 @@ impl MultiAppConfig {
             }
         }
 
-        write_json_file(&config_path, self)?;
+        write_json_file_sorted(&config_path, self)?;
         Ok(())
     }
 

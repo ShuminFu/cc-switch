@@ -6,16 +6,7 @@ write: ok
 === .config/opencode/opencode.json ===
 {
   "$schema": "https://opencode.ai/config.json",
-  "futureOpencodeKey": true,
-  "mcp": {
-    "docs": {
-      "command": [
-        "uvx",
-        "docs-mcp"
-      ],
-      "type": "local"
-    }
-  },
+  "theme": "opencode",
   "provider": {
     "existing": {
       "npm": "@ai-sdk/anthropic",
@@ -24,19 +15,28 @@ write: ok
       }
     },
     "relay": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Relay",
+      "options": {
+        "baseURL": "https://relay.example.com/v1",
+        "apiKey": "sk-provider-new"
+      },
       "models": {
         "gpt-5": {
           "name": "GPT-5"
         }
-      },
-      "name": "Relay",
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "apiKey": "sk-provider-new",
-        "baseURL": "https://relay.example.com/v1"
       }
     }
   },
-  "theme": "opencode"
+  "mcp": {
+    "docs": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "docs-mcp"
+      ]
+    }
+  },
+  "futureOpencodeKey": true
 }
 <no newline at end of file>

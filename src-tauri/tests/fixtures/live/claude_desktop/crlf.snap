@@ -5,18 +5,18 @@ description: "claude_desktop writer, crlf input"
 apply: ok
 === Claude/claude_desktop_config.json ===
 {
-  "deploymentMode": "3p",
   "mcpServers": {
     "docs": {
+      "command": "uvx",
       "args": [
         "docs-mcp"
-      ],
-      "command": "uvx"
+      ]
     }
   },
   "preferences": {
     "futureDesktopPref": true
-  }
+  },
+  "deploymentMode": "3p"
 }
 <no newline at end of file>
 === Claude-3p/claude_desktop_config.json ===

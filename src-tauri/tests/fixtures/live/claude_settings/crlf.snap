@@ -5,7 +5,6 @@ description: "claude_settings writer, crlf input"
 write: ok
 === .claude/settings.json ===
 {
-  "apiKeyHelper": "echo sk-helper",
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "sk-provider-new",
     "ANTHROPIC_BASE_URL": "https://relay.example.com",
@@ -21,6 +20,7 @@ write: ok
     1,
     2,
     3
-  ]
+  ],
+  "apiKeyHelper": "echo sk-helper"
 }
 <no newline at end of file>

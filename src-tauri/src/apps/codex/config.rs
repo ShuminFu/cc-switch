@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::{
     atomic_write, delete_file, get_home_dir, read_json_file, sanitize_provider_name,
-    write_json_file, write_text_file,
+    write_json_file, write_json_file_sorted, write_text_file,
 };
 use crate::error::AppError;
 use crate::model_capabilities::{image_input_capability_from_modalities, ImageInputCapability};
@@ -1013,7 +1013,7 @@ pub fn prepare_codex_config_text_with_model_catalog(
             CodexCatalogToolProfile::ProxyChat => false,
         };
         let config_text = set_codex_native_web_search_field(&config_text, disable_web_search)?;
-        write_json_file(&catalog_path, &catalog)?;
+        write_json_file_sorted(&catalog_path, &catalog)?;
         Ok(config_text)
     } else {
         let config_text = set_codex_model_catalog_json_field(config_text, None)?;
