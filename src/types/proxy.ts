@@ -128,3 +128,64 @@ export interface CaptureStatus {
   // 可导出的请求 ID（最新的在前）
   capturedRequestIds: string[];
 }
+
+// 请求追踪（CCS-139）
+export interface TraceHeader {
+  name: string;
+  value: string;
+}
+
+export interface TraceRoutePlan {
+  client: string;
+  upstream: string;
+  apiFormat: string | null;
+  decode: string;
+  url: string;
+  auth: string | null;
+  quirks: string[];
+  sideStores: string[];
+}
+
+export type TraceAttemptStatus =
+  | "in_flight"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface TraceAttempt {
+  providerId: string;
+  providerName: string;
+  status: TraceAttemptStatus;
+  // 失败或跳过的原因（已脱敏）
+  reason: string | null;
+  upstreamStatus: number | null;
+  plan: TraceRoutePlan | null;
+  // 按顺序应用的恢复策略
+  recovery: string[];
+  upstreamHeaders: TraceHeader[];
+  // 相对请求开始的毫秒数
+  startedMs: number;
+  durationMs: number | null;
+}
+
+export type TraceUsageSource = "stream_events" | "response_body" | "missing";
+
+export interface RequestTrace {
+  traceId: string;
+  requestId: string | null;
+  // Unix 毫秒
+  startedAt: number;
+  appType: string;
+  method: string;
+  path: string;
+  isStream: boolean;
+  clientHeaders: TraceHeader[];
+  attempts: TraceAttempt[];
+  droppedAttempts: number;
+  statusCode: number | null;
+  error: string | null;
+  ttfbMs: number | null;
+  firstTokenMs: number | null;
+  latencyMs: number | null;
+  usageSource: TraceUsageSource | null;
+}

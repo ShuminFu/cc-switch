@@ -21,6 +21,9 @@ const DYNAMIC_KEY_PREFIXES: Record<string, string> = {
     "settings.advanced.logConfig.levels",
   "usage.appFilter.${appType}": "usage.appFilter",
   "usage.appFilter.${type}": "usage.appFilter",
+  "usage.trace.status.${attempt.status}": "usage.trace.status",
+  "usage.trace.usageSourceValue.${trace.usageSource}":
+    "usage.trace.usageSourceValue",
 };
 
 // i18next 复数后缀：t("x", { count }) 会解析到 x_one / x_other 等

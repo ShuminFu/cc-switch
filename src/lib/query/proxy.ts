@@ -315,3 +315,16 @@ export function useExportBugReport() {
     },
   });
 }
+
+// ========== 请求追踪 Hooks ==========
+
+/**
+ * 获取请求日志行对应的请求追踪（路由计划、各次尝试与原因）
+ */
+export function useProxyRequestTrace(requestId: string | null) {
+  return useQuery({
+    queryKey: ["proxyRequestTrace", requestId],
+    queryFn: () => proxyApi.getRequestTrace(requestId as string),
+    enabled: requestId != null,
+  });
+}

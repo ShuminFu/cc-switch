@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RequestLogTable } from "@/components/usage/RequestLogTable";
@@ -7,6 +8,7 @@ const useRequestLogsMock = vi.hoisted(() => vi.fn());
 const captureStatusMock = vi.hoisted(() => vi.fn());
 const toggleCaptureMock = vi.hoisted(() => vi.fn());
 const exportBugReportMock = vi.hoisted(() => vi.fn());
+const traceQueryMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -42,6 +44,17 @@ vi.mock("@/lib/query/proxy", () => ({
     mutate: exportBugReportMock,
     isPending: false,
   }),
+  useProxyRequestTrace: (requestId: string | null) => traceQueryMock(requestId),
+}));
+
+type MockProps = { open?: boolean; children?: ReactNode };
+
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ open, children }: MockProps) =>
+    open ? <div>{children}</div> : null,
+  DialogContent: ({ children }: MockProps) => <div>{children}</div>,
+  DialogHeader: ({ children }: MockProps) => <div>{children}</div>,
+  DialogTitle: ({ children }: MockProps) => <h2>{children}</h2>,
 }));
 
 vi.mock("@/components/ui/button", () => ({
@@ -86,6 +99,8 @@ describe("RequestLogTable", () => {
     });
     toggleCaptureMock.mockReset();
     exportBugReportMock.mockReset();
+    traceQueryMock.mockReset();
+    traceQueryMock.mockReturnValue({ data: null, isLoading: false });
     useRequestLogsMock.mockReset();
     useRequestLogsMock.mockImplementation(
       ({ page = 0, pageSize = 20 }: { page?: number; pageSize?: number }) => ({
@@ -274,6 +289,116 @@ describe("RequestLogTable", () => {
       expect(exportButtons).toHaveLength(1);
       fireEvent.click(exportButtons[0]);
       expect(exportBugReportMock).toHaveBeenCalledWith("req-captured");
+    });
+  });
+
+  describe("request trace inspector (CCS-139)", () => {
+    const row = (requestId: string, dataSource: string) => ({
+      requestId,
+      providerId: "b",
+      providerName: "Provider B",
+      appType: "claude",
+      model: "claude-sonnet-4-5",
+      requestModel: "claude-sonnet-4-5",
+      costMultiplier: "1",
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      inputCostUsd: "0",
+      outputCostUsd: "0",
+      cacheReadCostUsd: "0",
+      cacheCreationCostUsd: "0",
+      totalCostUsd: "0.0001",
+      isStreaming: false,
+      latencyMs: 60,
+      firstTokenMs: null,
+      statusCode: 200,
+      createdAt: 1_710_000_000,
+      dataSource,
+    });
+
+    it("opens the trace panel for proxied rows only", () => {
+      useRequestLogsMock.mockReturnValue({
+        data: {
+          data: [row("req-proxy", "proxy"), row("req-session", "session")],
+          total: 2,
+          page: 0,
+          pageSize: 20,
+        },
+        isLoading: false,
+      });
+      traceQueryMock.mockImplementation((requestId: string | null) => ({
+        data:
+          requestId === "req-proxy"
+            ? {
+                traceId: "t1",
+                requestId: "req-proxy",
+                startedAt: 0,
+                appType: "claude",
+                method: "POST",
+                path: "/v1/messages",
+                isStream: false,
+                clientHeaders: [],
+                attempts: [
+                  {
+                    providerId: "a",
+                    providerName: "Provider A",
+                    status: "failed",
+                    reason: "上游错误 (503): overloaded",
+                    upstreamStatus: 503,
+                    plan: null,
+                    recovery: [],
+                    upstreamHeaders: [],
+                    startedMs: 0,
+                    durationMs: 5,
+                  },
+                  {
+                    providerId: "b",
+                    providerName: "Provider B",
+                    status: "succeeded",
+                    reason: null,
+                    upstreamStatus: 200,
+                    plan: null,
+                    recovery: [],
+                    upstreamHeaders: [],
+                    startedMs: 6,
+                    durationMs: 9,
+                  },
+                ],
+                droppedAttempts: 0,
+                statusCode: 200,
+                error: null,
+                ttfbMs: 15,
+                firstTokenMs: null,
+                latencyMs: 20,
+                usageSource: "response_body",
+              }
+            : null,
+        isLoading: false,
+      }));
+      render(
+        <RequestLogTable
+          range={{ preset: "today" }}
+          rangeLabel="Today"
+          appType="all"
+          refreshIntervalMs={0}
+        />,
+      );
+
+      const inspect = screen.getAllByRole("button", {
+        name: "usage.trace.inspect",
+      });
+      expect(inspect).toHaveLength(1);
+      expect(screen.queryByText("usage.trace.title")).toBeNull();
+
+      fireEvent.click(inspect[0]);
+      expect(traceQueryMock).toHaveBeenLastCalledWith("req-proxy");
+      expect(screen.getByText("usage.trace.title")).toBeInTheDocument();
+      expect(screen.getAllByTestId("trace-attempt")).toHaveLength(2);
+      expect(
+        screen.getByText("上游错误 (503): overloaded"),
+      ).toBeInTheDocument();
     });
   });
 });

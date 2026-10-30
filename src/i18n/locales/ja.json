@@ -1620,6 +1620,36 @@
       "exported": "不具合報告を {{path}} に保存しました",
       "exportFailed": "不具合報告のエクスポートに失敗しました: {{error}}"
     },
+    "trace": {
+      "inspect": "ルーティングを確認",
+      "title": "リクエストトレース",
+      "notFound": "このリクエストのトレースはありません。直近 {{count}} 件のプロキシリクエストのみ保持され、アプリの再起動で消去されます。",
+      "attempts": "試行（{{count}}）",
+      "noAttempts": "どのプロバイダーも試行されませんでした",
+      "droppedAttempts": "ほかに {{count}} 件の試行は記録されていません",
+      "reason": "理由",
+      "recovery": "適用したリカバリー",
+      "route": "ルート",
+      "auth": "認証",
+      "flags": "フラグ",
+      "clientHeaders": "クライアントのヘッダー",
+      "upstreamHeaders": "上流へのヘッダー",
+      "ttfb": "TTFB",
+      "firstToken": "最初のトークン",
+      "usageSource": "使用量の取得元",
+      "request": "リクエスト",
+      "status": {
+        "in_flight": "処理中",
+        "succeeded": "成功",
+        "failed": "失敗",
+        "skipped": "スキップ（サーキット遮断）"
+      },
+      "usageSourceValue": {
+        "stream_events": "ストリームイベント",
+        "response_body": "レスポンスボディ",
+        "missing": "なし"
+      }
+    },
     "basicInfo": "基本情報",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "キャッシュ作成コスト",

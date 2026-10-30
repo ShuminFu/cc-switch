@@ -32,6 +32,7 @@ use crate::database::Database;
 use crate::provider::Provider;
 use crate::proxy::capture::CaptureStore;
 use crate::proxy::server::ProxyServer;
+use crate::proxy::trace::TraceStore;
 use crate::proxy::types::{AppProxyConfig, ProxyConfig};
 
 /// App type every harness provider is registered under.
@@ -586,6 +587,8 @@ impl ProxyHarnessBuilder {
         // the requests of concurrent scenarios.
         let capture = Arc::new(CaptureStore::default());
         server.set_capture_store(capture.clone());
+        let traces = Arc::new(TraceStore::default());
+        server.set_trace_store(traces.clone());
         let info = server.start().await.expect("start proxy server");
         let token = crate::proxy::inbound_auth::get_or_create_inbound_token(&db)
             .expect("read proxy inbound token");
@@ -598,6 +601,7 @@ impl ProxyHarnessBuilder {
             server,
             db,
             capture,
+            traces,
             base_url: format!("http://127.0.0.1:{}", info.port),
             port: info.port,
             token,
@@ -651,6 +655,7 @@ pub struct ProxyHarness {
     server: ProxyServer,
     db: Arc<Database>,
     capture: Arc<CaptureStore>,
+    traces: Arc<TraceStore>,
     base_url: String,
     port: u16,
     token: String,
@@ -683,6 +688,11 @@ impl ProxyHarness {
     /// Bug report capture store of this proxy (disarmed until a test arms it).
     pub fn capture(&self) -> &CaptureStore {
         &self.capture
+    }
+
+    /// Request trace ring buffer of this proxy.
+    pub fn traces(&self) -> &TraceStore {
+        &self.traces
     }
 
     /// Port the proxy listens on.

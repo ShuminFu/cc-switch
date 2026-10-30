@@ -25,8 +25,9 @@ import {
   type LogFilters,
   type UsageRangeSelection,
 } from "@/types/usage";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Route } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
+import { RequestTracePanel } from "./RequestTracePanel";
 import {
   BugReportCaptureToggle,
   ExportBugReportButton,
@@ -64,6 +65,7 @@ export function RequestLogTable({
   const [statusCode, setStatusCode] = useState<number | undefined>(undefined);
   const [page, setPage] = useState(0);
   const [pageInput, setPageInput] = useState("");
+  const [traceRequestId, setTraceRequestId] = useState<string | null>(null);
   const pageSize = 20;
 
   const effectiveFilters: LogFilters = {
@@ -322,6 +324,21 @@ export function RequestLogTable({
                           >
                             {log.statusCode}
                           </span>
+                          {(log.dataSource || "proxy") === "proxy" && (
+                            <span className="ml-1 inline-flex align-middle">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0"
+                                aria-label={t("usage.trace.inspect")}
+                                title={t("usage.trace.inspect")}
+                                onClick={() => setTraceRequestId(log.requestId)}
+                              >
+                                <Route className="h-3.5 w-3.5" />
+                              </Button>
+                            </span>
+                          )}
                           {capturedRequestIds.has(log.requestId) && (
                             <span className="ml-1 inline-flex align-middle">
                               <ExportBugReportButton
@@ -421,6 +438,13 @@ export function RequestLogTable({
             </div>
           </div>
         </>
+      )}
+
+      {traceRequestId && (
+        <RequestTracePanel
+          requestId={traceRequestId}
+          onClose={() => setTraceRequestId(null)}
+        />
       )}
     </div>
   );

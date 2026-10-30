@@ -7,6 +7,7 @@ import type {
   GlobalProxyConfig,
   AppProxyConfig,
   CaptureStatus,
+  RequestTrace,
 } from "@/types/proxy";
 
 export const proxyApi = {
@@ -139,5 +140,12 @@ export const proxyApi = {
   // 导出缺陷报告 zip；保存位置由后端对话框选择，取消时返回 null
   async exportBugReport(requestId: string): Promise<string | null> {
     return invoke("export_proxy_bug_report", { requestId });
+  },
+
+  // ========== 请求追踪 API ==========
+
+  // 获取请求日志行对应的请求追踪；只保留最近的代理请求，找不到时返回 null
+  async getRequestTrace(requestId: string): Promise<RequestTrace | null> {
+    return invoke("get_proxy_request_trace", { requestId });
   },
 };

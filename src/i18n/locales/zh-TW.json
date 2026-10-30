@@ -1620,6 +1620,36 @@
       "exported": "缺陷報告已儲存到 {{path}}",
       "exportFailed": "匯出缺陷報告失敗：{{error}}"
     },
+    "trace": {
+      "inspect": "查看路由過程",
+      "title": "請求追蹤",
+      "notFound": "沒有此請求的追蹤記錄。只保留最近 {{count}} 個代理請求，應用程式重新啟動後清空。",
+      "attempts": "嘗試（{{count}}）",
+      "noAttempts": "沒有嘗試任何供應商",
+      "droppedAttempts": "另有 {{count}} 次嘗試未記錄",
+      "reason": "原因",
+      "recovery": "已套用的復原策略",
+      "route": "路由",
+      "auth": "認證",
+      "flags": "特性",
+      "clientHeaders": "用戶端請求標頭",
+      "upstreamHeaders": "上游請求標頭",
+      "ttfb": "首位元組",
+      "firstToken": "首個 token",
+      "usageSource": "用量來源",
+      "request": "請求",
+      "status": {
+        "in_flight": "進行中",
+        "succeeded": "成功",
+        "failed": "失敗",
+        "skipped": "已略過（熔斷）"
+      },
+      "usageSourceValue": {
+        "stream_events": "串流事件",
+        "response_body": "回應內容",
+        "missing": "缺失"
+      }
+    },
     "basicInfo": "基本資訊",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "快取寫入成本",

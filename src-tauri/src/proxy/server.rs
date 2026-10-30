@@ -19,6 +19,7 @@ use super::{
     provider_router::ProviderRouter,
     providers::{codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore},
     runtime_config::RuntimeConfigStore,
+    trace::TraceStore,
     types::*,
     ProxyError,
 };
@@ -59,6 +60,8 @@ pub struct ProxyState {
     pub forwarder_deps: Arc<ForwarderDeps>,
     /// 缺陷报告抓包（默认为应用级共享存储，见 [`CaptureStore::global`]）
     pub capture: Arc<CaptureStore>,
+    /// 最近请求的追踪（默认为应用级共享存储，见 [`TraceStore::global`]）
+    pub traces: Arc<TraceStore>,
 }
 
 impl ProxyState {
@@ -96,6 +99,7 @@ impl ProxyState {
             runtime_config,
             forwarder_deps,
             capture: CaptureStore::global(),
+            traces: TraceStore::global(),
         }
     }
 
@@ -169,6 +173,12 @@ impl ProxyServer {
     #[cfg_attr(not(feature = "testkit"), allow(dead_code))]
     pub(crate) fn set_capture_store(&mut self, store: Arc<CaptureStore>) {
         self.state.capture = store;
+    }
+
+    /// 替换追踪存储（须在 [`start`](Self::start) 之前调用；测试用独立存储隔离彼此）
+    #[cfg_attr(not(feature = "testkit"), allow(dead_code))]
+    pub(crate) fn set_trace_store(&mut self, store: Arc<TraceStore>) {
+        self.state.traces = store;
     }
 
     pub async fn start(&self) -> Result<ProxyServerInfo, ProxyError> {

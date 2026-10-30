@@ -1620,6 +1620,36 @@
       "exported": "缺陷报告已保存到 {{path}}",
       "exportFailed": "导出缺陷报告失败：{{error}}"
     },
+    "trace": {
+      "inspect": "查看路由过程",
+      "title": "请求追踪",
+      "notFound": "没有该请求的追踪记录。只保留最近 {{count}} 个代理请求，应用重启后清空。",
+      "attempts": "尝试（{{count}}）",
+      "noAttempts": "没有尝试任何供应商",
+      "droppedAttempts": "另有 {{count}} 次尝试未记录",
+      "reason": "原因",
+      "recovery": "已应用的恢复策略",
+      "route": "路由",
+      "auth": "认证",
+      "flags": "特性",
+      "clientHeaders": "客户端请求头",
+      "upstreamHeaders": "上游请求头",
+      "ttfb": "首字节",
+      "firstToken": "首 token",
+      "usageSource": "用量来源",
+      "request": "请求",
+      "status": {
+        "in_flight": "进行中",
+        "succeeded": "成功",
+        "failed": "失败",
+        "skipped": "已跳过（熔断）"
+      },
+      "usageSourceValue": {
+        "stream_events": "流式事件",
+        "response_body": "响应体",
+        "missing": "缺失"
+      }
+    },
     "basicInfo": "基本信息",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "缓存写入成本",

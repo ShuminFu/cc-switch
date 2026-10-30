@@ -10,6 +10,7 @@
 use super::hyper_client::ProxyResponse;
 use super::{
     capture::CaptureHandle,
+    error_mapper::get_error_message,
     failover_switch::FailoverSwitchManager,
     pipeline::{
         auth,
@@ -28,6 +29,7 @@ use super::{
         codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore, get_adapter,
         ProviderAdapter, ProviderType,
     },
+    trace::TraceHandle,
     types::{CopilotOptimizerConfig, OptimizerConfig, ProxyStatus, RectifierConfig},
     ProxyError,
 };
@@ -140,6 +142,8 @@ pub struct RequestScope {
     pub max_attempts: usize,
     /// 缺陷报告抓包句柄：每次尝试记录实际发往上游的请求
     pub capture: Option<CaptureHandle>,
+    /// 请求追踪句柄：记录每次尝试的路由计划、结果与原因
+    pub trace: Option<TraceHandle>,
 }
 
 impl RequestScope {
@@ -247,13 +251,38 @@ impl RequestForwarder {
             // `attempt` 在本轮迭代内持有 HalfOpen 探测许可：若请求在记录结果前被取消
             // （客户端断开等导致 future 被 drop），守卫 Drop 时会释放探测名额
             let Some(attempt) = recorder.begin(provider, bypass_circuit_breaker).await else {
+                if let Some(trace) = &self.req.trace {
+                    trace.skip_attempt(&provider.id, &provider.name, "熔断器未放行，跳过该供应商");
+                }
                 continue;
             };
             attempted_providers += 1;
+            if let Some(trace) = &self.req.trace {
+                trace.begin_attempt(&provider.id, &provider.name);
+            }
 
             let (outcome, decision, recovery) = self
                 .send_with_recovery(request, provider, adapter.as_ref())
                 .await;
+            if let Some(trace) = &self.req.trace {
+                let applied: Vec<&str> = recovery
+                    .applied()
+                    .iter()
+                    .map(|strategy| strategy.as_str())
+                    .collect();
+                match &outcome {
+                    Ok((response, _, _)) => {
+                        trace.succeed_attempt(response.status().as_u16(), &applied)
+                    }
+                    Err(error) => {
+                        let upstream_status = match error {
+                            ProxyError::UpstreamError { status, .. } => Some(*status),
+                            _ => None,
+                        };
+                        trace.fail_attempt(&get_error_message(error), upstream_status, &applied);
+                    }
+                }
+            }
             let error = match outcome {
                 Ok((response, plan, outbound_model)) => {
                     if let Some(strategy) = recovery.last() {
@@ -487,6 +516,9 @@ impl RequestForwarder {
                 &ordered_headers,
                 &built.body,
             );
+        }
+        if let Some(trace) = &self.req.trace {
+            trace.record_send(&plan, &ordered_headers);
         }
 
         let response = transport::send(

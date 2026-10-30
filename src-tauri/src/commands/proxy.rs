@@ -6,6 +6,7 @@ use crate::error::{AppError, IpcError};
 use crate::proxy::capture::{
     CaptureStatus, CaptureStore, DEFAULT_CAPTURE_MINUTES, MAX_CAPTURE_MINUTES,
 };
+use crate::proxy::trace::{RequestTrace, TraceStore};
 use crate::proxy::types::*;
 use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
 use crate::store::AppState;
@@ -536,4 +537,14 @@ pub async fn export_proxy_bug_report<R: tauri::Runtime>(
         .map_err(|e| AppError::Message(format!("无效的保存路径: {e}")))?;
     std::fs::write(&path, zip).map_err(|e| AppError::io(&path, e))?;
     Ok(Some(path.display().to_string()))
+}
+
+// ==================== Request Trace ====================
+
+/// 获取请求日志中 `request_id` 对应的请求追踪（路由计划、各次尝试与原因）
+///
+/// 只保留最近的代理请求；更早的请求或非代理来源的日志返回 None。
+#[tauri::command]
+pub async fn get_proxy_request_trace(request_id: String) -> Result<Option<RequestTrace>, IpcError> {
+    Ok(TraceStore::global().find(&request_id))
 }

@@ -61,6 +61,7 @@ fn test_forwarder(
             streaming_first_byte_timeout,
             max_attempts: 1,
             capture: None,
+            trace: None,
         },
     )
 }

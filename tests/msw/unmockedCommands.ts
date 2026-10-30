@@ -131,6 +131,7 @@ export const UNMOCKED_COMMANDS = [
   "stop_proxy_capture",
   "get_proxy_capture_status",
   "export_proxy_bug_report",
+  "get_proxy_request_trace",
   "get_global_proxy_config",
   "update_global_proxy_config",
   "get_proxy_config_for_app",

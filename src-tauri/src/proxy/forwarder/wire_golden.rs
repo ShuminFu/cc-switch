@@ -111,6 +111,7 @@ fn forwarder(client_format: WireFormat) -> RequestForwarder {
             streaming_first_byte_timeout: Duration::from_secs(10),
             max_attempts: 1,
             capture: None,
+            trace: None,
         },
     )
 }

@@ -152,8 +152,7 @@ pub(crate) struct RecoveryState {
 
 impl RecoveryState {
     /// 已应用的策略，按应用顺序
-    #[cfg(test)]
-    fn applied(&self) -> &[RecoveryStrategy] {
+    pub(crate) fn applied(&self) -> &[RecoveryStrategy] {
         &self.applied
     }
 

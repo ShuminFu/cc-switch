@@ -14,6 +14,7 @@ use super::{
     protocol::WireFormat,
     server::ProxyState,
     stream::{SseDecoder, SseEvent, StreamUsageFormat, TimingTap, UsageTap},
+    trace::{TraceHandle, UsageSource},
     usage::parser::TokenUsage,
     ProxyError,
 };
@@ -238,7 +239,9 @@ pub async fn handle_non_streaming(
     if usage_logging_enabled(state) {
         if let Ok(json_value) = serde_json::from_slice::<Value>(&body_bytes) {
             // 解析使用量
-            if let Some(usage) = (parser_config.response_parser)(&json_value) {
+            let parsed = (parser_config.response_parser)(&json_value);
+            set_usage_source(ctx, parsed.is_some(), UsageSource::ResponseBody);
+            if let Some(usage) = parsed {
                 // 归因优先级：usage 解析出的模型 → 响应 model 字段 → 映射后的出站
                 // 模型（路由接管真值）→ 客户端请求模型。空字符串视为缺失。
                 let model = usage
@@ -292,6 +295,7 @@ pub async fn handle_non_streaming(
                 ctx.tag,
                 body_bytes.len()
             );
+            set_usage_source(ctx, false, UsageSource::ResponseBody);
             spawn_log_usage(
                 state,
                 ctx,
@@ -565,12 +569,20 @@ pub(crate) fn create_usage_collector(
     let start_time = ctx.start_time;
     let session_id = ctx.session_id.clone();
     let capture = ctx.capture.clone();
+    let trace = ctx.trace.clone();
 
     Some(SseUsageCollector::new(
         start_time,
         parser_config.stream_usage,
         parser_config.stream_event_filter,
         move |usage_tap, timing| {
+            if let Some(trace) = &trace {
+                trace.set_usage_source(if usage_tap.usage().is_some() {
+                    UsageSource::StreamEvents
+                } else {
+                    UsageSource::Missing
+                });
+            }
             let usage = match (usage_tap.usage(), missing) {
                 (Some(usage), MissingStreamUsage::Record) => usage,
                 (Some(usage), MissingStreamUsage::SkipUnbillable)
@@ -602,6 +614,7 @@ pub(crate) fn create_usage_collector(
             let request_model = request_model.clone();
             let outbound_model = fallback_model.clone();
             let capture = capture.clone();
+            let trace = trace.clone();
 
             tokio::spawn(async move {
                 let request_id = log_usage_internal(
@@ -619,6 +632,12 @@ pub(crate) fn create_usage_collector(
                     Some(session_id),
                 )
                 .await;
+                link_trace(
+                    trace.as_ref(),
+                    request_id.as_deref(),
+                    latency_ms,
+                    timing.first_token_ms(),
+                );
                 link_capture(capture.as_ref(), request_id);
             });
         },
@@ -638,7 +657,9 @@ pub(crate) fn response_usage_log_task(
     if !usage_logging_enabled(state) {
         return None;
     }
-    let usage = parser(response).filter(TokenUsage::has_billable_tokens)?;
+    let usage = parser(response).filter(TokenUsage::has_billable_tokens);
+    set_usage_source(ctx, usage.is_some(), UsageSource::ResponseBody);
+    let usage = usage?;
     let model = response_model(ctx, response);
     Some(usage_log_task(
         state,
@@ -698,6 +719,7 @@ fn usage_log_task(
     let latency_ms = ctx.latency_ms();
     let session_id = ctx.session_id.clone();
     let capture = ctx.capture.clone();
+    let trace = ctx.trace.clone();
 
     async move {
         let request_id = log_usage_internal(
@@ -715,7 +737,27 @@ fn usage_log_task(
             Some(session_id),
         )
         .await;
+        link_trace(trace.as_ref(), request_id.as_deref(), latency_ms, None);
         link_capture(capture.as_ref(), request_id);
+    }
+}
+
+/// 记录 usage 来源：解析到 usage 时为 `found`，否则为 [`UsageSource::Missing`]
+fn set_usage_source(ctx: &RequestContext, parsed: bool, found: UsageSource) {
+    if let Some(trace) = &ctx.trace {
+        trace.set_usage_source(if parsed { found } else { UsageSource::Missing });
+    }
+}
+
+/// 把请求追踪关联到刚写入的请求日志行，供请求日志打开追踪详情
+fn link_trace(
+    trace: Option<&TraceHandle>,
+    request_id: Option<&str>,
+    latency_ms: u64,
+    first_token_ms: Option<u64>,
+) {
+    if let (Some(trace), Some(request_id)) = (trace, request_id) {
+        trace.link_request(request_id, latency_ms, first_token_ms);
     }
 }
 

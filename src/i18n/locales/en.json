@@ -1620,6 +1620,36 @@
       "exported": "Bug report saved to {{path}}",
       "exportFailed": "Failed to export bug report: {{error}}"
     },
+    "trace": {
+      "inspect": "Inspect route",
+      "title": "Request trace",
+      "notFound": "No trace for this request. Only the last {{count}} proxied requests are kept, and traces are cleared when the app restarts.",
+      "attempts": "Attempts ({{count}})",
+      "noAttempts": "No provider was attempted",
+      "droppedAttempts": "{{count}} more attempts were not recorded",
+      "reason": "Reason",
+      "recovery": "Recovery applied",
+      "route": "Route",
+      "auth": "Auth",
+      "flags": "Flags",
+      "clientHeaders": "Client headers",
+      "upstreamHeaders": "Upstream headers",
+      "ttfb": "TTFB",
+      "firstToken": "First token",
+      "usageSource": "Usage source",
+      "request": "Request",
+      "status": {
+        "in_flight": "In flight",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "skipped": "Skipped (circuit open)"
+      },
+      "usageSourceValue": {
+        "stream_events": "Stream events",
+        "response_body": "Response body",
+        "missing": "Missing"
+      }
+    },
     "basicInfo": "Basic Info",
     "tokenUsage": "Token Usage",
     "cacheCreationCost": "Cache Creation Cost",

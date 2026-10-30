@@ -203,6 +203,12 @@ pub(crate) async fn handle_proxied(
         .get("stream")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    // 请求追踪：始终记录（环形缓冲区，只保留最近的请求）
+    let trace = state
+        .traces
+        .begin(ctx.app_type_str, &method, &uri, is_stream);
+    trace.record_client_headers(&headers);
+    ctx.trace = Some(trace);
     let codex_tool_context = (client.client_format == WireFormat::OpenAiResponses)
         .then(|| transform_codex_chat::build_codex_tool_context_from_request(&body));
     // Claude 格式转换需要原始请求体（工具 schema 提示），其余端点直接移交给转发器
@@ -233,6 +239,12 @@ pub(crate) async fn handle_proxied(
             if let Some(capture) = ctx.capture.take() {
                 state.capture.discard(&capture);
             }
+            if let Some(trace) = &ctx.trace {
+                trace.finish(
+                    map_proxy_error_to_status(&err.error),
+                    Some(&get_error_message(&err.error)),
+                );
+            }
             log_forward_error(&state, &ctx, is_stream, &err.error);
             return render_forward_error(client.client_format, &ctx, &endpoint, err.error);
         }
@@ -244,6 +256,9 @@ pub(crate) async fn handle_proxied(
     // 响应解码只读成功那次尝试的路由计划，不再按最终 provider 重新推导格式
     let plan = result.plan;
     let response = result.response;
+    if let Some(trace) = &ctx.trace {
+        trace.finish(response.status().as_u16(), None);
+    }
     // 只抓协议桥请求；透传请求的记录直接丢弃
     if let Some(capture) = ctx.capture.take() {
         match CaptureBridge::from_decode(plan.response_decode()) {
@@ -790,8 +805,8 @@ fn log_forward_error(
     let error_message = get_error_message(error);
     let request_id = uuid::Uuid::new_v4().to_string();
 
-    if let Err(e) = logger.log_error_with_context(
-        request_id,
+    match logger.log_error_with_context(
+        request_id.clone(),
         ctx.provider.id.clone(),
         ctx.app_type_str.to_string(),
         ctx.request_model.clone(),
@@ -802,7 +817,12 @@ fn log_forward_error(
         Some(ctx.session_id.clone()),
         None,
     ) {
-        log::warn!("记录失败请求日志失败: {e}");
+        Ok(()) => {
+            if let Some(trace) = &ctx.trace {
+                trace.link_request(&request_id, ctx.latency_ms(), None);
+            }
+        }
+        Err(e) => log::warn!("记录失败请求日志失败: {e}"),
     }
 }
 

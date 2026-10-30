@@ -10,6 +10,7 @@ use crate::proxy::{
     forwarder::{RequestForwarder, RequestScope},
     protocol::WireFormat,
     server::ProxyState,
+    trace::TraceHandle,
     types::{AppProxyConfig, CopilotOptimizerConfig, OptimizerConfig, RectifierConfig},
     ProxyError,
 };
@@ -89,6 +90,8 @@ pub struct RequestContext {
     pub copilot_optimizer_config: CopilotOptimizerConfig,
     /// 缺陷报告抓包句柄（仅在用户开启抓包期间存在）
     pub capture: Option<CaptureHandle>,
+    /// 请求追踪句柄（由 handler 在转发前创建）
+    pub trace: Option<TraceHandle>,
 }
 
 impl RequestContext {
@@ -193,6 +196,7 @@ impl RequestContext {
             optimizer_config,
             copilot_optimizer_config,
             capture: None,
+            trace: None,
         })
     }
 
@@ -260,6 +264,7 @@ impl RequestContext {
                 streaming_first_byte_timeout: Duration::from_secs(first_byte_timeout),
                 max_attempts: RequestScope::max_attempts_for(max_retries),
                 capture: self.capture.clone(),
+                trace: self.trace.clone(),
             },
         )
     }
