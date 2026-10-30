@@ -151,6 +151,8 @@ export function SettingsLoadFailureNotice() {
               backupPath: failure.backupPath,
               error: failure.error,
             }),
+            // 描述按行列出文件、备份路径与错误，需保留换行
+            descriptionClassName: "whitespace-pre-line",
             closeButton: true,
             duration: Infinity,
           });

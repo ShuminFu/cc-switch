@@ -47,3 +47,8 @@ None.
 - `pnpm typecheck` → clean. `pnpm format:check` → clean.
 - `pnpm test:unit` → 172 files, 1628 tests passed (this includes the tests/i18n parity test).
 - No Rust changes.
+
+**Review**
+- Checked every acceptance criterion against 7d10409: the backend `SettingsLoadFailure` serialises as camelCase (`backupPath`), so the frontend type matches; `i18next` uses `escapeValue: false`, so paths are not HTML-escaped; the notice is mounted unconditionally in `App.tsx`; the MSW defaults and allowlist stay in parity.
+- Fixed: the backed-up warning's description is three lines (file, backup path, error), but the app `Toaster` styles descriptions without `white-space` handling, so the `\n` breaks collapsed into one run-on line. The toast now passes `descriptionClassName: "whitespace-pre-line"` (the blocked dialog already uses `whitespace-pre-line`), and the test asserts it.
+- Re-verified: the targeted tests (8/8), `pnpm typecheck`, `pnpm format:check` and `pnpm test:unit` (172 files, 1628 tests) all pass.

@@ -70,6 +70,7 @@ describe("SettingsLoadFailureNotice", () => {
       "/home/u/.cc-switch/settings.json.corrupt-20260101-000000",
     );
     expect(options.description).toContain("/home/u/.cc-switch/settings.json");
+    expect(options.descriptionClassName).toBe("whitespace-pre-line");
     expect(options.closeButton).toBe(true);
     expect(options.duration).toBe(Infinity);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
