@@ -398,9 +398,49 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/list_profiles`, () =>
     success({
       profiles: [],
-      currentIds: { claude: null, claudeDesktop: null, codex: null },
+      currentIds: {
+        claude: null,
+        claudeDesktop: null,
+        codex: null,
+        gemini: null,
+        grokbuild: null,
+        opencode: null,
+        openclaw: null,
+        hermes: null,
+      },
     }),
   ),
+  http.post(`${TAURI_ENDPOINT}/list_project_bindings`, () =>
+    success({ bindings: [], projectLevelScopes: ["claude", "gemini"] }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/bind_project_directory`, async ({ request }) => {
+    const body = await withJson<{
+      path: string;
+      profileId: string;
+      scopes?: string[];
+      projectLevel?: boolean;
+    }>(request);
+    return success({
+      path: body.path,
+      profileId: body.profileId,
+      scopes: body.scopes ?? [],
+      projectLevel: body.projectLevel ?? false,
+      managed: [],
+      createdAt: 0,
+      updatedAt: 0,
+    });
+  }),
+  http.post(`${TAURI_ENDPOINT}/unbind_project_directory`, () => success(true)),
+  http.post(`${TAURI_ENDPOINT}/detect_project`, async ({ request }) => {
+    const { path } = await withJson<{ path?: string }>(request);
+    return success({
+      directory: path ?? "",
+      gitRoot: null,
+      binding: null,
+      profileName: null,
+    });
+  }),
+  http.post(`${TAURI_ENDPOINT}/apply_project_binding`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/get_common_config_snippet`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/auth_get_status`, async ({ request }) => {
     const { authProvider } = await withJson<{ authProvider?: string }>(request);

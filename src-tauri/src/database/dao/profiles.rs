@@ -15,6 +15,13 @@ fn current_profile_key(scope: &str) -> String {
     format!("{CURRENT_PROFILE_ID_KEY_PREFIX}{scope}")
 }
 
+/// 每个 scope 的"首次应用项目前"基线快照 key（设备本地，见 backup.rs 的设备本地前缀）
+const PROFILE_BASELINE_KEY_PREFIX: &str = "profile_baseline_";
+
+fn profile_baseline_key(scope: &str) -> String {
+    format!("{PROFILE_BASELINE_KEY_PREFIX}{scope}")
+}
+
 /// 项目 Profile 记录（全应用共享，无所属分组）
 #[derive(Debug, Clone)]
 pub struct Profile {
@@ -121,9 +128,22 @@ impl Database {
 
     /// 设置某分组当前激活的项目 id；None 表示"不使用项目"（删除 key）
     pub fn set_current_profile_id(&self, scope: &str, id: Option<&str>) -> Result<(), AppError> {
-        let key = current_profile_key(scope);
-        match id {
-            Some(id) => self.set_setting(&key, id),
+        self.set_or_delete_setting(&current_profile_key(scope), id)
+    }
+
+    /// 读取某分组"首次应用项目前"的基线快照（ProfilePayload JSON 文本）
+    pub fn get_profile_baseline(&self, scope: &str) -> Result<Option<String>, AppError> {
+        self.get_setting(&profile_baseline_key(scope))
+    }
+
+    /// 写入/删除某分组的基线快照（设备本地，不随同步下载覆盖）
+    pub fn set_profile_baseline(&self, scope: &str, payload: Option<&str>) -> Result<(), AppError> {
+        self.set_or_delete_setting(&profile_baseline_key(scope), payload)
+    }
+
+    fn set_or_delete_setting(&self, key: &str, value: Option<&str>) -> Result<(), AppError> {
+        match value {
+            Some(value) => self.set_setting(key, value),
             None => {
                 let conn = lock_conn!(self.conn);
                 conn.execute("DELETE FROM settings WHERE key = ?1", params![key])
@@ -202,6 +222,27 @@ mod tests {
         // 重复清除应幂等
         db.set_current_profile_id("claude", None)?;
         assert_eq!(db.get_current_profile_id("claude")?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_profile_baseline_is_scoped_and_clearable() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        assert_eq!(db.get_profile_baseline("claude")?, None);
+
+        db.set_profile_baseline("claude", Some("{\"a\":1}"))?;
+        db.set_profile_baseline("gemini", Some("{}"))?;
+        assert_eq!(
+            db.get_profile_baseline("claude")?.as_deref(),
+            Some("{\"a\":1}")
+        );
+        assert_eq!(db.get_profile_baseline("gemini")?.as_deref(), Some("{}"));
+        // 基线与 current 标记互不干扰
+        assert_eq!(db.get_current_profile_id("claude")?, None);
+
+        db.set_profile_baseline("claude", None)?;
+        assert_eq!(db.get_profile_baseline("claude")?, None);
+        assert_eq!(db.get_profile_baseline("gemini")?.as_deref(), Some("{}"));
         Ok(())
     }
 }

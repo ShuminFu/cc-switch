@@ -10,6 +10,11 @@ export const APP_PROFILE_SCOPE: Partial<Record<AppId, ProfileScope>> = {
   claude: "claude",
   "claude-desktop": "claude-desktop",
   codex: "codex",
+  gemini: "gemini",
+  grokbuild: "grokbuild",
+  opencode: "opencode",
+  openclaw: "openclaw",
+  hermes: "hermes",
 };
 
 /** 分组内的 payload 槽位 key（后端 ProfileScope::apps 的前端镜像） */
@@ -17,6 +22,11 @@ const SCOPE_SLOT_KEYS: Record<ProfileScope, (keyof PerApp<unknown>)[]> = {
   claude: ["claude"],
   "claude-desktop": ["claude-desktop"],
   codex: ["codex"],
+  gemini: ["gemini"],
+  grokbuild: ["grokbuild"],
+  opencode: ["opencode"],
+  openclaw: ["openclaw"],
+  hermes: ["hermes"],
 };
 
 /**

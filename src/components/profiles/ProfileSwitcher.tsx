@@ -47,6 +47,11 @@ const CURRENT_ID_KEY: Record<ProfileScope, keyof CurrentProfileIds> = {
   claude: "claude",
   "claude-desktop": "claudeDesktop",
   codex: "codex",
+  gemini: "gemini",
+  grokbuild: "grokbuild",
+  opencode: "opencode",
+  openclaw: "openclaw",
+  hermes: "hermes",
 };
 
 interface ProfileSwitcherProps {
@@ -110,7 +115,10 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
             type="button"
             role="combobox"
             aria-expanded={open}
-            title={t(`profiles.switcherTooltip.${scope}`)}
+            title={t(`profiles.switcherTooltip.${scope}`, {
+              defaultValue:
+                "Projects: switch this app's saved configuration in one click",
+            })}
             className={cn(
               "inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium transition-colors",
               "hover:bg-black/5 dark:hover:bg-white/5",
@@ -216,7 +224,10 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
           <DialogHeader className="space-y-3 border-b-0 bg-transparent pb-0">
             <DialogTitle>{t("profiles.createFromCurrent")}</DialogTitle>
             <DialogDescription>
-              {t(`profiles.createDescription.${scope}`)}
+              {t(`profiles.createDescription.${scope}`, {
+                defaultValue:
+                  "Save the current configuration of this app as a project you can switch to later.",
+              })}
             </DialogDescription>
           </DialogHeader>
           <div className="px-6 pt-3">

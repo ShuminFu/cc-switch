@@ -86,12 +86,13 @@ const PROXY_CONFIG_TAKEOVER_FLAGS: &[&str] = &["enabled", "proxy_enabled", "live
 /// Device-local `settings` keys (exact match).
 const DEVICE_SETTINGS_KEYS: &[&str] = &[
     "global_proxy_url",
+    "project_bindings",
     "skills_ssot_migration_pending",
     "skills_ssot_migration_snapshot",
 ];
 
 /// Device-local `settings` key prefixes.
-const DEVICE_SETTINGS_KEY_PREFIXES: &[&str] = &["current_profile_id_"];
+const DEVICE_SETTINGS_KEY_PREFIXES: &[&str] = &["current_profile_id_", "profile_baseline_"];
 
 /// Built-in SQL functions an imported script may reference (expression
 /// indexes and column defaults in the app schema).
