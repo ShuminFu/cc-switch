@@ -9,7 +9,9 @@ use toml_edit::{DocumentMut, Item, TableLike};
 
 use crate::app_config::AppType;
 use crate::codex_config::{get_codex_auth_path, get_codex_config_path};
-use crate::config::{delete_file, get_claude_settings_path, read_json_file, write_json_file};
+use crate::config::{
+    delete_file, get_claude_settings_path, read_json_file, write_json_file, write_json_file_secret,
+};
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
@@ -1018,7 +1020,9 @@ pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Re
         AppType::Claude => {
             let path = get_claude_settings_path();
             let settings = sanitize_claude_settings_for_live(&provider.settings_config);
-            write_json_file(&path, &settings)?;
+            crate::config::backup_live_file("claude", &path);
+            // settings.json carries ANTHROPIC_AUTH_TOKEN: create it 0600 when new
+            write_json_file_secret(&path, &settings)?;
         }
         AppType::ClaudeDesktop => {
             return Err(AppError::localized(
@@ -1043,6 +1047,8 @@ pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Re
             // the proxy router (apiFormat meta/settings + TOML wire_api).
             let profile = crate::proxy::providers::resolve_codex_catalog_tool_profile(provider);
 
+            crate::config::backup_live_file("codex", &get_codex_auth_path());
+            crate::config::backup_live_file("codex", &get_codex_config_path());
             crate::codex_config::write_codex_provider_live_with_catalog(
                 &provider.settings_config,
                 provider.category.as_deref(),
@@ -1361,11 +1367,7 @@ pub fn read_live_settings(app_type: AppType) -> Result<Value, AppError> {
 
             // Read settings.json file (MCP config etc.)
             let settings_path = get_gemini_settings_path();
-            let config_obj = if settings_path.exists() {
-                read_json_file(&settings_path)?
-            } else {
-                json!({})
-            };
+            let config_obj = crate::gemini_config::read_gemini_settings_value(&settings_path)?;
 
             // Return complete structure: { "env": {...}, "config": {...} }
             Ok(json!({
@@ -1503,11 +1505,7 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
 
             // Read settings.json file (MCP config etc.)
             let settings_path = get_gemini_settings_path();
-            let config_obj = if settings_path.exists() {
-                read_json_file(&settings_path)?
-            } else {
-                json!({})
-            };
+            let config_obj = crate::gemini_config::read_gemini_settings_value(&settings_path)?;
 
             // Return complete structure: { "env": {...}, "config": {...} }
             json!({
@@ -1582,8 +1580,8 @@ pub fn should_import_default_config_on_startup(
 /// Write Gemini live configuration with authentication handling
 pub(crate) fn write_gemini_live(provider: &Provider) -> Result<(), AppError> {
     use crate::gemini_config::{
-        get_gemini_settings_path, json_to_env, validate_gemini_settings_strict,
-        write_gemini_env_atomic,
+        get_gemini_settings_path, json_to_env, read_gemini_settings_value,
+        validate_gemini_settings_strict, write_gemini_env_atomic,
     };
 
     // One-time auth type detection to avoid repeated detection
@@ -1600,12 +1598,9 @@ pub(crate) fn write_gemini_live(provider: &Provider) -> Result<(), AppError> {
 
     if let Some(config_value) = provider.settings_config.get("config") {
         if config_value.is_object() {
-            // Merge with existing settings to preserve mcpServers and other fields
-            let mut merged = if settings_path.exists() {
-                read_json_file::<Value>(&settings_path).unwrap_or_else(|_| json!({}))
-            } else {
-                json!({})
-            };
+            // Merge with existing settings to preserve mcpServers and other fields.
+            // An unparsable file aborts the switch instead of being replaced by `{}`.
+            let mut merged = read_gemini_settings_value(&settings_path)?;
 
             // Merge provider config into existing settings
             if let (Some(merged_obj), Some(config_obj)) =
@@ -1626,9 +1621,10 @@ pub(crate) fn write_gemini_live(provider: &Provider) -> Result<(), AppError> {
         // config is null: don't modify existing settings.json (preserve mcpServers etc.)
     }
 
-    // If no config specified or config is null, preserve existing file
-    if config_to_write.is_none() && settings_path.exists() {
-        config_to_write = Some(read_json_file(&settings_path)?);
+    // If no config specified or config is null, leave the existing file untouched
+    // (validate it up-front so the switch fails before anything is written).
+    if config_to_write.is_none() {
+        read_gemini_settings_value(&settings_path)?;
     }
 
     match auth_type {
@@ -1645,6 +1641,7 @@ pub(crate) fn write_gemini_live(provider: &Provider) -> Result<(), AppError> {
     }
 
     if let Some(config_value) = config_to_write {
+        crate::config::backup_live_file("gemini", &settings_path);
         write_json_file(&settings_path, &config_value)?;
     }
 

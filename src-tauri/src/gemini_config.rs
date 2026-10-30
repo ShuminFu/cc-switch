@@ -1,9 +1,9 @@
-use crate::config::{get_home_dir, write_text_file};
+use crate::config::{get_home_dir, write_text_file_secret};
 use crate::error::AppError;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 获取 Gemini 配置目录路径（支持设置覆盖）
 pub fn get_gemini_dir() -> PathBuf {
@@ -173,7 +173,8 @@ pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppE
     }
 
     let content = serialize_env_file(map);
-    write_text_file(&path, &content)?;
+    crate::config::backup_live_file("gemini", &path);
+    write_text_file_secret(&path, &content)?;
 
     // 设置文件权限为 600（仅所有者可读写）
     #[cfg(unix)]
@@ -282,42 +283,107 @@ pub fn get_gemini_settings_path() -> PathBuf {
     get_gemini_dir().join("settings.json")
 }
 
+/// 读取 Gemini `settings.json` 为 JSON 对象
+///
+/// - 文件不存在或内容为空：返回 `{}`；
+/// - Gemini CLI 允许 `//` 注释（strip-json-comments），严格 JSON 解析失败时回退到 JSON5；
+/// - 仍无法解析或顶层不是对象：返回错误，**绝不**以 `{}` 代替用户文件，
+///   避免切换供应商时清空 mcpServers、主题等用户设置。
+pub fn read_gemini_settings_value(path: &Path) -> Result<Value, AppError> {
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let raw = fs::read_to_string(path).map_err(|e| AppError::io(path, e))?;
+    let content = raw.trim_start_matches('\u{feff}');
+    if content.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let value = match serde_json::from_str::<Value>(content) {
+        Ok(v) => v,
+        Err(strict_err) => match json5::from_str::<Value>(content) {
+            Ok(v) => {
+                log::warn!(
+                    "Gemini settings.json 不是严格 JSON（可能含注释），已按 JSON5 解析: {}",
+                    path.display()
+                );
+                v
+            }
+            Err(_) => {
+                return Err(AppError::localized(
+                    "gemini.settings.unparsable",
+                    format!(
+                        "无法解析 Gemini 配置文件 {}: {strict_err}。请修复该文件后重试，文件未被修改。",
+                        path.display()
+                    ),
+                    format!(
+                        "Failed to parse Gemini settings file {}: {strict_err}. Fix the file and retry; it was not modified.",
+                        path.display()
+                    ),
+                ));
+            }
+        },
+    };
+
+    if !value.is_object() {
+        return Err(AppError::localized(
+            "gemini.settings.not_object",
+            format!(
+                "Gemini 配置文件 {} 的顶层必须是 JSON 对象，文件未被修改。",
+                path.display()
+            ),
+            format!(
+                "Gemini settings file {} must contain a JSON object at the top level; it was not modified.",
+                path.display()
+            ),
+        ));
+    }
+    Ok(value)
+}
+
 /// 更新 Gemini 目录 settings.json 中的 security.auth.selectedType 字段
 ///
 /// 此函数会：
-/// 1. 读取现有的 settings.json（如果存在）
+/// 1. 读取现有的 settings.json（如果存在；无法解析时返回错误且不修改文件）
 /// 2. 只更新 `security.auth.selectedType` 字段，保留其他所有字段
-/// 3. 原子性写入文件
+/// 3. 备份旧文件后原子性写入（值未变化时不写入）
 ///
 /// # 参数
 /// - `selected_type`: 要设置的 selectedType 值（如 "gemini-api-key" 或 "oauth-personal"）
 fn update_selected_type(selected_type: &str) -> Result<(), AppError> {
-    let settings_path = get_gemini_settings_path();
+    update_selected_type_at(&get_gemini_settings_path(), selected_type, true)
+}
 
-    // 确保目录存在
-    if let Some(parent) = settings_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+fn update_selected_type_at(
+    settings_path: &Path,
+    selected_type: &str,
+    backup: bool,
+) -> Result<(), AppError> {
+    let mut settings_content = read_gemini_settings_value(settings_path)?;
+
+    let current = settings_content
+        .pointer("/security/auth/selectedType")
+        .and_then(|v| v.as_str());
+    if settings_path.exists() && current == Some(selected_type) {
+        return Ok(());
     }
-
-    // 读取现有的 settings.json（如果存在）
-    let mut settings_content = if settings_path.exists() {
-        let content =
-            fs::read_to_string(&settings_path).map_err(|e| AppError::io(&settings_path, e))?;
-        serde_json::from_str::<Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
 
     // 只更新 security.auth.selectedType 字段
     if let Some(obj) = settings_content.as_object_mut() {
         let security = obj
             .entry("security")
             .or_insert_with(|| serde_json::json!({}));
+        if !security.is_object() {
+            *security = serde_json::json!({});
+        }
 
         if let Some(security_obj) = security.as_object_mut() {
             let auth = security_obj
                 .entry("auth")
                 .or_insert_with(|| serde_json::json!({}));
+            if !auth.is_object() {
+                *auth = serde_json::json!({});
+            }
 
             if let Some(auth_obj) = auth.as_object_mut() {
                 auth_obj.insert(
@@ -328,8 +394,10 @@ fn update_selected_type(selected_type: &str) -> Result<(), AppError> {
         }
     }
 
-    // 写入文件
-    crate::config::write_json_file(&settings_path, &settings_content)?;
+    if backup {
+        crate::config::backup_live_file("gemini", settings_path);
+    }
+    crate::config::write_json_file(settings_path, &settings_content)?;
 
     Ok(())
 }
@@ -373,6 +441,67 @@ pub fn write_google_oauth_settings() -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_gemini_settings_value_rejects_unparsable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{").unwrap();
+
+        let err = read_gemini_settings_value(&path).unwrap_err();
+        assert!(err.to_string().contains("settings.json"), "{err}");
+    }
+
+    #[test]
+    fn read_gemini_settings_value_accepts_comments_and_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert_eq!(
+            read_gemini_settings_value(&path).unwrap(),
+            serde_json::json!({})
+        );
+
+        fs::write(&path, "// comment\n{ \"mcpServers\": { \"a\": {} } }").unwrap();
+        let value = read_gemini_settings_value(&path).unwrap();
+        assert!(value.get("mcpServers").is_some());
+
+        fs::write(&path, "[1, 2]").unwrap();
+        assert!(read_gemini_settings_value(&path).is_err());
+    }
+
+    #[test]
+    fn update_selected_type_keeps_unparsable_file_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{ not json").unwrap();
+
+        assert!(update_selected_type_at(&path, "gemini-api-key", false).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
+    }
+
+    #[test]
+    fn update_selected_type_preserves_other_keys_and_skips_noop_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            "// keep\n{ \"mcpServers\": { \"x\": { \"command\": \"x\" } }, \"theme\": \"dark\" }",
+        )
+        .unwrap();
+
+        update_selected_type_at(&path, "gemini-api-key", false).unwrap();
+        let value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value["theme"], "dark");
+        assert_eq!(value["mcpServers"]["x"]["command"], "x");
+        assert_eq!(value["security"]["auth"]["selectedType"], "gemini-api-key");
+
+        // 值未变化时不重写文件
+        let before = fs::read_to_string(&path).unwrap();
+        let commented = format!("// user note\n{before}");
+        fs::write(&path, &commented).unwrap();
+        update_selected_type_at(&path, "gemini-api-key", false).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), commented);
+    }
 
     #[test]
     fn test_parse_env_file() {
