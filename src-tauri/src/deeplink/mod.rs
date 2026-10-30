@@ -46,7 +46,10 @@ pub struct DeepLinkImportRequest {
     /// Resource name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Whether to enable after import (default: false)
+    /// Whether to enable after import (default: false). For providers this makes
+    /// the imported provider current; for MCP it writes the servers into the
+    /// target apps' live configs. The confirmation dialog overrides it with the
+    /// user's explicit choice.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 
@@ -114,7 +117,8 @@ pub struct DeepLinkImportRequest {
     pub config_url: Option<String>,
 
     // ============ Usage script fields (v3.9+) ============
-    /// Whether to enable usage query (default: true if usage_script is provided)
+    /// Whether to enable usage query (default: false; only an explicit `true`
+    /// enables a usage script imported from a deep link)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_enabled: Option<bool>,
     /// Base64 encoded usage query script code

@@ -19,7 +19,12 @@ use std::str::FromStr;
 /// 2. Merges config file if provided (v3.8+)
 /// 3. Converts it to a Provider structure
 /// 4. Delegates to ProviderService for actual import
-/// 5. Optionally sets as current provider if enabled=true
+/// 5. Sets it as the current provider only when `enabled == Some(true)`.
+///
+/// Trust model: the request comes from the deep-link confirmation dialog,
+/// which overrides `enabled` / `usage_enabled` with the user's explicit
+/// choices (both default to off), so a link alone can never make an
+/// imported endpoint the current provider or enable its usage script.
 pub fn import_provider_from_deeplink(
     state: &AppState,
     request: DeepLinkImportRequest,
@@ -127,8 +132,8 @@ pub fn import_provider_from_deeplink(
         }
     }
 
-    // If enabled=true, set as current provider
-    if merged_request.enabled.unwrap_or(false) {
+    // Only an explicit `enabled == Some(true)` switches the current provider.
+    if merged_request.enabled == Some(true) {
         ProviderService::switch(state, app_type.clone(), &provider_id)?;
         log::info!("Provider '{provider_id}' set as current for {app_type:?}");
     }
@@ -251,8 +256,10 @@ fn build_provider_meta(request: &DeepLinkImportRequest) -> Result<Option<Provide
         String::new()
     };
 
-    // Determine enabled state: explicit param > has code > false
-    let enabled = request.usage_enabled.unwrap_or(!code.is_empty());
+    // Usage scripts are code that runs inside CC Switch. A script arriving via a
+    // deep link is imported disabled unless the request explicitly enables it
+    // (the confirmation dialog sets `usage_enabled` from an explicit opt-in).
+    let enabled = request.usage_enabled == Some(true);
 
     let usage_script = UsageScript {
         enabled,
