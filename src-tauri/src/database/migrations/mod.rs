@@ -14,6 +14,7 @@ mod baseline;
 mod legacy;
 mod v016;
 mod v017;
+mod v018;
 
 use super::{Database, SCHEMA_VERSION};
 use crate::error::AppError;
@@ -163,6 +164,13 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
             "mcp_server_apps / skill_apps join tables and proxy_config without the app_type CHECK",
         db_compat: DbCompatImpact::Additive,
         up: |conn, _| v017::apply(conn),
+    },
+    Migration {
+        version: 18,
+        name:
+            "model_pricing provenance (source, catalog_version, updated_at) and deleted tombstones",
+        db_compat: DbCompatImpact::Additive,
+        up: |conn, _| v018::apply(conn),
     },
 ];
 

@@ -786,6 +786,92 @@ fn newer_schema_version_is_rejected() {
     );
 }
 
+/// 从 v17 升级（CCS-158）：改过的内置定价与自定义定价标为用户行，未改过的内置行
+/// （含仍等于旧价的行）跟随目录；settings 中 P1 的删除标记变成墓碑，重启后保持删除。
+#[test]
+fn pricing_provenance_survives_upgrade_from_v17() {
+    let _env = TestEnv::new();
+    let settings: AppSettings = serde_json::from_value(serde_json::json!({
+        "localMigrations": { "deletedBuiltinModelPricing": ["claude-sonnet-5"] }
+    }))
+    .expect("settings with a P1 pricing deletion");
+    update_settings(settings).expect("store P1 pricing deletion");
+
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    {
+        let conn = open(&path);
+        load_fixture(&conn, &fixtures_dir().join("db/v17.sql"));
+        conn.execute_batch(
+            "DELETE FROM model_pricing;
+             INSERT INTO model_pricing VALUES
+                ('claude-opus-4-7', 'Claude Opus 4.7', '5', '25', '0.50', '6.25'),
+                ('gpt-5.6-sol', 'GPT-5.6 Sol', '5', '30', '0.50', '0'),
+                ('claude-opus-4-8', 'Claude Opus 4.8', '99', '25', '0.50', '6.25'),
+                ('my-custom-model', 'Custom', '1', '2', '0', '0');",
+        )
+        .expect("seed v17 pricing rows");
+    }
+
+    type PricingRow = (String, i64, String, String);
+    let pricing = |id: &str| -> Option<PricingRow> {
+        open(&db_path())
+            .query_row(
+                "SELECT source, deleted, input_cost_per_million, cache_creation_cost_per_million
+                 FROM model_pricing WHERE model_id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .ok()
+    };
+    let row = |source: &str, deleted: i64, input: &str, cache_creation: &str| {
+        Some((
+            source.to_string(),
+            deleted,
+            input.to_string(),
+            cache_creation.to_string(),
+        ))
+    };
+
+    for label in ["upgrade", "restart"] {
+        drop(Database::init().unwrap_or_else(|e| panic!("{label}: init failed: {e}")));
+        assert_eq!(user_version(&open(&path)), SCHEMA_VERSION);
+        assert_eq!(
+            pricing("claude-opus-4-7"),
+            row("builtin", 0, "5", "6.25"),
+            "{label}: untouched built-in"
+        );
+        assert_eq!(
+            pricing("gpt-5.6-sol"),
+            row("builtin", 0, "5", "6.25"),
+            "{label}: a row at a superseded built-in price is upgraded"
+        );
+        assert_eq!(
+            pricing("claude-opus-4-8"),
+            row("user", 0, "99", "6.25"),
+            "{label}: an edited built-in is user-owned and kept"
+        );
+        assert_eq!(
+            pricing("my-custom-model"),
+            row("user", 0, "1", "0"),
+            "{label}: custom pricing is user-owned"
+        );
+        let deleted = pricing("claude-sonnet-5").expect("tombstone row");
+        assert_eq!(
+            (deleted.0.as_str(), deleted.1),
+            ("user", 1),
+            "{label}: the P1 deletion becomes a tombstone"
+        );
+        // 目录里的新模型照常追加
+        assert_eq!(
+            pricing("claude-haiku-4-5-20251001").map(|r| r.0),
+            Some("builtin".to_string()),
+            "{label}: new catalog rows are seeded"
+        );
+    }
+    assert_second_init_is_noop("pricing provenance");
+}
+
 // ---------------------------------------------------------------------------
 // 旧版 config.json → SQLite
 // ---------------------------------------------------------------------------

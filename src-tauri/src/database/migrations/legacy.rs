@@ -114,7 +114,7 @@ impl Database {
         // 清空并重新插入模型定价
         conn.execute("DELETE FROM model_pricing", [])
             .map_err(|e| AppError::Database(format!("清空模型定价失败: {e}")))?;
-        crate::pricing::catalog::seed(conn)?;
+        crate::pricing::catalog::legacy_seed(conn)?;
 
         // 重构 skills 表（添加 app_type 字段）
         Self::migrate_skills_table(conn)?;
@@ -808,7 +808,7 @@ impl Database {
         .map_err(|e| AppError::Database(format!("创建 model_pricing 表失败: {e}")))?;
         conn.execute("DELETE FROM model_pricing", [])
             .map_err(|e| AppError::Database(format!("清空模型定价失败: {e}")))?;
-        crate::pricing::catalog::seed(conn)?;
+        crate::pricing::catalog::legacy_seed(conn)?;
         log::info!("v8 -> v9 迁移完成：已刷新全部模型定价数据");
         Ok(())
     }

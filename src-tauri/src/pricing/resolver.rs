@@ -56,7 +56,7 @@ fn query_model_pricing_exact(
         "SELECT input_cost_per_million, output_cost_per_million,
                 cache_read_cost_per_million, cache_creation_cost_per_million
          FROM model_pricing
-         WHERE model_id = ?1",
+         WHERE model_id = ?1 AND deleted = 0",
         [model_id],
         |row| {
             Ok((
@@ -80,7 +80,7 @@ fn query_model_pricing_prefix(
         "SELECT input_cost_per_million, output_cost_per_million,
                 cache_read_cost_per_million, cache_creation_cost_per_million
          FROM model_pricing
-         WHERE model_id LIKE ?1
+         WHERE model_id LIKE ?1 AND deleted = 0
          ORDER BY LENGTH(model_id) ASC
          LIMIT 1",
         [pattern],

@@ -742,12 +742,14 @@ fn model_pricing_seed_repairs_known_outdated_builtin_prices() {
             [],
         )
         .expect("restore old DeepSeek price");
+        // 用户编辑（与 save_user_model_pricing 一样把行标为 user）
         conn.execute(
             "UPDATE model_pricing
              SET input_cost_per_million = '9',
                  output_cost_per_million = '9',
                  cache_read_cost_per_million = '9',
-                 cache_creation_cost_per_million = '0'
+                 cache_creation_cost_per_million = '0',
+                 source = 'user'
              WHERE model_id = 'glm-5.1'",
             [],
         )
@@ -1241,7 +1243,7 @@ fn restore_backup_over_newer_db_downgrades_and_keeps_newer_copy() {
 fn model_pricing_ids(db: &Database) -> Vec<String> {
     let conn = db.conn.lock().expect("lock conn");
     let mut stmt = conn
-        .prepare("SELECT model_id FROM model_pricing")
+        .prepare("SELECT model_id FROM model_pricing WHERE deleted = 0")
         .expect("prepare pricing query");
     stmt.query_map([], |row| row.get(0))
         .expect("query pricing")
@@ -1295,7 +1297,13 @@ fn deleted_builtin_model_pricing_stays_deleted_after_restart() {
         );
         assert!(ids.iter().any(|id| id == "claude-opus-4-8"));
 
-        // 清除删除标记（用户重新添加同名定价时）后，下次启动恢复内置定价
+        // 目录更新（新版本给这一行换了价格）也不会恢复它
+        let next = crate::pricing::catalog::next_catalog_for_test(&[builtin]);
+        crate::pricing::catalog::sync_with(&db.conn.lock().expect("lock conn"), &next, &[])
+            .expect("apply catalog update");
+        assert!(!model_pricing_ids(&db).iter().any(|id| id == builtin));
+
+        // 仅清除 settings 中的删除标记不会恢复它：墓碑在数据库里
         crate::settings::set_builtin_model_pricing_deleted(builtin, false)
             .expect("clear deleted marker");
     }
@@ -1303,7 +1311,37 @@ fn deleted_builtin_model_pricing_stays_deleted_after_restart() {
     {
         let _settings = crate::settings::scoped_settings_store();
         let db = Database::init().expect("re-init database");
+        assert!(!model_pricing_ids(&db).iter().any(|id| id == builtin));
+
+        // 用户重新添加同名定价：覆盖墓碑，行变为用户行
+        db.save_user_model_pricing(
+            builtin,
+            "Mine",
+            crate::pricing::catalog::CatalogPrice {
+                input: "1".into(),
+                output: "2".into(),
+                cache_read: "0".into(),
+                cache_creation: "0".into(),
+            },
+        )
+        .expect("re-add pricing");
+    }
+
+    {
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::init().expect("re-init database");
         assert!(model_pricing_ids(&db).iter().any(|id| id == builtin));
         assert!(crate::settings::deleted_builtin_model_pricing_ids().is_empty());
+        let name: String = db
+            .conn
+            .lock()
+            .expect("lock conn")
+            .query_row(
+                "SELECT display_name FROM model_pricing WHERE model_id = ?1",
+                [builtin],
+                |row| row.get(0),
+            )
+            .expect("query re-added pricing");
+        assert_eq!(name, "Mine", "a re-added row is user-owned");
     }
 }

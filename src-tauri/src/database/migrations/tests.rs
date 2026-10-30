@@ -475,3 +475,53 @@ fn migrate_v16_to_v17_backfill_tolerates_missing_legacy_columns() -> Result<(), 
     assert!(Database::table_exists(&conn, "skill_apps")?);
     Ok(())
 }
+
+/// v18：未改过的内置行（当前价或旧价）标为 builtin，改过价格的内置行与自定义模型标为 user
+#[test]
+fn migrate_v17_to_v18_classifies_pricing_provenance() -> Result<(), AppError> {
+    let conn = Connection::open_in_memory()?;
+    Database::apply_schema_migrations_up_to(&conn, 17)?;
+    conn.execute_batch(
+        "DELETE FROM model_pricing WHERE model_id = 'claude-sonnet-5';
+         UPDATE model_pricing SET cache_creation_cost_per_million = '0'
+            WHERE model_id = 'gpt-5.6-sol';
+         UPDATE model_pricing SET input_cost_per_million = '99'
+            WHERE model_id = 'claude-opus-4-8';
+         UPDATE model_pricing SET display_name = 'Renamed only'
+            WHERE model_id = 'claude-haiku-4-5-20251001';
+         INSERT INTO model_pricing (model_id, display_name, input_cost_per_million,
+            output_cost_per_million) VALUES ('my-custom-model', 'Custom', '1', '2');",
+    )?;
+
+    Database::apply_schema_migrations_on_conn(&conn)?;
+
+    let row = |id: &str| -> Result<(String, Option<i64>, Option<i64>, i64), AppError> {
+        Ok(conn.query_row(
+            "SELECT source, catalog_version, updated_at, deleted
+             FROM model_pricing WHERE model_id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )?)
+    };
+    let version = i64::from(crate::pricing::catalog::catalog().version);
+    assert_eq!(
+        row("claude-opus-4-7")?,
+        ("builtin".into(), Some(version), None, 0)
+    );
+    // 只看价格：仅改了显示名的行仍跟随目录
+    assert_eq!(
+        row("claude-haiku-4-5-20251001")?,
+        ("builtin".into(), Some(version), None, 0)
+    );
+    // 等于目录旧价：未改过，但不属于任何目录版本
+    assert_eq!(row("gpt-5.6-sol")?, ("builtin".into(), None, None, 0));
+    assert_eq!(row("claude-opus-4-8")?, ("user".into(), None, None, 0));
+    assert_eq!(row("my-custom-model")?, ("user".into(), None, None, 0));
+    let missing: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM model_pricing WHERE model_id = 'claude-sonnet-5'",
+        [],
+        |r| r.get(0),
+    )?;
+    assert_eq!(missing, 0, "the migration itself writes no rows");
+    Ok(())
+}

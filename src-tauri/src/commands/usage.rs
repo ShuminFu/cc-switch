@@ -174,6 +174,7 @@ pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingI
         "SELECT model_id, display_name, input_cost_per_million, output_cost_per_million,
                 cache_read_cost_per_million, cache_creation_cost_per_million
          FROM model_pricing
+         WHERE deleted = 0
          ORDER BY display_name",
     )?;
 
@@ -252,27 +253,16 @@ pub fn update_model_pricing(
         }
     }
 
-    // 用户重新添加被删除过的内置定价：清除删除标记
-    crate::settings::set_builtin_model_pricing_deleted(&model_id, false)?;
-
-    {
-        let conn = crate::database::lock_conn!(db.conn);
-        conn.execute(
-            "INSERT OR REPLACE INTO model_pricing (
-                model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![
-                model_id,
-                display_name,
-                input_cost.trim(),
-                output_cost.trim(),
-                cache_read_cost.trim(),
-                cache_creation_cost.trim()
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("更新模型定价失败: {e}")))?;
-    }
+    db.save_user_model_pricing(
+        &model_id,
+        &display_name,
+        crate::pricing::catalog::CatalogPrice {
+            input: input_cost.trim().to_string(),
+            output: output_cost.trim().to_string(),
+            cache_read: cache_read_cost.trim().to_string(),
+            cache_creation: cache_creation_cost.trim().to_string(),
+        },
+    )?;
 
     if let Err(e) = db.backfill_missing_usage_costs_for_model(&model_id) {
         log::warn!("模型定价更新后回填历史用量成本失败 (model_id={model_id}): {e}");

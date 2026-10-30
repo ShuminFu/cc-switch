@@ -448,8 +448,9 @@ pub struct LocalMigrations {
     /// 这样重新开启能把"关闭期间"落入 openai 桶的官方会话补迁进来。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_official_history_unify_v1: Option<CodexOfficialHistoryUnifyMigration>,
-    /// 用户删除过的内置模型定价 ID。启动时 seed 内置定价会跳过这些 ID，
-    /// 避免被删除的内置定价在下次启动时又被插回来；用户重新添加同名定价时移除。
+    /// 用户删除过的内置模型定价 ID（P1 的删除标记）。v18 起删除以 `model_pricing`
+    /// 墓碑为准，启动同步时这些 ID 会并入墓碑；这里仍双写，供旧版本与旧快照使用。
+    /// 用户重新添加同名定价时移除。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deleted_builtin_model_pricing: Vec<String>,
 }

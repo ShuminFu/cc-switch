@@ -17,23 +17,57 @@ impl Database {
     }
 
     pub(crate) fn ensure_model_pricing_seeded_on_conn(conn: &Connection) -> Result<(), AppError> {
-        // 每次启动都执行 INSERT OR IGNORE，增量追加新模型（跳过用户删除过的内置定价）；
-        // 仅修复仍等于旧内置值的定价。
+        // 每次启动都执行 INSERT OR IGNORE，增量追加新模型（墓碑行不会被恢复）；
+        // 只把来源为 builtin 的行更新到当前目录价，用户改过的行不动。
         crate::pricing::catalog::sync(conn)
     }
 
-    /// 删除模型定价。内置定价会先在 settings 中记录删除标记，
-    /// 确保之后的启动 seed 不会把它恢复。
+    /// 删除模型定价。内置定价写墓碑（`deleted = 1`），之后的目录同步与重启都不会恢复它；
+    /// 同时仍在 settings 中记录删除标记，供只认识该标记的旧版本使用。自定义定价直接删除。
     pub fn delete_model_pricing(&self, model_id: &str) -> Result<(), AppError> {
         if crate::pricing::catalog::is_builtin(model_id) {
             crate::settings::set_builtin_model_pricing_deleted(model_id, true)?;
         }
         let conn = lock_conn!(self.conn);
+        if crate::pricing::catalog::tombstone(&conn, model_id)? {
+            return Ok(());
+        }
         conn.execute(
             "DELETE FROM model_pricing WHERE model_id = ?1",
             params![model_id],
         )
         .map_err(|e| AppError::Database(format!("删除模型定价失败: {e}")))?;
+        Ok(())
+    }
+
+    /// 保存用户新增或编辑的模型定价：行标记为 `user`，之后的目录更新不再覆盖；
+    /// 覆盖同名墓碑（用户重新添加被删除过的内置定价），并清除 settings 中的删除标记。
+    pub fn save_user_model_pricing(
+        &self,
+        model_id: &str,
+        display_name: &str,
+        price: crate::pricing::catalog::CatalogPrice,
+    ) -> Result<(), AppError> {
+        crate::settings::set_builtin_model_pricing_deleted(model_id, false)?;
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "INSERT OR REPLACE INTO model_pricing (
+                model_id, display_name, input_cost_per_million, output_cost_per_million,
+                cache_read_cost_per_million, cache_creation_cost_per_million,
+                source, catalog_version, updated_at, deleted
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, 0)",
+            params![
+                model_id,
+                display_name,
+                price.input,
+                price.output,
+                price.cache_read,
+                price.cache_creation,
+                crate::pricing::catalog::SOURCE_USER,
+                chrono::Utc::now().timestamp()
+            ],
+        )
+        .map_err(|e| AppError::Database(format!("更新模型定价失败: {e}")))?;
         Ok(())
     }
 
