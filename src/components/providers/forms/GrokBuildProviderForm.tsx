@@ -393,6 +393,7 @@ export function GrokBuildProviderForm({
     <Form {...form}>
       <form
         id="provider-form"
+        noValidate
         onSubmit={form.handleSubmit(handleSubmit)}
         className="space-y-6"
       >

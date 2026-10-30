@@ -182,3 +182,35 @@ describe("common-config first-run notice (FE-PROV-27)", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 });
+
+describe("soft validation is not short-circuited by native validation (FE-PROV-07)", () => {
+  it("opens the save-anyway dialog for an empty template value", async () => {
+    const onSubmit = vi.fn();
+    renderWithClient(
+      <ProviderForm
+        appId="claude"
+        submitLabel="add"
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /AWS Bedrock \(AKSK\)/ }),
+    );
+    const templateInput = (await screen.findByLabelText(
+      "Access Key ID",
+    )) as HTMLInputElement;
+    expect(templateInput.required).toBe(false);
+    expect(templateInput).toHaveAttribute("aria-required", "true");
+    const formElement = document.getElementById(
+      "provider-form",
+    ) as HTMLFormElement;
+    expect(formElement.noValidate).toBe(true);
+
+    fireEvent.submit(formElement);
+    expect(
+      await screen.findByRole("button", { name: "仍要保存" }),
+    ).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
