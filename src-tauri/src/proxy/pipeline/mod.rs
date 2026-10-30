@@ -11,6 +11,7 @@
 //! - [`transport`]：reqwest / raw hyper 发送；
 //! - [`validate`]：2xx 语义校验、流式首包预读与错误体读取；
 //! - [`classify`]：失败分类与日志；
+//! - [`rate_limit`]：429 / 529 的 `Retry-After` 解析（provider 冷却）；
 //! - [`recovery`]：同一 provider 上的恢复策略；
 //! - [`failover`]：故障转移记账。
 
@@ -20,6 +21,7 @@ pub(crate) mod copilot;
 pub(crate) mod endpoint;
 pub(crate) mod failover;
 pub(crate) mod headers;
+pub(crate) mod rate_limit;
 pub(crate) mod recovery;
 pub(crate) mod request_builder;
 pub(crate) mod transport;

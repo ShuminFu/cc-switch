@@ -29,7 +29,7 @@ impl RequestForwarder {
             headers,
             extensions,
         };
-        self.forward(&request, provider, adapter).await
+        self.forward(&request, provider, adapter, &mut None).await
     }
 }
 

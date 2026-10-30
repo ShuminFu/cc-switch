@@ -19,6 +19,7 @@ use super::{
         endpoint::UpstreamTarget,
         failover::{settle_failure, AttemptFailure, AttemptFailureInput, AttemptRecorder},
         headers::{self as header_policy, HeaderPolicy, HeaderPolicyInput},
+        rate_limit,
         recovery::{RecoveryDecision, RecoveryInput, RecoveryState},
         request_builder::{self, BodyStages, RouteFlags},
         transport::{self, TransportTimeouts, UpstreamRequest},
@@ -39,6 +40,7 @@ use crate::{app_config::AppType, provider::Provider};
 use http::Extensions;
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 
 pub struct ForwardResult {
@@ -261,7 +263,7 @@ impl RequestForwarder {
                 trace.begin_attempt(&provider.id, &provider.name);
             }
 
-            let (outcome, decision, recovery) = self
+            let (outcome, decision, recovery, retry_after) = self
                 .send_with_recovery(request, provider, adapter.as_ref())
                 .await;
             if let Some(trace) = &self.req.trace {
@@ -304,6 +306,7 @@ impl RequestForwarder {
                 error,
                 decision,
                 recovery: &recovery,
+                retry_after,
                 provider,
                 attempted_providers,
                 total_providers: providers.len(),
@@ -346,6 +349,8 @@ impl RequestForwarder {
 
     /// 对同一 provider 发送请求：每个 Provider 只发送原始请求一次；上游拒绝请求体时，
     /// 命中的恢复策略改写请求体后对同一 Provider 再发送（每个策略最多一次，不计入熔断器）
+    ///
+    /// 第四项是最后一次发送收到的限流 `Retry-After`（429/529 且带该头时才有）。
     async fn send_with_recovery(
         &self,
         request: &ClientRequest<'_>,
@@ -355,6 +360,7 @@ impl RequestForwarder {
         Result<ForwardSuccess, ProxyError>,
         RecoveryDecision,
         RecoveryState,
+        Option<Duration>,
     ) {
         // PRE-SEND 优化器：每个 provider 独立决定是否优化
         let mut provider_body =
@@ -374,8 +380,12 @@ impl RequestForwarder {
                 body: &provider_body,
                 ..*request
             };
-            match self.forward(&attempt_request, provider, adapter).await {
-                Ok(success) => return (Ok(success), RecoveryDecision::Unhandled, recovery),
+            let mut retry_after = None;
+            match self
+                .forward(&attempt_request, provider, adapter, &mut retry_after)
+                .await
+            {
+                Ok(success) => return (Ok(success), RecoveryDecision::Unhandled, recovery, None),
                 Err(e) => {
                     let decision = recovery.recover(
                         &RecoveryInput {
@@ -391,7 +401,7 @@ impl RequestForwarder {
                     if matches!(decision, RecoveryDecision::Retry(_)) {
                         continue;
                     }
-                    return (Err(e), decision, recovery);
+                    return (Err(e), decision, recovery, retry_after);
                 }
             }
         }
@@ -401,11 +411,13 @@ impl RequestForwarder {
     ///
     /// 成功时返回 `(response, plan, outbound_model)`，其中 `plan` 是本次尝试的路由计划，
     /// `outbound_model` 是最终发往上游的模型名（所有映射/改写之后）。
+    /// 上游返回 429/529 且带 `Retry-After` 时写入 `retry_after`。
     async fn forward(
         &self,
         request: &ClientRequest<'_>,
         provider: &Provider,
         adapter: &dyn ProviderAdapter,
+        retry_after: &mut Option<Duration>,
     ) -> Result<ForwardSuccess, ProxyError> {
         let app_handle = self.shared.app_handle.as_ref();
         let mut base_url = adapter.extract_base_url(provider)?;
@@ -542,6 +554,11 @@ impl RequestForwarder {
             },
         )
         .await?;
+        *retry_after = rate_limit::rate_limit_retry_after(
+            response.status().as_u16(),
+            response.headers(),
+            SystemTime::now(),
+        );
 
         let check =
             SuccessCheck::for_route(flags.codex_responses_to_anthropic, plan.claude_api_format);

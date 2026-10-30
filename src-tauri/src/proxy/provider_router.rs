@@ -15,7 +15,8 @@ use crate::proxy::runtime_config::RuntimeConfigStore;
 use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// 供应商路由器
@@ -26,6 +27,8 @@ pub struct ProviderRouter {
     runtime_config: Arc<RuntimeConfigStore>,
     /// 熔断器管理器 - 每个（应用, 供应商）一个熔断器
     circuit_breakers: Arc<RwLock<HashMap<BreakerKey, Arc<CircuitBreaker>>>>,
+    /// 限流冷却截止时间 - 上游 429/529 带 Retry-After 时写入，与熔断器相互独立
+    cooldowns: Arc<Mutex<HashMap<BreakerKey, Instant>>>,
 }
 
 impl ProviderRouter {
@@ -42,6 +45,7 @@ impl ProviderRouter {
             db,
             runtime_config,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
+            cooldowns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -49,11 +53,13 @@ impl ProviderRouter {
     ///
     /// 返回按优先级排序的可用供应商列表：
     /// - 故障转移关闭时：仅返回当前供应商
-    /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）
+    /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）；
+    ///   处于限流冷却中的 provider 被跳过，只有其余 provider 都不可用时才按队列顺序兜底返回
     pub async fn select_providers(&self, app_type: &str) -> Result<Vec<Provider>, AppError> {
         let mut result = Vec::new();
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
+        let mut cooling_down = Vec::new();
 
         // 检查该应用的自动故障转移开关是否开启（proxy_config，经运行时配置快照）
         let auto_failover_enabled = match self.runtime_config.app_proxy_config(app_type).await {
@@ -79,11 +85,21 @@ impl ProviderRouter {
                 let circuit_key = BreakerKey::new(app_type, provider.id.as_str());
                 let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
-                if breaker.is_available().await {
-                    result.push(provider);
-                } else {
+                if !breaker.is_available().await {
                     circuit_open_count += 1;
+                } else if self.cooldown_remaining(&provider.id, app_type).is_some() {
+                    cooling_down.push(provider);
+                } else {
+                    result.push(provider);
                 }
+            }
+
+            if result.is_empty() && !cooling_down.is_empty() {
+                log::info!(
+                    "[{app_type}] 可用供应商均处于限流冷却中，按队列顺序继续尝试 ({} 个)",
+                    cooling_down.len()
+                );
+                result = cooling_down;
             }
         } else {
             // 故障转移关闭：仅使用当前供应商，跳过熔断器检查
@@ -241,6 +257,37 @@ impl ProviderRouter {
                 fallback
             }
         }
+    }
+
+    /// 让 provider 进入限流冷却（上游 429/529 的 Retry-After）
+    ///
+    /// 冷却只影响 [`Self::select_providers`] 的选择顺序，不改变熔断器状态；
+    /// 已有更晚的冷却截止时间时保留较晚者。`duration` 为零时不做任何事。
+    pub fn start_cooldown(&self, provider_id: &str, app_type: &str, duration: Duration) {
+        if duration.is_zero() {
+            return;
+        }
+        let until = Instant::now() + duration;
+        let mut cooldowns = self.cooldowns.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = cooldowns
+            .entry(BreakerKey::new(app_type, provider_id))
+            .or_insert(until);
+        if *entry < until {
+            *entry = until;
+        }
+    }
+
+    /// provider 剩余的限流冷却时长（未在冷却中时返回 `None`，并清理已过期的记录）
+    pub fn cooldown_remaining(&self, provider_id: &str, app_type: &str) -> Option<Duration> {
+        let key = BreakerKey::new(app_type, provider_id);
+        let mut cooldowns = self.cooldowns.lock().unwrap_or_else(|e| e.into_inner());
+        let until = *cooldowns.get(&key)?;
+        let remaining = until.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            cooldowns.remove(&key);
+            return None;
+        }
+        Some(remaining)
     }
 
     /// 重置熔断器（手动恢复）
@@ -540,6 +587,59 @@ mod tests {
         // 故障转移开启时：仅按队列顺序选择（忽略当前供应商）
         assert_eq!(providers[0].id, "b");
         assert_eq!(providers[1].id, "a");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_cooldown_skips_provider_until_it_expires() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        for id in ["a", "b"] {
+            let provider = Provider::with_id(id.to_string(), id.to_string(), json!({}), None);
+            db.save_provider("claude", &provider).unwrap();
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        let ids = |providers: Vec<Provider>| -> Vec<String> {
+            providers.into_iter().map(|p| p.id).collect()
+        };
+
+        // 零时长不进入冷却；更短的冷却不会覆盖更长的
+        router.start_cooldown("a", "claude", Duration::ZERO);
+        assert!(router.cooldown_remaining("a", "claude").is_none());
+        router.start_cooldown("a", "claude", Duration::from_millis(200));
+        router.start_cooldown("a", "claude", Duration::from_millis(1));
+        assert!(router.cooldown_remaining("a", "claude").unwrap() > Duration::from_millis(100));
+        assert!(
+            router.cooldown_remaining("a", "codex").is_none(),
+            "cooldowns are per app"
+        );
+
+        assert_eq!(ids(router.select_providers("claude").await.unwrap()), ["b"]);
+
+        // 其余 provider 也都在冷却中：按队列顺序兜底，而不是报「未配置供应商」
+        router.start_cooldown("b", "claude", Duration::from_millis(200));
+        assert_eq!(
+            ids(router.select_providers("claude").await.unwrap()),
+            ["a", "b"]
+        );
+
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(router.cooldown_remaining("a", "claude").is_none());
+        assert_eq!(
+            ids(router.select_providers("claude").await.unwrap()),
+            ["a", "b"]
+        );
+        let breaker = router
+            .get_circuit_breaker_stats("a", "claude")
+            .await
+            .unwrap();
+        assert_eq!(breaker.state, CircuitState::Closed);
     }
 
     #[tokio::test]

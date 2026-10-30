@@ -15,16 +15,20 @@
 //! 并发请求在异步切换落地前各自成功时只计一次。
 //!
 //! 一次尝试失败后由 [`settle_failure`] 决定去向：记入 provider 健康度后继续故障转移，
-//! 或作为客户端错误直接返回（只释放 HalfOpen permit）。
+//! 或作为客户端错误直接返回（只释放 HalfOpen permit）。上游 429/529 带 `Retry-After`
+//! 时 provider 进入限流冷却并继续故障转移，同样不计入熔断器和健康度。
 
 use super::classify::{build_retryable_failure_log, categorize_proxy_error};
+use super::rate_limit;
 use super::recovery::{RecoveryDecision, RecoveryState};
 use crate::provider::Provider;
 use crate::proxy::circuit_breaker::HalfOpenPermit;
 use crate::proxy::error::{ErrorCategory, ProxyError};
 use crate::proxy::forwarder::{ForwardError, ForwarderDeps};
+use crate::proxy::log_codes::fwd as log_fwd;
 use crate::proxy::types::ProxyStatus;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 /// 按当前计数重新计算成功率
 fn refresh_success_rate(status: &mut ProxyStatus) {
@@ -224,6 +228,22 @@ impl Attempt<'_, '_> {
         status.last_error = Some(status_message);
     }
 
+    /// 上游限流（429/529 + `Retry-After`）：provider 进入冷却，换下一家继续。
+    ///
+    /// 限流不是 provider 故障：不计入熔断器和数据库健康度，仅中性释放 HalfOpen 许可；
+    /// 但仍算作「排在前面的 provider 失败」，后面的 provider 接手时计一次故障转移。
+    pub(crate) async fn rate_limited(self, retry_after: Duration, status_message: String) {
+        let recorder = self.recorder;
+        recorder.mark_provider_failed();
+        let router = &recorder.deps.router;
+        router.start_cooldown(&self.provider.id, recorder.app_type, retry_after);
+        router
+            .release_permit_neutral(&self.provider.id, recorder.app_type, self.permit.as_ref())
+            .await;
+        let mut status = recorder.deps.status.write().await;
+        status.last_error = Some(status_message);
+    }
+
     /// 客户端层错误：换哪家 provider 都会被拒绝，不污染熔断器和健康度，
     /// 仅中性释放 HalfOpen 许可，并记一次请求失败
     pub(crate) async fn fail_request(self, message: String) {
@@ -252,6 +272,8 @@ pub(crate) struct AttemptFailureInput<'a> {
     pub error: ProxyError,
     pub decision: RecoveryDecision,
     pub recovery: &'a RecoveryState,
+    /// 上游限流响应携带的 `Retry-After`（见 [`rate_limit::rate_limit_retry_after`]）
+    pub retry_after: Option<Duration>,
     pub provider: &'a Provider,
     pub attempted_providers: usize,
     pub total_providers: usize,
@@ -281,6 +303,28 @@ pub(crate) async fn settle_failure(
     if failure.decision == RecoveryDecision::ClientError {
         attempt.fail_request(e.to_string()).await;
         return abort(e);
+    }
+
+    // 上游限流并告知了重试时间：冷却该 provider，换下一家，不计入熔断器
+    if let (ProxyError::UpstreamError { status, .. }, Some(retry_after)) = (&e, failure.retry_after)
+    {
+        if rate_limit::is_rate_limit_status(*status) {
+            log::warn!(
+                "[{app_type}] [{}] Provider {} 限流 (HTTP {status})，冷却 {}s 后再使用 ({}/{})",
+                log_fwd::PROVIDER_RATE_LIMITED,
+                provider.name,
+                retry_after.as_secs_f32(),
+                failure.attempted_providers,
+                failure.total_providers,
+            );
+            attempt
+                .rate_limited(
+                    retry_after,
+                    format!("Provider {} 限流: {}", provider.name, e),
+                )
+                .await;
+            return AttemptFailure::Continue(e);
+        }
     }
 
     // 恢复重试仍失败，且没有其他策略可用。
@@ -572,6 +616,52 @@ mod tests {
         assert_eq!(status.failed_requests, 1);
         assert_eq!(status.success_rate, 25.0);
         assert_eq!(status.last_error.as_deref(), Some("bad request"));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_cools_down_without_tripping_the_breaker() {
+        let deps = deps_with_breaker(60).await;
+        let recorder = AttemptRecorder::new(&deps, "claude", "a");
+        let (a, b) = (provider("a"), provider("b"));
+
+        recorder
+            .begin(&a, false)
+            .await
+            .expect("closed breaker")
+            .rate_limited(Duration::from_secs(30), "Provider a 限流".into())
+            .await;
+
+        assert!(
+            recorder.begin(&a, false).await.is_some(),
+            "a rate limit must not reach the breaker (threshold is 1)"
+        );
+        assert!(deps.router.cooldown_remaining("a", "claude").is_some());
+        recorder
+            .begin(&b, false)
+            .await
+            .expect("closed")
+            .succeed()
+            .await;
+        let status = deps.status.read().await;
+        assert_eq!(status.failover_count, 1, "b taking over is a failover");
+        assert_eq!(status.failed_requests, 0);
+    }
+
+    #[tokio::test]
+    async fn rate_limit_releases_half_open_permit() {
+        let deps = deps_with_breaker(0).await;
+        trip(&deps, "a").await;
+        let recorder = AttemptRecorder::new(&deps, "claude", "a");
+        let a = provider("a");
+
+        let probe = recorder.begin(&a, false).await.expect("half-open probe");
+        probe
+            .rate_limited(Duration::from_secs(1), "limited".into())
+            .await;
+
+        let next = deps.router.allow_provider_request("a", "claude").await;
+        assert!(next.allowed, "a rate limit must free the probe slot");
+        assert!(next.used_half_open_permit());
     }
 
     #[tokio::test]

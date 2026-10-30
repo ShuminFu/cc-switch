@@ -74,6 +74,12 @@ pub enum MockReply {
         delay: Duration,
         reply: Box<MockReply>,
     },
+    /// `reply` with an extra response header.
+    WithHeader {
+        name: &'static str,
+        value: String,
+        reply: Box<MockReply>,
+    },
 }
 
 impl MockReply {
@@ -120,6 +126,15 @@ impl MockReply {
     pub fn delayed(self, delay: Duration) -> Self {
         Self::Delayed {
             delay,
+            reply: Box::new(self),
+        }
+    }
+
+    /// This reply with an extra response header (e.g. `retry-after`).
+    pub fn with_header(self, name: &'static str, value: impl Into<String>) -> Self {
+        Self::WithHeader {
+            name,
+            value: value.into(),
             reply: Box::new(self),
         }
     }
@@ -259,17 +274,32 @@ async fn mock_handler(State(state): State<MockState>, request: Request) -> Respo
     };
 
     let mut reply = (state.responder)(index, &recorded);
-    while let MockReply::Delayed {
-        delay,
-        reply: inner,
-    } = reply
-    {
-        tokio::time::sleep(delay).await;
-        reply = *inner;
+    let mut extra_headers = Vec::new();
+    loop {
+        match reply {
+            MockReply::Delayed {
+                delay,
+                reply: inner,
+            } => {
+                tokio::time::sleep(delay).await;
+                reply = *inner;
+            }
+            MockReply::WithHeader {
+                name,
+                value,
+                reply: inner,
+            } => {
+                extra_headers.push((name, value));
+                reply = *inner;
+            }
+            _ => break,
+        }
     }
 
-    match reply {
-        MockReply::Delayed { .. } => unreachable!("delays are unwrapped above"),
+    let mut response = match reply {
+        MockReply::Delayed { .. } | MockReply::WithHeader { .. } => {
+            unreachable!("wrappers are unwrapped above")
+        }
         MockReply::Json { status, body } => Response::builder()
             .status(StatusCode::from_u16(status).expect("valid mock status"))
             .header("content-type", "application/json")
@@ -288,7 +318,14 @@ async fn mock_handler(State(state): State<MockState>, request: Request) -> Respo
                 .body(Body::from_stream(stream))
                 .expect("mock sse response")
         }
+    };
+    for (name, value) in extra_headers {
+        response.headers_mut().insert(
+            name,
+            axum::http::HeaderValue::from_str(&value).expect("valid mock header value"),
+        );
     }
+    response
 }
 
 // ============================================================================

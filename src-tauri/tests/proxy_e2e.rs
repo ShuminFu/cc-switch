@@ -347,6 +347,75 @@ async fn breaker_opens_after_threshold_and_skips_the_provider() {
 }
 
 #[tokio::test]
+async fn retry_after_cools_the_provider_down_without_tripping_the_breaker() {
+    let _env = TestEnv::new();
+    // a: rate limited once with `Retry-After: 2`, healthy afterwards.
+    let a = MockUpstream::spawn(|index, _| {
+        if index == 0 {
+            MockReply::error(429, "rate limited").with_header("retry-after", "2")
+        } else {
+            MockReply::message("from a", 10, 5)
+        }
+    })
+    .await;
+    let b = MockUpstream::messages("from b", 10, 5).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            // One counted failure would open the breaker.
+            failure_threshold: 1,
+            success_threshold: 1,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await;
+
+    // 1. a answers 429 + Retry-After: the request fails over to b at once.
+    let started = Instant::now();
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 1);
+
+    // 2. During the cooldown a is not tried at all.
+    for _ in 0..3 {
+        let body = json_body(harness.messages(&simple_request()).await).await;
+        assert_eq!(first_text(&body), "from b");
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the cooldown window was missed"
+    );
+    assert_eq!(a.hits(), 1, "a is cooling down");
+    assert_eq!(b.hits(), 4);
+
+    // The rate limit is not a breaker failure, and a's health is untouched.
+    let stats = harness.circuit_stats("a").await.expect("a has a breaker");
+    assert_eq!(stats.state, CircuitState::Closed, "{stats:?}");
+    assert_eq!(stats.consecutive_failures, 0, "{stats:?}");
+    assert_eq!(harness.health("a").await, healthy());
+
+    // 3. Once Retry-After has elapsed, traffic goes back to a.
+    tokio::time::sleep(
+        Duration::from_secs(2).saturating_sub(started.elapsed()) + Duration::from_millis(200),
+    )
+    .await;
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!(a.hits(), 2);
+    assert_eq!(b.hits(), 4);
+
+    let stats = harness.circuit_stats("a").await.expect("a has a breaker");
+    assert_eq!(stats.state, CircuitState::Closed, "{stats:?}");
+    let status = harness.status().await;
+    assert_eq!(status.success_requests, 5);
+    assert_eq!(status.failover_count, 1);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
 async fn half_open_probe_failure_reopens_and_success_closes_the_breaker() {
     let _env = TestEnv::new();
     // a: fails, fails (the half-open probe), then recovers.
