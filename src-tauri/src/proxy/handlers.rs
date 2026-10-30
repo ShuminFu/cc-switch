@@ -17,6 +17,7 @@ use super::{
     },
     handler_context::RequestContext,
     providers::{
+        chat_tool_call_slots::ChatToolCallSlots,
         codex_chat_common::extract_reasoning_field_text,
         codex_chat_history::record_responses_sse_stream,
         get_adapter, get_claude_api_format,
@@ -2019,6 +2020,9 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
     // 进程（C1）。BTreeMap 既免去无界分配，又天然保持 index 有序输出。
     let mut tool_calls: std::collections::BTreeMap<usize, Value> =
         std::collections::BTreeMap::new();
+    // 与流式转换器共用的 slot 解析：缺 index 的网关按 id / name 区分并行调用，
+    // 不会把不同调用合并，也不会丢弃无 index 的分片。
+    let mut tool_slots = ChatToolCallSlots::default();
     let mut finish_reason = Value::Null;
     let mut usage = Value::Null;
     let mut saw_choice = false;
@@ -2133,6 +2137,7 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
                 content.clear();
                 reasoning_content.clear();
                 tool_calls.clear();
+                tool_slots = ChatToolCallSlots::default();
             }
             match payload.get("content") {
                 Some(Value::String(text)) => content.push_str(text),
@@ -2159,8 +2164,13 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
                 reasoning_content.push_str(&text);
             }
             if let Some(deltas) = payload.get("tool_calls").and_then(|t| t.as_array()) {
-                for (pos, tc) in deltas.iter().enumerate() {
-                    merge_tool_call_delta(&mut tool_calls, tc, pos);
+                for tc in deltas {
+                    let key = tool_slots.resolve(
+                        tc.get("index").and_then(Value::as_u64).map(|i| i as usize),
+                        tc.get("id").and_then(Value::as_str),
+                        tc.pointer("/function/name").and_then(Value::as_str),
+                    );
+                    merge_tool_call_delta(&mut tool_calls, tc, key);
                 }
             } else if let Some(fc) = payload.get("function_call").filter(|v| !v.is_null()) {
                 // legacy function_call（2023 弃用但仍有中转回传）→ 当单个 tool_call。
@@ -2172,7 +2182,12 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
                     "type": "function",
                     "function": fc,
                 });
-                merge_tool_call_delta(&mut tool_calls, &synthetic, 0);
+                let key = tool_slots.resolve(
+                    Some(0),
+                    synthetic.get("id").and_then(Value::as_str),
+                    synthetic.pointer("/function/name").and_then(Value::as_str),
+                );
+                merge_tool_call_delta(&mut tool_calls, &synthetic, key);
             }
             Ok(())
         };
@@ -2274,20 +2289,15 @@ fn envelope_value_meaningful(v: &Value) -> bool {
     }
 }
 
-/// 合并单条 tool_calls 增量到按 index 聚合的 BTreeMap：OpenAI 流式把 id/name 放
-/// 首个增量、arguments 分片下发，按 delta.index 定位目标；缺 index 时退到所在数组
-/// 中的位置（message 形态的完整 tool_calls 常不带 index，按 0 会互相覆盖）。
+/// 合并单条 tool_calls 增量到按 slot 聚合的 BTreeMap：OpenAI 流式把 id/name 放
+/// 首个增量、arguments 分片下发；slot 由 `ChatToolCallSlots` 解析（有 index 用
+/// index，缺 index 时按 id / name 区分，message 形态的完整 tool_calls 也不会互相覆盖）。
 fn merge_tool_call_delta(
     tool_calls: &mut std::collections::BTreeMap<usize, Value>,
     delta: &Value,
-    fallback_index: usize,
+    key: usize,
 ) {
-    let index = delta
-        .get("index")
-        .and_then(|i| i.as_u64())
-        .map(|i| i as usize)
-        .unwrap_or(fallback_index);
-    let target = tool_calls.entry(index).or_insert_with(|| {
+    let target = tool_calls.entry(key).or_insert_with(|| {
         json!({
             "id": "",
             "type": "function",
@@ -2791,6 +2801,29 @@ data: [DONE]\n\n";
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0]["id"], "tool_call_4000000000");
         assert_eq!(tool_calls[0]["function"]["name"], "f");
+    }
+
+    #[test]
+    fn chat_sse_to_response_value_routes_index_less_parallel_tool_calls() {
+        // Gateways that omit `index` across separate chunks: distinct ids must stay
+        // distinct calls and id-less continuations attach to the latest call.
+        let sse = concat!(
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call_a\",\"function\":{\"name\":\"f\",\"arguments\":\"{\\\"x\\\"\"}}]}}]}\n\n",
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\":1}\"}}]}}]}\n\n",
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call_b\",\"function\":{\"name\":\"g\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let response = chat_sse_to_response_value(sse).unwrap();
+        let tool_calls = response["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap();
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0]["id"], "call_a");
+        assert_eq!(tool_calls[0]["function"]["arguments"], "{\"x\":1}");
+        assert_eq!(tool_calls[1]["id"], "call_b");
+        assert_eq!(tool_calls[1]["function"]["name"], "g");
     }
 
     #[test]
