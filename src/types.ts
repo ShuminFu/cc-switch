@@ -367,6 +367,8 @@ export interface Settings {
   enableFailoverToggle?: boolean;
   // Keep each client session on the provider that last served it (failover on)
   stickySessionRouting?: boolean;
+  // Proxy protocol conversion engine; "legacy" keeps the original converters
+  codecEngine?: "legacy" | "ir";
   // Whether to show the project profile switcher on the main page header
   showProfileSwitcher?: boolean;
   // Preserve Codex ChatGPT login in auth.json when switching third-party providers

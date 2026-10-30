@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::app_config::AppType;
 use crate::apps::registry;
 use crate::error::AppError;
+use crate::proxy::codec::CodecEngine;
 use crate::services::skill::{SkillStorageLocation, SyncMethod};
 
 /// 自定义端点配置（历史兼容，实际存储在 provider.meta.custom_endpoints）
@@ -538,6 +539,11 @@ pub struct AppSettings {
     /// failover. Only applies when auto failover is on. Opt-in: defaults to false.
     #[serde(default)]
     pub sticky_session_routing: bool,
+    /// Protocol conversion engine for proxy bridges (`codecEngine`): `legacy`
+    /// keeps the original per-bridge converters, `ir` uses the IR codecs for
+    /// bridges that have been migrated. Kept for one release as a fallback.
+    #[serde(default, skip_serializing_if = "CodecEngine::is_legacy")]
+    pub codec_engine: CodecEngine,
     /// Whether to show the project profile switcher on the main page header
     #[serde(default = "default_show_profile_switcher")]
     pub show_profile_switcher: bool,
@@ -644,6 +650,7 @@ impl Default for AppSettings {
             usage_dashboard_refresh_interval_ms: None,
             enable_failover_toggle: false,
             sticky_session_routing: false,
+            codec_engine: CodecEngine::Legacy,
             show_profile_switcher: true,
             preserve_codex_official_auth_on_switch: false,
             unify_codex_session_history: false,
@@ -1248,6 +1255,19 @@ pub fn sticky_session_routing_enabled() -> bool {
             e.into_inner()
         })
         .sticky_session_routing
+}
+
+/// The proxy protocol conversion engine (see [`AppSettings::codec_engine`]).
+/// Read on the request path once the first bridge migrates to codecs (CCS-176).
+#[allow(dead_code)]
+pub fn codec_engine() -> CodecEngine {
+    settings_store()
+        .read()
+        .unwrap_or_else(|e| {
+            log::warn!("设置锁已毒化，使用恢复值: {e}");
+            e.into_inner()
+        })
+        .codec_engine
 }
 
 // ===== 当前供应商管理函数 =====

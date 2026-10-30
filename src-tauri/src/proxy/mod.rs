@@ -6,6 +6,7 @@ pub mod body_filter;
 pub mod cache_injector;
 pub(crate) mod capture;
 pub mod circuit_breaker;
+pub mod codec;
 pub(crate) mod content_encoding;
 pub mod copilot_optimizer;
 pub(crate) mod endpoints;
