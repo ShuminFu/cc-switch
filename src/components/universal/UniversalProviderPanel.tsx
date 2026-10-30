@@ -148,7 +148,11 @@ export function UniversalProviderPanel() {
       const duplicated: UniversalProvider = {
         ...deepClone(provider),
         id: crypto.randomUUID(),
-        name: `${provider.name} copy`,
+        // Localised copy suffix (FE-PROV-12).
+        name: t("provider.copyName", {
+          name: provider.name,
+          defaultValue: "{{name}} copy",
+        }),
         createdAt: Date.now(),
       };
       try {
