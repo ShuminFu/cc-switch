@@ -173,9 +173,6 @@ export const handlers = [
     return success(getMcpConfig(app));
   }),
 
-  http.post(`${TAURI_ENDPOINT}/import_mcp_from_claude`, () => success(1)),
-  http.post(`${TAURI_ENDPOINT}/import_mcp_from_codex`, () => success(1)),
-
   http.post(`${TAURI_ENDPOINT}/set_mcp_enabled`, async ({ request }) => {
     const { app, id, enabled } = await withJson<{
       app: AppId;
@@ -256,18 +253,6 @@ export const handlers = [
   }),
 
   http.post(`${TAURI_ENDPOINT}/is_portable_mode`, () => success(false)),
-
-  http.post(
-    `${TAURI_ENDPOINT}/select_config_directory`,
-    async ({ request }) => {
-      const { defaultPath, default_path } = await withJson<{
-        defaultPath?: string;
-        default_path?: string;
-      }>(request);
-      const initial = defaultPath ?? default_path;
-      return success(initial ? `${initial}/picked` : "/mock/selected-dir");
-    },
-  ),
 
   http.post(`${TAURI_ENDPOINT}/pick_directory`, async ({ request }) => {
     const { defaultPath, default_path } = await withJson<{
@@ -352,8 +337,6 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/remove_from_failover_queue`, () =>
     success(true),
   ),
-  http.post(`${TAURI_ENDPOINT}/reorder_failover_queue`, () => success(true)),
-  http.post(`${TAURI_ENDPOINT}/set_failover_item_enabled`, () => success(true)),
 
   http.post(`${TAURI_ENDPOINT}/get_circuit_breaker_config`, () =>
     success({

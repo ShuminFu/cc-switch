@@ -14,16 +14,21 @@ frontend:
           - "tsconfig.node.json"
           - "components.json"
           - "tests/**"
+          - "eslint.config.js"
+          - ".node-version"
+          - "scripts/**"
 
 backend:
   - changed-files:
       - any-glob-to-any-file:
           - "src-tauri/**"
+          - "rust-toolchain.toml"
 
 i18n:
   - changed-files:
       - any-glob-to-any-file:
-          - "src/locales/**"
+          - "src/i18n/locales/**"
+          - "scripts/check-i18n.mjs"
 
 actions:
   - changed-files:

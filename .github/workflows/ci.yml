@@ -7,12 +7,21 @@ on:
     branches: [main]
   # Called by release.yml so every release commit passes CI first.
   workflow_call:
+  schedule:
+    # Weekly run so new RustSec / npm advisories surface without code changes.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 concurrency:
   # github.workflow is the caller's name when invoked via workflow_call, so a
   # release run never shares (and cancels) a group with a regular CI run.
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# Toolchain versions come from the repository, not from this file:
+#   Node  -> .node-version
+#   pnpm  -> package.json "packageManager"
+#   Rust  -> rust-toolchain.toml
 
 jobs:
   frontend:
@@ -22,16 +31,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10.12.3
           run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
 
       - name: Get pnpm store directory
         id: pnpm-store
@@ -51,27 +59,57 @@ jobs:
       - name: TypeScript type check
         run: pnpm typecheck
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Check formatting
         run: pnpm format:check
 
-      - name: Unit tests
-        run: pnpm test:unit
+      - name: Check i18n locale integrity
+        run: pnpm i18n:check
+
+      - name: Unit tests (with coverage report)
+        run: pnpm test:coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Build renderer bundle
+        run: pnpm build:renderer
+
+      - name: Upload renderer bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: renderer-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
 
   backend:
     name: Backend Checks
+    needs: frontend
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-latest]
+        # Keep in sync with the release.yml build images.
+        os: [ubuntu-22.04, windows-2022, macos-14]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Setup Rust (from rust-toolchain.toml)
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustc --version
+          cargo --version
 
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -92,12 +130,14 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Create frontend dist placeholder
-        shell: bash
-        run: mkdir -p dist
+      - name: Download renderer bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: renderer-dist
+          path: dist
 
       - name: Check Rust formatting
         run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
@@ -107,3 +147,41 @@ jobs:
 
       - name: Run tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  supply-chain:
+    name: Supply Chain (licenses, advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: cargo-deny (licenses, bans, sources)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check bans licenses sources
+
+      # Report-only until the existing advisories are triaged; flip
+      # continue-on-error to false once the baseline is clean.
+      - name: cargo-deny (RustSec advisories)
+        continue-on-error: true
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check advisories
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      # Report-only: production deps currently have open advisories
+      # (smol-toml, zod). Make this blocking once they are upgraded.
+      - name: pnpm audit (production dependencies)
+        continue-on-error: true
+        run: pnpm audit --prod --audit-level=high
