@@ -42,12 +42,32 @@ impl From<Profile> for ProfileDto {
 }
 
 /// 每个分组当前激活的项目 id（未使用项目时为 null）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CurrentProfileIds {
     pub claude: Option<String>,
     pub claude_desktop: Option<String>,
     pub codex: Option<String>,
+    pub gemini: Option<String>,
+    pub grokbuild: Option<String>,
+    pub opencode: Option<String>,
+    pub openclaw: Option<String>,
+    pub hermes: Option<String>,
+}
+
+impl CurrentProfileIds {
+    fn slot_mut(&mut self, scope: ProfileScope) -> &mut Option<String> {
+        match scope {
+            ProfileScope::Claude => &mut self.claude,
+            ProfileScope::ClaudeDesktop => &mut self.claude_desktop,
+            ProfileScope::Codex => &mut self.codex,
+            ProfileScope::Gemini => &mut self.gemini,
+            ProfileScope::GrokBuild => &mut self.grokbuild,
+            ProfileScope::OpenCode => &mut self.opencode,
+            ProfileScope::OpenClaw => &mut self.openclaw,
+            ProfileScope::Hermes => &mut self.hermes,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -66,6 +86,17 @@ pub fn emit_profile_apply_events(
     app: &tauri::AppHandle,
     state: &AppState,
     profile_id: &str,
+    scope: ProfileScope,
+) {
+    emit_profile_events(app, state, Some(profile_id), scope);
+}
+
+/// 与 [`emit_profile_apply_events`] 相同；`profile_id = None` 表示该分组已切到
+/// "不使用项目"（前端据 profileId=null 刷新）。
+pub fn emit_profile_events(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    profile_id: Option<&str>,
     scope: ProfileScope,
 ) {
     for app_type in scope.apps().iter() {
@@ -96,20 +127,13 @@ pub fn emit_profile_apply_events(
 
 fn list_profiles_inner(state: &AppState) -> Result<ProfilesResponse, String> {
     let profiles = ProfileService::list(state).map_err(|e| e.to_string())?;
-    let current_ids = CurrentProfileIds {
-        claude: state
+    let mut current_ids = CurrentProfileIds::default();
+    for scope in ProfileScope::ALL {
+        *current_ids.slot_mut(scope) = state
             .db
-            .get_current_profile_id(ProfileScope::Claude.as_str())
-            .map_err(|e| e.to_string())?,
-        claude_desktop: state
-            .db
-            .get_current_profile_id(ProfileScope::ClaudeDesktop.as_str())
-            .map_err(|e| e.to_string())?,
-        codex: state
-            .db
-            .get_current_profile_id(ProfileScope::Codex.as_str())
-            .map_err(|e| e.to_string())?,
-    };
+            .get_current_profile_id(scope.as_str())
+            .map_err(|e| e.to_string())?;
+    }
     Ok(ProfilesResponse {
         profiles: profiles.into_iter().map(ProfileDto::from).collect(),
         current_ids,
@@ -164,16 +188,20 @@ pub async fn delete_profile(handle: AppHandle, id: String) -> Result<(), String>
     .await
 }
 
+/// "不使用项目"：清除分组的当前项目；若首次应用项目前拍过基线，则恢复该基线
+/// （PRODUCT-68），返回 warnings。
 #[tauri::command]
-pub async fn clear_current_profile(handle: AppHandle, scope: String) -> Result<(), String> {
+pub async fn clear_current_profile(
+    app: tauri::AppHandle,
+    scope: String,
+) -> Result<Vec<String>, String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
-    run_blocking_with_state(handle, move |state| {
-        state
-            .db
-            .set_current_profile_id(scope.as_str(), None)
-            .map_err(|e| e.to_string())
+    let (warnings, should_stop_proxy) = run_blocking_with_state(app.clone(), move |state| {
+        ProfileService::clear_current(state, scope).map_err(|e| e.to_string())
     })
-    .await
+    .await?;
+    finish_profile_change(app, None, vec![scope], should_stop_proxy).await;
+    Ok(warnings)
 }
 
 /// 应用项目快照（只作用于发起页所属分组内的应用）。
@@ -194,33 +222,46 @@ pub async fn apply_profile(
     })
     .await?;
 
+    finish_profile_change(app, Some(id), vec![scope], should_stop_proxy).await;
+    Ok(warnings)
+}
+
+/// 项目应用 / 清除后的统一收尾：必要时停止代理，然后为每个分组发事件并刷新托盘。
+///
+/// 停止代理可能等待服务端退出，放到后台执行，停止后再补发事件刷新 UI
+/// （与托盘入口的行为一致）；否则直接在阻塞线程池发事件（事件发射与托盘
+/// 重建本身也会读 DB / settings）。
+pub(crate) async fn finish_profile_change(
+    app: tauri::AppHandle,
+    profile_id: Option<String>,
+    scopes: Vec<ProfileScope>,
+    should_stop_proxy: bool,
+) {
+    if scopes.is_empty() {
+        return;
+    }
+    let emit = move |app_handle: tauri::AppHandle| async move {
+        let handle_for_events = app_handle.clone();
+        let _ = run_blocking_with_state(app_handle, move |state| -> Result<(), String> {
+            for scope in scopes {
+                emit_profile_events(&handle_for_events, state, profile_id.as_deref(), scope);
+            }
+            Ok(())
+        })
+        .await;
+    };
+
     if should_stop_proxy {
-        // 停止代理可能等待服务端退出，放到后台执行，停止后再补发事件刷新 UI
-        //（与托盘入口的行为一致）。
         let app_handle = app.clone();
-        let profile_id = id.clone();
         tauri::async_runtime::spawn(async move {
             if let Some(app_state) = app_handle.try_state::<AppState>() {
                 if let Err(e) = app_state.proxy_service.stop().await {
                     log::warn!("切换项目后停止代理服务失败: {e}");
                 }
             }
-            let handle_for_events = app_handle.clone();
-            let _ = run_blocking_with_state(app_handle, move |state| -> Result<(), String> {
-                emit_profile_apply_events(&handle_for_events, state, &profile_id, scope);
-                Ok(())
-            })
-            .await;
+            emit(app_handle).await;
         });
     } else {
-        // 事件发射与托盘重建本身也会读 DB / settings，放到阻塞线程池。
-        let app_for_events = app.clone();
-        let _ = run_blocking_with_state(app, move |state| -> Result<(), String> {
-            emit_profile_apply_events(&app_for_events, state, &id, scope);
-            Ok(())
-        })
-        .await;
+        emit(app).await;
     }
-
-    Ok(warnings)
 }

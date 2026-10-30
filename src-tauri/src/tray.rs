@@ -396,19 +396,50 @@ pub fn handle_profile_tray_event(app: &tauri::AppHandle, event_id: &str) -> bool
             log::error!("未知的项目分组托盘事件: {event_id}");
             return true;
         };
-        if let Some(app_state) = app.try_state::<AppState>() {
-            if let Err(e) = app_state.db.set_current_profile_id(scope.as_str(), None) {
-                log::error!("清除当前项目失败: {e}");
+        // 清除当前项目；若有首次应用前的基线则恢复它（会写 live 文件，放到阻塞线程池）。
+        // 收尾事件里 profileId=null 表示该分组已清除当前项目。
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let Some(app_state) = app_handle.try_state::<AppState>() else {
+                return;
+            };
+            match crate::services::profile::ProfileService::clear_current(app_state.inner(), scope)
+            {
+                Ok((warnings, should_stop_proxy)) => {
+                    for warning in &warnings {
+                        log::warn!("[Profile] 清除当前项目警告: {warning}");
+                    }
+                    if should_stop_proxy {
+                        let app_handle2 = app_handle.clone();
+                        let proxy_service = app_state.proxy_service.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = proxy_service.stop().await {
+                                log::warn!("托盘清除项目后停止代理服务失败: {e}");
+                            }
+                            if let Some(state) = app_handle2.try_state::<AppState>() {
+                                crate::commands::emit_profile_events(
+                                    &app_handle2,
+                                    state.inner(),
+                                    None,
+                                    scope,
+                                );
+                            }
+                        });
+                    } else {
+                        crate::commands::emit_profile_events(
+                            &app_handle,
+                            app_state.inner(),
+                            None,
+                            scope,
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::error!("清除当前项目失败: {e}");
+                    refresh_tray_menu(&app_handle);
+                }
             }
-        }
-        // 通知主窗口刷新（profileId=null 表示该分组已清除当前项目）
-        if let Err(e) = app.emit(
-            "profile-applied",
-            serde_json::json!({ "profileId": null, "scope": scope.as_str() }),
-        ) {
-            log::error!("发射 profile-applied 事件失败: {e}");
-        }
-        refresh_tray_menu(app);
+        });
         return true;
     }
 
@@ -937,11 +968,7 @@ fn collect_tray_model(app_state: &AppState) -> Result<(TrayModel, bool), AppErro
                     .get_current_profile_id(scope.as_str())?
                     .unwrap_or_default();
                 // 分组标签用产品名，不进 i18n
-                let label = match scope {
-                    ProfileScope::Claude => "Claude Code",
-                    ProfileScope::ClaudeDesktop => "Claude Desktop",
-                    ProfileScope::Codex => "Codex",
-                };
+                let label = scope.label();
                 profile_scopes.push(TrayProfileScopeModel {
                     scope: scope.as_str(),
                     label,

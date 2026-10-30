@@ -59,6 +59,7 @@ pub use prompt::Prompt;
 pub use provider::{Provider, ProviderMeta};
 pub use services::{
     profile::{ProfilePayload, ProfileScope, ProfileService},
+    project_binding,
     provider::reapply_current_codex_official_live,
     skill::{migrate_skills_to_ssot, ImportSkillSelection},
     ConfigService, EndpointLatency, McpService, PromptService, ProviderService, ProxyService,
@@ -927,6 +928,11 @@ pub fn run() {
             commands::delete_profile,
             commands::clear_current_profile,
             commands::apply_profile,
+            commands::list_project_bindings,
+            commands::bind_project_directory,
+            commands::unbind_project_directory,
+            commands::detect_project,
+            commands::apply_project_binding,
             // model list fetch (OpenAI-compatible /v1/models)
             commands::fetch_models_for_config,
             // ours: endpoint speed test + custom endpoint management

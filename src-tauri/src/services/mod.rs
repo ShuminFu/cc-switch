@@ -11,6 +11,7 @@ pub mod model_fetch;
 pub mod notifications;
 pub mod omo;
 pub mod profile;
+pub mod project_binding;
 pub mod prompt;
 pub mod provider;
 pub mod proxy;
