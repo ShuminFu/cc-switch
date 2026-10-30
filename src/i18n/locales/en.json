@@ -442,6 +442,25 @@
           "debug": "Detailed info including SSE stream and request/response",
           "trace": "All logs, most verbose"
         }
+      },
+      "capabilityMatrix": {
+        "title": "Capability Matrix",
+        "description": "Which features each app supports; copy it for support requests",
+        "app": "App",
+        "supported": "Supported",
+        "unsupported": "Not supported",
+        "copy": "Copy diagnostics",
+        "copied": "Capability matrix copied",
+        "copyFailed": "Failed to copy capability matrix",
+        "loadFailed": "Failed to load the app registry",
+        "caps": {
+          "mcp": "MCP",
+          "skills": "Skills",
+          "prompts": "Prompts",
+          "proxyTakeover": "Proxy takeover",
+          "usage": "Usage stats",
+          "sessionResume": "Session resume"
+        }
       }
     },
     "language": "Language",

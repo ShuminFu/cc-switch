@@ -8,6 +8,10 @@ export interface BackendAppCaps {
   prompts: boolean;
   proxyTakeover: boolean;
   tray: boolean;
+  /** 请求用量进入使用统计（经代理记录或从会话日志导入） */
+  usage: boolean;
+  /** 会话管理中可在终端恢复会话 */
+  sessionResume: boolean;
 }
 
 /** 后端应用描述符（`src-tauri/src/apps/registry.rs` 的可序列化视图） */

@@ -46,6 +46,10 @@ impl AppCaps {
     pub const PROXY_TAKEOVER: Self = Self(1 << 3);
     /// 在系统托盘中有独立的供应商分区
     pub const TRAY: Self = Self(1 << 4);
+    /// 请求用量会进入使用统计（经本地代理记录，或从会话日志导入）
+    pub const USAGE: Self = Self(1 << 5);
+    /// 会话管理中可一键在终端恢复会话（`session_manager::build_resume_command`）
+    pub const SESSION_RESUME: Self = Self(1 << 6);
 
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
@@ -94,7 +98,10 @@ impl AppDescriptor {
 const CORE_CAPS: AppCaps = AppCaps::MCP.union(AppCaps::SKILLS).union(AppCaps::PROMPTS);
 const PROXIED_CAPS: AppCaps = CORE_CAPS
     .union(AppCaps::PROXY_TAKEOVER)
-    .union(AppCaps::TRAY);
+    .union(AppCaps::TRAY)
+    .union(AppCaps::USAGE);
+/// 有 CLI 会话恢复命令的经代理应用（Claude、Codex、Gemini、Grok Build）
+const PROXIED_CLI_CAPS: AppCaps = PROXIED_CAPS.union(AppCaps::SESSION_RESUME);
 
 /// 所有受管应用，顺序即 `AppType::all()` 的顺序。
 pub static APPS: &[AppDescriptor] = &[
@@ -105,7 +112,7 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.claude",
         display_name: "Claude",
         sync_mode: SyncMode::Switch,
-        caps: PROXIED_CAPS,
+        caps: PROXIED_CLI_CAPS,
         proxy_route: Some("/claude"),
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
@@ -117,7 +124,8 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.claude-desktop",
         display_name: "Claude Desktop",
         sync_mode: SyncMode::Switch,
-        caps: AppCaps::NONE,
+        // 无 MCP / Skills / 提示词；请求经 /claude-desktop 路由，用量照常记录
+        caps: AppCaps::USAGE,
         proxy_route: Some("/claude-desktop"),
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
@@ -129,7 +137,7 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.codex",
         display_name: "Codex",
         sync_mode: SyncMode::Switch,
-        caps: PROXIED_CAPS,
+        caps: PROXIED_CLI_CAPS,
         proxy_route: Some("/codex"),
         input_token_semantics: InputTokenSemantics::CacheInclusive,
         default_visible: true,
@@ -141,7 +149,7 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.gemini",
         display_name: "Gemini",
         sync_mode: SyncMode::Switch,
-        caps: PROXIED_CAPS,
+        caps: PROXIED_CLI_CAPS,
         proxy_route: Some("/gemini"),
         input_token_semantics: InputTokenSemantics::CacheInclusive,
         default_visible: true,
@@ -153,7 +161,7 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.grokbuild",
         display_name: "Grok Build",
         sync_mode: SyncMode::Switch,
-        caps: PROXIED_CAPS,
+        caps: PROXIED_CLI_CAPS,
         proxy_route: Some("/grokbuild"),
         input_token_semantics: InputTokenSemantics::CacheInclusive,
         default_visible: true,
@@ -165,7 +173,9 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.opencode",
         display_name: "OpenCode",
         sync_mode: SyncMode::Additive,
-        caps: CORE_CAPS,
+        caps: CORE_CAPS
+            .union(AppCaps::USAGE)
+            .union(AppCaps::SESSION_RESUME),
         proxy_route: None,
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
@@ -206,6 +216,8 @@ pub struct AppCapsDto {
     pub prompts: bool,
     pub proxy_takeover: bool,
     pub tray: bool,
+    pub usage: bool,
+    pub session_resume: bool,
 }
 
 impl From<AppCaps> for AppCapsDto {
@@ -216,6 +228,8 @@ impl From<AppCaps> for AppCapsDto {
             prompts: caps.contains(AppCaps::PROMPTS),
             proxy_takeover: caps.contains(AppCaps::PROXY_TAKEOVER),
             tray: caps.contains(AppCaps::TRAY),
+            usage: caps.contains(AppCaps::USAGE),
+            session_resume: caps.contains(AppCaps::SESSION_RESUME),
         }
     }
 }
@@ -622,6 +636,8 @@ mod tests {
             assert_eq!(entry.caps.prompts, d.has(AppCaps::PROMPTS));
             assert_eq!(entry.caps.proxy_takeover, d.has(AppCaps::PROXY_TAKEOVER));
             assert_eq!(entry.caps.tray, d.has(AppCaps::TRAY));
+            assert_eq!(entry.caps.usage, d.has(AppCaps::USAGE));
+            assert_eq!(entry.caps.session_resume, d.has(AppCaps::SESSION_RESUME));
         }
         let json = serde_json::to_value(&dto[1]).unwrap();
         assert_eq!(
@@ -637,12 +653,54 @@ mod tests {
                     "skills": false,
                     "prompts": false,
                     "proxyTakeover": false,
-                    "tray": false
+                    "tray": false,
+                    "usage": true,
+                    "sessionResume": false
                 },
                 "proxyRoute": "/claude-desktop",
                 "inputTokenSemantics": "fresh",
                 "defaultVisible": true
             })
+        );
+    }
+
+    #[test]
+    fn usage_cap_matches_proxy_routes_and_session_log_imports() {
+        // services::session_usage::sync_all_session_usage 导入会话日志的应用
+        const SESSION_LOG_APPS: [&str; 4] = ["claude", "codex", "gemini", "opencode"];
+        for d in APPS {
+            assert_eq!(
+                d.has(AppCaps::USAGE),
+                d.proxy_route.is_some() || SESSION_LOG_APPS.contains(&d.slug),
+                "{}",
+                d.slug
+            );
+        }
+    }
+
+    #[test]
+    fn session_resume_cap_matches_resume_command_templates() {
+        for d in APPS {
+            assert_eq!(
+                d.has(AppCaps::SESSION_RESUME),
+                crate::session_manager::build_resume_command(d.slug, "abc-123").is_some(),
+                "{}",
+                d.slug
+            );
+        }
+    }
+
+    /// `tests/fixtures/app-registry.json` 是 `get_app_registry` 的完整快照，
+    /// 前端能力矩阵测试读取同一份文件，保证前后端对注册表的理解一致。
+    #[test]
+    fn registry_dto_matches_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/app-registry.json"))
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(registry_dto()).unwrap(),
+            fixture,
+            "get_app_registry changed; regenerate tests/fixtures/app-registry.json"
         );
     }
 

@@ -442,6 +442,25 @@
           "debug": "详细信息，包含 SSE 流和请求/响应详情",
           "trace": "全部日志，最详细"
         }
+      },
+      "capabilityMatrix": {
+        "title": "能力矩阵",
+        "description": "查看各应用支持的功能，可复制用于反馈问题",
+        "app": "应用",
+        "supported": "支持",
+        "unsupported": "不支持",
+        "copy": "复制诊断信息",
+        "copied": "已复制能力矩阵",
+        "copyFailed": "复制能力矩阵失败",
+        "loadFailed": "加载应用注册表失败",
+        "caps": {
+          "mcp": "MCP",
+          "skills": "Skills",
+          "prompts": "提示词",
+          "proxyTakeover": "代理接管",
+          "usage": "用量统计",
+          "sessionResume": "会话恢复"
+        }
       }
     },
     "language": "界面语言",

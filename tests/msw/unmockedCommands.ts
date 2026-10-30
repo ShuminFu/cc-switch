@@ -8,7 +8,6 @@ import type { CommandName } from "./commands";
  * 需要这些命令的测试应在用例内 `server.use(...)` 或 `vi.mock` 自行提供。
  */
 export const UNMOCKED_COMMANDS = [
-  "get_app_registry",
   "remove_provider_from_live_config",
   "get_claude_desktop_status",
   "get_claude_desktop_default_routes",

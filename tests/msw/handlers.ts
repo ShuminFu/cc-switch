@@ -25,6 +25,7 @@ import {
   deleteMcpServer,
 } from "./state";
 import type { CommandName, CommandResult } from "./commands";
+import appRegistryFixture from "../fixtures/app-registry.json";
 
 const TAURI_ENDPOINT = "http://tauri.local";
 
@@ -56,6 +57,7 @@ export const command = <K extends CommandName>(
   });
 
 export const handlers = [
+  command("get_app_registry", () => appRegistryFixture),
   command("get_migration_result", () => false),
   command("get_skills_migration_result", () => null),
   command("get_providers", async (request) => {

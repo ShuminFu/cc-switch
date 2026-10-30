@@ -1,0 +1,154 @@
+[
+  {
+    "id": "claude",
+    "aliases": [],
+    "labelKey": "apps.claude",
+    "displayName": "Claude",
+    "syncMode": "switch",
+    "caps": {
+      "mcp": true,
+      "skills": true,
+      "prompts": true,
+      "proxyTakeover": true,
+      "tray": true,
+      "usage": true,
+      "sessionResume": true
+    },
+    "proxyRoute": "/claude",
+    "inputTokenSemantics": "fresh",
+    "defaultVisible": true
+  },
+  {
+    "id": "claude-desktop",
+    "aliases": ["claude_desktop", "claudedesktop"],
+    "labelKey": "apps.claude-desktop",
+    "displayName": "Claude Desktop",
+    "syncMode": "switch",
+    "caps": {
+      "mcp": false,
+      "skills": false,
+      "prompts": false,
+      "proxyTakeover": false,
+      "tray": false,
+      "usage": true,
+      "sessionResume": false
+    },
+    "proxyRoute": "/claude-desktop",
+    "inputTokenSemantics": "fresh",
+    "defaultVisible": true
+  },
+  {
+    "id": "codex",
+    "aliases": [],
+    "labelKey": "apps.codex",
+    "displayName": "Codex",
+    "syncMode": "switch",
+    "caps": {
+      "mcp": true,
+      "skills": true,
+      "prompts": true,
+      "proxyTakeover": true,
+      "tray": true,
+      "usage": true,
+      "sessionResume": true
+    },
+    "proxyRoute": "/codex",
+    "inputTokenSemantics": "cacheInclusive",
+    "defaultVisible": true
+  },
+  {
+    "id": "gemini",
+    "aliases": [],
+    "labelKey": "apps.gemini",
+    "displayName": "Gemini",
+    "syncMode": "switch",
+    "caps": {
+      "mcp": true,
+      "skills": true,
+      "prompts": true,
+      "proxyTakeover": true,
+      "tray": true,
+      "usage": true,
+      "sessionResume": true
+    },
+    "proxyRoute": "/gemini",
+    "inputTokenSemantics": "cacheInclusive",
+    "defaultVisible": true
+  },
+  {
+    "id": "grokbuild",
+    "aliases": ["grok-build", "grok_build", "grok"],
+    "labelKey": "apps.grokbuild",
+    "displayName": "Grok Build",
+    "syncMode": "switch",
+    "caps": {
+      "mcp": true,
+      "skills": true,
+      "prompts": true,
+      "proxyTakeover": true,
+      "tray": true,
+      "usage": true,
+      "sessionResume": true
+    },
+    "proxyRoute": "/grokbuild",
+    "inputTokenSemantics": "cacheInclusive",
+    "defaultVisible": true
+  },
+  {
+    "id": "opencode",
+    "aliases": [],
+    "labelKey": "apps.opencode",
+    "displayName": "OpenCode",
+    "syncMode": "additive",
+    "caps": {
+      "mcp": true,
+      "skills": true,
+      "prompts": true,
+      "proxyTakeover": false,
+      "tray": false,
+      "usage": true,
+      "sessionResume": true
+    },
+    "proxyRoute": null,
+    "inputTokenSemantics": "fresh",
+    "defaultVisible": true
+  },
+  {
+    "id": "openclaw",
+    "aliases": [],
+    "labelKey": "apps.openclaw",
+    "displayName": "OpenClaw",
+    "syncMode": "additive",
+    "caps": {
+      "mcp": true,
+      "skills": false,
+      "prompts": true,
+      "proxyTakeover": false,
+      "tray": false,
+      "usage": false,
+      "sessionResume": false
+    },
+    "proxyRoute": null,
+    "inputTokenSemantics": "fresh",
+    "defaultVisible": true
+  },
+  {
+    "id": "hermes",
+    "aliases": [],
+    "labelKey": "apps.hermes",
+    "displayName": "Hermes",
+    "syncMode": "additive",
+    "caps": {
+      "mcp": true,
+      "skills": true,
+      "prompts": true,
+      "proxyTakeover": false,
+      "tray": false,
+      "usage": false,
+      "sessionResume": false
+    },
+    "proxyRoute": null,
+    "inputTokenSemantics": "fresh",
+    "defaultVisible": false
+  }
+]

@@ -442,6 +442,25 @@
           "debug": "SSE ストリームとリクエスト/レスポンスを含む詳細情報",
           "trace": "すべてのログ、最も詳細"
         }
+      },
+      "capabilityMatrix": {
+        "title": "機能マトリクス",
+        "description": "各アプリが対応する機能を確認し、サポート依頼用にコピーできます",
+        "app": "アプリ",
+        "supported": "対応",
+        "unsupported": "非対応",
+        "copy": "診断情報をコピー",
+        "copied": "機能マトリクスをコピーしました",
+        "copyFailed": "機能マトリクスのコピーに失敗しました",
+        "loadFailed": "アプリレジストリの読み込みに失敗しました",
+        "caps": {
+          "mcp": "MCP",
+          "skills": "Skills",
+          "prompts": "プロンプト",
+          "proxyTakeover": "プロキシ引き継ぎ",
+          "usage": "使用量統計",
+          "sessionResume": "セッション再開"
+        }
       }
     },
     "language": "言語",
