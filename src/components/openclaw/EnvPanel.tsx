@@ -7,13 +7,14 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 import { Button } from "@/components/ui/button";
 import JsonEditor from "@/components/JsonEditor";
 import { parseOpenClawEnvEditorValue } from "./utils";
+import { useDarkMode } from "@/hooks/useDarkMode";
 
 const EnvPanel: React.FC = () => {
   const { t } = useTranslation();
   const { data: envData, isLoading } = useOpenClawEnv();
   const saveEnvMutation = useSaveOpenClawEnv();
   const [editorValue, setEditorValue] = useState("{}");
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const isDarkMode = useDarkMode();
 
   useEffect(() => {
     const nextValue =
@@ -22,21 +23,6 @@ const EnvPanel: React.FC = () => {
         : "{}";
     setEditorValue(nextValue);
   }, [envData]);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
-    return () => observer.disconnect();
-  }, []);
 
   const handleSave = async () => {
     try {

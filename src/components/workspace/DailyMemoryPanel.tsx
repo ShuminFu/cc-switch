@@ -19,6 +19,7 @@ import {
   type DailyMemoryFileInfo,
   type DailyMemorySearchResult,
 } from "@/lib/api/workspace";
+import { useDarkMode } from "@/hooks/useDarkMode";
 
 interface DailyMemoryPanelProps {
   isOpen: boolean;
@@ -69,19 +70,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Dark mode
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   // Whether we are in active search mode (search open with a non-empty term)
   const isActiveSearch = useMemo(

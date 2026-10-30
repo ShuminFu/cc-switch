@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import MarkdownEditor from "@/components/MarkdownEditor";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { workspaceApi } from "@/lib/api/workspace";
+import { useDarkMode } from "@/hooks/useDarkMode";
 
 interface WorkspaceFileEditorProps {
   filename: string;
@@ -26,19 +27,7 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
   const [loadError, setLoadError] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => observer.disconnect();
-  }, []);
+  const isDarkMode = useDarkMode();
 
   useEffect(() => {
     if (!isOpen || !filename) return;
