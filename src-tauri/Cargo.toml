@@ -110,5 +110,6 @@ panic = "unwind"
 strip = "symbols"
 
 [dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
 serial_test = "3"
 tempfile = "3"

@@ -1,0 +1,5 @@
+data: {"id": "chatcmpl-s1", "object": "chat.completion.chunk", "created": 1700000000, "model": "gpt-4o-2024-08-06", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-s1", "object": "chat.completion.chunk", "created": 1700000000, "model": "gpt-4o-2024-08-06", "choices": [{"index": 0, "delta": {"content": "Au revoir, "}, "finish_reason": null}]}
+
+: x-fixture-transport-error

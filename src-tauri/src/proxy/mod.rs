@@ -30,6 +30,8 @@ pub(crate) mod server;
 pub mod session;
 pub(crate) mod sse;
 pub(crate) mod switch_lock;
+#[cfg(test)]
+pub(crate) mod testing;
 pub mod thinking_budget_rectifier;
 pub mod thinking_optimizer;
 pub mod thinking_rectifier;

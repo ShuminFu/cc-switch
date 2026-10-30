@@ -1,0 +1,46 @@
+{
+  "id": "resp_chatcmpl-002",
+  "object": "response",
+  "created_at": 1700000001,
+  "status": "completed",
+  "model": "gpt-4o-2024-08-06",
+  "output": [
+    {
+      "id": "resp_chatcmpl-002_msg",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Checking both cities.",
+          "annotations": []
+        }
+      ]
+    },
+    {
+      "id": "fc_call_paris",
+      "type": "function_call",
+      "status": "completed",
+      "call_id": "call_paris",
+      "name": "get_weather",
+      "arguments": "{\"city\":\"Paris\"}"
+    },
+    {
+      "id": "fc_call_rome",
+      "type": "function_call",
+      "status": "completed",
+      "call_id": "call_rome",
+      "name": "get_weather",
+      "arguments": "{\"city\":\"Rome\"}"
+    }
+  ],
+  "usage": {
+    "input_tokens": 80,
+    "output_tokens": 30,
+    "total_tokens": 110,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "promptFeedback": {
+    "blockReason": "SAFETY",
+    "safetyRatings": [
+      {
+        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+        "probability": "HIGH"
+      }
+    ]
+  },
+  "usageMetadata": {
+    "promptTokenCount": 25,
+    "totalTokenCount": 25
+  },
+  "modelVersion": "gemini-2.5-pro",
+  "responseId": "gem-resp-blocked"
+}

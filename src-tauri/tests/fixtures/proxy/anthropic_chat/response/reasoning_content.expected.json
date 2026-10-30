@@ -1,0 +1,22 @@
+{
+  "id": "chatcmpl-003",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "6*8 = 48."
+    },
+    {
+      "type": "text",
+      "text": "48"
+    }
+  ],
+  "model": "deepseek-reasoner",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 20
+  }
+}

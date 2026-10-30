@@ -1,0 +1,35 @@
+{
+  "id": "gem-resp-001",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Checking both cities."
+    },
+    {
+      "type": "tool_use",
+      "id": "gemini_synth_<1>",
+      "name": "get_weather",
+      "input": {
+        "city": "Paris"
+      }
+    },
+    {
+      "type": "tool_use",
+      "id": "gemini_synth_<2>",
+      "name": "get_weather",
+      "input": {
+        "city": "Rome"
+      }
+    }
+  ],
+  "model": "gemini-2.5-pro",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 6,
+    "cache_read_input_tokens": 10
+  }
+}

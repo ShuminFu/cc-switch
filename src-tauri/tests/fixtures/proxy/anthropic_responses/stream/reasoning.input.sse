@@ -1,0 +1,39 @@
+event: response.created
+data: {"sequence_number": 0, "response": {"id": "resp_s3", "object": "response", "created_at": 1700000000, "status": "in_progress", "model": "gpt-5", "output": []}, "type": "response.created"}
+
+event: response.output_item.added
+data: {"sequence_number": 1, "output_index": 0, "item": {"type": "reasoning", "id": "rs_s1", "summary": []}, "type": "response.output_item.added"}
+
+event: response.reasoning_summary_part.added
+data: {"sequence_number": 2, "item_id": "rs_s1", "output_index": 0, "summary_index": 0, "part": {"type": "summary_text", "text": ""}, "type": "response.reasoning_summary_part.added"}
+
+event: response.reasoning_summary_text.delta
+data: {"sequence_number": 3, "item_id": "rs_s1", "output_index": 0, "summary_index": 0, "delta": "6*8 = 48.", "type": "response.reasoning_summary_text.delta"}
+
+event: response.reasoning_summary_text.done
+data: {"sequence_number": 4, "item_id": "rs_s1", "output_index": 0, "summary_index": 0, "text": "6*8 = 48.", "type": "response.reasoning_summary_text.done"}
+
+event: response.reasoning_summary_part.done
+data: {"sequence_number": 5, "item_id": "rs_s1", "output_index": 0, "summary_index": 0, "part": {"type": "summary_text", "text": "6*8 = 48."}, "type": "response.reasoning_summary_part.done"}
+
+event: response.output_item.done
+data: {"sequence_number": 6, "output_index": 0, "item": {"type": "reasoning", "id": "rs_s1", "summary": [{"type": "summary_text", "text": "6*8 = 48."}], "encrypted_content": "gAAAAABencrypted"}, "type": "response.output_item.done"}
+
+event: response.output_item.added
+data: {"sequence_number": 7, "output_index": 1, "item": {"type": "message", "id": "msg_s3", "status": "in_progress", "role": "assistant", "content": []}, "type": "response.output_item.added"}
+
+event: response.content_part.added
+data: {"sequence_number": 8, "item_id": "msg_s3", "output_index": 1, "content_index": 0, "part": {"type": "output_text", "text": "", "annotations": []}, "type": "response.content_part.added"}
+
+event: response.output_text.delta
+data: {"sequence_number": 9, "item_id": "msg_s3", "output_index": 1, "content_index": 0, "delta": "48", "type": "response.output_text.delta"}
+
+event: response.output_text.done
+data: {"sequence_number": 10, "item_id": "msg_s3", "output_index": 1, "content_index": 0, "text": "48", "type": "response.output_text.done"}
+
+event: response.output_item.done
+data: {"sequence_number": 11, "output_index": 1, "item": {"type": "message", "id": "msg_s3", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": "48", "annotations": []}]}, "type": "response.output_item.done"}
+
+event: response.completed
+data: {"sequence_number": 12, "response": {"id": "resp_s3", "object": "response", "created_at": 1700000000, "status": "completed", "model": "gpt-5", "output": [], "usage": {"input_tokens": 25, "input_tokens_details": {"cached_tokens": 10}, "output_tokens": 6, "output_tokens_details": {"reasoning_tokens": 0}, "total_tokens": 31}}, "type": "response.completed"}
+

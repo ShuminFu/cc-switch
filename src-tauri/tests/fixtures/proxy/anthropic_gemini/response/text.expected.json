@@ -1,0 +1,19 @@
+{
+  "id": "gem-resp-001",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Au revoir !"
+    }
+  ],
+  "model": "gemini-2.5-pro",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 6,
+    "cache_read_input_tokens": 10
+  }
+}

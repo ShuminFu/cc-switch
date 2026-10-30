@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"role": "model", "parts": [{"text": "Partial ans"}]}, "index": 0}], "modelVersion": "gemini-2.5-pro", "responseId": "gem-resp-001"}
+
+data: {"candidates": [{"content": {"role": "model", "parts": [{"text": "wer"}]}, "index": 0}], "modelVersion": "gemini-2.5-pro", "responseId": "gem-resp-001"}
+

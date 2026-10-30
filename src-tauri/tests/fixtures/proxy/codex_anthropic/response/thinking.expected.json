@@ -1,0 +1,45 @@
+{
+  "id": "resp_msg_01A",
+  "object": "response",
+  "created_at": 0,
+  "status": "completed",
+  "model": "claude-sonnet-4-5",
+  "output": [
+    {
+      "id": "rs_resp_msg_01A_0",
+      "type": "reasoning",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "6*8 = 48."
+        }
+      ],
+      "encrypted_content": "ccswitch-anthropic-thinking-v1:eyJ0eXBlIjoidGhpbmtpbmciLCJ0aGlua2luZyI6IjYqOCA9IDQ4LiIsInNpZ25hdHVyZSI6InNpZ190aGlua18xIn0"
+    },
+    {
+      "id": "resp_msg_01A_msg_1",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "48",
+          "annotations": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 35,
+    "output_tokens": 6,
+    "total_tokens": 41,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "input_tokens_details": {
+      "cached_tokens": 10,
+      "cache_write_tokens": 0
+    }
+  }
+}

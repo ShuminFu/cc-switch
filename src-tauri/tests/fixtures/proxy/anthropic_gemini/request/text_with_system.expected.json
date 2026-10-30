@@ -1,0 +1,42 @@
+{
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "You are a terse assistant."
+      }
+    ]
+  },
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Hello"
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "text": "Hi."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Say goodbye in French."
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 1024,
+    "temperature": 0.2,
+    "stopSequences": [
+      "END"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "model": "gpt-5-codex",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are Codex."
+    },
+    {
+      "role": "user",
+      "content": "What is 6 * 7?"
+    },
+    {
+      "role": "assistant",
+      "content": "42",
+      "reasoning_content": "Multiply."
+    },
+    {
+      "role": "user",
+      "content": "And 6 * 8?"
+    }
+  ],
+  "stream": false,
+  "reasoning_effort": "high"
+}

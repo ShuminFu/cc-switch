@@ -1,0 +1,73 @@
+{
+  "model": "gpt-5-codex",
+  "instructions": "You are Codex, a coding agent.",
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Run a shell command",
+      "strict": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "List the files."
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_ls",
+      "name": "shell",
+      "arguments": "{\"command\":[\"ls\"]}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_ls",
+      "output": "a.txt\nb.txt"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Two files: a.txt and b.txt."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Show a.txt."
+        }
+      ]
+    }
+  ],
+  "stream": true
+}

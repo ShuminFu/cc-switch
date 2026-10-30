@@ -1,0 +1,22 @@
+{
+  "id": "chatcmpl-005",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "call_0",
+      "name": "get_weather",
+      "input": {
+        "city": "Paris"
+      }
+    }
+  ],
+  "model": "qwen2.5-coder",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 20,
+    "output_tokens": 10
+  }
+}

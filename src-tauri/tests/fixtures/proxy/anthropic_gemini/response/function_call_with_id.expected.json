@@ -1,0 +1,23 @@
+{
+  "id": "gem-resp-001",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "fc-paris-1",
+      "name": "get_weather",
+      "input": {
+        "city": "Paris"
+      }
+    }
+  ],
+  "model": "gemini-2.5-pro",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 6,
+    "cache_read_input_tokens": 10
+  }
+}
