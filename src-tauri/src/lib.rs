@@ -25,6 +25,7 @@ mod model_capabilities;
 mod panic_hook;
 pub mod paths;
 mod picked_paths;
+mod platform;
 mod pricing;
 mod prompt;
 mod prompt_files;

@@ -1,6 +1,10 @@
+//! 会话恢复终端（`launch_session_terminal`）：在 macOS 首选终端中执行后端生成的 resume 命令。
+//! 命令与工作目录由 `session_manager::resolve_resume_target` 按固定模板生成（CCS-074）。
+
+use crate::platform::shell::shell_single_quote;
 use std::process::Command;
 
-pub fn launch_terminal(
+pub(crate) fn launch_resume_terminal(
     target: &str,
     command: &str,
     cwd: Option<&str>,
@@ -309,15 +313,10 @@ fn launch_custom(
 fn build_shell_command(command: &str, cwd: Option<&str>) -> String {
     match cwd {
         Some(dir) if !dir.trim().is_empty() => {
-            format!("cd {} && {}", shell_escape(dir), command)
+            format!("cd {} && {}", shell_single_quote(dir), command)
         }
         _ => command.to_string(),
     }
-}
-
-/// POSIX 单引号转义：双引号内仍会展开 `$(...)` 与反引号，因此统一使用单引号。
-fn shell_escape(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 fn escape_osascript(value: &str) -> String {
@@ -377,7 +376,7 @@ mod tests {
         );
 
         // Verify shell_escape works correctly for paths with spaces
-        assert_eq!(shell_escape(cwd), "'/tmp/project dir'");
+        assert_eq!(shell_single_quote(cwd), "'/tmp/project dir'");
     }
 
     #[test]
@@ -386,6 +385,6 @@ mod tests {
             build_shell_command("claude --resume abc", Some("/tmp/$(rm -rf ~)")),
             "cd '/tmp/$(rm -rf ~)' && claude --resume abc"
         );
-        assert_eq!(shell_escape("it's"), "'it'\"'\"'s'");
+        assert_eq!(shell_single_quote("it's"), "'it'\"'\"'s'");
     }
 }

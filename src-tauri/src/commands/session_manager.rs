@@ -40,7 +40,7 @@ pub async fn launch_session_terminal(
 
     tauri::async_runtime::spawn_blocking(move || {
         let resume = session_manager::resolve_resume_target(&provider_id, &session_id)?;
-        session_manager::terminal::launch_terminal(
+        crate::platform::terminal::launch_resume_terminal(
             &target,
             &resume.command,
             resume.cwd.as_deref(),

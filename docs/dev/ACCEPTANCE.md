@@ -106,8 +106,8 @@ Backend (`src-tauri/src/`):
    least one golden case for each bridge the app uses.
 7. Deep links (`deeplink/{parser,provider,mcp}.rs` and `deeplink/tests.rs`),
    the session manager (`session_manager/providers/<app>.rs`), `tray.rs`, and
-   the command layer (`commands/config.rs`, `commands/proxy.rs`,
-   `commands/misc.rs`).
+   the command layer (`commands/config.rs`, `commands/proxy.rs`), and the
+   CLI tool tables in `services/cli_tools/` (if the app ships a CLI).
 8. Integration tests: add the app to `tests/support.rs` and to the provider,
    MCP and import/export suites.
 
