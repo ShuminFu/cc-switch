@@ -32,6 +32,7 @@ import {
   detectCodingPlanProvider,
 } from "@/config/codingPlanProviders";
 import { formatUsageDataSummary } from "@/utils/usageDisplay";
+import { queryKeys } from "@/lib/query/keys";
 
 /**
  * 火山引擎账号级 AccessKey 的密钥管理页（IAM）。
@@ -467,7 +468,9 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
       if (settingsData) {
         const { webdavSync: _, ...rest } = settingsData;
         await settingsApi.save({ ...rest, usageConfirmed: true });
-        await queryClient.invalidateQueries({ queryKey: ["settings"] });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.settings.all,
+        });
       }
     } catch (error) {
       console.error("Failed to save usage confirmed:", error);
@@ -519,7 +522,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
             duration: 3000,
             closeButton: true,
           });
-          queryClient.setQueryData(["subscription", "quota", appId], quota);
+          queryClient.setQueryData(queryKeys.subscription.quota(appId), quota);
         } else {
           toast.error(
             `${t("usageScript.testFailed")}: ${quota.error || t("endpointTest.noResult")}`,
@@ -549,7 +552,10 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
             duration: 3000,
             closeButton: true,
           });
-          queryClient.setQueryData(["usage", provider.id, appId], result);
+          queryClient.setQueryData(
+            queryKeys.usageScript.byProvider(provider.id, appId),
+            result,
+          );
         } else {
           toast.error(
             `${t("usageScript.testFailed")}: ${result.error || t("endpointTest.noResult")}`,
@@ -598,10 +604,13 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
             used: tier.utilization,
             unit: "%",
           }));
-          queryClient.setQueryData(["usage", provider.id, appId], {
-            success: true,
-            data: usageData,
-          });
+          queryClient.setQueryData(
+            queryKeys.usageScript.byProvider(provider.id, appId),
+            {
+              success: true,
+              data: usageData,
+            },
+          );
         } else {
           toast.error(
             `${t("usageScript.testFailed")}: ${quota.error || t("endpointTest.noResult")}`,
@@ -628,18 +637,21 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
           closeButton: true,
         });
         // 更新缓存
-        queryClient.setQueryData(["usage", provider.id, appId], {
-          success: true,
-          data: [
-            {
-              planName: usage.copilot_plan,
-              remaining: premium.remaining,
-              total: premium.entitlement,
-              used: used,
-              unit: t("usageScript.premiumRequests"),
-            },
-          ],
-        });
+        queryClient.setQueryData(
+          queryKeys.usageScript.byProvider(provider.id, appId),
+          {
+            success: true,
+            data: [
+              {
+                planName: usage.copilot_plan,
+                remaining: premium.remaining,
+                total: premium.entitlement,
+                used: used,
+                unit: t("usageScript.premiumRequests"),
+              },
+            ],
+          },
+        );
         return;
       }
 
@@ -670,7 +682,10 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
         });
 
         // 🔧 测试成功后，更新主界面列表的用量查询缓存
-        queryClient.setQueryData(["usage", provider.id, appId], result);
+        queryClient.setQueryData(
+          queryKeys.usageScript.byProvider(provider.id, appId),
+          result,
+        );
       } else {
         toast.error(
           `${t("usageScript.testFailed")}: ${result.error || t("endpointTest.noResult")}`,

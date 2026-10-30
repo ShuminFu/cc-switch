@@ -122,6 +122,7 @@ import { HERMES_DEFAULT_CONFIG } from "./hooks/useHermesFormState";
 import { resolveManagedAccountId } from "@/lib/authBinding";
 import { useOpenClawLiveProviderIds } from "@/hooks/useOpenClaw";
 import { useHermesLiveProviderIds } from "@/hooks/useHermes";
+import { queryKeys } from "@/lib/query/keys";
 
 type PresetEntry = {
   id: string;
@@ -281,7 +282,9 @@ function ProviderFormFull({
       if (settingsData) {
         const { webdavSync: _, ...rest } = settingsData;
         await settingsApi.save({ ...rest, commonConfigConfirmed: true });
-        await queryClient.invalidateQueries({ queryKey: ["settings"] });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.settings.all,
+        });
       }
     } catch (error) {
       console.error("Failed to save commonConfigConfirmed:", error);
@@ -861,7 +864,7 @@ function ProviderFormFull({
     data: opencodeLiveProviderIds = [],
     isLoading: isOpencodeLiveProviderIdsLoading,
   } = useQuery({
-    queryKey: ["opencodeLiveProviderIds"],
+    queryKey: queryKeys.providers.opencodeLiveIds,
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
     enabled: appId === "opencode" && !isAnyOmoCategory,
   });

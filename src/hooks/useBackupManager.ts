@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { backupsApi } from "@/lib/api";
+import { queryKeys } from "@/lib/query/keys";
 
 export function useBackupManager() {
   const queryClient = useQueryClient();
@@ -9,7 +10,7 @@ export function useBackupManager() {
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ["db-backups"],
+    queryKey: queryKeys.backups.db,
     queryFn: () => backupsApi.listDbBackups(),
   });
 

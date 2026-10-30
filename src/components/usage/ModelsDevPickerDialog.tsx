@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { useUpdateModelPricing } from "@/lib/query/usage";
 import { isTextEditableTarget } from "@/utils/domUtils";
+import { queryKeys } from "@/lib/query/keys";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 // 全量约 5000 条：默认只展示最新发布的一批，搜索时才做全量匹配
@@ -159,7 +160,7 @@ export function ModelsDevPickerDialog({
   }, [open]);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["models-dev-pricing"],
+    queryKey: queryKeys.modelsDevPricing,
     queryFn: async (): Promise<ModelsDevResponse> => {
       const res = await fetch(MODELS_DEV_API_URL);
       if (!res.ok) {

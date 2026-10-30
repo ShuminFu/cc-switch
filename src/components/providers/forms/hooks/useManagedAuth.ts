@@ -7,6 +7,7 @@ import type {
   ManagedAuthStatus,
   ManagedAuthDeviceCodeResponse,
 } from "@/lib/api";
+import { queryKeys } from "@/lib/query/keys";
 
 type PollingState = "idle" | "polling" | "success" | "error";
 
@@ -15,7 +16,7 @@ export function useManagedAuth(
   githubDomain?: string,
 ) {
   const queryClient = useQueryClient();
-  const queryKey = ["managed-auth-status", authProvider];
+  const queryKey = queryKeys.managedAuth.status(authProvider);
 
   const [pollingState, setPollingState] = useState<PollingState>("idle");
   const [deviceCode, setDeviceCode] =

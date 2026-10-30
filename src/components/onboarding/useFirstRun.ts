@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSettingsQuery } from "@/lib/query";
 import { settingsApi } from "@/lib/api";
 import type { Settings, VisibleApps } from "@/types";
+import { queryKeys } from "@/lib/query/keys";
 
 /** Window event used to re-open the setup wizard from anywhere (e.g. Settings → About). */
 export const OPEN_FIRST_RUN_EVENT = "cc-switch:open-first-run-wizard";
@@ -73,7 +74,9 @@ export function useFirstRun(): UseFirstRunResult {
           ...(options.visibleApps ? { visibleApps: options.visibleApps } : {}),
           firstRunNoticeConfirmed: true,
         });
-        await queryClient.invalidateQueries({ queryKey: ["settings"] });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.settings.all,
+        });
       } catch (error) {
         console.error("[useFirstRun] Failed to save first-run state:", error);
       }

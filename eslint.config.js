@@ -49,6 +49,35 @@ export default tseslint.config(
     },
   },
   {
+    // FE-ARCH-04: every TanStack Query key comes from src/lib/query/keys.ts,
+    // so producers, consumers and invalidations cannot drift apart.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/lib/query/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "Property[key.name='queryKey'] > ArrayExpression, Property[key.name='queryKey'] > TSAsExpression > ArrayExpression",
+          message:
+            "Use a key from src/lib/query/keys.ts instead of a literal queryKey array.",
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name=/^(setQueryData|getQueryData|getQueryState|setQueriesData|getQueriesData|fetchQuery|prefetchQuery|ensureQueryData)$/] > ArrayExpression.arguments",
+          message:
+            "Use a key from src/lib/query/keys.ts instead of a literal query key array.",
+        },
+        {
+          selector:
+            "VariableDeclarator[id.name=/^(queryKey|QUERY_KEY|[a-z]\\w*QueryKey)$/] > ArrayExpression, VariableDeclarator[id.name=/^(queryKey|QUERY_KEY|[a-z]\\w*QueryKey)$/] > TSAsExpression > ArrayExpression",
+          message:
+            "Define query keys in src/lib/query/keys.ts instead of a local array.",
+        },
+      ],
+    },
+  },
+  {
     files: ["tests/**/*.{ts,tsx}", "**/*.test.{ts,tsx}"],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node, ...globals.vitest },

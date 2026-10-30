@@ -74,6 +74,7 @@ import {
   type SessionProviderGroup,
   shouldHideCodexMessageFromToc,
 } from "./utils";
+import { queryKeys } from "@/lib/query/keys";
 
 const SESSION_LIST_VIEW_MODE_STORAGE_KEY =
   "cc-switch.sessionManager.listViewMode";
@@ -490,10 +491,12 @@ export function SessionManagerPage({ appId }: { appId: string }) {
 
       if (deletedKeys.length > 0) {
         const deletedKeySet = new Set(deletedKeys);
-        queryClient.setQueryData<SessionMeta[]>(["sessions"], (current) =>
-          (current ?? []).filter(
-            (session) => !deletedKeySet.has(getSessionKey(session)),
-          ),
+        queryClient.setQueryData<SessionMeta[]>(
+          queryKeys.sessions.all,
+          (current) =>
+            (current ?? []).filter(
+              (session) => !deletedKeySet.has(getSessionKey(session)),
+            ),
         );
       }
 
@@ -501,7 +504,10 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         .filter((result) => result.success)
         .forEach((result) => {
           queryClient.removeQueries({
-            queryKey: ["sessionMessages", result.providerId, result.sourcePath],
+            queryKey: queryKeys.sessions.messages(
+              result.providerId,
+              result.sourcePath,
+            ),
           });
         });
 
@@ -511,7 +517,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         return next;
       });
 
-      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.sessions.all });
 
       if (deletedKeys.length > 0) {
         toast.success(

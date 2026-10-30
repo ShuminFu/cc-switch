@@ -23,6 +23,7 @@ import { settingsApi } from "@/lib/api";
 import type { S3SyncSettings, WebDavSyncSettings } from "@/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import type { SyncBackendId } from "./types";
+import { queryKeys } from "@/lib/query/keys";
 
 /**
  * Which backend the panel shows. Only one backend may be enabled: switching
@@ -74,7 +75,7 @@ export function useSyncTypeSelection(
           false,
         );
       }
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings.all });
       setSyncType(next);
     } catch (error) {
       toast.error(

@@ -14,6 +14,7 @@ import type {
   CloudSyncBackendAdapter,
   SyncFormValues,
 } from "./types";
+import { queryKeys } from "@/lib/query/keys";
 
 export type TransferKind = "upload" | "download";
 
@@ -215,7 +216,7 @@ export function useCloudSyncForm<
         setJustSaved(false);
         justSavedTimerRef.current = null;
       }, 2000);
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings.all });
     } catch (error) {
       pendingSecretRef.current = null;
       toast.error(t(m.saveFailed, { error: errorText(error) }));
@@ -307,7 +308,9 @@ export function useCloudSyncForm<
         // A download replaces the whole database, so every cached query is
         // stale; an upload only changes the sync status in settings.
         await queryClient.invalidateQueries(
-          operation === "download" ? undefined : { queryKey: ["settings"] },
+          operation === "download"
+            ? undefined
+            : { queryKey: queryKeys.settings.all },
         );
       } catch (error) {
         const conflict = force ? null : detectSyncConflict(error);

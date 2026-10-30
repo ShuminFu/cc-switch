@@ -11,8 +11,9 @@ import {
   type SyncEncryptionStatus,
 } from "@/lib/api/syncEncryption";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { queryKeys } from "@/lib/query/keys";
 
-const QUERY_KEY = ["syncEncryptionStatus"];
+const QUERY_KEY = queryKeys.sync.encryptionStatus;
 
 /**
  * End-to-end encryption of the WebDAV/S3 sync snapshot (SEC-06 / SVC-04).

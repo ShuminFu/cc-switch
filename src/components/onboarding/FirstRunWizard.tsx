@@ -30,6 +30,7 @@ import {
   type OnboardingApp,
   type WizardStep,
 } from "./onboardingModel";
+import { queryKeys } from "@/lib/query/keys";
 
 type ImportState = "idle" | "pending" | "imported" | "nothing" | "error";
 
@@ -53,7 +54,9 @@ function ProviderSetupRow({
     try {
       const imported = await importLiveConfig(app.id);
       setImportState(imported ? "imported" : "nothing");
-      await queryClient.invalidateQueries({ queryKey: ["providers", app.id] });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.providers.byApp(app.id),
+      });
     } catch (err) {
       setImportState("error");
       setError(extractErrorMessage(err) || String(err));

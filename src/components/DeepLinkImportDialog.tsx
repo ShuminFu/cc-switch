@@ -21,6 +21,7 @@ import { McpConfirmation } from "./deeplink/McpConfirmation";
 import { SkillConfirmation } from "./deeplink/SkillConfirmation";
 import { ProviderIcon } from "./ProviderIcon";
 import { decodeBase64Lenient, getEndpointHost } from "./deeplink/safety";
+import { queryKeys } from "@/lib/query/keys";
 
 interface DeeplinkError {
   url: string;
@@ -173,11 +174,11 @@ export function DeepLinkImportDialog() {
       }) => {
         // 强制刷新 MCP 相关缓存，确保管理页重新从数据库加载
         await queryClient.invalidateQueries({
-          queryKey: ["mcp", "all"],
+          queryKey: queryKeys.mcp.all,
           refetchType: "all",
         });
         await queryClient.refetchQueries({
-          queryKey: ["mcp", "all"],
+          queryKey: queryKeys.mcp.all,
           type: "all",
         });
 
@@ -202,7 +203,9 @@ export function DeepLinkImportDialog() {
       if ("type" in result) {
         if (result.type === "provider") {
           await queryClient.invalidateQueries({
-            queryKey: ["providers", request.app],
+            queryKey: request.app
+              ? queryKeys.providers.byApp(request.app)
+              : queryKeys.providers.all,
           });
           toast.success(t("deeplink.importSuccess"), {
             description: t("deeplink.importSuccessDescription", {
@@ -228,11 +231,11 @@ export function DeepLinkImportDialog() {
         } else if (result.type === "skill") {
           // Refresh Skills with aggressive strategy
           queryClient.invalidateQueries({
-            queryKey: ["skills"],
+            queryKey: queryKeys.skills.all,
             refetchType: "all",
           });
           await queryClient.refetchQueries({
-            queryKey: ["skills"],
+            queryKey: queryKeys.skills.all,
             type: "all",
           });
           toast.success(t("deeplink.skillImportSuccess"), {
@@ -248,7 +251,9 @@ export function DeepLinkImportDialog() {
       } else {
         // Legacy return type (string ID) - assume provider
         await queryClient.invalidateQueries({
-          queryKey: ["providers", request.app],
+          queryKey: request.app
+            ? queryKeys.providers.byApp(request.app)
+            : queryKeys.providers.all,
         });
         toast.success(t("deeplink.importSuccess"), {
           description: t("deeplink.importSuccessDescription", {

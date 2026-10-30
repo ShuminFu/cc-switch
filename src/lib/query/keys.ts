@@ -141,6 +141,7 @@ export const usageKeys = {
   pricing: () => [...usageKeys.all, "pricing"] as const,
   limits: (providerId: string, appType: string) =>
     [...usageKeys.all, "limits", providerId, appType] as const,
+  dataSources: () => [...usageKeys.all, "data-sources"] as const,
   /**
    * Per-provider usage-script query. Deliberately NOT under `usageKeys.all`
    * (FE-ARCH-04): dashboard invalidations must not refetch third-party quota
@@ -273,6 +274,26 @@ export const queryKeys = {
 
   backups: {
     db: ["db-backups"] as const,
+  },
+
+  prompts: {
+    all: ["prompts"] as const,
+    byApp: (appId: AppId | string) => ["prompts", appId] as const,
+    currentFile: (appId: AppId | string) =>
+      ["prompts", appId, "current-file"] as const,
+  },
+
+  budget: {
+    enforcement: ["budget", "enforcement"] as const,
+  },
+
+  sync: {
+    encryptionStatus: ["syncEncryptionStatus"] as const,
+  },
+
+  managedAuth: {
+    status: (authProvider: string) =>
+      ["managed-auth-status", authProvider] as const,
   },
 
   modelsDevPricing: ["models-dev-pricing"] as const,

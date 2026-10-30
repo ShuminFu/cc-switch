@@ -46,6 +46,7 @@ import { useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
+import { queryKeys } from "@/lib/query/keys";
 
 interface ProviderListProps {
   providers: Record<string, Provider>;
@@ -102,7 +103,7 @@ export function ProviderList({
   );
 
   const { data: opencodeLiveIds } = useQuery({
-    queryKey: ["opencodeLiveProviderIds"],
+    queryKey: queryKeys.providers.opencodeLiveIds,
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
     enabled: appId === "opencode",
   });
@@ -202,7 +203,7 @@ export function ProviderList({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { data: claudeDesktopStatus } = useQuery({
-    queryKey: ["claudeDesktopStatus"],
+    queryKey: queryKeys.providers.claudeDesktopStatus,
     queryFn: () => providersApi.getClaudeDesktopStatus(),
     enabled: appId === "claude-desktop",
     refetchInterval: appId === "claude-desktop" ? 5000 : false,
@@ -240,9 +241,13 @@ export function ProviderList({
     },
     onSuccess: (imported) => {
       if (imported) {
-        queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.providers.byApp(appId),
+        });
         if (appId === "claude-desktop") {
-          queryClient.invalidateQueries({ queryKey: ["claudeDesktopStatus"] });
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.providers.claudeDesktopStatus,
+          });
         }
         toast.success(t("provider.importCurrentDescription"));
       } else {
