@@ -6,7 +6,9 @@ use crate::app_config::AppType;
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
-use crate::proxy::circuit_breaker::{AllowResult, CircuitBreaker, CircuitBreakerConfig};
+use crate::proxy::circuit_breaker::{
+    AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
+};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -122,6 +124,19 @@ impl ProviderRouter {
         breaker.allow_request().await
     }
 
+    /// Like [`allow_provider_request`](Self::allow_provider_request), but returns an
+    /// RAII [`HalfOpenPermit`] that releases the probe slot if the request future is
+    /// dropped (client disconnect / cancellation) before a result is recorded.
+    pub async fn allow_provider_request_guarded(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> (AllowResult, HalfOpenPermit) {
+        let circuit_key = format!("{app_type}:{provider_id}");
+        let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
+        breaker.allow_request_guarded().await
+    }
+
     /// 记录供应商请求结果
     pub async fn record_result(
         &self,
@@ -134,7 +149,7 @@ impl ProviderRouter {
         // 1. 按应用独立获取熔断器配置
         let failure_threshold = match self.db.get_proxy_config_for_app(app_type).await {
             Ok(app_config) => app_config.circuit_failure_threshold,
-            Err(_) => 5, // 默认值
+            Err(_) => crate::proxy::circuit_breaker::DEFAULT_FAILURE_THRESHOLD,
         };
 
         // 2. 更新熔断器状态
