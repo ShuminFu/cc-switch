@@ -25,6 +25,8 @@ use crate::proxy::protocol::ir::{
 };
 use crate::proxy::protocol::WireFormat;
 
+pub mod side_store;
+
 /// 协议转换引擎
 ///
 /// `Legacy` 保留一个版本作为回退：在编解码出现回归时让所有桥接退回原有的

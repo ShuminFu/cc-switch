@@ -4,6 +4,7 @@
 //! so Gemini thought signatures and tool turns can be replayed without bloating
 //! the main proxy files.
 
+use crate::proxy::codec::side_store::{SessionSideStore, SideStoreKind, SideStoreScope};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{RwLock, RwLockWriteGuard};
@@ -286,6 +287,42 @@ impl GeminiShadowStore {
             };
             inner.sessions.remove(&evicted_key);
         }
+    }
+}
+
+/// 回复侧记录一轮助手回复，请求侧把会话内保存的各轮（旧 → 新）追加到回放列表。
+/// 只在有会话 ID 时生效：Gemini shadow 按 (provider, 会话) 隔离。
+impl SessionSideStore for GeminiShadowStore {
+    type Record = GeminiAssistantTurn;
+    type Restore = Vec<GeminiAssistantTurn>;
+
+    fn kind(&self) -> SideStoreKind {
+        SideStoreKind::GeminiShadow
+    }
+
+    fn record(&self, scope: &SideStoreScope<'_>, record: &mut GeminiAssistantTurn) -> usize {
+        let Some(session_id) = scope.session_id else {
+            return 0;
+        };
+        self.record_assistant_turn(
+            scope.provider_id,
+            session_id,
+            record.assistant_content.clone(),
+            record.tool_calls.clone(),
+        );
+        1
+    }
+
+    fn restore(&self, scope: &SideStoreScope<'_>, restore: &mut Vec<GeminiAssistantTurn>) -> usize {
+        let Some(snapshot) = scope
+            .session_id
+            .and_then(|session_id| self.get_session(scope.provider_id, session_id))
+        else {
+            return 0;
+        };
+        let restored = snapshot.turns.len();
+        restore.extend(snapshot.turns);
+        restored
     }
 }
 

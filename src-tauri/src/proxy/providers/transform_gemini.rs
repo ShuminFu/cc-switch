@@ -6,6 +6,7 @@
 
 use super::gemini_schema::build_gemini_function_declaration;
 use super::gemini_shadow::{GeminiAssistantTurn, GeminiShadowStore, GeminiToolCallMeta};
+use crate::proxy::codec::side_store::{SessionSideStore, SideStoreScope};
 use crate::proxy::error::ProxyError;
 use crate::proxy::protocol::StopReason;
 use crate::proxy::usage::ir::UsageIR;
@@ -57,12 +58,13 @@ pub fn anthropic_to_gemini_with_shadow(
     session_id: Option<&str>,
 ) -> Result<Value, ProxyError> {
     let mut result = json!({});
-    let shadow_turns = shadow_store
-        .zip(provider_id)
-        .zip(session_id)
-        .and_then(|((store, provider_id), session_id)| store.get_session(provider_id, session_id))
-        .map(|snapshot| snapshot.turns)
-        .unwrap_or_default();
+    let mut shadow_turns = Vec::new();
+    if let (Some(store), Some(provider_id)) = (shadow_store, provider_id) {
+        store.restore(
+            &SideStoreScope::new(provider_id, session_id),
+            &mut shadow_turns,
+        );
+    }
 
     let messages = body.get("messages").and_then(|value| value.as_array());
 
@@ -253,11 +255,9 @@ pub fn gemini_to_anthropic_with_shadow_and_hints(
         if let Some(parts_value) = shadow_content.get_mut("parts") {
             *parts_value = json!(rectified_parts.clone());
         }
-        store.record_assistant_turn(
-            provider_id,
-            session_id,
-            shadow_content,
-            extract_tool_call_meta(&rectified_parts),
+        store.record(
+            &SideStoreScope::new(provider_id, Some(session_id)),
+            &mut GeminiAssistantTurn::new(shadow_content, extract_tool_call_meta(&rectified_parts)),
         );
     }
 

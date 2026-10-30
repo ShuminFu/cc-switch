@@ -3,11 +3,12 @@
 //! Converts Gemini `streamGenerateContent?alt=sse` chunks into Anthropic-style
 //! SSE events for Claude-compatible clients.
 
-use super::gemini_shadow::{GeminiShadowStore, GeminiToolCallMeta};
+use super::gemini_shadow::{GeminiAssistantTurn, GeminiShadowStore, GeminiToolCallMeta};
 use super::transform_gemini::{
     build_anthropic_usage, is_synthesized_tool_call_id, rectify_tool_call_parts,
     synthesize_tool_call_id, AnthropicToolSchemaHints,
 };
+use crate::proxy::codec::side_store::{SessionSideStore, SideStoreScope};
 use crate::proxy::protocol::StopReason;
 use crate::proxy::sse::{append_utf8_safe, strip_sse_field, take_sse_block};
 use bytes::Bytes;
@@ -599,11 +600,9 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                 &tool_calls,
             );
             if !shadow_parts.is_empty() {
-                store.record_assistant_turn(
-                    provider_id,
-                    session_id,
-                    json!({ "parts": shadow_parts }),
-                    tool_calls.clone(),
+                store.record(
+                    &SideStoreScope::new(provider_id, Some(session_id)),
+                    &mut GeminiAssistantTurn::new(json!({ "parts": shadow_parts }), tool_calls.clone()),
                 );
             }
         }

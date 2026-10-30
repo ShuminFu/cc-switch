@@ -663,8 +663,7 @@ async fn handle_codex_chat_to_responses_transform(
     })?;
     state
         .codex_chat_history
-        .record_response(&responses_response)
-        .await;
+        .record_response(&responses_response);
 
     // 上游非流式 Chat 省略 usage 时，chat_usage_to_responses_usage 会合成全 0 usage，
     // from_codex_response 对 input/output 字段存在(哪怕=0)即返回 Some。全 0 由

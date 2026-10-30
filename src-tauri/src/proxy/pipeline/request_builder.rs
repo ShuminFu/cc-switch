@@ -14,6 +14,7 @@ use super::copilot::{self, CopilotOptimization};
 use crate::app_config::AppType;
 use crate::provider::{LocalProxyRequestOverrides, Provider};
 use crate::proxy::body_filter::filter_private_params_with_whitelist;
+use crate::proxy::codec::side_store::{SessionSideStore, SideStoreScope};
 use crate::proxy::error::ProxyError;
 use crate::proxy::forwarder::{ForwarderDeps, RequestScope};
 use crate::proxy::json_canonical::{canonicalize_value, short_value_hash};
@@ -288,7 +289,10 @@ impl BodyStages<'_> {
             .get("prompt_cache_key")
             .and_then(|value| value.as_str())
             .map(ToString::to_string);
-        let restored = self.deps.codex_chat_history.enrich_request(&mut body).await;
+        let restored = self.deps.codex_chat_history.restore(
+            &SideStoreScope::new(&self.provider.id, self.client_session_id()),
+            &mut body,
+        );
         if restored > 0 {
             log::debug!(
                 "[Codex] Restored or enriched {restored} cached function call item(s) for Chat upstream"
