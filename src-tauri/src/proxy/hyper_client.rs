@@ -1120,14 +1120,15 @@ mod tests {
         }
     }
 
-    /// Bind a listener on `[::1]:0`, or `None` when the host has no IPv6.
-    /// `CCS_REQUIRE_IPV6` set to anything but empty or `0` turns the skip
-    /// into a failure, so CI legs with IPv6 cannot pass without running the
-    /// `[::1]` tests (CCS-227).
+    /// Whether a `CCS_REQUIRE_IPV6` value demands IPv6: anything but unset,
+    /// empty or `0` turns the skip into a failure, so CI legs with IPv6
+    /// cannot pass without running the `[::1]` tests (CCS-227).
     fn ipv6_required(value: Option<&str>) -> bool {
         matches!(value.map(str::trim), Some(v) if !v.is_empty() && v != "0")
     }
 
+    /// Bind a listener on `[::1]:0`, or `None` when the host has no IPv6
+    /// (panics instead when [`ipv6_required`] says IPv6 is required).
     async fn bind_ipv6_loopback() -> Option<tokio::net::TcpListener> {
         match tokio::net::TcpListener::bind("[::1]:0").await {
             Ok(listener) => Some(listener),

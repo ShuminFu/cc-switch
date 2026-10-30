@@ -35,3 +35,7 @@ Verification (Linux container without IPv6):
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 2852 passed, 0 failed, 3 ignored.
 - YAML parses with `yaml.safe_load`; `~/go/bin/actionlint .github/workflows/ci.yml` — clean.
 - Remaining (CI only): the real `[::1]` assertions run on the GitHub Linux/macOS backend legs.
+
+Review:
+- Checked all three acceptance criteria and the CI wiring; the env guard logic, the unit test and the Linux/macOS-only `CCS_REQUIRE_IPV6` value are correct, and `bind_ipv6_loopback()` is the only `[::1]` bind in the Rust tests. One fix: inserting `ipv6_required()` had left the "Bind a listener on `[::1]:0`" doc comment attached to the helper instead of `bind_ipv6_loopback()`; each function now has its own doc comment.
+- Re-verified here: `--lib proxy::hyper_client` 16 passed; with `CCS_REQUIRE_IPV6=1` both `[::1]` tests panic with EAFNOSUPPORT; with `CCS_REQUIRE_IPV6=0` they skip; fmt, clippy `--all-targets -D warnings`, actionlint clean; full `--lib` 2852 passed, 0 failed, 3 ignored.
