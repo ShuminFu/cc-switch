@@ -2,12 +2,14 @@
 
 use super::calculator::{CostBreakdown, CostCalculator, ModelPricing};
 use super::parser::TokenUsage;
-use crate::database::{Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
+use crate::database::{Database, WriteJob, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 use crate::error::AppError;
 use crate::services::sql_helpers::{INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL};
 use crate::services::usage_stats::{find_model_pricing_row, is_placeholder_pricing_model};
+use rusqlite::Connection;
 use rust_decimal::Decimal;
 use std::str::FromStr;
+use std::sync::Arc;
 
 /// 请求日志
 #[derive(Debug, Clone)]
@@ -38,89 +40,122 @@ pub struct RequestLog {
 }
 
 /// 使用量记录器
+///
+/// 所有 SQLite 工作（定价查询、`INSERT OR REPLACE`）都在数据库的使用量写线程上
+/// 批量执行（见 `database::usage_writer`）；这里的方法只做内存计算并非阻塞入队，
+/// 不在调用方（Tokio worker / 请求路径）上获取数据库锁。测试或退出时调用
+/// [`Database::flush_usage_writes`] 等待写入落库。
 pub struct UsageLogger<'a> {
-    db: &'a Database,
+    db: &'a Arc<Database>,
+}
+
+const INSERT_REQUEST_LOG_SQL: &str = "INSERT OR REPLACE INTO proxy_request_logs (
+    request_id, provider_id, app_type, model, request_model, pricing_model,
+    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+    input_token_semantics,
+    input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
+    latency_ms, first_token_ms, status_code, error_message, session_id,
+    provider_type, is_streaming, cost_multiplier, created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)";
+
+/// 在给定连接上写入一条请求日志（使用缓存的预编译语句）。
+fn insert_request_log(
+    conn: &Connection,
+    log: &RequestLog,
+    created_at: i64,
+) -> Result<(), AppError> {
+    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) =
+        if let Some(cost) = &log.cost {
+            (
+                cost.input_cost.to_string(),
+                cost.output_cost.to_string(),
+                cost.cache_read_cost.to_string(),
+                cost.cache_creation_cost.to_string(),
+                cost.total_cost.to_string(),
+            )
+        } else {
+            (
+                "0".to_string(),
+                "0".to_string(),
+                "0".to_string(),
+                "0".to_string(),
+                "0".to_string(),
+            )
+        };
+
+    let input_token_semantics = if matches!(log.app_type.as_str(), "codex" | "gemini" | "grokbuild")
+    {
+        INPUT_TOKEN_SEMANTICS_TOTAL
+    } else {
+        INPUT_TOKEN_SEMANTICS_FRESH
+    };
+
+    let mut stmt = conn
+        .prepare_cached(INSERT_REQUEST_LOG_SQL)
+        .map_err(|e| AppError::Database(format!("记录请求日志失败: {e}")))?;
+    stmt.execute(rusqlite::params![
+        log.request_id,
+        log.provider_id,
+        log.app_type,
+        log.model,
+        log.request_model,
+        log.pricing_model,
+        log.usage.input_tokens,
+        log.usage.output_tokens,
+        log.usage.cache_read_tokens,
+        log.usage.cache_creation_tokens,
+        input_token_semantics,
+        input_cost,
+        output_cost,
+        cache_read_cost,
+        cache_creation_cost,
+        total_cost,
+        log.latency_ms as i64,
+        log.first_token_ms.map(|v| v as i64),
+        log.status_code as i64,
+        log.error_message,
+        log.session_id,
+        log.provider_type,
+        log.is_streaming as i64,
+        log.cost_multiplier,
+        created_at,
+    ])
+    .map_err(|e| AppError::Database(format!("记录请求日志失败: {e}")))?;
+    Ok(())
+}
+
+/// 在给定连接上查询模型定价。
+fn model_pricing_on_conn(
+    conn: &Connection,
+    model_id: &str,
+) -> Result<Option<ModelPricing>, AppError> {
+    match find_model_pricing_row(conn, model_id)? {
+        Some((input, output, cache_read, cache_creation)) => {
+            ModelPricing::from_strings(&input, &output, &cache_read, &cache_creation)
+                .map(Some)
+                .map_err(|e| AppError::Database(format!("解析定价数据失败: {e}")))
+        }
+        None => Ok(None),
+    }
 }
 
 impl<'a> UsageLogger<'a> {
-    pub fn new(db: &'a Database) -> Self {
+    pub fn new(db: &'a Arc<Database>) -> Self {
         Self { db }
     }
 
-    /// 记录成功的请求
+    /// 记录请求（非阻塞入队，由写线程批量写入）
+    ///
+    /// `created_at` 取入队时刻，而不是落库时刻。
     pub fn log_request(&self, log: &RequestLog) -> Result<(), AppError> {
-        let conn = crate::database::lock_conn!(self.db.conn);
-
-        let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) =
-            if let Some(cost) = &log.cost {
-                (
-                    cost.input_cost.to_string(),
-                    cost.output_cost.to_string(),
-                    cost.cache_read_cost.to_string(),
-                    cost.cache_creation_cost.to_string(),
-                    cost.total_cost.to_string(),
-                )
-            } else {
-                (
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                )
-            };
-
         let created_at = chrono::Utc::now().timestamp();
-        let input_token_semantics =
-            if matches!(log.app_type.as_str(), "codex" | "gemini" | "grokbuild") {
-                INPUT_TOKEN_SEMANTICS_TOTAL
-            } else {
-                INPUT_TOKEN_SEMANTICS_FRESH
-            };
-
-        conn.execute(
-            "INSERT OR REPLACE INTO proxy_request_logs (
-                request_id, provider_id, app_type, model, request_model, pricing_model,
-                input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                input_token_semantics,
-                input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-                latency_ms, first_token_ms, status_code, error_message, session_id,
-                provider_type, is_streaming, cost_multiplier, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
-            rusqlite::params![
-                log.request_id,
-                log.provider_id,
-                log.app_type,
-                log.model,
-                log.request_model,
-                log.pricing_model,
-                log.usage.input_tokens,
-                log.usage.output_tokens,
-                log.usage.cache_read_tokens,
-                log.usage.cache_creation_tokens,
-                input_token_semantics,
-                input_cost,
-                output_cost,
-                cache_read_cost,
-                cache_creation_cost,
-                total_cost,
-                log.latency_ms as i64,
-                log.first_token_ms.map(|v| v as i64),
-                log.status_code as i64,
-                log.error_message,
-                log.session_id,
-                log.provider_type,
-                log.is_streaming as i64,
-                log.cost_multiplier,
-                created_at,
-            ],
+        let log = log.clone();
+        self.db.enqueue_usage_write(
+            WriteJob::new("proxy_request_log", move |conn| {
+                insert_request_log(conn, &log, created_at)
+            })
+            .notify_usage(),
         )
-        .map_err(|e| AppError::Database(format!("记录请求日志失败: {e}")))?;
-
-        // 通知前端使用统计有更新（200ms 防抖合并，不阻塞写入路径）
-        crate::usage_events::notify_log_recorded();
-
-        Ok(())
     }
 
     /// 记录失败的请求
@@ -202,18 +237,11 @@ impl<'a> UsageLogger<'a> {
         self.log_request(&log)
     }
 
-    /// 获取模型定价
+    /// 获取模型定价（同步查询主连接；请求路径请勿调用，计价已在写线程上完成）
+    #[allow(dead_code)]
     pub fn get_model_pricing(&self, model_id: &str) -> Result<Option<ModelPricing>, AppError> {
         let conn = crate::database::lock_conn!(self.db.conn);
-        let row = find_model_pricing_row(&conn, model_id)?;
-        match row {
-            Some((input, output, cache_read, cache_creation)) => {
-                ModelPricing::from_strings(&input, &output, &cache_read, &cache_creation)
-                    .map(Some)
-                    .map_err(|e| AppError::Database(format!("解析定价数据失败: {e}")))
-            }
-            None => Ok(None),
-        }
+        model_pricing_on_conn(&conn, model_id)
     }
 
     /// 获取有效的倍率与计费模式来源（供应商优先，未配置则回退全局默认）
@@ -230,14 +258,24 @@ impl<'a> UsageLogger<'a> {
         } else {
             app_type
         };
-        let default_multiplier_raw =
-            match self.db.get_default_cost_multiplier(default_app_type).await {
-                Ok(value) => value,
-                Err(e) => {
-                    log::warn!("[USG-003] 获取默认倍率失败 (app_type={app_type}): {e}");
-                    "1".to_string()
-                }
-            };
+        // 命中快照缓存时不访问数据库；未命中时在 spawn_blocking 上重建
+        let default_snapshot = match self.db.proxy_request_snapshot_async(default_app_type).await {
+            Ok(snapshot) => Some(snapshot),
+            Err(e) => {
+                log::warn!("[USG-003] 获取默认计费配置失败 (app_type={app_type}): {e}");
+                None
+            }
+        };
+        let default_multiplier_raw = match default_snapshot
+            .as_ref()
+            .and_then(|s| s.default_cost_multiplier.clone())
+        {
+            Some(value) => value,
+            None => {
+                log::warn!("[USG-003] 获取默认倍率失败 (app_type={app_type})");
+                "1".to_string()
+            }
+        };
         let default_multiplier = match Decimal::from_str(&default_multiplier_raw) {
             Ok(value) => value,
             Err(e) => {
@@ -248,14 +286,16 @@ impl<'a> UsageLogger<'a> {
             }
         };
 
-        let default_pricing_source_raw =
-            match self.db.get_pricing_model_source(default_app_type).await {
-                Ok(value) => value,
-                Err(e) => {
-                    log::warn!("[USG-003] 获取默认计费模式失败 (app_type={app_type}): {e}");
-                    PRICING_SOURCE_RESPONSE.to_string()
-                }
-            };
+        let default_pricing_source_raw = match default_snapshot
+            .as_ref()
+            .and_then(|s| s.default_pricing_model_source.clone())
+        {
+            Some(value) => value,
+            None => {
+                log::warn!("[USG-003] 获取默认计费模式失败 (app_type={app_type})");
+                PRICING_SOURCE_RESPONSE.to_string()
+            }
+        };
         let default_pricing_source = if default_pricing_source_raw == PRICING_SOURCE_RESPONSE
             || default_pricing_source_raw == PRICING_SOURCE_REQUEST
         {
@@ -267,11 +307,14 @@ impl<'a> UsageLogger<'a> {
             PRICING_SOURCE_RESPONSE.to_string()
         };
 
-        let provider = self
-            .db
-            .get_provider_by_id(provider_id, app_type)
-            .ok()
-            .flatten();
+        let app_snapshot = if app_type == default_app_type {
+            default_snapshot
+        } else {
+            self.db.proxy_request_snapshot_async(app_type).await.ok()
+        };
+        let provider = app_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.providers.get(provider_id));
 
         let (provider_multiplier, provider_pricing_source) = provider
             .as_ref()
@@ -330,25 +373,13 @@ impl<'a> UsageLogger<'a> {
         provider_type: Option<String>,
         is_streaming: bool,
     ) -> Result<(), AppError> {
-        let pricing = self.get_model_pricing(&pricing_model)?;
-
         let has_usage = usage.input_tokens > 0
             || usage.output_tokens > 0
             || usage.cache_read_tokens > 0
             || usage.cache_creation_tokens > 0;
+        let created_at = chrono::Utc::now().timestamp();
 
-        if pricing.is_none() && has_usage && !is_placeholder_pricing_model(&pricing_model) {
-            log::warn!("[USG-002] 模型定价未找到，成本将记录为 0: {pricing_model}");
-        }
-
-        let cost = CostCalculator::try_calculate_for_app(
-            &app_type,
-            &usage,
-            pricing.as_ref(),
-            cost_multiplier,
-        );
-
-        let log = RequestLog {
+        let mut log = RequestLog {
             request_id,
             provider_id,
             app_type,
@@ -356,7 +387,7 @@ impl<'a> UsageLogger<'a> {
             request_model,
             pricing_model,
             usage,
-            cost,
+            cost: None,
             latency_ms,
             first_token_ms,
             status_code,
@@ -367,7 +398,29 @@ impl<'a> UsageLogger<'a> {
             cost_multiplier: cost_multiplier.to_string(),
         };
 
-        self.log_request(&log)
+        // 定价查询与插入都在写线程的批事务里执行
+        self.db.enqueue_usage_write(
+            WriteJob::new("proxy_request_log_priced", move |conn| {
+                let pricing = model_pricing_on_conn(conn, &log.pricing_model)?;
+                if pricing.is_none()
+                    && has_usage
+                    && !is_placeholder_pricing_model(&log.pricing_model)
+                {
+                    log::warn!(
+                        "[USG-002] 模型定价未找到，成本将记录为 0: {}",
+                        log.pricing_model
+                    );
+                }
+                log.cost = CostCalculator::try_calculate_for_app(
+                    &log.app_type,
+                    &log.usage,
+                    pricing.as_ref(),
+                    cost_multiplier,
+                );
+                insert_request_log(conn, &log, created_at)
+            })
+            .notify_usage(),
+        )
     }
 }
 
@@ -377,7 +430,7 @@ mod tests {
 
     #[test]
     fn test_log_request() -> Result<(), AppError> {
-        let db = Database::memory()?;
+        let db = Arc::new(Database::memory()?);
 
         // 插入测试定价
         {
@@ -419,6 +472,7 @@ mod tests {
         )?;
 
         // 验证记录已插入
+        db.flush_usage_writes()?;
         let conn = crate::database::lock_conn!(db.conn);
         let (count, request_model): (i64, String) = conn
             .query_row(
@@ -434,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_log_error() -> Result<(), AppError> {
-        let db = Database::memory()?;
+        let db = Arc::new(Database::memory()?);
         let logger = UsageLogger::new(&db);
 
         logger.log_error(
@@ -448,6 +502,7 @@ mod tests {
         )?;
 
         // 验证错误记录已插入
+        db.flush_usage_writes()?;
         let conn = crate::database::lock_conn!(db.conn);
         let (status, error): (i64, Option<String>) = conn
             .query_row(
@@ -463,7 +518,7 @@ mod tests {
 
     #[test]
     fn grokbuild_logs_total_input_token_semantics() -> Result<(), AppError> {
-        let db = Database::memory()?;
+        let db = Arc::new(Database::memory()?);
         let logger = UsageLogger::new(&db);
         let log = RequestLog {
             request_id: "grok-semantics".to_string(),
@@ -486,6 +541,7 @@ mod tests {
 
         logger.log_request(&log)?;
 
+        db.flush_usage_writes()?;
         let conn = crate::database::lock_conn!(db.conn);
         let semantics: i64 = conn.query_row(
             "SELECT input_token_semantics FROM proxy_request_logs WHERE request_id = 'grok-semantics'",
@@ -493,6 +549,148 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(semantics, INPUT_TOKEN_SEMANTICS_TOTAL);
+        Ok(())
+    }
+
+    fn sample_log(request_id: &str) -> RequestLog {
+        RequestLog {
+            request_id: request_id.to_string(),
+            provider_id: "provider-1".to_string(),
+            app_type: "claude".to_string(),
+            model: "m".to_string(),
+            request_model: "m".to_string(),
+            pricing_model: String::new(),
+            usage: TokenUsage::default(),
+            cost: None,
+            latency_ms: 1,
+            first_token_ms: None,
+            status_code: 200,
+            error_message: None,
+            session_id: None,
+            provider_type: None,
+            is_streaming: false,
+            cost_multiplier: "1".to_string(),
+        }
+    }
+
+    /// PERF-03 / PROXY-04：记录日志不再在调用方线程上获取数据库锁。
+    /// 若 log_request 仍同步获取锁，这里会在同一线程上死锁。
+    #[test]
+    fn log_request_does_not_touch_sqlite_on_caller_thread() -> Result<(), AppError> {
+        let db = Arc::new(Database::memory()?);
+        let logger = UsageLogger::new(&db);
+        {
+            let _held = db.conn.lock().unwrap();
+            for i in 0..5 {
+                logger.log_request(&sample_log(&format!("held-{i}")))?;
+            }
+            logger.log_with_calculation(
+                "held-priced".to_string(),
+                "provider-1".to_string(),
+                "claude".to_string(),
+                "m".to_string(),
+                "m".to_string(),
+                "m".to_string(),
+                TokenUsage::default(),
+                Decimal::from(1),
+                1,
+                None,
+                200,
+                None,
+                None,
+                false,
+            )?;
+        }
+        db.flush_usage_writes()?;
+        let conn = crate::database::lock_conn!(db.conn);
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM proxy_request_logs WHERE request_id LIKE 'held-%'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 6);
+        Ok(())
+    }
+
+    #[test]
+    fn priced_log_is_costed_on_the_writer() -> Result<(), AppError> {
+        let db = Arc::new(Database::memory()?);
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO model_pricing (model_id, display_name, input_cost_per_million, output_cost_per_million)
+                 VALUES ('priced-model', 'Priced', '3.0', '15.0')",
+                [],
+            )?;
+        }
+        let logger = UsageLogger::new(&db);
+        logger.log_with_calculation(
+            "priced".to_string(),
+            "provider-1".to_string(),
+            "claude".to_string(),
+            "priced-model".to_string(),
+            "priced-model".to_string(),
+            "priced-model".to_string(),
+            TokenUsage {
+                input_tokens: 1_000_000,
+                output_tokens: 1_000_000,
+                ..TokenUsage::default()
+            },
+            Decimal::from(2),
+            1,
+            None,
+            200,
+            None,
+            None,
+            false,
+        )?;
+        db.flush_usage_writes()?;
+        let conn = crate::database::lock_conn!(db.conn);
+        let total: String = conn.query_row(
+            "SELECT total_cost_usd FROM proxy_request_logs WHERE request_id = 'priced'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(Decimal::from_str(&total).unwrap(), Decimal::from(36));
+        Ok(())
+    }
+
+    /// PERF-05：计价配置来自缓存快照，供应商/全局配置写入后立即生效。
+    #[tokio::test]
+    async fn resolve_pricing_config_follows_config_writes() -> Result<(), AppError> {
+        use crate::provider::{Provider, ProviderMeta};
+
+        let db = Arc::new(Database::memory()?);
+        let logger = UsageLogger::new(&db);
+
+        let (multiplier, source) = logger.resolve_pricing_config("p1", "claude").await;
+        assert_eq!(multiplier, Decimal::from(1));
+        assert_eq!(source, PRICING_SOURCE_RESPONSE);
+
+        db.set_default_cost_multiplier("claude", "1.5").await?;
+        let (multiplier, _) = logger.resolve_pricing_config("p1", "claude").await;
+        assert_eq!(multiplier, Decimal::from_str("1.5").unwrap());
+
+        let mut provider = Provider::with_id(
+            "p1".to_string(),
+            "P1".to_string(),
+            serde_json::json!({}),
+            None,
+        );
+        provider.meta = Some(ProviderMeta {
+            cost_multiplier: Some("2".to_string()),
+            pricing_model_source: Some("request".to_string()),
+            ..ProviderMeta::default()
+        });
+        db.save_provider("claude", &provider)?;
+        let (multiplier, source) = logger.resolve_pricing_config("p1", "claude").await;
+        assert_eq!(multiplier, Decimal::from(2));
+        assert_eq!(source, PRICING_SOURCE_REQUEST);
+
+        provider.meta.as_mut().unwrap().cost_multiplier = Some("3".to_string());
+        db.save_provider("claude", &provider)?;
+        let (multiplier, _) = logger.resolve_pricing_config("p1", "claude").await;
+        assert_eq!(multiplier, Decimal::from(3));
         Ok(())
     }
 }

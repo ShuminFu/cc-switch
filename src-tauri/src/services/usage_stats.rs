@@ -576,7 +576,7 @@ impl Database {
         provider_name: Option<&str>,
         model: Option<&str>,
     ) -> Result<UsageSummary, AppError> {
-        let conn = lock_conn!(self.conn);
+        let conn = self.read_conn()?;
 
         // Build detail WHERE clause
         let mut conditions = vec![effective_usage_log_filter("l")];
@@ -736,7 +736,7 @@ impl Database {
         provider_name: Option<&str>,
         model: Option<&str>,
     ) -> Result<Vec<UsageSummaryByApp>, AppError> {
-        let conn = lock_conn!(self.conn);
+        let conn = self.read_conn()?;
 
         let mut detail_conditions = vec![effective_usage_log_filter("l")];
         let mut detail_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -900,7 +900,7 @@ impl Database {
         provider_name: Option<&str>,
         model: Option<&str>,
     ) -> Result<Vec<DailyStats>, AppError> {
-        let conn = lock_conn!(self.conn);
+        let conn = self.read_conn()?;
 
         let end_ts = end_date.unwrap_or_else(|| Local::now().timestamp());
         let mut start_ts = start_date.unwrap_or_else(|| end_ts - 24 * 60 * 60);
@@ -1240,7 +1240,7 @@ impl Database {
         provider_name: Option<&str>,
         model: Option<&str>,
     ) -> Result<Vec<ProviderStats>, AppError> {
-        let conn = lock_conn!(self.conn);
+        let conn = self.read_conn()?;
 
         let mut detail_conditions = vec![effective_usage_log_filter("l")];
         let mut detail_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -1384,7 +1384,7 @@ impl Database {
         provider_name: Option<&str>,
         model: Option<&str>,
     ) -> Result<Vec<ModelStats>, AppError> {
-        let conn = lock_conn!(self.conn);
+        let conn = self.read_conn()?;
 
         let mut detail_conditions = vec![effective_usage_log_filter("l")];
         let mut detail_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -1529,7 +1529,7 @@ impl Database {
         page: u32,
         page_size: u32,
     ) -> Result<PaginatedLogs, AppError> {
-        let conn = lock_conn!(self.conn);
+        let conn = self.read_conn()?;
 
         let mut conditions = vec![effective_usage_log_filter("l")];
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();

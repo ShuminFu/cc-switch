@@ -1023,6 +1023,7 @@ mod tests {
         )
         .await;
 
+        db.flush_usage_writes()?;
         let conn = crate::database::lock_conn!(db.conn);
         let (model, request_model, total_cost, cost_multiplier): (String, String, String, String) =
             conn.query_row(
@@ -1093,6 +1094,7 @@ mod tests {
         )
         .await;
 
+        db.flush_usage_writes()?;
         let conn = crate::database::lock_conn!(db.conn);
         let (model, request_model, total_cost): (String, String, String) = conn
             .query_row(
@@ -1173,6 +1175,7 @@ mod tests {
         )
         .await;
 
+        db.flush_usage_writes()?;
         let conn = crate::database::lock_conn!(db.conn);
         let (total_cost, cost_multiplier): (String, String) = conn
             .query_row(

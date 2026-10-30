@@ -26,7 +26,10 @@
 pub(crate) mod backup;
 mod dao;
 mod migration;
+mod read_pool;
+mod request_cache;
 mod schema;
+mod usage_writer;
 
 #[cfg(test)]
 mod tests;
@@ -41,12 +44,18 @@ pub(crate) use dao::proxy::{
 };
 pub use dao::FailoverQueueItem;
 pub use dao::Profile;
+pub(crate) use read_pool::ReadConn;
+pub use request_cache::ProxyRequestSnapshot;
+pub use usage_writer::UsageWriterStats;
+pub(crate) use usage_writer::WriteJob;
 
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
 use rusqlite::{hooks::Action, Connection};
 use serde::Serialize;
-use std::sync::Mutex;
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // DAO 方法通过 impl Database 提供，无需额外导出
@@ -147,16 +156,27 @@ pub(crate) use lock_conn;
 
 /// 数据库连接封装
 ///
-/// 使用 Mutex 包装 Connection 以支持在多线程环境（如 Tauri State）中共享。
-/// rusqlite::Connection 本身不是 Sync 的，因此需要这层包装。
+/// - `conn`：主连接（读写）。使用 Mutex 包装以支持在多线程环境（如 Tauri State）中共享；
+///   rusqlite::Connection 本身不是 Sync 的。绝大多数 DAO 通过 `lock_conn!` 使用它。
+/// - 只读连接池（仅文件库 + WAL）：通过 [`Database::read_conn`] 供仪表盘等耗时只读查询使用，
+///   WAL 下与主连接上的写入互不阻塞。
+/// - 使用量写线程：代理请求的使用量记录经 [`Database::enqueue_usage_write`] 入队，
+///   由专用线程批量写入，请求路径不执行 SQLite。
+/// - 请求配置快照缓存：见 [`Database::proxy_request_snapshot`]。
 pub struct Database {
-    pub(crate) conn: Mutex<Connection>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
+    read_pool: Option<read_pool::ReadPool>,
+    usage_writer: usage_writer::UsageWriter,
+    request_cache: request_cache::RequestCache,
 }
 
-fn register_db_change_hook(conn: &Connection) {
+fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>) {
     conn.update_hook(Some(
-        |action: Action, _database: &str, table: &str, _row_id: i64| match action {
+        move |action: Action, _database: &str, table: &str, _row_id: i64| match action {
             Action::SQLITE_INSERT | Action::SQLITE_UPDATE | Action::SQLITE_DELETE => {
+                if !request_cache::is_volatile_table(table) {
+                    config_generation.fetch_add(1, Ordering::AcqRel);
+                }
                 crate::services::webdav_auto_sync::notify_db_changed(table);
                 crate::services::s3_auto_sync::notify_db_changed(table);
             }
@@ -189,11 +209,8 @@ impl Database {
         }
         // 外键、WAL、synchronous、busy_timeout、缓存等连接级设置
         configure_connection(&conn, true)?;
-        register_db_change_hook(&conn);
 
-        let db = Self {
-            conn: Mutex::new(conn),
-        };
+        let mut db = Self::from_connection(conn);
         db.create_tables()?;
 
         // Pre-migration backup: only when upgrading from an existing database
@@ -218,6 +235,9 @@ impl Database {
             log::warn!("Failed to ensure incremental auto-vacuum: {e}");
         }
         db.ensure_model_pricing_seeded()?;
+
+        // 迁移完成后再打开只读连接，避免它们缓存迁移前的 schema。
+        db.read_pool = Self::open_read_pool(&db_path);
 
         // 日志清理 / rollup+prune / 成本回填 / incremental_vacuum 不在这里同步执行：
         // `periodic_backup_if_needed()` 会在启动后的后台任务里（lib.rs setup 的 async
@@ -250,15 +270,85 @@ impl Database {
         conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
         configure_connection(&conn, false)?;
-        register_db_change_hook(&conn);
 
-        let db = Self {
-            conn: Mutex::new(conn),
-        };
+        let db = Self::from_connection(conn);
         db.create_tables()?;
         db.ensure_model_pricing_seeded()?;
 
         Ok(db)
+    }
+
+    /// 打开（或创建）指定路径的文件数据库，行为与 [`Database::init`] 的连接设置一致，
+    /// 并启用只读连接池。主要用于测试与工具。
+    #[allow(dead_code)]
+    pub(crate) fn open_file(db_path: &Path) -> Result<Self, AppError> {
+        let conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        configure_connection(&conn, true)?;
+        let mut db = Self::from_connection(conn);
+        db.create_tables()?;
+        db.apply_schema_migrations()?;
+        db.ensure_model_pricing_seeded()?;
+        db.read_pool = Self::open_read_pool(db_path);
+        Ok(db)
+    }
+
+    fn from_connection(conn: Connection) -> Self {
+        let request_cache = request_cache::RequestCache::new();
+        register_db_change_hook(&conn, request_cache.generation_handle());
+        let conn = Arc::new(Mutex::new(conn));
+        Self {
+            usage_writer: usage_writer::UsageWriter::new(Arc::clone(&conn)),
+            conn,
+            read_pool: None,
+            request_cache,
+        }
+    }
+
+    fn open_read_pool(db_path: &Path) -> Option<read_pool::ReadPool> {
+        match read_pool::ReadPool::open(db_path, read_pool::READ_POOL_SIZE) {
+            Ok(pool) => {
+                if pool.is_none() {
+                    log::info!("数据库未处于 WAL 模式，只读查询继续使用主连接");
+                }
+                pool
+            }
+            Err(e) => {
+                log::warn!("打开只读连接池失败，只读查询继续使用主连接: {e}");
+                None
+            }
+        }
+    }
+
+    /// 获取一个用于**只读**查询的连接。
+    ///
+    /// 文件库且处于 WAL 模式时返回只读池中的连接，耗时的聚合查询不会阻塞主连接上的
+    /// 写入（代理日志、维护任务），也不会被它们阻塞；否则回落到主连接（与
+    /// `lock_conn!(self.conn)` 等价）。只读连接看到的是最近一次已提交的数据。
+    /// 不要在返回的连接上执行写语句（只读连接会报错）。
+    pub(crate) fn read_conn(&self) -> Result<ReadConn<'_>, AppError> {
+        match &self.read_pool {
+            Some(pool) => pool.get().map(ReadConn::pooled),
+            None => Ok(ReadConn::main(lock_conn!(self.conn))),
+        }
+    }
+
+    /// 把一个写任务交给使用量写线程（非阻塞；队列满时返回错误并丢弃）。
+    pub(crate) fn enqueue_usage_write(&self, job: WriteJob) -> Result<(), AppError> {
+        self.usage_writer.enqueue(job)
+    }
+
+    /// 同步等待所有已入队的使用量写入落库（测试与退出路径使用）。
+    pub fn flush_usage_writes(&self) -> Result<(), AppError> {
+        self.usage_writer
+            .flush(usage_writer::SHUTDOWN_FLUSH_TIMEOUT)
+    }
+
+    /// 使用量写线程的统计计数。
+    #[allow(dead_code)]
+    pub fn usage_writer_stats(&self) -> UsageWriterStats {
+        self.usage_writer.stats()
     }
 
     pub(crate) fn get_auto_vacuum_mode(conn: &Connection) -> Result<i32, AppError> {
@@ -442,5 +532,86 @@ mod connection_pragma_tests {
             Database::get_user_version(&conn).expect("user_version"),
             SCHEMA_VERSION
         );
+    }
+}
+
+#[cfg(test)]
+mod read_path_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use tempfile::TempDir;
+
+    #[test]
+    fn memory_db_read_conn_falls_back_to_main_connection() {
+        let db = Database::memory().expect("memory db");
+        let conn = db.read_conn().expect("read conn");
+        assert!(!conn.is_pooled());
+    }
+
+    #[test]
+    fn file_db_reads_do_not_wait_for_the_main_connection() {
+        let dir = TempDir::new().expect("temp dir");
+        let db = Arc::new(Database::open_file(&dir.path().join("read.db")).expect("open"));
+        db.conn
+            .lock()
+            .expect("lock")
+            .execute(
+                "INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, status_code, latency_ms, created_at)
+                 VALUES ('r1', 'p1', 'claude', 'm', 200, 1, 1)",
+                [],
+            )
+            .expect("insert");
+
+        // 主连接被长时间占用（模拟维护任务/写入），只读路径仍立即可用并看到已提交数据
+        let main_guard = db.conn.lock().expect("lock main");
+        let (tx, rx) = mpsc::channel();
+        let reader = Arc::clone(&db);
+        let handle = std::thread::spawn(move || {
+            let conn = reader.read_conn().expect("read conn");
+            assert!(conn.is_pooled());
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |r| r.get(0))
+                .expect("count");
+            // 只读连接拒绝写入
+            assert!(conn.execute("DELETE FROM proxy_request_logs", []).is_err());
+            drop(conn);
+            let summary = reader
+                .get_usage_summary(None, None, None, None, None)
+                .expect("dashboard summary on read pool");
+            tx.send((count, summary.total_requests)).unwrap();
+        });
+        let (count, total_requests) = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("read path must not block on the main connection");
+        drop(main_guard);
+        handle.join().unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(total_requests, 1);
+    }
+
+    #[test]
+    fn usage_writes_reach_the_file_and_are_visible_to_readers() {
+        let dir = TempDir::new().expect("temp dir");
+        let db = Database::open_file(&dir.path().join("writer.db")).expect("open");
+        for i in 0..20 {
+            db.enqueue_usage_write(WriteJob::new("test", move |conn| {
+                conn.prepare_cached(
+                    "INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, status_code, latency_ms, created_at)
+                     VALUES (?1, 'p', 'claude', 'm', 200, 1, 1)",
+                )
+                .and_then(|mut stmt| stmt.execute([format!("w{i}")]))
+                .map(|_| ())
+                .map_err(|e| AppError::Database(e.to_string()))
+            }))
+            .expect("enqueue");
+        }
+        db.flush_usage_writes().expect("flush");
+        let count: i64 = db
+            .read_conn()
+            .expect("read conn")
+            .query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(count, 20);
+        assert_eq!(db.usage_writer_stats().written, 20);
     }
 }

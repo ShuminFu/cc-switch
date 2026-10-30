@@ -1694,6 +1694,7 @@ pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
             } else {
                 log::info!("已恢复 Live 配置（代理状态已保留，下次启动将自动恢复）");
             }
+            flush_usage_writes_on_exit(&state.db);
             return;
         }
 
@@ -1705,6 +1706,14 @@ pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
             }
             log::info!("代理服务器清理完成");
         }
+        flush_usage_writes_on_exit(&state.db);
+    }
+}
+
+/// 退出前等待使用量写线程把已入队的请求日志写入数据库（有超时上限）。
+fn flush_usage_writes_on_exit(db: &database::Database) {
+    if let Err(e) = db.flush_usage_writes() {
+        log::warn!("退出时写入剩余使用量日志失败: {e}");
     }
 }
 

@@ -380,6 +380,8 @@ impl Database {
                 .step(-1)
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
+        // 整库替换不触发行级 update_hook，显式使代理请求配置快照失效
+        self.invalidate_proxy_request_cache();
 
         let backup_id = backup_path
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
@@ -1062,6 +1064,8 @@ impl Database {
                 .step(-1)
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
+        // 整库替换不触发行级 update_hook，显式使代理请求配置快照失效
+        self.invalidate_proxy_request_cache();
 
         self.ensure_model_pricing_seeded()?;
 
