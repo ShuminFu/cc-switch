@@ -235,12 +235,12 @@ describe("ProviderList Component", () => {
     // Drag attributes from useSortable
     expect(
       providerCardRenderSpy.mock.calls[0][0].dragHandleProps?.attributes[
-      "data-dnd-id"
+        "data-dnd-id"
       ],
     ).toBe("b");
     expect(
       providerCardRenderSpy.mock.calls[1][0].dragHandleProps?.attributes[
-      "data-dnd-id"
+        "data-dnd-id"
       ],
     ).toBe("a");
 
@@ -262,6 +262,35 @@ describe("ProviderList Component", () => {
       { a: providerA, b: providerB },
       "claude",
     );
+  });
+
+  it("passes the in-flight mutation state to every card (FE-PROV-49)", () => {
+    const providerA = createProvider({ id: "a", name: "A" });
+    const providerB = createProvider({ id: "b", name: "B" });
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [providerA, providerB],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ a: providerA, b: providerB }}
+        currentProviderId="a"
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+        isActionPending
+      />,
+    );
+
+    expect(providerCardRenderSpy).toHaveBeenCalledTimes(2);
+    for (const call of providerCardRenderSpy.mock.calls) {
+      expect(call[0].isActionPending).toBe(true);
+    }
   });
 
   it("filters providers with the search input", () => {

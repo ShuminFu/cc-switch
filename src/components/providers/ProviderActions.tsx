@@ -22,6 +22,8 @@ interface ProviderActionsProps {
   isCurrent: boolean;
   isInConfig?: boolean;
   isTesting?: boolean;
+  // Some provider mutation is in flight; disable the main/failover button
+  isActionPending?: boolean;
   isProxyTakeover?: boolean;
   isOmo?: boolean;
   onSwitch: () => void;
@@ -61,6 +63,7 @@ export function ProviderActions({
   isCurrent,
   isInConfig = false,
   isTesting,
+  isActionPending = false,
   isProxyTakeover = false,
   isOmo = false,
   onSwitch,
@@ -95,6 +98,7 @@ export function ProviderActions({
     !isAdditiveMode && !isOmo && isAutoFailoverEnabled && onToggleFailover;
 
   const handleMainButtonClick = () => {
+    if (isActionPending) return;
     if (isOmo) {
       if (isCurrent) {
         onDisableOmo?.();
@@ -272,7 +276,8 @@ export function ProviderActions({
           size="sm"
           variant={buttonState.variant}
           onClick={handleMainButtonClick}
-          disabled={buttonState.disabled}
+          disabled={buttonState.disabled || isActionPending}
+          aria-busy={isActionPending || undefined}
           className={cn("w-[4.5rem] px-2.5", buttonState.className)}
         >
           {buttonState.icon}

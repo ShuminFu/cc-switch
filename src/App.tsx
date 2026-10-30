@@ -308,6 +308,7 @@ function App() {
     deleteProvider,
     saveUsageScript,
     setAsDefaultModel,
+    isLoading: isProviderActionPending,
   } = useProviderActions(
     activeApp,
     isProxyRunning,
@@ -985,6 +986,7 @@ function App() {
                       currentProviderId={currentProviderId}
                       appId={activeApp}
                       isLoading={isLoading}
+                      isActionPending={isProviderActionPending}
                       isProxyRunning={isProxyRunning}
                       isProxyTakeover={
                         isProxyRunning && isCurrentAppTakeoverActive
