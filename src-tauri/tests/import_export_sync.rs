@@ -1273,3 +1273,54 @@ fn import_sql_accepts_cc_switch_exported_backup() {
         "imported providers should contain test-provider"
     );
 }
+
+/// Regression: exports must not carry triggers (the import authorizer rejects
+/// CREATE TRIGGER), and import must recreate the app's own dedup triggers.
+#[test]
+fn sql_export_has_no_triggers_and_import_recreates_app_triggers() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+
+    let mut config = MultiAppConfig::default();
+    {
+        let manager = config
+            .get_manager_mut(&AppType::Claude)
+            .expect("claude manager");
+        manager.current = "p1".to_string();
+        manager.providers.insert(
+            "p1".to_string(),
+            Provider::with_id(
+                "p1".to_string(),
+                "P1".to_string(),
+                json!({"env": {"ANTHROPIC_API_KEY": "k"}}),
+                None,
+            ),
+        );
+    }
+    let state = create_test_state_with_config(&config).expect("create test state");
+    let dump = state.db.export_sql_string().expect("export sql");
+    assert!(
+        !dump.to_ascii_uppercase().contains("CREATE TRIGGER"),
+        "exported SQL must not contain triggers"
+    );
+
+    reset_test_fs();
+    let state = create_test_state().expect("create fresh state");
+    state
+        .db
+        .import_sql_string(&dump)
+        .expect("import own export");
+    drop(state);
+
+    let db_path = home.join(".cc-switch").join("cc-switch.db");
+    let conn = rusqlite::Connection::open(&db_path).expect("open imported db");
+    let triggers: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_request_logs_dedup_%'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count triggers");
+    assert_eq!(triggers, 2, "dedup triggers must exist after import");
+}

@@ -352,11 +352,15 @@ impl Database {
 
         Self::execute_import_script(&temp_conn, sql_content)?;
 
+        // Drop anything the dump may have smuggled in (triggers/views) BEFORE
+        // re-creating the schema, so the app's own triggers (e.g. the
+        // dedup_hidden maintenance triggers) are recreated and kept.
+        Self::drop_untrusted_schema_objects(&temp_conn)?;
+
         // 补齐缺失表/索引并进行基础校验
         Self::create_tables_on_conn(&temp_conn)?;
         Self::apply_schema_migrations_on_conn(&temp_conn)?;
         Self::validate_basic_state(&temp_conn)?;
-        Self::drop_untrusted_schema_objects(&temp_conn)?;
 
         // 导入前备份现有数据库（校验通过后再备份，失败的导入不会占用备份轮换名额）
         let backup_path = self.backup_database_file_of_kind(BackupKind::Safety, None)?;
@@ -497,8 +501,10 @@ impl Database {
         }
     }
 
-    /// The app never creates triggers or views; drop any that a backup carries
-    /// so they cannot persist into the main database.
+    /// Drop every trigger and view a backup or dump carries so they cannot
+    /// persist into the main database. Callers run this BEFORE
+    /// `create_tables_on_conn`, which recreates the app's own triggers
+    /// (the `dedup_hidden` maintenance triggers).
     fn drop_untrusted_schema_objects(conn: &Connection) -> Result<(), AppError> {
         let objects: Vec<(String, String)> = {
             let mut stmt = conn
@@ -830,12 +836,14 @@ impl Database {
         output.push_str(&format!("PRAGMA user_version={user_version};\n"));
         output.push_str("BEGIN TRANSACTION;\n");
 
-        // 导出 schema
+        // 导出 schema。Only tables and indexes: the app's own triggers are
+        // recreated by create_tables_on_conn on import, and the import
+        // authorizer rejects CREATE TRIGGER / CREATE VIEW.
         let mut stmt = conn
             .prepare(
                 "SELECT type, name, tbl_name, sql
                  FROM sqlite_master
-                 WHERE sql NOT NULL AND type IN ('table','index','trigger','view')
+                 WHERE sql NOT NULL AND type IN ('table','index')
                  ORDER BY type='table' DESC, name",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -1118,9 +1126,11 @@ impl Database {
         staging_conn
             .execute("PRAGMA foreign_keys = ON;", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
+        // Drop untrusted triggers/views first; create_tables_on_conn then
+        // recreates the app's own triggers.
+        Self::drop_untrusted_schema_objects(&staging_conn)?;
         Self::create_tables_on_conn(&staging_conn)?;
         Self::apply_schema_migrations_on_conn(&staging_conn)?;
-        Self::drop_untrusted_schema_objects(&staging_conn)?;
         Ok(staging_conn)
     }
 
@@ -1515,9 +1525,11 @@ mod tests {
             assert_eq!(
                 query_i64(
                     &target,
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('trigger', 'view')"
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('trigger', 'view') \
+                     AND name NOT LIKE 'trg_request_logs_dedup_%'"
                 ),
-                0
+                0,
+                "only the app's own dedup triggers may exist"
             );
             assert_eq!(
                 query_i64(
