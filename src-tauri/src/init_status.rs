@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::sync::{OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InitErrorPayload {
@@ -103,6 +104,83 @@ pub fn take_skills_migration_result() -> Option<SkillsMigrationPayload> {
     }
 }
 
+// ============================================================
+// 启动阶段计时（CMD-09 / PERF-11）
+// ============================================================
+
+/// 后台初始化每完成一个阶段发射一次，payload 为 [`StartupPhaseTiming`]。
+/// 前端不监听也没关系：它只是进度信号，不影响任何功能。
+pub const STARTUP_PROGRESS_EVENT: &str = "startup-progress";
+/// 后台初始化全部完成后发射一次，payload 为 [`StartupReadyPayload`]。
+pub const STARTUP_READY_EVENT: &str = "startup-ready";
+
+static STARTUP_EPOCH: OnceLock<Instant> = OnceLock::new();
+
+/// 记录启动起点（`run()` 入口处调用；重复调用保持第一次的值）。
+pub fn mark_startup_begin() -> Instant {
+    *STARTUP_EPOCH.get_or_init(Instant::now)
+}
+
+/// 距启动起点经过的毫秒数。
+pub fn startup_elapsed_ms() -> u64 {
+    duration_ms(mark_startup_begin().elapsed())
+}
+
+fn duration_ms(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// 单个启动阶段的耗时。
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupPhaseTiming {
+    pub phase: &'static str,
+    /// 该阶段自身耗时
+    pub elapsed_ms: u64,
+    /// 该阶段结束时距启动起点的耗时
+    pub since_start_ms: u64,
+}
+
+/// 启动完成事件的 payload。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupReadyPayload {
+    pub total_ms: u64,
+    pub phases: Vec<StartupPhaseTiming>,
+}
+
+/// 阶段计时器：`start` 开始，`finish` 结束并以统一格式写入日志
+/// （`startup.phase=<name> ms=<n> since_start_ms=<n>`，便于在 cc-switch.log 中检索）。
+pub struct StartupPhase {
+    name: &'static str,
+    started: Instant,
+}
+
+impl StartupPhase {
+    pub fn start(name: &'static str) -> Self {
+        mark_startup_begin();
+        Self {
+            name,
+            started: Instant::now(),
+        }
+    }
+
+    pub fn finish(self) -> StartupPhaseTiming {
+        let timing = StartupPhaseTiming {
+            phase: self.name,
+            elapsed_ms: duration_ms(self.started.elapsed()),
+            since_start_ms: startup_elapsed_ms(),
+        };
+        log::info!(
+            "startup.phase={} ms={} since_start_ms={}",
+            timing.phase,
+            timing.elapsed_ms,
+            timing.since_start_ms
+        );
+        timing
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +198,28 @@ mod tests {
         let got = get_init_error().expect("should get payload back");
         assert_eq!(got.path, payload.path);
         assert_eq!(got.error, payload.error);
+    }
+
+    #[test]
+    fn startup_phase_reports_monotonic_timings_in_camel_case() {
+        let begin = mark_startup_begin();
+        assert_eq!(mark_startup_begin(), begin, "epoch must be fixed once set");
+
+        let phase = StartupPhase::start("unit_test_phase");
+        std::thread::sleep(Duration::from_millis(5));
+        let timing = phase.finish();
+        assert_eq!(timing.phase, "unit_test_phase");
+        assert!(timing.elapsed_ms >= 5);
+        assert!(timing.since_start_ms >= timing.elapsed_ms);
+
+        let json = serde_json::to_value(StartupReadyPayload {
+            total_ms: 7,
+            phases: vec![timing],
+        })
+        .expect("serialize");
+        assert_eq!(json["totalMs"], 7);
+        assert_eq!(json["phases"][0]["phase"], "unit_test_phase");
+        assert!(json["phases"][0]["elapsedMs"].is_u64());
+        assert!(json["phases"][0]["sinceStartMs"].is_u64());
     }
 }
