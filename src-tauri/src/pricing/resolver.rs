@@ -5,8 +5,9 @@
 //! 表中查价。所有计价路径（代理 ingest、会话导入、零成本回填）共用这一个解析器。
 
 use super::engine::ModelPricing;
+use crate::database::repo;
 use crate::error::AppError;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 
 pub(crate) fn find_model_pricing(conn: &Connection, model_id: &str) -> Option<ModelPricing> {
     find_model_pricing_row(conn, model_id)
@@ -27,14 +28,14 @@ pub(crate) fn find_model_pricing_row(
     }
 
     for candidate in &candidates {
-        if let Some(row) = query_model_pricing_exact(conn, candidate)? {
+        if let Some(row) = repo::pricing::find_exact(conn, candidate)? {
             return Ok(Some(row));
         }
     }
 
     for candidate in &candidates {
         if should_try_pricing_prefix_match(candidate) {
-            if let Some(row) = query_model_pricing_prefix(conn, candidate)? {
+            if let Some(row) = repo::pricing::find_prefix(conn, candidate)? {
                 return Ok(Some(row));
             }
         }
@@ -46,55 +47,6 @@ pub(crate) fn find_model_pricing_row(
 pub(crate) fn is_placeholder_pricing_model(model_id: &str) -> bool {
     let normalized = model_id.trim().to_ascii_lowercase();
     normalized.is_empty() || matches!(normalized.as_str(), "unknown" | "null" | "none")
-}
-
-fn query_model_pricing_exact(
-    conn: &Connection,
-    model_id: &str,
-) -> Result<Option<(String, String, String, String)>, AppError> {
-    conn.query_row(
-        "SELECT input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-         FROM model_pricing
-         WHERE model_id = ?1 AND deleted = 0",
-        [model_id],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        },
-    )
-    .optional()
-    .map_err(|e| AppError::Database(format!("查询模型定价失败: {e}")))
-}
-
-fn query_model_pricing_prefix(
-    conn: &Connection,
-    model_id: &str,
-) -> Result<Option<(String, String, String, String)>, AppError> {
-    let pattern = format!("{model_id}-%");
-    conn.query_row(
-        "SELECT input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-         FROM model_pricing
-         WHERE model_id LIKE ?1 AND deleted = 0
-         ORDER BY LENGTH(model_id) ASC
-         LIMIT 1",
-        [pattern],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        },
-    )
-    .optional()
-    .map_err(|e| AppError::Database(format!("查询模型前缀定价失败: {e}")))
 }
 
 pub(crate) fn model_pricing_candidates(model_id: &str) -> Vec<String> {

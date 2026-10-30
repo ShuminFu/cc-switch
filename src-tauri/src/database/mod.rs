@@ -17,6 +17,7 @@
 //! ├── backup.rs     - SQL 导入导出 + 快照备份
 //! ├── journal.rs    - journal_mode / synchronous / busy_timeout
 //! ├── migration.rs  - JSON → SQLite 数据迁移
+//! ├── repo/         - 使用量 / 定价 / 会话导入游标仓库（UsageQuery、UsageSource）
 //! └── dao/          - 数据访问对象
 //!     ├── providers.rs
 //!     ├── mcp.rs
@@ -30,6 +31,7 @@ mod dao;
 pub(crate) mod journal;
 mod migration;
 mod migrations;
+pub(crate) mod repo;
 mod schema;
 
 #[cfg(test)]

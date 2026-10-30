@@ -14,8 +14,9 @@
 //!
 //! 调价 = 改 `models[]` 里的价格，并把旧价追加到 `supersedes[]`。
 
+use crate::database::repo;
 use crate::error::AppError;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde::Deserialize;
 use std::sync::LazyLock;
 
@@ -85,32 +86,13 @@ fn now_ts() -> i64 {
 /// 跳过 settings 中记录的已删除内置定价。已发布的迁移步骤行为保持不变。
 pub fn legacy_seed(conn: &Connection) -> Result<(), AppError> {
     let deleted = crate::settings::deleted_builtin_model_pricing_ids();
-    let mut stmt = conn
-        .prepare(
-            "INSERT OR IGNORE INTO model_pricing (
-                model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )
-        .map_err(|e| AppError::Database(format!("准备模型定价语句失败: {e}")))?;
-
-    let mut count = 0usize;
-    for model in &catalog().models {
-        if deleted.iter().any(|id| id == &model.id) {
-            continue;
-        }
-        let p = &model.price;
-        stmt.execute(params![
-            model.id,
-            model.name,
-            p.input,
-            p.output,
-            p.cache_read,
-            p.cache_creation
-        ])
-        .map_err(|e| AppError::Database(format!("插入模型定价失败: {e}")))?;
-        count += 1;
-    }
+    let count = repo::pricing::insert_legacy_seed(
+        conn,
+        catalog()
+            .models
+            .iter()
+            .filter(|model| !deleted.iter().any(|id| id == &model.id)),
+    )?;
 
     log::info!(
         "已插入 {count} 条默认模型定价数据（目录 v{}）",
@@ -129,26 +111,7 @@ pub fn legacy_seed(conn: &Connection) -> Result<(), AppError> {
 pub fn classify_provenance(conn: &Connection) -> Result<(), AppError> {
     let catalog = catalog();
     let mark = |model_id: &str, price: &CatalogPrice, name: Option<&str>, version: Option<u32>| {
-        conn.execute(
-            "UPDATE model_pricing SET source = ?2, catalog_version = ?3
-             WHERE model_id = ?1
-               AND input_cost_per_million = ?4
-               AND output_cost_per_million = ?5
-               AND cache_read_cost_per_million = ?6
-               AND cache_creation_cost_per_million = ?7
-               AND (?8 IS NULL OR display_name = ?8)",
-            params![
-                model_id,
-                SOURCE_BUILTIN,
-                version,
-                price.input,
-                price.output,
-                price.cache_read,
-                price.cache_creation,
-                name
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("标注模型 {model_id} 定价来源失败: {e}")))
+        repo::pricing::mark_builtin_if_unchanged(conn, model_id, price, name, version)
     };
 
     let mut builtin = 0usize;
@@ -191,36 +154,7 @@ fn insert_tombstone(
     model: &CatalogModel,
     overwrite: bool,
 ) -> Result<(), AppError> {
-    let conflict = if overwrite {
-        "ON CONFLICT(model_id) DO UPDATE SET
-            source = excluded.source, deleted = 1, updated_at = excluded.updated_at"
-    } else {
-        "ON CONFLICT(model_id) DO NOTHING"
-    };
-    let p = &model.price;
-    conn.execute(
-        &format!(
-            "INSERT INTO model_pricing (
-                model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million,
-                source, catalog_version, updated_at, deleted
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)
-            {conflict}"
-        ),
-        params![
-            model.id,
-            model.name,
-            p.input,
-            p.output,
-            p.cache_read,
-            p.cache_creation,
-            SOURCE_USER,
-            catalog.version,
-            now_ts()
-        ],
-    )
-    .map_err(|e| AppError::Database(format!("写入模型 {} 定价墓碑失败: {e}", model.id)))?;
-    Ok(())
+    repo::pricing::insert_tombstone(conn, model, catalog.version, now_ts(), overwrite)
 }
 
 /// 删除内置定价：写墓碑（保留行并标记 `deleted = 1`），之后的目录同步与重启都不会恢复它。
@@ -251,67 +185,7 @@ pub(crate) fn sync_with(
 ) -> Result<(), AppError> {
     fold_legacy_deletions(conn, catalog, legacy_deleted)?;
 
-    let now = now_ts();
-    let mut insert = conn
-        .prepare(
-            "INSERT OR IGNORE INTO model_pricing (
-                model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million,
-                source, catalog_version, updated_at, deleted
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
-        )
-        .map_err(|e| AppError::Database(format!("准备模型定价语句失败: {e}")))?;
-    let mut update = conn
-        .prepare(
-            "UPDATE model_pricing SET
-                display_name = ?2,
-                input_cost_per_million = ?3,
-                output_cost_per_million = ?4,
-                cache_read_cost_per_million = ?5,
-                cache_creation_cost_per_million = ?6,
-                catalog_version = ?7,
-                updated_at = ?8
-             WHERE model_id = ?1
-               AND source = 'builtin'
-               AND deleted = 0
-               AND (display_name IS NOT ?2
-                    OR input_cost_per_million IS NOT ?3
-                    OR output_cost_per_million IS NOT ?4
-                    OR cache_read_cost_per_million IS NOT ?5
-                    OR cache_creation_cost_per_million IS NOT ?6
-                    OR catalog_version IS NOT ?7)",
-        )
-        .map_err(|e| AppError::Database(format!("准备模型定价更新语句失败: {e}")))?;
-
-    let (mut inserted, mut updated) = (0usize, 0usize);
-    for model in &catalog.models {
-        let p = &model.price;
-        inserted += insert
-            .execute(params![
-                model.id,
-                model.name,
-                p.input,
-                p.output,
-                p.cache_read,
-                p.cache_creation,
-                SOURCE_BUILTIN,
-                catalog.version,
-                now
-            ])
-            .map_err(|e| AppError::Database(format!("插入模型定价失败: {e}")))?;
-        updated += update
-            .execute(params![
-                model.id,
-                model.name,
-                p.input,
-                p.output,
-                p.cache_read,
-                p.cache_creation,
-                catalog.version,
-                now
-            ])
-            .map_err(|e| AppError::Database(format!("更新模型 {} 定价失败: {e}", model.id)))?;
-    }
+    let (inserted, updated) = repo::pricing::sync_catalog_rows(conn, catalog, now_ts())?;
 
     log::info!(
         "模型定价目录 v{} 同步完成：新增 {inserted} 条，更新 {updated} 条内置行",

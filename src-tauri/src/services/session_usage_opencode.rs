@@ -11,16 +11,18 @@
 //!   → proxy_request_logs 表
 //! ```
 
-use crate::database::{lock_conn, Database};
+use crate::database::repo::session_cursor::SessionCursor;
+use crate::database::repo::usage::{self as usage_repo, SessionUsageRow, UsageCosts, UsageSource};
+use crate::database::Database;
 use crate::error::AppError;
 use crate::opencode_config::get_opencode_db_path;
 use crate::pricing::resolver::find_model_pricing;
 use crate::proxy::usage::calculator::CostCalculator;
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
+    get_sync_state, ingest_file, metadata_modified_nanos, update_sync_state, IngestBatch,
+    SessionSyncResult,
 };
-use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
 use std::fs;
@@ -107,52 +109,65 @@ pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError>
             continue; // 会话未更新，跳过
         }
 
-        let mut session_had_error = false;
-
         // 查询该会话的所有 assistant 消息
-        let mut session_has_incomplete_usage = false;
-        match query_assistant_messages(&opencode_conn, session_id) {
-            Ok(query_result) => {
-                session_has_incomplete_usage = query_result.has_incomplete_usage;
-                for (message_id, msg_data) in &query_result.messages {
-                    let request_id = format!("opencode_session:{session_id}:{message_id}");
-
-                    match insert_opencode_message(db, &request_id, msg_data, session_id) {
-                        Ok(true) => result.imported += 1,
-                        Ok(false) => result.skipped += 1,
-                        Err(e) => {
-                            let msg = format!("OpenCode 消息插入失败 {request_id}: {e}");
-                            log::warn!("[OPENCODE-SYNC] {msg}");
-                            result.errors.push(msg);
-                            result.skipped += 1;
-                            session_had_error = true;
-                        }
-                    }
-                }
-            }
+        let query_result = match query_assistant_messages(&opencode_conn, session_id) {
+            Ok(query_result) => query_result,
             Err(e) => {
                 let msg = format!("OpenCode 会话消息查询失败 {session_id}: {e}");
                 log::warn!("[OPENCODE-SYNC] {msg}");
                 result.errors.push(msg);
-                session_had_error = true;
+                has_sync_errors = true;
+                continue;
             }
-        }
+        };
 
-        if session_had_error {
-            has_sync_errors = true;
-            continue;
-        }
+        // 该会话的消息与会话级游标在同一个事务里提交。有插入失败或存在未完成的
+        // 消息时不推进会话游标（已写入的行照常提交，靠 request_id 去重重试）。
+        let session_result = ingest_file(db, &sync_key, |conn| {
+            let mut imported = 0u32;
+            let mut skipped = 0u32;
+            let mut errors = Vec::new();
+            for (message_id, msg_data) in &query_result.messages {
+                let request_id = format!("opencode_session:{session_id}:{message_id}");
 
-        if session_has_incomplete_usage {
-            continue;
-        }
+                match insert_opencode_message(conn, &request_id, msg_data, session_id) {
+                    Ok(true) => imported += 1,
+                    Ok(false) => skipped += 1,
+                    Err(e) => {
+                        let msg = format!("OpenCode 消息插入失败 {request_id}: {e}");
+                        log::warn!("[OPENCODE-SYNC] {msg}");
+                        errors.push(msg);
+                        skipped += 1;
+                    }
+                }
+            }
+            let advance = errors.is_empty() && !query_result.has_incomplete_usage;
+            Ok(IngestBatch {
+                wrote_rows: imported > 0,
+                cursor: advance.then_some(SessionCursor {
+                    last_modified: *time_updated,
+                    last_offset: 0,
+                }),
+                value: (imported, skipped, errors),
+            })
+        });
 
-        // 更新会话级同步状态。失败时不要推进文件级状态，确保下次可重试。
-        if let Err(e) = update_sync_state(db, &sync_key, *time_updated, 0) {
-            let msg = format!("OpenCode 会话同步状态更新失败 {session_id}: {e}");
-            log::warn!("[OPENCODE-SYNC] {msg}");
-            result.errors.push(msg);
-            has_sync_errors = true;
+        match session_result {
+            Ok((imported, skipped, errors)) => {
+                result.imported += imported;
+                result.skipped += skipped;
+                if !errors.is_empty() {
+                    has_sync_errors = true;
+                    result.errors.extend(errors);
+                }
+            }
+            Err(e) => {
+                // 游标写入或提交失败：整个会话回滚，不要推进文件级状态，确保下次可重试。
+                let msg = format!("OpenCode 会话同步状态更新失败 {session_id}: {e}");
+                log::warn!("[OPENCODE-SYNC] {msg}");
+                result.errors.push(msg);
+                has_sync_errors = true;
+            }
         }
     }
 
@@ -312,13 +327,11 @@ fn parse_message_data(value: &serde_json::Value) -> Option<OpenCodeMessageData> 
 
 /// 插入单条 OpenCode 消息记录到 proxy_request_logs
 fn insert_opencode_message(
-    db: &Database,
+    conn: &rusqlite::Connection,
     request_id: &str,
     msg: &OpenCodeMessageData,
     session_id: &str,
 ) -> Result<bool, AppError> {
-    let conn = lock_conn!(db.conn);
-
     let created_at = if msg.timestamp_ms > 0 {
         msg.timestamp_ms / 1000
     } else {
@@ -341,105 +354,62 @@ fn insert_opencode_message(
         cache_creation_tokens: msg.cache_write_tokens,
         created_at,
     };
-    if should_skip_session_insert(&conn, request_id, &dedup_key)? {
+    if should_skip_session_insert(conn, request_id, &dedup_key)? {
         return Ok(false);
     }
 
     // 如果 opencode 已经提供了费用，直接使用；否则从模型定价计算
-    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) =
-        if msg.cost > 0.0 {
-            // opencode 已计算费用，直接使用
-            // 简化处理：全部放入 total_cost（opencode 的 cost 是聚合值，无法精确拆分）
-            (
-                "0".to_string(),
-                "0".to_string(),
-                "0".to_string(),
-                "0".to_string(),
-                msg.cost.to_string(),
-            )
-        } else {
-            // opencode 费用为 0（如免费模型），尝试用 cc-switch 自带的模型定价计算
-            let usage = TokenUsage {
-                input_tokens: msg.input_tokens,
-                output_tokens: output_with_reasoning,
-                cache_read_tokens: msg.cache_read_tokens,
-                cache_creation_tokens: msg.cache_write_tokens,
-                model: Some(msg.model_id.clone()),
-                message_id: None,
-            };
-
-            match find_model_pricing(&conn, &msg.model_id) {
-                Some(pricing) => {
-                    let cost = CostCalculator::calculate_for_app(
-                        "opencode",
-                        &usage,
-                        &pricing,
-                        Decimal::from(1),
-                    );
-                    (
-                        cost.input_cost.to_string(),
-                        cost.output_cost.to_string(),
-                        cost.cache_read_cost.to_string(),
-                        cost.cache_creation_cost.to_string(),
-                        cost.total_cost.to_string(),
-                    )
-                }
-                None => (
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                ),
-            }
+    let costs = if msg.cost > 0.0 {
+        // opencode 已计算费用，直接使用
+        // 简化处理：全部放入 total_cost（opencode 的 cost 是聚合值，无法精确拆分）
+        UsageCosts {
+            total: msg.cost.to_string(),
+            ..UsageCosts::zero()
+        }
+    } else {
+        // opencode 费用为 0（如免费模型），尝试用 cc-switch 自带的模型定价计算
+        let usage = TokenUsage {
+            input_tokens: msg.input_tokens,
+            output_tokens: output_with_reasoning,
+            cache_read_tokens: msg.cache_read_tokens,
+            cache_creation_tokens: msg.cache_write_tokens,
+            model: Some(msg.model_id.clone()),
+            message_id: None,
         };
 
-    let inserted_rows = conn.execute(
-        "INSERT OR IGNORE INTO proxy_request_logs (
-            request_id, provider_id, app_type, model, request_model,
-            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-            latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source,
-            pricing_model, input_token_semantics
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
-        rusqlite::params![
-            request_id,
-            "_opencode_session",   // provider_id
-            "opencode",            // app_type
-            msg.model_id,
-            msg.model_id,          // request_model = model
-            msg.input_tokens,
-            output_with_reasoning,
-            msg.cache_read_tokens,
-            msg.cache_write_tokens,
-            input_cost,
-            output_cost,
-            cache_read_cost,
-            cache_creation_cost,
-            total_cost,
-            0i64,                  // latency_ms
-            Option::<i64>::None,   // first_token_ms
-            200i64,                // status_code
-            Option::<String>::None,// error_message
-            Some(session_id.to_string()),
-            Some("opencode_session"), // provider_type
-            1i64,                  // is_streaming
-            "1.0",                 // cost_multiplier
-            created_at,
-            "opencode_session",    // data_source
-            msg.model_id,          // pricing_model
-            input_token_semantics_for_app_type("opencode"),
-        ],
-    )
-    .map_err(|e| AppError::Database(format!("插入 OpenCode 会话日志失败: {e}")))?;
+        match find_model_pricing(conn, &msg.model_id) {
+            Some(pricing) => UsageCosts::from_breakdown(&CostCalculator::calculate_for_app(
+                "opencode",
+                &usage,
+                &pricing,
+                Decimal::from(1),
+            )),
+            None => UsageCosts::zero(),
+        }
+    };
 
-    Ok(inserted_rows > 0)
+    usage_repo::insert_session_row(
+        conn,
+        &SessionUsageRow {
+            request_id,
+            source: UsageSource::OpenCodeSession,
+            model: &msg.model_id,
+            pricing_model: &msg.model_id,
+            session_id: Some(session_id),
+            input_tokens: msg.input_tokens,
+            output_tokens: output_with_reasoning,
+            cache_read_tokens: msg.cache_read_tokens,
+            cache_creation_tokens: msg.cache_write_tokens,
+            costs,
+            created_at,
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::lock_conn;
 
     #[test]
     fn test_parse_message_data_full() {
@@ -590,7 +560,12 @@ mod tests {
             model_id: "claude-sonnet-4-5".to_string(),
             timestamp_ms: 1_000_000,
         };
-        assert!(insert_opencode_message(&db, "opencode-sem", &msg, "s1")?);
+        assert!(insert_opencode_message(
+            &db.conn.lock().unwrap(),
+            "opencode-sem",
+            &msg,
+            "s1"
+        )?);
 
         let conn = lock_conn!(db.conn);
         let (pricing_model, semantics): (Option<String>, i64) = conn.query_row(

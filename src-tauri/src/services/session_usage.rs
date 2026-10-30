@@ -9,16 +9,14 @@
 //! ```
 
 use crate::config::get_claude_config_dir;
+use crate::database::repo::session_cursor::{self, SessionCursor};
+use crate::database::repo::usage::{self as usage_repo, SessionUsageRow, UsageCosts, UsageSource};
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::pricing::resolver::find_model_pricing;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
 use crate::proxy::usage::parser::TokenUsage;
-use crate::services::sql_helpers::input_token_semantics_for_app_type;
-use crate::services::usage_stats::{
-    effective_usage_log_filter, should_skip_session_insert, DedupKey,
-};
-use rusqlite::OptionalExtension;
+use crate::services::usage_stats::{should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -316,51 +314,95 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
         }
     }
 
-    // 写入数据库
-    let mut imported: u32 = 0;
-    let mut skipped: u32 = 0;
+    // 写入数据库：本文件的所有行与游标在同一个事务里提交
+    let cursor = SessionCursor {
+        last_modified: file_modified,
+        last_offset: line_offset,
+    };
+    ingest_file(db, &file_path_str, |conn| {
+        let mut imported: u32 = 0;
+        let mut skipped: u32 = 0;
 
-    for msg in messages.values() {
-        // 只要产生了真实计费 token 就导入，不再强制要求 stop_reason 或 output>0。
-        //
-        // Anthropic 在受理请求时即对 input + cache_read + cache_creation 计费
-        // （这些在请求开始就确定），output 按实际生成量计。Workflow / 子 agent 的
-        // 并行短命请求经常只写了 message_start 快照（output=1、stop_reason=None）
-        // 却没有写最终块，但其 cache/input 成本已被真实计费。旧逻辑用 stop_reason
-        // 非空 + output>0 双重过滤，会把这类请求整条丢弃，实测系统性低估约 4.1%，
-        // 且 92% 集中在 workflow/subagent。这里改为「任一计费维度 > 0 即导入」。
-        //
-        // 去重选择逻辑（上方按 message.id 取 stop_reason 优先 / output 最大者）保持
-        // 不变：它选出的代表行的 input/cache 本就准确；request_id = session:msg_id
-        // 主键 + INSERT OR IGNORE 保证一个 message 仍只落库一次，放宽 gate 不会双算。
-        let has_billable_tokens = msg.input_tokens > 0
-            || msg.output_tokens > 0
-            || msg.cache_read_tokens > 0
-            || msg.cache_creation_tokens > 0;
-        if !has_billable_tokens {
-            continue;
-        }
+        for msg in messages.values() {
+            // 只要产生了真实计费 token 就导入，不再强制要求 stop_reason 或 output>0。
+            //
+            // Anthropic 在受理请求时即对 input + cache_read + cache_creation 计费
+            // （这些在请求开始就确定），output 按实际生成量计。Workflow / 子 agent 的
+            // 并行短命请求经常只写了 message_start 快照（output=1、stop_reason=None）
+            // 却没有写最终块，但其 cache/input 成本已被真实计费。旧逻辑用 stop_reason
+            // 非空 + output>0 双重过滤，会把这类请求整条丢弃，实测系统性低估约 4.1%，
+            // 且 92% 集中在 workflow/subagent。这里改为「任一计费维度 > 0 即导入」。
+            //
+            // 去重选择逻辑（上方按 message.id 取 stop_reason 优先 / output 最大者）保持
+            // 不变：它选出的代表行的 input/cache 本就准确；request_id = session:msg_id
+            // 主键 + INSERT OR IGNORE 保证一个 message 仍只落库一次，放宽 gate 不会双算。
+            let has_billable_tokens = msg.input_tokens > 0
+                || msg.output_tokens > 0
+                || msg.cache_read_tokens > 0
+                || msg.cache_creation_tokens > 0;
+            if !has_billable_tokens {
+                continue;
+            }
 
-        let request_id = format!(
-            "{}{}",
-            crate::proxy::usage::parser::SESSION_REQUEST_ID_PREFIX,
-            msg.message_id
-        );
+            let request_id = format!(
+                "{}{}",
+                crate::proxy::usage::parser::SESSION_REQUEST_ID_PREFIX,
+                msg.message_id
+            );
 
-        match insert_session_log_entry(db, &request_id, msg) {
-            Ok(true) => imported += 1,
-            Ok(false) => skipped += 1,
-            Err(e) => {
-                log::warn!("[SESSION-SYNC] 插入失败 ({}): {e}", msg.message_id);
-                skipped += 1;
+            match insert_session_log_entry(conn, &request_id, msg) {
+                Ok(true) => imported += 1,
+                Ok(false) => skipped += 1,
+                Err(e) => {
+                    log::warn!("[SESSION-SYNC] 插入失败 ({}): {e}", msg.message_id);
+                    skipped += 1;
+                }
             }
         }
+
+        Ok(IngestBatch {
+            value: (imported, skipped),
+            wrote_rows: imported > 0,
+            cursor: Some(cursor),
+        })
+    })
+}
+
+/// 一个导入来源（文件 / OpenCode 会话）在一个事务里写入的结果
+pub(crate) struct IngestBatch<T> {
+    pub value: T,
+    /// 是否写入或更新了使用量行（用于通知前端刷新）
+    pub wrote_rows: bool,
+    /// 要推进到的游标；`None` 表示本次不推进（下次重试）
+    pub cursor: Option<SessionCursor>,
+}
+
+/// 在一个事务里执行 `write` 并写入 `key` 的游标，一起提交。
+///
+/// 进程在两个文件之间（或文件写到一半时）被杀掉，要么整个文件连同游标都已提交，
+/// 要么都没有：重跑时不会出现「行已写入、游标未推进」的重复导入窗口。
+/// 单行写入失败由 `write` 自行记录并跳过；游标写入或提交失败时整个文件回滚。
+pub(crate) fn ingest_file<T>(
+    db: &Database,
+    key: &str,
+    write: impl FnOnce(&rusqlite::Connection) -> Result<IngestBatch<T>, AppError>,
+) -> Result<T, AppError> {
+    let mut conn = lock_conn!(db.conn);
+    let tx = conn
+        .transaction()
+        .map_err(|e| AppError::Database(format!("开启导入事务失败: {e}")))?;
+    let batch = write(&tx)?;
+    if let Some(cursor) = batch.cursor {
+        session_cursor::put(&tx, key, cursor)?;
     }
+    tx.commit()
+        .map_err(|e| AppError::Database(format!("提交导入事务失败: {e}")))?;
+    drop(conn);
 
-    // 更新同步状态
-    update_sync_state(db, &file_path_str, file_modified, line_offset)?;
-
-    Ok((imported, skipped))
+    if batch.wrote_rows {
+        crate::usage_events::notify_log_recorded();
+    }
+    Ok(batch.value)
 }
 
 /// 逐行读取 JSONL，只产出以 `\n` 结尾的完整行（已去掉行尾 `\n` / `\r\n`）。
@@ -404,17 +446,13 @@ impl<R: BufRead> Iterator for CompleteLines<R> {
     }
 }
 
-/// 获取 session_log_sync 表中某条目的同步进度。
+/// 获取 session_log_sync 表中某条目的同步进度 `(last_modified, last_offset)`。
 ///
 /// Shared by all session_usage_* parsers.
 pub(crate) fn get_sync_state(db: &Database, file_path: &str) -> Result<(i64, i64), AppError> {
     let conn = lock_conn!(db.conn);
-    let result = conn.query_row(
-        "SELECT last_modified, last_line_offset FROM session_log_sync WHERE file_path = ?1",
-        rusqlite::params![file_path],
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-    );
-    Ok(result.unwrap_or((0, 0)))
+    let cursor = session_cursor::get(&conn, file_path)?;
+    Ok((cursor.last_modified, cursor.last_offset))
 }
 
 /// 返回文件 mtime 的纳秒时间戳。
@@ -430,7 +468,7 @@ pub(crate) fn metadata_modified_nanos(metadata: &fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
-/// 更新 session_log_sync 表中某条目的同步进度。
+/// 更新 session_log_sync 表中某条目的同步进度（单独提交，不与使用量行同事务）。
 ///
 /// Shared by all session_usage_* parsers.
 pub(crate) fn update_sync_state(
@@ -439,19 +477,15 @@ pub(crate) fn update_sync_state(
     last_modified: i64,
     last_offset: i64,
 ) -> Result<(), AppError> {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-
     let conn = lock_conn!(db.conn);
-    conn.execute(
-        "INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at)
-         VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![file_path, last_modified, last_offset, now],
+    session_cursor::put(
+        &conn,
+        file_path,
+        SessionCursor {
+            last_modified,
+            last_offset,
+        },
     )
-    .map_err(|e| AppError::Database(format!("更新同步状态失败: {e}")))?;
-    Ok(())
 }
 
 /// 插入单条会话日志到 proxy_request_logs，返回是否写入了数据
@@ -463,12 +497,10 @@ pub(crate) fn update_sync_state(
 /// 与费用会被永久低估。表中没有保存 stop_reason 的列，因此按 output_tokens
 /// 更大来判定是否为更新的快照，并重写 token 与费用列。
 fn insert_session_log_entry(
-    db: &Database,
+    conn: &rusqlite::Connection,
     request_id: &str,
     msg: &ParsedAssistantUsage,
 ) -> Result<bool, AppError> {
-    let conn = lock_conn!(db.conn);
-
     let created_at = msg
         .timestamp
         .as_ref()
@@ -494,22 +526,15 @@ fn insert_session_log_entry(
         created_at,
     };
     // 已有同 message 的会话日志行：仅当新条目 output 更大时升级（见函数注释）
-    let existing_output: Option<i64> = conn
-        .query_row(
-            "SELECT output_tokens FROM proxy_request_logs
-             WHERE request_id = ?1 AND data_source = 'session_log'",
-            rusqlite::params![request_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| AppError::Database(format!("查询会话日志失败: {e}")))?;
+    let existing_output =
+        usage_repo::session_row_output_tokens(conn, request_id, UsageSource::ClaudeSession)?;
     let upgrade_existing = match existing_output {
         Some(old_output) if i64::from(msg.output_tokens) > old_output => true,
         Some(_) => return Ok(false),
         None => false,
     };
 
-    if !upgrade_existing && should_skip_session_insert(&conn, request_id, &dedup_key)? {
+    if !upgrade_existing && should_skip_session_insert(conn, request_id, &dedup_key)? {
         return Ok(false);
     }
 
@@ -523,103 +548,32 @@ fn insert_session_log_entry(
         message_id: None,
     };
 
-    let pricing = find_model_pricing_for_session(&conn, &msg.model);
+    let pricing = find_model_pricing_for_session(conn, &msg.model);
     let multiplier = Decimal::from(1);
-    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) = match pricing
-    {
-        Some(p) => {
-            let cost = CostCalculator::calculate(&usage, &p, multiplier);
-            (
-                cost.input_cost.to_string(),
-                cost.output_cost.to_string(),
-                cost.cache_read_cost.to_string(),
-                cost.cache_creation_cost.to_string(),
-                cost.total_cost.to_string(),
-            )
-        }
-        None => (
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-        ),
+    let costs = match pricing {
+        Some(p) => UsageCosts::from_breakdown(&CostCalculator::calculate(&usage, &p, multiplier)),
+        None => UsageCosts::zero(),
+    };
+
+    let row = SessionUsageRow {
+        request_id,
+        source: UsageSource::ClaudeSession,
+        model: &msg.model,
+        pricing_model: &msg.model, // 会话日志按响应模型计价
+        session_id: msg.session_id.as_deref(),
+        input_tokens: msg.input_tokens,
+        output_tokens: msg.output_tokens,
+        cache_read_tokens: msg.cache_read_tokens,
+        cache_creation_tokens: msg.cache_creation_tokens,
+        costs,
+        created_at,
     };
 
     if upgrade_existing {
-        let updated_rows = conn
-            .execute(
-                "UPDATE proxy_request_logs SET
-                input_tokens = ?2, output_tokens = ?3, cache_read_tokens = ?4, cache_creation_tokens = ?5,
-                input_cost_usd = ?6, output_cost_usd = ?7, cache_read_cost_usd = ?8,
-                cache_creation_cost_usd = ?9, total_cost_usd = ?10
-             WHERE request_id = ?1 AND data_source = 'session_log' AND output_tokens < ?3",
-                rusqlite::params![
-                    request_id,
-                    msg.input_tokens,
-                    msg.output_tokens,
-                    msg.cache_read_tokens,
-                    msg.cache_creation_tokens,
-                    input_cost,
-                    output_cost,
-                    cache_read_cost,
-                    cache_creation_cost,
-                    total_cost,
-                ],
-            )
-            .map_err(|e| AppError::Database(format!("更新会话日志失败: {e}")))?;
-        if updated_rows > 0 {
-            crate::usage_events::notify_log_recorded();
-        }
-        return Ok(updated_rows > 0);
+        return usage_repo::upgrade_session_row(conn, &row);
     }
 
-    let inserted_rows = conn
-        .execute(
-            "INSERT OR IGNORE INTO proxy_request_logs (
-            request_id, provider_id, app_type, model, request_model,
-            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-            latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source,
-            pricing_model, input_token_semantics
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
-            rusqlite::params![
-                request_id,
-                "_session",         // provider_id: 标记为会话来源
-                "claude",           // app_type
-                msg.model,
-                msg.model,          // request_model = model
-                msg.input_tokens,
-                msg.output_tokens,
-                msg.cache_read_tokens,
-                msg.cache_creation_tokens,
-                input_cost,
-                output_cost,
-                cache_read_cost,
-                cache_creation_cost,
-                total_cost,
-                0i64,               // latency_ms: 会话日志无此数据
-                Option::<i64>::None, // first_token_ms
-                200i64,             // status_code: 会话日志中的请求只要产生计费 token 即视为成功
-                Option::<String>::None, // error_message
-                msg.session_id,
-                Some("session_log"), // provider_type
-                1i64,               // is_streaming: Claude Code 通常使用流式
-                "1.0",              // cost_multiplier
-                created_at,
-                "session_log",      // data_source
-                msg.model,          // pricing_model: 会话日志按响应模型计价
-                input_token_semantics_for_app_type("claude"),
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("插入会话日志失败: {e}")))?;
-
-    // 仅在确实写入新行时通知前端，避免 INSERT OR IGNORE 跳过时产生空刷新
-    if inserted_rows > 0 {
-        crate::usage_events::notify_log_recorded();
-    }
-
+    usage_repo::insert_session_row(conn, &row)?;
     Ok(true)
 }
 
@@ -634,33 +588,14 @@ fn find_model_pricing_for_session(
 /// 查询数据来源分布统计
 pub fn get_data_source_breakdown(db: &Database) -> Result<Vec<DataSourceSummary>, AppError> {
     let conn = lock_conn!(db.conn);
-
-    let effective_filter = effective_usage_log_filter("l");
-    let sql = format!(
-        "SELECT COALESCE(l.data_source, 'proxy') as ds, COUNT(*) as cnt,
-                COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as cost
-         FROM proxy_request_logs l
-         WHERE {effective_filter}
-         GROUP BY ds
-         ORDER BY cnt DESC"
-    );
-
-    let mut stmt = conn.prepare(&sql)?;
-
-    let rows = stmt.query_map([], |row| {
-        Ok(DataSourceSummary {
-            data_source: row.get(0)?,
-            request_count: row.get::<_, i64>(1)? as u32,
-            total_cost_usd: format!("{:.6}", row.get::<_, f64>(2)?),
+    Ok(usage_repo::data_source_breakdown(&conn)?
+        .into_iter()
+        .map(|(data_source, count, cost)| DataSourceSummary {
+            data_source,
+            request_count: count as u32,
+            total_cost_usd: format!("{cost:.6}"),
         })
-    })?;
-
-    let mut summaries = Vec::new();
-    for row in rows {
-        summaries.push(row.map_err(|e| AppError::Database(e.to_string()))?);
-    }
-
-    Ok(summaries)
+        .collect())
 }
 
 /// 会话数据同步函数签名
@@ -855,7 +790,7 @@ mod tests {
             session_id: Some("session-1".to_string()),
         };
 
-        let inserted = insert_session_log_entry(&db, "session:msg_1", &msg)?;
+        let inserted = insert_session_log_entry(&db.conn.lock().unwrap(), "session:msg_1", &msg)?;
         assert!(!inserted);
 
         let conn = lock_conn!(db.conn);
@@ -1069,7 +1004,11 @@ mod tests {
             timestamp: Some("2026-06-07T13:01:23Z".to_string()),
             session_id: Some("session-stream".to_string()),
         };
-        assert!(!insert_session_log_entry(&db, "session:msg_1", &stale)?);
+        assert!(!insert_session_log_entry(
+            &db.conn.lock().unwrap(),
+            "session:msg_1",
+            &stale
+        )?);
         assert_eq!(read_row(&db)?.0, 500);
         Ok(())
     }
@@ -1150,7 +1089,11 @@ mod tests {
             timestamp: Some("1970-01-01T00:16:45Z".to_string()),
             session_id: Some("session-1".to_string()),
         };
-        assert!(insert_session_log_entry(&db, "session:msg_sem", &msg)?);
+        assert!(insert_session_log_entry(
+            &db.conn.lock().unwrap(),
+            "session:msg_sem",
+            &msg
+        )?);
 
         let conn = lock_conn!(db.conn);
         let (pricing_model, semantics): (Option<String>, i64) = conn.query_row(

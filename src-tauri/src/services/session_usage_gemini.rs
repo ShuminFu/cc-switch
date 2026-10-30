@@ -13,16 +13,17 @@
 //! - 无需状态恢复：不依赖前一条消息的累计值
 //! - 天然去重：每条消息有唯一 id 字段
 
-use crate::database::{lock_conn, Database};
+use crate::database::repo::session_cursor::SessionCursor;
+use crate::database::repo::usage::{self as usage_repo, SessionUsageRow, UsageCosts, UsageSource};
+use crate::database::Database;
 use crate::error::AppError;
 use crate::gemini_config::get_gemini_dir;
 use crate::pricing::resolver::find_model_pricing;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
+    get_sync_state, ingest_file, metadata_modified_nanos, IngestBatch, SessionSyncResult,
 };
-use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{has_matching_proxy_usage_log, DedupKey};
 use rust_decimal::Decimal;
 use std::fs;
@@ -158,9 +159,8 @@ fn sync_single_gemini_file(db: &Database, file_path: &Path) -> Result<(u32, u32)
         None => return Ok((0, 0)),
     };
 
-    let mut imported: u32 = 0;
-    let mut skipped: u32 = 0;
     let mut gemini_msg_count: i64 = 0;
+    let mut pending: Vec<PendingGeminiEntry<'_>> = Vec::new();
 
     for msg in messages {
         // 只处理 type == "gemini" 的消息
@@ -193,27 +193,53 @@ fn sync_single_gemini_file(db: &Database, file_path: &Path) -> Result<(u32, u32)
         let session_id_str = session_id.as_deref().unwrap_or("unknown");
         let request_id = format!("gemini_session:{session_id_str}:{message_id}");
 
-        match insert_gemini_session_entry(
-            db,
-            &request_id,
-            &tokens,
+        pending.push(PendingGeminiEntry {
+            request_id,
+            tokens,
             model,
-            session_id.as_deref(),
             timestamp,
-        ) {
-            Ok(true) => imported += 1,
-            Ok(false) => skipped += 1,
-            Err(e) => {
-                log::warn!("[GEMINI-SYNC] 插入失败 ({}): {e}", request_id);
-                skipped += 1;
-            }
-        }
+        });
     }
 
-    // 更新同步状态
-    update_sync_state(db, &file_path_str, file_modified, gemini_msg_count)?;
+    // 本文件的所有行与游标在同一个事务里提交
+    let cursor = SessionCursor {
+        last_modified: file_modified,
+        last_offset: gemini_msg_count,
+    };
+    ingest_file(db, &file_path_str, |conn| {
+        let mut imported: u32 = 0;
+        let mut skipped: u32 = 0;
+        for entry in &pending {
+            match insert_gemini_session_entry(
+                conn,
+                &entry.request_id,
+                &entry.tokens,
+                entry.model,
+                session_id.as_deref(),
+                entry.timestamp,
+            ) {
+                Ok(true) => imported += 1,
+                Ok(false) => skipped += 1,
+                Err(e) => {
+                    log::warn!("[GEMINI-SYNC] 插入失败 ({}): {e}", entry.request_id);
+                    skipped += 1;
+                }
+            }
+        }
+        Ok(IngestBatch {
+            value: (imported, skipped),
+            wrote_rows: imported > 0,
+            cursor: Some(cursor),
+        })
+    })
+}
 
-    Ok((imported, skipped))
+/// 解析阶段收集、在文件事务里写入的一条 Gemini 用量
+struct PendingGeminiEntry<'a> {
+    request_id: String,
+    tokens: GeminiTokens,
+    model: &'a str,
+    timestamp: Option<&'a str>,
 }
 
 /// 从 tokens JSON 对象中提取 token 数据
@@ -228,15 +254,13 @@ fn parse_gemini_tokens(tokens: &serde_json::Value) -> GeminiTokens {
 
 /// 插入单条 Gemini 会话记录到 proxy_request_logs
 fn insert_gemini_session_entry(
-    db: &Database,
+    conn: &rusqlite::Connection,
     request_id: &str,
     tokens: &GeminiTokens,
     model: &str,
     session_id: Option<&str>,
     timestamp: Option<&str>,
 ) -> Result<bool, AppError> {
-    let conn = lock_conn!(db.conn);
-
     let created_at = timestamp
         .and_then(|ts| {
             chrono::DateTime::parse_from_rfc3339(ts)
@@ -265,7 +289,7 @@ fn insert_gemini_session_entry(
     // 只按代理日志去重，不能用 should_skip_session_insert：它在 request_id 已存在时
     // 直接跳过，导致下方 UPSERT 的 DO UPDATE 分支永远走不到，重读文件拿到的新值被丢弃。
     // 自身的会话行由 ON CONFLICT(request_id) 处理（值相同则不变，值变化则更新）。
-    if has_matching_proxy_usage_log(&conn, &dedup_key)? {
+    if has_matching_proxy_usage_log(conn, &dedup_key)? {
         return Ok(false);
     }
 
@@ -279,94 +303,33 @@ fn insert_gemini_session_entry(
         message_id: None,
     };
 
-    let pricing = find_gemini_pricing(&conn, model);
+    let pricing = find_gemini_pricing(conn, model);
     let multiplier = Decimal::from(1);
-    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) = match pricing
-    {
-        Some(p) => {
-            let cost = CostCalculator::calculate_for_app("gemini", &usage, &p, multiplier);
-            (
-                cost.input_cost.to_string(),
-                cost.output_cost.to_string(),
-                cost.cache_read_cost.to_string(),
-                cost.cache_creation_cost.to_string(),
-                cost.total_cost.to_string(),
-            )
-        }
-        None => (
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-        ),
+    let costs = match pricing {
+        Some(p) => UsageCosts::from_breakdown(&CostCalculator::calculate_for_app(
+            "gemini", &usage, &p, multiplier,
+        )),
+        None => UsageCosts::zero(),
     };
 
-    // 使用 UPSERT：新记录插入，已存在记录更新 token 和费用（Gemini 全量重读可能携带更新值）
-    conn.execute(
-        "INSERT INTO proxy_request_logs (
-            request_id, provider_id, app_type, model, request_model,
-            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-            latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source,
-            pricing_model, input_token_semantics
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
-        ON CONFLICT(request_id) DO UPDATE SET
-            model = excluded.model,
-            input_tokens = excluded.input_tokens,
-            output_tokens = excluded.output_tokens,
-            cache_read_tokens = excluded.cache_read_tokens,
-            input_cost_usd = excluded.input_cost_usd,
-            output_cost_usd = excluded.output_cost_usd,
-            cache_read_cost_usd = excluded.cache_read_cost_usd,
-            cache_creation_cost_usd = excluded.cache_creation_cost_usd,
-            total_cost_usd = excluded.total_cost_usd,
-            pricing_model = excluded.pricing_model,
-            input_token_semantics = excluded.input_token_semantics
-        WHERE input_tokens != excluded.input_tokens
-           OR output_tokens != excluded.output_tokens
-           OR cache_read_tokens != excluded.cache_read_tokens
-           OR model != excluded.model
-           OR pricing_model IS NOT excluded.pricing_model
-           OR input_token_semantics != excluded.input_token_semantics",
-        rusqlite::params![
+    // 使用 UPSERT：新记录插入，已存在记录更新 token 和费用（Gemini 全量重读可能携带更新值）。
+    // 返回 true 表示新插入或已更新，false 表示值完全相同（无实际变更）
+    usage_repo::upsert_session_row(
+        conn,
+        &SessionUsageRow {
             request_id,
-            "_gemini_session",   // provider_id
-            "gemini",            // app_type
+            source: UsageSource::GeminiSession,
             model,
-            model,               // request_model = model
-            tokens.input,
+            pricing_model: model,
+            session_id,
+            input_tokens: tokens.input,
             output_tokens,
-            tokens.cached,
-            0i64,                // cache_creation_tokens
-            input_cost,
-            output_cost,
-            cache_read_cost,
-            cache_creation_cost,
-            total_cost,
-            0i64,                // latency_ms
-            Option::<i64>::None, // first_token_ms
-            200i64,              // status_code
-            Option::<String>::None, // error_message
-            session_id.map(|s| s.to_string()),
-            Some("gemini_session"), // provider_type
-            1i64,                // is_streaming
-            "1.0",               // cost_multiplier
+            cache_read_tokens: tokens.cached,
+            cache_creation_tokens: 0,
+            costs,
             created_at,
-            "gemini_session",    // data_source
-            model,               // pricing_model
-            input_token_semantics_for_app_type("gemini"),
-        ],
+        },
     )
-    .map_err(|e| AppError::Database(format!("插入 Gemini 会话日志失败: {e}")))?;
-
-    // changes() > 0 表示新插入或已更新，== 0 表示值完全相同（无实际变更）
-    let changed = conn.changes() > 0;
-    if changed {
-        crate::usage_events::notify_log_recorded();
-    }
-    Ok(changed)
 }
 
 /// 查找 Gemini 模型定价
@@ -377,6 +340,7 @@ fn find_gemini_pricing(conn: &rusqlite::Connection, model_id: &str) -> Option<Mo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::lock_conn;
 
     #[test]
     fn test_collect_gemini_session_files_nonexistent() {
@@ -421,7 +385,7 @@ mod tests {
             thoughts: 5,
         };
         let inserted = insert_gemini_session_entry(
-            &db,
+            &db.conn.lock().unwrap(),
             "gemini-session-dup",
             &tokens,
             "gemini-2.5-pro",
@@ -518,7 +482,7 @@ mod tests {
             thoughts: 5,
         };
         assert!(insert_gemini_session_entry(
-            &db,
+            &db.conn.lock().unwrap(),
             "gemini_session:s1:m1",
             &tokens,
             "gemini-2.5-pro",
@@ -552,7 +516,7 @@ mod tests {
             thoughts: 0,
         };
         assert!(insert_gemini_session_entry(
-            &db,
+            &db.conn.lock().unwrap(),
             request_id,
             &first,
             "gemini-2.5-pro",
@@ -562,7 +526,7 @@ mod tests {
 
         // 相同值重读：不产生变更
         assert!(!insert_gemini_session_entry(
-            &db,
+            &db.conn.lock().unwrap(),
             request_id,
             &first,
             "gemini-2.5-pro",
@@ -578,7 +542,7 @@ mod tests {
             thoughts: 10,
         };
         assert!(insert_gemini_session_entry(
-            &db,
+            &db.conn.lock().unwrap(),
             request_id,
             &updated,
             "gemini-2.5-pro",
@@ -627,7 +591,7 @@ mod tests {
             thoughts: 0,
         };
         assert!(insert_gemini_session_entry(
-            &db,
+            &db.conn.lock().unwrap(),
             request_id,
             &tokens,
             "gemini-2.5-pro",
