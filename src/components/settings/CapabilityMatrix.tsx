@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { appRegistryQueryKey } from "@/entities/app/registry";
 import {
   appsApi,
   type BackendAppCaps,
@@ -39,8 +40,6 @@ const COLUMN_LABEL_KEYS = {
   usage: "settings.advanced.capabilityMatrix.caps.usage",
   sessionResume: "settings.advanced.capabilityMatrix.caps.sessionResume",
 } as const satisfies Record<CapabilityColumn, string>;
-
-export const appRegistryQueryKey = ["appRegistry"] as const;
 
 /**
  * 生成可粘贴到支持工单的纯文本矩阵（Markdown 表格）。
