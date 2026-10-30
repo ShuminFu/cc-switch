@@ -7,6 +7,7 @@ import { Trash2, ExternalLink, Plus } from "lucide-react";
 import { settingsApi } from "@/lib/api";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { DiscoverableSkill, SkillRepo } from "@/lib/api/skills";
+import { parseRepoUrl } from "./parseRepoUrl";
 
 interface RepoManagerPanelProps {
   repos: SkillRepo[];
@@ -36,21 +37,6 @@ export function RepoManagerPanel({
         (skill.repoBranch || "main") === (repo.branch || "main"),
     ).length;
 
-  const parseRepoUrl = (
-    url: string,
-  ): { owner: string; name: string } | null => {
-    let cleaned = url.trim();
-    cleaned = cleaned.replace(/^https?:\/\/github\.com\//, "");
-    cleaned = cleaned.replace(/\.git$/, "");
-
-    const parts = cleaned.split("/");
-    if (parts.length === 2 && parts[0] && parts[1]) {
-      return { owner: parts[0], name: parts[1] };
-    }
-
-    return null;
-  };
-
   const handleAdd = async () => {
     setError("");
 
@@ -64,7 +50,9 @@ export function RepoManagerPanel({
       await onAdd({
         owner: parsed.owner,
         name: parsed.name,
-        branch: branch || "main",
+        // A typed branch wins over one parsed from a /tree/<branch> URL; the
+        // backend still falls back to main/master when the branch is missing.
+        branch: branch.trim() || parsed.branch || "main",
         enabled: true,
       });
 
