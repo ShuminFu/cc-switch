@@ -303,9 +303,13 @@ export function ProviderActions({
         <Button
           size="icon"
           variant="ghost"
-          onClick={onDuplicate}
-          title={t("provider.duplicate")}
-          className={iconButtonClass}
+          onClick={isReadOnly ? undefined : onDuplicate}
+          disabled={isReadOnly}
+          title={isReadOnly ? readOnlyHint : t("provider.duplicate")}
+          className={cn(
+            iconButtonClass,
+            isReadOnly && "opacity-40 cursor-not-allowed text-muted-foreground",
+          )}
         >
           <Copy className="h-4 w-4" />
         </Button>
