@@ -114,14 +114,77 @@ pub struct ProxyServerInfo {
 }
 
 /// 各应用的接管状态（是否改写该应用的 Live 配置指向本地代理）
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+///
+/// 由应用注册表生成：每个已注册应用一个键（`slug`，如 `claude`、`grokbuild`、
+/// `hermes`），按 [`crate::apps::registry::APPS`] 顺序序列化为 JSON 对象，
+/// 与旧版逐字段结构体的键名保持一致；不支持接管的应用恒为 `false`。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyTakeoverStatus {
-    pub claude: bool,
-    pub codex: bool,
-    pub gemini: bool,
-    pub grokbuild: bool,
-    pub opencode: bool,
-    pub openclaw: bool,
+    apps: Vec<(&'static str, bool)>,
+}
+
+impl ProxyTakeoverStatus {
+    /// 按注册表生成状态；`enabled` 只对具备 `PROXY_TAKEOVER` 能力的应用调用
+    pub fn from_registry(
+        mut enabled: impl FnMut(&'static crate::apps::registry::AppDescriptor) -> bool,
+    ) -> Self {
+        use crate::apps::{registry::APPS, AppCaps};
+        Self {
+            apps: APPS
+                .iter()
+                .map(|d| (d.slug, d.has(AppCaps::PROXY_TAKEOVER) && enabled(d)))
+                .collect(),
+        }
+    }
+
+    /// 指定应用是否处于接管状态
+    pub fn get(&self, app: &crate::app_config::AppType) -> bool {
+        let slug = app.as_str();
+        self.apps
+            .iter()
+            .any(|(key, enabled)| *key == slug && *enabled)
+    }
+
+    /// 是否有任意应用处于接管状态
+    pub fn any(&self) -> bool {
+        self.apps.iter().any(|(_, enabled)| *enabled)
+    }
+
+    /// 处于接管状态的应用（注册表顺序）
+    pub fn enabled_apps(&self) -> impl Iterator<Item = crate::app_config::AppType> + '_ {
+        self.apps
+            .iter()
+            .filter(|(_, enabled)| *enabled)
+            .filter_map(|(slug, _)| crate::apps::registry::find_by_id(slug))
+            .map(|d| d.app.clone())
+    }
+}
+
+impl Default for ProxyTakeoverStatus {
+    fn default() -> Self {
+        Self::from_registry(|_| false)
+    }
+}
+
+impl Serialize for ProxyTakeoverStatus {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.apps.len()))?;
+        for (slug, enabled) in &self.apps {
+            map.serialize_entry(slug, enabled)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ProxyTakeoverStatus {
+    /// 缺失的键视为 `false`，未知键忽略
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = std::collections::HashMap::<String, bool>::deserialize(deserializer)?;
+        Ok(Self::from_registry(|d| {
+            raw.get(d.slug).copied().unwrap_or(false)
+        }))
+    }
 }
 
 /// Provider健康状态
@@ -377,6 +440,61 @@ impl LogConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 状态 JSON 快照：保留旧结构体的全部键名（claude/codex/gemini/grokbuild/
+    /// opencode/openclaw），并由注册表补齐 claude-desktop 与 hermes。
+    #[test]
+    fn takeover_status_json_snapshot_is_backward_compatible() {
+        use crate::app_config::AppType;
+
+        let status = ProxyTakeoverStatus::from_registry(|d| {
+            matches!(d.app, AppType::Codex | AppType::GrokBuild)
+        });
+        assert_eq!(
+            serde_json::to_string(&status).unwrap(),
+            r#"{"claude":false,"claude-desktop":false,"codex":true,"gemini":false,"grokbuild":true,"opencode":false,"openclaw":false,"hermes":false}"#
+        );
+
+        let json = serde_json::to_value(&status).unwrap();
+        for key in [
+            "claude",
+            "codex",
+            "gemini",
+            "grokbuild",
+            "opencode",
+            "openclaw",
+        ] {
+            assert!(json[key].is_boolean(), "legacy key `{key}` missing");
+        }
+        assert!(status.get(&AppType::Codex));
+        assert!(!status.get(&AppType::Claude));
+        assert!(status.any());
+        assert_eq!(
+            status.enabled_apps().collect::<Vec<_>>(),
+            vec![AppType::Codex, AppType::GrokBuild]
+        );
+    }
+
+    #[test]
+    fn takeover_status_never_reports_apps_without_takeover_capability() {
+        let status = ProxyTakeoverStatus::from_registry(|_| true);
+        let json = serde_json::to_value(&status).unwrap();
+        for key in ["claude-desktop", "opencode", "openclaw", "hermes"] {
+            assert_eq!(json[key], false, "{key}");
+        }
+        assert_eq!(json["claude"], true);
+        assert!(!ProxyTakeoverStatus::default().any());
+    }
+
+    #[test]
+    fn takeover_status_deserializes_legacy_payloads() {
+        let legacy = r#"{"claude":true,"codex":false,"gemini":true,"grokbuild":false,"opencode":false,"openclaw":false}"#;
+        let status: ProxyTakeoverStatus = serde_json::from_str(legacy).unwrap();
+        assert_eq!(
+            status,
+            ProxyTakeoverStatus::from_registry(|d| matches!(d.slug, "claude" | "gemini"))
+        );
+    }
 
     #[test]
     fn test_rectifier_config_default_enabled() {

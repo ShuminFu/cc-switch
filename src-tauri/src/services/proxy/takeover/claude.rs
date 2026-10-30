@@ -347,10 +347,6 @@ impl ProxyService {
         Ok(())
     }
 
-    pub(in crate::services::proxy) fn is_claude_live_taken_over(config: &Value) -> bool {
-        Self::adapter_live_has_placeholder(&AppType::Claude, config)
-    }
-
     pub(in crate::services::proxy) fn read_claude_live(&self) -> Result<Value, String> {
         let path = get_claude_settings_path();
         if !path.exists() {

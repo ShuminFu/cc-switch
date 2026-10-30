@@ -1,7 +1,6 @@
 //! Codex Live 配置接管字段与读写
 
 use super::*;
-use crate::app_config::AppType;
 use crate::config::write_json_file;
 use crate::provider::Provider;
 use crate::proxy::inbound_auth::is_proxy_token;
@@ -73,10 +72,6 @@ impl ProxyService {
     /// Remove local proxy base_url from TOML（委托给 codex_config 共享实现）
     pub(in crate::services::proxy) fn remove_local_toml_base_url(toml_str: &str) -> String {
         crate::codex_config::remove_codex_toml_base_url_if(toml_str, Self::is_local_proxy_url)
-    }
-
-    pub(in crate::services::proxy) fn is_codex_live_taken_over(config: &Value) -> bool {
-        Self::adapter_live_has_placeholder(&AppType::Codex, config)
     }
 
     /// 接管 Codex 时，本地客户端必须继续以 Responses wire API 访问代理。

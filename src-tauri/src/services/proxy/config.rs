@@ -1,15 +1,14 @@
 //! 代理配置读写、重启与熔断器管理
 
 use super::*;
-use crate::app_config::AppType;
 use crate::proxy::server::ProxyServer;
 use std::sync::Arc;
 
 impl ProxyService {
-    /// 构造写入 Live 的代理地址（处理 0.0.0.0 / IPv6 等特殊情况）
-    pub(in crate::services::proxy) async fn build_proxy_urls(
-        &self,
-    ) -> Result<(String, String), String> {
+    /// 构造写入 Live 的代理源地址 `http://host:port`（处理 0.0.0.0 / IPv6 等特殊情况）
+    ///
+    /// 各应用的基础地址由 [`ProxyService::takeover_base_url`] 在此之上拼接。
+    pub(in crate::services::proxy) async fn proxy_origin(&self) -> Result<String, String> {
         let config = self
             .db
             .get_proxy_config()
@@ -40,11 +39,7 @@ impl ProxyService {
             return Err("代理监听端口为 0，但代理服务器尚未运行，无法生成接管地址".to_string());
         }
 
-        let proxy_origin = format!("http://{}:{}", connect_host_for_url, listen_port);
-        let proxy_url = proxy_origin.clone();
-        let proxy_codex_base_url = format!("{}/v1", proxy_origin.trim_end_matches('/'));
-
-        Ok((proxy_url, proxy_codex_base_url))
+        Ok(format!("http://{}:{}", connect_host_for_url, listen_port))
     }
 
     /// 获取代理配置
@@ -98,24 +93,8 @@ impl ProxyService {
             if let Ok(takeover) = self.get_takeover_status().await {
                 let mut updated_any = false;
 
-                if takeover.claude {
-                    self.takeover_live_config_best_effort(&AppType::Claude)
-                        .await?;
-                    updated_any = true;
-                }
-                if takeover.codex {
-                    self.takeover_live_config_best_effort(&AppType::Codex)
-                        .await?;
-                    updated_any = true;
-                }
-                if takeover.gemini {
-                    self.takeover_live_config_best_effort(&AppType::Gemini)
-                        .await?;
-                    updated_any = true;
-                }
-                if takeover.grokbuild {
-                    self.takeover_live_config_best_effort(&AppType::GrokBuild)
-                        .await?;
+                for app in takeover.enabled_apps() {
+                    self.takeover(&app, TakeoverMode::BestEffort).await?;
                     updated_any = true;
                 }
 

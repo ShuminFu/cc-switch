@@ -202,6 +202,11 @@ impl McpProjector for GeminiAdapter {
 }
 
 impl ProxyTakeover for GeminiAdapter {
+    /// 沿用无前缀的 `/v1beta/...`：Gemini CLI 自行拼接版本路径
+    fn base_url(&self, proxy_origin: &str, _proxy_route: &str) -> String {
+        proxy_origin.to_string()
+    }
+
     fn has_placeholder(&self, settings: &Value) -> bool {
         settings
             .get("env")

@@ -203,6 +203,11 @@ impl McpProjector for ClaudeAdapter {
 }
 
 impl ProxyTakeover for ClaudeAdapter {
+    /// 沿用无前缀的 `/v1/messages`：Claude Code 自行拼接 `/v1/...`
+    fn base_url(&self, proxy_origin: &str, _proxy_route: &str) -> String {
+        proxy_origin.to_string()
+    }
+
     fn has_placeholder(&self, settings: &Value) -> bool {
         let Some(env) = settings.get("env").and_then(Value::as_object) else {
             return false;

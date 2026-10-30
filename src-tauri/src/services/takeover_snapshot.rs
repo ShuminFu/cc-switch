@@ -55,6 +55,11 @@ impl TakeoverEngine {
         *self == Self::default()
     }
 
+    /// 是否走统一接管引擎（`takeover(app, Strict | BestEffort)`，CCS-154）
+    pub fn uses_unified_takeover(self) -> bool {
+        self == Self::Unified
+    }
+
     /// 是否记录并使用原始字节快照
     pub fn uses_raw_snapshot(self) -> bool {
         self == Self::Unified

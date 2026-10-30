@@ -11,51 +11,35 @@ use tauri::Emitter;
 
 mod claude;
 mod codex;
+mod engine;
 mod gemini;
 mod grok;
+mod legacy;
 
-use claude::ClaudeTakeoverAuthPolicy;
+pub(crate) use engine::{TakeoverError, TakeoverMode};
 
 impl ProxyService {
     /// 获取各应用的接管状态（是否改写该应用的 Live 配置指向本地代理）
+    ///
+    /// 由注册表生成：具备 `PROXY_TAKEOVER` 能力的应用读取 `proxy_config.enabled`，
+    /// 其余应用（Claude Desktop、OpenCode、OpenClaw、Hermes）恒为 `false`。
     pub async fn get_takeover_status(&self) -> Result<ProxyTakeoverStatus, String> {
-        // 从 proxy_config.enabled 读取（优先），兼容旧的 live_backup 备份检测
-        let claude_enabled = self
-            .db
-            .get_proxy_config_for_app("claude")
-            .await
-            .map(|c| c.enabled)
-            .unwrap_or(false);
-        let codex_enabled = self
-            .db
-            .get_proxy_config_for_app("codex")
-            .await
-            .map(|c| c.enabled)
-            .unwrap_or(false);
-        let gemini_enabled = self
-            .db
-            .get_proxy_config_for_app("gemini")
-            .await
-            .map(|c| c.enabled)
-            .unwrap_or(false);
-        let grokbuild_enabled = self
-            .db
-            .get_proxy_config_for_app("grokbuild")
-            .await
-            .map(|c| c.enabled)
-            .unwrap_or(false);
-        // OpenCode and OpenClaw don't support proxy features, always return false
-        let opencode_enabled = false;
-        let openclaw_enabled = false;
+        let mut enabled = std::collections::HashSet::new();
+        for descriptor in crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER) {
+            if self
+                .db
+                .get_proxy_config_for_app(descriptor.slug)
+                .await
+                .map(|c| c.enabled)
+                .unwrap_or(false)
+            {
+                enabled.insert(descriptor.slug);
+            }
+        }
 
-        Ok(ProxyTakeoverStatus {
-            claude: claude_enabled,
-            codex: codex_enabled,
-            gemini: gemini_enabled,
-            grokbuild: grokbuild_enabled,
-            opencode: opencode_enabled,
-            openclaw: openclaw_enabled,
-        })
+        Ok(ProxyTakeoverStatus::from_registry(|d| {
+            enabled.contains(d.slug)
+        }))
     }
 
     /// 为指定应用开启/关闭 Live 接管
@@ -126,7 +110,7 @@ impl ProxyService {
             }
 
             // 5) 写入接管配置（仅当前 app）
-            if let Err(e) = self.takeover_live_config_strict(&app).await {
+            if let Err(e) = self.takeover(&app, TakeoverMode::Strict).await {
                 log::error!("{app_type_str} 接管 Live 配置失败，尝试恢复: {e}");
                 match self.restore_live_config_for_app_inner(&app).await {
                     Ok(()) => {
@@ -139,7 +123,7 @@ impl ProxyService {
                         );
                     }
                 }
-                return Err(e);
+                return Err(e.into());
             }
 
             // 6) 设置 proxy_config.enabled = true
@@ -590,206 +574,6 @@ impl ProxyService {
         Ok(())
     }
 
-    /// 接管各应用的 Live 配置（写入代理地址）
-    ///
-    /// 代理服务器的路由已经根据 API 端点自动区分应用类型：
-    /// - `/v1/messages` → Claude
-    /// - `/v1/chat/completions`, `/v1/responses` → Codex
-    /// - `/v1beta/*` → Gemini
-    ///
-    /// 因此不需要在 URL 中添加应用前缀。
-    pub(in crate::services::proxy) async fn takeover_live_configs(&self) -> Result<(), String> {
-        let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
-        let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
-
-        // Claude: 修改 ANTHROPIC_BASE_URL，使用占位符替代真实 Token（代理会注入真实 Token）
-        if let Ok(mut live_config) = self.read_claude_live() {
-            let claude_provider = self.require_current_provider_for_app(&AppType::Claude)?;
-            let claude_provider = self.claude_provider_with_effective_settings(&claude_provider)?;
-            Self::apply_claude_takeover_fields_for_provider(
-                &mut live_config,
-                &proxy_url,
-                &claude_provider,
-            );
-            self.write_claude_live(&live_config)?;
-            log::info!("Claude Live 配置已接管，代理地址: {proxy_url}");
-        }
-
-        // Codex: project the selected provider through the local Responses endpoint.
-        if let Ok(mut live_config) = self.read_codex_live() {
-            let codex_provider = self.require_current_provider_for_app(&AppType::Codex)?;
-            Self::apply_codex_takeover_fields_for_provider(
-                &mut live_config,
-                &proxy_codex_base_url,
-                &codex_provider,
-            )?;
-
-            self.write_codex_takeover_live_for_provider(&live_config, Some(&codex_provider))?;
-            log::info!("Codex Live 配置已接管，代理地址: {proxy_codex_base_url}");
-        }
-
-        // Gemini: 修改 GOOGLE_GEMINI_BASE_URL，使用占位符替代真实 Token（代理会注入真实 Token）
-        if let Ok(mut live_config) = self.read_gemini_live() {
-            if let Some(env) = live_config.get_mut("env").and_then(|v| v.as_object_mut()) {
-                env.insert("GOOGLE_GEMINI_BASE_URL".to_string(), json!(&proxy_url));
-                // 使用占位符，避免显示缺少 key 的警告
-                env.insert("GEMINI_API_KEY".to_string(), json!(PROXY_TOKEN_PLACEHOLDER));
-            } else {
-                live_config["env"] = json!({
-                    "GOOGLE_GEMINI_BASE_URL": &proxy_url,
-                    "GEMINI_API_KEY": PROXY_TOKEN_PLACEHOLDER
-                });
-            }
-            self.write_gemini_live(&live_config)?;
-            log::info!("Gemini Live 配置已接管，代理地址: {proxy_url}");
-        }
-
-        // Grok Build: keep its own provider namespace while reusing Responses forwarding.
-        if let Ok(mut live_config) = self.read_grok_live() {
-            Self::apply_grok_takeover_fields(&mut live_config, &proxy_grok_base_url)?;
-            self.write_grok_live(&live_config)?;
-            log::info!("Grok Build Live 配置已接管，代理地址: {proxy_grok_base_url}");
-        }
-
-        Ok(())
-    }
-
-    /// 接管指定应用的 Live 配置（严格模式：目标配置不存在则返回错误）
-    pub(in crate::services::proxy) async fn takeover_live_config_strict(
-        &self,
-        app_type: &AppType,
-    ) -> Result<(), String> {
-        let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
-        let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
-
-        match app_type {
-            AppType::Claude => {
-                let mut live_config = self.read_claude_live()?;
-                let claude_provider = self.require_current_provider_for_app(&AppType::Claude)?;
-                let claude_provider =
-                    self.claude_provider_with_effective_settings(&claude_provider)?;
-                Self::apply_claude_takeover_fields_for_provider(
-                    &mut live_config,
-                    &proxy_url,
-                    &claude_provider,
-                );
-                self.write_claude_live(&live_config)?;
-                log::info!("Claude Live 配置已接管，代理地址: {proxy_url}");
-            }
-            AppType::Codex => {
-                let mut live_config = self.read_codex_live()?;
-                let codex_provider = self.require_current_provider_for_app(&AppType::Codex)?;
-                Self::apply_codex_takeover_fields_for_provider(
-                    &mut live_config,
-                    &proxy_codex_base_url,
-                    &codex_provider,
-                )?;
-
-                self.write_codex_takeover_live_for_provider(&live_config, Some(&codex_provider))?;
-                log::info!("Codex Live 配置已接管，代理地址: {proxy_codex_base_url}");
-            }
-            AppType::Gemini => {
-                let mut live_config = self.read_gemini_live()?;
-
-                if let Some(env) = live_config.get_mut("env").and_then(|v| v.as_object_mut()) {
-                    env.insert("GOOGLE_GEMINI_BASE_URL".to_string(), json!(&proxy_url));
-                    env.insert("GEMINI_API_KEY".to_string(), json!(PROXY_TOKEN_PLACEHOLDER));
-                } else {
-                    live_config["env"] = json!({
-                        "GOOGLE_GEMINI_BASE_URL": &proxy_url,
-                        "GEMINI_API_KEY": PROXY_TOKEN_PLACEHOLDER
-                    });
-                }
-
-                self.write_gemini_live(&live_config)?;
-                log::info!("Gemini Live 配置已接管，代理地址: {proxy_url}");
-            }
-            AppType::GrokBuild => {
-                let mut live_config = self.read_grok_live()?;
-                Self::apply_grok_takeover_fields(&mut live_config, &proxy_grok_base_url)?;
-                self.write_grok_live(&live_config)?;
-                log::info!("Grok Build Live 配置已接管，代理地址: {proxy_grok_base_url}");
-            }
-            _ => return Err("该应用不支持代理功能".to_string()),
-        }
-
-        Ok(())
-    }
-
-    /// 接管指定应用的 Live 配置（尽力而为：配置不存在/读取失败则跳过）
-    pub(in crate::services::proxy) async fn takeover_live_config_best_effort(
-        &self,
-        app_type: &AppType,
-    ) -> Result<(), String> {
-        let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
-        let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
-
-        match app_type {
-            AppType::Claude => {
-                if let Ok(mut live_config) = self.read_claude_live() {
-                    let claude_provider = self
-                        .get_current_provider_for_app(&AppType::Claude)
-                        .ok()
-                        .flatten();
-                    if let Some(provider) = claude_provider.as_ref() {
-                        let provider = self.claude_provider_with_effective_settings(provider)?;
-                        Self::apply_claude_takeover_fields_for_provider(
-                            &mut live_config,
-                            &proxy_url,
-                            &provider,
-                        );
-                    } else {
-                        Self::apply_claude_takeover_fields_with_policy(
-                            &mut live_config,
-                            &proxy_url,
-                            ClaudeTakeoverAuthPolicy::PreserveExistingOrAuthToken,
-                        );
-                    }
-                    let _ = self.write_claude_live(&live_config);
-                }
-            }
-            AppType::Codex => {
-                if let Ok(mut live_config) = self.read_codex_live() {
-                    let codex_provider = self.require_current_provider_for_app(&AppType::Codex)?;
-                    Self::apply_codex_takeover_fields_for_provider(
-                        &mut live_config,
-                        &proxy_codex_base_url,
-                        &codex_provider,
-                    )?;
-
-                    self.write_codex_takeover_live_for_provider(
-                        &live_config,
-                        Some(&codex_provider),
-                    )?;
-                }
-            }
-            AppType::Gemini => {
-                if let Ok(mut live_config) = self.read_gemini_live() {
-                    if let Some(env) = live_config.get_mut("env").and_then(|v| v.as_object_mut()) {
-                        env.insert("GOOGLE_GEMINI_BASE_URL".to_string(), json!(&proxy_url));
-                        env.insert("GEMINI_API_KEY".to_string(), json!(PROXY_TOKEN_PLACEHOLDER));
-                    } else {
-                        live_config["env"] = json!({
-                            "GOOGLE_GEMINI_BASE_URL": &proxy_url,
-                            "GEMINI_API_KEY": PROXY_TOKEN_PLACEHOLDER
-                        });
-                    }
-
-                    let _ = self.write_gemini_live(&live_config);
-                }
-            }
-            AppType::GrokBuild => {
-                if let Ok(mut live_config) = self.read_grok_live() {
-                    Self::apply_grok_takeover_fields(&mut live_config, &proxy_grok_base_url)?;
-                    let _ = self.write_grok_live(&live_config);
-                }
-            }
-            _ => {}
-        }
-
-        Ok(())
-    }
-
     pub(in crate::services::proxy) fn write_live_config_for_app(
         &self,
         app_type: &AppType,
@@ -805,25 +589,8 @@ impl ProxyService {
     }
 
     pub fn detect_takeover_in_live_config_for_app(&self, app_type: &AppType) -> bool {
-        match app_type {
-            AppType::Claude => match self.read_claude_live() {
-                Ok(config) => Self::is_claude_live_taken_over(&config),
-                Err(_) => false,
-            },
-            AppType::Codex => match self.read_codex_live() {
-                Ok(config) => Self::is_codex_live_taken_over(&config),
-                Err(_) => false,
-            },
-            AppType::Gemini => match self.read_gemini_live() {
-                Ok(config) => Self::is_gemini_live_taken_over(&config),
-                Err(_) => false,
-            },
-            AppType::GrokBuild => match self.read_grok_live() {
-                Ok(config) => Self::is_grok_live_taken_over(&config),
-                Err(_) => false,
-            },
-            _ => false,
-        }
+        self.read_live_for_takeover(app_type)
+            .is_ok_and(|config| Self::live_has_proxy_placeholder_for_app(app_type, &config))
     }
 
     pub(in crate::services::proxy) fn cleanup_takeover_placeholders_in_live_for_app(
@@ -862,55 +629,14 @@ impl ProxyService {
         &self,
         app_type: &AppType,
     ) -> Result<bool, String> {
-        let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
-        let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
-
-        match app_type {
-            AppType::Claude => {
-                let config = self.read_claude_live()?;
-                let base_url_matches = config
-                    .get("env")
-                    .and_then(|value| value.get("ANTHROPIC_BASE_URL"))
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|url| Self::proxy_urls_match(url, &proxy_url));
-                Ok(Self::is_claude_live_taken_over(&config) && base_url_matches)
-            }
-            AppType::Codex => {
-                let config = self.read_codex_live()?;
-                let base_url_matches = config
-                    .get("config")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|config_text| {
-                        Self::codex_config_has_base_url_matching(config_text, |url| {
-                            Self::proxy_urls_match(url, &proxy_codex_base_url)
-                        })
-                    });
-                Ok(Self::is_codex_live_taken_over(&config) && base_url_matches)
-            }
-            AppType::Gemini => {
-                let config = self.read_gemini_live()?;
-                let base_url_matches = config
-                    .get("env")
-                    .and_then(|value| value.get("GOOGLE_GEMINI_BASE_URL"))
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|url| Self::proxy_urls_match(url, &proxy_url));
-                Ok(Self::is_gemini_live_taken_over(&config) && base_url_matches)
-            }
-            AppType::GrokBuild => {
-                let config = self.read_grok_live()?;
-                let base_url_matches =
-                    config
-                        .get("config")
-                        .and_then(Value::as_str)
-                        .is_some_and(|config_toml| {
-                            crate::grok_config::base_url_matches(config_toml, |url| {
-                                Self::proxy_urls_match(url, &proxy_grok_base_url)
-                            })
-                        });
-                Ok(Self::is_grok_live_taken_over(&config) && base_url_matches)
-            }
-            _ => Ok(false),
-        }
+        let expected = match self.takeover_base_url(app_type).await {
+            Ok(url) => url,
+            Err(TakeoverError::Unsupported(_)) => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
+        let config = self.read_live_for_takeover(app_type)?;
+        Ok(Self::live_has_proxy_placeholder_for_app(app_type, &config)
+            && Self::live_base_url_matches(app_type, &config, &expected))
     }
 
     /// 检测 Live 配置是否处于"被接管"的残留状态
@@ -918,31 +644,8 @@ impl ProxyService {
     /// 用于兜底处理：当数据库备份缺失但 Live 文件已经写成代理占位符时，
     /// 启动流程可以据此触发恢复逻辑。
     pub fn detect_takeover_in_live_configs(&self) -> bool {
-        if let Ok(config) = self.read_claude_live() {
-            if Self::is_claude_live_taken_over(&config) {
-                return true;
-            }
-        }
-
-        if let Ok(config) = self.read_codex_live() {
-            if Self::is_codex_live_taken_over(&config) {
-                return true;
-            }
-        }
-
-        if let Ok(config) = self.read_gemini_live() {
-            if Self::is_gemini_live_taken_over(&config) {
-                return true;
-            }
-        }
-
-        if let Ok(config) = self.read_grok_live() {
-            if Self::is_grok_live_taken_over(&config) {
-                return true;
-            }
-        }
-
-        false
+        crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER)
+            .any(|d| self.detect_takeover_in_live_config_for_app(&d.app))
     }
 
     /// 占位符判定已迁移到 `AppAdapter::takeover()` 的应用
@@ -965,12 +668,6 @@ impl ProxyService {
         app_type: &AppType,
         config: &Value,
     ) -> bool {
-        match app_type {
-            AppType::Claude => Self::is_claude_live_taken_over(config),
-            AppType::Codex => Self::is_codex_live_taken_over(config),
-            AppType::Gemini => Self::is_gemini_live_taken_over(config),
-            AppType::GrokBuild => Self::is_grok_live_taken_over(config),
-            _ => false,
-        }
+        Self::adapter_live_has_placeholder(app_type, config)
     }
 }

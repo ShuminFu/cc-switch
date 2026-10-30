@@ -239,6 +239,15 @@ pub trait ProxyTakeover {
     fn official_provider_supported(&self, _provider: &Provider) -> bool {
         false
     }
+
+    /// 接管时写入 live 的代理基础地址。
+    ///
+    /// `proxy_origin` 为 `http://host:port`（无尾部斜杠），`proxy_route` 为描述符中的
+    /// [`crate::apps::registry::AppDescriptor::proxy_route`]。默认使用 `{route}/v1`
+    /// 前缀路由；早于前缀路由接管的应用覆写此方法，保持已写入用户 live 的地址不变。
+    fn base_url(&self, proxy_origin: &str, proxy_route: &str) -> String {
+        format!("{proxy_origin}{proxy_route}/v1")
+    }
 }
 
 /// 会话历史扫描入口

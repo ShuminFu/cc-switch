@@ -14,7 +14,7 @@ impl ProxyService {
     ) -> Result<(), String> {
         let effective_provider = self.claude_provider_with_effective_settings(provider)?;
         let mut effective_settings = effective_provider.settings_config.clone();
-        let (proxy_url, _) = self.build_proxy_urls().await?;
+        let proxy_url = self.takeover_base_url(&AppType::Claude).await?;
 
         Self::apply_claude_takeover_fields_for_provider(
             &mut effective_settings,
@@ -69,7 +69,7 @@ impl ProxyService {
                 existing_live,
             )?;
         }
-        let (_, proxy_codex_base_url) = self.build_proxy_urls().await?;
+        let proxy_codex_base_url = self.takeover_base_url(&AppType::Codex).await?;
 
         Self::apply_codex_takeover_fields_for_provider(
             &mut effective_settings,
@@ -98,8 +98,7 @@ impl ProxyService {
                 existing_live,
             )?;
         }
-        let (proxy_url, _) = self.build_proxy_urls().await?;
-        let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
+        let proxy_grok_base_url = self.takeover_base_url(&AppType::GrokBuild).await?;
         Self::apply_grok_takeover_fields(&mut effective_settings, &proxy_grok_base_url)?;
         self.write_grok_live(&effective_settings)
     }

@@ -1,3 +1,4 @@
+use super::takeover::TakeoverError;
 use super::*;
 use crate::config::{get_claude_settings_path, write_json_file};
 use crate::provider::ProviderMeta;
@@ -959,7 +960,7 @@ wire_api = "responses"
         .expect("set local current provider");
 
     service
-        .takeover_live_config_strict(&AppType::Codex)
+        .takeover(&AppType::Codex, TakeoverMode::Strict)
         .await
         .expect("take over Codex live config");
 
@@ -1045,7 +1046,7 @@ wire_api = "responses"
         .expect("set local current provider");
 
     service
-        .takeover_live_config_strict(&AppType::Codex)
+        .takeover(&AppType::Codex, TakeoverMode::Strict)
         .await
         .expect("take over Codex live config");
 
@@ -1548,7 +1549,7 @@ wire_api = "responses"
         .expect("backup Codex live config");
     state
         .proxy_service
-        .takeover_live_config_strict(&AppType::Codex)
+        .takeover(&AppType::Codex, TakeoverMode::Strict)
         .await
         .expect("take over Codex live config");
     assert!(
@@ -1796,7 +1797,7 @@ wire_api = "responses"
         .expect("set local current provider");
 
     service
-        .takeover_live_config_strict(&AppType::Codex)
+        .takeover(&AppType::Codex, TakeoverMode::Strict)
         .await
         .expect("take over Codex live config");
 
@@ -4291,7 +4292,9 @@ fn proxy_service_modules_stay_under_line_budget() {
         ("takeover/mod.rs", include_str!("takeover/mod.rs")),
         ("takeover/claude.rs", include_str!("takeover/claude.rs")),
         ("takeover/codex.rs", include_str!("takeover/codex.rs")),
+        ("takeover/engine.rs", include_str!("takeover/engine.rs")),
         ("takeover/gemini.rs", include_str!("takeover/gemini.rs")),
+        ("takeover/legacy.rs", include_str!("takeover/legacy.rs")),
         ("takeover/grok.rs", include_str!("takeover/grok.rs")),
     ];
     for (name, src) in files {
@@ -4301,4 +4304,300 @@ fn proxy_service_modules_stay_under_line_budget() {
             "services/proxy/{name} has {lines} lines; split it further"
         );
     }
+}
+
+// ============================================================================
+// CCS-154: unified takeover engine
+// ============================================================================
+
+const ENGINE_TEST_PORT: u16 = 15_999;
+const ENGINE_TEST_KEY: &str = "sk-engine-test-key";
+const ENGINE_TEST_UPSTREAM: &str = "https://engine-test.example.com";
+
+fn use_takeover_engine(engine: crate::services::takeover_snapshot::TakeoverEngine) {
+    crate::settings::update_settings_with(|current| {
+        let mut next = current.clone();
+        next.takeover_engine = engine;
+        next
+    })
+    .expect("update takeover engine");
+}
+
+async fn use_fixed_proxy_port(db: &Arc<Database>) {
+    let mut proxy_config = db.get_proxy_config().await.expect("get proxy config");
+    proxy_config.listen_address = "127.0.0.1".to_string();
+    proxy_config.listen_port = ENGINE_TEST_PORT;
+    db.update_proxy_config(proxy_config)
+        .await
+        .expect("set fixed proxy port");
+}
+
+/// 一个可接管应用的 (应用, live 文件, 供应商配置)
+type EngineTestCase = (AppType, Vec<(&'static str, String)>, Value);
+
+fn engine_test_cases() -> Vec<EngineTestCase> {
+    let codex_config = format!(
+        "model_provider = \"custom\"\nmodel = \"gpt-5.4\"\n\n[model_providers.custom]\nname = \"Engine\"\nbase_url = \"{ENGINE_TEST_UPSTREAM}/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n"
+    );
+    let grok_config = format!(
+        "[models]\ndefault = \"grok-4.5\"\n\n[model.\"grok-4.5\"]\nmodel = \"grok-4.5\"\nbase_url = \"{ENGINE_TEST_UPSTREAM}/v1\"\nname = \"Engine\"\napi_key = \"{ENGINE_TEST_KEY}\"\napi_backend = \"responses\"\ncontext_window = 500000\n"
+    );
+    vec![
+        (
+            AppType::Claude,
+            vec![(
+                "settings.json",
+                format!(
+                    "{{\"permissions\":{{\"allow\":[\"Bash\"]}},\"env\":{{\"ANTHROPIC_BASE_URL\":\"{ENGINE_TEST_UPSTREAM}\",\"ANTHROPIC_AUTH_TOKEN\":\"{ENGINE_TEST_KEY}\"}}}}"
+                ),
+            )],
+            json!({ "env": {
+                "ANTHROPIC_AUTH_TOKEN": ENGINE_TEST_KEY,
+                "ANTHROPIC_BASE_URL": ENGINE_TEST_UPSTREAM
+            }}),
+        ),
+        (
+            AppType::Codex,
+            vec![
+                (
+                    "auth.json",
+                    format!("{{\"OPENAI_API_KEY\":\"{ENGINE_TEST_KEY}\"}}"),
+                ),
+                ("config.toml", codex_config.clone()),
+            ],
+            json!({ "auth": { "OPENAI_API_KEY": ENGINE_TEST_KEY }, "config": codex_config }),
+        ),
+        (
+            AppType::Gemini,
+            vec![(
+                ".env",
+                format!(
+                    "GOOGLE_GEMINI_BASE_URL={ENGINE_TEST_UPSTREAM}\nGEMINI_API_KEY={ENGINE_TEST_KEY}\nGEMINI_MODEL=gemini-2.5-pro\n"
+                ),
+            )],
+            json!({ "env": {
+                "GEMINI_API_KEY": ENGINE_TEST_KEY,
+                "GOOGLE_GEMINI_BASE_URL": ENGINE_TEST_UPSTREAM,
+                "GEMINI_MODEL": "gemini-2.5-pro"
+            }}),
+        ),
+        (
+            AppType::GrokBuild,
+            vec![("config.toml", grok_config.clone())],
+            json!({ "config": grok_config }),
+        ),
+    ]
+}
+
+fn seed_engine_case(db: &Database, app: &AppType, files: &[(&str, String)], settings: &Value) {
+    let dir = crate::apps::adapter(app).config_dir().expect("config dir");
+    std::fs::create_dir_all(&dir).expect("create config dir");
+    for (name, body) in files {
+        #[allow(clippy::disallowed_methods)]
+        std::fs::write(dir.join(name), body).expect("write live file");
+    }
+    let provider = Provider::with_id(
+        "engine".to_string(),
+        "Engine".to_string(),
+        settings.clone(),
+        None,
+    );
+    db.save_provider(app.as_str(), &provider)
+        .expect("save provider");
+    db.set_current_provider(app.as_str(), "engine")
+        .expect("set db current provider");
+    crate::settings::set_current_provider(app, Some("engine")).expect("set local current provider");
+}
+
+fn read_engine_case(app: &AppType, files: &[(&str, String)]) -> Vec<(String, Option<Vec<u8>>)> {
+    let dir = crate::apps::adapter(app).config_dir().expect("config dir");
+    files
+        .iter()
+        .map(|(name, _)| (name.to_string(), std::fs::read(dir.join(name)).ok()))
+        .collect()
+}
+
+#[tokio::test]
+#[serial]
+async fn takeover_base_url_comes_from_the_registry_and_keeps_existing_live_urls() {
+    let _home = TempHome::new();
+    crate::settings::reload_settings().expect("reload settings");
+    let db = Arc::new(Database::memory().expect("init db"));
+    use_fixed_proxy_port(&db).await;
+    let service = ProxyService::new(db);
+
+    let origin = format!("http://127.0.0.1:{ENGINE_TEST_PORT}");
+    let expected = [
+        (AppType::Claude, origin.clone()),
+        (AppType::Codex, format!("{origin}/v1")),
+        (AppType::Gemini, origin.clone()),
+        (AppType::GrokBuild, format!("{origin}/grokbuild/v1")),
+    ];
+    for (app, url) in expected {
+        assert_eq!(
+            service.takeover_base_url(&app).await.expect("base url"),
+            url,
+            "{app:?}"
+        );
+    }
+
+    // 每个可接管应用都在注册表上声明了代理路由与接管适配器
+    for d in crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER) {
+        assert!(d.proxy_route.is_some(), "{} has no proxy_route", d.slug);
+        assert!(
+            crate::apps::adapter(&d.app).takeover().is_some(),
+            "{} has no ProxyTakeover",
+            d.slug
+        );
+    }
+
+    for app in [
+        AppType::ClaudeDesktop,
+        AppType::OpenCode,
+        AppType::OpenClaw,
+        AppType::Hermes,
+    ] {
+        assert_eq!(
+            service.takeover_base_url(&app).await,
+            Err(TakeoverError::Unsupported(app.clone()))
+        );
+        let err = service
+            .takeover(&app, TakeoverMode::Strict)
+            .await
+            .expect_err("unsupported app");
+        assert_eq!(err.to_string(), "该应用不支持代理功能");
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn unified_takeover_writes_the_same_live_files_as_the_legacy_engine() {
+    use crate::services::takeover_snapshot::TakeoverEngine;
+
+    for mode in [TakeoverMode::Strict, TakeoverMode::BestEffort] {
+        for (app, files, settings) in engine_test_cases() {
+            let _home = TempHome::new();
+            crate::settings::reload_settings().expect("reload settings");
+            let db = Arc::new(Database::memory().expect("init db"));
+            use_fixed_proxy_port(&db).await;
+            let service = ProxyService::new(db.clone());
+
+            let mut outputs = Vec::new();
+            for engine in [TakeoverEngine::Legacy, TakeoverEngine::Unified] {
+                use_takeover_engine(engine);
+                seed_engine_case(&db, &app, &files, &settings);
+                service
+                    .takeover(&app, mode)
+                    .await
+                    .unwrap_or_else(|e| panic!("{app:?} {mode:?} {engine:?}: {e}"));
+                assert!(
+                    service
+                        .live_takeover_matches_current_proxy(&app)
+                        .await
+                        .expect("match live"),
+                    "{app:?} {mode:?} {engine:?}: live must point at the proxy"
+                );
+                outputs.push(read_engine_case(&app, &files));
+            }
+            use_takeover_engine(TakeoverEngine::Unified);
+            assert_eq!(
+                outputs[0], outputs[1],
+                "{app:?} {mode:?}: unified and legacy takeover must write identical live files"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn strict_takeover_requires_live_config_and_best_effort_skips_it() {
+    let _home = TempHome::new();
+    crate::settings::reload_settings().expect("reload settings");
+    let db = Arc::new(Database::memory().expect("init db"));
+    use_fixed_proxy_port(&db).await;
+    let service = ProxyService::new(db);
+
+    for (app, files, _) in engine_test_cases() {
+        let before = read_engine_case(&app, &files);
+        match service.takeover(&app, TakeoverMode::Strict).await {
+            Err(TakeoverError::LiveUnavailable { app: failed, .. }) => assert_eq!(failed, app),
+            other => panic!("{app:?}: strict takeover without live must fail, got {other:?}"),
+        }
+        service
+            .takeover(&app, TakeoverMode::BestEffort)
+            .await
+            .unwrap_or_else(|e| panic!("{app:?}: best-effort takeover must skip: {e}"));
+        assert_eq!(
+            read_engine_case(&app, &files),
+            before,
+            "{app:?}: skipped takeover must not create live files"
+        );
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn strict_takeover_reports_a_missing_current_provider() {
+    let _home = TempHome::new();
+    crate::settings::reload_settings().expect("reload settings");
+    let db = Arc::new(Database::memory().expect("init db"));
+    use_fixed_proxy_port(&db).await;
+    let service = ProxyService::new(db);
+
+    service
+        .write_claude_live(&json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "live-key" } }))
+        .expect("seed claude live");
+    match service
+        .takeover(&AppType::Claude, TakeoverMode::Strict)
+        .await
+    {
+        Err(TakeoverError::Provider { app, message }) => {
+            assert_eq!(app, AppType::Claude);
+            assert!(message.contains("当前供应商不存在"), "{message}");
+        }
+        other => panic!("expected a provider error, got {other:?}"),
+    }
+
+    // 尽力模式下 Claude 不依赖供应商投影：保留现有凭据字段并写入占位符
+    service
+        .takeover(&AppType::Claude, TakeoverMode::BestEffort)
+        .await
+        .expect("best-effort claude takeover");
+    assert!(service
+        .live_takeover_matches_current_proxy(&AppType::Claude)
+        .await
+        .expect("match live"));
+}
+
+#[tokio::test]
+#[serial]
+async fn takeover_status_is_generated_from_the_registry() {
+    let _home = TempHome::new();
+    crate::settings::reload_settings().expect("reload settings");
+    let db = Arc::new(Database::memory().expect("init db"));
+    let service = ProxyService::new(db.clone());
+
+    let mut grok = db
+        .get_proxy_config_for_app("grokbuild")
+        .await
+        .expect("grokbuild proxy config");
+    grok.enabled = true;
+    db.update_proxy_config_for_app(grok)
+        .await
+        .expect("enable grokbuild takeover");
+
+    let status = service.get_takeover_status().await.expect("status");
+    let json = serde_json::to_value(&status).expect("serialize status");
+    let expected: Value = crate::apps::registry::APPS
+        .iter()
+        .map(|d| (d.slug.to_string(), json!(d.slug == "grokbuild")))
+        .collect::<Map<_, _>>()
+        .into();
+    assert_eq!(json, expected);
+    assert_eq!(json["hermes"], false, "hermes must be reported");
+    assert!(service.is_takeover_active().await.expect("active"));
+    assert_eq!(
+        status.enabled_apps().collect::<Vec<_>>(),
+        vec![AppType::GrokBuild]
+    );
 }

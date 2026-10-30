@@ -1,7 +1,6 @@
 //! Grok Build Live 配置接管字段与读写
 
 use super::*;
-use crate::app_config::AppType;
 use serde_json::{json, Value};
 
 impl ProxyService {
@@ -40,10 +39,6 @@ impl ProxyService {
             .map_err(|e| format!("清理 Grok Build 接管占位符失败: {e}"))?;
         crate::config::write_text_file(&crate::grok_config::get_grok_config_path(), &updated)
             .map_err(|e| format!("写入 Grok Build 配置失败: {e}"))
-    }
-
-    pub(in crate::services::proxy) fn is_grok_live_taken_over(config: &Value) -> bool {
-        Self::adapter_live_has_placeholder(&AppType::GrokBuild, config)
     }
 
     pub(in crate::services::proxy) fn read_grok_live(&self) -> Result<Value, String> {

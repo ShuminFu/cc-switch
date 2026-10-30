@@ -1,11 +1,27 @@
 //! Gemini Live 配置接管字段与读写
 
 use super::*;
-use crate::app_config::AppType;
 use crate::proxy::inbound_auth::is_proxy_token;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 impl ProxyService {
+    /// 写入 `GOOGLE_GEMINI_BASE_URL`，并用占位符替代真实 Token（代理会注入真实 Token）
+    pub(in crate::services::proxy) fn apply_gemini_takeover_fields(
+        config: &mut Value,
+        proxy_base_url: &str,
+    ) {
+        if let Some(env) = config.get_mut("env").and_then(|v| v.as_object_mut()) {
+            env.insert("GOOGLE_GEMINI_BASE_URL".to_string(), json!(proxy_base_url));
+            // 使用占位符，避免显示缺少 key 的警告
+            env.insert("GEMINI_API_KEY".to_string(), json!(PROXY_TOKEN_PLACEHOLDER));
+        } else {
+            config["env"] = json!({
+                "GOOGLE_GEMINI_BASE_URL": proxy_base_url,
+                "GEMINI_API_KEY": PROXY_TOKEN_PLACEHOLDER
+            });
+        }
+    }
+
     pub(in crate::services::proxy) fn cleanup_gemini_takeover_placeholders_in_live(
         &self,
     ) -> Result<(), String> {
@@ -34,10 +50,6 @@ impl ProxyService {
 
         self.write_gemini_live(&config)?;
         Ok(())
-    }
-
-    pub(in crate::services::proxy) fn is_gemini_live_taken_over(config: &Value) -> bool {
-        Self::adapter_live_has_placeholder(&AppType::Gemini, config)
     }
 
     pub(in crate::services::proxy) fn read_gemini_live(&self) -> Result<Value, String> {

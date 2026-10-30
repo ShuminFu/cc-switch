@@ -174,7 +174,7 @@ impl ProxyService {
         }
 
         // 4. 接管各应用的 Live 配置（写入代理地址，清空 Token）
-        if let Err(e) = self.takeover_live_configs().await {
+        if let Err(e) = self.takeover_all().await {
             // 接管失败（可能是部分写入），尝试恢复原始配置；若恢复失败则保留标志与备份，等待下次启动自动恢复。
             log::error!("接管 Live 配置失败，尝试恢复原始配置: {e}");
             match self.restore_live_configs().await {
@@ -189,7 +189,7 @@ impl ProxyService {
             if started_proxy_before_takeover {
                 let _ = self.stop().await;
             }
-            return Err(e);
+            return Err(e.into());
         }
 
         // 5. 启动代理服务器
@@ -353,8 +353,7 @@ impl ProxyService {
 
     /// 检查是否处于 Live 接管模式
     pub async fn is_takeover_active(&self) -> Result<bool, String> {
-        let status = self.get_takeover_status().await?;
-        Ok(status.claude || status.codex || status.gemini || status.grokbuild)
+        Ok(self.get_takeover_status().await?.any())
     }
 
     /// 从异常退出中恢复（启动时调用）

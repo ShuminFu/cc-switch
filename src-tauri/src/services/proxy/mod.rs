@@ -19,6 +19,8 @@ mod hot_switch;
 mod lifecycle;
 mod takeover;
 
+pub(crate) use takeover::TakeoverMode;
+
 /// 用于接管 Live 配置时的占位符（避免客户端提示缺少 key，同时不泄露真实 Token）
 ///
 /// 接管投影先写入该哨兵，落盘前由 `bind_inbound_token` 替换为本安装的代理 token。

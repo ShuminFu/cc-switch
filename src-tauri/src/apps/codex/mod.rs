@@ -334,6 +334,11 @@ impl McpProjector for CodexAdapter {
 }
 
 impl ProxyTakeover for CodexAdapter {
+    /// 沿用无前缀的 `/v1`：Codex CLI 还会探测 `/v1/models`，该路径没有 `/codex` 前缀版本
+    fn base_url(&self, proxy_origin: &str, _proxy_route: &str) -> String {
+        format!("{proxy_origin}/v1")
+    }
+
     /// `auth.json` 的 `OPENAI_API_KEY` 或 `config.toml` 的 bearer token 是代理占位符，
     /// 或 `config.toml` 带有官方供应商的代理路由
     fn has_placeholder(&self, settings: &Value) -> bool {
