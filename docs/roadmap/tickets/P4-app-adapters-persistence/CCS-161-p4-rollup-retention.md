@@ -80,3 +80,16 @@ p4-usage-repo
 - `cargo test --manifest-path src-tauri/Cargo.toml --test migrations`: 14 passed (includes
   the v20 fixture and `db_fixtures_cover_every_schema_version`)
 - `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast`: 2615 passed, 0 failed
+
+**Review**
+- Re-checked both acceptance criteria against the code: every rollup reader in `repo/usage.rs`
+  (5 dashboard queries + `PROVIDER_LIMIT_WINDOW_SQL`) reads `total_cost_micros`; the only rollup
+  writer is `rollup_and_prune`; SQL import / sync import run migrations, so older dumps get the
+  v20 backfill; unknown settings keys round-trip through the frontend save (spread payload).
+- Fixed: the `maintenance_prunes_per_retention_policy` helper set backup mtimes through a
+  read-only `File::open` handle, which Windows rejects (setting file times needs
+  `FILE_WRITE_ATTRIBUTES`), so the test would fail on the `windows-latest` CI job. It now writes
+  and stamps the file through one `File::create` handle (`OpenOptions` is banned by
+  `tests/write_lint.rs`).
+- Re-verified: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test maintenance` (4 passed), full `cargo test --no-fail-fast` (2615 passed, 0 failed).

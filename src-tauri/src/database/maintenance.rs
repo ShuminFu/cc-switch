@@ -135,13 +135,12 @@ mod tests {
     }
 
     fn touch_backup(dir: &std::path::Path, name: &str, age_secs: u64) {
-        let path = dir.join(name);
-        std::fs::write(&path, b"backup").expect("write backup");
+        use std::io::Write;
         let mtime = std::time::SystemTime::now() - std::time::Duration::from_secs(age_secs);
-        // 文件属主可在只读句柄上设置时间戳
-        std::fs::File::open(&path)
-            .and_then(|f| f.set_modified(mtime))
-            .expect("set backup mtime");
+        // 在同一个可写句柄上设置时间戳：Windows 需要 FILE_WRITE_ATTRIBUTES，只读句柄会被拒绝
+        let mut file = std::fs::File::create(dir.join(name)).expect("create backup");
+        file.write_all(b"backup").expect("write backup");
+        file.set_modified(mtime).expect("set backup mtime");
     }
 
     #[test]
