@@ -141,6 +141,7 @@ impl EventDecoder for TextDecoder {
             "message_start" => vec![StreamEvent::MessageStart {
                 id: data["id"].as_str().unwrap_or_default().to_string(),
                 model: data["model"].as_str().unwrap_or_default().to_string(),
+                usage: None,
             }],
             "content_block_start" => vec![StreamEvent::PartStart {
                 index: index(),
@@ -168,7 +169,7 @@ fn frame(event: &str, data: Value) -> Bytes {
 impl EventEncoder for TextEncoder {
     fn encode(&mut self, event: &StreamEvent) -> Vec<Bytes> {
         let frame = match event {
-            StreamEvent::MessageStart { id, model } => {
+            StreamEvent::MessageStart { id, model, .. } => {
                 frame("message_start", json!({"id": id, "model": model}))
             }
             StreamEvent::PartStart { index, .. } => {
@@ -194,11 +195,11 @@ impl EventEncoder for TextEncoder {
 }
 
 impl StreamCodec for TextCodec {
-    fn stream_decoder(&self) -> Box<dyn EventDecoder> {
-        Box::new(TextDecoder)
+    fn stream_decoder(&self) -> Result<Box<dyn EventDecoder>, CodecError> {
+        Ok(Box::new(TextDecoder))
     }
-    fn stream_encoder(&self) -> Box<dyn EventEncoder> {
-        Box::new(TextEncoder)
+    fn stream_encoder(&self) -> Result<Box<dyn EventEncoder>, CodecError> {
+        Ok(Box::new(TextEncoder))
     }
 }
 
@@ -239,7 +240,7 @@ fn non_stream_response_is_stream_plus_aggregate() {
         text_response(&["hello", "world"], Some(StopReason::EndTurn))
     );
 
-    let frames = codec.encode_response_as_stream(&response);
+    let frames = codec.encode_response_as_stream(&response).unwrap();
     let sse: String = frames
         .iter()
         .map(|f| String::from_utf8(f.to_vec()).unwrap())
@@ -336,7 +337,7 @@ proptest! {
         let codec = TextCodec;
         let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
         let response = text_response(&texts, stop);
-        let frames = codec.encode_response_as_stream(&response);
+        let frames = codec.encode_response_as_stream(&response).unwrap();
         prop_assert_eq!(reaggregate(&codec, &frames), Ok(response.clone()));
         let body = codec.encode_response(&response).unwrap();
         prop_assert_eq!(codec.decode_response(&body), Ok(response));

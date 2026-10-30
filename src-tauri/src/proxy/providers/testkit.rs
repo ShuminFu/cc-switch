@@ -28,10 +28,7 @@
 //! same event sequence as the unsplit input and satisfies the structural
 //! invariants. Every failure names the split offsets that produced it.
 
-use super::transform::{
-    anthropic_to_openai_with_reasoning_content, inject_openai_stream_include_usage,
-    openai_to_anthropic,
-};
+use super::transform::inject_openai_stream_include_usage;
 use super::transform_codex_anthropic::{
     anthropic_response_to_responses_with_context, responses_request_to_anthropic,
 };
@@ -45,9 +42,10 @@ use super::transform_gemini::{
 };
 use super::transform_responses::{anthropic_to_responses, responses_to_anthropic};
 use super::{
-    streaming::create_anthropic_sse_stream, streaming_codex_anthropic, streaming_codex_chat,
-    streaming_gemini, streaming_responses,
+    streaming_codex_anthropic, streaming_codex_chat, streaming_gemini, streaming_responses,
 };
+use crate::proxy::codec::bridge;
+pub use crate::proxy::codec::CodecEngine;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 use crate::proxy::usage::parser::TokenUsage;
 use bytes::Bytes;
@@ -451,13 +449,24 @@ impl ClientEvent {
     }
 }
 
-/// Convert the client request into the upstream request, as the proxy does.
+/// Convert the client request into the upstream request, as the proxy does
+/// with the default (legacy) conversion engine.
 pub fn convert_request(fixture: &Fixture) -> Option<Result<Value, String>> {
+    convert_request_with(fixture, CodecEngine::Legacy)
+}
+
+/// [`convert_request`] with an explicit conversion engine. Bridges that are
+/// not migrated to codecs ignore `engine`.
+pub fn convert_request_with(
+    fixture: &Fixture,
+    engine: CodecEngine,
+) -> Option<Result<Value, String>> {
     let body = fixture.client_request.clone()?;
     let result = match fixture.bridge {
-        Bridge::AnthropicOpenAiChat => anthropic_to_openai_with_reasoning_content(
+        Bridge::AnthropicOpenAiChat => bridge::anthropic_to_openai_chat_request(
             body,
             fixture.meta.options.preserve_reasoning_content,
+            engine,
         )
         .map(|mut converted| {
             inject_openai_stream_include_usage(&mut converted);
@@ -486,9 +495,17 @@ const CODEX_ANTHROPIC_DEFAULT_MAX_TOKENS: u64 = 8192;
 
 /// Convert the non-stream upstream body into the client response.
 pub fn convert_non_stream(fixture: &Fixture) -> Option<Result<Value, String>> {
+    convert_non_stream_with(fixture, CodecEngine::Legacy)
+}
+
+/// [`convert_non_stream`] with an explicit conversion engine.
+pub fn convert_non_stream_with(
+    fixture: &Fixture,
+    engine: CodecEngine,
+) -> Option<Result<Value, String>> {
     let body = fixture.upstream_json.clone()?;
     let result = match fixture.bridge {
-        Bridge::AnthropicOpenAiChat => openai_to_anthropic(body),
+        Bridge::AnthropicOpenAiChat => bridge::openai_chat_to_anthropic_response(body, engine),
         Bridge::AnthropicGemini => gemini_to_anthropic_with_shadow_and_hints(
             body,
             None,
@@ -509,6 +526,24 @@ pub fn convert_non_stream(fixture: &Fixture) -> Option<Result<Value, String>> {
 
 /// Feed `chunks` through the bridge's stream converter and parse the output.
 pub fn run_stream(fixture: &Fixture, chunks: &[&[u8]]) -> Result<Vec<ClientEvent>, String> {
+    run_stream_with(fixture, chunks, CodecEngine::Legacy)
+}
+
+/// [`run_stream`] with an explicit conversion engine.
+pub fn run_stream_with(
+    fixture: &Fixture,
+    chunks: &[&[u8]],
+    engine: CodecEngine,
+) -> Result<Vec<ClientEvent>, String> {
+    parse_client_stream(stream_output_with(fixture, chunks, engine))
+}
+
+/// Raw items the bridge's stream converter yields for `chunks`, before parsing.
+pub fn stream_output_with(
+    fixture: &Fixture,
+    chunks: &[&[u8]],
+    engine: CodecEngine,
+) -> Vec<Result<Bytes, std::io::Error>> {
     let mut items: Vec<Result<Bytes, std::io::Error>> = chunks
         .iter()
         .map(|chunk| Ok(Bytes::copy_from_slice(chunk)))
@@ -518,10 +553,10 @@ pub fn run_stream(fixture: &Fixture, chunks: &[&[u8]]) -> Result<Vec<ClientEvent
     }
     let upstream = futures::stream::iter(items);
 
-    let outputs: Vec<Result<Bytes, std::io::Error>> = match fixture.bridge {
-        Bridge::AnthropicOpenAiChat => {
-            futures::executor::block_on(create_anthropic_sse_stream(upstream).collect())
-        }
+    match fixture.bridge {
+        Bridge::AnthropicOpenAiChat => futures::executor::block_on(
+            bridge::openai_chat_to_anthropic_sse(upstream, engine).collect(),
+        ),
         Bridge::AnthropicGemini => futures::executor::block_on(
             streaming_gemini::create_anthropic_sse_stream_from_gemini(
                 upstream,
@@ -549,8 +584,7 @@ pub fn run_stream(fixture: &Fixture, chunks: &[&[u8]]) -> Result<Vec<ClientEvent
             )
             .collect(),
         ),
-    };
-    parse_client_stream(outputs)
+    }
 }
 
 /// Parse bridge output items into events. Output must be valid UTF-8 and made
@@ -1918,14 +1952,20 @@ pub struct FixtureOutcome {
     pub failures: Vec<String>,
 }
 
-/// Run every check for one fixture.
+/// Run every check for one fixture with the default (legacy) conversion engine.
 pub fn run_fixture(fixture: &Fixture) -> FixtureOutcome {
+    run_fixture_with(fixture, CodecEngine::Legacy)
+}
+
+/// [`run_fixture`] with an explicit conversion engine; the snapshots of a
+/// bridge migrated to codecs must be identical under both engines.
+pub fn run_fixture_with(fixture: &Fixture, engine: CodecEngine) -> FixtureOutcome {
     let mut outcome = FixtureOutcome::default();
     let mut redactor = Redactor::new(fixture);
     let skip = fixture.skipped();
     let client = fixture.bridge.client();
 
-    if let Some(result) = convert_request(fixture) {
+    if let Some(result) = convert_request_with(fixture, engine) {
         match result {
             Ok(mut request) => {
                 redactor.redact(&mut request);
@@ -1956,7 +1996,7 @@ pub fn run_fixture(fixture: &Fixture) -> FixtureOutcome {
             );
             (normalized, violations)
         };
-        let run = |chunks: &[&[u8]]| run_stream(fixture, chunks);
+        let run = |chunks: &[&[u8]]| run_stream_with(fixture, chunks, engine);
 
         match run(&[input.as_slice()]) {
             Ok(events) => {
@@ -1979,7 +2019,7 @@ pub fn run_fixture(fixture: &Fixture) -> FixtureOutcome {
             .extend(fuzz_splits(input, seed_for(&fixture.id()), run, check));
     }
 
-    if let Some(result) = convert_non_stream(fixture) {
+    if let Some(result) = convert_non_stream_with(fixture, engine) {
         if !client_response.is_empty() {
             client_response.push('\n');
             usage.push('\n');

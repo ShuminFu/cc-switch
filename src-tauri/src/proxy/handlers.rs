@@ -19,8 +19,7 @@ use super::{
     handler_context::RequestContext,
     protocol::{ClaudeApiFormat, WireFormat},
     providers::{
-        transform, transform_codex_anthropic, transform_codex_chat, transform_gemini,
-        transform_responses,
+        transform_codex_anthropic, transform_codex_chat, transform_gemini, transform_responses,
     },
     response_processor::{
         process_response, read_decoded_body, rebuilt_json_response, response_usage_log_task,
@@ -500,7 +499,10 @@ async fn handle_claude_transform(
             tool_schema_hints.as_ref(),
         )
     } else {
-        transform::openai_to_anthropic(upstream_response)
+        crate::proxy::codec::bridge::openai_chat_to_anthropic_response(
+            upstream_response,
+            crate::settings::codec_engine(),
+        )
     };
     let anthropic_response = match transform_result {
         Ok(response) => response,

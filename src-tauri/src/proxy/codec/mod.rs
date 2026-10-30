@@ -11,9 +11,10 @@
 //! （非流式上游 → 流式客户端），两者都不需要格式各自再写一遍。
 //!
 //! 迁移期间由 [`CodecEngine`]（设置项 `codecEngine`）决定桥接走旧转换器还是编解码；
-//! 各桥接按 anthropic←openai_chat、gemini、responses 的顺序逐个迁移。
+//! 各桥接按 anthropic←openai_chat、gemini、responses 的顺序逐个迁移，入口见 [`bridge`]。
+//! 已迁移：anthropic←openai_chat（[`anthropic`] + [`openai_chat`]，CCS-176）。
 
-// 桥接从 CCS-176 起逐个迁移到编解码；在此之前部分 IR 与编解码项尚无调用方。
+// 桥接逐个迁移到编解码；尚未迁移的桥接对应的部分 IR 与编解码项暂无调用方。
 #![allow(dead_code)]
 
 use bytes::Bytes;
@@ -25,7 +26,11 @@ use crate::proxy::protocol::ir::{
 };
 use crate::proxy::protocol::WireFormat;
 
+pub mod anthropic;
+pub mod bridge;
+pub mod openai_chat;
 pub mod side_store;
+pub mod transcode;
 
 /// 协议转换引擎
 ///
@@ -144,9 +149,12 @@ pub trait EventEncoder: Send {
 }
 
 /// 流式编解码：每个流新建一对状态机
+///
+/// 一种格式只在某一侧出现时（例如 OpenAI Chat 只作为上游），未实现的方向
+/// 返回 [`CodecError::Unsupported`]。
 pub trait StreamCodec: Send + Sync {
-    fn stream_decoder(&self) -> Box<dyn EventDecoder>;
-    fn stream_encoder(&self) -> Box<dyn EventEncoder>;
+    fn stream_decoder(&self) -> Result<Box<dyn EventDecoder>, CodecError>;
+    fn stream_encoder(&self) -> Result<Box<dyn EventEncoder>, CodecError>;
 }
 
 /// 一种线协议的完整编解码；非流式与流式之间的转换由提供的方法完成
@@ -156,7 +164,7 @@ pub trait Codec: RequestCodec + ResponseCodec + StreamCodec {
         &self,
         events: &mut dyn Iterator<Item = (&'a str, &'a str)>,
     ) -> Result<ChatResponse, CodecError> {
-        let mut decoder = self.stream_decoder();
+        let mut decoder = self.stream_decoder()?;
         let mut aggregator = StreamAggregator::new();
         for (event, data) in events {
             for ir_event in decoder.decode(event, data)? {
@@ -170,15 +178,15 @@ pub trait Codec: RequestCodec + ResponseCodec + StreamCodec {
     }
 
     /// 完整回复 → 客户端 SSE 帧：展开为 IR 事件后逐个编码
-    fn encode_response_as_stream(&self, response: &ChatResponse) -> Vec<Bytes> {
-        let mut encoder = self.stream_encoder();
+    fn encode_response_as_stream(&self, response: &ChatResponse) -> Result<Vec<Bytes>, CodecError> {
+        let mut encoder = self.stream_encoder()?;
         let mut frames: Vec<Bytes> = response
             .to_events()
             .iter()
             .flat_map(|event| encoder.encode(event))
             .collect();
         frames.extend(encoder.finish());
-        frames
+        Ok(frames)
     }
 }
 

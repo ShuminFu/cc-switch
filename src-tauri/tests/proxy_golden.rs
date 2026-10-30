@@ -6,11 +6,15 @@
 //! usage with insta, re-splits stream inputs at every chunk boundary, and
 //! checks the structural invariants of every output.
 //!
+//! Bridges migrated to codecs (see `proxy::codec::bridge`) run every fixture
+//! under both conversion engines against the same snapshots, and the parity
+//! checker compares the two engines' raw outputs case by case.
+//!
 //! Update snapshots after an intended behaviour change with
 //! `INSTA_UPDATE=always cargo test --test proxy_golden` (or `cargo insta review`)
 //! and review the diff.
 
-use cc_switch_lib::proxy_testkit::{self as testkit, Bridge, Fixture};
+use cc_switch_lib::proxy_testkit::{self as testkit, Bridge, CodecEngine, Fixture};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
@@ -50,6 +54,10 @@ fn assert_snapshots(fixture: &Fixture, outcome: &testkit::FixtureOutcome) {
 }
 
 fn run_bridge(bridge: Bridge) {
+    run_bridge_with(bridge, CodecEngine::Legacy);
+}
+
+fn run_bridge_with(bridge: Bridge, engine: CodecEngine) {
     let fixtures = load(bridge);
     assert!(
         !fixtures.is_empty(),
@@ -59,7 +67,7 @@ fn run_bridge(bridge: Bridge) {
 
     let mut report = Vec::new();
     for fixture in &fixtures {
-        let outcome = testkit::run_fixture(fixture);
+        let outcome = testkit::run_fixture_with(fixture, engine);
         for failure in &outcome.failures {
             report.push(format!("{}: {failure}", fixture.id()));
         }
@@ -74,7 +82,7 @@ fn run_bridge(bridge: Bridge) {
 
     assert!(
         report.is_empty(),
-        "{} golden failure(s) for {}:\n{}",
+        "{} golden failure(s) for {} ({engine:?} engine):\n{}",
         report.len(),
         bridge.dir_name(),
         report.join("\n")
@@ -84,6 +92,80 @@ fn run_bridge(bridge: Bridge) {
 #[test]
 fn golden_anthropic_openai_chat() {
     run_bridge(Bridge::AnthropicOpenAiChat);
+}
+
+#[test]
+fn golden_anthropic_openai_chat_ir() {
+    run_bridge_with(Bridge::AnthropicOpenAiChat, CodecEngine::Ir);
+}
+
+/// Raw client SSE output (bytes, or the error text of an `Err` item).
+fn raw_stream(fixture: &Fixture, engine: CodecEngine) -> Option<Vec<Result<Vec<u8>, String>>> {
+    let input = fixture.upstream_sse.as_deref()?;
+    Some(
+        testkit::stream_output_with(fixture, &[input], engine)
+            .into_iter()
+            .map(|item| item.map(|bytes| bytes.to_vec()).map_err(|e| e.to_string()))
+            .collect(),
+    )
+}
+
+/// Parity checker for a bridge migrated to codecs: every fixture must give the
+/// same upstream request, the same raw client stream bytes, the same client
+/// response, usage and check failures under the legacy converters and the IR
+/// codecs. Split-point fuzzing runs inside `run_fixture_with` for both engines.
+fn assert_codec_parity(bridge: Bridge) {
+    let mut mismatches = Vec::new();
+    for fixture in &load(bridge) {
+        let legacy = testkit::run_fixture_with(fixture, CodecEngine::Legacy);
+        let ir = testkit::run_fixture_with(fixture, CodecEngine::Ir);
+        let fields = [
+            (
+                "upstream_request",
+                &legacy.upstream_request,
+                &ir.upstream_request,
+            ),
+            (
+                "client_response",
+                &legacy.client_response,
+                &ir.client_response,
+            ),
+            ("usage", &legacy.usage, &ir.usage),
+        ];
+        for (name, legacy, ir) in fields {
+            if legacy != ir {
+                mismatches.push(format!(
+                    "{}: {name} differs\n--- legacy\n{}\n--- ir\n{}",
+                    fixture.id(),
+                    legacy.as_deref().unwrap_or("<none>"),
+                    ir.as_deref().unwrap_or("<none>")
+                ));
+            }
+        }
+        if legacy.failures != ir.failures {
+            mismatches.push(format!(
+                "{}: check failures differ\n  legacy: {:#?}\n  ir: {:#?}",
+                fixture.id(),
+                legacy.failures,
+                ir.failures
+            ));
+        }
+        if raw_stream(fixture, CodecEngine::Legacy) != raw_stream(fixture, CodecEngine::Ir) {
+            mismatches.push(format!("{}: raw client stream bytes differ", fixture.id()));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "{} legacy/IR parity mismatch(es) for {}:\n{}",
+        mismatches.len(),
+        bridge.dir_name(),
+        mismatches.join("\n")
+    );
+}
+
+#[test]
+fn codec_parity_anthropic_openai_chat() {
+    assert_codec_parity(Bridge::AnthropicOpenAiChat);
 }
 
 #[test]

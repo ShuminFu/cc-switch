@@ -44,6 +44,9 @@ pub enum MediaSource {
     Base64 { media_type: String, data: String },
     /// 远程 URL
     Url { url: String },
+    /// 内联纯文本（Anthropic 文档的 `text` / `content` 源）；无法读取内容的
+    /// 文档来源也以空文本表示，由目标编解码决定如何占位
+    Text { data: String },
 }
 
 /// 消息内容块
@@ -190,8 +193,11 @@ pub enum ToolChoice {
 pub struct ReasoningConfig {
     /// 思考 token 预算（Anthropic `budget_tokens`、Gemini `thinkingBudget`）
     pub budget_tokens: Option<u64>,
-    /// 思考强度（OpenAI `reasoning_effort` / `reasoning.effort`），保留原始取值
+    /// 思考强度（OpenAI `reasoning_effort` / `reasoning.effort`、Anthropic
+    /// `output_config.effort`），保留原始取值
     pub effort: Option<String>,
+    /// 由模型自行决定思考深度（Anthropic `thinking.type = adaptive`）
+    pub adaptive: bool,
 }
 
 /// 一次对话请求
@@ -239,6 +245,7 @@ impl ChatResponse {
         let mut events = vec![StreamEvent::MessageStart {
             id: self.id.clone(),
             model: self.model.clone(),
+            usage: None,
         }];
         for (index, part) in self.parts.iter().enumerate() {
             events.push(StreamEvent::PartStart {
@@ -281,8 +288,13 @@ pub enum PartDelta {
 /// （例如 Chat 的并行工具调用），聚合后块按 `PartStart` 的先后排序。
 #[derive(Debug, Clone, PartialEq)]
 pub enum StreamEvent {
-    /// 回复开始
-    MessageStart { id: String, model: String },
+    /// 回复开始；`usage` 为开始时已知的 usage（例如输入 token），之后的
+    /// [`StreamEvent::Usage`] 覆盖它
+    MessageStart {
+        id: String,
+        model: String,
+        usage: Option<UsageIR>,
+    },
     /// 新内容块开始，`part` 为初始内容（可增量字段通常为空）
     PartStart { index: usize, part: Part },
     /// 内容块增量
@@ -293,8 +305,11 @@ pub enum StreamEvent {
     Usage(UsageIR),
     /// 回复结束
     MessageStop { stop_reason: Option<StopReason> },
-    /// 上游在流中报告的错误
-    Error { message: String },
+    /// 上游在流中报告的错误；`code` 为上游给出的错误类型（如 `overloaded_error`）
+    Error {
+        message: String,
+        code: Option<String>,
+    },
 }
 
 /// 事件序列违反 [`StreamEvent`] 约定（编解码实现错误或上游流损坏）
@@ -339,9 +354,12 @@ impl StreamAggregator {
             return Err(AggregateError::AfterStop);
         }
         match event {
-            StreamEvent::MessageStart { id, model } => {
+            StreamEvent::MessageStart { id, model, usage } => {
                 self.response.id = id;
                 self.response.model = model;
+                if usage.is_some() {
+                    self.response.usage = usage;
+                }
             }
             StreamEvent::PartStart { index, part } => {
                 if self.slots.contains_key(&index) {
@@ -367,7 +385,7 @@ impl StreamAggregator {
                 self.response.stop_reason = stop_reason;
                 self.stopped = true;
             }
-            StreamEvent::Error { message } => return Err(AggregateError::Upstream(message)),
+            StreamEvent::Error { message, .. } => return Err(AggregateError::Upstream(message)),
         }
         Ok(())
     }
@@ -445,7 +463,8 @@ mod tests {
             events.first(),
             Some(&StreamEvent::MessageStart {
                 id: "msg_1".into(),
-                model: "claude".into()
+                model: "claude".into(),
+                usage: None,
             })
         );
         assert_eq!(
@@ -535,6 +554,26 @@ mod tests {
     }
 
     #[test]
+    fn message_start_usage_is_overridden_by_later_usage() {
+        let start = |usage| StreamEvent::MessageStart {
+            id: "msg_1".into(),
+            model: "m".into(),
+            usage,
+        };
+        let response = aggregate([start(Some(usage()))]).unwrap();
+        assert_eq!(response.usage, Some(usage()));
+
+        let mut later = usage();
+        later.output = 42;
+        let response = aggregate([start(Some(usage())), StreamEvent::Usage(later)]).unwrap();
+        assert_eq!(response.usage, Some(later));
+
+        // 开始事件不带 usage 时不清除之前的 usage
+        let response = aggregate([StreamEvent::Usage(later), start(None)]).unwrap();
+        assert_eq!(response.usage, Some(later));
+    }
+
+    #[test]
     fn truncated_stream_has_no_stop_reason() {
         let mut aggregator = StreamAggregator::new();
         aggregator
@@ -581,6 +620,7 @@ mod tests {
             (
                 vec![StreamEvent::Error {
                     message: "overloaded".into(),
+                    code: None,
                 }],
                 AggregateError::Upstream("overloaded".into()),
             ),
@@ -626,6 +666,7 @@ mod tests {
             (arb_text(), arb_text())
                 .prop_map(|(media_type, data)| MediaSource::Base64 { media_type, data }),
             arb_text().prop_map(|url| MediaSource::Url { url }),
+            arb_text().prop_map(|data| MediaSource::Text { data }),
         ]
     }
 

@@ -384,9 +384,10 @@ pub fn transform_claude_request_for_api_format(
         ClaudeApiFormat::OpenAiChat => {
             let preserve_reasoning_content =
                 should_preserve_reasoning_content_for_openai_chat(provider, &body);
-            let mut result = super::transform::anthropic_to_openai_with_reasoning_content(
+            let mut result = crate::proxy::codec::bridge::anthropic_to_openai_chat_request(
                 body,
                 preserve_reasoning_content,
+                crate::settings::codec_engine(),
             )?;
             // Inject prompt_cache_key only if explicitly configured in meta
             if let Some(key) = provider

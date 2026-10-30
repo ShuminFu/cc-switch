@@ -1257,9 +1257,8 @@ pub fn sticky_session_routing_enabled() -> bool {
         .sticky_session_routing
 }
 
-/// The proxy protocol conversion engine (see [`AppSettings::codec_engine`]).
-/// Read on the request path once the first bridge migrates to codecs (CCS-176).
-#[allow(dead_code)]
+/// The proxy protocol conversion engine (see [`AppSettings::codec_engine`]),
+/// read on the request path by the bridges migrated to codecs.
 pub fn codec_engine() -> CodecEngine {
     settings_store()
         .read()
