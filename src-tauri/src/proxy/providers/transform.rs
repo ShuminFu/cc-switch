@@ -513,13 +513,20 @@ fn convert_message_to_openai(
                 msg["tool_calls"] = json!(tool_calls);
             }
 
-            if preserve_reasoning_content && role == "assistant" && !tool_calls.is_empty() {
-                let reasoning_content = if reasoning_parts.is_empty() {
-                    "tool call".to_string()
-                } else {
-                    reasoning_parts.join("\n")
-                };
-                msg["reasoning_content"] = json!(reasoning_content);
+            if preserve_reasoning_content && role == "assistant" {
+                if !tool_calls.is_empty() {
+                    let reasoning_content = if reasoning_parts.is_empty() {
+                        "tool call".to_string()
+                    } else {
+                        reasoning_parts.join("\n")
+                    };
+                    msg["reasoning_content"] = json!(reasoning_content);
+                } else if !reasoning_parts.is_empty() {
+                    // PROV-32: Kimi/DeepSeek-style providers expect the reasoning
+                    // history on every assistant turn, not only tool-call turns
+                    // (mirrors the #5508 forward-attach on the Codex→Chat path).
+                    msg["reasoning_content"] = json!(reasoning_parts.join("\n"));
+                }
             }
 
             result.push(msg);
@@ -1111,6 +1118,44 @@ mod tests {
         let msg = &result["messages"][0];
         assert_eq!(msg["reasoning_content"], "[redacted thinking]");
         assert_eq!(msg["tool_calls"][0]["id"], "call_123");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_text_only_assistant_keeps_reasoning_content() {
+        let input = json!({
+            "model": "kimi-k2-thinking",
+            "max_tokens": 100,
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "Greet back.", "signature": "s"},
+                    {"type": "text", "text": "Hello!"}
+                ]},
+                {"role": "user", "content": "again"}
+            ]
+        });
+        let result = anthropic_to_openai_with_reasoning_content(input.clone(), true).unwrap();
+        let msg = &result["messages"][1];
+        assert_eq!(msg["role"], "assistant");
+        assert_eq!(msg["content"], "Hello!");
+        assert_eq!(msg["reasoning_content"], "Greet back.");
+
+        // Generic provider: unchanged.
+        let result = anthropic_to_openai_with_reasoning_content(input, false).unwrap();
+        assert!(result["messages"][1].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_text_only_assistant_without_thinking_has_no_reasoning() {
+        let input = json!({
+            "model": "kimi-k2-thinking",
+            "max_tokens": 100,
+            "messages": [
+                {"role": "assistant", "content": [{"type": "text", "text": "Hello!"}]}
+            ]
+        });
+        let result = anthropic_to_openai_with_reasoning_content(input, true).unwrap();
+        assert!(result["messages"][0].get("reasoning_content").is_none());
     }
 
     #[test]
