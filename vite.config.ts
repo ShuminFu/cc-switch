@@ -27,6 +27,9 @@ export default defineConfig(({ command }) => ({
     },
   },
   clearScreen: false,
-  envPrefix: ["VITE_", "TAURI_"],
+  // Only VITE_* variables are exposed to client code. Never widen this to
+  // TAURI_*: the release build runs with TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)
+  // in its environment and Vite would inline any referenced match into dist/.
+  envPrefix: ["VITE_"],
 }));
 
