@@ -161,7 +161,7 @@ mod tests {
     /// match-app 站点计数（CI 通过 `cargo test` 执行）。
     ///
     /// CCS-149 前为 56 处（同一统计口径），之后的上限见 [`MATCH_APP_SITE_BUDGET`]，只允许下降。
-    /// P4 退出目标是 15 处以内，剩余站点集中在接管引擎（services/proxy.rs，
+    /// P4 退出目标是 15 处以内，剩余站点集中在接管引擎（services/proxy/，
     /// CCS-153/154）和按应用状态（settings.rs / app_config.rs，CCS-155）。
     const MATCH_APP_SITE_BUDGET: usize = 40;
 

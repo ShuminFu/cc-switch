@@ -721,8 +721,19 @@ mod tests {
                 ],
             ),
             (
-                "services/proxy.rs",
-                include_str!("../services/proxy.rs"),
+                "services/proxy/**",
+                concat!(
+                    include_str!("../services/proxy/mod.rs"),
+                    include_str!("../services/proxy/lifecycle.rs"),
+                    include_str!("../services/proxy/config.rs"),
+                    include_str!("../services/proxy/backup.rs"),
+                    include_str!("../services/proxy/hot_switch.rs"),
+                    include_str!("../services/proxy/takeover/mod.rs"),
+                    include_str!("../services/proxy/takeover/claude.rs"),
+                    include_str!("../services/proxy/takeover/codex.rs"),
+                    include_str!("../services/proxy/takeover/gemini.rs"),
+                    include_str!("../services/proxy/takeover/grok.rs"),
+                ),
                 &[
                     "ifletOk(live_config)=self.read_claude_live()",
                     "forapp_typein[\"claude\",\"codex\",\"gemini\",\"grokbuild\"]",
