@@ -62,9 +62,11 @@ export const useProvidersQuery = (
   return useQuery({
     queryKey: ["providers", appId],
     placeholderData: keepPreviousData,
-    // 当代理服务运行时，每 10 秒刷新一次供应商列表
-    // 这样可以自动反映后端熔断器自动禁用代理目标的变更
-    refetchInterval: isProxyRunning ? 10000 : false,
+    // 当代理服务运行时，每 30 秒兜底刷新一次供应商列表，反映后端熔断器
+    // 自动禁用代理目标的变更。故障转移切换本身会 emit `provider-switched`
+    // （App 中监听并刷新），因此无需更频繁轮询；窗口隐藏时暂停。
+    refetchInterval: isProxyRunning ? 30_000 : false,
+    refetchIntervalInBackground: false,
     queryFn: async () => {
       let providers: Record<string, Provider> = {};
       let currentProviderId = "";
