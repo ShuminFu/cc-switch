@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { HintText } from "./HintText";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -42,11 +43,14 @@ export function EndpointField({
   });
   const effectiveHint =
     showFullUrlToggle && isFullUrl
-      ? fullUrlHint ||
-        t("providerForm.fullUrlHint", {
-          defaultValue:
-            "💡 请填写完整请求 URL，并且必须开启代理后使用；代理将直接使用此 URL，不拼接路径",
-        })
+      ? fullUrlHint || (
+          <HintText>
+            {t("providerForm.fullUrlHint", {
+              defaultValue:
+                "请填写完整请求 URL，并且必须开启代理后使用；代理将直接使用此 URL，不拼接路径",
+            })}
+          </HintText>
+        )
       : hint;
 
   return (

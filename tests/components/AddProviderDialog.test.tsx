@@ -242,7 +242,9 @@ context_window = 500000
     );
     expect(await screen.findByTestId("universal-panel")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: /provider.tabProvider/ }));
+    await user.click(
+      screen.getByRole("tab", { name: /provider\.tabProviderFor|Provider$/ }),
+    );
 
     expect(screen.getByLabelText("mock-provider-name")).toHaveValue(
       "My provider",

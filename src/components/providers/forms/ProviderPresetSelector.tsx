@@ -28,6 +28,7 @@ import {
 } from "@/config/universalProviderPresets";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { settingsApi } from "@/lib/api/settings";
+import { HintText } from "./shared/HintText";
 
 type PresetTranslator = (key: string) => unknown;
 
@@ -273,33 +274,47 @@ export function ProviderPresetSelector({
     });
   };
 
+  const hint = (text: string) => <HintText>{text}</HintText>;
+
   const getCategoryHint = (): ReactNode => {
     switch (category) {
       case "official":
-        return t("providerForm.officialHint", {
-          defaultValue: "💡 官方供应商使用浏览器登录，无需配置 API Key",
-        });
+        return hint(
+          t("providerForm.officialHint", {
+            defaultValue: "官方供应商使用浏览器登录，无需配置 API Key",
+          }),
+        );
       case "cn_official":
-        return t("providerForm.cnOfficialApiKeyHint", {
-          defaultValue: "💡 国产官方供应商只需填写 API Key，请求地址已预设",
-        });
+        return hint(
+          t("providerForm.cnOfficialApiKeyHint", {
+            defaultValue: "国产官方供应商只需填写 API Key，请求地址已预设",
+          }),
+        );
       case "aggregator":
-        return t("providerForm.aggregatorApiKeyHint", {
-          defaultValue: "💡 聚合服务供应商只需填写 API Key 即可使用",
-        });
+        return hint(
+          t("providerForm.aggregatorApiKeyHint", {
+            defaultValue: "聚合服务供应商只需填写 API Key 即可使用",
+          }),
+        );
       case "third_party":
-        return t("providerForm.thirdPartyApiKeyHint", {
-          defaultValue: "💡 第三方供应商需要填写 API Key 和请求地址",
-        });
+        return hint(
+          t("providerForm.thirdPartyApiKeyHint", {
+            defaultValue: "第三方供应商需要填写 API Key 和请求地址",
+          }),
+        );
       case "custom":
-        return t("providerForm.customApiKeyHint", {
-          defaultValue: "💡 自定义配置需手动填写所有必要字段",
-        });
+        return hint(
+          t("providerForm.customApiKeyHint", {
+            defaultValue: "自定义配置需手动填写所有必要字段",
+          }),
+        );
       case "omo":
-        return t("providerForm.omoHint", {
-          defaultValue:
-            "💡 OMO 配置管理 Agent 模型分配，兼容 oh-my-openagent.jsonc / oh-my-opencode.jsonc",
-        });
+        return hint(
+          t("providerForm.omoHint", {
+            defaultValue:
+              "OMO 配置管理 Agent 模型分配，兼容 oh-my-openagent.jsonc / oh-my-opencode.jsonc",
+          }),
+        );
       default:
         return t("providerPreset.hint", {
           defaultValue: "选择预设后可继续调整下方字段。",

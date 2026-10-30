@@ -242,7 +242,10 @@ export function AddProviderDialog({
         >
           <TabsList className="grid w-full grid-cols-2 mb-6">
             <TabsTrigger value="app-specific">
-              {t(`apps.${appId}`)} {t("provider.tabProvider")}
+              {t("provider.tabProviderFor", {
+                app: t(`apps.${appId}`),
+                defaultValue: "{{app}} Provider",
+              })}
             </TabsTrigger>
             <TabsTrigger value="universal">
               {t("provider.tabUniversal")}

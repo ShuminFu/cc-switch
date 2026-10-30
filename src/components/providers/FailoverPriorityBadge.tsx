@@ -28,7 +28,10 @@ export function FailoverPriorityBadge({
         defaultValue: `故障转移优先级 ${priority}`,
       })}
     >
-      P{priority}
+      {t("failover.priorityBadge", {
+        priority,
+        defaultValue: "P{{priority}}",
+      })}
     </div>
   );
 }

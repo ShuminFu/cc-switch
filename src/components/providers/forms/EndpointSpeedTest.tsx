@@ -489,7 +489,10 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
         {/* 测速控制栏 */}
         <div className="flex items-center justify-between">
           <div className="text-sm text-muted-foreground">
-            {entries.length} {t("endpointTest.endpoints")}
+            {t("endpointTest.endpointCount", {
+              count: entries.length,
+              defaultValue: "{{count}} endpoints",
+            })}
           </div>
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">

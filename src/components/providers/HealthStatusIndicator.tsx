@@ -44,7 +44,11 @@ export const HealthStatusIndicator: React.FC<HealthStatusIndicatorProps> = ({
       <div className={cn("w-2 h-2 rounded-full", config.color)} />
       <span className={cn("text-xs font-medium", config.textColor)}>
         {label}
-        {responseTimeMs !== undefined && ` (${responseTimeMs}ms)`}
+        {responseTimeMs !== undefined &&
+          t("health.responseTimeSuffix", {
+            ms: responseTimeMs,
+            defaultValue: " ({{ms}} ms)",
+          })}
       </span>
     </div>
   );
