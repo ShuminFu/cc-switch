@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { GeminiProviderPreset } from "@/config/geminiProviderPresets";
+import { mergeEnvIntoText } from "@/utils/providerEnvText";
 import GeminiConfigEditor from "../GeminiConfigEditor";
 import { GeminiFormFields } from "../GeminiFormFields";
 import { GEMINI_DEFAULT_CONFIG } from "../helpers/opencodeFormUtils";
@@ -88,11 +89,18 @@ function GeminiAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
     [setModelInEnv, updateEnvField],
   );
 
+  // Toggling the common snippet patches the env text in place too.
+  const envObjToText = useCallback(
+    (env: Record<string, unknown>) =>
+      geminiEnv.trim() ? mergeEnvIntoText(geminiEnv, env) : envObjToString(env),
+    [geminiEnv, envObjToString],
+  );
+
   const commonConfig = useGeminiCommonConfig({
     envValue: geminiEnv,
     onEnvChange: handleGeminiEnvChange,
     envStringToObj,
-    envObjToString,
+    envObjToString: envObjToText,
     initialData,
     initialEnabled: initialData?.meta?.commonConfigEnabled,
     selectedPresetId: selectedPresetId ?? undefined,

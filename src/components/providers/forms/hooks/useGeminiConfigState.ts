@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { mergeEnvIntoText } from "@/utils/providerEnvText";
 
 interface UseGeminiConfigStateProps {
   initialData?: {
@@ -158,10 +159,11 @@ export function useGeminiConfigState({
 
       const envObj = envStringToObj(geminiEnv);
       envObj.GEMINI_API_KEY = trimmed;
-      const newEnv = envObjToString(envObj);
+      // Patch the text in place to keep comments and order (FE-PROV-48).
+      const newEnv = mergeEnvIntoText(geminiEnv, envObj);
       setGeminiEnv(newEnv);
     },
-    [geminiEnv, envStringToObj, envObjToString, setGeminiEnv],
+    [geminiEnv, envStringToObj, setGeminiEnv],
   );
 
   // 处理 Gemini Base URL 变化
@@ -172,10 +174,11 @@ export function useGeminiConfigState({
 
       const envObj = envStringToObj(geminiEnv);
       envObj.GOOGLE_GEMINI_BASE_URL = sanitized;
-      const newEnv = envObjToString(envObj);
+      // Patch the text in place to keep comments and order (FE-PROV-48).
+      const newEnv = mergeEnvIntoText(geminiEnv, envObj);
       setGeminiEnv(newEnv);
     },
-    [geminiEnv, envStringToObj, envObjToString, setGeminiEnv],
+    [geminiEnv, envStringToObj, setGeminiEnv],
   );
 
   // 处理 Gemini Model 变化
@@ -186,10 +189,11 @@ export function useGeminiConfigState({
 
       const envObj = envStringToObj(geminiEnv);
       envObj.GEMINI_MODEL = trimmed;
-      const newEnv = envObjToString(envObj);
+      // Patch the text in place to keep comments and order (FE-PROV-48).
+      const newEnv = mergeEnvIntoText(geminiEnv, envObj);
       setGeminiEnv(newEnv);
     },
-    [geminiEnv, envStringToObj, envObjToString, setGeminiEnv],
+    [geminiEnv, envStringToObj, setGeminiEnv],
   );
 
   // 处理 env 变化
