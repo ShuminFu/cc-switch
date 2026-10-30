@@ -19,6 +19,27 @@ function renderActions(
 }
 
 describe("ProviderActions", () => {
+  it("shows a disabled pending button instead of Add while live ids load (FE-PROV-51)", () => {
+    const props = renderActions({
+      appId: "openclaw",
+      isInConfig: false,
+      isConfigStatusLoading: true,
+      onSetAsDefault: vi.fn(),
+    });
+    expect(
+      screen.queryByRole("button", { name: /provider.addToConfig/ }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /provider.setAsDefault/ }),
+    ).toBeNull();
+    const pending = screen.getByRole("button", {
+      name: /configStatusLoading|Checking the app config/,
+    });
+    expect(pending).toBeDisabled();
+    fireEvent.click(pending);
+    expect(props.onSwitch).not.toHaveBeenCalled();
+  });
+
   it("disables Duplicate for read-only (Hermes-managed) providers (FE-PROV-42)", () => {
     const props = renderActions({ appId: "hermes", isReadOnly: true });
 

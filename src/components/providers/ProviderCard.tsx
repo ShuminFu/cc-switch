@@ -41,6 +41,8 @@ interface ProviderCardProps {
   isCurrent: boolean;
   appId: AppId;
   isInConfig?: boolean; // OpenCode: 是否已添加到 opencode.json
+  /** Live config ids are still loading, so `isInConfig` is not known yet. */
+  isConfigStatusLoading?: boolean;
   isOmo?: boolean;
   isOmoSlim?: boolean;
   onSwitch: (provider: Provider) => void;
@@ -96,6 +98,7 @@ export function ProviderCard({
   isCurrent,
   appId,
   isInConfig = true,
+  isConfigStatusLoading = false,
   isOmo = false,
   isOmoSlim = false,
   onSwitch,
@@ -538,6 +541,7 @@ export function ProviderCard({
               appId={appId}
               isCurrent={isCurrent}
               isInConfig={isInConfig}
+              isConfigStatusLoading={isConfigStatusLoading}
               isTesting={isTesting}
               isActionPending={isActionPending}
               isProxyTakeover={isProxyTakeover}

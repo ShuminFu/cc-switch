@@ -101,19 +101,27 @@ export function ProviderList({
     appId,
   );
 
-  const { data: opencodeLiveIds } = useQuery({
-    queryKey: ["opencodeLiveProviderIds"],
-    queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-    enabled: appId === "opencode",
-  });
+  const { data: opencodeLiveIds, isLoading: isOpencodeLiveIdsLoading } =
+    useQuery({
+      queryKey: ["opencodeLiveProviderIds"],
+      queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
+      enabled: appId === "opencode",
+    });
 
   // OpenClaw: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: openclawLiveIds } = useOpenClawLiveProviderIds(
-    appId === "openclaw",
-  );
+  const { data: openclawLiveIds, isLoading: isOpenclawLiveIdsLoading } =
+    useOpenClawLiveProviderIds(appId === "openclaw");
 
   // Hermes: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: hermesLiveIds } = useHermesLiveProviderIds(appId === "hermes");
+  const { data: hermesLiveIds, isLoading: isHermesLiveIdsLoading } =
+    useHermesLiveProviderIds(appId === "hermes");
+
+  // Until the live ids arrive, "in config" is unknown: additive cards show a
+  // disabled pending button instead of flashing "Add" (FE-PROV-51).
+  const isConfigStatusLoading =
+    (appId === "opencode" && isOpencodeLiveIdsLoading) ||
+    (appId === "openclaw" && isOpenclawLiveIdsLoading) ||
+    (appId === "hermes" && isHermesLiveIdsLoading);
 
   // Hermes: 读取当前 model.provider，用于判断哪个供应商是"当前激活"（高亮）
   const { data: hermesModelConfig } = useHermesModelConfig(appId === "hermes");
@@ -412,6 +420,7 @@ export function ProviderList({
                 }
                 appId={appId}
                 isInConfig={isProviderInConfig(provider.id)}
+                isConfigStatusLoading={isConfigStatusLoading}
                 isOmo={isOmo}
                 isOmoSlim={isOmoSlim}
                 onSwitch={onSwitch}
@@ -552,6 +561,7 @@ interface SortableProviderCardProps {
   isCurrent: boolean;
   appId: AppId;
   isInConfig: boolean;
+  isConfigStatusLoading?: boolean;
   isOmo: boolean;
   isOmoSlim: boolean;
   onSwitch: (provider: Provider) => void;
@@ -584,6 +594,7 @@ function SortableProviderCard({
   isCurrent,
   appId,
   isInConfig,
+  isConfigStatusLoading,
   isOmo,
   isOmoSlim,
   onSwitch,
@@ -630,6 +641,7 @@ function SortableProviderCard({
         isCurrent={isCurrent}
         appId={appId}
         isInConfig={isInConfig}
+        isConfigStatusLoading={isConfigStatusLoading}
         isOmo={isOmo}
         isOmoSlim={isOmoSlim}
         onSwitch={onSwitch}
