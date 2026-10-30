@@ -119,19 +119,9 @@ fn set_windows_app_user_model_id(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-async fn update_tray_menu(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
-    match tray::create_tray_menu(&app, state.inner()) {
-        Ok(new_menu) => {
-            if let Some(tray) = app.tray_by_id(tray::TRAY_ID) {
-                tray.set_menu(Some(new_menu))
-                    .map_err(|e| format!("更新托盘菜单失败: {e}"))?;
-                return Ok(true);
-            }
-            Ok(false)
-        }
+async fn update_tray_menu(app: tauri::AppHandle) -> Result<bool, String> {
+    match tray::rebuild_tray_menu(&app).await {
+        Ok(updated) => Ok(updated),
         Err(err) => {
             log::error!("创建托盘菜单失败: {err}");
             Ok(false)

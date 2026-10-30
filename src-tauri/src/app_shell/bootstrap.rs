@@ -1016,6 +1016,8 @@ fn spawn_post_setup_tasks(app_handle: tauri::AppHandle) {
 
         // 检查 settings 表中的代理状态，自动恢复代理服务
         crate::restore_proxy_state_on_startup(&state).await;
+        // 代理状态恢复后刷新托盘：重新探测运行态（接管期间官方供应商置灰依赖它）
+        crate::tray::refresh_tray_menu(&app_handle);
 
         // live 配置漂移检测：恢复完成后检测一次，并监听应用外的改动（CCS-166）
         let drift_handle = app_handle.clone();

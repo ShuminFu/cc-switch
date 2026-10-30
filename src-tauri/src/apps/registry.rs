@@ -730,8 +730,8 @@ mod tests {
                 ],
             ),
             (
-                "tray.rs",
-                include_str!("../tray.rs"),
+                "tray/mod.rs",
+                include_str!("../tray/mod.rs"),
                 &["TrayAppSection{app_type:AppType::"],
             ),
             (
