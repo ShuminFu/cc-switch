@@ -33,6 +33,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { PROXY_CAPABLE_APPS, getAppLabel } from "@/config/proxyApps";
 import { copyText } from "@/lib/clipboard";
+import { formatUptime } from "./formatUptime";
 import { isLoopbackListenAddress } from "./listenAddress";
 
 interface LanExposureNoticeProps {
@@ -116,7 +117,7 @@ export function ProxyPanel({
   onToggleProxy,
   isProxyPending,
 }: ProxyPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { status, isRunning } = useProxyStatus();
 
   // 获取应用接管状态
@@ -274,26 +275,109 @@ export function ProxyPanel({
     }
   };
 
-  const formatUptime = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${secs}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${secs}s`;
-    } else {
-      return `${secs}s`;
-    }
-  };
-
   // 格式化地址用于 URL（IPv6 需要方括号）
   const formatAddressForUrl = (address: string, port: number): string => {
     const isIPv6 = address.includes(":");
     const host = isIPv6 ? `[${address}]` : address;
     return `http://${host}:${port}`;
   };
+
+  // Listen address/port are always visible; while running they are read-only
+  // with a "stop to edit" hint (FE-UI-23).
+  const basicSettings = (
+    <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-4">
+      <div>
+        <h4 className="text-sm font-semibold">
+          {t("proxy.settings.basic.title", {
+            defaultValue: "基础设置",
+          })}
+        </h4>
+        <p className="text-xs text-muted-foreground">
+          {t("proxy.settings.basic.description", {
+            defaultValue: "配置代理服务监听的地址与端口。",
+          })}
+        </p>
+        {isRunning && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+            {t("proxy.settings.restartRequired", {
+              defaultValue: "修改监听地址/端口需要先停止代理服务",
+            })}
+          </p>
+        )}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="listen-address">
+            {t("proxy.settings.fields.listenAddress.label", {
+              defaultValue: "监听地址",
+            })}
+          </Label>
+          <Input
+            id="listen-address"
+            value={listenAddress}
+            onChange={(e) => setListenAddress(e.target.value)}
+            disabled={isRunning}
+            placeholder={t("proxy.settings.fields.listenAddress.placeholder", {
+              defaultValue: "127.0.0.1",
+            })}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("proxy.settings.fields.listenAddress.description", {
+              defaultValue: "代理服务器监听的 IP 地址（推荐 127.0.0.1）",
+            })}
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="listen-port">
+            {t("proxy.settings.fields.listenPort.label", {
+              defaultValue: "监听端口",
+            })}
+          </Label>
+          <Input
+            id="listen-port"
+            type="number"
+            value={listenPort}
+            onChange={(e) => setListenPort(e.target.value)}
+            disabled={isRunning}
+            placeholder={t("proxy.settings.fields.listenPort.placeholder", {
+              defaultValue: "15721",
+            })}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("proxy.settings.fields.listenPort.description", {
+              defaultValue: "代理服务器监听的端口号（1024 ~ 65535）",
+            })}
+          </p>
+        </div>
+      </div>
+
+      {!isLoopbackListenAddress(listenAddress) && (
+        <LanExposureNotice accessToken={globalConfig?.accessToken} />
+      )}
+
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={handleSaveBasicConfig}
+          disabled={isRunning || updateGlobalConfig.isPending}
+        >
+          {updateGlobalConfig.isPending ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              {t("common.saving", { defaultValue: "保存中..." })}
+            </>
+          ) : (
+            <>
+              <Save className="mr-2 h-4 w-4" />
+              {t("common.save", { defaultValue: "保存" })}
+            </>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -403,16 +487,25 @@ export function ProxyPanel({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
-                      navigator.clipboard.writeText(
-                        formatAddressForUrl(status.address, status.port),
-                      );
-                      toast.success(
-                        t("proxy.panel.addressCopied", {
-                          defaultValue: "地址已复制",
-                        }),
-                        { closeButton: true },
-                      );
+                    onClick={async () => {
+                      try {
+                        await copyText(
+                          formatAddressForUrl(status.address, status.port),
+                        );
+                        toast.success(
+                          t("proxy.panel.addressCopied", {
+                            defaultValue: "地址已复制",
+                          }),
+                          { closeButton: true },
+                        );
+                      } catch (error) {
+                        toast.error(
+                          t("common.copyFailed", {
+                            defaultValue: "Copy failed",
+                          }),
+                          { description: String(error) },
+                        );
+                      }
                     }}
                   >
                     {t("common.copy")}
@@ -582,110 +675,28 @@ export function ProxyPanel({
                   defaultValue: "成功率",
                 })}
                 value={`${status.success_rate.toFixed(1)}%`}
-                variant={status.success_rate > 90 ? "success" : "warning"}
+                variant={
+                  status.total_requests === 0
+                    ? "default"
+                    : status.success_rate > 90
+                      ? "success"
+                      : "warning"
+                }
               />
               <StatCard
                 icon={<Clock className="h-4 w-4" />}
                 label={t("proxy.panel.stats.uptime", {
                   defaultValue: "运行时间",
                 })}
-                value={formatUptime(status.uptime_seconds)}
+                value={formatUptime(status.uptime_seconds, i18n.language)}
               />
             </div>
+
+            {basicSettings}
           </div>
         ) : (
           <div className="space-y-6">
-            {/* [8] Basic settings — address/port (only when stopped) */}
-            <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-4">
-              <div>
-                <h4 className="text-sm font-semibold">
-                  {t("proxy.settings.basic.title", {
-                    defaultValue: "基础设置",
-                  })}
-                </h4>
-                <p className="text-xs text-muted-foreground">
-                  {t("proxy.settings.basic.description", {
-                    defaultValue: "配置代理服务监听的地址与端口。",
-                  })}
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="listen-address">
-                    {t("proxy.settings.fields.listenAddress.label", {
-                      defaultValue: "监听地址",
-                    })}
-                  </Label>
-                  <Input
-                    id="listen-address"
-                    value={listenAddress}
-                    onChange={(e) => setListenAddress(e.target.value)}
-                    placeholder={t(
-                      "proxy.settings.fields.listenAddress.placeholder",
-                      {
-                        defaultValue: "127.0.0.1",
-                      },
-                    )}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t("proxy.settings.fields.listenAddress.description", {
-                      defaultValue:
-                        "代理服务器监听的 IP 地址（推荐 127.0.0.1）",
-                    })}
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="listen-port">
-                    {t("proxy.settings.fields.listenPort.label", {
-                      defaultValue: "监听端口",
-                    })}
-                  </Label>
-                  <Input
-                    id="listen-port"
-                    type="number"
-                    value={listenPort}
-                    onChange={(e) => setListenPort(e.target.value)}
-                    placeholder={t(
-                      "proxy.settings.fields.listenPort.placeholder",
-                      {
-                        defaultValue: "15721",
-                      },
-                    )}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t("proxy.settings.fields.listenPort.description", {
-                      defaultValue: "代理服务器监听的端口号（1024 ~ 65535）",
-                    })}
-                  </p>
-                </div>
-              </div>
-
-              {!isLoopbackListenAddress(listenAddress) && (
-                <LanExposureNotice accessToken={globalConfig?.accessToken} />
-              )}
-
-              <div className="flex justify-end">
-                <Button
-                  size="sm"
-                  onClick={handleSaveBasicConfig}
-                  disabled={updateGlobalConfig.isPending}
-                >
-                  {updateGlobalConfig.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {t("common.saving", { defaultValue: "保存中..." })}
-                    </>
-                  ) : (
-                    <>
-                      <Save className="mr-2 h-4 w-4" />
-                      {t("common.save", { defaultValue: "保存" })}
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
+            {basicSettings}
 
             {/* Stopped hint */}
             <div className="text-center py-6 text-muted-foreground">
