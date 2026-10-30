@@ -30,6 +30,7 @@ import type { ProxyStatus } from "@/types/proxy";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { PROXY_CAPABLE_APPS, getAppLabel } from "@/config/proxyApps";
 
 interface ProxyPanelProps {
   enableLocalProxy: boolean;
@@ -80,12 +81,12 @@ export function ProxyPanel({
       toast.success(
         enabled
           ? t("proxy.takeover.enabled", {
-              app: appType,
-              defaultValue: `${appType} 接管已启用`,
+              app: getAppLabel(appType),
+              defaultValue: `${getAppLabel(appType)} 接管已启用`,
             })
           : t("proxy.takeover.disabled", {
-              app: appType,
-              defaultValue: `${appType} 接管已关闭`,
+              app: getAppLabel(appType),
+              defaultValue: `${getAppLabel(appType)} 接管已关闭`,
             }),
         { closeButton: true },
       );
@@ -274,31 +275,29 @@ export function ProxyPanel({
                   })}
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                  {(["claude", "codex", "gemini", "grokbuild"] as const).map(
-                    (appType) => {
-                      const isEnabled =
-                        takeoverStatus?.[
-                          appType as keyof typeof takeoverStatus
-                        ] ?? false;
-                      return (
-                        <div
-                          key={appType}
-                          className="flex items-center justify-between rounded-md border border-primary/20 bg-background/60 px-3 py-2"
-                        >
-                          <span className="text-sm font-medium capitalize">
-                            {appType === "grokbuild" ? "Grok Build" : appType}
-                          </span>
-                          <Switch
-                            checked={isEnabled}
-                            onCheckedChange={(checked) =>
-                              handleTakeoverChange(appType, checked)
-                            }
-                            disabled={setTakeoverForApp.isPending}
-                          />
-                        </div>
-                      );
-                    },
-                  )}
+                  {PROXY_CAPABLE_APPS.map((appType) => {
+                    const isEnabled =
+                      takeoverStatus?.[
+                        appType as keyof typeof takeoverStatus
+                      ] ?? false;
+                    return (
+                      <div
+                        key={appType}
+                        className="flex items-center justify-between rounded-md border border-primary/20 bg-background/60 px-3 py-2"
+                      >
+                        <span className="text-sm font-medium">
+                          {getAppLabel(appType)}
+                        </span>
+                        <Switch
+                          checked={isEnabled}
+                          onCheckedChange={(checked) =>
+                            handleTakeoverChange(appType, checked)
+                          }
+                          disabled={setTakeoverForApp.isPending}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {t("proxy.takeover.hint", {

@@ -12,6 +12,7 @@ import type {
   ProxyTakeoverStatus,
 } from "@/types/proxy";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { getAppLabel, isAnyTakeoverActive } from "@/config/proxyApps";
 
 /**
  * 代理服务状态管理
@@ -125,16 +126,7 @@ export function useProxyStatus() {
     mutationFn: ({ appType, enabled }: { appType: string; enabled: boolean }) =>
       invoke("set_proxy_takeover_for_app", { appType, enabled }),
     onSuccess: (_data, variables) => {
-      const appLabel =
-        variables.appType === "claude"
-          ? "Claude"
-          : variables.appType === "codex"
-            ? "Codex"
-            : variables.appType === "gemini"
-              ? "Gemini"
-              : variables.appType === "grokbuild"
-                ? "Grok Build"
-                : "OpenCode";
+      const appLabel = getAppLabel(variables.appType);
 
       toast.success(
         variables.enabled
@@ -213,12 +205,7 @@ export function useProxyStatus() {
     isLoading,
     isRunning: status?.running || false,
     takeoverStatus,
-    isTakeoverActive:
-      takeoverStatus?.claude ||
-      takeoverStatus?.codex ||
-      takeoverStatus?.gemini ||
-      takeoverStatus?.grokbuild ||
-      false,
+    isTakeoverActive: isAnyTakeoverActive(takeoverStatus),
 
     // 启动/停止（总开关）
     startProxyServer: startProxyServerMutation.mutateAsync,

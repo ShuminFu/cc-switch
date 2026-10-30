@@ -19,6 +19,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
 import type { SettingsFormState } from "@/hooks/useSettings";
+import { PROXY_CAPABLE_APPS, getAppLabel } from "@/config/proxyApps";
 
 interface ProxyTabContentProps {
   settings: SettingsFormState;
@@ -171,13 +172,20 @@ export function ProxyTabContent({
                 </div>
               )}
 
-              <Tabs defaultValue="claude" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="claude">Claude</TabsTrigger>
-                  <TabsTrigger value="codex">Codex</TabsTrigger>
-                  <TabsTrigger value="gemini">Gemini</TabsTrigger>
+              <Tabs defaultValue={PROXY_CAPABLE_APPS[0]} className="w-full">
+                <TabsList
+                  className="grid w-full"
+                  style={{
+                    gridTemplateColumns: `repeat(${PROXY_CAPABLE_APPS.length}, minmax(0, 1fr))`,
+                  }}
+                >
+                  {PROXY_CAPABLE_APPS.map((appType) => (
+                    <TabsTrigger key={appType} value={appType}>
+                      {getAppLabel(appType)}
+                    </TabsTrigger>
+                  ))}
                 </TabsList>
-                {(["claude", "codex", "gemini"] as const).map((appType) => {
+                {PROXY_CAPABLE_APPS.map((appType) => {
                   const failoverDisabled =
                     !isRunning || !(takeoverStatus?.[appType] ?? false);
                   return (
