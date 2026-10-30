@@ -143,4 +143,5 @@ cc-switch = { path = ".", features = ["testkit"] }
 specta = { version = "=2.0.0-rc.25", features = ["derive", "function", "serde_json"] }
 specta-typescript = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
-tauri = { version = "2.8.2", features = ["specta"] }
+# `test`: mock runtime for the command ACL tests (CCS-180).
+tauri = { version = "2.8.2", features = ["specta", "test"] }

@@ -85,8 +85,8 @@ How we run it for now:
   `ActiveTarget`. They are registered with `Builder::typ` because their
   commands do not carry `#[specta::specta]` yet.
 - The builder also exports `COMMANDS`, every command name in the
-  `generate_handler!` list in `lib.rs` (parsed from the source by
-  `registered_commands()`). Adding or removing a command therefore also makes
+  per-domain registry `src-tauri/src/commands/registry.rs` that also feeds
+  `generate_handler!` and the ACL permission sets (CCS-180). Adding or removing a command therefore also makes
   the committed bindings stale.
 - CI: the Linux `Backend Checks` job has a `Check generated bindings` step. It
   regenerates the file and fails with a `git diff` when it differs from the

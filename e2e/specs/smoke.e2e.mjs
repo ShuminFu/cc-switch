@@ -64,6 +64,18 @@ describe("CC Switch release smoke", () => {
     await confirm.waitForExist({ reverse: true });
   });
 
+  it("rejects IPC commands that no capability grants", async () => {
+    // CCS-180: with the app ACL manifest, a command outside every granted
+    // permission set fails in the ACL check instead of reaching a handler.
+    const error = await browser.executeAsync((done) => {
+      window.__TAURI_INTERNALS__.invoke("ccs_e2e_command_not_granted").then(
+        () => done("resolved"),
+        (e) => done(String(e)),
+      );
+    });
+    expect(error).toMatch(/not allowed/);
+  });
+
   it("adds a provider from a preset", async () => {
     await $('[data-testid="add-provider"]').click();
     // The provider form explains the common config snippet once per install.

@@ -142,6 +142,12 @@ jobs:
             echo "::error file=src/shared/bindings.ts::stale generated bindings; run 'UPDATE_BINDINGS=1 cargo test --lib bindings' in src-tauri and commit the result"
             exit 1
           fi
+          # build.rs regenerates the ACL permission sets from
+          # src-tauri/src/commands/registry.rs (CCS-180).
+          if ! git diff --exit-code -- src-tauri/permissions; then
+            echo "::error file=src-tauri/permissions::stale command permission sets; rebuild src-tauri and commit src-tauri/permissions/*.toml"
+            exit 1
+          fi
 
       - name: Run tests
         run: cargo test --manifest-path src-tauri/Cargo.toml

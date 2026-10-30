@@ -2,6 +2,8 @@
 //! 用 forbid 而非 deny，子模块无法再用 `allow(non_snake_case)` 绕过（CCS-118）。
 #![forbid(non_snake_case)]
 
+#[cfg(test)]
+mod acl_tests;
 mod apps;
 mod auth;
 mod balance;
@@ -26,6 +28,7 @@ mod profile;
 mod prompt;
 mod provider;
 mod proxy;
+pub mod registry;
 mod session_manager;
 mod settings;
 pub mod skill;

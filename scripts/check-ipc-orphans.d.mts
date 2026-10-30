@@ -1,6 +1,6 @@
-export function registeredCommands(libSource: string): string[];
+export function registeredCommands(registrySource: string): string[];
 export function checkIpcCommands(
-  libSource: string,
+  registrySource: string,
   frontendFiles: Record<string, string>,
 ): {
   total: number;
@@ -9,6 +9,6 @@ export function checkIpcCommands(
   badNames: string[];
 };
 export function readSources(root: string): {
-  libSource: string;
+  registrySource: string;
   frontendFiles: Record<string, string>;
 };
