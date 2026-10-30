@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { validateEndpointUrl } from "@/utils/providerInputValidation";
 import { ModelOrderButtons, moveItem } from "./shared/ModelOrderButtons";
 import {
   useState,
@@ -79,28 +80,12 @@ const BASE_URL_ERROR_I18N_KEY: Record<BaseUrlErrorCode, string> = {
   invalid: "hermes.form.baseUrlInvalid",
 };
 
-const TEMPLATE_TOKEN_RE = /\$\{[^}]+\}/g;
-
 /**
  * Hermes 0.10.0+ rejects `base_url` entries that don't parse as proper URLs
- * (commit 2cdae233). Validate client-side so the error surfaces before the
- * request ever reaches Hermes' startup.
+ * (commit 2cdae233). Uses the validator shared by every app (FE-PROV-21).
  */
-function validateBaseUrl(raw: string): BaseUrlErrorCode | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return "empty";
-  // Presets like KAT-Coder embed `${VAR}` tokens — swap them before URL parse.
-  const candidate = trimmed.replace(TEMPLATE_TOKEN_RE, "placeholder");
-  let u: URL;
-  try {
-    u = new URL(candidate);
-  } catch {
-    return "invalid";
-  }
-  if (!u.protocol.startsWith("http")) return "scheme";
-  if (!u.hostname) return "invalid";
-  return null;
-}
+const validateBaseUrl = (raw: string): BaseUrlErrorCode | null =>
+  validateEndpointUrl(raw);
 
 interface AdvancedSectionProps {
   open: boolean;

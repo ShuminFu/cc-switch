@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { Download, Plus, Trash2, ChevronRight, Loader2 } from "lucide-react";
 import { ApiKeySection, ModelDropdown } from "./shared";
+import { useEndpointUrlError } from "./shared/useEndpointUrlError";
 import {
   fetchModelsForConfig,
   showFetchModelsError,
@@ -263,6 +264,7 @@ export function OpenCodeFormFields({
   onExtraOptionsChange,
 }: OpenCodeFormFieldsProps) {
   const { t } = useTranslation();
+  const baseUrlError = useEndpointUrlError(baseUrl);
 
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
@@ -652,13 +654,18 @@ export function OpenCodeFormFields({
           value={baseUrl}
           onChange={(e) => onBaseUrlChange(e.target.value)}
           placeholder="https://api.example.com/v1"
+          {...baseUrlError.inputProps}
         />
-        <p className="text-xs text-muted-foreground">
-          {t("opencode.baseUrlHint", {
-            defaultValue:
-              "The base URL for the API endpoint. Leave empty to use the default endpoint for official SDKs.",
-          })}
-        </p>
+        {baseUrlError.message ? (
+          <p className="text-xs text-destructive">{baseUrlError.message}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t("opencode.baseUrlHint", {
+              defaultValue:
+                "The base URL for the API endpoint. Leave empty to use the default endpoint for official SDKs.",
+            })}
+          </p>
+        )}
       </div>
 
       {/* Headers Editor */}

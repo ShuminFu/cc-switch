@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ModelOrderButtons, moveItem } from "./shared/ModelOrderButtons";
+import { useEndpointUrlError } from "./shared/useEndpointUrlError";
 import { useState, useRef, useCallback } from "react";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -89,6 +90,7 @@ export function OpenClawFormFields({
   onUserAgentChange,
 }: OpenClawFormFieldsProps) {
   const { t } = useTranslation();
+  const baseUrlError = useEndpointUrlError(baseUrl);
   // Keyed by the stable row key, not the index, so deleting a row does not
   // move the expanded state onto its neighbour (FE-PROV-11).
   const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>(
@@ -255,12 +257,17 @@ export function OpenClawFormFields({
           value={baseUrl}
           onChange={(e) => onBaseUrlChange(e.target.value)}
           placeholder="https://api.example.com/v1"
+          {...baseUrlError.inputProps}
         />
-        <p className="text-xs text-muted-foreground">
-          {t("openclaw.baseUrlHint", {
-            defaultValue: "供应商的 API 端点地址。",
-          })}
-        </p>
+        {baseUrlError.message ? (
+          <p className="text-xs text-destructive">{baseUrlError.message}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t("openclaw.baseUrlHint", {
+              defaultValue: "供应商的 API 端点地址。",
+            })}
+          </p>
+        )}
       </div>
 
       {/* API Key */}
