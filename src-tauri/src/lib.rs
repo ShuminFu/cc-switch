@@ -218,25 +218,17 @@ fn emit_or_buffer_deeplink(app: &tauri::AppHandle, item: crate::commands::Pendin
 }
 
 /// 更新托盘菜单的Tauri命令
+///
+/// 前端在每次 mutation 后都会调用它，经常与后端自己的刷新成串到达；
+/// 这里只登记一次去抖重建（菜单内容未变化时不会替换菜单），不在命令线程上
+/// 同步读库和构建菜单。返回值表示托盘是否存在（重建请求已登记）。
 #[tauri::command]
-async fn update_tray_menu(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<bool, String> {
-    match tray::create_tray_menu(&app, state.inner()) {
-        Ok(new_menu) => {
-            if let Some(tray) = app.tray_by_id(tray::TRAY_ID) {
-                tray.set_menu(Some(new_menu))
-                    .map_err(|e| format!("更新托盘菜单失败: {e}"))?;
-                return Ok(true);
-            }
-            Ok(false)
-        }
-        Err(err) => {
-            log::error!("创建托盘菜单失败: {err}");
-            Ok(false)
-        }
+async fn update_tray_menu(app: tauri::AppHandle) -> Result<bool, String> {
+    if app.tray_by_id(tray::TRAY_ID).is_none() {
+        return Ok(false);
     }
+    tray::request_tray_rebuild(&app, false);
+    Ok(true)
 }
 
 #[cfg(target_os = "macos")]
