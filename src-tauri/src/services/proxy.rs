@@ -13,6 +13,7 @@ use crate::proxy::types::*;
 use crate::services::provider::{
     build_effective_settings_with_common_config, write_live_with_common_config,
 };
+use crate::services::takeover_snapshot::RawLiveSnapshot;
 use serde_json::{json, Map, Value};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1470,10 +1471,7 @@ impl ProxyService {
             if Self::live_has_proxy_placeholder_for_app(&AppType::Claude, &config) {
                 log::warn!("claude Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live");
             } else {
-                let json_str = serde_json::to_string(&config)
-                    .map_err(|e| format!("序列化 Claude 配置失败: {e}"))?;
-                self.db
-                    .save_live_backup("claude", &json_str)
+                self.save_takeover_backup(&AppType::Claude, &config)
                     .await
                     .map_err(|e| format!("备份 Claude 配置失败: {e}"))?;
             }
@@ -1484,10 +1482,7 @@ impl ProxyService {
             if Self::live_has_proxy_placeholder_for_app(&AppType::Codex, &config) {
                 log::warn!("codex Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live");
             } else {
-                let json_str = serde_json::to_string(&config)
-                    .map_err(|e| format!("序列化 Codex 配置失败: {e}"))?;
-                self.db
-                    .save_live_backup("codex", &json_str)
+                self.save_takeover_backup(&AppType::Codex, &config)
                     .await
                     .map_err(|e| format!("备份 Codex 配置失败: {e}"))?;
             }
@@ -1498,10 +1493,7 @@ impl ProxyService {
             if Self::live_has_proxy_placeholder_for_app(&AppType::Gemini, &config) {
                 log::warn!("gemini Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live");
             } else {
-                let json_str = serde_json::to_string(&config)
-                    .map_err(|e| format!("序列化 Gemini 配置失败: {e}"))?;
-                self.db
-                    .save_live_backup("gemini", &json_str)
+                self.save_takeover_backup(&AppType::Gemini, &config)
                     .await
                     .map_err(|e| format!("备份 Gemini 配置失败: {e}"))?;
             }
@@ -1512,10 +1504,7 @@ impl ProxyService {
             if Self::live_has_proxy_placeholder_for_app(&AppType::GrokBuild, &config) {
                 log::warn!("grokbuild Live 已被代理接管，不备份；下次 stop 会从 SSOT 重建 Live");
             } else {
-                let json_str = serde_json::to_string(&config)
-                    .map_err(|e| format!("序列化 Grok Build 配置失败: {e}"))?;
-                self.db
-                    .save_live_backup("grokbuild", &json_str)
+                self.save_takeover_backup(&AppType::GrokBuild, &config)
                     .await
                     .map_err(|e| format!("备份 Grok Build 配置失败: {e}"))?;
             }
@@ -1544,14 +1533,73 @@ impl ProxyService {
             return Ok(());
         }
 
-        let json_str = serde_json::to_string(&config)
-            .map_err(|e| format!("序列化 {app_type_str} 配置失败: {e}"))?;
-        self.db
-            .save_live_backup(app_type_str, &json_str)
+        self.save_takeover_backup(app_type, &config)
             .await
             .map_err(|e| format!("备份 {app_type_str} 配置失败: {e}"))?;
 
         Ok(())
+    }
+
+    /// 保存接管前的 Live 备份；`unified` 引擎还会附上 live 文件的原始字节快照
+    ///（CCS-152），恢复时据此逐字节还原。
+    ///
+    /// 快照只在原文与刚读到的 `config` 一致时记录：读完 `config` 后若 live 又被
+    /// 改写，快照与备份不再对应，宁可不记录（恢复回退为按备份 JSON 写入）。
+    async fn save_takeover_backup(&self, app_type: &AppType, config: &Value) -> Result<(), String> {
+        let app_type_str = app_type.as_str();
+        let json_str = serde_json::to_string(config)
+            .map_err(|e| format!("序列化 {app_type_str} 配置失败: {e}"))?;
+        self.db
+            .save_live_backup(app_type_str, &json_str)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !crate::settings::takeover_engine().uses_raw_snapshot() {
+            return Ok(());
+        }
+        let Some(snapshot) = RawLiveSnapshot::capture(app_type) else {
+            return Ok(());
+        };
+        match self.read_live_for_takeover(app_type) {
+            Ok(current) if current == *config => {}
+            _ => {
+                log::warn!("{app_type_str} Live 在备份期间发生变化，不记录接管快照");
+                return Ok(());
+            }
+        }
+        let raw = snapshot.to_json()?;
+        if let Err(e) = self
+            .db
+            .save_live_backup_raw_snapshot(app_type_str, &raw)
+            .await
+        {
+            // 快照只影响恢复后的格式，保存失败不阻止接管
+            log::warn!("保存 {app_type_str} 接管快照失败（恢复将按备份 JSON 写入）: {e}");
+        }
+        Ok(())
+    }
+
+    /// 按备份写回 Live 之后，用接管快照逐字节还原 live 文件（CCS-152）。
+    ///
+    /// 仅当备份行仍带快照（即备份未被热切换等路径重写）且引擎为 `unified` 时生效；
+    /// 失败只记录警告：此时 live 已按备份写好，只是格式可能与接管前不同。
+    async fn restore_takeover_raw_snapshot(&self, app_type: &AppType) {
+        if !crate::settings::takeover_engine().uses_raw_snapshot() {
+            return;
+        }
+        let app_type_str = app_type.as_str();
+        let raw = match self.db.get_live_backup_raw_snapshot(app_type_str).await {
+            Ok(Some(raw)) => raw,
+            Ok(None) => return,
+            Err(e) => {
+                log::warn!("读取 {app_type_str} 接管快照失败: {e}");
+                return;
+            }
+        };
+        match RawLiveSnapshot::from_json(&raw).and_then(|snapshot| snapshot.restore(app_type)) {
+            Ok(()) => log::info!("{app_type_str} Live 文件已按接管快照逐字节还原"),
+            Err(e) => log::warn!("{app_type_str} 接管快照还原失败（保留按备份写入的结果）: {e}"),
+        }
     }
 
     /// 构造写入 Live 的代理地址（处理 0.0.0.0 / IPv6 等特殊情况）
@@ -1809,6 +1857,7 @@ impl ProxyService {
                     let config: Value = serde_json::from_str(&backup.original_config)
                         .map_err(|e| format!("解析 Claude 备份失败: {e}"))?;
                     self.write_claude_live(&config)?;
+                    self.restore_takeover_raw_snapshot(&AppType::Claude).await;
                     log::info!("Claude Live 配置已恢复");
                 }
             }
@@ -1817,6 +1866,7 @@ impl ProxyService {
                     let config: Value = serde_json::from_str(&backup.original_config)
                         .map_err(|e| format!("解析 Codex 备份失败: {e}"))?;
                     self.write_codex_live(&config)?;
+                    self.restore_takeover_raw_snapshot(&AppType::Codex).await;
                     log::info!("Codex Live 配置已恢复");
                 }
             }
@@ -1825,6 +1875,7 @@ impl ProxyService {
                     let config: Value = serde_json::from_str(&backup.original_config)
                         .map_err(|e| format!("解析 Gemini 备份失败: {e}"))?;
                     self.write_gemini_live(&config)?;
+                    self.restore_takeover_raw_snapshot(&AppType::Gemini).await;
                     log::info!("Gemini Live 配置已恢复");
                 }
             }
@@ -1833,6 +1884,8 @@ impl ProxyService {
                     let config: Value = serde_json::from_str(&backup.original_config)
                         .map_err(|e| format!("解析 Grok Build 备份失败: {e}"))?;
                     self.write_grok_live(&config)?;
+                    self.restore_takeover_raw_snapshot(&AppType::GrokBuild)
+                        .await;
                     log::info!("Grok Build Live 配置已恢复");
                 }
             }
@@ -1916,6 +1969,7 @@ impl ProxyService {
                 );
             } else {
                 self.write_live_config_for_app(app_type, &config)?;
+                self.restore_takeover_raw_snapshot(app_type).await;
                 log::info!("{app_type_str} Live 配置已从备份恢复");
                 return Ok(());
             }

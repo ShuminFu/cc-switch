@@ -26,6 +26,7 @@ pub mod sql_helpers;
 pub mod stream_check;
 pub mod subscription;
 pub mod sync_protocol;
+pub mod takeover_snapshot;
 pub mod usage_cache;
 pub mod usage_stats;
 pub mod webdav;

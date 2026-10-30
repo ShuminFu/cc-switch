@@ -570,3 +570,43 @@ fn migrate_v19_to_v20_backfills_rollup_cost_micros() -> Result<(), AppError> {
     assert!(audit_versions(&conn)?.ends_with(&[20]));
     Ok(())
 }
+
+#[test]
+fn migrate_v20_to_v21_adds_live_backup_raw_snapshot() -> Result<(), AppError> {
+    let conn = Connection::open_in_memory()?;
+    Database::apply_schema_migrations_up_to(&conn, 20)?;
+    conn.execute(
+        "INSERT INTO proxy_live_backup (app_type, original_config, backed_up_at)
+         VALUES ('claude', '{\"env\":{}}', '2026-05-01T00:00:00Z')",
+        [],
+    )?;
+
+    Database::apply_schema_migrations_up_to(&conn, 21)?;
+
+    let (config, raw): (String, Option<String>) = conn.query_row(
+        "SELECT original_config, raw_snapshot FROM proxy_live_backup WHERE app_type = 'claude'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(config, "{\"env\":{}}", "existing backup is kept");
+    assert_eq!(raw, None, "existing backups carry no raw snapshot");
+
+    // INSERT OR REPLACE（save_live_backup）整行重写时快照随之清空
+    conn.execute(
+        "UPDATE proxy_live_backup SET raw_snapshot = 'x' WHERE app_type = 'claude'",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR REPLACE INTO proxy_live_backup (app_type, original_config, backed_up_at)
+         VALUES ('claude', '{}', '2026-05-02T00:00:00Z')",
+        [],
+    )?;
+    let raw: Option<String> = conn.query_row(
+        "SELECT raw_snapshot FROM proxy_live_backup WHERE app_type = 'claude'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(raw, None, "rewriting the backup drops the stale snapshot");
+    assert!(audit_versions(&conn)?.ends_with(&[21]));
+    Ok(())
+}

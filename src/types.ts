@@ -369,6 +369,8 @@ export interface Settings {
   stickySessionRouting?: boolean;
   // Proxy protocol conversion engine; "legacy" keeps the original converters
   codecEngine?: "legacy" | "ir";
+  // Proxy takeover engine; "legacy" restores live configs from the JSON backup only
+  takeoverEngine?: "legacy" | "unified";
   // Whether to show the project profile switcher on the main page header
   showProfileSwitcher?: boolean;
   // Preserve Codex ChatGPT login in auth.json when switching third-party providers

@@ -14,6 +14,7 @@ use crate::proxy::codec::CodecEngine;
 use crate::secret_store::{self, SecretPolicy};
 use crate::services::skill::{SkillStorageLocation, SyncMethod};
 use crate::services::sync_protocol::SyncKey;
+use crate::services::takeover_snapshot::TakeoverEngine;
 
 /// 自定义端点配置（历史兼容，实际存储在 provider.meta.custom_endpoints）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -550,6 +551,11 @@ pub struct AppSettings {
     /// bridges that have been migrated. Kept for one release as a fallback.
     #[serde(default, skip_serializing_if = "CodecEngine::is_legacy")]
     pub codec_engine: CodecEngine,
+    /// Proxy takeover engine (`takeoverEngine`): `unified` (default) also keeps
+    /// the original bytes of each live file and restores them verbatim, `legacy`
+    /// restores only from the JSON backup. Kept for one release as a fallback.
+    #[serde(default, skip_serializing_if = "TakeoverEngine::is_default")]
+    pub takeover_engine: TakeoverEngine,
     /// Whether to show the project profile switcher on the main page header
     #[serde(default = "default_show_profile_switcher")]
     pub show_profile_switcher: bool,
@@ -665,6 +671,7 @@ impl Default for AppSettings {
             enable_failover_toggle: false,
             sticky_session_routing: false,
             codec_engine: CodecEngine::Legacy,
+            takeover_engine: TakeoverEngine::default(),
             show_profile_switcher: true,
             preserve_codex_official_auth_on_switch: false,
             unify_codex_session_history: false,
@@ -1370,6 +1377,18 @@ pub fn codec_engine() -> CodecEngine {
             e.into_inner()
         })
         .codec_engine
+}
+
+/// The proxy takeover engine (see [`AppSettings::takeover_engine`]), read when
+/// live configs are backed up for takeover and when they are restored.
+pub fn takeover_engine() -> TakeoverEngine {
+    settings_store()
+        .read()
+        .unwrap_or_else(|e| {
+            log::warn!("设置锁已毒化，使用恢复值: {e}");
+            e.into_inner()
+        })
+        .takeover_engine
 }
 
 // ===== 当前供应商管理函数 =====

@@ -793,6 +793,42 @@ impl Database {
         Ok(())
     }
 
+    /// 为已保存的 Live 备份附上接管前 live 文件的原始字节快照（CCS-152）
+    ///
+    /// 只更新已有的备份行；之后任何 `save_live_backup` 都会整行重写并清空快照，
+    /// 因此快照只在备份仍是接管时那一份时才会被读到。
+    pub async fn save_live_backup_raw_snapshot(
+        &self,
+        app_type: &str,
+        raw_snapshot: &str,
+    ) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "UPDATE proxy_live_backup SET raw_snapshot = ?2 WHERE app_type = ?1",
+            rusqlite::params![app_type, raw_snapshot],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 读取 Live 备份附带的原始字节快照（无备份或无快照时为 `None`）
+    pub async fn get_live_backup_raw_snapshot(
+        &self,
+        app_type: &str,
+    ) -> Result<Option<String>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let result = conn.query_row(
+            "SELECT raw_snapshot FROM proxy_live_backup WHERE app_type = ?1",
+            rusqlite::params![app_type],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        match result {
+            Ok(snapshot) => Ok(snapshot),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::Database(e.to_string())),
+        }
+    }
+
     /// 检查是否存在任意 Live 配置备份
     pub async fn has_any_live_backup(&self) -> Result<bool, AppError> {
         let conn = lock_conn!(self.conn);

@@ -17,6 +17,7 @@ mod v017;
 mod v018;
 mod v019;
 mod v020;
+mod v021;
 
 use super::{Database, SCHEMA_VERSION};
 use crate::error::AppError;
@@ -185,6 +186,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "usage_daily_rollups.total_cost_micros integer micro-USD cost",
         db_compat: DbCompatImpact::Additive,
         up: |conn, _| v020::apply(conn),
+    },
+    Migration {
+        version: 21,
+        name: "proxy_live_backup.raw_snapshot byte-exact live files for takeover restore",
+        db_compat: DbCompatImpact::Additive,
+        up: |conn, _| v021::apply(conn),
     },
 ];
 
