@@ -5,6 +5,7 @@ import type { CodexApiFormat } from "@/types";
 import { deepClone } from "@/utils/deepClone";
 import { normalizeTomlText } from "@/utils/textNormalization";
 import { parse as parseToml } from "smol-toml";
+import i18n from "i18next";
 
 const isPlainObject = (value: unknown): value is Record<string, any> => {
   return Object.prototype.toString.call(value) === "[object Object]";
@@ -69,22 +70,31 @@ export interface UpdateCommonConfigResult {
   error?: string;
 }
 
-// 验证JSON配置格式
+// 验证JSON配置格式（错误文案走 i18n，fieldName 应传入已本地化的字段名）
 export const validateJsonConfig = (
   value: string,
-  fieldName: string = "配置",
+  fieldName?: string,
 ): string => {
   if (!value.trim()) {
     return "";
   }
+  const field =
+    fieldName ??
+    i18n.t("providerForm.validation.fieldConfig", { defaultValue: "Config" });
   try {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return `${fieldName}必须是 JSON 对象`;
+      return i18n.t("providerForm.validation.fieldMustBeObject", {
+        field,
+        defaultValue: "{{field}} must be a JSON object",
+      });
     }
     return "";
   } catch {
-    return `${fieldName}JSON格式错误，请检查语法`;
+    return i18n.t("providerForm.validation.fieldJsonSyntaxError", {
+      field,
+      defaultValue: "{{field}}: JSON format error, please check the syntax",
+    });
   }
 };
 
@@ -100,7 +110,10 @@ export const updateCommonConfigSnippet = (
   } catch (err) {
     return {
       updatedConfig: jsonString,
-      error: "配置 JSON 解析失败，无法应用通用配置",
+      error: i18n.t("providerForm.validation.commonConfigParseFailed", {
+        defaultValue:
+          "Config JSON could not be parsed, so the common config was not applied",
+      }),
     };
   }
 
@@ -111,7 +124,12 @@ export const updateCommonConfigSnippet = (
   }
 
   // 使用统一的验证函数
-  const snippetError = validateJsonConfig(snippetString, "通用配置片段");
+  const snippetError = validateJsonConfig(
+    snippetString,
+    i18n.t("providerForm.validation.fieldCommonConfigSnippet", {
+      defaultValue: "Common config snippet",
+    }),
+  );
   if (snippetError) {
     return {
       updatedConfig: JSON.stringify(config, null, 2),

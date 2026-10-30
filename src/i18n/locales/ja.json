@@ -1168,7 +1168,20 @@
     "fetchModelsEndpointNotFound": "利用可能なモデル一覧エンドポイントが見つかりません。Base URL を確認するか、プロバイダーが該当 API を公開しているかご確認ください",
     "fetchModelsTimeout": "リクエストがタイムアウトしました。ネットワーク接続を確認してください",
     "providerKeyStatusLoading": "プロバイダーキーの状態を読み込み中です。しばらくしてから再試行してください",
-    "requiredFields": "プロバイダー名、API エンドポイント、API Key、モデルを入力してください"
+    "requiredFields": "プロバイダー名、API エンドポイント、API Key、モデルを入力してください",
+    "validation": {
+      "invalidUrl": "有効な URL を入力してください",
+      "configJsonInvalid": "設定 JSON の形式が不正です",
+      "jsonError": "JSON 形式エラー: {{detail}}",
+      "jsonErrorAtPosition": "JSON 形式エラー: {{detail}}（位置: {{position}}）",
+      "jsonErrorAtLineColumn": "JSON 形式エラー: {{line}} 行目、{{column}} 列目",
+      "fieldConfig": "設定",
+      "fieldCommonConfigSnippet": "共通設定スニペット",
+      "fieldExtractedConfig": "抽出した設定",
+      "fieldMustBeObject": "{{field}}は JSON オブジェクトである必要があります",
+      "fieldJsonSyntaxError": "{{field}}の JSON 形式が不正です。構文を確認してください",
+      "commonConfigParseFailed": "設定 JSON を解析できないため、共通設定を適用できませんでした"
+    }
   },
   "copilot": {
     "authSection": "GitHub Copilot 認証",

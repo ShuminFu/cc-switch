@@ -1168,7 +1168,20 @@
     "fetchModelsEndpointNotFound": "No reachable models endpoint found. Please check the Base URL or confirm whether the provider exposes this API.",
     "fetchModelsTimeout": "Request timed out, please check network connection",
     "providerKeyStatusLoading": "Still loading provider key status, please try again in a moment",
-    "requiredFields": "Please fill in the provider name, API endpoint, API Key and model"
+    "requiredFields": "Please fill in the provider name, API endpoint, API Key and model",
+    "validation": {
+      "invalidUrl": "Please enter a valid URL",
+      "configJsonInvalid": "Config JSON format error",
+      "jsonError": "JSON format error: {{detail}}",
+      "jsonErrorAtPosition": "JSON format error: {{detail}} (position {{position}})",
+      "jsonErrorAtLineColumn": "JSON format error: line {{line}}, column {{column}}",
+      "fieldConfig": "Config",
+      "fieldCommonConfigSnippet": "Common config snippet",
+      "fieldExtractedConfig": "Extracted config",
+      "fieldMustBeObject": "{{field}} must be a JSON object",
+      "fieldJsonSyntaxError": "{{field}}: JSON format error, please check the syntax",
+      "commonConfigParseFailed": "Config JSON could not be parsed, so the common config was not applied"
+    }
   },
   "copilot": {
     "authSection": "GitHub Copilot Authentication",

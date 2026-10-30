@@ -1168,7 +1168,20 @@
     "fetchModelsEndpointNotFound": "未找到可用的模型清單端點，請檢查 Base URL 或確認供應商是否開放該 API",
     "fetchModelsTimeout": "請求逾時，請檢查網路連線",
     "providerKeyStatusLoading": "正在載入供應商標識狀態，請稍後再試",
-    "requiredFields": "請填寫供應商名稱、API 位址、API Key 和模型"
+    "requiredFields": "請填寫供應商名稱、API 位址、API Key 和模型",
+    "validation": {
+      "invalidUrl": "請輸入有效的網址",
+      "configJsonInvalid": "設定 JSON 格式錯誤",
+      "jsonError": "JSON 格式錯誤：{{detail}}",
+      "jsonErrorAtPosition": "JSON 格式錯誤：{{detail}}（位置：{{position}}）",
+      "jsonErrorAtLineColumn": "JSON 格式錯誤：第 {{line}} 行，第 {{column}} 欄",
+      "fieldConfig": "設定",
+      "fieldCommonConfigSnippet": "通用設定片段",
+      "fieldExtractedConfig": "擷取的設定",
+      "fieldMustBeObject": "{{field}}必須是 JSON 物件",
+      "fieldJsonSyntaxError": "{{field}} JSON 格式錯誤，請檢查語法",
+      "commonConfigParseFailed": "設定 JSON 解析失敗，無法套用通用設定"
+    }
   },
   "copilot": {
     "authSection": "GitHub Copilot 驗證",

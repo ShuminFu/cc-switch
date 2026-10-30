@@ -258,7 +258,10 @@ export function useCommonConfigSnippet({
       }
 
       // 验证JSON格式
-      const validationError = validateJsonConfig(value, "通用配置片段");
+      const validationError = validateJsonConfig(
+        value,
+        t("providerForm.validation.fieldCommonConfigSnippet"),
+      );
       if (validationError) {
         setCommonConfigError(validationError);
       } else {
@@ -305,7 +308,7 @@ export function useCommonConfigSnippet({
         }, 0);
       }
     },
-    [commonConfigSnippet, settingsConfig, useCommonConfig, onConfigChange],
+    [commonConfigSnippet, settingsConfig, useCommonConfig, onConfigChange, t],
   );
 
   // 当配置变化时检查是否包含通用配置（但避免在通过通用配置更新时检查）
@@ -337,7 +340,10 @@ export function useCommonConfigSnippet({
       }
 
       // 验证 JSON 格式
-      const validationError = validateJsonConfig(extracted, "提取的配置");
+      const validationError = validateJsonConfig(
+        extracted,
+        t("providerForm.validation.fieldExtractedConfig"),
+      );
       if (validationError) {
         setCommonConfigError(validationError);
         return;
