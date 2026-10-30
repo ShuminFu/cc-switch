@@ -216,7 +216,7 @@ export function useProviderActions(
           provider.meta?.claudeDesktopMode === "proxy"
         ) {
           proxyRequiredReason = t("notifications.proxyReasonClaudeDesktop", {
-            defaultValue: "使用 Claude Desktop 本地路由模式",
+            defaultValue: "uses Claude Desktop local routing mode",
           });
         } else if (
           provider.meta?.isFullUrl &&

@@ -277,7 +277,7 @@ export function RequestLogTable({
                             }`}
                           >
                             {unpriced
-                              ? t("usage.unpriced", "未定价")
+                              ? t("usage.unpriced", "Unpriced")
                               : fmtUsd(log.totalCostUsd, 4)}
                           </div>
                           {parseFiniteNumber(log.costMultiplier) != null &&

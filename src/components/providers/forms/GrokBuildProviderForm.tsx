@@ -302,7 +302,8 @@ export function GrokBuildProviderForm({
     ) {
       toast.error(
         t("providerForm.requiredFields", {
-          defaultValue: "请填写供应商名称、API 地址、API Key 和模型",
+          defaultValue:
+            "Please fill in the provider name, API endpoint, API Key and model",
         }),
       );
       return;

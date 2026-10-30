@@ -322,7 +322,8 @@ export function useCodexCommonConfig({
       if (!parsedSnippet.hasContent) {
         setCommonConfigError(
           t("codexConfig.noCommonConfigToApply", {
-            defaultValue: "通用配置片段为空或没有可写入的内容",
+            defaultValue:
+              "The common config snippet is empty or has nothing to write",
           }),
         );
         setUseCommonConfig(false);

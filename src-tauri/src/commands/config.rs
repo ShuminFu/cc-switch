@@ -17,28 +17,29 @@ pub async fn get_claude_config_status() -> Result<ConfigStatus, String> {
 
 use std::str::FromStr;
 
-fn invalid_json_format_error(error: serde_json::Error) -> String {
-    let lang = settings::get_settings()
+/// 当前提示语言：优先用户设置，未设置（首次安装）时按系统区域推断，
+/// 未知区域回退到英文（与前端 `getInitialLanguage` 和托盘一致）。
+fn current_message_language() -> String {
+    settings::get_settings()
         .language
-        .unwrap_or_else(|| "zh".to_string());
+        .unwrap_or_else(|| crate::tray::detect_system_tray_language().to_string())
+}
 
-    match lang.as_str() {
-        "en" => format!("Invalid JSON format: {error}"),
-        "ja" => format!("JSON形式が無効です: {error}"),
-        _ => format!("无效的 JSON 格式: {error}"),
+fn format_error_message(lang: &str, format: &str, error: &dyn std::fmt::Display) -> String {
+    match lang {
+        "zh" => format!("无效的 {format} 格式: {error}"),
+        "zh-TW" => format!("無效的 {format} 格式: {error}"),
+        "ja" => format!("{format}形式が無効です: {error}"),
+        _ => format!("Invalid {format} format: {error}"),
     }
 }
 
-fn invalid_toml_format_error(error: toml_edit::TomlError) -> String {
-    let lang = settings::get_settings()
-        .language
-        .unwrap_or_else(|| "zh".to_string());
+fn invalid_json_format_error(error: serde_json::Error) -> String {
+    format_error_message(&current_message_language(), "JSON", &error)
+}
 
-    match lang.as_str() {
-        "en" => format!("Invalid TOML format: {error}"),
-        "ja" => format!("TOML形式が無効です: {error}"),
-        _ => format!("无效的 TOML 格式: {error}"),
-    }
+fn invalid_toml_format_error(error: toml_edit::TomlError) -> String {
+    format_error_message(&current_message_language(), "TOML", &error)
 }
 
 fn validate_common_config_snippet(app_type: &str, snippet: &str) -> Result<(), String> {
@@ -383,7 +384,32 @@ pub async fn set_common_config_snippet(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_common_config_snippet;
+    use super::{format_error_message, validate_common_config_snippet};
+
+    #[test]
+    fn format_error_message_localizes_and_falls_back_to_english() {
+        assert_eq!(
+            format_error_message("en", "JSON", &"boom"),
+            "Invalid JSON format: boom"
+        );
+        assert_eq!(
+            format_error_message("zh", "TOML", &"boom"),
+            "无效的 TOML 格式: boom"
+        );
+        assert_eq!(
+            format_error_message("zh-TW", "JSON", &"boom"),
+            "無效的 JSON 格式: boom"
+        );
+        assert_eq!(
+            format_error_message("ja", "JSON", &"boom"),
+            "JSON形式が無効です: boom"
+        );
+        // 未知语言码回退到英文，而不是简体中文
+        assert_eq!(
+            format_error_message("de", "JSON", &"boom"),
+            "Invalid JSON format: boom"
+        );
+    }
 
     #[test]
     fn validate_common_config_snippet_accepts_comment_only_codex_snippet() {
