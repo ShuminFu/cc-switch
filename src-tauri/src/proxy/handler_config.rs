@@ -20,6 +20,36 @@ pub type StreamModelExtractor = fn(&[Value], &str) -> String;
 /// token/chunk 高频路径上解析与 usage 无关的事件。
 pub type StreamUsageEventFilter = fn(&str) -> bool;
 
+/// 流式 usage 收集器保留哪些已解析事件（PERF-07）。
+///
+/// 解析器只需要「最后一个 usage 事件」与「首个带模型名的事件」时，没有必要把
+/// 整条流的每个 chunk 都以 `serde_json::Value` 形式留到流结束。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamEventRetention {
+    /// 保留全部被过滤器选中的事件（事件少或解析器依赖顺序语义时使用）。
+    All,
+    /// 只保留首个带 `model_key` 的事件与最后一个 usage 事件（至多两个）。
+    LastUsage {
+        /// usage 所在字段（OpenAI: `usage`，Gemini: `usageMetadata`）
+        usage_key: &'static str,
+        /// 为 true 时 `usage: null` 不算 usage 事件（OpenAI 每个 chunk 都带 null）
+        ignore_null_usage: bool,
+        /// 模型名字段（OpenAI: `model`，Gemini: `modelVersion`）
+        model_key: &'static str,
+    },
+}
+
+/// 流式响应在中途失败时，向客户端补发的协议终止错误事件格式（PROXY-09）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamErrorFormat {
+    /// Anthropic Messages：`event: error`
+    Anthropic,
+    /// OpenAI Chat Completions / Gemini：`data: {"error": {...}}`
+    OpenAiChat,
+    /// OpenAI Responses：`event: response.failed`
+    Responses,
+}
+
 /// 各 API 的使用量解析配置
 #[derive(Clone, Copy)]
 pub struct UsageParserConfig {
@@ -31,6 +61,10 @@ pub struct UsageParserConfig {
     pub model_extractor: StreamModelExtractor,
     /// 流式 usage 事件预过滤器
     pub stream_event_filter: Option<StreamUsageEventFilter>,
+    /// 流式 usage 事件保留策略
+    pub stream_event_retention: StreamEventRetention,
+    /// 流中途失败时补发的终止错误事件格式
+    pub stream_error_format: StreamErrorFormat,
     /// 应用类型字符串（用于日志记录）
     pub app_type_str: &'static str,
 }
@@ -141,6 +175,8 @@ pub const CLAUDE_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
     response_parser: TokenUsage::from_claude_response,
     model_extractor: claude_model_extractor,
     stream_event_filter: Some(claude_stream_usage_event_filter),
+    stream_event_retention: StreamEventRetention::All,
+    stream_error_format: StreamErrorFormat::Anthropic,
     app_type_str: "claude",
 };
 
@@ -150,6 +186,12 @@ pub const OPENAI_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
     response_parser: TokenUsage::from_openai_response,
     model_extractor: openai_model_extractor,
     stream_event_filter: Some(openai_stream_usage_event_filter),
+    stream_event_retention: StreamEventRetention::LastUsage {
+        usage_key: "usage",
+        ignore_null_usage: true,
+        model_key: "model",
+    },
+    stream_error_format: StreamErrorFormat::OpenAiChat,
     app_type_str: "codex",
 };
 
@@ -159,6 +201,8 @@ pub const CODEX_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
     response_parser: TokenUsage::from_codex_response_auto,
     model_extractor: codex_auto_model_extractor,
     stream_event_filter: Some(codex_stream_usage_event_filter),
+    stream_event_retention: StreamEventRetention::All,
+    stream_error_format: StreamErrorFormat::Responses,
     app_type_str: "codex",
 };
 
@@ -168,6 +212,12 @@ pub const GEMINI_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
     response_parser: TokenUsage::from_gemini_response,
     model_extractor: gemini_model_extractor,
     stream_event_filter: Some(gemini_stream_usage_event_filter),
+    stream_event_retention: StreamEventRetention::LastUsage {
+        usage_key: "usageMetadata",
+        ignore_null_usage: false,
+        model_key: "modelVersion",
+    },
+    stream_error_format: StreamErrorFormat::OpenAiChat,
     app_type_str: "gemini",
 };
 

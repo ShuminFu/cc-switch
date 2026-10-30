@@ -12,11 +12,13 @@ use super::{
     error_mapper::{get_error_message, map_proxy_error_to_status},
     forwarder::ActiveConnectionGuard,
     handler_config::{
-        claude_stream_usage_event_filter, codex_stream_usage_event_filter, CLAUDE_PARSER_CONFIG,
-        CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG, OPENAI_PARSER_CONFIG,
+        claude_stream_usage_event_filter, codex_stream_usage_event_filter, ResponseUsageParser,
+        StreamErrorFormat, CLAUDE_PARSER_CONFIG, CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG,
+        OPENAI_PARSER_CONFIG,
     },
     handler_context::RequestContext,
     providers::{
+        chat_tool_call_slots::ChatToolCallSlots,
         codex_chat_common::extract_reasoning_field_text,
         codex_chat_history::record_responses_sse_stream,
         get_adapter, get_claude_api_format,
@@ -32,9 +34,9 @@ use super::{
         transform_responses,
     },
     response_processor::{
-        create_logged_passthrough_stream, process_response, read_decoded_body,
-        strip_entity_headers_for_rebuilt_body, strip_hop_by_hop_response_headers,
-        usage_logging_enabled, SseUsageCollector,
+        converted_stream_usage_collector, create_logged_passthrough_stream, process_response,
+        read_decoded_body, strip_entity_headers_for_rebuilt_body,
+        strip_hop_by_hop_response_headers, usage_logging_enabled, UsageLogTarget, UsageSource,
     },
     server::ProxyState,
     sse::{strip_sse_field, take_sse_block},
@@ -43,7 +45,6 @@ use super::{
     ProxyError,
 };
 use crate::app_config::AppType;
-use crate::database::PRICING_SOURCE_REQUEST;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use bytes::Bytes;
 use http_body_util::BodyExt;
@@ -171,8 +172,8 @@ async fn handle_messages_for_app(
         .await
         .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
         .to_bytes();
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value =
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -197,7 +198,7 @@ async fn handle_messages_for_app(
             &app_type,
             method,
             endpoint,
-            body.clone(),
+            &body,
             headers,
             extensions,
             ctx.get_providers(),
@@ -253,6 +254,23 @@ async fn handle_messages_for_app(
     .await
 }
 
+/// 转换后的非流式响应记账（Converted 来源，零用量不落账）。
+fn record_converted_response_usage(
+    state: &ProxyState,
+    ctx: &RequestContext,
+    parser: ResponseUsageParser,
+    response: &Value,
+    status_code: u16,
+) {
+    if !usage_logging_enabled(state) {
+        return;
+    }
+    let target = UsageLogTarget::from_ctx(state, ctx, UsageSource::Converted);
+    if let Some((usage, model)) = target.usage_from_response(parser, response) {
+        target.spawn(usage, model, None, false, status_code);
+    }
+}
+
 fn validate_claude_desktop_gateway_auth(
     state: &ProxyState,
     headers: &axum::http::HeaderMap,
@@ -283,90 +301,6 @@ fn validate_claude_desktop_gateway_auth(
 /// Claude 格式转换处理（独有逻辑）
 ///
 /// 支持 OpenAI Chat Completions 和 Responses API 两种格式的转换
-struct ClaudeUsageLog {
-    model: String,
-    request_model: String,
-    outbound_model: String,
-    app_type: &'static str,
-    provider_id: String,
-    session_id: String,
-    usage: TokenUsage,
-    latency_ms: u64,
-    status_code: u16,
-    is_streaming: bool,
-}
-
-fn prepare_claude_usage_log(
-    ctx: &RequestContext,
-    response: &Value,
-    status_code: u16,
-    is_streaming: bool,
-) -> Option<ClaudeUsageLog> {
-    let usage =
-        TokenUsage::from_claude_response(response).filter(TokenUsage::has_billable_tokens)?;
-
-    let model = response
-        .get("model")
-        .and_then(Value::as_str)
-        .filter(|model| !model.is_empty())
-        .map(str::to_string)
-        .or_else(|| ctx.outbound_model.clone())
-        .unwrap_or_else(|| ctx.request_model.clone());
-
-    Some(ClaudeUsageLog {
-        model,
-        request_model: ctx.request_model.clone(),
-        outbound_model: ctx
-            .outbound_model
-            .clone()
-            .unwrap_or_else(|| ctx.request_model.clone()),
-        app_type: ctx.app_type_str,
-        provider_id: ctx.provider.id.clone(),
-        session_id: ctx.session_id.clone(),
-        usage,
-        latency_ms: ctx.latency_ms(),
-        status_code,
-        is_streaming,
-    })
-}
-
-async fn write_claude_usage_log(state: &ProxyState, log: ClaudeUsageLog) {
-    log_usage(
-        state,
-        &log.provider_id,
-        log.app_type,
-        &log.model,
-        &log.request_model,
-        &log.outbound_model,
-        log.usage,
-        log.latency_ms,
-        None,
-        log.is_streaming,
-        log.status_code,
-        Some(log.session_id),
-    )
-    .await;
-}
-
-fn spawn_claude_usage_log(
-    state: &ProxyState,
-    ctx: &RequestContext,
-    response: &Value,
-    status_code: u16,
-    is_streaming: bool,
-) {
-    if !usage_logging_enabled(state) {
-        return;
-    }
-    let Some(log) = prepare_claude_usage_log(ctx, response, status_code, is_streaming) else {
-        return;
-    };
-    let state = state.clone();
-    tokio::spawn(async move {
-        write_claude_usage_log(&state, log).await;
-    });
-}
-
 async fn handle_claude_transform(
     response: super::hyper_client::ProxyResponse,
     ctx: &RequestContext,
@@ -423,65 +357,14 @@ async fn handle_claude_transform(
         };
 
         // 创建使用量收集器；关闭 usage logging 时不要再解析转换后的 SSE。
-        let usage_collector = if usage_logging_enabled(state) {
-            let state = state.clone();
-            let provider_id = ctx.provider.id.clone();
-            let request_model = ctx.request_model.clone();
-            // 上游/转换层未回显模型时，优先用映射后的出站模型兜底（路由接管真值），
-            // 其次才是客户端请求别名。空字符串视为缺失（转换器对无回显上游会合成 ""）。
-            let fallback_model = ctx
-                .outbound_model
-                .clone()
-                .unwrap_or_else(|| ctx.request_model.clone());
-            let status_code = status.as_u16();
-            let start_time = ctx.start_time;
-            let session_id = ctx.session_id.clone();
-            // 用 ctx 的 app_type：Claude Desktop 网关也走此转换路径，硬编码
-            // "claude" 会把 claude-desktop 的行错记到 claude 名下
-            let app_type_str = ctx.app_type_str;
-
-            Some(SseUsageCollector::new(
-                start_time,
-                Some(claude_stream_usage_event_filter),
-                move |events, first_token_ms| {
-                    if let Some(usage) = TokenUsage::from_claude_stream_events(&events) {
-                        let model = usage
-                            .model
-                            .clone()
-                            .filter(|m| !m.is_empty())
-                            .unwrap_or_else(|| fallback_model.clone());
-                        let latency_ms = start_time.elapsed().as_millis() as u64;
-                        let state = state.clone();
-                        let provider_id = provider_id.clone();
-                        let session_id = session_id.clone();
-                        let request_model = request_model.clone();
-                        let outbound_model = fallback_model.clone();
-
-                        tokio::spawn(async move {
-                            log_usage(
-                                &state,
-                                &provider_id,
-                                app_type_str,
-                                &model,
-                                &request_model,
-                                &outbound_model,
-                                usage,
-                                latency_ms,
-                                first_token_ms,
-                                true,
-                                status_code,
-                                Some(session_id),
-                            )
-                            .await;
-                        });
-                    } else {
-                        log::debug!("[Claude] OpenRouter 流式响应缺少 usage 统计，跳过消费记录");
-                    }
-                },
-            ))
-        } else {
-            None
-        };
+        // 用 ctx 的 app_type：Claude Desktop 网关也走此转换路径。
+        let usage_collector = converted_stream_usage_collector(
+            state,
+            ctx,
+            status.as_u16(),
+            claude_stream_usage_event_filter,
+            TokenUsage::from_claude_stream_events,
+        );
 
         // 获取流式超时配置
         let timeout_config = ctx.streaming_timeout_config();
@@ -492,6 +375,7 @@ async fn handle_claude_transform(
             usage_collector,
             timeout_config,
             connection_guard,
+            StreamErrorFormat::Anthropic,
         );
 
         let mut headers = axum::http::HeaderMap::new();
@@ -595,12 +479,15 @@ async fn handle_claude_transform(
         Err(error) => {
             log::error!("[Claude] 转换响应失败: {error}");
             if usage_logging_enabled(state) {
-                if let Some(log) = raw_usage_response.as_ref().and_then(|response| {
-                    prepare_claude_usage_log(ctx, response, status.as_u16(), false)
+                let target = UsageLogTarget::from_ctx(state, ctx, UsageSource::Converted);
+                if let Some((usage, model)) = raw_usage_response.as_ref().and_then(|response| {
+                    target.usage_from_response(TokenUsage::from_claude_response, response)
                 }) {
                     // The upstream request already succeeded and consumed tokens. Persist
                     // usage before returning the terminal transform error to the client.
-                    write_claude_usage_log(state, log).await;
+                    target
+                        .write(usage, model, None, false, status.as_u16())
+                        .await;
                 }
             }
             return Err(error);
@@ -610,7 +497,13 @@ async fn handle_claude_transform(
     // 记录使用量
     // 全 0 usage 不落账（对齐 Codex 流式收集器的 skip）：SSE 聚合兜底救回的流
     // 在上游缺 stream_options.include_usage 时没有 usage，写入只会产生无意义空行
-    spawn_claude_usage_log(state, ctx, &anthropic_response, status.as_u16(), false);
+    record_converted_response_usage(
+        state,
+        ctx,
+        TokenUsage::from_claude_response,
+        &anthropic_response,
+        status.as_u16(),
+    );
 
     // 构建响应
     let mut builder = axum::response::Response::builder().status(status);
@@ -710,8 +603,8 @@ pub async fn handle_chat_completions(
         .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
         .to_bytes();
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value =
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, AppType::Codex, "Codex", "codex").await?;
@@ -728,7 +621,7 @@ pub async fn handle_chat_completions(
             &AppType::Codex,
             method,
             &endpoint,
-            body,
+            &body,
             headers,
             extensions,
             ctx.get_providers(),
@@ -800,8 +693,8 @@ async fn handle_responses_for_app(
         .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
         .to_bytes();
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value =
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -819,7 +712,7 @@ async fn handle_responses_for_app(
             &app_type,
             method,
             &endpoint,
-            body,
+            &body,
             headers,
             extensions,
             ctx.get_providers(),
@@ -915,8 +808,8 @@ async fn handle_responses_compact_for_app(
         .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
         .to_bytes();
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value =
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -934,7 +827,7 @@ async fn handle_responses_compact_for_app(
             &app_type,
             method,
             &endpoint,
-            body,
+            &body,
             headers,
             extensions,
             ctx.get_providers(),
@@ -1012,69 +905,15 @@ async fn handle_codex_chat_to_responses_transform(
         let sse_stream = create_responses_sse_stream_from_chat_with_context(stream, tool_context);
         let sse_stream = record_responses_sse_stream(sse_stream, state.codex_chat_history.clone());
 
-        let usage_collector = if usage_logging_enabled(state) {
-            let state = state.clone();
-            let provider_id = ctx.provider.id.clone();
-            let request_model = ctx.request_model.clone();
-            // 接管/模型覆写场景的归因兜底：出站真值优先于客户端请求别名
-            let fallback_model = ctx
-                .outbound_model
-                .clone()
-                .unwrap_or_else(|| ctx.request_model.clone());
-            let app_type_str = ctx.app_type_str;
-            let start_time = ctx.start_time;
-            let session_id = ctx.session_id.clone();
-
-            Some(SseUsageCollector::new(
-                start_time,
-                Some(codex_stream_usage_event_filter),
-                move |events, first_token_ms| {
-                    let usage =
-                        TokenUsage::from_codex_stream_events_auto(&events).unwrap_or_default();
-                    // 上游遵守 OpenAI 语义省略 usage 时，Chat→Responses 转换器会合成一个
-                    // 全 0 的 response.completed，from_codex_response 对 input/output 字段
-                    // 存在（哪怕=0）即返回 Some。缺 nonzero 闸门会让全 0 usage 也被写入：
-                    // message_id=None → dedup_request_id 退化为随机 UUID，无法去重，每笔
-                    // 请求插入一条无意义空行、虚增请求数。对齐 Claude transform handler 的 skip。
-                    if !usage.has_billable_tokens() {
-                        log::debug!("[Codex] 流式响应 usage 全 0 或缺失，跳过消费记录");
-                        return;
-                    }
-                    let model = usage
-                        .model
-                        .clone()
-                        .filter(|m| !m.is_empty())
-                        .unwrap_or_else(|| fallback_model.clone());
-                    let latency_ms = start_time.elapsed().as_millis() as u64;
-
-                    let state = state.clone();
-                    let provider_id = provider_id.clone();
-                    let request_model = request_model.clone();
-                    let outbound_model = fallback_model.clone();
-                    let session_id = session_id.clone();
-
-                    tokio::spawn(async move {
-                        log_usage(
-                            &state,
-                            &provider_id,
-                            app_type_str,
-                            &model,
-                            &request_model,
-                            &outbound_model,
-                            usage,
-                            latency_ms,
-                            first_token_ms,
-                            true,
-                            status.as_u16(),
-                            Some(session_id),
-                        )
-                        .await;
-                    });
-                },
-            ))
-        } else {
-            None
-        };
+        // 上游遵守 OpenAI 语义省略 usage 时，Chat→Responses 转换器会合成全 0 的
+        // response.completed；Converted 来源的零用量规则会跳过这类空行。
+        let usage_collector = converted_stream_usage_collector(
+            state,
+            ctx,
+            status.as_u16(),
+            codex_stream_usage_event_filter,
+            TokenUsage::from_codex_stream_events_auto,
+        );
 
         let logged_stream = create_logged_passthrough_stream(
             sse_stream,
@@ -1082,6 +921,7 @@ async fn handle_codex_chat_to_responses_transform(
             usage_collector,
             ctx.streaming_timeout_config(),
             connection_guard,
+            StreamErrorFormat::Responses,
         );
 
         let mut headers = axum::http::HeaderMap::new();
@@ -1153,46 +993,13 @@ async fn handle_codex_chat_to_responses_transform(
     // (transform_codex_chat.rs:1581)，from_codex_response 对 input/output 字段存在(哪怕=0)
     // 即返回 Some。用 has_billable_tokens 闸门跳过全 0，避免空行虚增请求数——与流式分支
     // 及 Claude transform handler 的 skip 行为对齐。
-    if let Some(usage) = TokenUsage::from_codex_response_auto(&responses_response)
-        .filter(TokenUsage::has_billable_tokens)
-    {
-        let model = responses_response
-            .get("model")
-            .and_then(|m| m.as_str())
-            .filter(|m| !m.is_empty())
-            .map(str::to_string)
-            .or_else(|| ctx.outbound_model.clone())
-            .unwrap_or_else(|| ctx.request_model.clone());
-        let request_model = ctx.request_model.clone();
-        let outbound_model = ctx
-            .outbound_model
-            .clone()
-            .unwrap_or_else(|| ctx.request_model.clone());
-        let app_type_str = ctx.app_type_str;
-        tokio::spawn({
-            let state = state.clone();
-            let provider_id = ctx.provider.id.clone();
-            let session_id = ctx.session_id.clone();
-            let latency_ms = ctx.latency_ms();
-            async move {
-                log_usage(
-                    &state,
-                    &provider_id,
-                    app_type_str,
-                    &model,
-                    &request_model,
-                    &outbound_model,
-                    usage,
-                    latency_ms,
-                    None,
-                    false,
-                    status.as_u16(),
-                    Some(session_id),
-                )
-                .await;
-            }
-        });
-    }
+    record_converted_response_usage(
+        state,
+        ctx,
+        TokenUsage::from_codex_response_auto,
+        &responses_response,
+        status.as_u16(),
+    );
 
     strip_entity_headers_for_rebuilt_body(&mut response_headers);
     strip_hop_by_hop_response_headers(&mut response_headers);
@@ -1318,46 +1125,13 @@ async fn handle_codex_anthropic_to_responses_transform(
             e
         })?;
 
-    if let Some(usage) = TokenUsage::from_codex_response_auto(&responses_response)
-        .filter(TokenUsage::has_billable_tokens)
-    {
-        let model = responses_response
-            .get("model")
-            .and_then(|m| m.as_str())
-            .filter(|m| !m.is_empty())
-            .map(str::to_string)
-            .or_else(|| ctx.outbound_model.clone())
-            .unwrap_or_else(|| ctx.request_model.clone());
-        let request_model = ctx.request_model.clone();
-        let outbound_model = ctx
-            .outbound_model
-            .clone()
-            .unwrap_or_else(|| ctx.request_model.clone());
-        let app_type_str = ctx.app_type_str;
-        tokio::spawn({
-            let state = state.clone();
-            let provider_id = ctx.provider.id.clone();
-            let session_id = ctx.session_id.clone();
-            let latency_ms = ctx.latency_ms();
-            async move {
-                log_usage(
-                    &state,
-                    &provider_id,
-                    app_type_str,
-                    &model,
-                    &request_model,
-                    &outbound_model,
-                    usage,
-                    latency_ms,
-                    None,
-                    false,
-                    status.as_u16(),
-                    Some(session_id),
-                )
-                .await;
-            }
-        });
-    }
+    record_converted_response_usage(
+        state,
+        ctx,
+        TokenUsage::from_codex_response_auto,
+        &responses_response,
+        status.as_u16(),
+    );
 
     strip_entity_headers_for_rebuilt_body(&mut response_headers);
     strip_hop_by_hop_response_headers(&mut response_headers);
@@ -1392,62 +1166,13 @@ fn build_codex_anthropic_sse_response(
     status: StatusCode,
     connection_guard: Option<ActiveConnectionGuard>,
 ) -> Result<axum::response::Response, ProxyError> {
-    let usage_collector = if usage_logging_enabled(state) {
-        let state = state.clone();
-        let provider_id = ctx.provider.id.clone();
-        let request_model = ctx.request_model.clone();
-        let fallback_model = ctx
-            .outbound_model
-            .clone()
-            .unwrap_or_else(|| ctx.request_model.clone());
-        let app_type_str = ctx.app_type_str;
-        let start_time = ctx.start_time;
-        let session_id = ctx.session_id.clone();
-
-        Some(SseUsageCollector::new(
-            start_time,
-            Some(codex_stream_usage_event_filter),
-            move |events, first_token_ms| {
-                let usage = TokenUsage::from_codex_stream_events_auto(&events).unwrap_or_default();
-                if !usage.has_billable_tokens() {
-                    log::debug!("[Codex] Anthropic streaming response usage is all-zero or missing, skipping usage recording");
-                    return;
-                }
-                let model = usage
-                    .model
-                    .clone()
-                    .filter(|m| !m.is_empty())
-                    .unwrap_or_else(|| fallback_model.clone());
-                let latency_ms = start_time.elapsed().as_millis() as u64;
-
-                let state = state.clone();
-                let provider_id = provider_id.clone();
-                let request_model = request_model.clone();
-                let outbound_model = fallback_model.clone();
-                let session_id = session_id.clone();
-
-                tokio::spawn(async move {
-                    log_usage(
-                        &state,
-                        &provider_id,
-                        app_type_str,
-                        &model,
-                        &request_model,
-                        &outbound_model,
-                        usage,
-                        latency_ms,
-                        first_token_ms,
-                        true,
-                        status.as_u16(),
-                        Some(session_id),
-                    )
-                    .await;
-                });
-            },
-        ))
-    } else {
-        None
-    };
+    let usage_collector = converted_stream_usage_collector(
+        state,
+        ctx,
+        status.as_u16(),
+        codex_stream_usage_event_filter,
+        TokenUsage::from_codex_stream_events_auto,
+    );
 
     let logged_stream = create_logged_passthrough_stream(
         sse_stream,
@@ -1455,6 +1180,7 @@ fn build_codex_anthropic_sse_response(
         usage_collector,
         ctx.streaming_timeout_config(),
         connection_guard,
+        StreamErrorFormat::Responses,
     );
 
     let mut headers = axum::http::HeaderMap::new();
@@ -1595,7 +1321,7 @@ fn codex_proxy_error_json(
                 "error": {
                     "message": get_error_message(error),
                     "type": "proxy_error",
-                    "code": codex_proxy_error_code(error),
+                    "code": error.code(),
                     "param": Value::Null,
                 }
             }),
@@ -1659,10 +1385,7 @@ fn codex_proxy_error_json(
     }
 
     if error_obj.get("code").map(Value::is_null).unwrap_or(true) {
-        error_obj.insert(
-            "code".to_string(),
-            Value::String(codex_proxy_error_code(error).to_string()),
-        );
+        error_obj.insert("code".to_string(), Value::String(error.code().to_string()));
     }
 
     if !error_obj.contains_key("param") {
@@ -1687,30 +1410,6 @@ fn codex_proxy_error_json(
     }
 
     body
-}
-
-fn codex_proxy_error_code(error: &ProxyError) -> &'static str {
-    match error {
-        ProxyError::ForwardFailed(_) => "cc_switch_forward_failed",
-        ProxyError::Timeout(_) | ProxyError::StreamIdleTimeout(_) => "cc_switch_timeout",
-        ProxyError::NoAvailableProvider => "cc_switch_no_available_provider",
-        ProxyError::AllProvidersCircuitOpen => "cc_switch_all_providers_circuit_open",
-        ProxyError::NoProvidersConfigured => "cc_switch_no_providers_configured",
-        ProxyError::MaxRetriesExceeded => "cc_switch_max_retries_exceeded",
-        ProxyError::ProviderUnhealthy(_) => "cc_switch_provider_unhealthy",
-        ProxyError::ConfigError(_) => "cc_switch_config_error",
-        ProxyError::TransformError(_) => "cc_switch_transform_error",
-        ProxyError::InvalidRequest(_) => "cc_switch_invalid_request",
-        ProxyError::AuthError(_) => "cc_switch_auth_error",
-        ProxyError::UpstreamError { .. } => "cc_switch_upstream_error",
-        ProxyError::DatabaseError(_) => "cc_switch_database_error",
-        ProxyError::Internal(_) => "cc_switch_internal_error",
-        ProxyError::AlreadyRunning
-        | ProxyError::NotRunning
-        | ProxyError::BindFailed(_)
-        | ProxyError::StopTimeout
-        | ProxyError::StopFailed(_) => "cc_switch_proxy_error",
-    }
 }
 
 fn compact_error_message(message: &str, max_chars: usize) -> String {
@@ -1752,8 +1451,7 @@ pub async fn handle_gemini(
     let body: Value = if body_bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&body_bytes)
-            .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?
     };
 
     // Gemini 的模型名称在 URI 中
@@ -1778,7 +1476,7 @@ pub async fn handle_gemini(
             &AppType::Gemini,
             method,
             endpoint,
-            body,
+            &body,
             headers,
             extensions,
             ctx.get_providers(),
@@ -2047,6 +1745,9 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
     // 进程（C1）。BTreeMap 既免去无界分配，又天然保持 index 有序输出。
     let mut tool_calls: std::collections::BTreeMap<usize, Value> =
         std::collections::BTreeMap::new();
+    // 与流式转换器共用的 slot 解析：缺 index 的网关按 id / name 区分并行调用，
+    // 不会把不同调用合并，也不会丢弃无 index 的分片。
+    let mut tool_slots = ChatToolCallSlots::default();
     let mut finish_reason = Value::Null;
     let mut usage = Value::Null;
     let mut saw_choice = false;
@@ -2161,6 +1862,7 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
                 content.clear();
                 reasoning_content.clear();
                 tool_calls.clear();
+                tool_slots = ChatToolCallSlots::default();
             }
             match payload.get("content") {
                 Some(Value::String(text)) => content.push_str(text),
@@ -2187,8 +1889,13 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
                 reasoning_content.push_str(&text);
             }
             if let Some(deltas) = payload.get("tool_calls").and_then(|t| t.as_array()) {
-                for (pos, tc) in deltas.iter().enumerate() {
-                    merge_tool_call_delta(&mut tool_calls, tc, pos);
+                for tc in deltas {
+                    let key = tool_slots.resolve(
+                        tc.get("index").and_then(Value::as_u64).map(|i| i as usize),
+                        tc.get("id").and_then(Value::as_str),
+                        tc.pointer("/function/name").and_then(Value::as_str),
+                    );
+                    merge_tool_call_delta(&mut tool_calls, tc, key);
                 }
             } else if let Some(fc) = payload.get("function_call").filter(|v| !v.is_null()) {
                 // legacy function_call（2023 弃用但仍有中转回传）→ 当单个 tool_call。
@@ -2200,7 +1907,12 @@ fn chat_sse_to_response_value(body: &str) -> Result<Value, ProxyError> {
                     "type": "function",
                     "function": fc,
                 });
-                merge_tool_call_delta(&mut tool_calls, &synthetic, 0);
+                let key = tool_slots.resolve(
+                    Some(0),
+                    synthetic.get("id").and_then(Value::as_str),
+                    synthetic.pointer("/function/name").and_then(Value::as_str),
+                );
+                merge_tool_call_delta(&mut tool_calls, &synthetic, key);
             }
             Ok(())
         };
@@ -2302,20 +2014,15 @@ fn envelope_value_meaningful(v: &Value) -> bool {
     }
 }
 
-/// 合并单条 tool_calls 增量到按 index 聚合的 BTreeMap：OpenAI 流式把 id/name 放
-/// 首个增量、arguments 分片下发，按 delta.index 定位目标；缺 index 时退到所在数组
-/// 中的位置（message 形态的完整 tool_calls 常不带 index，按 0 会互相覆盖）。
+/// 合并单条 tool_calls 增量到按 slot 聚合的 BTreeMap：OpenAI 流式把 id/name 放
+/// 首个增量、arguments 分片下发；slot 由 `ChatToolCallSlots` 解析（有 index 用
+/// index，缺 index 时按 id / name 区分，message 形态的完整 tool_calls 也不会互相覆盖）。
 fn merge_tool_call_delta(
     tool_calls: &mut std::collections::BTreeMap<usize, Value>,
     delta: &Value,
-    fallback_index: usize,
+    key: usize,
 ) {
-    let index = delta
-        .get("index")
-        .and_then(|i| i.as_u64())
-        .map(|i| i as usize)
-        .unwrap_or(fallback_index);
-    let target = tool_calls.entry(index).or_insert_with(|| {
+    let target = tool_calls.entry(key).or_insert_with(|| {
         json!({
             "id": "",
             "type": "function",
@@ -2387,63 +2094,6 @@ fn log_forward_error(
         None,
     ) {
         log::warn!("记录失败请求日志失败: {e}");
-    }
-}
-
-/// 记录请求使用量
-///
-/// `outbound_model` 是「按请求计价」模式的锚点：实际发往上游的模型
-/// （路由接管映射后的真值，无映射时等于 request_model）。
-#[allow(clippy::too_many_arguments)]
-async fn log_usage(
-    state: &ProxyState,
-    provider_id: &str,
-    app_type: &str,
-    model: &str,
-    request_model: &str,
-    outbound_model: &str,
-    usage: TokenUsage,
-    latency_ms: u64,
-    first_token_ms: Option<u64>,
-    is_streaming: bool,
-    status_code: u16,
-    session_id: Option<String>,
-) {
-    use super::usage::logger::UsageLogger;
-
-    if !usage_logging_enabled(state) {
-        return;
-    }
-
-    let logger = UsageLogger::new(&state.db);
-
-    let (multiplier, pricing_model_source) =
-        logger.resolve_pricing_config(provider_id, app_type).await;
-    let pricing_model = if pricing_model_source == PRICING_SOURCE_REQUEST {
-        outbound_model
-    } else {
-        model
-    };
-
-    let request_id = usage.dedup_request_id();
-
-    if let Err(e) = logger.log_with_calculation(
-        request_id,
-        provider_id.to_string(),
-        app_type.to_string(),
-        model.to_string(),
-        request_model.to_string(),
-        pricing_model.to_string(),
-        usage,
-        multiplier,
-        latency_ms,
-        first_token_ms,
-        status_code,
-        session_id,
-        None, // provider_type
-        is_streaming,
-    ) {
-        log::warn!("[USG-001] 记录使用量失败: {e}");
     }
 }
 
@@ -2822,6 +2472,29 @@ data: [DONE]\n\n";
     }
 
     #[test]
+    fn chat_sse_to_response_value_routes_index_less_parallel_tool_calls() {
+        // Gateways that omit `index` across separate chunks: distinct ids must stay
+        // distinct calls and id-less continuations attach to the latest call.
+        let sse = concat!(
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call_a\",\"function\":{\"name\":\"f\",\"arguments\":\"{\\\"x\\\"\"}}]}}]}\n\n",
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\":1}\"}}]}}]}\n\n",
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call_b\",\"function\":{\"name\":\"g\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let response = chat_sse_to_response_value(sse).unwrap();
+        let tool_calls = response["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap();
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0]["id"], "call_a");
+        assert_eq!(tool_calls[0]["function"]["arguments"], "{\"x\":1}");
+        assert_eq!(tool_calls[1]["id"], "call_b");
+        assert_eq!(tool_calls[1]["function"]["name"], "g");
+    }
+
+    #[test]
     fn chat_sse_to_response_value_empty_delta_falls_back_to_message_snapshot() {
         // C3：同一 choice 同时带空 delta:{} 与完整 message 快照——不能因 delta 键
         // 存在就短路到空 delta、丢掉 message 内容（finish_reason 还会击穿守卫）
@@ -3128,5 +2801,59 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
         assert_eq!(body["error"]["provider"], "HCAI");
         assert_eq!(body["error"]["model"], "gpt-5.5");
         assert_eq!(body["error"]["endpoint"], "/responses");
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        use http_body_util::BodyExt;
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        serde_json::from_slice(&bytes).expect("json body")
+    }
+
+    #[tokio::test]
+    async fn malformed_client_json_returns_400_invalid_request() {
+        use axum::response::IntoResponse;
+        let db = std::sync::Arc::new(crate::database::Database::memory().expect("db"));
+        let state = crate::proxy::response_processor::tests::build_state(db);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from("{"))
+            .unwrap();
+
+        let error = match super::handle_messages(axum::extract::State(state), request).await {
+            Ok(_) => panic!("malformed JSON must be rejected"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, ProxyError::InvalidRequest(_)));
+
+        let response = error.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["type"], "error");
+        assert_eq!(body["error"]["type"], "proxy_error");
+        assert_eq!(body["error"]["code"], "cc_switch_invalid_request");
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("line 1"));
+    }
+
+    #[tokio::test]
+    async fn malformed_codex_json_returns_400_invalid_request() {
+        let db = std::sync::Arc::new(crate::database::Database::memory().expect("db"));
+        let state = crate::proxy::response_processor::tests::build_state(db);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/v1/responses")
+            .body(axum::body::Body::from("not json"))
+            .unwrap();
+        let result = super::handle_responses(axum::extract::State(state), request).await;
+        assert!(matches!(result, Err(ProxyError::InvalidRequest(_))));
     }
 }
