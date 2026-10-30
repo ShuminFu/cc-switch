@@ -1,6 +1,6 @@
 # CC Switch ユーザーマニュアル
 
-> Claude Code / Claude Desktop / Codex / Gemini CLI / OpenCode / OpenClaw / Hermes オールインワンアシスタント
+> Claude Code / Claude Desktop / Codex / Gemini CLI / Grok Build / OpenCode / OpenClaw / Hermes オールインワンアシスタント
 
 ## 目次構成
 
@@ -12,7 +12,8 @@ CC Switch ユーザーマニュアル
 │   ├── 1.2 インストールガイド
 │   ├── 1.3 インターフェース概要
 │   ├── 1.4 クイックスタート
-│   └── 1.5 個人設定
+│   ├── 1.5 個人設定
+│   └── 1.6 プロジェクト
 │
 ├── 2. プロバイダー管理
 │   ├── 2.1 プロバイダーの追加
@@ -20,7 +21,8 @@ CC Switch ユーザーマニュアル
 │   ├── 2.3 プロバイダーの編集
 │   ├── 2.4 並べ替えと複製
 │   ├── 2.5 使用量クエリ
-│   └── 2.6 Claude Desktop
+│   ├── 2.6 Claude Desktop
+│   └── 2.7 Grok Build
 │
 ├── 3. 拡張機能
 │   ├── 3.1 MCP サーバー管理
@@ -53,7 +55,8 @@ CC Switch ユーザーマニュアル
 | [1.2-installation.md](./1-getting-started/1.2-installation.md) | Windows/macOS/Linux インストールガイド |
 | [1.3-interface.md](./1-getting-started/1.3-interface.md) | インターフェースレイアウト、ナビゲーションバー、プロバイダーカードの説明 |
 | [1.4-quickstart.md](./1-getting-started/1.4-quickstart.md) | 5 分でできるクイックスタートチュートリアル |
-| [1.5-settings.md](./1-getting-started/1.5-settings.md) | 言語、テーマ、ディレクトリ、クラウド同期の設定 |
+| [1.5-settings.md](./1-getting-started/1.5-settings.md) | 言語、テーマ、ディレクトリ、バックアップ、WebDAV / S3 クラウド同期の設定 |
+| [1.6-projects.md](./1-getting-started/1.6-projects.md) | プロジェクト：プロバイダー / MCP / Skills / プロンプトのスナップショットを保存・切り替え |
 
 ### 2. プロバイダー管理
 
@@ -65,6 +68,7 @@ CC Switch ユーザーマニュアル
 | [2.4-sort-duplicate.md](./2-providers/2.4-sort-duplicate.md) | ドラッグで並べ替え、プロバイダーの複製、削除 |
 | [2.5-usage-query.md](./2-providers/2.5-usage-query.md) | 使用量クエリ、残額表示、複数プラン表示 |
 | [2.6-claude-desktop.md](./2-providers/2.6-claude-desktop.md) | Claude Desktop サードパーティプロバイダー、直結モード、モデルマッピング |
+| [2.7-grok-build.md](./2-providers/2.7-grok-build.md) | Grok Build のプロバイダー、`config.toml`、プロキシテイクオーバー |
 
 ### 3. 拡張機能
 
@@ -80,7 +84,7 @@ CC Switch ユーザーマニュアル
 
 | ファイル | 内容 |
 |------|------|
-| [4.1-service.md](./4-proxy/4.1-service.md) | プロキシの起動、設定項目、実行状態 |
+| [4.1-service.md](./4-proxy/4.1-service.md) | プロキシの起動、設定項目、LAN アクセストークン、実行状態 |
 | [4.2-routing.md](./4-proxy/4.2-routing.md) | アプリケーションルーティング、設定変更、ステータス表示 |
 | [4.3-failover.md](./4-proxy/4.3-failover.md) | フェイルオーバーキュー、サーキットブレーカー、ヘルスステータス |
 | [4.4-usage.md](./4-proxy/4.4-usage.md) | 使用量統計、トレンドグラフ、料金設定 |
@@ -101,14 +105,30 @@ CC Switch ユーザーマニュアル
 - **インストールの問題**：[1.2 インストールガイド](./1-getting-started/1.2-installation.md) をご確認ください
 - **プロバイダーの設定**：[2.1 プロバイダーの追加](./2-providers/2.1-add.md) をご確認ください
 - **Claude Desktop の利用**：[2.6 Claude Desktop](./2-providers/2.6-claude-desktop.md) をご確認ください
+- **Grok Build の利用**：[2.7 Grok Build](./2-providers/2.7-grok-build.md) をご確認ください
+- **設定一式をまとめて切り替える**：[1.6 プロジェクト](./1-getting-started/1.6-projects.md) をご確認ください
 - **プロキシの使用**：[4.1 プロキシサービス](./4-proxy/4.1-service.md) をご確認ください
 - **お困りの方**：[5.2 FAQ](./5-faq/5.2-questions.md) をご確認ください
 
 ## バージョン情報
 
-- ドキュメントバージョン：v3.16.0
-- 最終更新：2026-05-29
-- CC Switch v3.16.0+ 対応
+- ドキュメントバージョン：v3.17.0
+- 最終更新：2026-10-30
+- CC Switch v3.17.0+ 対応
+
+### v3.17.0 以降の変更（次期リリース）
+
+- **LAN アクセストークン**：プロキシがループバック以外のアドレスで待ち受ける場合、他のデバイスはインストールごとのアクセストークンを送信する必要があります。パネルに警告とトークンが表示されます — 詳細は [4.1 プロキシサービス](./4-proxy/4.1-service.md)
+- **ディープリンクは明示的な同意が必要**：対応するチェックボックスをオンにしない限り、ディープリンクがプロバイダーの切り替え、MCP サーバーの有効化、使用量スクリプトの有効化を行うことはありません。MCP のインポートではコマンド全体が表示されます — 詳細は [5.3 ディープリンクプロトコル](./5-faq/5.3-deeplink.md)
+- **同期の競合検出**：WebDAV / S3 のアップロードとダウンロードは、前回の同期以降に他のデバイスやローカルで行われた変更を上書きしません。平文の `http://` エンドポイントは警告されます — 詳細は [1.5 個人設定](./1-getting-started/1.5-settings.md)
+- **バックアップの種類**：データベースバックアップは種類（定期、手動、安全、移行前）ごとに命名・ローテーションされ、手動バックアップは自動削除されません。復元前にファイルが検証されます — 詳細は [1.5 個人設定](./1-getting-started/1.5-settings.md)
+- **ライブファイルの保護**：ライブ設定ファイルは上書き前にバックアップされ、解析できないファイルは置き換えずに切り替えを中止します — 詳細は [5.1 設定ファイルの説明](./5-faq/5.1-config-files.md)
+
+### v3.17.0 の注目機能
+
+- **プロジェクト（Project Profiles）**：Claude Code、Codex、Claude Desktop のプロバイダー・MCP・Skills・プロンプトの状態を名前付きプロジェクトとして保存し、ヘッダーまたはトレイから切り替え — 詳細は [1.6 プロジェクト](./1-getting-started/1.6-projects.md)
+- **Grok Build**：xAI の Grok Build CLI に正式対応。プロバイダー、MCP、Skills、プロンプト、セッション、プロキシテイクオーバーをサポート — 詳細は [2.7 Grok Build](./2-providers/2.7-grok-build.md)
+- **Codex 公式セッションのプロキシ経由ルーティング**：ChatGPT サブスクリプションの Codex 公式セッションをローカルプロキシのテイクオーバー経由でルーティング可能に。Codex プロバイダーはネイティブ Anthropic Messages 上流にも接続可能 — 詳細は [2.1 プロバイダーの追加](./2-providers/2.1-add.md)
 
 ### v3.16.0 の注目機能
 
