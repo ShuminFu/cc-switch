@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { validateEndpointUrl } from "@/utils/providerInputValidation";
+import { ModelOrderButtons, moveItem } from "./shared/ModelOrderButtons";
 import {
   useState,
   useRef,
@@ -78,28 +80,12 @@ const BASE_URL_ERROR_I18N_KEY: Record<BaseUrlErrorCode, string> = {
   invalid: "hermes.form.baseUrlInvalid",
 };
 
-const TEMPLATE_TOKEN_RE = /\$\{[^}]+\}/g;
-
 /**
  * Hermes 0.10.0+ rejects `base_url` entries that don't parse as proper URLs
- * (commit 2cdae233). Validate client-side so the error surfaces before the
- * request ever reaches Hermes' startup.
+ * (commit 2cdae233). Uses the validator shared by every app (FE-PROV-21).
  */
-function validateBaseUrl(raw: string): BaseUrlErrorCode | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return "empty";
-  // Presets like KAT-Coder embed `${VAR}` tokens — swap them before URL parse.
-  const candidate = trimmed.replace(TEMPLATE_TOKEN_RE, "placeholder");
-  let u: URL;
-  try {
-    u = new URL(candidate);
-  } catch {
-    return "invalid";
-  }
-  if (!u.protocol.startsWith("http")) return "scheme";
-  if (!u.hostname) return "invalid";
-  return null;
-}
+const validateBaseUrl = (raw: string): BaseUrlErrorCode | null =>
+  validateEndpointUrl(raw);
 
 interface AdvancedSectionProps {
   open: boolean;
@@ -157,7 +143,8 @@ export function HermesFormFields({
   onRateLimitDelayChange,
 }: HermesFormFieldsProps) {
   const { t } = useTranslation();
-  const [expandedModels, setExpandedModels] = useState<Record<number, boolean>>(
+  // Keyed by the stable row key, not the index (FE-PROV-11).
+  const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>(
     {},
   );
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -211,7 +198,15 @@ export function HermesFormFields({
   );
 
   const toggleModelAdvanced = (index: number) => {
-    setExpandedModels((prev) => ({ ...prev, [index]: !prev[index] }));
+    const key = modelKeys[index];
+    setExpandedModels((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Reorder models; the first one becomes model.default on switch.
+  const handleMoveModel = (from: number, to: number) => {
+    if (to < 0 || to >= models.length) return;
+    modelKeysRef.current = moveItem(modelKeysRef.current, from, to);
+    onModelsChange(moveItem(models, from, to));
   };
 
   const handleAddModel = () => {
@@ -250,13 +245,13 @@ export function HermesFormFields({
   }, [baseUrl, apiKey, t]);
 
   const handleRemoveModel = (index: number) => {
-    modelKeysRef.current.splice(index, 1);
+    const [removedKey] = modelKeysRef.current.splice(index, 1);
     const next = [...models];
     next.splice(index, 1);
     onModelsChange(next);
     setExpandedModels((prev) => {
       const updated = { ...prev };
-      delete updated[index];
+      delete updated[removedKey];
       return updated;
     });
   };
@@ -477,11 +472,19 @@ export function HermesFormFields({
                       })}
                     />
                   </div>
+                  <ModelOrderButtons
+                    index={index}
+                    count={models.length}
+                    onMove={handleMoveModel}
+                  />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => handleRemoveModel(index)}
+                    aria-label={t("providerForm.removeModel", {
+                      defaultValue: "Remove model",
+                    })}
                     className="h-9 w-9 mt-5 text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -489,7 +492,7 @@ export function HermesFormFields({
                 </div>
 
                 <AdvancedSection
-                  open={expandedModels[index] ?? false}
+                  open={expandedModels[modelKeys[index]] ?? false}
                   onOpenChange={() => toggleModelAdvanced(index)}
                   labelKey="hermes.form.advancedOptions"
                 >

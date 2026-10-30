@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { HintText } from "./HintText";
 import ApiKeyInput from "../ApiKeyInput";
 import type { ProviderCategory } from "@/types";
 
@@ -76,10 +77,11 @@ export function ApiKeySection({
           {partnerPromotionKey && (
             <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 p-2.5 border border-blue-200 dark:border-blue-800">
               <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-300">
-                💡{" "}
-                {t(`providerForm.partnerPromotion.${partnerPromotionKey}`, {
-                  defaultValue: "",
-                })}
+                <HintText>
+                  {t(`providerForm.partnerPromotion.${partnerPromotionKey}`, {
+                    defaultValue: "",
+                  })}
+                </HintText>
               </p>
             </div>
           )}

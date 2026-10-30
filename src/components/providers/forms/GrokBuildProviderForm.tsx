@@ -28,24 +28,22 @@ import type {
   ProviderCategory,
   ProviderMeta,
 } from "@/types";
-import type { ProviderFormProps, ProviderFormValues } from "./ProviderForm";
+import type { ProviderFormProps, ProviderFormValues } from "./adapters/types";
 import { BasicFormFields } from "./BasicFormFields";
 import { CodexFormFields } from "./CodexFormFields";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
-import {
-  codexProviderPresets,
-  type CodexProviderPreset,
-} from "@/config/codexProviderPresets";
+import type { CodexProviderPreset } from "@/config/codexProviderPresets";
 import {
   codexApiFormatFromWireApi,
   extractCodexBaseUrl,
   extractCodexModelName,
   extractCodexWireApi,
 } from "@/utils/providerConfigUtils";
+import { getPresetEntries } from "@/config/presetRegistry";
 import {
   buildGrokBuildConfig,
   parseGrokBuildConfig,
-  updateGrokBuildConfig,
+  updateGrokBuildConfigPreservingFormat,
   validateGrokBuildConfig,
 } from "@/utils/grokBuildConfig";
 import { resolveProviderIcon } from "@/utils/providerIcon";
@@ -55,9 +53,7 @@ type GrokBuildProviderFormProps = Omit<ProviderFormProps, "appId">;
 const grokPresetEntries: Array<{
   id: string;
   preset: CodexProviderPreset;
-}> = codexProviderPresets
-  .map((preset, index) => ({ id: `grokbuild-${index}`, preset }))
-  .filter(({ preset }) => preset.category !== "official" && !preset.isOfficial);
+}> = getPresetEntries("grokbuild");
 
 export const grokApiBackendFromApiFormat = (format: CodexApiFormat): string => {
   if (format === "openai_chat") return "chat_completions";
@@ -220,7 +216,9 @@ export function GrokBuildProviderForm({
       contextWindow: Number.parseInt(contextWindow, 10),
       ...overrides,
     };
-    setRawConfig((current) => updateGrokBuildConfig(current, next));
+    setRawConfig((current) =>
+      updateGrokBuildConfigPreservingFormat(current, next),
+    );
   };
 
   const handlePresetChange = (presetId: string) => {
@@ -317,7 +315,7 @@ export function GrokBuildProviderForm({
       return;
     }
 
-    const finalConfig = updateGrokBuildConfig(rawConfig, {
+    const finalConfig = updateGrokBuildConfigPreservingFormat(rawConfig, {
       model: profile,
       upstreamModel,
       baseUrl,
@@ -391,12 +389,17 @@ export function GrokBuildProviderForm({
     await onSubmit(payload);
   };
 
-  const rawConfigError = validateGrokBuildConfig(rawConfig);
+  // Validate once per config change, not on every render (FE-PROV-31).
+  const rawConfigError = useMemo(
+    () => validateGrokBuildConfig(rawConfig),
+    [rawConfig],
+  );
 
   return (
     <Form {...form}>
       <form
         id="provider-form"
+        noValidate
         onSubmit={form.handleSubmit(handleSubmit)}
         className="space-y-6"
       >

@@ -88,48 +88,68 @@ export function useProviderActions(
 
       // OpenClaw: register models to allowlist after adding provider
       if (activeApp === "openclaw" && provider.suggestedDefaults) {
-        const { model, modelCatalog } = provider.suggestedDefaults;
-        let modelsRegistered = false;
+        const suggested = provider.suggestedDefaults;
+        const register = async (): Promise<void> => {
+          try {
+            const { model, modelCatalog } = suggested;
+            let modelsRegistered = false;
 
-        try {
-          // 1. Merge model catalog (allowlist)
-          if (modelCatalog && Object.keys(modelCatalog).length > 0) {
-            const existingCatalog = (await openclawApi.getModelCatalog()) || {};
-            const mergedCatalog = { ...existingCatalog, ...modelCatalog };
-            await openclawApi.setModelCatalog(mergedCatalog);
-            await queryClient.invalidateQueries({
-              queryKey: openclawKeys.health,
-            });
-            modelsRegistered = true;
-          }
-
-          // 2. Set default model (only if not already set)
-          if (model) {
-            const existingDefault = await openclawApi.getDefaultModel();
-            if (!existingDefault?.primary) {
-              await openclawApi.setDefaultModel(model);
+            // 1. Merge model catalog (allowlist)
+            if (modelCatalog && Object.keys(modelCatalog).length > 0) {
+              const existingCatalog =
+                (await openclawApi.getModelCatalog()) || {};
+              const mergedCatalog = { ...existingCatalog, ...modelCatalog };
+              await openclawApi.setModelCatalog(mergedCatalog);
               await queryClient.invalidateQueries({
                 queryKey: openclawKeys.health,
               });
+              modelsRegistered = true;
             }
-          }
 
-          // Show success toast if models were registered
-          if (modelsRegistered) {
-            toast.success(
-              t("notifications.openclawModelsRegistered", {
-                defaultValue: "模型已注册到 /model 列表",
+            // 2. Set default model (only if not already set)
+            if (model) {
+              const existingDefault = await openclawApi.getDefaultModel();
+              if (!existingDefault?.primary) {
+                await openclawApi.setDefaultModel(model);
+                await queryClient.invalidateQueries({
+                  queryKey: openclawKeys.health,
+                });
+              }
+            }
+
+            if (modelsRegistered) {
+              toast.success(
+                t("notifications.openclawModelsRegistered", {
+                  defaultValue: "模型已注册到 /model 列表",
+                }),
+                { closeButton: true },
+              );
+            }
+          } catch (error) {
+            // The provider itself is saved; tell the user the models are
+            // missing from OpenClaw's /model list and offer a retry instead
+            // of only logging (FE-PROV-50).
+            console.warn(
+              "[OpenClaw] Failed to register models to allowlist:",
+              error,
+            );
+            toast.warning(
+              t("notifications.openclawModelsRegisterFailed", {
+                defaultValue:
+                  "Provider added, but its models could not be registered in OpenClaw: {{error}}",
+                error: extractErrorMessage(error),
               }),
-              { closeButton: true },
+              {
+                closeButton: true,
+                action: {
+                  label: t("common.retry", { defaultValue: "Retry" }),
+                  onClick: () => void register(),
+                },
+              },
             );
           }
-        } catch (error) {
-          // Log warning but don't block main flow - provider config is already saved
-          console.warn(
-            "[OpenClaw] Failed to register models to allowlist:",
-            error,
-          );
-        }
+        };
+        await register();
       }
     },
     [addProviderMutation, activeApp, queryClient, t],

@@ -9,8 +9,9 @@ import {
   type SecretsVaultStatus,
 } from "@/lib/api/secretsVault";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { queryKeys } from "@/lib/query/keys";
 
-const QUERY_KEY = ["secretsVaultStatus"];
+const QUERY_KEY = queryKeys.secrets.vaultStatus;
 
 /**
  * Opt-in provider API-key vault (DB-02 / PRODUCT-01): keeps provider keys in

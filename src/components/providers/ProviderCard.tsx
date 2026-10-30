@@ -20,8 +20,11 @@ import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge"
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
 import { BudgetLimitBadge } from "@/components/usage/BudgetLimitBadge";
 import {
-  extractCodexBaseUrl,
-  extractCodexExperimentalBearerToken,
+  getProviderCodec,
+  getProviderEndpoint,
+  getProviderModels,
+} from "@/lib/providerCodecs";
+import {
   extractCodexWireApi,
   isCodexAnthropicWireApi,
   isCodexChatWireApi,
@@ -42,6 +45,8 @@ interface ProviderCardProps {
   isCurrent: boolean;
   appId: AppId;
   isInConfig?: boolean; // OpenCode: 是否已添加到 opencode.json
+  /** Live config ids are still loading, so `isInConfig` is not known yet. */
+  isConfigStatusLoading?: boolean;
   isOmo?: boolean;
   isOmoSlim?: boolean;
   onSwitch: (provider: Provider) => void;
@@ -75,73 +80,29 @@ function isOfficialProvider(provider: Provider, appId: AppId): boolean {
   if (provider.category === "official") {
     return true;
   }
-
-  const config = provider.settingsConfig as Record<string, any>;
-  if (appId === "claude") {
-    const baseUrl = config?.env?.ANTHROPIC_BASE_URL;
-    return !baseUrl || (typeof baseUrl === "string" && baseUrl.trim() === "");
-  }
-  if (appId === "codex") {
-    // 无 OPENAI_API_KEY → 使用 Codex CLI 内置 OAuth（官方）
-    const apiKey = config?.auth?.OPENAI_API_KEY;
-    const bearerToken =
-      typeof config?.config === "string"
-        ? extractCodexExperimentalBearerToken(config.config)
-        : undefined;
-    return (
-      !bearerToken &&
-      (!apiKey || (typeof apiKey === "string" && apiKey.trim() === ""))
-    );
-  }
-  if (appId === "gemini") {
-    // 无 GEMINI_API_KEY 且无 GOOGLE_GEMINI_BASE_URL → Google OAuth 官方模式
-    const apiKey = config?.env?.GEMINI_API_KEY;
-    const baseUrl = config?.env?.GOOGLE_GEMINI_BASE_URL;
-    return (
-      (!apiKey || (typeof apiKey === "string" && apiKey.trim() === "")) &&
-      (!baseUrl || (typeof baseUrl === "string" && baseUrl.trim() === ""))
-    );
-  }
-  return false;
+  return getProviderCodec(appId).isOfficial(provider.settingsConfig);
 }
 
-const extractApiUrl = (provider: Provider, fallbackText: string) => {
-  if (provider.notes?.trim()) {
-    return provider.notes.trim();
-  }
-
-  if (provider.websiteUrl) {
-    return provider.websiteUrl;
-  }
-
-  const config = provider.settingsConfig;
-
-  if (config && typeof config === "object") {
-    const envBase =
-      (config as Record<string, any>)?.env?.ANTHROPIC_BASE_URL ||
-      (config as Record<string, any>)?.env?.GOOGLE_GEMINI_BASE_URL;
-    if (typeof envBase === "string" && envBase.trim()) {
-      return envBase;
-    }
-
-    const baseUrl = (config as Record<string, any>)?.config;
-
-    if (typeof baseUrl === "string" && baseUrl.includes("base_url")) {
-      const extractedBaseUrl = extractCodexBaseUrl(baseUrl);
-      if (extractedBaseUrl) {
-        return extractedBaseUrl;
-      }
-    }
-  }
-
-  return fallbackText;
-};
+/**
+ * Endpoint line of a card: the website URL when set, otherwise the upstream
+ * endpoint from the app's codec, so OpenCode/OpenClaw/Hermes/Grok Build cards
+ * no longer fall back to "not configured" (FE-PROV-09). Notes are rendered on
+ * their own line instead of replacing the endpoint.
+ */
+export const getProviderCardUrl = (
+  provider: Provider,
+  appId: AppId,
+): string | undefined =>
+  provider.websiteUrl?.trim() ||
+  getProviderEndpoint(appId, provider) ||
+  undefined;
 
 export function ProviderCard({
   provider,
   isCurrent,
   appId,
   isInConfig = true,
+  isConfigStatusLoading = false,
   isOmo = false,
   isOmoSlim = false,
   onSwitch,
@@ -176,25 +137,30 @@ export function ProviderCard({
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
   const isAdditiveMode = appId === "opencode" && !isAnyOmo;
 
-  const { data: health } = useProviderHealth(provider.id, appId);
+  // The health badge only renders for queued providers while the proxy runs,
+  // so do not query (or poll) health for every other card (FE-PROV-13).
+  const { data: health } = useProviderHealth(
+    provider.id,
+    appId,
+    isProxyRunning && Boolean(isInFailoverQueue),
+  );
 
   const fallbackUrlText = t("provider.notConfigured", {
     defaultValue: "未配置接口地址",
   });
 
-  const displayUrl = useMemo(() => {
-    return extractApiUrl(provider, fallbackUrlText);
-  }, [provider, fallbackUrlText]);
-
-  const isClickableUrl = useMemo(() => {
-    if (provider.notes?.trim()) {
-      return false;
-    }
-    if (displayUrl === fallbackUrlText) {
-      return false;
-    }
-    return true;
-  }, [provider.notes, displayUrl, fallbackUrlText]);
+  const providerUrl = useMemo(
+    () => getProviderCardUrl(provider, appId),
+    [provider, appId],
+  );
+  const displayUrl = providerUrl ?? fallbackUrlText;
+  const isClickableUrl = Boolean(providerUrl);
+  const notes = provider.notes?.trim();
+  // Primary model chip; all configured models in the tooltip (FE-PROV-54).
+  const models = useMemo(
+    () => getProviderModels(appId, provider),
+    [appId, provider],
+  );
 
   const usageEnabled = provider.meta?.usage_script?.enabled ?? false;
   const isOfficial = isOfficialProvider(provider, appId);
@@ -499,6 +465,24 @@ export function ProviderCard({
                 <span className="min-w-0 truncate">{displayUrl}</span>
               </button>
             )}
+            {models.length > 0 && (
+              <span
+                className="inline-flex max-w-full items-center truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                title={models.join("\n")}
+                data-testid="provider-model-chip"
+              >
+                {models[0]}
+                {models.length > 1 ? ` +${models.length - 1}` : ""}
+              </span>
+            )}
+            {notes && (
+              <p
+                className="truncate text-xs text-muted-foreground"
+                title={notes}
+              >
+                {notes}
+              </p>
+            )}
           </div>
         </div>
 
@@ -571,11 +555,12 @@ export function ProviderCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-shrink-0 opacity-0 pointer-events-none group-hover:opacity-100 group-focus-within:opacity-100 group-hover:pointer-events-auto group-focus-within:pointer-events-auto transition-opacity duration-200">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             <ProviderActions
               appId={appId}
               isCurrent={isCurrent}
               isInConfig={isInConfig}
+              isConfigStatusLoading={isConfigStatusLoading}
               isTesting={isTesting}
               isActionPending={isActionPending}
               isProxyTakeover={isProxyTakeover}

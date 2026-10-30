@@ -344,6 +344,51 @@ export function mergeCustomModelsIntoStore(
   return updated;
 }
 
+/**
+ * Collapsible section header. Declared at module scope so React keeps the
+ * same component type across renders instead of remounting the headers on
+ * every keystroke (FE-PROV-25).
+ */
+function SectionHeader({
+  title,
+  isOpen,
+  onToggle,
+  badge,
+  action,
+}: {
+  title: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  badge?: React.ReactNode | string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex items-center justify-between w-full py-2 px-3 text-left"
+      onClick={onToggle}
+      aria-expanded={isOpen}
+    >
+      <div className="flex items-center gap-2">
+        {isOpen ? (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        )}
+        <Label className="text-sm font-semibold cursor-pointer">{title}</Label>
+        {typeof badge === "string" ? (
+          <Badge variant="outline" className="text-[10px] h-5">
+            {badge}
+          </Badge>
+        ) : (
+          badge
+        )}
+      </div>
+      {action && <div onClick={(e) => e.stopPropagation()}>{action}</div>}
+    </button>
+  );
+}
+
 export function OmoFormFields({
   modelOptions,
   modelVariantsMap = {},
@@ -395,7 +440,7 @@ export function OmoFormFields({
     setCustomAgents((prev) =>
       reconcileCustomModels(prev, agents, builtinAgentKeys),
     );
-  }, [agents]);
+  }, [agents, builtinAgentKeys]);
 
   useEffect(() => {
     setCustomCategories((prev) =>
@@ -927,7 +972,10 @@ export function OmoFormFields({
       );
     }
   }, [
+    isSlim,
     readLocalFile,
+    readSlimLocalFile,
+    builtinAgentKeys,
     onAgentsChange,
     onCategoriesChange,
     onOtherFieldsStrChange,
@@ -1100,43 +1148,6 @@ export function OmoFormFields({
       </div>
     );
   };
-
-  const SectionHeader = ({
-    title,
-    isOpen,
-    onToggle,
-    badge,
-    action,
-  }: {
-    title: string;
-    isOpen: boolean;
-    onToggle: () => void;
-    badge?: React.ReactNode | string;
-    action?: React.ReactNode;
-  }) => (
-    <button
-      type="button"
-      className="flex items-center justify-between w-full py-2 px-3 text-left"
-      onClick={onToggle}
-    >
-      <div className="flex items-center gap-2">
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-        <Label className="text-sm font-semibold cursor-pointer">{title}</Label>
-        {typeof badge === "string" ? (
-          <Badge variant="outline" className="text-[10px] h-5">
-            {badge}
-          </Badge>
-        ) : (
-          badge
-        )}
-      </div>
-      {action && <div onClick={(e) => e.stopPropagation()}>{action}</div>}
-    </button>
-  );
 
   const renderModelSection = ({
     title,

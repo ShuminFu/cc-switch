@@ -7,6 +7,7 @@ import {
   OPENCODE_HEADER_DRAFT_PREFIX,
   isKnownOpencodeOptionKey,
   parseOpencodeConfig,
+  stripOpencodeModelDrafts,
   toOpencodeExtraOptions,
 } from "../helpers/opencodeFormUtils";
 
@@ -170,7 +171,7 @@ export function useOpencodeFormState({
     (models: Record<string, OpenCodeModel>) => {
       setOpencodeModels(models);
       updateOpencodeSettings((config) => {
-        config.models = models;
+        config.models = stripOpencodeModelDrafts(models);
       });
     },
     [updateOpencodeSettings],

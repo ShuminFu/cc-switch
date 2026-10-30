@@ -7,19 +7,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { Provider, CustomEndpoint, UniversalProvider } from "@/types";
 import type { AppId } from "@/lib/api";
-import { universalProvidersApi } from "@/lib/api";
+import { saveUniversalProvider } from "@/components/universal/saveUniversalProvider";
 import {
   ProviderForm,
   type ProviderFormValues,
 } from "@/components/providers/forms/ProviderForm";
 import { UniversalProviderFormModal } from "@/components/universal/UniversalProviderFormModal";
 import { UniversalProviderPanel } from "@/components/universal";
-import { providerPresets } from "@/config/claudeProviderPresets";
-import { codexProviderPresets } from "@/config/codexProviderPresets";
-import { geminiProviderPresets } from "@/config/geminiProviderPresets";
-import { claudeDesktopProviderPresets } from "@/config/claudeDesktopProviderPresets";
-import { extractCodexBaseUrl } from "@/utils/providerConfigUtils";
-import { extractGrokBuildBaseUrl } from "@/utils/grokBuildConfig";
+import { findPresetEntry } from "@/config/presetRegistry";
+import { getProviderCodec, parseSettingsConfig } from "@/lib/providerCodecs";
+import { appHas } from "@/config/apps";
 import type { OpenClawSuggestedDefaults } from "@/config/openclawProviderPresets";
 import type { UniversalProviderPreset } from "@/config/universalProviderPresets";
 
@@ -45,12 +42,7 @@ export function AddProviderDialog({
 }: AddProviderDialogProps) {
   const { t } = useTranslation();
   // OpenCode and OpenClaw don't support universal providers
-  const showUniversalTab =
-    appId !== "opencode" &&
-    appId !== "openclaw" &&
-    appId !== "hermes" &&
-    appId !== "grokbuild" &&
-    appId !== "claude-desktop";
+  const showUniversalTab = appHas(appId, "universal");
   const [activeTab, setActiveTab] = useState<"app-specific" | "universal">(
     "app-specific",
   );
@@ -61,43 +53,17 @@ export function AddProviderDialog({
 
   const handleUniversalProviderSave = useCallback(
     async (provider: UniversalProvider) => {
-      try {
-        await universalProvidersApi.upsert(provider);
-      } catch (error) {
-        console.error(
-          "[AddProviderDialog] Failed to save universal provider",
-          error,
-        );
-        toast.error(
-          t("universalProvider.addFailed", {
-            defaultValue: "统一供应商添加失败",
-          }),
-        );
-        return;
-      }
-
-      try {
-        await universalProvidersApi.sync(provider.id);
-        toast.success(
-          t("universalProvider.addedAndSynced", {
-            defaultValue: "统一供应商已添加并同步",
-          }),
-        );
-      } catch (error) {
-        console.error(
-          "[AddProviderDialog] Provider saved but sync failed",
-          error,
-        );
-        toast.warning(
-          t("universalProvider.addedButSyncFailed", {
-            defaultValue: "统一供应商已添加，但同步失败",
-          }),
-        );
-      }
+      const result = await saveUniversalProvider(provider, {
+        sync: true,
+        isEdit: false,
+        t,
+      });
+      if (result === "saveFailed") return false;
 
       setUniversalFormOpen(false);
       setSelectedUniversalPreset(null);
       onOpenChange(false);
+      return true;
     },
     [t, onOpenChange],
   );
@@ -109,10 +75,18 @@ export function AddProviderDialog({
 
   const handleSubmit = useCallback(
     async (values: ProviderFormValues) => {
-      const parsedConfig = JSON.parse(values.settingsConfig) as Record<
-        string,
-        unknown
-      >;
+      const parsedConfig = parseSettingsConfig(values.settingsConfig);
+      if (!parsedConfig) {
+        // The form is expected to emit a JSON object; never let a malformed
+        // string throw inside RHF's submit handler (FE-PROV-26).
+        toast.error(
+          t("providerForm.settingsConfigInvalid", {
+            defaultValue:
+              "The provider configuration is not a valid JSON object.",
+          }),
+        );
+        return;
+      }
 
       // 构造基础提交数据
       const providerData: Omit<Provider, "id"> & {
@@ -131,29 +105,19 @@ export function AddProviderDialog({
         ...(values.meta ? { meta: values.meta } : {}),
       };
 
-      if (appId === "claude-desktop" && values.presetId) {
-        const presetIndex = parseInt(
-          values.presetId.replace("claude-desktop-", ""),
-        );
-        const preset = claudeDesktopProviderPresets[presetIndex];
-        providerData.ensureClaudeDesktopOfficialSeed =
-          values.presetCategory === "official" &&
-          preset?.category === "official";
+      const presetEntry = findPresetEntry(appId, values.presetId);
+      const presetIsOfficial =
+        values.presetCategory === "official" &&
+        presetEntry?.preset.category === "official";
+      if (appId === "claude-desktop" && presetEntry) {
+        providerData.ensureClaudeDesktopOfficialSeed = presetIsOfficial;
       }
-
-      if (appId === "codex" && values.presetId) {
-        const presetIndex = parseInt(values.presetId.replace("codex-", ""));
-        const preset = codexProviderPresets[presetIndex];
-        providerData.ensureCodexOfficialSeed =
-          values.presetCategory === "official" &&
-          preset?.category === "official";
+      if (appId === "codex" && presetEntry) {
+        providerData.ensureCodexOfficialSeed = presetIsOfficial;
       }
 
       // OpenCode/OpenClaw: pass providerKey for ID generation
-      if (
-        (appId === "opencode" || appId === "openclaw" || appId === "hermes") &&
-        values.providerKey
-      ) {
+      if (appHas(appId, "additiveLiveConfig") && values.providerKey) {
         providerData.providerKey = values.providerKey;
       }
 
@@ -171,114 +135,25 @@ export function AddProviderDialog({
           }
         };
 
-        if (values.presetId) {
-          if (appId === "claude") {
-            const presets = providerPresets;
-            const presetIndex = parseInt(
-              values.presetId.replace("claude-", ""),
+        if (presetEntry) {
+          const preset = presetEntry.preset as {
+            endpointCandidates?: unknown;
+            baseUrl?: unknown;
+          };
+          if (Array.isArray(preset.endpointCandidates)) {
+            preset.endpointCandidates.forEach((url) =>
+              addUrl(typeof url === "string" ? url : undefined),
             );
-            if (
-              !isNaN(presetIndex) &&
-              presetIndex >= 0 &&
-              presetIndex < presets.length
-            ) {
-              const preset = presets[presetIndex];
-              if (preset?.endpointCandidates) {
-                preset.endpointCandidates.forEach(addUrl);
-              }
-            }
-          } else if (appId === "codex") {
-            const presets = codexProviderPresets;
-            const presetIndex = parseInt(values.presetId.replace("codex-", ""));
-            if (
-              !isNaN(presetIndex) &&
-              presetIndex >= 0 &&
-              presetIndex < presets.length
-            ) {
-              const preset = presets[presetIndex];
-              if (Array.isArray(preset.endpointCandidates)) {
-                preset.endpointCandidates.forEach(addUrl);
-              }
-            }
-          } else if (appId === "gemini") {
-            const presets = geminiProviderPresets;
-            const presetIndex = parseInt(
-              values.presetId.replace("gemini-", ""),
-            );
-            if (
-              !isNaN(presetIndex) &&
-              presetIndex >= 0 &&
-              presetIndex < presets.length
-            ) {
-              const preset = presets[presetIndex];
-              if (Array.isArray(preset.endpointCandidates)) {
-                preset.endpointCandidates.forEach(addUrl);
-              }
-            }
-          } else if (appId === "claude-desktop") {
-            const presets = claudeDesktopProviderPresets;
-            const presetIndex = parseInt(
-              values.presetId.replace("claude-desktop-", ""),
-            );
-            if (
-              !isNaN(presetIndex) &&
-              presetIndex >= 0 &&
-              presetIndex < presets.length
-            ) {
-              const preset = presets[presetIndex];
-              if (Array.isArray(preset.endpointCandidates)) {
-                preset.endpointCandidates.forEach(addUrl);
-              }
-              addUrl(preset.baseUrl);
-            }
+          }
+          if (
+            appId === "claude-desktop" &&
+            typeof preset.baseUrl === "string"
+          ) {
+            addUrl(preset.baseUrl);
           }
         }
 
-        if (appId === "claude") {
-          const env = parsedConfig.env as Record<string, any> | undefined;
-          if (env?.ANTHROPIC_BASE_URL) {
-            addUrl(env.ANTHROPIC_BASE_URL);
-          }
-        } else if (appId === "claude-desktop") {
-          const env = parsedConfig.env as Record<string, any> | undefined;
-          if (env?.ANTHROPIC_BASE_URL) {
-            addUrl(env.ANTHROPIC_BASE_URL);
-          }
-        } else if (appId === "codex") {
-          const config = parsedConfig.config as string | undefined;
-          if (config) {
-            const extractedBaseUrl = extractCodexBaseUrl(config);
-            if (extractedBaseUrl) {
-              addUrl(extractedBaseUrl);
-            }
-          }
-        } else if (appId === "gemini") {
-          const env = parsedConfig.env as Record<string, any> | undefined;
-          if (env?.GOOGLE_GEMINI_BASE_URL) {
-            addUrl(env.GOOGLE_GEMINI_BASE_URL);
-          }
-        } else if (appId === "grokbuild") {
-          const config = parsedConfig.config as string | undefined;
-          if (config) {
-            addUrl(extractGrokBuildBaseUrl(config));
-          }
-        } else if (appId === "opencode") {
-          const options = parsedConfig.options as
-            | Record<string, any>
-            | undefined;
-          if (options?.baseURL) {
-            addUrl(options.baseURL);
-          }
-        } else if (appId === "openclaw") {
-          // OpenClaw uses baseUrl directly
-          if (parsedConfig.baseUrl) {
-            addUrl(parsedConfig.baseUrl as string);
-          }
-        } else if (appId === "hermes") {
-          if (parsedConfig.base_url) {
-            addUrl(parsedConfig.base_url as string);
-          }
-        }
+        addUrl(getProviderCodec(appId).getEndpoint(parsedConfig));
 
         const urls = Array.from(urlSet);
         if (urls.length > 0) {
@@ -307,7 +182,7 @@ export function AddProviderDialog({
       await onSubmit(providerData);
       onOpenChange(false);
     },
-    [appId, onSubmit, onOpenChange],
+    [appId, onSubmit, onOpenChange, t],
   );
 
   const footer =
@@ -367,7 +242,10 @@ export function AddProviderDialog({
         >
           <TabsList className="grid w-full grid-cols-2 mb-6">
             <TabsTrigger value="app-specific">
-              {t(`apps.${appId}`)} {t("provider.tabProvider")}
+              {t("provider.tabProviderFor", {
+                app: t(`apps.${appId}`),
+                defaultValue: "{{app}} Provider",
+              })}
             </TabsTrigger>
             <TabsTrigger value="universal">
               {t("provider.tabUniversal")}

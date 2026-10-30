@@ -489,7 +489,10 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
         {/* 测速控制栏 */}
         <div className="flex items-center justify-between">
           <div className="text-sm text-muted-foreground">
-            {entries.length} {t("endpointTest.endpoints")}
+            {t("endpointTest.endpointCount", {
+              count: entries.length,
+              defaultValue: "{{count}} endpoints",
+            })}
           </div>
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
@@ -627,7 +630,10 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
                         event.stopPropagation();
                         handleRemoveEndpoint(entry);
                       }}
-                      className="opacity-0 transition hover:text-red-600 group-hover:opacity-100 dark:hover:text-red-400"
+                      aria-label={t("endpointTest.removeEndpoint", {
+                        defaultValue: "Remove endpoint",
+                      })}
+                      className="[@media(hover:hover)]:opacity-0 transition hover:text-red-600 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 dark:hover:text-red-400"
                     >
                       <X className="h-4 w-4" />
                     </button>

@@ -28,6 +28,22 @@ export type AppToolbarFeature =
   | "hermesMemory"
   | "hermesWebUI";
 
+/**
+ * Which provider form adapter renders an app's Add/Edit provider form
+ * (FE-PROV-17). Implementations live in
+ * `src/components/providers/forms/adapters`, keyed by this id; the form shell
+ * itself never branches on the app.
+ */
+export type ProviderFormAdapterId =
+  | "claude"
+  | "claudeDesktop"
+  | "codex"
+  | "gemini"
+  | "grokbuild"
+  | "opencode"
+  | "openclaw"
+  | "hermes";
+
 export interface AppCapabilities {
   /** The local proxy can take this app over (per-app proxy toggle). */
   proxy: boolean;
@@ -89,6 +105,8 @@ export interface AppDefinition {
   setAsDefault: "model" | "switch" | null;
   /** Feature shortcuts in the providers-page toolbar. */
   toolbar: readonly AppToolbarFeature[];
+  /** Provider form adapter used by the Add/Edit provider dialogs. */
+  providerForm: ProviderFormAdapterId;
   capabilities: AppCapabilities;
 }
 
@@ -148,6 +166,7 @@ const defineApp = (
   toolbar: def.toolbar ?? DEFAULT_TOOLBAR,
   label: def.label,
   iconName: def.iconName,
+  providerForm: def.providerForm,
   capabilities: { ...NO_CAPABILITIES, ...def.capabilities },
 });
 
@@ -165,6 +184,7 @@ const CLAUDE_FEATURES: Partial<AppCapabilities> = {
  */
 export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
   claude: defineApp("claude", {
+    providerForm: "claude",
     label: "Claude",
     switcherLabel: "Claude Code",
     iconName: "claude",
@@ -178,6 +198,7 @@ export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
     },
   }),
   "claude-desktop": defineApp("claude-desktop", {
+    providerForm: "claudeDesktop",
     label: "Claude Desktop",
     iconName: "claude",
     featureApp: "claude",
@@ -189,6 +210,7 @@ export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
     },
   }),
   codex: defineApp("codex", {
+    providerForm: "codex",
     label: "Codex",
     iconName: "openai",
     capabilities: {
@@ -200,6 +222,7 @@ export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
     },
   }),
   gemini: defineApp("gemini", {
+    providerForm: "gemini",
     label: "Gemini",
     iconName: "gemini",
     capabilities: {
@@ -211,6 +234,7 @@ export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
     },
   }),
   grokbuild: defineApp("grokbuild", {
+    providerForm: "grokbuild",
     label: "Grok Build",
     iconName: "grok",
     capabilities: {
@@ -221,6 +245,7 @@ export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
     },
   }),
   opencode: defineApp("opencode", {
+    providerForm: "opencode",
     label: "OpenCode",
     iconName: "opencode",
     capabilities: {
@@ -230,6 +255,7 @@ export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
     },
   }),
   openclaw: defineApp("openclaw", {
+    providerForm: "openclaw",
     label: "OpenClaw",
     iconName: "openclaw",
     skillsTargetApp: "claude",
@@ -248,6 +274,7 @@ export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
     },
   }),
   hermes: defineApp("hermes", {
+    providerForm: "hermes",
     label: "Hermes",
     iconName: "hermes",
     setAsDefault: "switch",

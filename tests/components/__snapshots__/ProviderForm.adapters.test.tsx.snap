@@ -1,0 +1,396 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProviderForm per-app submit payloads (edit mode) > claude/third_party submits the unchanged provider 1`] = `
+{
+  "icon": "",
+  "iconColor": "",
+  "meta": {
+    "apiFormat": "anthropic",
+    "commonConfigEnabled": false,
+    "costMultiplier": "1.5",
+    "endpointAutoSelect": true,
+  },
+  "name": "Claude Relay",
+  "notes": "",
+  "settingsConfig": {
+    "env": {
+      "ANTHROPIC_AUTH_TOKEN": "sk-claude",
+      "ANTHROPIC_BASE_URL": "https://relay.example.com",
+      "ANTHROPIC_MODEL": "claude-x",
+    },
+  },
+  "websiteUrl": "https://relay.example.com",
+}
+`;
+
+exports[`ProviderForm per-app submit payloads (edit mode) > codex/third_party submits the unchanged provider 1`] = `
+{
+  "icon": "",
+  "iconColor": "",
+  "meta": {
+    "apiFormat": "openai_responses",
+    "commonConfigEnabled": true,
+    "endpointAutoSelect": true,
+  },
+  "name": "Codex Relay",
+  "notes": "",
+  "settingsConfig": {
+    "auth": {
+      "OPENAI_API_KEY": "sk-codex",
+    },
+    "config": "model_provider = "relay"
+model = "gpt-5"
+
+[model_providers.relay]
+name = "relay"
+base_url = "https://codex.example.com/v1"
+wire_api = "responses"
+",
+  },
+  "websiteUrl": "",
+}
+`;
+
+exports[`ProviderForm per-app submit payloads (edit mode) > gemini/third_party submits the unchanged provider 1`] = `
+{
+  "icon": "",
+  "iconColor": "",
+  "meta": {
+    "commonConfigEnabled": false,
+    "endpointAutoSelect": true,
+  },
+  "name": "Gemini Relay",
+  "notes": "",
+  "settingsConfig": {
+    "config": {
+      "general": {
+        "previewFeatures": true,
+      },
+    },
+    "env": {
+      "GEMINI_API_KEY": "g-key",
+      "GEMINI_MODEL": "gemini-x",
+      "GOOGLE_GEMINI_BASE_URL": "https://gemini.example.com",
+    },
+  },
+  "websiteUrl": "",
+}
+`;
+
+exports[`ProviderForm per-app submit payloads (edit mode) > hermes/third_party submits the unchanged provider 1`] = `
+{
+  "icon": "",
+  "iconColor": "",
+  "meta": {
+    "endpointAutoSelect": true,
+  },
+  "name": "Hermes Relay",
+  "notes": "",
+  "providerKey": "my-hermes",
+  "settingsConfig": {
+    "api_key": "sk-h",
+    "base_url": "https://hermes.example.com/v1",
+    "models": [
+      {
+        "id": "h1",
+      },
+    ],
+    "name": "my-hermes",
+  },
+  "websiteUrl": "",
+}
+`;
+
+exports[`ProviderForm per-app submit payloads (edit mode) > openclaw/third_party submits the unchanged provider 1`] = `
+{
+  "icon": "",
+  "iconColor": "",
+  "meta": {
+    "endpointAutoSelect": true,
+  },
+  "name": "OpenClaw Relay",
+  "notes": "",
+  "providerKey": "my-openclaw",
+  "settingsConfig": {
+    "api": "openai-completions",
+    "apiKey": "sk-ocl",
+    "baseUrl": "https://openclaw.example.com/v1",
+    "models": [
+      {
+        "id": "m1",
+        "name": "M1",
+      },
+    ],
+  },
+  "websiteUrl": "",
+}
+`;
+
+exports[`ProviderForm per-app submit payloads (edit mode) > opencode/omo submits the unchanged provider 1`] = `
+{
+  "icon": "",
+  "iconColor": "",
+  "meta": {
+    "endpointAutoSelect": true,
+  },
+  "name": "OMO",
+  "notes": "",
+  "presetCategory": "omo",
+  "settingsConfig": {
+    "agents": {
+      "sisyphus": {
+        "model": "relay/model-a",
+      },
+    },
+    "otherFields": {
+      "foo": 1,
+    },
+  },
+  "websiteUrl": "",
+}
+`;
+
+exports[`ProviderForm per-app submit payloads (edit mode) > opencode/third_party submits the unchanged provider 1`] = `
+{
+  "icon": "",
+  "iconColor": "",
+  "meta": {
+    "endpointAutoSelect": true,
+  },
+  "name": "OpenCode Relay",
+  "notes": "",
+  "providerKey": "my-opencode",
+  "settingsConfig": {
+    "models": {
+      "model-a": {
+        "name": "Model A",
+      },
+    },
+    "npm": "@ai-sdk/openai-compatible",
+    "options": {
+      "apiKey": "sk-oc",
+      "baseURL": "https://opencode.example.com/v1",
+    },
+  },
+  "websiteUrl": "",
+}
+`;
+
+exports[`ProviderForm preset application (add mode) > claude applies the Shengsuanyun preset 1`] = `
+{
+  "icon": "shengsuanyun",
+  "iconColor": "",
+  "isPartner": true,
+  "meta": {
+    "apiFormat": "anthropic",
+    "commonConfigEnabled": true,
+    "endpointAutoSelect": true,
+    "isPartner": true,
+    "partnerPromotionKey": "shengsuanyun",
+  },
+  "name": "providerForm.presets.shengsuanyun",
+  "notes": "",
+  "presetCategory": "aggregator",
+  "presetId": "<preset>",
+  "settingsConfig": {
+    "env": {
+      "ANTHROPIC_AUTH_TOKEN": "",
+      "ANTHROPIC_BASE_URL": "https://router.shengsuanyun.com/api",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic/claude-haiku-4.5",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic/claude-opus-4.8",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic/claude-sonnet-5",
+      "ANTHROPIC_MODEL": "anthropic/claude-sonnet-5",
+    },
+    "includeCoAuthoredBy": false,
+  },
+  "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+}
+`;
+
+exports[`ProviderForm preset application (add mode) > codex applies the Shengsuanyun preset 1`] = `
+{
+  "icon": "shengsuanyun",
+  "iconColor": "",
+  "isPartner": true,
+  "meta": {
+    "apiFormat": "openai_responses",
+    "commonConfigEnabled": true,
+    "endpointAutoSelect": true,
+    "isPartner": true,
+    "partnerPromotionKey": "shengsuanyun",
+  },
+  "name": "providerForm.presets.shengsuanyun",
+  "notes": "",
+  "presetCategory": "aggregator",
+  "presetId": "<preset>",
+  "settingsConfig": {
+    "auth": {
+      "OPENAI_API_KEY": "",
+    },
+    "config": "model_provider = "custom"
+model = "openai/gpt-5.5"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "shengsuanyun"
+base_url = "https://router.shengsuanyun.com/api/v1"
+wire_api = "responses"
+requires_openai_auth = true",
+  },
+  "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+}
+`;
+
+exports[`ProviderForm preset application (add mode) > gemini applies the Shengsuanyun preset 1`] = `
+{
+  "icon": "shengsuanyun",
+  "iconColor": "",
+  "isPartner": true,
+  "meta": {
+    "commonConfigEnabled": false,
+    "endpointAutoSelect": true,
+    "isPartner": true,
+    "partnerPromotionKey": "shengsuanyun",
+  },
+  "name": "providerForm.presets.shengsuanyun",
+  "notes": "",
+  "presetCategory": "aggregator",
+  "presetId": "<preset>",
+  "settingsConfig": {
+    "config": {},
+    "env": {
+      "GEMINI_MODEL": "google/gemini-3.5-flash",
+      "GOOGLE_GEMINI_BASE_URL": "https://router.shengsuanyun.com/api",
+    },
+  },
+  "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+}
+`;
+
+exports[`ProviderForm preset application (add mode) > hermes applies the Shengsuanyun preset 1`] = `
+{
+  "icon": "shengsuanyun",
+  "iconColor": "",
+  "isPartner": true,
+  "meta": {
+    "endpointAutoSelect": true,
+    "isPartner": true,
+    "partnerPromotionKey": "shengsuanyun",
+  },
+  "name": "providerForm.presets.shengsuanyun",
+  "notes": "",
+  "presetCategory": "aggregator",
+  "presetId": "<preset>",
+  "providerKey": "ssy",
+  "settingsConfig": {
+    "api_key": "",
+    "api_mode": "chat_completions",
+    "base_url": "https://router.shengsuanyun.com/api/v1",
+    "models": [
+      {
+        "id": "openai/gpt-5.5",
+        "name": "GPT-5.5",
+      },
+    ],
+    "name": "shengsuanyun",
+  },
+  "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+}
+`;
+
+exports[`ProviderForm preset application (add mode) > openclaw applies the Shengsuanyun preset 1`] = `
+{
+  "icon": "shengsuanyun",
+  "iconColor": "",
+  "isPartner": true,
+  "meta": {
+    "endpointAutoSelect": true,
+    "isPartner": true,
+    "partnerPromotionKey": "shengsuanyun",
+  },
+  "name": "providerForm.presets.shengsuanyun",
+  "notes": "",
+  "presetCategory": "aggregator",
+  "presetId": "<preset>",
+  "providerKey": "ssy",
+  "settingsConfig": {
+    "api": "anthropic-messages",
+    "apiKey": "",
+    "baseUrl": "https://router.shengsuanyun.com/api",
+    "models": [
+      {
+        "contextWindow": 1000000,
+        "cost": {
+          "input": 5,
+          "output": 25,
+        },
+        "id": "anthropic/claude-opus-4.8",
+        "name": "Claude Opus 4.8",
+      },
+      {
+        "contextWindow": 1000000,
+        "cost": {
+          "input": 3,
+          "output": 15,
+        },
+        "id": "anthropic/claude-sonnet-5",
+        "name": "Claude Sonnet 5",
+      },
+    ],
+  },
+  "suggestedDefaults": {
+    "model": {
+      "fallbacks": [
+        "ssy/anthropic/claude-sonnet-5",
+      ],
+      "primary": "ssy/anthropic/claude-opus-4.8",
+    },
+    "modelCatalog": {
+      "ssy/anthropic/claude-opus-4.8": {
+        "alias": "Opus",
+      },
+      "ssy/anthropic/claude-sonnet-5": {
+        "alias": "Sonnet",
+      },
+    },
+  },
+  "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+}
+`;
+
+exports[`ProviderForm preset application (add mode) > opencode applies the Shengsuanyun preset 1`] = `
+{
+  "icon": "shengsuanyun",
+  "iconColor": "",
+  "isPartner": true,
+  "meta": {
+    "endpointAutoSelect": true,
+    "isPartner": true,
+    "partnerPromotionKey": "shengsuanyun",
+  },
+  "name": "providerForm.presets.shengsuanyun",
+  "notes": "",
+  "presetCategory": "aggregator",
+  "presetId": "<preset>",
+  "providerKey": "ssy",
+  "settingsConfig": {
+    "models": {
+      "anthropic/claude-opus-4.8": {
+        "name": "Claude Opus 4.8",
+      },
+      "anthropic/claude-sonnet-5": {
+        "name": "Claude Sonnet 5",
+      },
+    },
+    "name": "Shengsuanyun",
+    "npm": "@ai-sdk/anthropic",
+    "options": {
+      "apiKey": "",
+      "baseURL": "https://router.shengsuanyun.com/api/v1",
+      "setCacheKey": true,
+    },
+  },
+  "websiteUrl": "https://www.shengsuanyun.com/?from=CH_4HHXMRYF",
+}
+`;

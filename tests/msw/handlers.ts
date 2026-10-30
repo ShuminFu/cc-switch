@@ -88,6 +88,10 @@ export const handlers = [
     success(getLiveProviderIds("openclaw")),
   ),
 
+  http.post(`${TAURI_ENDPOINT}/get_hermes_live_provider_ids`, () =>
+    success(getLiveProviderIds("hermes")),
+  ),
+
   http.post(`${TAURI_ENDPOINT}/get_openclaw_default_model`, () =>
     success({ primary: null, fallback: [] }),
   ),

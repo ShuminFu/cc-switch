@@ -335,4 +335,45 @@ describe("ProviderList Component", () => {
       screen.getByText("No providers match your search."),
     ).toBeInTheDocument();
   });
+
+  it("matches providers by configured model and endpoint (FE-PROV-54)", () => {
+    const withModel = createProvider({
+      id: "m",
+      name: "Relay One",
+      settingsConfig: {
+        env: {
+          ANTHROPIC_BASE_URL: "https://one.example.com",
+          ANTHROPIC_MODEL: "glm-5.1",
+        },
+      },
+    });
+    const other = createProvider({ id: "o", name: "Relay Two" });
+    useDragSortMock.mockReturnValue({
+      sortedProviders: [withModel, other],
+      sensors: [],
+      handleDragEnd: vi.fn(),
+    });
+
+    renderWithQueryClient(
+      <ProviderList
+        providers={{ m: withModel, o: other }}
+        currentProviderId=""
+        appId="claude"
+        onSwitch={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onDuplicate={vi.fn()}
+        onOpenWebsite={vi.fn()}
+      />,
+    );
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const searchInput = screen.getByPlaceholderText(
+      "Search name, notes, or URL...",
+    );
+    fireEvent.change(searchInput, { target: { value: "glm-5" } });
+    expect(screen.getByTestId("provider-card-m")).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-card-o")).not.toBeInTheDocument();
+    fireEvent.change(searchInput, { target: { value: "one.example" } });
+    expect(screen.getByTestId("provider-card-m")).toBeInTheDocument();
+  });
 });

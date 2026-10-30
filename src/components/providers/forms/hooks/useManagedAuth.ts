@@ -49,8 +49,15 @@ export function useManagedAuth(
     }
   }, []);
 
+  // Hook-level mutation callbacks still run after unmount, so every side
+  // effect below checks this ref: closing the dialog while a login is in
+  // flight must not open the browser, write the clipboard or start polling
+  // (FE-PROV-46).
+  const isMountedRef = useRef(true);
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       stopPolling();
     };
   }, [stopPolling]);
@@ -58,6 +65,7 @@ export function useManagedAuth(
   const startLoginMutation = useMutation({
     mutationFn: () => authApi.authStartLogin(authProvider, githubDomain),
     onSuccess: async (response) => {
+      if (!isMountedRef.current) return;
       setDeviceCode(response);
       setPollingState("polling");
       setError(null);
@@ -68,11 +76,13 @@ export function useManagedAuth(
         console.debug("[ManagedAuth] Failed to copy user code:", e);
       }
 
+      if (!isMountedRef.current) return;
       try {
         await settingsApi.openExternal(response.verification_uri);
       } catch (e) {
         console.debug("[ManagedAuth] Failed to open browser:", e);
       }
+      if (!isMountedRef.current) return;
 
       // Add a small buffer on top of GitHub's suggested interval to avoid
       // hitting slow_down responses too aggressively during device polling.
@@ -80,6 +90,10 @@ export function useManagedAuth(
       const expiresAt = Date.now() + response.expires_in * 1000;
 
       const pollOnce = async () => {
+        if (!isMountedRef.current) {
+          stopPolling();
+          return;
+        }
         if (Date.now() > expiresAt) {
           stopPolling();
           setPollingState("error");
@@ -93,6 +107,7 @@ export function useManagedAuth(
             response.device_code,
             githubDomain,
           );
+          if (!isMountedRef.current) return;
           if (newAccount) {
             stopPolling();
             setPollingState("success");
@@ -102,6 +117,7 @@ export function useManagedAuth(
             setDeviceCode(null);
           }
         } catch (e) {
+          if (!isMountedRef.current) return;
           const errorMessage = e instanceof Error ? e.message : String(e);
           if (
             !errorMessage.includes("pending") &&
@@ -114,6 +130,7 @@ export function useManagedAuth(
         }
       };
 
+      stopPolling();
       void pollOnce();
       pollingIntervalRef.current = setInterval(pollOnce, interval);
       pollingTimeoutRef.current = setTimeout(() => {
@@ -123,6 +140,7 @@ export function useManagedAuth(
       }, response.expires_in * 1000);
     },
     onError: (e) => {
+      if (!isMountedRef.current) return;
       setPollingState("error");
       setError(e instanceof Error ? e.message : String(e));
     },

@@ -146,16 +146,6 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
     setCodexModel((prev) => (prev === extracted ? prev : extracted));
   }, [codexConfig]);
 
-  // 获取 API Key（从 auth JSON）
-  const getCodexAuthApiKey = useCallback((authString: string): string => {
-    try {
-      const auth = JSON.parse(authString || "{}");
-      return typeof auth.OPENAI_API_KEY === "string" ? auth.OPENAI_API_KEY : "";
-    } catch {
-      return "";
-    }
-  }, []);
-
   // 从 codexAuth 中提取并同步 API Key
   useEffect(() => {
     let parsed: { OPENAI_API_KEY?: unknown } | null = null;
@@ -308,7 +298,5 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
     handleCodexModelChange,
     handleCodexConfigChange,
     resetCodexConfig,
-    getCodexAuthApiKey,
-    validateCodexAuth,
   };
 }

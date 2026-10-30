@@ -19,12 +19,16 @@ const HEALTH_REFETCH_MS = 5000;
 /**
  * 获取供应商健康状态
  */
-export function useProviderHealth(providerId: string, appType: string) {
+export function useProviderHealth(
+  providerId: string,
+  appType: string,
+  enabled = true,
+) {
   const proxyRunning = useCachedProxyRunning();
   return useQuery({
     queryKey: queryKeys.failover.providerHealth(providerId, appType),
     queryFn: () => failoverApi.getProviderHealth(providerId, appType),
-    enabled: !!providerId && !!appType,
+    enabled: enabled && !!providerId && !!appType,
     refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
     refetchIntervalInBackground: false,
     retry: false,

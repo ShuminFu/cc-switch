@@ -1,4 +1,5 @@
 import { CSS } from "@dnd-kit/utilities";
+import { queryKeys } from "@/lib/query/keys";
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -46,7 +47,7 @@ import { useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
-import { queryKeys } from "@/lib/query/keys";
+import { getProviderEndpoint, getProviderModels } from "@/lib/providerCodecs";
 
 interface ProviderListProps {
   providers: Record<string, Provider>;
@@ -102,19 +103,27 @@ export function ProviderList({
     appId,
   );
 
-  const { data: opencodeLiveIds } = useQuery({
-    queryKey: queryKeys.providers.opencodeLiveIds,
-    queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-    enabled: appId === "opencode",
-  });
+  const { data: opencodeLiveIds, isLoading: isOpencodeLiveIdsLoading } =
+    useQuery({
+      queryKey: queryKeys.providers.opencodeLiveIds,
+      queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
+      enabled: appId === "opencode",
+    });
 
   // OpenClaw: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: openclawLiveIds } = useOpenClawLiveProviderIds(
-    appId === "openclaw",
-  );
+  const { data: openclawLiveIds, isLoading: isOpenclawLiveIdsLoading } =
+    useOpenClawLiveProviderIds(appId === "openclaw");
 
   // Hermes: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: hermesLiveIds } = useHermesLiveProviderIds(appId === "hermes");
+  const { data: hermesLiveIds, isLoading: isHermesLiveIdsLoading } =
+    useHermesLiveProviderIds(appId === "hermes");
+
+  // Until the live ids arrive, "in config" is unknown: additive cards show a
+  // disabled pending button instead of flashing "Add" (FE-PROV-51).
+  const isConfigStatusLoading =
+    (appId === "opencode" && isOpencodeLiveIdsLoading) ||
+    (appId === "openclaw" && isOpenclawLiveIdsLoading) ||
+    (appId === "hermes" && isHermesLiveIdsLoading);
 
   // Hermes: 读取当前 model.provider，用于判断哪个供应商是"当前激活"（高亮）
   const { data: hermesModelConfig } = useHermesModelConfig(appId === "hermes");
@@ -296,12 +305,19 @@ export function ProviderList({
     const keyword = searchTerm.trim().toLowerCase();
     if (!keyword) return sortedProviders;
     return sortedProviders.filter((provider) => {
-      const fields = [provider.name, provider.notes, provider.websiteUrl];
+      // Endpoint and configured models are searchable too (FE-PROV-54).
+      const fields = [
+        provider.name,
+        provider.notes,
+        provider.websiteUrl,
+        getProviderEndpoint(appId, provider),
+        ...getProviderModels(appId, provider),
+      ];
       return fields.some((field) =>
         field?.toString().toLowerCase().includes(keyword),
       );
     });
-  }, [searchTerm, sortedProviders]);
+  }, [appId, searchTerm, sortedProviders]);
 
   const claudeDesktopStatusMessages = useMemo(() => {
     if (appId !== "claude-desktop" || !claudeDesktopStatus) return [];
@@ -417,6 +433,7 @@ export function ProviderList({
                 }
                 appId={appId}
                 isInConfig={isProviderInConfig(provider.id)}
+                isConfigStatusLoading={isConfigStatusLoading}
                 isOmo={isOmo}
                 isOmoSlim={isOmoSlim}
                 onSwitch={onSwitch}
@@ -557,6 +574,7 @@ interface SortableProviderCardProps {
   isCurrent: boolean;
   appId: AppId;
   isInConfig: boolean;
+  isConfigStatusLoading?: boolean;
   isOmo: boolean;
   isOmoSlim: boolean;
   onSwitch: (provider: Provider) => void;
@@ -589,6 +607,7 @@ function SortableProviderCard({
   isCurrent,
   appId,
   isInConfig,
+  isConfigStatusLoading,
   isOmo,
   isOmoSlim,
   onSwitch,
@@ -635,6 +654,7 @@ function SortableProviderCard({
         isCurrent={isCurrent}
         appId={appId}
         isInConfig={isInConfig}
+        isConfigStatusLoading={isConfigStatusLoading}
         isOmo={isOmo}
         isOmoSlim={isOmoSlim}
         onSwitch={onSwitch}

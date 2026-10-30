@@ -26,6 +26,15 @@ vi.mock("@/components/ui/dialog", () => ({
   ),
 }));
 
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+  },
+}));
+
 let mockFormValues: ProviderFormValues;
 const formMountCount = vi.hoisted(() => ({ value: 0 }));
 
@@ -186,6 +195,32 @@ context_window = 500000
     expect(submitted.iconColor).toBeUndefined();
   });
 
+  it("does not throw or submit when the form emits malformed settingsConfig (FE-PROV-26)", async () => {
+    const handleSubmit = vi.fn().mockResolvedValue(undefined);
+    const handleOpenChange = vi.fn();
+    mockFormValues = {
+      name: "Broken",
+      websiteUrl: "",
+      settingsConfig: "{ not json",
+    };
+
+    render(
+      <AddProviderDialog
+        open
+        onOpenChange={handleOpenChange}
+        appId="claude"
+        onSubmit={handleSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "common.add" }));
+
+    const { toast } = await import("sonner");
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(handleSubmit).not.toHaveBeenCalled();
+    expect(handleOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
   it("keeps the app-specific form mounted across a Universal tab switch (FE-PROV-04)", async () => {
     const user = userEvent.setup();
 
@@ -207,7 +242,9 @@ context_window = 500000
     );
     expect(await screen.findByTestId("universal-panel")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: /provider.tabProvider/ }));
+    await user.click(
+      screen.getByRole("tab", { name: /provider\.tabProviderFor|Provider$/ }),
+    );
 
     expect(screen.getByLabelText("mock-provider-name")).toHaveValue(
       "My provider",

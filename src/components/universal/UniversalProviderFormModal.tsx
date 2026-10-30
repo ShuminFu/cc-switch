@@ -21,8 +21,13 @@ import { deepClone } from "@/utils/deepClone";
 interface UniversalProviderFormModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (provider: UniversalProvider) => void;
-  onSaveAndSync?: (provider: UniversalProvider) => void;
+  /** Return `false` (or resolve to it) to keep the modal open on failure. */
+  onSave: (
+    provider: UniversalProvider,
+  ) => void | boolean | Promise<void | boolean>;
+  onSaveAndSync?: (
+    provider: UniversalProvider,
+  ) => void | boolean | Promise<void | boolean>;
   editingProvider?: UniversalProvider | null;
   initialPreset?: UniversalProviderPreset | null;
 }
@@ -186,7 +191,7 @@ requires_openai_auth = true`;
   }, [geminiEnabled, baseUrl, apiKey, models.gemini]);
 
   // 提交表单
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (!name.trim() || !baseUrl.trim() || !apiKey.trim()) {
       return;
     }
@@ -226,7 +231,8 @@ requires_openai_auth = true`;
       provider.notes = notes.trim() || undefined;
     }
 
-    onSave(provider);
+    // Wait for the save so a failed upsert keeps the entered values.
+    if ((await onSave(provider)) === false) return;
     onClose();
   }, [
     editingProvider,
@@ -310,12 +316,13 @@ requires_openai_auth = true`;
   }, [buildProvider, onSaveAndSync]);
 
   // 确认保存并同步
-  const confirmSaveAndSync = useCallback(() => {
+  const confirmSaveAndSync = useCallback(async () => {
     if (!pendingProvider || !onSaveAndSync) return;
 
-    onSaveAndSync(pendingProvider);
     setSyncConfirmOpen(false);
+    const saved = await onSaveAndSync(pendingProvider);
     setPendingProvider(null);
+    if (saved === false) return;
     onClose();
   }, [pendingProvider, onSaveAndSync, onClose]);
 
@@ -334,7 +341,7 @@ requires_openai_auth = true`;
         </Button>
       ) : (
         <Button
-          onClick={handleSubmit}
+          onClick={() => void handleSubmit()}
           disabled={!name.trim() || !baseUrl.trim() || !apiKey.trim()}
         >
           {t("common.add", { defaultValue: "添加" })}

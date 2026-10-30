@@ -291,6 +291,10 @@ export const queryKeys = {
     encryptionStatus: ["syncEncryptionStatus"] as const,
   },
 
+  secrets: {
+    vaultStatus: ["secretsVaultStatus"] as const,
+  },
+
   managedAuth: {
     status: (authProvider: string) =>
       ["managed-auth-status", authProvider] as const,

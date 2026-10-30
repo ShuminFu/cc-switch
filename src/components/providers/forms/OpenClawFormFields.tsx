@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { ModelOrderButtons, moveItem } from "./shared/ModelOrderButtons";
+import { useEndpointUrlError } from "./shared/useEndpointUrlError";
 import { useState, useRef, useCallback } from "react";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -88,7 +90,10 @@ export function OpenClawFormFields({
   onUserAgentChange,
 }: OpenClawFormFieldsProps) {
   const { t } = useTranslation();
-  const [expandedModels, setExpandedModels] = useState<Record<number, boolean>>(
+  const baseUrlError = useEndpointUrlError(baseUrl);
+  // Keyed by the stable row key, not the index, so deleting a row does not
+  // move the expanded state onto its neighbour (FE-PROV-11).
+  const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>(
     {},
   );
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -111,7 +116,15 @@ export function OpenClawFormFields({
 
   // Toggle advanced section for a model
   const toggleModelAdvanced = (index: number) => {
-    setExpandedModels((prev) => ({ ...prev, [index]: !prev[index] }));
+    const key = modelKeys[index];
+    setExpandedModels((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Reorder models; the first one is the default (primary) model.
+  const handleMoveModel = (from: number, to: number) => {
+    if (to < 0 || to >= models.length) return;
+    modelKeysRef.current = moveItem(modelKeysRef.current, from, to);
+    onModelsChange(moveItem(models, from, to));
   };
 
   // Add a new model entry
@@ -160,14 +173,13 @@ export function OpenClawFormFields({
 
   // Remove a model entry
   const handleRemoveModel = (index: number) => {
-    modelKeysRef.current.splice(index, 1);
+    const [removedKey] = modelKeysRef.current.splice(index, 1);
     const newModels = [...models];
     newModels.splice(index, 1);
     onModelsChange(newModels);
-    // Clean up expanded state
     setExpandedModels((prev) => {
       const updated = { ...prev };
-      delete updated[index];
+      delete updated[removedKey];
       return updated;
     });
   };
@@ -245,12 +257,17 @@ export function OpenClawFormFields({
           value={baseUrl}
           onChange={(e) => onBaseUrlChange(e.target.value)}
           placeholder="https://api.example.com/v1"
+          {...baseUrlError.inputProps}
         />
-        <p className="text-xs text-muted-foreground">
-          {t("openclaw.baseUrlHint", {
-            defaultValue: "供应商的 API 端点地址。",
-          })}
-        </p>
+        {baseUrlError.message ? (
+          <p className="text-xs text-destructive">{baseUrlError.message}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t("openclaw.baseUrlHint", {
+              defaultValue: "供应商的 API 端点地址。",
+            })}
+          </p>
+        )}
       </div>
 
       {/* API Key */}
@@ -428,11 +445,19 @@ export function OpenClawFormFields({
                       })}
                     />
                   </div>
+                  <ModelOrderButtons
+                    index={index}
+                    count={models.length}
+                    onMove={handleMoveModel}
+                  />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => handleRemoveModel(index)}
+                    aria-label={t("providerForm.removeModel", {
+                      defaultValue: "Remove model",
+                    })}
                     className="h-9 w-9 mt-5 text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -441,7 +466,7 @@ export function OpenClawFormFields({
 
                 {/* Advanced Options (Collapsible) */}
                 <Collapsible
-                  open={expandedModels[index] ?? false}
+                  open={expandedModels[modelKeys[index]] ?? false}
                   onOpenChange={() => toggleModelAdvanced(index)}
                 >
                   <CollapsibleTrigger asChild>
@@ -451,7 +476,7 @@ export function OpenClawFormFields({
                       size="sm"
                       className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
                     >
-                      {expandedModels[index] ? (
+                      {expandedModels[modelKeys[index]] ? (
                         <ChevronDown className="h-3.5 w-3.5" />
                       ) : (
                         <ChevronRight className="h-3.5 w-3.5" />
@@ -661,9 +686,9 @@ export function OpenClawFormFields({
         )}
 
         <p className="text-xs text-muted-foreground">
-          {t("openclaw.modelsHint", {
+          {t("openclaw.modelsOrderHint", {
             defaultValue:
-              "配置该供应商支持的模型。第一个模型为默认模型（Primary），其余为回退模型（Fallback）。拖拽或调整顺序可更改默认模型。",
+              "The first model is the default (Primary); the others are fallbacks. Use the arrows to change the order.",
           })}
         </p>
       </div>

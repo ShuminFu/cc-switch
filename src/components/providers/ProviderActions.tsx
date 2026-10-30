@@ -21,6 +21,8 @@ interface ProviderActionsProps {
   appId?: AppId;
   isCurrent: boolean;
   isInConfig?: boolean;
+  /** Additive apps: live config ids not loaded yet (FE-PROV-51). */
+  isConfigStatusLoading?: boolean;
   isTesting?: boolean;
   // Some provider mutation is in flight; disable the main/failover button
   isActionPending?: boolean;
@@ -62,6 +64,7 @@ export function ProviderActions({
   appId,
   isCurrent,
   isInConfig = false,
+  isConfigStatusLoading = false,
   isTesting,
   isActionPending = false,
   isProxyTakeover = false,
@@ -146,6 +149,18 @@ export function ProviderActions({
 
     // 累加模式（OpenCode 非 OMO / OpenClaw）
     if (isAdditiveMode) {
+      if (isConfigStatusLoading) {
+        return {
+          disabled: true,
+          variant: "secondary" as const,
+          className: "",
+          icon: <Loader2 className="h-4 w-4 animate-spin" />,
+          text: "",
+          title: t("provider.configStatusLoading", {
+            defaultValue: "Checking the app config…",
+          }),
+        };
+      }
       if (isInConfig) {
         return {
           disabled: isDefaultModel === true,
@@ -234,6 +249,7 @@ export function ProviderActions({
     <div className="flex items-center gap-1.5">
       {(appId === "openclaw" || appId === "hermes") &&
         isInConfig &&
+        !isConfigStatusLoading &&
         onSetAsDefault &&
         (() => {
           const activeLabel =
@@ -277,7 +293,8 @@ export function ProviderActions({
           variant={buttonState.variant}
           onClick={handleMainButtonClick}
           disabled={buttonState.disabled || isActionPending}
-          aria-busy={isActionPending || undefined}
+          aria-busy={isActionPending || isConfigStatusLoading || undefined}
+          aria-label={buttonState.text ? undefined : buttonState.title}
           className={cn("w-[4.5rem] px-2.5", buttonState.className)}
         >
           {buttonState.icon}
@@ -285,7 +302,10 @@ export function ProviderActions({
         </Button>
       </span>
 
-      <div className="flex items-center gap-1">
+      {/* Secondary actions: revealed on hover/focus where hover exists,
+          always visible on touch; the main button is always shown
+          (FE-PROV-29). */}
+      <div className="flex items-center gap-1 duration-200 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity">
         <Button
           size="icon"
           variant="ghost"

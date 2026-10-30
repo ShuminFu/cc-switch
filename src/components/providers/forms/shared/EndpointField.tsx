@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { HintText } from "./HintText";
+import { useEndpointUrlError } from "./useEndpointUrlError";
 import { FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -36,17 +38,21 @@ export function EndpointField({
   onFullUrlChange,
 }: EndpointFieldProps) {
   const { t } = useTranslation();
+  const urlError = useEndpointUrlError(value);
 
   const defaultManageLabel = t("providerForm.manageAndTest", {
     defaultValue: "管理和测速",
   });
   const effectiveHint =
     showFullUrlToggle && isFullUrl
-      ? fullUrlHint ||
-        t("providerForm.fullUrlHint", {
-          defaultValue:
-            "💡 请填写完整请求 URL，并且必须开启代理后使用；代理将直接使用此 URL，不拼接路径",
-        })
+      ? fullUrlHint || (
+          <HintText>
+            {t("providerForm.fullUrlHint", {
+              defaultValue:
+                "请填写完整请求 URL，并且必须开启代理后使用；代理将直接使用此 URL，不拼接路径",
+            })}
+          </HintText>
+        )
       : hint;
 
   return (
@@ -99,7 +105,11 @@ export function EndpointField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoComplete="off"
+        {...urlError.inputProps}
       />
+      {urlError.message && (
+        <p className="text-xs text-destructive">{urlError.message}</p>
+      )}
       {effectiveHint ? (
         <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">
           <p className="text-xs text-amber-600 dark:text-amber-400">
