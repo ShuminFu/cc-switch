@@ -5,9 +5,9 @@
 use super::log_codes::cb as log_cb;
 use super::types::AppProxyConfig;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
@@ -86,8 +86,91 @@ impl Default for CircuitBreakerConfig {
     }
 }
 
+/// A breaker state transition, reported to every listener registered with
+/// [`add_state_listener`]. Only breakers created with a key (see
+/// [`CircuitBreaker::new_registered`]) report transitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CircuitStateChange {
+    /// Breaker key, `"app_type:provider_id"`.
+    pub key: String,
+    pub from: CircuitState,
+    pub to: CircuitState,
+}
+
+impl CircuitStateChange {
+    /// Split the key into `(app_type, provider_id)`.
+    pub fn app_and_provider(&self) -> Option<(&str, &str)> {
+        split_breaker_key(&self.key)
+    }
+}
+
+/// Split a breaker key (`"app_type:provider_id"`) into its parts.
+pub fn split_breaker_key(key: &str) -> Option<(&str, &str)> {
+    key.split_once(':')
+        .filter(|(app, id)| !app.is_empty() && !id.is_empty())
+}
+
+/// Callback invoked synchronously on every keyed state transition. Listeners
+/// must not block; spawn a task for anything slow.
+pub type CircuitStateListener = Arc<dyn Fn(&CircuitStateChange) + Send + Sync>;
+
+static STATE_LISTENERS: once_cell::sync::Lazy<std::sync::RwLock<Vec<(u64, CircuitStateListener)>>> =
+    once_cell::sync::Lazy::new(|| std::sync::RwLock::new(Vec::new()));
+static NEXT_LISTENER_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Registry of live keyed breakers, used by the background health prober.
+/// Holds weak references so stopping the proxy (dropping its router) drops
+/// the breakers too.
+static BREAKER_REGISTRY: once_cell::sync::Lazy<
+    std::sync::Mutex<HashMap<String, Weak<CircuitBreaker>>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+/// Register a state-change listener; returns an id for [`remove_state_listener`].
+pub fn add_state_listener(listener: CircuitStateListener) -> u64 {
+    let id = NEXT_LISTENER_ID.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut listeners) = STATE_LISTENERS.write() {
+        listeners.push((id, listener));
+    }
+    id
+}
+
+/// Remove a listener registered with [`add_state_listener`].
+#[allow(dead_code)]
+pub fn remove_state_listener(id: u64) {
+    if let Ok(mut listeners) = STATE_LISTENERS.write() {
+        listeners.retain(|(existing, _)| *existing != id);
+    }
+}
+
+fn notify_state_listeners(change: &CircuitStateChange) {
+    // Clone the list first so a listener can (un)register without deadlocking.
+    let listeners: Vec<CircuitStateListener> = match STATE_LISTENERS.read() {
+        Ok(listeners) => listeners.iter().map(|(_, l)| l.clone()).collect(),
+        Err(_) => return,
+    };
+    for listener in listeners {
+        listener(change);
+    }
+}
+
+/// Every live breaker created with [`CircuitBreaker::new_registered`], with its
+/// key. Dead entries are pruned as a side effect.
+pub fn registered_breakers() -> Vec<(String, Arc<CircuitBreaker>)> {
+    let Ok(mut registry) = BREAKER_REGISTRY.lock() else {
+        return Vec::new();
+    };
+    registry.retain(|_, weak| weak.strong_count() > 0);
+    registry
+        .iter()
+        .filter_map(|(key, weak)| weak.upgrade().map(|b| (key.clone(), b)))
+        .collect()
+}
+
 /// 熔断器实例
 pub struct CircuitBreaker {
+    /// `"app_type:provider_id"` for breakers owned by the router; `None` for
+    /// anonymous breakers, which do not report state changes.
+    key: Option<String>,
     /// 当前状态
     state: Arc<RwLock<CircuitState>>,
     /// 连续失败计数
@@ -192,7 +275,22 @@ fn release_counter(counter: &AtomicU32) {
 impl CircuitBreaker {
     /// 创建新的熔断器
     pub fn new(config: CircuitBreakerConfig) -> Self {
+        Self::with_key(None, config)
+    }
+
+    /// Create a keyed breaker, register it for the background health prober
+    /// and report its state transitions to the registered listeners.
+    pub fn new_registered(key: &str, config: CircuitBreakerConfig) -> Arc<Self> {
+        let breaker = Arc::new(Self::with_key(Some(key.to_string()), config));
+        if let Ok(mut registry) = BREAKER_REGISTRY.lock() {
+            registry.insert(key.to_string(), Arc::downgrade(&breaker));
+        }
+        breaker
+    }
+
+    fn with_key(key: Option<String>, config: CircuitBreakerConfig) -> Self {
         Self {
+            key,
             state: Arc::new(RwLock::new(CircuitState::Closed)),
             consecutive_failures: Arc::new(AtomicU32::new(0)),
             consecutive_successes: Arc::new(AtomicU32::new(0)),
@@ -214,6 +312,30 @@ impl CircuitBreaker {
     pub async fn update_config(&self, new_config: CircuitBreakerConfig) {
         *self.config.write().await = new_config;
         self.clear_outcomes();
+    }
+
+    /// Current configuration snapshot.
+    pub async fn config(&self) -> CircuitBreakerConfig {
+        self.config.read().await.clone()
+    }
+
+    /// The breaker key (`"app_type:provider_id"`), if it has one.
+    #[allow(dead_code)]
+    pub fn key(&self) -> Option<&str> {
+        self.key.as_deref()
+    }
+
+    fn report_transition(&self, from: CircuitState, to: CircuitState) {
+        if from == to {
+            return;
+        }
+        if let Some(key) = &self.key {
+            notify_state_listeners(&CircuitStateChange {
+                key: key.clone(),
+                from,
+                to,
+            });
+        }
     }
 
     fn clear_outcomes(&self) {
@@ -482,11 +604,12 @@ impl CircuitBreaker {
 
     /// 转换到打开状态
     async fn transition_to_open(&self) {
-        *self.state.write().await = CircuitState::Open;
+        let previous = std::mem::replace(&mut *self.state.write().await, CircuitState::Open);
         self.clear_outcomes();
         *self.last_opened_at.write().await = Some(Instant::now());
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
+        self.report_transition(previous, CircuitState::Open);
     }
 
     /// 转换到半开状态
@@ -501,17 +624,20 @@ impl CircuitBreaker {
         self.consecutive_successes.store(0, Ordering::SeqCst);
         // 重置半开状态的请求限流计数
         self.half_open_requests.store(0, Ordering::SeqCst);
+        drop(state);
+        self.report_transition(CircuitState::Open, CircuitState::HalfOpen);
     }
 
     /// 转换到关闭状态
     async fn transition_to_closed(&self) {
-        *self.state.write().await = CircuitState::Closed;
+        let previous = std::mem::replace(&mut *self.state.write().await, CircuitState::Closed);
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
         // 重置计数器
         self.total_requests.store(0, Ordering::SeqCst);
         self.failed_requests.store(0, Ordering::SeqCst);
         self.clear_outcomes();
+        self.report_transition(previous, CircuitState::Closed);
     }
 }
 
@@ -780,5 +906,63 @@ mod tests {
         breaker.reset().await;
         assert_eq!(breaker.get_state().await, CircuitState::Closed);
         assert!(breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn keyed_breaker_reports_transitions_and_registers() {
+        let key = format!("claude:listener-test-{}", uuid::Uuid::new_v4());
+        let seen: Arc<std::sync::Mutex<Vec<CircuitStateChange>>> = Arc::default();
+        let sink = seen.clone();
+        let watched = key.clone();
+        let id = add_state_listener(Arc::new(move |change: &CircuitStateChange| {
+            if change.key == watched {
+                sink.lock().unwrap().push(change.clone());
+            }
+        }));
+
+        let breaker = CircuitBreaker::new_registered(
+            &key,
+            CircuitBreakerConfig {
+                failure_threshold: 1,
+                success_threshold: 1,
+                timeout_seconds: 0,
+                ..Default::default()
+            },
+        );
+        assert!(registered_breakers().iter().any(|(k, _)| k == &key));
+
+        breaker.record_failure(false).await; // Closed -> Open
+        breaker.record_failure(false).await; // Open stays Open: no event
+        let allow = breaker.allow_request().await; // Open -> HalfOpen
+        assert!(allow.used_half_open_permit);
+        breaker.record_success(true).await; // HalfOpen -> Closed
+        breaker.reset().await; // Closed -> Closed: no event
+
+        let states: Vec<(CircuitState, CircuitState)> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|c| (c.from, c.to))
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                (CircuitState::Closed, CircuitState::Open),
+                (CircuitState::Open, CircuitState::HalfOpen),
+                (CircuitState::HalfOpen, CircuitState::Closed),
+            ]
+        );
+        remove_state_listener(id);
+
+        drop(breaker);
+        assert!(!registered_breakers().iter().any(|(k, _)| k == &key));
+    }
+
+    #[test]
+    fn split_breaker_key_parses_app_and_provider() {
+        assert_eq!(split_breaker_key("claude:abc"), Some(("claude", "abc")));
+        assert_eq!(split_breaker_key("codex:a:b"), Some(("codex", "a:b")));
+        assert_eq!(split_breaker_key("claude:"), None);
+        assert_eq!(split_breaker_key("nokey"), None);
     }
 }
