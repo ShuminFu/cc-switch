@@ -107,3 +107,22 @@ commit.
 - `ci.yml` parses with PyYAML. actionlint is not installed here.
 - Windows/macOS were not run locally. The capabilities have no platform
   filter, and the registry and build.rs code have no platform-specific code.
+
+**Review.** Independent check of 95b8d4e/ba21f0d. The registry holds the same
+298 commands as the old `generate_handler!` list in `lib.rs` (set diff empty, no
+cfg-gated entries lost). `main` is the only webview window, including the one
+lightweight mode rebuilds from config, so the window scoping breaks nothing.
+`gen/schemas/acl-manifests.json` has `__app-acl__` with 596 permissions and the
+18 sets. Path-taking commands left in standard sets were checked:
+`delete_session(s)` validates the path against the provider session roots, and
+the workspace readers validate the filename. One gap fixed: CI's stale-set
+check used `git diff`, which ignores untracked files, so a new domain whose
+`permissions/<domain>.toml` was never committed would pass. It now fails on any
+`git status --porcelain` output under `src-tauri/permissions`, which was
+tested with a stray untracked file. The stale `generate_handler!` comment there
+was also updated. Re-verified: `cargo fmt --check`,
+`cargo clippy --all-targets -D warnings` clean; `cargo test --lib` 2813 passed
+(includes `acl_tests`); `cargo test --no-fail-fast` 3045 passed / 0 failed;
+`pnpm typecheck`, `pnpm format:check` clean; `pnpm test:unit` 1573 passed;
+orphan check 298/0/0; `pnpm tauri build --debug --no-bundle` plus
+`xvfb-run -a pnpm --dir e2e test` 6 passing, including the "not allowed" step.

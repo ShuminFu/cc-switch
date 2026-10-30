@@ -128,9 +128,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      # src/shared/bindings.ts is generated from the Rust DTOs and the
-      # generate_handler! command list (CCS-117). Regenerate it and fail with
-      # a diff when the committed file is stale.
+      # src/shared/bindings.ts is generated from the Rust DTOs and the command
+      # registry in src-tauri/src/commands/registry.rs (CCS-117, CCS-180).
+      # Regenerate it and fail with a diff when the committed file is stale.
       - name: Check generated bindings
         if: runner.os == 'Linux'
         shell: bash
@@ -144,7 +144,10 @@ jobs:
           fi
           # build.rs regenerates the ACL permission sets from
           # src-tauri/src/commands/registry.rs (CCS-180).
-          if ! git diff --exit-code -- src-tauri/permissions; then
+          # `git status` also catches a new domain whose set was never committed.
+          if [ -n "$(git status --porcelain -- src-tauri/permissions)" ]; then
+            git status --porcelain -- src-tauri/permissions
+            git diff -- src-tauri/permissions
             echo "::error file=src-tauri/permissions::stale command permission sets; rebuild src-tauri and commit src-tauri/permissions/*.toml"
             exit 1
           fi
