@@ -38,15 +38,39 @@ pub fn build_gemini_function_parameters(input_schema: Value) -> GeminiFunctionPa
 fn ensure_object_schema(schema: Value) -> Value {
     match schema {
         Value::Object(mut obj) => {
-            obj.entry("type".to_string())
-                .or_insert_with(|| json!("object"));
-            if obj.get("type").and_then(|v| v.as_str()) == Some("object") {
-                obj.entry("properties".to_string())
-                    .or_insert_with(|| json!({}));
+            // PROV-25: `type: null` / `"Object"` / type arrays at the root are
+            // forced to object too, not only a missing `type` key. An explicit
+            // primitive type (e.g. `"string"`) is left untouched.
+            let force_object = match obj.get("type") {
+                None | Some(Value::Null) | Some(Value::Array(_)) => true,
+                Some(Value::String(t)) => t != "object" && t.eq_ignore_ascii_case("object"),
+                Some(_) => true,
+            };
+            if force_object {
+                obj.insert("type".to_string(), json!("object"));
+            }
+            if obj.get("type").and_then(|v| v.as_str()) == Some("object")
+                && !obj.get("properties").is_some_and(Value::is_object)
+            {
+                obj.insert("properties".to_string(), json!({}));
             }
             Value::Object(obj)
         }
-        other => other,
+        _ => json!({"type": "object", "properties": {}}),
+    }
+}
+
+/// Gemini `Schema.format` only accepts `enum` / `date-time` for strings and
+/// `float` / `double` / `int32` / `int64` for numbers (PROV-13). Anything else
+/// (`uri`, `email`, `uuid`, `date`, ...) makes the whole request fail with
+/// INVALID_ARGUMENT, so it is dropped from the restricted `parameters` channel.
+fn is_supported_gemini_format(schema_type: Option<&str>, format: &str) -> bool {
+    match schema_type.map(|t| t.to_ascii_lowercase()) {
+        Some(t) if t == "string" => matches!(format, "enum" | "date-time"),
+        Some(t) if t == "number" || t == "integer" => {
+            matches!(format, "float" | "double" | "int32" | "int64")
+        }
+        _ => false,
     }
 }
 
@@ -168,13 +192,25 @@ fn to_gemini_schema(schema: Value) -> Value {
     match schema {
         Value::Object(obj) => {
             let mut result = Map::new();
+            let schema_type = obj
+                .get("type")
+                .and_then(|v| v.as_str())
+                .map(ToString::to_string);
 
             for (key, value) in obj {
                 match key.as_str() {
-                    "type" | "format" | "title" | "description" | "nullable" | "enum"
-                    | "maxItems" | "minItems" | "required" | "minProperties" | "maxProperties"
-                    | "minLength" | "maxLength" | "pattern" | "example" | "propertyOrdering"
-                    | "default" | "minimum" | "maximum" => {
+                    "format" => {
+                        if value
+                            .as_str()
+                            .is_some_and(|f| is_supported_gemini_format(schema_type.as_deref(), f))
+                        {
+                            result.insert(key, value);
+                        }
+                    }
+                    "type" | "title" | "description" | "nullable" | "enum" | "maxItems"
+                    | "minItems" | "required" | "minProperties" | "maxProperties" | "minLength"
+                    | "maxLength" | "pattern" | "example" | "propertyOrdering" | "default"
+                    | "minimum" | "maximum" => {
                         result.insert(key, value);
                     }
                     "properties" => {
@@ -334,5 +370,69 @@ mod tests {
 
         assert_eq!(result["parameters"]["type"], "string");
         assert!(result["parameters"].get("properties").is_none());
+    }
+
+    #[test]
+    fn unsupported_string_format_is_dropped_from_parameters() {
+        let params = build_gemini_function_parameters(json!({
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "format": "uri"},
+                "when": {"type": "string", "format": "date-time"},
+                "count": {"type": "integer", "format": "int64"},
+                "id": {"type": "string", "format": "uuid"}
+            }
+        }));
+        let GeminiFunctionParameters::Schema(schema) = params else {
+            panic!("expected restricted Schema channel");
+        };
+        assert!(schema["properties"]["url"].get("format").is_none());
+        assert!(schema["properties"]["id"].get("format").is_none());
+        assert_eq!(schema["properties"]["when"]["format"], "date-time");
+        assert_eq!(schema["properties"]["count"]["format"], "int64");
+    }
+
+    /// PROV-27: nullable type arrays and `$ref`/`$defs` need the JSON Schema
+    /// channel; `enum` on a non-string stays in the restricted channel.
+    #[test]
+    fn nullable_type_array_and_refs_use_json_schema_channel() {
+        let nullable = build_gemini_function_parameters(json!({
+            "type": "object",
+            "properties": {"x": {"type": ["string", "null"]}}
+        }));
+        assert!(matches!(nullable, GeminiFunctionParameters::JsonSchema(_)));
+
+        let refs = build_gemini_function_parameters(json!({
+            "type": "object",
+            "properties": {"x": {"$ref": "#/$defs/x"}},
+            "$defs": {"x": {"type": "string"}}
+        }));
+        assert!(matches!(refs, GeminiFunctionParameters::JsonSchema(_)));
+
+        let int_enum = build_gemini_function_parameters(json!({
+            "type": "object",
+            "properties": {"level": {"type": "integer", "enum": [1, 2, 3]}}
+        }));
+        let GeminiFunctionParameters::Schema(schema) = int_enum else {
+            panic!("expected restricted Schema channel");
+        };
+        assert_eq!(schema["properties"]["level"]["enum"], json!([1, 2, 3]));
+    }
+
+    #[test]
+    fn non_object_root_types_are_forced_to_object() {
+        for input in [
+            json!({"type": null}),
+            json!({"type": "Object"}),
+            json!({"properties": {}}),
+            json!(null),
+        ] {
+            let params = build_gemini_function_parameters(input.clone());
+            let schema = match params {
+                GeminiFunctionParameters::Schema(s) | GeminiFunctionParameters::JsonSchema(s) => s,
+            };
+            assert_eq!(schema["type"], "object", "input = {input}");
+            assert!(schema["properties"].is_object(), "input = {input}");
+        }
     }
 }
