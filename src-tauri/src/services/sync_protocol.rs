@@ -799,7 +799,8 @@ pub(crate) fn ensure_no_encryption_downgrade(
     encrypting: bool,
     force: bool,
 ) -> Result<(), AppError> {
-    if force || encrypting || !remote.is_some_and(|m| m.encryption.is_some()) {
+    let remote_encrypted = remote.and_then(|m| m.encryption.as_ref()).is_some();
+    if force || encrypting || !remote_encrypted {
         return Ok(());
     }
     Err(localized(
