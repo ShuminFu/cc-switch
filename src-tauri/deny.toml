@@ -23,12 +23,16 @@ yanked = "deny"
 # cannot fix belong here (CCS-018 baseline, pruned in CCS-214). Every new entry
 # needs a reason and a follow-up ticket.
 ignore = [
-    # zip 2.x (direct dependency); fixed by a zip major upgrade (CCS-215)
-    { id = "RUSTSEC-2026-0367", reason = "baseline: zip 2.x, needs zip upgrade (CCS-215)" },
-    { id = "RUSTSEC-2026-0368", reason = "baseline: zip 2.x, needs zip upgrade (CCS-215)" },
-    { id = "RUSTSEC-2026-0369", reason = "baseline: zip 2.x, needs zip upgrade (CCS-215)" },
-    # zstd 0.13 / zstd-safe 7 (direct and via zip 2.x); fixed in zstd >= 0.14.3 /
-    # zstd-safe >= 8.2.0, which is a breaking bump for us and for zip
+    # zip 4.6.1, pulled in only by tauri-plugin-updater 2.10 (latest 2.x) and only
+    # on Windows. Our direct zip dependency is on 9.x, which fixes all three
+    # (CCS-215). The updater extracts a signature-verified bundle, and these
+    # advisories concern Unix SUID bits and symlinks. Drop the entries once the
+    # updater moves to zip >= 9.
+    { id = "RUSTSEC-2026-0367", reason = "transitive: zip 4.6.1 via tauri-plugin-updater (Windows only)" },
+    { id = "RUSTSEC-2026-0368", reason = "transitive: zip 4.6.1 via tauri-plugin-updater (Windows only)" },
+    { id = "RUSTSEC-2026-0369", reason = "transitive: zip 4.6.1 via tauri-plugin-updater (Windows only)" },
+    # zstd 0.13 / zstd-safe 7 (direct dependency); fixed in zstd >= 0.14.3 /
+    # zstd-safe >= 8.2.0, which is a breaking bump for us
     { id = "RUSTSEC-2026-0391", reason = "baseline: zstd 0.13, fix needs zstd 0.14.3 (breaking)" },
     { id = "RUSTSEC-2026-0398", reason = "baseline: zstd-safe 7, fix needs zstd-safe 8.2 (breaking)" },
     { id = "RUSTSEC-2026-0403", reason = "baseline: zstd-safe 7, fix needs zstd-safe 8.2 (breaking)" },
@@ -55,6 +59,12 @@ allow = [
     "0BSD",
 ]
 confidence-threshold = 0.8
+# Per-crate exceptions for licenses we accept for one crate only.
+exceptions = [
+    # Pure-Rust libbzip2 port behind zip 9's default bzip2 support (CCS-215).
+    # bzip2-1.0.6 is the permissive BSD-style libbzip2 license.
+    { allow = ["bzip2-1.0.6"], crate = "libbz2-rs-sys" },
+]
 
 [bans]
 # Duplicate versions are common in a Tauri graph; report them without failing.

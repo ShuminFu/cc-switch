@@ -2299,7 +2299,10 @@ impl SkillService {
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
             let Some(enclosed) = file.enclosed_name() else {
-                log::warn!("跳过不安全的 ZIP 条目: {}", file.name());
+                log::warn!(
+                    "跳过不安全的 ZIP 条目: {}",
+                    String::from_utf8_lossy(file.name_raw())
+                );
                 continue;
             };
 
@@ -2318,7 +2321,10 @@ impl SkillService {
                 .components()
                 .all(|c| matches!(c, Component::Normal(_)))
             {
-                log::warn!("跳过不安全的 ZIP 条目: {}", file.name());
+                log::warn!(
+                    "跳过不安全的 ZIP 条目: {}",
+                    String::from_utf8_lossy(file.name_raw())
+                );
                 continue;
             }
 
@@ -3362,5 +3368,37 @@ mod tests {
             !dest.join("skill").join("leak.txt").exists(),
             "symlink pointing outside the repo must not be materialized"
         );
+    }
+
+    /// RUSTSEC-2026-0367：归档里的 SUID/SGID/sticky 位不能带到解压出的文件上
+    #[cfg(unix)]
+    #[test]
+    fn extract_repo_archive_drops_setuid_setgid_and_sticky_bits() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().expect("tempdir");
+        let dest = temp.path().join("dest");
+        fs::create_dir_all(&dest).expect("create dest");
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default().unix_permissions(0o7755);
+        writer
+            .add_directory("repo-main/", zip::write::SimpleFileOptions::default())
+            .expect("add root dir");
+        writer
+            .start_file("repo-main/run.sh", options)
+            .expect("start file");
+        writer.write_all(b"#!/bin/sh\n").expect("write file");
+        let mut zip = writer.finish().expect("finish zip");
+        zip.set_position(0);
+
+        SkillService::extract_repo_archive(zip, &dest, 100, 1024 * 1024).expect("extract archive");
+
+        let mode = fs::metadata(dest.join("run.sh"))
+            .expect("extracted file")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o7000, 0, "privileged bits leaked: {mode:o}");
     }
 }

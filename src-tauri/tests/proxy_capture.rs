@@ -58,10 +58,11 @@ fn unzip_into(zip: &[u8], dir: &Path) -> Vec<String> {
         let mut file = archive.by_index(index).expect("zip entry");
         let mut contents = Vec::new();
         file.read_to_end(&mut contents).expect("read zip entry");
-        let path = dir.join(file.name());
+        let name = file.name().expect("utf-8 entry name").into_owned();
+        let path = dir.join(&name);
         std::fs::create_dir_all(path.parent().expect("entry parent")).expect("mkdir");
         std::fs::write(&path, contents).expect("write entry");
-        names.push(file.name().to_string());
+        names.push(name);
     }
     names
 }

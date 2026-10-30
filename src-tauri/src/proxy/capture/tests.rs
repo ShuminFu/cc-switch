@@ -88,7 +88,10 @@ fn unzip(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
             let mut file = archive.by_index(index).expect("zip entry");
             let mut contents = Vec::new();
             file.read_to_end(&mut contents).expect("read entry");
-            (file.name().to_string(), contents)
+            (
+                file.name().expect("utf-8 entry name").into_owned(),
+                contents,
+            )
         })
         .collect()
 }
