@@ -95,17 +95,18 @@ impl RequestContext {
     ) -> Result<Self, ProxyError> {
         let start_time = Instant::now();
 
-        // 从数据库读取应用级代理配置（per-app）
-        let app_config = state
+        // 一次性获取该 app 的配置快照（per-app 代理配置、整流器/优化器配置、供应商列表、
+        // 故障转移队列）。命中缓存时不访问数据库；配置写入后由 update_hook 自动失效。
+        let snapshot = state
             .db
-            .get_proxy_config_for_app(app_type_str)
+            .proxy_request_snapshot_async(app_type_str)
             .await
             .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
-        // 从数据库读取整流器配置
-        let rectifier_config = state.db.get_rectifier_config().unwrap_or_default();
-        let optimizer_config = state.db.get_optimizer_config().unwrap_or_default();
-        let copilot_optimizer_config = state.db.get_copilot_optimizer_config().unwrap_or_default();
+        let app_config = snapshot.app_config.clone();
+        let rectifier_config = snapshot.rectifier_config.clone();
+        let optimizer_config = snapshot.optimizer_config.clone();
+        let copilot_optimizer_config = snapshot.copilot_optimizer_config.clone();
 
         let current_provider_id =
             crate::settings::get_current_provider(&app_type).unwrap_or_default();
@@ -133,7 +134,7 @@ impl RequestContext {
         // 注意：只在这里调用一次，结果传递给 forwarder，避免重复消耗 HalfOpen 名额
         let providers = state
             .provider_router
-            .select_providers(app_type_str)
+            .select_providers_from_snapshot(&snapshot)
             .await
             .map_err(|e| match e {
                 crate::error::AppError::AllProvidersCircuitOpen => {
