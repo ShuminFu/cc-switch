@@ -11,7 +11,7 @@ use cc_switch_lib::{AppType, MultiAppConfig, Provider, ProviderService};
 
 #[path = "support.rs"]
 mod support;
-use support::{create_test_state_with_config, ensure_test_home, reset_test_fs, test_mutex};
+use support::{create_test_state_with_config, ensure_test_home, TestEnv};
 
 fn backups_in(dir: &Path) -> Vec<(String, Vec<u8>)> {
     let mut out: Vec<(String, Vec<u8>)> = match fs::read_dir(dir) {
@@ -57,8 +57,7 @@ fn gemini_provider(id: &str, with_config: bool) -> Provider {
 
 #[test]
 fn gemini_switch_fails_and_keeps_unparsable_settings_json() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let gemini_dir = home.join(".gemini");
@@ -86,8 +85,7 @@ fn gemini_switch_fails_and_keeps_unparsable_settings_json() {
 
 #[test]
 fn gemini_switch_preserves_commented_settings_and_backs_up_original() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let gemini_dir = home.join(".gemini");
@@ -132,8 +130,7 @@ fn gemini_switch_preserves_commented_settings_and_backs_up_original() {
 
 #[test]
 fn claude_switch_backs_up_live_settings_and_warns_when_unreadable() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let claude_dir = home.join(".claude");
@@ -199,8 +196,7 @@ fn claude_switch_backs_up_live_settings_and_warns_when_unreadable() {
 
 #[test]
 fn codex_switch_backs_up_auth_and_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let codex_dir = home.join(".codex");
