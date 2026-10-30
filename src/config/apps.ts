@@ -297,5 +297,4 @@ export const isAppVisible = (
 /** First app the user has not hidden, or Claude when everything is hidden. */
 export const getFirstVisibleApp = (
   visibleApps: Partial<Record<AppId, boolean>> | undefined,
-): AppId =>
-  ALL_APP_IDS.find((id) => isAppVisible(visibleApps, id)) ?? "claude";
+): AppId => ALL_APP_IDS.find((id) => isAppVisible(visibleApps, id)) ?? "claude";
