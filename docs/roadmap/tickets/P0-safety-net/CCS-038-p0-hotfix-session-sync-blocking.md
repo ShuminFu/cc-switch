@@ -1,6 +1,6 @@
 # CCS-038: [usage] Move session-log sync off tokio workers and off the main thread
 
-**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P0`, `p1-high`, `area:usage`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:P0`, `p1-high`, `area:usage`
 
 > **Ticket key:** `p0-hotfix-session-sync-blocking` · **Phase:** P0 · **Priority:** p1-high · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -18,7 +18,7 @@ Verified finding backend-session-sync-blocking. The 60 s periodic sync runs bloc
 ## Acceptance criteria / verification
 - [x] `cargo check` and `cargo test --manifest-path src-tauri/Cargo.toml session_usage`
 - [x] A debug log shows the command no longer runs on the `main` thread
-- [ ] Manual: with many large .jsonl files, the window stays responsive during a manual sync
+- [x] Manual: with many large .jsonl files, the window stays responsive during a manual sync (automated by CCS-224: `e2e/specs/session-sync-responsiveness.e2e.mjs`)
 
 ## Dependencies
 None.
@@ -95,3 +95,12 @@ Re-run on the lane2/followups tree at f13a403 (Linux):
   → clean.
 - The test box and the debug-log box are ticked. The manual responsiveness check
   stays open (CCS-224 covers it headlessly).
+
+### Responsiveness check automated (CCS-224)
+
+`e2e/specs/session-sync-responsiveness.e2e.mjs` covers the manual box. It runs
+`sync_session_usage` over 300 session logs (~206 MB) in the real debug build
+under tauri-driver/xvfb. During the ~12 s sync, WebDriver round trips stayed
+at or below 72 ms and frame gaps at or below 81 ms; the limit for both is
+250 ms. When the command was made synchronous in a scratch build, the spec
+failed with an 11.4 s stall. See the CCS-224 implementation notes for details.
