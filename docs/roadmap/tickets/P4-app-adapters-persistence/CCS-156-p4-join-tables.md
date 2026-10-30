@@ -15,9 +15,9 @@
 - AppSet replaces McpApps and SkillApps.
 
 ## Acceptance criteria / verification
-- [ ] The migration harness passes; an older-version fixture importing the new dump keeps its app flags
-- [ ] A test-only 9th app needs no migration
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --test migrations dao::`
+- [x] The migration harness passes; an older-version fixture importing the new dump keeps its app flags
+- [x] A test-only 9th app needs no migration
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --test migrations dao::`
 
 ## Dependencies
 p4-migration-framework
@@ -85,3 +85,5 @@ p4-migration-framework
   - the `AppSet` serde shape tests
 - Full suite `cargo test --no-fail-fast`: 2573 passed, 0 failed.
 - Before the v17 fixture was added, the only failure was `db_fixtures_cover_every_schema_version` (a v17 fixture was missing).
+
+**Review.** I checked each acceptance criterion against `dd64eeb` and `4671acb`: the v17 step, the DAOs (named columns, flags read only from the join tables, legacy dual-write inside a savepoint), the `AppSet` JSON shape, the v17 fixture and the four `dao::` tests. I grepped for remaining `McpApps`/`SkillApps` users and for raw `enabled_*` SQL outside the DAOs; there are none. I re-ran fmt, clippy `--all-targets`, `--test migrations` (13 passed) and the full `cargo test --no-fail-fast`. Leaving `DB_COMPAT_VERSION` at 6 is consistent with docs/dev/DB_COMPATIBILITY.md: the data is copied, not moved, the old columns keep their meaning, and an older build refuses a v17 dump anyway. One gap fixed: `AppJoinTable::write` replaced rows for every app in the registry, including apps that `AppSet` cannot hold (OpenClaw, Claude Desktop). If a newer build of the same schema gives one of these apps MCP or Skills support, a save from this build would silently delete its rows. The write now replaces only rows for `AppSet::supported_apps()`. `rows_for_apps_this_build_does_not_know_survive_a_save` now also covers an `openclaw` row. The acceptance boxes are now ticked.

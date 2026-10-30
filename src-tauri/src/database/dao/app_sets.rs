@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use rusqlite::{params, params_from_iter, types::Value, Connection};
 
 use crate::app_config::{AppSet, AppType};
-use crate::apps::APPS;
 use crate::error::AppError;
 
 /// v17 之前主表上每应用一列的旧启用列 `enabled_<slug>`（冻结，新增应用不再加列）
@@ -114,11 +113,11 @@ impl AppJoinTable {
 
     /// 用 `apps` 替换主表行 `id` 的启用集合，并双写旧的 `enabled_<slug>` 列
     ///
-    /// 只替换本版本注册表中认识的应用的行：同一 Schema 版本下更新的构建可能已为
-    /// 新应用写入行（新增应用不需要迁移），这些行必须原样保留。
+    /// 只替换 `AppSet` 在本版本能表示的应用的行：同一 Schema 版本下更新的构建可能已为
+    /// 新应用（或新获得 MCP / Skills 能力的已有应用）写入行（不需要迁移），这些行必须原样保留。
     /// 调用方负责主表行已存在，并把本调用与主表写入放在同一事务中。
     pub(crate) fn write(&self, conn: &Connection, id: &str, apps: &AppSet) -> Result<(), AppError> {
-        let known: Vec<&str> = APPS.iter().map(|d| d.slug).collect();
+        let known: Vec<&str> = AppSet::supported_apps().map(|d| d.slug).collect();
         let placeholders = (0..known.len())
             .map(|i| format!("?{}", i + 2))
             .collect::<Vec<_>>()
@@ -338,6 +337,11 @@ mod tests {
                 "INSERT INTO skill_apps (skill_id, app_type) VALUES ('s1', 'ninth')",
                 [],
             )?;
+            // 本版本认识但 AppSet 不接纳的应用（例如 OpenClaw 在更新的构建中获得 MCP 能力）
+            conn.execute(
+                "INSERT INTO mcp_server_apps (server_id, app_type) VALUES ('echo', 'openclaw')",
+                [],
+            )?;
         }
 
         assert_eq!(
@@ -347,7 +351,7 @@ mod tests {
         db.save_mcp_server(&server("echo", AppSet::only(&AppType::Codex)))?;
         assert_eq!(
             join_rows(&db, &MCP_SERVER_APPS, "echo")?,
-            ["codex", "ninth"]
+            ["codex", "ninth", "openclaw"]
         );
 
         db.update_skill_apps("s1", &AppSet::default())?;
