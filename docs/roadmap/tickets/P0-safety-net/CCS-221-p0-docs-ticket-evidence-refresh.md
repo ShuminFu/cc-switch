@@ -60,7 +60,7 @@ changed.
 `docs/roadmap/tickets/P0-safety-net/{CCS-033-p0-ci-release-hygiene,CCS-036-p0-hotfix-terminal-tempfiles,CCS-038-p0-hotfix-session-sync-blocking,CCS-221-p0-docs-ticket-evidence-refresh}.md`,
 `docs/roadmap/tickets/P4-app-adapters-persistence/{CCS-149-p4-adapter-additive,CCS-152-p4-takeover-crash-e2e}.md`.
 
-**Commits.** See the follow-up commit that records the SHA.
+**Commits.** `1f543c6` (ticket evidence refresh + Hermes doc comment); this SHA is recorded in a follow-up commit.
 
 **Verification (Linux).**
 - `node scripts/check-versions.mjs v3.18.0` → exit 1; `node scripts/check-versions.mjs` → exit 0.
