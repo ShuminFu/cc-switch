@@ -29,7 +29,6 @@ use futures::StreamExt;
 use serde_json::{json, Value};
 
 #[path = "support.rs"]
-#[allow(dead_code)]
 mod support;
 
 // ---------------------------------------------------------------------------

@@ -260,7 +260,9 @@ fn import_creates_backup_that_list_and_restore_commands_can_use() {
     let env = TestEnv::new();
     let state = create_disk_test_state().expect("create disk state");
 
-    assert!(list_db_backups().expect("list backups").is_empty());
+    assert!(tauri::async_runtime::block_on(list_db_backups())
+        .expect("list backups")
+        .is_empty());
 
     state
         .db
@@ -281,7 +283,7 @@ fn import_creates_backup_that_list_and_restore_commands_can_use() {
     assert_eq!(provider_ids(&state), vec!["before"]);
 
     // list_db_backups command sees that backup.
-    let backups = list_db_backups().expect("list backups");
+    let backups = tauri::async_runtime::block_on(list_db_backups()).expect("list backups");
     let entry = backups
         .iter()
         .find(|b| b.filename.contains(&backup_id))
