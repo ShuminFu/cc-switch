@@ -49,41 +49,59 @@ export function DeepLinkImportDialog() {
   };
 
   useEffect(() => {
+    const showRequest = async (payload: DeepLinkImportRequest) => {
+      // If config is present, merge it to get the complete configuration
+      if (payload.config || payload.configUrl) {
+        try {
+          const mergedRequest = await deeplinkApi.mergeDeeplinkConfig(payload);
+          setRequest(mergedRequest);
+        } catch (error) {
+          console.error("Failed to merge config:", error);
+          toast.error(t("deeplink.configMergeError"), {
+            description: error instanceof Error ? error.message : String(error),
+          });
+          // Fall back to original request
+          setRequest(payload);
+        }
+      } else {
+        setRequest(payload);
+      }
+
+      setIsOpen(true);
+    };
+
+    const showError = (payload: DeeplinkError) => {
+      console.error("Deep link error:", payload);
+      toast.error(t("deeplink.parseError"), {
+        description: payload.error,
+      });
+    };
+
     // Listen for deep link import events
     const unlistenImport = listen<DeepLinkImportRequest>(
       "deeplink-import",
-      async (event) => {
-        // If config is present, merge it to get the complete configuration
-        if (event.payload.config || event.payload.configUrl) {
-          try {
-            const mergedRequest = await deeplinkApi.mergeDeeplinkConfig(
-              event.payload,
-            );
-            setRequest(mergedRequest);
-          } catch (error) {
-            console.error("Failed to merge config:", error);
-            toast.error(t("deeplink.configMergeError"), {
-              description:
-                error instanceof Error ? error.message : String(error),
-            });
-            // Fall back to original request
-            setRequest(event.payload);
-          }
-        } else {
-          setRequest(event.payload);
-        }
-
-        setIsOpen(true);
-      },
+      (event) => showRequest(event.payload),
     );
 
     // Listen for deep link error events
-    const unlistenError = listen<DeeplinkError>("deeplink-error", (event) => {
-      console.error("Deep link error:", event.payload);
-      toast.error(t("deeplink.parseError"), {
-        description: event.payload.error,
+    const unlistenError = listen<DeeplinkError>("deeplink-error", (event) =>
+      showError(event.payload),
+    );
+
+    // Once both listeners exist, tell the backend and pick up any link that
+    // arrived before the webview was listening (cold start, lightweight mode).
+    Promise.all([unlistenImport, unlistenError])
+      .then(() => deeplinkApi.frontendReady())
+      .then((pending) => {
+        if (pending?.kind === "import") {
+          void showRequest(pending.request);
+        } else if (pending?.kind === "error") {
+          showError(pending);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to fetch pending deep link:", error);
       });
-    });
 
     return () => {
       unlistenImport.then((fn) => fn());
