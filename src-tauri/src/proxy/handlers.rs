@@ -171,8 +171,8 @@ async fn handle_messages_for_app(
         .await
         .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
         .to_bytes();
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value =
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -710,8 +710,8 @@ pub async fn handle_chat_completions(
         .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
         .to_bytes();
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value =
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, AppType::Codex, "Codex", "codex").await?;
@@ -800,8 +800,8 @@ async fn handle_responses_for_app(
         .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
         .to_bytes();
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value =
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -915,8 +915,8 @@ async fn handle_responses_compact_for_app(
         .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
         .to_bytes();
     let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?;
+    let body: Value =
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
 
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
@@ -1595,7 +1595,7 @@ fn codex_proxy_error_json(
                 "error": {
                     "message": get_error_message(error),
                     "type": "proxy_error",
-                    "code": codex_proxy_error_code(error),
+                    "code": error.code(),
                     "param": Value::Null,
                 }
             }),
@@ -1659,10 +1659,7 @@ fn codex_proxy_error_json(
     }
 
     if error_obj.get("code").map(Value::is_null).unwrap_or(true) {
-        error_obj.insert(
-            "code".to_string(),
-            Value::String(codex_proxy_error_code(error).to_string()),
-        );
+        error_obj.insert("code".to_string(), Value::String(error.code().to_string()));
     }
 
     if !error_obj.contains_key("param") {
@@ -1687,30 +1684,6 @@ fn codex_proxy_error_json(
     }
 
     body
-}
-
-fn codex_proxy_error_code(error: &ProxyError) -> &'static str {
-    match error {
-        ProxyError::ForwardFailed(_) => "cc_switch_forward_failed",
-        ProxyError::Timeout(_) | ProxyError::StreamIdleTimeout(_) => "cc_switch_timeout",
-        ProxyError::NoAvailableProvider => "cc_switch_no_available_provider",
-        ProxyError::AllProvidersCircuitOpen => "cc_switch_all_providers_circuit_open",
-        ProxyError::NoProvidersConfigured => "cc_switch_no_providers_configured",
-        ProxyError::MaxRetriesExceeded => "cc_switch_max_retries_exceeded",
-        ProxyError::ProviderUnhealthy(_) => "cc_switch_provider_unhealthy",
-        ProxyError::ConfigError(_) => "cc_switch_config_error",
-        ProxyError::TransformError(_) => "cc_switch_transform_error",
-        ProxyError::InvalidRequest(_) => "cc_switch_invalid_request",
-        ProxyError::AuthError(_) => "cc_switch_auth_error",
-        ProxyError::UpstreamError { .. } => "cc_switch_upstream_error",
-        ProxyError::DatabaseError(_) => "cc_switch_database_error",
-        ProxyError::Internal(_) => "cc_switch_internal_error",
-        ProxyError::AlreadyRunning
-        | ProxyError::NotRunning
-        | ProxyError::BindFailed(_)
-        | ProxyError::StopTimeout
-        | ProxyError::StopFailed(_) => "cc_switch_proxy_error",
-    }
 }
 
 fn compact_error_message(message: &str, max_chars: usize) -> String {
@@ -1752,8 +1725,7 @@ pub async fn handle_gemini(
     let body: Value = if body_bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&body_bytes)
-            .map_err(|e| ProxyError::Internal(format!("Failed to parse request body: {e}")))?
+        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?
     };
 
     // Gemini 的模型名称在 URI 中
@@ -3128,5 +3100,59 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
         assert_eq!(body["error"]["provider"], "HCAI");
         assert_eq!(body["error"]["model"], "gpt-5.5");
         assert_eq!(body["error"]["endpoint"], "/responses");
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        use http_body_util::BodyExt;
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect body")
+            .to_bytes();
+        serde_json::from_slice(&bytes).expect("json body")
+    }
+
+    #[tokio::test]
+    async fn malformed_client_json_returns_400_invalid_request() {
+        use axum::response::IntoResponse;
+        let db = std::sync::Arc::new(crate::database::Database::memory().expect("db"));
+        let state = crate::proxy::response_processor::tests::build_state(db);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from("{"))
+            .unwrap();
+
+        let error = match super::handle_messages(axum::extract::State(state), request).await {
+            Ok(_) => panic!("malformed JSON must be rejected"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, ProxyError::InvalidRequest(_)));
+
+        let response = error.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["type"], "error");
+        assert_eq!(body["error"]["type"], "proxy_error");
+        assert_eq!(body["error"]["code"], "cc_switch_invalid_request");
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("line 1"));
+    }
+
+    #[tokio::test]
+    async fn malformed_codex_json_returns_400_invalid_request() {
+        let db = std::sync::Arc::new(crate::database::Database::memory().expect("db"));
+        let state = crate::proxy::response_processor::tests::build_state(db);
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/v1/responses")
+            .body(axum::body::Body::from("not json"))
+            .unwrap();
+        let result = super::handle_responses(axum::extract::State(state), request).await;
+        assert!(matches!(result, Err(ProxyError::InvalidRequest(_))));
     }
 }

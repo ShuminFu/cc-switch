@@ -809,7 +809,7 @@ fn format_headers(headers: &HeaderMap) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::database::Database;
     use crate::error::AppError;
@@ -931,7 +931,7 @@ mod tests {
         );
     }
 
-    fn build_state(db: Arc<Database>) -> ProxyState {
+    pub(crate) fn build_state(db: Arc<Database>) -> ProxyState {
         ProxyState {
             db: db.clone(),
             config: Arc::new(RwLock::new(ProxyConfig::default())),
