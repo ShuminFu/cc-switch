@@ -471,8 +471,8 @@ fn upsert_mcp_server_rejects_invalid_spec_before_any_write() {
 
     let state = support::create_test_state().expect("create test state");
     for spec in [
-        json!({"command": "echo", "args": ["ok", 1]}),
-        json!({"command": "echo", "env": {"A": 1}}),
+        json!({"command": "echo", "args": ["ok", [1]]}),
+        json!({"command": "echo", "env": {"A": {"nested": 1}}}),
         json!({"type": "http", "url": "file:///etc/passwd"}),
         json!({"type": "websocket", "url": "https://example.com"}),
     ] {

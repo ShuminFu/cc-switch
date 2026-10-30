@@ -40,7 +40,8 @@
     "deleting": "Deleting...",
     "auto": "Auto",
     "enabled": "Enabled",
-    "notSet": "Not Set"
+    "notSet": "Not Set",
+    "retry": "Retry"
   },
   "firstRunNotice": {
     "title": "Welcome to CC Switch",
@@ -1181,7 +1182,12 @@
       "fieldMustBeObject": "{{field}} must be a JSON object",
       "fieldJsonSyntaxError": "{{field}}: JSON format error, please check the syntax",
       "commonConfigParseFailed": "Config JSON could not be parsed, so the common config was not applied"
-    }
+    },
+    "codexAuthInvalid": "auth.json is not valid JSON. Fix it before saving.",
+    "codexAuthNotObject": "auth.json must be a JSON object.",
+    "codexConfigInvalid": "config.toml has a syntax error. Fix it before saving.",
+    "geminiConfigInvalid": "Gemini config.json is not valid JSON. Fix it before saving.",
+    "geminiConfigNotObject": "Gemini config.json must be a JSON object."
   },
   "copilot": {
     "authSection": "GitHub Copilot Authentication",
@@ -2420,7 +2426,16 @@
       "title": "Batch Import MCP Servers",
       "targetApps": "Target Apps",
       "serverCount": "MCP Servers ({{count}})",
-      "enabledWarning": "After import, configurations will be written to all specified apps immediately"
+      "enabledWarning": "After import, configurations will be written to all specified apps immediately",
+      "executionWarning": "MCP servers run commands on your computer with your user permissions whenever the target app starts. Review every command, argument and environment variable below and only import servers from sources you trust.",
+      "parseFailed": "The MCP configuration could not be decoded.",
+      "command": "Command",
+      "env": "Environment variables",
+      "headers": "Headers",
+      "riskyCommand": "This server runs a shell or downloader, or its arguments contain shell metacharacters. It can execute arbitrary code.",
+      "enableNowLabel": "Enable for the target apps now (write to their config files)",
+      "linkRequestedEnable": "The link asked to enable these servers immediately. They are only enabled if you tick the box above.",
+      "disabledHint": "Servers will be saved to CC Switch disabled. No app config files are changed; you can enable them per app on the MCP page."
     },
     "prompt": {
       "title": "Import System Prompt",
@@ -2445,7 +2460,15 @@
     "usageApiKey": "Usage API Key",
     "usageBaseUrl": "Usage Query URL",
     "usageAutoInterval": "Auto Query",
-    "usageAutoIntervalValue": "Every {{minutes}} minutes"
+    "usageAutoIntervalValue": "Every {{minutes}} minutes",
+    "endpointHostLabel": "Requests will be sent to",
+    "usageScriptSource": "Script source",
+    "usageScriptDecodeFailed": "(script could not be decoded)",
+    "usageScriptEnableLabel": "Enable this usage script (it runs inside CC Switch on every usage query)",
+    "switchRequestedWarning": "This link asks to make this provider current immediately, which would route all {{app}} traffic to {{host}}. It is only switched if you tick the box below.",
+    "switchNowLabel": "Switch to this provider now (route all {{app}} traffic to {{host}})",
+    "switchNowWarning": "All {{app}} traffic, including your prompts and file contents, will be sent to {{host}} right after import.",
+    "firstProviderNotice": "No provider is active for {{app}} yet, so this provider will become the current one."
   },
   "iconPicker": {
     "search": "Search Icons",
@@ -2593,7 +2616,13 @@
       "invalidAddress": "Invalid address. Enter an IPv4 (e.g. 127.0.0.1), IPv6 (e.g. ::1), or localhost",
       "configSaved": "Routing configuration saved",
       "configSaveFailed": "Failed to save configuration",
-      "restartRequired": "Restart routing service for address or port changes to take effect"
+      "restartRequired": "Restart routing service for address or port changes to take effect",
+      "lanExposure": {
+        "tokenCopied": "Access token copied",
+        "title": "This address exposes the proxy to other devices",
+        "description": "Anyone who can reach this address could spend your provider credits. Requests from other devices must send the access token below as \"Authorization: Bearer <token>\" (or x-api-key / x-goog-api-key). Apps on this computer keep working without it. Only use this on networks you trust.",
+        "tokenLabel": "Access token"
+      }
     },
     "switchFailed": "Switch failed: {{error}}",
     "takeover": {
@@ -2604,7 +2633,8 @@
       "tooltip": {
         "active": "{{appLabel}} is routing - {{address}}:{{port}}\nSwitch provider for hot switching",
         "broken": "{{appLabel}} is routing, but routing service is not running",
-        "inactive": "Route {{appLabel}}'s requests through local routing"
+        "inactive": "Route {{appLabel}}'s requests through local routing",
+        "lanExposed": "Listening on a network address: other devices need the access token"
       }
     },
     "failover": {

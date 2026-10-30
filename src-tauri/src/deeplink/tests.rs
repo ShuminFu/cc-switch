@@ -1032,8 +1032,8 @@ fn test_mcp_deeplink_rejects_invalid_specs_and_ids() {
     let state = AppState::new(db.clone());
 
     let config = r#"{"mcpServers":{
-        "bad-args":{"command":"echo","args":["ok",1]},
-        "bad-env":{"command":"echo","env":{"A":1}},
+        "bad-args":{"command":"echo","args":["ok",[1]]},
+        "bad-env":{"command":"echo","env":{"A":{"nested":1}}},
         "bad-url":{"type":"http","url":"file:///etc/passwd"},
         "bad id":{"command":"echo"},
         "good":{"command":"echo","args":["hi"]}

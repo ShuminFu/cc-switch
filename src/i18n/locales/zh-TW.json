@@ -40,7 +40,8 @@
     "deleting": "刪除中...",
     "auto": "自動",
     "enabled": "已啟用",
-    "notSet": "未設定"
+    "notSet": "未設定",
+    "retry": "重試"
   },
   "firstRunNotice": {
     "title": "歡迎使用 CC Switch",
@@ -1181,7 +1182,12 @@
       "fieldMustBeObject": "{{field}}必須是 JSON 物件",
       "fieldJsonSyntaxError": "{{field}} JSON 格式錯誤，請檢查語法",
       "commonConfigParseFailed": "設定 JSON 解析失敗，無法套用通用設定"
-    }
+    },
+    "codexAuthInvalid": "auth.json 不是有效的 JSON，請修正後再儲存。",
+    "codexAuthNotObject": "auth.json 必須是 JSON 物件。",
+    "codexConfigInvalid": "config.toml 有語法錯誤，請修正後再儲存。",
+    "geminiConfigInvalid": "Gemini config.json 不是有效的 JSON，請修正後再儲存。",
+    "geminiConfigNotObject": "Gemini config.json 必須是 JSON 物件。"
   },
   "copilot": {
     "authSection": "GitHub Copilot 驗證",
@@ -2420,7 +2426,16 @@
       "title": "批次匯入 MCP Servers",
       "targetApps": "目標應用程式",
       "serverCount": "MCP Servers ({{count}} 個)",
-      "enabledWarning": "匯入後將立即寫入所有指定應用程式的設定檔"
+      "enabledWarning": "匯入後將立即寫入所有指定應用程式的設定檔",
+      "executionWarning": "MCP 伺服器會在目標應用程式啟動時，以你的使用者權限在本機執行命令。請逐一檢查下方的命令、參數和環境變數，只匯入來自可信來源的伺服器。",
+      "parseFailed": "無法解碼 MCP 設定。",
+      "command": "命令",
+      "env": "環境變數",
+      "headers": "請求標頭",
+      "riskyCommand": "此伺服器會執行 shell 或下載工具，或其參數包含 shell 中繼字元，可以執行任意程式碼。",
+      "enableNowLabel": "立即為目標應用程式啟用（寫入其設定檔）",
+      "linkRequestedEnable": "該連結要求立即啟用這些伺服器。只有勾選上方選項後才會啟用。",
+      "disabledHint": "伺服器將以停用狀態儲存至 CC Switch，不會修改任何應用程式的設定檔；你可以在 MCP 頁面按應用程式啟用。"
     },
     "prompt": {
       "title": "匯入系統提示詞",
@@ -2445,7 +2460,15 @@
     "usageApiKey": "用量 API Key",
     "usageBaseUrl": "用量查詢位址",
     "usageAutoInterval": "自動查詢",
-    "usageAutoIntervalValue": "每 {{minutes}} 分鐘"
+    "usageAutoIntervalValue": "每 {{minutes}} 分鐘",
+    "endpointHostLabel": "請求將傳送至",
+    "usageScriptSource": "腳本原始碼",
+    "usageScriptDecodeFailed": "（腳本無法解碼）",
+    "usageScriptEnableLabel": "啟用此用量腳本（每次查詢用量時都會在 CC Switch 內執行）",
+    "switchRequestedWarning": "此連結要求立即將該供應商設為目前供應商，這會把 {{app}} 的全部流量傳送至 {{host}}。只有勾選下方選項後才會切換。",
+    "switchNowLabel": "立即切換至此供應商（將 {{app}} 的全部流量傳送至 {{host}}）",
+    "switchNowWarning": "匯入後，{{app}} 的全部流量（包括你的提示詞和檔案內容）將立即傳送至 {{host}}。",
+    "firstProviderNotice": "{{app}} 目前尚無啟用的供應商，因此該供應商將成為目前供應商。"
   },
   "iconPicker": {
     "search": "搜尋圖示",
@@ -2593,7 +2616,13 @@
       "invalidAddress": "位址無效，請輸入 IPv4（如 127.0.0.1）、IPv6（如 ::1）或 localhost",
       "configSaved": "路由設定已儲存",
       "configSaveFailed": "儲存設定失敗",
-      "restartRequired": "修改位址或連接埠後需要重新啟動路由服務才能生效"
+      "restartRequired": "修改位址或連接埠後需要重新啟動路由服務才能生效",
+      "lanExposure": {
+        "tokenCopied": "已複製存取權杖",
+        "title": "此位址會將路由服務暴露給其他裝置",
+        "description": "任何能存取此位址的人都可能消耗你的供應商額度。來自其他裝置的請求必須以 \"Authorization: Bearer <token>\"（或 x-api-key / x-goog-api-key）攜帶下方的存取權杖；本機上的應用程式無需權杖即可繼續使用。請僅在可信網路中使用。",
+        "tokenLabel": "存取權杖"
+      }
     },
     "switchFailed": "切換失敗：{{error}}",
     "takeover": {
@@ -2604,7 +2633,8 @@
       "tooltip": {
         "active": "{{appLabel}} 路由中 - {{address}}:{{port}}\n切換該應用程式供應商為熱切換",
         "broken": "{{appLabel}} 路由中，但路由服務未執行",
-        "inactive": "路由 {{appLabel}} 的請求，讓該應用程式請求走本地路由"
+        "inactive": "路由 {{appLabel}} 的請求，讓該應用程式請求走本地路由",
+        "lanExposed": "正在監聽網路位址：其他裝置需要存取權杖"
       }
     },
     "failover": {

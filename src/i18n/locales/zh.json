@@ -40,7 +40,8 @@
     "deleting": "删除中...",
     "auto": "自动",
     "enabled": "已开启",
-    "notSet": "未设置"
+    "notSet": "未设置",
+    "retry": "重试"
   },
   "firstRunNotice": {
     "title": "欢迎使用 CC Switch",
@@ -1181,7 +1182,12 @@
       "fieldMustBeObject": "{{field}}必须是 JSON 对象",
       "fieldJsonSyntaxError": "{{field}} JSON 格式错误，请检查语法",
       "commonConfigParseFailed": "配置 JSON 解析失败，无法应用通用配置"
-    }
+    },
+    "codexAuthInvalid": "auth.json 不是有效的 JSON，请修正后再保存。",
+    "codexAuthNotObject": "auth.json 必须是 JSON 对象。",
+    "codexConfigInvalid": "config.toml 存在语法错误，请修正后再保存。",
+    "geminiConfigInvalid": "Gemini config.json 不是有效的 JSON，请修正后再保存。",
+    "geminiConfigNotObject": "Gemini config.json 必须是 JSON 对象。"
   },
   "copilot": {
     "authSection": "GitHub Copilot 认证",
@@ -2420,7 +2426,16 @@
       "title": "批量导入 MCP Servers",
       "targetApps": "目标应用",
       "serverCount": "MCP Servers ({{count}} 个)",
-      "enabledWarning": "导入后将立即写入所有指定应用的配置文件"
+      "enabledWarning": "导入后将立即写入所有指定应用的配置文件",
+      "executionWarning": "MCP 服务器会在目标应用启动时，以你的用户权限在本机运行命令。请逐一检查下方的命令、参数和环境变量，只导入来自可信来源的服务器。",
+      "parseFailed": "无法解码 MCP 配置。",
+      "command": "命令",
+      "env": "环境变量",
+      "headers": "请求头",
+      "riskyCommand": "此服务器会运行 shell 或下载工具，或其参数包含 shell 元字符，可以执行任意代码。",
+      "enableNowLabel": "立即为目标应用启用（写入其配置文件）",
+      "linkRequestedEnable": "该链接要求立即启用这些服务器。只有勾选上方选项后才会启用。",
+      "disabledHint": "服务器将以禁用状态保存到 CC Switch，不会修改任何应用的配置文件；你可以在 MCP 页面按应用启用。"
     },
     "prompt": {
       "title": "导入系统提示词",
@@ -2445,7 +2460,15 @@
     "usageApiKey": "用量 API Key",
     "usageBaseUrl": "用量查询地址",
     "usageAutoInterval": "自动查询",
-    "usageAutoIntervalValue": "每 {{minutes}} 分钟"
+    "usageAutoIntervalValue": "每 {{minutes}} 分钟",
+    "endpointHostLabel": "请求将发送到",
+    "usageScriptSource": "脚本源码",
+    "usageScriptDecodeFailed": "（脚本无法解码）",
+    "usageScriptEnableLabel": "启用此用量脚本（每次查询用量时都会在 CC Switch 内运行）",
+    "switchRequestedWarning": "此链接要求立即将该供应商设为当前供应商，这会把 {{app}} 的全部流量发送到 {{host}}。只有勾选下方选项后才会切换。",
+    "switchNowLabel": "立即切换到此供应商（将 {{app}} 的全部流量发送到 {{host}}）",
+    "switchNowWarning": "导入后，{{app}} 的全部流量（包括你的提示词和文件内容）将立即发送到 {{host}}。",
+    "firstProviderNotice": "{{app}} 当前还没有启用的供应商，因此该供应商将成为当前供应商。"
   },
   "iconPicker": {
     "search": "搜索图标",
@@ -2593,7 +2616,13 @@
       "invalidAddress": "地址无效，请输入 IPv4（如 127.0.0.1）、IPv6（如 ::1）或 localhost",
       "configSaved": "路由配置已保存",
       "configSaveFailed": "保存配置失败",
-      "restartRequired": "修改地址或端口后需要重启路由服务才能生效"
+      "restartRequired": "修改地址或端口后需要重启路由服务才能生效",
+      "lanExposure": {
+        "tokenCopied": "已复制访问令牌",
+        "title": "此地址会将路由服务暴露给其他设备",
+        "description": "任何能访问此地址的人都可能消耗你的供应商额度。来自其他设备的请求必须以 \"Authorization: Bearer <token>\"（或 x-api-key / x-goog-api-key）携带下方的访问令牌；本机上的应用无需令牌即可继续使用。请仅在可信网络中使用。",
+        "tokenLabel": "访问令牌"
+      }
     },
     "switchFailed": "切换失败: {{error}}",
     "takeover": {
@@ -2604,7 +2633,8 @@
       "tooltip": {
         "active": "{{appLabel}} 路由中 - {{address}}:{{port}}\n切换该应用供应商为热切换",
         "broken": "{{appLabel}} 路由中，但路由服务未运行",
-        "inactive": "路由 {{appLabel}} 的请求，让该应用请求走本地路由"
+        "inactive": "路由 {{appLabel}} 的请求，让该应用请求走本地路由",
+        "lanExposed": "正在监听网络地址：其他设备需要访问令牌"
       }
     },
     "failover": {
