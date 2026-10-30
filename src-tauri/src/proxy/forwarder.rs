@@ -2090,7 +2090,7 @@ impl RequestForwarder {
                 log::debug!(
                     "[{tag}] >>> 请求体内容 ({}字节): {}",
                     body_str.len(),
-                    body_str
+                    super::http_client::log_body_excerpt(&body_str)
                 );
             }
         }

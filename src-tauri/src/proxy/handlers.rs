@@ -542,12 +542,18 @@ async fn handle_claude_transform(
                 // 现场诊断（content-type/body 摘要），否则命中嗅探臂的用户只拿到
                 // 裸聚合错误、丢失非嗅探臂已有的诊断增强（C7）
                 aggregated.map_err(|e| {
-                    log::error!("[Claude] SSE 聚合兜底失败: {e}, body: {body_str}");
+                    log::error!(
+                        "[Claude] SSE 聚合兜底失败: {e}, body: {}",
+                        super::http_client::log_body_excerpt(&body_str)
+                    );
                     aggregate_fallback_error(e, &response_headers, &body_str)
                 })?
             }
             Err(e) => {
-                log::error!("[Claude] 解析上游响应失败: {e}, body: {body_str}");
+                log::error!(
+                    "[Claude] 解析上游响应失败: {e}, body: {}",
+                    super::http_client::log_body_excerpt(&body_str)
+                );
                 return Err(upstream_body_parse_error(
                     "Failed to parse upstream response",
                     &e,
@@ -1110,12 +1116,18 @@ async fn handle_codex_chat_to_responses_transform(
             log::warn!("[Codex] 上游对非流请求返回未标记的 SSE 体，按 Chat SSE 聚合兜底");
             // 聚合也失败时：保留全量 body 服务端日志，并给客户端错误附带现场诊断（C7）
             chat_sse_to_response_value(&body_str).map_err(|e| {
-                log::error!("[Codex] SSE 聚合兜底失败: {e}, body: {body_str}");
+                log::error!(
+                    "[Codex] SSE 聚合兜底失败: {e}, body: {}",
+                    super::http_client::log_body_excerpt(&body_str)
+                );
                 aggregate_fallback_error(e, &response_headers, &body_str)
             })?
         }
         Err(e) => {
-            log::error!("[Codex] 解析 Chat 上游响应失败: {e}, body: {body_str}");
+            log::error!(
+                "[Codex] 解析 Chat 上游响应失败: {e}, body: {}",
+                super::http_client::log_body_excerpt(&body_str)
+            );
             return Err(upstream_body_parse_error(
                 "Failed to parse upstream chat response",
                 &e,
@@ -1270,7 +1282,8 @@ async fn handle_codex_anthropic_to_responses_transform(
         }
         Err(e) => {
             log::error!(
-                "[Codex] Failed to parse Anthropic upstream response: {e}, body: {body_str}"
+                "[Codex] Failed to parse Anthropic upstream response: {e}, body: {}",
+                super::http_client::log_body_excerpt(&body_str)
             );
             return Err(upstream_body_parse_error(
                 "Failed to parse upstream anthropic response",

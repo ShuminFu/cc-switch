@@ -227,7 +227,7 @@ pub async fn handle_non_streaming(
     log::debug!(
         "[{}] 上游响应体内容: {}",
         ctx.tag,
-        String::from_utf8_lossy(&body_bytes)
+        super::http_client::log_body_excerpt(&String::from_utf8_lossy(&body_bytes))
     );
 
     // 解析并记录使用量。关闭 usage logging 时直接跳过，避免非流式响应整包 JSON parse。
@@ -762,9 +762,15 @@ pub fn create_logged_passthrough_stream(
                                                 _ => false,
                                             };
                                             if collected {
-                                                log::debug!("[{tag}] <<< SSE 事件: {data}");
+                                                log::debug!(
+                                                    "[{tag}] <<< SSE 事件: {}",
+                                                    super::http_client::log_body_excerpt(data)
+                                                );
                                             } else {
-                                                log::debug!("[{tag}] <<< SSE 数据: {data}");
+                                                log::debug!(
+                                                    "[{tag}] <<< SSE 数据: {}",
+                                                    super::http_client::log_body_excerpt(data)
+                                                );
                                             }
                                         } else {
                                             log::debug!("[{tag}] <<< SSE: [DONE]");
@@ -799,14 +805,7 @@ pub fn create_logged_passthrough_stream(
 }
 
 fn format_headers(headers: &HeaderMap) -> String {
-    headers
-        .iter()
-        .map(|(key, value)| {
-            let value_str = value.to_str().unwrap_or("<non-utf8>");
-            format!("{key}={value_str}")
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
+    super::http_client::format_headers_redacted(headers)
 }
 
 #[cfg(test)]
