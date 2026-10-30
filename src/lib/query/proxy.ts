@@ -61,6 +61,8 @@ export function useProxyTakeoverStatus() {
   return useQuery({
     queryKey: queryKeys.proxy.takeoverStatus,
     queryFn: () => proxyApi.getProxyTakeoverStatus(),
+    // Opt out of the global staleTime: the tray can change this at any time.
+    staleTime: 0,
     refetchInterval: TAKEOVER_FALLBACK_REFETCH_MS,
     refetchIntervalInBackground: false,
     placeholderData: (previousData) => previousData,
@@ -78,6 +80,8 @@ export function useProxyStatus() {
   const { data: status, isLoading } = useQuery({
     queryKey: queryKeys.proxy.status,
     queryFn: () => proxyApi.getProxyStatus(),
+    // Always refresh on focus/mount (global staleTime does not apply).
+    staleTime: 0,
     // 仅在服务运行时轮询
     refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
     // 保持之前的数据，避免闪烁
