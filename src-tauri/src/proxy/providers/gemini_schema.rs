@@ -199,13 +199,13 @@ fn to_gemini_schema(schema: Value) -> Value {
 
             for (key, value) in obj {
                 match key.as_str() {
-                    "format" => {
-                        if value
-                            .as_str()
-                            .is_some_and(|f| is_supported_gemini_format(schema_type.as_deref(), f))
-                        {
-                            result.insert(key, value);
-                        }
+                    // Unsupported formats fall through to `_ => {}` and are dropped.
+                    "format"
+                        if value.as_str().is_some_and(|f| {
+                            is_supported_gemini_format(schema_type.as_deref(), f)
+                        }) =>
+                    {
+                        result.insert(key, value);
                     }
                     "type" | "title" | "description" | "nullable" | "enum" | "maxItems"
                     | "minItems" | "required" | "minProperties" | "maxProperties" | "minLength"

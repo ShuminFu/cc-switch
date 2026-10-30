@@ -52,6 +52,7 @@ impl InputTokenSemantics {
         }
     }
 
+    #[allow(dead_code)] // for UsageLogger's input_token_semantics column
     pub fn input_includes_cache(self) -> bool {
         self == Self::Total
     }

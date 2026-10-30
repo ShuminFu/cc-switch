@@ -315,8 +315,14 @@ pub enum GeminiTextStreamMode {
 /// `ProviderMeta` has no field for this, so it is read from the optional
 /// `settings_config.geminiTextStreamMode` key (`"auto"` | `"incremental"` |
 /// `"cumulative"`, case-insensitive). Missing or unknown values keep `Auto`.
+///
+/// The streaming handler (handlers.rs, owned by the proxy-core cluster) still
+/// has to pass `GeminiTextStreamMode::for_provider(&ctx.provider)` to
+/// [`create_anthropic_sse_stream_from_gemini_with_text_mode`].
+#[allow(dead_code)] // wired by the gemini_native streaming handler
 pub const GEMINI_TEXT_STREAM_MODE_KEY: &str = "geminiTextStreamMode";
 
+#[allow(dead_code)] // wired by the gemini_native streaming handler
 impl GeminiTextStreamMode {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
