@@ -13,6 +13,11 @@ import {
   type ResolvedDirectories,
 } from "./useDirectorySettings";
 import { useSettingsMetadata } from "./useSettingsMetadata";
+import {
+  changedDirectoryFields,
+  sanitizeDir,
+  sanitizeDirectoryFields,
+} from "./settingsDirectoryFields";
 
 interface SaveResult {
   requiresRestart: boolean;
@@ -45,12 +50,6 @@ export interface UseSettingsResult {
 }
 
 export type { SettingsFormState, ResolvedDirectories };
-
-const sanitizeDir = (value?: string | null): string | undefined => {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-};
 
 /**
  * useSettings - 组合层
@@ -185,30 +184,21 @@ export function useSettings(): UseSettingsResult {
       if (!mergedSettings) return null;
 
       try {
-        const sanitizedClaudeDir = sanitizeDir(mergedSettings.claudeConfigDir);
-        const sanitizedCodexDir = sanitizeDir(mergedSettings.codexConfigDir);
-        const sanitizedGeminiDir = sanitizeDir(mergedSettings.geminiConfigDir);
-        const sanitizedGrokDir = sanitizeDir(mergedSettings.grokConfigDir);
-        const sanitizedOpencodeDir = sanitizeDir(
-          mergedSettings.opencodeConfigDir,
-        );
-        const sanitizedOpenclawDir = sanitizeDir(
-          mergedSettings.openclawConfigDir,
-        );
         const {
           webdavSync: _ignoredWebdavSync,
           s3Sync: _ignoredS3Sync,
           ...restSettings
         } = mergedSettings;
 
+        // 目录覆盖属于 Advanced 标签页的"草稿"，只能通过显式保存（saveSettings）
+        // 提交（它负责 live 同步等副作用）。自动保存始终沿用已持久化的目录值，
+        // 避免把未保存、甚至只输入了一半的目录静默写入 settings.json。
+        const persisted =
+          queryClient.getQueryData<Settings>(["settings"]) ?? data ?? null;
+
         const payload: Settings = {
           ...restSettings,
-          claudeConfigDir: sanitizedClaudeDir,
-          codexConfigDir: sanitizedCodexDir,
-          geminiConfigDir: sanitizedGeminiDir,
-          grokConfigDir: sanitizedGrokDir,
-          opencodeConfigDir: sanitizedOpencodeDir,
-          openclawConfigDir: sanitizedOpenclawDir,
+          ...sanitizeDirectoryFields(persisted),
           language: mergedSettings.language,
         };
 
@@ -318,23 +308,7 @@ export function useSettings(): UseSettingsResult {
       if (!mergedSettings) return null;
       try {
         const sanitizedAppDir = sanitizeDir(appConfigDir);
-        const sanitizedClaudeDir = sanitizeDir(mergedSettings.claudeConfigDir);
-        const sanitizedCodexDir = sanitizeDir(mergedSettings.codexConfigDir);
-        const sanitizedGeminiDir = sanitizeDir(mergedSettings.geminiConfigDir);
-        const sanitizedGrokDir = sanitizeDir(mergedSettings.grokConfigDir);
-        const sanitizedOpencodeDir = sanitizeDir(
-          mergedSettings.opencodeConfigDir,
-        );
-        const sanitizedOpenclawDir = sanitizeDir(
-          mergedSettings.openclawConfigDir,
-        );
         const previousAppDir = initialAppConfigDir;
-        const previousClaudeDir = sanitizeDir(data?.claudeConfigDir);
-        const previousCodexDir = sanitizeDir(data?.codexConfigDir);
-        const previousGeminiDir = sanitizeDir(data?.geminiConfigDir);
-        const previousGrokDir = sanitizeDir(data?.grokConfigDir);
-        const previousOpencodeDir = sanitizeDir(data?.opencodeConfigDir);
-        const previousOpenclawDir = sanitizeDir(data?.openclawConfigDir);
         const {
           webdavSync: _ignoredWebdavSync,
           s3Sync: _ignoredS3Sync,
@@ -343,20 +317,15 @@ export function useSettings(): UseSettingsResult {
 
         const payload: Settings = {
           ...restSettings,
-          claudeConfigDir: sanitizedClaudeDir,
-          codexConfigDir: sanitizedCodexDir,
-          geminiConfigDir: sanitizedGeminiDir,
-          grokConfigDir: sanitizedGrokDir,
-          opencodeConfigDir: sanitizedOpencodeDir,
-          openclawConfigDir: sanitizedOpenclawDir,
+          ...sanitizeDirectoryFields(mergedSettings),
           language: mergedSettings.language,
         };
 
         // 在 mutate 之前从实时缓存捕获上一次持久化的插件集成状态，
         // 避免 closure 里的 data 因 React 尚未 re-render 而滞后
-        const prevPluginEnabled = queryClient.getQueryData<Settings>([
-          "settings",
-        ])?.enableClaudePluginIntegration;
+        const prevPersisted =
+          queryClient.getQueryData<Settings>(["settings"]) ?? data;
+        const prevPluginEnabled = prevPersisted?.enableClaudePluginIntegration;
 
         await saveMutation.mutateAsync(payload);
 
@@ -428,23 +397,11 @@ export function useSettings(): UseSettingsResult {
           console.warn("[useSettings] Failed to refresh tray menu", error);
         }
 
-        // 如果 Claude/Codex/Gemini/OpenCode/OpenClaw 的目录覆盖发生变化，则立即将"当前使用的供应商"写回对应应用的 live 配置
+        // 如果任一应用的目录覆盖发生变化，则立即将"当前使用的供应商"写回对应应用的 live 配置
         // 如果插件同步已经执行过 syncCurrentProvidersLiveSafe，则跳过避免重复
-        const claudeDirChanged = sanitizedClaudeDir !== previousClaudeDir;
-        const codexDirChanged = sanitizedCodexDir !== previousCodexDir;
-        const geminiDirChanged = sanitizedGeminiDir !== previousGeminiDir;
-        const grokDirChanged = sanitizedGrokDir !== previousGrokDir;
-        const opencodeDirChanged = sanitizedOpencodeDir !== previousOpencodeDir;
-        const openclawDirChanged = sanitizedOpenclawDir !== previousOpenclawDir;
-        if (
-          !pluginSynced &&
-          (claudeDirChanged ||
-            codexDirChanged ||
-            geminiDirChanged ||
-            grokDirChanged ||
-            opencodeDirChanged ||
-            openclawDirChanged)
-        ) {
+        const dirChanged =
+          changedDirectoryFields(payload, prevPersisted).length > 0;
+        if (!pluginSynced && dirChanged) {
           const syncResult = await syncCurrentProvidersLiveSafe();
           if (!syncResult.ok) {
             console.warn(
