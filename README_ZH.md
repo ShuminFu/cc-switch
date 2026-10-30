@@ -206,7 +206,7 @@ TeamoRouter 还提供企业级功能，包括集中账单、团队管理、BYOK�
 - **系统托盘快速切换** — 从托盘菜单即时切换供应商，无需打开完整应用
 - **云同步** — 通过 Dropbox、OneDrive、iCloud 或 WebDAV 服务器在不同设备之间同步供应商数据
 - **跨平台** — 基于 Tauri 2 构建的原生桌面应用，支持 Windows、macOS 和 Linux
-- **小工具** - 内置了多种小工具来解决首次安装登录确认、禁止签名、插件拓展同步等多种功能
+- **小工具** - 内置了多种小工具：跳过 Claude Code 首次运行确认、通过通用配置片段关闭 Claude Code 提交中的 `Co-Authored-By` 署名、代理模式下自动修复 thinking 签名错误（Thinking 签名整流）、将供应商同步到 Claude Code VS Code 插件等
 
 ## 界面预览
 

@@ -205,7 +205,7 @@ Modernes KI-gestütztes Programmieren stützt sich auf Werkzeuge wie Claude Code
 - **Schnellumschaltung über System-Tray** — Wechseln Sie Anbieter sofort über das Tray-Menü, ohne die vollständige App öffnen zu müssen
 - **Cloud-Synchronisierung** — Synchronisieren Sie Anbieterdaten geräteübergreifend über Dropbox, OneDrive, iCloud oder WebDAV-Server
 - **Plattformübergreifend** — Native Desktop-App für Windows, macOS und Linux, gebaut mit Tauri 2
-- **Integrierte Hilfsprogramme** — Enthält diverse Hilfsprogramme für die Login-Bestätigung beim Erststart, das Umgehen von Signaturen, die Synchronisierung von Plugin-Erweiterungen und mehr
+- **Integrierte Hilfsprogramme** — Überspringen der Erststart-Bestätigung von Claude Code, Abschalten der `Co-Authored-By`-Commit-Angabe von Claude Code über das gemeinsame Konfigurations-Snippet, automatisches Beheben von Thinking-Signatur-Fehlern im Proxy-Modus (Thinking-Signatur-Gleichrichter), Synchronisierung des Anbieters mit der Claude Code VS-Code-Erweiterung und mehr
 
 ## Screenshots
 

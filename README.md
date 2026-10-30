@@ -205,7 +205,7 @@ Modern AI-powered coding relies on tools like Claude Code, Claude Desktop, Codex
 - **System Tray Quick Switch** — Switch providers instantly from the tray menu, no need to open the full app
 - **Cloud Sync** — Sync provider data across devices via Dropbox, OneDrive, iCloud, or WebDAV servers
 - **Cross-Platform** — Native desktop app for Windows, macOS, and Linux, built with Tauri 2
-- **Built-in Utilities** — Includes various utilities for first-launch login confirmation, signature bypass, plugin extension sync, and more
+- **Built-in Utilities** — Skip Claude Code's first-run confirmation, turn off Claude Code's `Co-Authored-By` commit attribution via the common config snippet, automatically repair thinking-signature errors in proxy mode (thinking-signature rectifier), sync the provider to the Claude Code VS Code extension, and more
 
 ## Screenshots
 
