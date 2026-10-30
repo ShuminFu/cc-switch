@@ -120,7 +120,8 @@ impl ProxyService {
     pub(in crate::services::proxy) async fn rollback_hot_switch_preparation(
         &self,
         app_type: &AppType,
-        previous_backup: Option<&LiveBackup>,
+        // 热切换前的备份行及其接管快照
+        previous_backup: Option<(&LiveBackup, Option<&str>)>,
         previous_provider_id: Option<&str>,
         should_sync_backup: bool,
         live_taken_over: bool,
@@ -131,9 +132,10 @@ impl ProxyService {
         }
 
         let rollback_result = match previous_backup {
-            Some(backup) => {
+            // 连同接管快照整行写回（CCS-212）：不在此重新采集快照，live 此时可能已被改写
+            Some((backup, raw_snapshot)) => {
                 self.db
-                    .save_live_backup(app_type.as_str(), &backup.original_config)
+                    .save_live_backup_with_raw_snapshot(backup, raw_snapshot)
                     .await
             }
             None => self.db.delete_live_backup(app_type.as_str()).await,
@@ -245,6 +247,21 @@ impl ProxyService {
         } else {
             None
         };
+        // 热切换会整行重写备份并清空接管快照；回滚时需要连同快照一起写回（CCS-212）。
+        // legacy 引擎不使用快照，保持原行为。
+        let previous_raw_snapshot = if previous_backup.is_some()
+            && crate::settings::takeover_engine().uses_raw_snapshot()
+        {
+            self.db
+                .get_live_backup_raw_snapshot(app_type_enum.as_str())
+                .await
+                .map_err(|e| format!("读取 {app_type} 接管快照失败: {e}"))?
+        } else {
+            None
+        };
+        let previous_backup_row = previous_backup
+            .as_ref()
+            .map(|backup| (backup, previous_raw_snapshot.as_deref()));
         let previous_live_before_direct_write =
             if has_backup && !live_taken_over && matches!(app_type_enum, AppType::Codex) {
                 Some(
@@ -303,7 +320,7 @@ impl ProxyService {
         if let Err(error) = prepare_result {
             self.rollback_hot_switch_preparation(
                 &app_type_enum,
-                previous_backup.as_ref(),
+                previous_backup_row,
                 previous_provider_id.as_deref(),
                 should_sync_backup,
                 live_taken_over,
@@ -317,7 +334,7 @@ impl ProxyService {
         {
             self.rollback_hot_switch_preparation(
                 &app_type_enum,
-                previous_backup.as_ref(),
+                previous_backup_row,
                 previous_provider_id.as_deref(),
                 should_sync_backup,
                 live_taken_over,
@@ -338,7 +355,7 @@ impl ProxyService {
             }
             self.rollback_hot_switch_preparation(
                 &app_type_enum,
-                previous_backup.as_ref(),
+                previous_backup_row,
                 previous_provider_id.as_deref(),
                 should_sync_backup,
                 live_taken_over,

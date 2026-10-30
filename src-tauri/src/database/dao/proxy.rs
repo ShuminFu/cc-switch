@@ -814,6 +814,31 @@ impl Database {
         Ok(())
     }
 
+    /// 整行写回一份 Live 备份及其原始字节快照（CCS-212）
+    ///
+    /// 用于热切换失败后的回滚：备份 JSON、备份时间与快照一并恢复为热切换前读到的
+    /// 那一行，使后续恢复仍能逐字节还原接管前的 live 文件。`raw_snapshot` 为
+    /// `None` 时写回的行不带快照。
+    pub async fn save_live_backup_with_raw_snapshot(
+        &self,
+        backup: &LiveBackup,
+        raw_snapshot: Option<&str>,
+    ) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "INSERT OR REPLACE INTO proxy_live_backup (app_type, original_config, backed_up_at, raw_snapshot)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                backup.app_type,
+                backup.original_config,
+                backup.backed_up_at,
+                raw_snapshot
+            ],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
     /// 读取 Live 备份附带的原始字节快照（无备份或无快照时为 `None`）
     pub async fn get_live_backup_raw_snapshot(
         &self,

@@ -496,6 +496,133 @@ fn takeover_snapshot_is_dropped_when_the_backup_is_rewritten() {
 }
 
 // ============================================================================
+// Failed hot switch (CCS-212)
+// ============================================================================
+
+const SECOND_PROVIDER_ID: &str = "crash-provider-b";
+
+/// 接管后热切换到另一个供应商，并让最后一步（数据库提交当前供应商）失败：
+/// 此时备份已被热切换重写，回滚必须把接管前的备份行（含快照）原样写回。
+/// 返回 (接管前的 HOME 快照, 回滚后备份行上的接管快照)。
+fn takeover_then_fail_hot_switch(case: &Case, home: &Path) -> (Snapshot, Option<String>) {
+    let db = Arc::new(Database::init().expect("open database"));
+    let state = AppState::new(db.clone());
+    let rt = process_runtime();
+
+    rt.block_on(async {
+        let mut proxy_config = db.get_proxy_config().await.expect("proxy config");
+        proxy_config.listen_port = 0;
+        db.update_proxy_config(proxy_config)
+            .await
+            .expect("use an ephemeral proxy port");
+    });
+    seed_live(case, Seed::HandWritten, &db);
+    let second = Provider::with_id(
+        SECOND_PROVIDER_ID.to_string(),
+        "Crash E2E B".to_string(),
+        case.settings.clone(),
+        None,
+    );
+    db.save_provider(case.slug, &second)
+        .expect("save second provider");
+    let before = snapshot(home);
+
+    let snapshot_after_rollback = rt.block_on(async {
+        state
+            .proxy_service
+            .set_takeover_for_app(case.slug, true)
+            .await
+            .unwrap_or_else(|e| panic!("{}: takeover: {e}", case.slug));
+
+        let conn = rusqlite::Connection::open(home.join(".cc-switch").join("cc-switch.db"))
+            .expect("open database file");
+        conn.execute_batch(
+            "CREATE TRIGGER reject_current_update
+                 BEFORE UPDATE OF is_current ON providers
+                 BEGIN
+                   SELECT RAISE(ABORT, 'forced current-provider commit failure');
+                 END;",
+        )
+        .expect("install failure trigger");
+        let error = state
+            .proxy_service
+            .hot_switch_provider(case.slug, SECOND_PROVIDER_ID)
+            .await
+            .expect_err("hot switch must fail at the provider commit");
+        assert!(
+            error.contains("forced current-provider commit failure"),
+            "{}: unexpected hot switch error: {error}",
+            case.slug
+        );
+        conn.execute_batch("DROP TRIGGER reject_current_update;")
+            .expect("drop failure trigger");
+
+        db.get_live_backup_raw_snapshot(case.slug)
+            .await
+            .expect("read takeover snapshot")
+    });
+
+    drop(rt);
+    drop(state);
+    drop(db);
+    (before, snapshot_after_rollback)
+}
+
+/// 会在热切换时重写备份的应用（累加模式应用的备份在热切换时保持不变）
+fn whole_file_cases() -> Vec<Case> {
+    cases()
+        .into_iter()
+        .filter(|case| {
+            adapter(&case.app)
+                .takeover()
+                .is_some_and(|takeover| takeover.entry_takeover().is_none())
+        })
+        .collect()
+}
+
+#[test]
+fn failed_hot_switch_keeps_the_takeover_snapshot() {
+    let cases = whole_file_cases();
+    assert_eq!(
+        cases.iter().map(|case| case.slug).collect::<Vec<_>>(),
+        ["claude", "codex", "gemini", "grokbuild"]
+    );
+    for case in cases {
+        let env = TestEnv::new();
+        let (before, snapshot_after_rollback) = takeover_then_fail_hot_switch(&case, env.home());
+        assert!(
+            snapshot_after_rollback.is_some(),
+            "{}: rollback must write the takeover snapshot back",
+            case.slug
+        );
+
+        assert!(restart_and_recover(), "{}: recovered", case.slug);
+        let after = snapshot(env.home());
+        assert!(
+            before == after,
+            "{}: restore after a failed hot switch must give back the original bytes:\n{}",
+            case.slug,
+            describe_diff(&before, &after)
+        );
+    }
+}
+
+#[test]
+fn legacy_engine_failed_hot_switch_records_no_snapshot() {
+    for case in whole_file_cases() {
+        let env = TestEnv::new();
+        use_takeover_engine("legacy");
+        let (_, snapshot_after_rollback) = takeover_then_fail_hot_switch(&case, env.home());
+        assert_eq!(
+            snapshot_after_rollback, None,
+            "{}: legacy engine never stores a takeover snapshot",
+            case.slug
+        );
+        assert!(restart_and_recover(), "{}: recovered", case.slug);
+    }
+}
+
+// ============================================================================
 // Additive apps (CCS-163)
 // ============================================================================
 
