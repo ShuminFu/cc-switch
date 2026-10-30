@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
 use serde_json::Value;
 
+use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
-use super::utils::{parse_timestamp_to_ms, path_basename, truncate_summary};
+use super::utils::{open_tool_db, parse_timestamp_to_ms, path_basename, truncate_summary};
 
 const PROVIDER_ID: &str = "opencode";
 
@@ -99,19 +99,25 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
         return Vec::new();
     }
 
-    let conn = match Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
+    let conn = match open_tool_db(&db_path, false) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            log::warn!(
+                "Failed to open OpenCode database {}: {e}",
+                db_path.display()
+            );
+            return Vec::new();
+        }
     };
 
     let mut stmt = match conn.prepare(
         "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC",
     ) {
         Ok(s) => s,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            log::warn!("Failed to query OpenCode sessions in {}: {e}", db_path.display());
+            return Vec::new();
+        }
     };
 
     let db_display = db_path.display().to_string();
@@ -149,7 +155,7 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
             created_at: Some(created),
             last_active_at: Some(updated),
             source_path: Some(format!("sqlite:{db_display}:{session_id}")),
-            resume_command: Some(format!("opencode -s {session_id}")),
+            resume_command: resume_command("opencode", &session_id),
         });
     }
     sessions
@@ -230,11 +236,8 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
     let (db_path, session_id) = parse_sqlite_source(source)
         .ok_or_else(|| format!("Invalid SQLite source reference: {source}"))?;
 
-    let conn = Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| format!("Failed to open OpenCode database: {e}"))?;
+    let conn = open_tool_db(&db_path, false)
+        .map_err(|e| format!("Failed to open OpenCode database: {e}"))?;
 
     let mut msg_stmt = conn
         .prepare(
@@ -398,8 +401,8 @@ pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, Str
         return Err("SQLite path does not match expected OpenCode database".to_string());
     }
 
-    let conn =
-        Connection::open(&db_path).map_err(|e| format!("Failed to open OpenCode database: {e}"))?;
+    let conn = open_tool_db(&db_path, true)
+        .map_err(|e| format!("Failed to open OpenCode database: {e}"))?;
 
     let tx = conn
         .unchecked_transaction()
@@ -473,7 +476,7 @@ fn parse_session(storage: &Path, path: &Path) -> Option<SessionMeta> {
         created_at,
         last_active_at: updated_at.or(created_at),
         source_path: Some(source_path),
-        resume_command: Some(format!("opencode -s {session_id}")),
+        resume_command: resume_command("opencode", &session_id),
     })
 }
 

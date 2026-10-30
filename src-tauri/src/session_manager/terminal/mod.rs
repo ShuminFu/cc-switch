@@ -1,11 +1,42 @@
 use std::process::Command;
 
-pub fn launch_terminal(
+use super::resume::{quote_posix, resume_spec, validate_cwd, ShellKind};
+
+/// Launch a terminal that resumes `session_id` of `provider_id`.
+///
+/// The command line is built here from validated structured parts; callers
+/// (including the webview) never supply a free-form command string.
+pub fn launch_session_terminal(
     target: &str,
-    command: &str,
+    provider_id: &str,
+    session_id: &str,
     cwd: Option<&str>,
-    custom_config: Option<&str>,
 ) -> Result<(), String> {
+    let (command, cwd) = prepare_resume(provider_id, session_id, cwd)?;
+    launch_terminal(target, &command, cwd.as_deref())
+}
+
+/// Validate inputs and build the POSIX resume command plus canonical cwd.
+fn prepare_resume(
+    provider_id: &str,
+    session_id: &str,
+    cwd: Option<&str>,
+) -> Result<(String, Option<String>), String> {
+    let spec = resume_spec(provider_id, session_id).ok_or_else(|| {
+        format!(
+            "Session cannot be resumed (unsupported provider or invalid session id): {provider_id}"
+        )
+    })?;
+    let cwd = match cwd {
+        Some(dir) if !dir.trim().is_empty() => {
+            Some(validate_cwd(dir)?.to_string_lossy().into_owned())
+        }
+        _ => None,
+    };
+    Ok((spec.render(ShellKind::Posix), cwd))
+}
+
+fn launch_terminal(target: &str, command: &str, cwd: Option<&str>) -> Result<(), String> {
     if command.trim().is_empty() {
         return Err("Resume command is empty".to_string());
     }
@@ -24,7 +55,6 @@ pub fn launch_terminal(
         "alacritty" => launch_alacritty(command, cwd),
         #[cfg(unix)]
         "warp" => launch_warp(command, cwd),
-        "custom" => launch_custom(command, cwd, custom_config),
         _ => Err(format!("Unsupported terminal target: {target}")),
     }
 }
@@ -212,7 +242,7 @@ fn launch_warp(command: &str, cwd: Option<&str>) -> Result<(), String> {
 
     let mut script_file = tempfile::Builder::new()
         .disable_cleanup(true)
-        .permissions(std::fs::Permissions::from_mode(0o755))
+        .permissions(std::fs::Permissions::from_mode(0o700))
         .tempfile_in(cwd)
         .map_err(|e| format!("Failed to create temporary script file for launching Warp: {e}"))?;
 
@@ -274,50 +304,13 @@ fn launch_alacritty(command: &str, cwd: Option<&str>) -> Result<(), String> {
     }
 }
 
-fn launch_custom(
-    command: &str,
-    cwd: Option<&str>,
-    custom_config: Option<&str>,
-) -> Result<(), String> {
-    let template = custom_config.ok_or("No custom terminal config provided")?;
-
-    if template.trim().is_empty() {
-        return Err("Custom terminal command template is empty".to_string());
-    }
-
-    let cmd_str = command;
-    let dir_str = cwd.unwrap_or(".");
-
-    let final_cmd_line = template
-        .replace("{command}", cmd_str)
-        .replace("{cwd}", dir_str);
-
-    // Execute via sh -c
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg(&final_cmd_line)
-        .status()
-        .map_err(|e| format!("Failed to execute custom terminal launcher: {e}"))?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Custom terminal execution returned error code".to_string())
-    }
-}
-
 fn build_shell_command(command: &str, cwd: Option<&str>) -> String {
     match cwd {
         Some(dir) if !dir.trim().is_empty() => {
-            format!("cd {} && {}", shell_escape(dir), command)
+            format!("cd {} && {}", quote_posix(dir), command)
         }
         _ => command.to_string(),
     }
-}
-
-fn shell_escape(value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{escaped}\"")
 }
 
 fn escape_osascript(value: &str) -> String {
@@ -376,7 +369,64 @@ mod tests {
             "claude --resume abc-123"
         );
 
-        // Verify shell_escape works correctly for paths with spaces
-        assert_eq!(shell_escape(cwd), "\"/tmp/project dir\"");
+        // Paths with spaces are single-quoted for shells that need a `cd` prefix
+        assert_eq!(
+            build_shell_command(command, Some(cwd)),
+            "cd '/tmp/project dir' && claude --resume abc-123"
+        );
+    }
+
+    #[test]
+    fn prepare_resume_rejects_injected_session_id() {
+        let err = prepare_resume("claude", "x; touch /tmp/pwned", None)
+            .expect_err("injected session id must be rejected");
+        assert!(err.contains("invalid session id"));
+        assert!(prepare_resume("hermes", "abc", None).is_err());
+    }
+
+    #[test]
+    fn prepare_resume_rejects_missing_cwd() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("$(touch pwned)");
+        assert!(prepare_resume("claude", "abc-123", Some(&missing.to_string_lossy())).is_err());
+    }
+
+    #[test]
+    fn prepare_resume_builds_command_from_parts() {
+        let (cmd, cwd) = prepare_resume("codex", "abc-123", None).expect("valid");
+        assert_eq!(cmd, "codex resume abc-123");
+        assert_eq!(cwd, None);
+    }
+
+    /// A directory literally named with a command substitution must not be
+    /// evaluated by the shell when the resume command is run.
+    #[cfg(unix)]
+    #[test]
+    fn shell_command_with_malicious_cwd_does_not_execute_payload() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let marker = root.path().join("pwned");
+        let evil = root.path().join(format!(
+            "a$(touch {m})`touch {m}`'b",
+            m = marker.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::create_dir_all(&evil).expect("create evil dir");
+
+        let (_cmd, cwd) =
+            prepare_resume("claude", "abc-123", Some(&evil.to_string_lossy())).expect("valid");
+        let script = build_shell_command("pwd", cwd.as_deref());
+        let out = Command::new("sh")
+            .arg("-c")
+            .arg(&script)
+            .current_dir(root.path())
+            .output()
+            .expect("run sh");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!marker.exists(), "payload in cwd must not execute");
+        let printed = String::from_utf8_lossy(&out.stdout);
+        assert!(printed.trim_end().ends_with("`touch pwned`'b"));
     }
 }

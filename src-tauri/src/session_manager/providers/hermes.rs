@@ -9,7 +9,8 @@ use crate::hermes_config::get_hermes_dir;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{
-    extract_text, parse_timestamp_to_ms, read_head_tail_lines, truncate_summary, TITLE_MAX_CHARS,
+    extract_text, open_tool_db, parse_timestamp_to_ms, read_head_tail_lines, truncate_summary,
+    TITLE_MAX_CHARS,
 };
 
 const PROVIDER_ID: &str = "hermes";
@@ -57,12 +58,12 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
         return Vec::new();
     }
 
-    let conn = match Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
+    let conn = match open_tool_db(&db_path, false) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            log::warn!("Failed to open Hermes database {}: {e}", db_path.display());
+            return Vec::new();
+        }
     };
 
     // Check if sessions table exists
@@ -84,7 +85,13 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
     let query = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
     let mut stmt = match conn.prepare(query) {
         Ok(s) => s,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            log::warn!(
+                "Failed to query Hermes sessions in {}: {e}",
+                db_path.display()
+            );
+            return Vec::new();
+        }
     };
 
     let mut sessions = Vec::new();
@@ -189,11 +196,8 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
     let (db_path, session_id) = parse_sqlite_source(source)
         .ok_or_else(|| format!("Invalid SQLite source reference: {source}"))?;
 
-    let conn = Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| format!("Failed to open Hermes database: {e}"))?;
+    let conn = open_tool_db(&db_path, false)
+        .map_err(|e| format!("Failed to open Hermes database: {e}"))?;
 
     // Try querying with common column names
     let query =
@@ -250,7 +254,7 @@ pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, Str
     }
 
     let conn =
-        Connection::open(&db_path).map_err(|e| format!("Failed to open Hermes database: {e}"))?;
+        open_tool_db(&db_path, true).map_err(|e| format!("Failed to open Hermes database: {e}"))?;
 
     let tx = conn
         .unchecked_transaction()

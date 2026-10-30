@@ -5,11 +5,12 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::config::get_claude_config_dir;
+use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{
-    extract_text, parse_timestamp_to_ms, path_basename, read_head_tail_lines, truncate_summary,
-    TITLE_MAX_CHARS,
+    extract_text, file_mtime_ms, parse_timestamp_to_ms, path_basename, read_head_tail_lines,
+    truncate_summary, TITLE_MAX_CHARS,
 };
 
 const PROVIDER_ID: &str = "claude";
@@ -246,9 +247,11 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
         summary,
         project_dir,
         created_at,
-        last_active_at,
+        // A tail without timestamps (e.g. a final line beyond the tail cap)
+        // falls back to the file modification time.
+        last_active_at: last_active_at.or_else(|| file_mtime_ms(path)),
         source_path: Some(path.to_string_lossy().to_string()),
-        resume_command: Some(format!("claude --resume {session_id}")),
+        resume_command: resume_command("claude", &session_id),
     })
 }
 
@@ -496,5 +499,54 @@ mod tests {
 
         let meta = parse_session(&path).unwrap();
         assert_eq!(meta.title.as_deref(), Some("帮我看看工作区的改动"));
+    }
+
+    #[test]
+    fn parse_session_drops_resume_command_for_injected_session_id() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("evil.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"sessionId\":\"x; touch /tmp/pwned\",\"cwd\":\"/tmp/project\",\"timestamp\":\"2026-03-06T10:00:00Z\"}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"},\"timestamp\":\"2026-03-06T10:01:00Z\"}\n",
+            ),
+        )
+        .expect("write");
+
+        let meta = parse_session(&path).unwrap();
+        assert_eq!(meta.resume_command, None);
+
+        let ok = temp.path().join("abc-123.jsonl");
+        std::fs::write(
+            &ok,
+            "{\"sessionId\":\"abc-123\",\"timestamp\":\"2026-03-06T10:00:00Z\"}\n",
+        )
+        .expect("write");
+        let meta = parse_session(&ok).unwrap();
+        assert_eq!(
+            meta.resume_command.as_deref(),
+            Some("claude --resume abc-123")
+        );
+    }
+
+    #[test]
+    fn parse_session_reads_last_active_at_from_large_final_line() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("big-session.jsonl");
+        let big = "x".repeat(40 * 1024);
+        let content = format!(
+            "{{\"sessionId\":\"big-session\",\"cwd\":\"/tmp/project\",\"timestamp\":\"2026-03-06T10:00:00Z\"}}\n\
+             {{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"hi\"}},\"timestamp\":\"2026-03-06T10:01:00Z\"}}\n\
+             {{\"type\":\"assistant\",\"message\":{{\"role\":\"assistant\",\"content\":\"done {big}\"}},\"timestamp\":\"2026-03-06T12:00:00Z\"}}\n"
+        );
+        std::fs::write(&path, content).expect("write");
+
+        let meta = parse_session(&path).unwrap();
+        assert_eq!(
+            meta.last_active_at,
+            parse_timestamp_to_ms(&serde_json::json!("2026-03-06T12:00:00Z"))
+        );
+        assert!(meta.summary.as_deref().unwrap_or("").starts_with("done "));
     }
 }

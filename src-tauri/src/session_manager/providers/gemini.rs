@@ -2,6 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{parse_timestamp_to_ms, truncate_summary};
@@ -169,7 +170,7 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
         created_at,
         last_active_at: last_active_at.or(created_at),
         source_path: Some(source_path),
-        resume_command: Some(format!("gemini --resume {session_id}")),
+        resume_command: resume_command("gemini", &session_id),
     })
 }
 

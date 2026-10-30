@@ -428,7 +428,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
 
     try {
       await sessionsApi.launchTerminal({
-        command: selectedSession.resumeCommand,
+        providerId: selectedSession.providerId,
+        sessionId: selectedSession.sessionId,
         cwd: selectedSession.projectDir ?? undefined,
       });
       toast.success(t("sessionManager.terminalLaunched"));
