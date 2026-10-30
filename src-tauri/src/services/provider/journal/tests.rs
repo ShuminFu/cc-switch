@@ -261,6 +261,61 @@ fn journal_revert_refuses_when_current_provider_changed_since() {
 
 #[test]
 #[serial]
+fn journal_revert_refuses_when_previous_provider_was_deleted() {
+    let _home = TempHome::new();
+    let app = AppType::Claude;
+    let state = seed(&app, &[claude_provider("a"), claude_provider("b")], "a");
+    let live_path = get_claude_settings_path();
+    fs::create_dir_all(live_path.parent().unwrap()).unwrap();
+    fs::write(&live_path, CLAUDE_LIVE_A).unwrap();
+
+    ProviderService::switch(&state, app.clone(), "b").expect("switch to b");
+    state.db.delete_provider(app.as_str(), "a").unwrap();
+    let switched = fs::read(&live_path).unwrap();
+
+    let err = ProviderService::revert_last_switch(&state, app.clone()).expect_err("missing");
+    assert!(matches!(
+        err,
+        AppError::Localized {
+            key: "switch.revertPreviousMissing",
+            ..
+        }
+    ));
+    assert_eq!(
+        fs::read(&live_path).unwrap(),
+        switched,
+        "live left untouched"
+    );
+    assert_eq!(
+        crate::settings::get_effective_current_provider(&state.db, &app)
+            .unwrap()
+            .as_deref(),
+        Some("b")
+    );
+    assert_eq!(journal_len(&app), 1, "a refused revert keeps the entry");
+}
+
+#[test]
+#[serial]
+fn journal_skips_switch_without_previous_current_provider() {
+    let _home = TempHome::new();
+    let app = AppType::Claude;
+    let db = Arc::new(Database::memory().expect("init db"));
+    db.save_provider(app.as_str(), &claude_provider("b"))
+        .expect("save provider");
+    crate::settings::set_current_provider(&app, None).unwrap();
+    let state = AppState::new(db);
+
+    let result = ProviderService::switch(&state, app.clone(), "b").expect("switch to b");
+    assert!(
+        !result.undoable,
+        "nothing to restore the current provider to"
+    );
+    assert_eq!(journal_len(&app), 0);
+}
+
+#[test]
+#[serial]
 fn journal_revert_restores_additive_live_and_managed_flag() {
     let _home = TempHome::new();
     let app = AppType::OpenCode;

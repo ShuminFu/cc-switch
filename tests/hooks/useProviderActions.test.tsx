@@ -61,6 +61,7 @@ vi.mock("@/lib/query", () => ({
 const providersApiUpdateMock = vi.fn();
 const providersApiUpdateTrayMenuMock = vi.fn();
 const providersApiRevertLastSwitchMock = vi.fn();
+const providersApiGetAllMock = vi.fn();
 const settingsApiGetMock = vi.fn();
 const settingsApiApplyMock = vi.fn();
 const openclawApiGetModelCatalogMock = vi.fn();
@@ -74,6 +75,7 @@ vi.mock("@/lib/api", () => ({
       providersApiUpdateTrayMenuMock(...args),
     revertLastSwitch: (...args: unknown[]) =>
       providersApiRevertLastSwitchMock(...args),
+    getAll: (...args: unknown[]) => providersApiGetAllMock(...args),
   },
   settingsApi: {
     get: (...args: unknown[]) => settingsApiGetMock(...args),
@@ -122,6 +124,7 @@ beforeEach(() => {
   providersApiUpdateMock.mockReset();
   providersApiUpdateTrayMenuMock.mockReset();
   providersApiRevertLastSwitchMock.mockReset();
+  providersApiGetAllMock.mockReset();
   settingsApiGetMock.mockReset();
   settingsApiApplyMock.mockReset();
   openclawApiGetModelCatalogMock.mockReset();
@@ -226,6 +229,12 @@ describe("useProviderActions", () => {
       restoredFiles: ["/home/u/.claude/settings.json"],
     });
     providersApiUpdateTrayMenuMock.mockResolvedValueOnce(true);
+    providersApiGetAllMock.mockResolvedValueOnce({
+      previous: createProvider({ id: "previous", category: "official" }),
+    });
+    settingsApiGetMock.mockResolvedValue({
+      enableClaudePluginIntegration: true,
+    });
     const { wrapper } = createWrapper();
     const provider = createProvider({ category: "custom" });
 
@@ -237,6 +246,7 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
+    expect(settingsApiApplyMock).toHaveBeenLastCalledWith({ official: false });
     expect(toastSuccessMock).toHaveBeenCalledTimes(1);
     const [, options] = toastSuccessMock.mock.calls[0] as [
       string,
@@ -251,6 +261,9 @@ describe("useProviderActions", () => {
 
     expect(providersApiRevertLastSwitchMock).toHaveBeenCalledWith("claude");
     expect(providersApiUpdateTrayMenuMock).toHaveBeenCalledTimes(1);
+    // 插件配置跟随恢复后的供应商
+    expect(providersApiGetAllMock).toHaveBeenCalledWith("claude");
+    expect(settingsApiApplyMock).toHaveBeenLastCalledWith({ official: true });
     expect(toastSuccessMock).toHaveBeenLastCalledWith(
       "已撤销切换，已恢复之前的配置",
       { closeButton: true },

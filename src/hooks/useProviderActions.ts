@@ -55,35 +55,6 @@ export function useProviderActions(
       ? switchProviderMutation.variables.providerId
       : undefined;
 
-  // 撤销最近一次切换（切换成功 toast 上的"撤销"按钮）
-  const undoSwitch = useCallback(
-    async (appId: AppId) => {
-      try {
-        await providersApi.revertLastSwitch(appId);
-        await invalidateProviderGraph(queryClient, appId);
-        try {
-          await providersApi.updateTrayMenu();
-        } catch (trayError) {
-          console.error(
-            "Failed to update tray menu after reverting switch",
-            trayError,
-          );
-        }
-        toast.success(t("notifications.switchReverted"), {
-          closeButton: true,
-        });
-      } catch (error) {
-        toast.error(
-          t("notifications.switchRevertFailed", {
-            error: extractErrorMessage(error) || t("common.unknown"),
-          }),
-          { duration: 6000 },
-        );
-      }
-    },
-    [queryClient, t],
-  );
-
   // Claude 插件同步逻辑
   const syncClaudePlugin = useCallback(
     async (provider: Provider) => {
@@ -107,6 +78,41 @@ export function useProviderActions(
       }
     },
     [activeApp, t],
+  );
+
+  // 撤销最近一次切换（切换成功 toast 上的"撤销"按钮）
+  const undoSwitch = useCallback(
+    async (appId: AppId) => {
+      try {
+        const reverted = await providersApi.revertLastSwitch(appId);
+        await invalidateProviderGraph(queryClient, appId);
+        // Claude 插件配置不在 live 日志内，按恢复后的供应商重新同步
+        if (appId === "claude" && reverted?.providerId) {
+          const providers = await providersApi.getAll(appId);
+          const restored = providers[reverted.providerId];
+          if (restored) await syncClaudePlugin(restored);
+        }
+        try {
+          await providersApi.updateTrayMenu();
+        } catch (trayError) {
+          console.error(
+            "Failed to update tray menu after reverting switch",
+            trayError,
+          );
+        }
+        toast.success(t("notifications.switchReverted"), {
+          closeButton: true,
+        });
+      } catch (error) {
+        toast.error(
+          t("notifications.switchRevertFailed", {
+            error: extractErrorMessage(error) || t("common.unknown"),
+          }),
+          { duration: 6000 },
+        );
+      }
+    },
+    [queryClient, syncClaudePlugin, t],
   );
 
   // 添加供应商

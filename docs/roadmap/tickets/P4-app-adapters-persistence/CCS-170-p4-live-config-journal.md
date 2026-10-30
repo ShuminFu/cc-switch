@@ -35,3 +35,10 @@ The new `revert_last_switch` command takes the per-app switch lock and restores 
 - `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast`: 2660 passed, 0 failed.
 - `cargo fmt --check` clean; `cargo clippy -- -D warnings` clean; `UPDATE_BINDINGS=1 cargo test --lib bindings` regenerated `src/shared/bindings.ts` (`revert_last_switch` in COMMANDS, `RevertSwitchResult` type).
 - `pnpm typecheck` clean; `pnpm format:check` clean; `pnpm test:unit`: 160 files / 1549 tests passed. This includes two new `useProviderActions` cases: Undo action reverts and toasts; a failed undo reports the error; a switch that was not journaled has no Undo. One run in parallel with cargo hit a 5 s timeout in `tests/integration/App.test.tsx`; it passed when rerun on its own and in a full rerun.
+
+**Review.** I checked the acceptance criteria against `17718ce` and confirmed them: byte-identical revert, a journal bounded at 10, and 0700/0600 permissions. I re-ran the suites and fixed three gaps.
+1. If the provider that was current before the switch was deleted later, the revert still restored its live files. It then cleared only the local current provider, so the effective current provider fell back to the DB's `is_current`, which still pointed at the target. The UI then showed B as current while live held A. The revert now refuses with `switch.revertPreviousMissing` and keeps the entry.
+2. A switch made when no provider was current was journaled, but its revert cannot clear DB `is_current`. It hit the same mismatch. Such switches are no longer journaled, so `undoable` is false for them.
+3. Undo did not re-sync the Claude plugin config (`~/.claude/config.json`, written by the frontend outside the journal). It now re-applies the plugin config for the restored provider.
+
+New tests: `journal_revert_refuses_when_previous_provider_was_deleted`, `journal_skips_switch_without_previous_current_provider`, and a plugin-sync assertion in the `useProviderActions` Undo case. Results: `cargo test --no-fail-fast` 2662 passed / 0 failed; fmt and clippy clean; `pnpm typecheck` and `format:check` clean; `pnpm test:unit` 160 files / 1549 tests passed.

@@ -191,6 +191,11 @@ impl ProviderService {
         let (result, priors) = record_writes(switch);
         let mut result = result?;
 
+        // 切换前没有当前供应商时无从恢复（DB 的 is_current 无法清空），不记入日志
+        if !app_type.is_additive_mode() && from_provider_id.is_none() {
+            return Ok(result);
+        }
+
         let snapshot = LiveSnapshot {
             app: app_type.as_str().to_string(),
             created_at: chrono::Utc::now().timestamp_millis(),
@@ -257,6 +262,22 @@ impl ProviderService {
             }
         }
 
+        // 切换前的供应商已被删除：还原 live 后当前供应商会落回目标供应商，造成分裂
+        let from_exists = match snapshot.from_provider_id.as_deref() {
+            Some(from) => state
+                .db
+                .get_provider_by_id(from, app_type.as_str())?
+                .is_some(),
+            None => app_type.is_additive_mode(),
+        };
+        if !from_exists {
+            return Err(AppError::localized(
+                "switch.revertPreviousMissing",
+                "切换前的供应商已不存在，无法撤销。",
+                "The provider used before that switch no longer exists, so it cannot be undone.",
+            ));
+        }
+
         let engine = base64::engine::general_purpose::STANDARD;
         let mut restored_files = Vec::with_capacity(snapshot.files.len());
         for file in &snapshot.files {
@@ -288,19 +309,11 @@ impl ProviderService {
             }
             None
         } else {
-            let from = snapshot.from_provider_id.as_deref().filter(|id| {
-                state
-                    .db
-                    .get_provider_by_id(id, app_type.as_str())
-                    .ok()
-                    .flatten()
-                    .is_some()
-            });
-            crate::settings::set_current_provider(&app_type, from)?;
-            if let Some(from) = from {
-                state.db.set_current_provider(app_type.as_str(), from)?;
-            }
-            from.map(str::to_string)
+            // 上面已校验存在
+            let from = snapshot.from_provider_id.as_deref().unwrap_or_default();
+            crate::settings::set_current_provider(&app_type, Some(from))?;
+            state.db.set_current_provider(app_type.as_str(), from)?;
+            Some(from.to_string())
         };
 
         fs::remove_file(&entry_path).map_err(|e| AppError::io(&entry_path, e))?;
