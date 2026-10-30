@@ -370,6 +370,31 @@ export const handlers = [
   // mount. Without them those invokes reject and the components silently
   // render their error branches (TEST-04/TEST-40).
   http.post(`${TAURI_ENDPOINT}/get_installed_skills`, () => success([])),
+  // Defaults for commands added in wave 2 (tests can override per test).
+  http.post(`${TAURI_ENDPOINT}/sync_encryption_get_status`, () =>
+    success({
+      enabled: false,
+      hasPassphrase: false,
+      storage: "none",
+      minPassphraseLength: 8,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_usage_data_sources`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_tool_versions`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_budget_enforcement`, () => success(false)),
+  http.post(`${TAURI_ENDPOINT}/set_budget_enforcement`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/check_provider_limits`, async ({ request }) => {
+    const { providerId } = await withJson<{ providerId: string }>(request);
+    return success({
+      providerId,
+      dailyUsage: "0",
+      dailyLimit: null,
+      dailyExceeded: false,
+      monthlyUsage: "0",
+      monthlyLimit: null,
+      monthlyExceeded: false,
+    });
+  }),
   http.post(`${TAURI_ENDPOINT}/list_profiles`, () =>
     success({
       profiles: [],
