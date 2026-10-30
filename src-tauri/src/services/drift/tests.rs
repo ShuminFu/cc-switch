@@ -479,3 +479,100 @@ fn drift_watcher_reports_external_writes() {
         .expect("watcher reports the write");
     assert!(paths.contains(&file), "{paths:?}");
 }
+
+fn seed_app(app: &AppType, provider: Provider) -> AppState {
+    let db = Arc::new(Database::memory().expect("init db"));
+    db.save_provider(app.as_str(), &provider)
+        .expect("save provider");
+    db.set_current_provider(app.as_str(), &provider.id)
+        .expect("set db current provider");
+    crate::settings::set_current_provider(app, Some(&provider.id))
+        .expect("set local current provider");
+    let state = AppState::new(db);
+    crate::services::provider::write_live_with_common_config(state.db.as_ref(), app, &provider)
+        .expect("write expected live");
+    state
+}
+
+/// Gemini 默认端点：接管会给 `.env` 新增 `GOOGLE_GEMINI_BASE_URL`，这不算外部改动；
+/// 用户在接管期间新增的键仍要报告
+#[tokio::test]
+#[serial]
+async fn drift_ignores_keys_the_gemini_takeover_adds() {
+    let _home = TempHome::new();
+    let provider = Provider::with_id(
+        "g1".into(),
+        "G1".into(),
+        json!({ "env": { "GEMINI_API_KEY": "gem-key", "GEMINI_MODEL": "gemini-2.5-pro" }, "config": {} }),
+        None,
+    );
+    let state = seed_app(&AppType::Gemini, provider);
+    use_ephemeral_proxy_port(&state.db).await;
+    state
+        .proxy_service
+        .set_takeover_for_app("gemini", true)
+        .await
+        .expect("take over gemini");
+
+    let report = DriftService::detect(&state, &AppType::Gemini).expect("detect");
+    assert!(report.takeover_active);
+    assert!(!report.has_drift(), "{report:?}");
+
+    let env_path = crate::gemini_config::get_gemini_env_path();
+    let mut env = std::fs::read_to_string(&env_path).expect("read .env");
+    env.push_str("\nGEMINI_SANDBOX=true\n");
+    std::fs::write(&env_path, env).expect("external edit");
+    let edited = DriftService::detect(&state, &AppType::Gemini).expect("detect");
+    assert_eq!(
+        edited
+            .fields
+            .iter()
+            .map(|field| (field.path.join("."), field.change))
+            .collect::<Vec<_>>(),
+        vec![("GEMINI_SANDBOX".to_string(), DriftChange::Added)]
+    );
+
+    state
+        .proxy_service
+        .stop_with_restore()
+        .await
+        .expect("stop proxy and restore");
+}
+
+/// Codex 官方供应商：接管新增 `model_provider` / `model_providers`，不算外部改动
+#[tokio::test]
+#[serial]
+async fn drift_ignores_keys_the_codex_official_takeover_adds() {
+    let _home = TempHome::new();
+    let seed_db = Database::memory().expect("init db");
+    seed_db
+        .ensure_official_seed_by_id(crate::database::CODEX_OFFICIAL_PROVIDER_ID, AppType::Codex)
+        .expect("seed official provider");
+    let provider = seed_db
+        .get_provider_by_id(crate::database::CODEX_OFFICIAL_PROVIDER_ID, "codex")
+        .expect("get provider")
+        .expect("official provider exists");
+    let state = seed_app(&AppType::Codex, provider);
+    // 官方供应商依赖 Codex 自己的 ChatGPT 登录
+    std::fs::write(
+        crate::codex_config::get_codex_auth_path(),
+        r#"{"tokens":{"access_token":"chatgpt-login"}}"#,
+    )
+    .expect("write chatgpt login");
+    use_ephemeral_proxy_port(&state.db).await;
+    state
+        .proxy_service
+        .set_takeover_for_app("codex", true)
+        .await
+        .expect("take over codex");
+
+    let report = DriftService::detect(&state, &AppType::Codex).expect("detect");
+    assert!(report.takeover_active);
+    assert!(!report.has_drift(), "{report:?}");
+
+    state
+        .proxy_service
+        .stop_with_restore()
+        .await
+        .expect("stop proxy and restore");
+}

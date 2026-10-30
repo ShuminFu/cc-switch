@@ -153,8 +153,12 @@ impl DriftService {
             diff_file(file, &mut fields);
         }
         if takeover_active {
-            // 接管改写了凭据 / 端点（嵌套字段），这些属于预期；只剩用户新增的顶层字段
-            fields.retain(|field| field.change == DriftChange::Added && field.path.len() == 1);
+            // 接管改写了凭据 / 端点，这些属于预期；只剩用户新增的顶层字段
+            fields.retain(|field| {
+                field.change == DriftChange::Added
+                    && field.path.len() == 1
+                    && !is_takeover_owned_key(app, &field.file, &field.path[0])
+            });
         }
 
         let foldable = FoldSource::from_live(app);
@@ -298,6 +302,27 @@ impl DriftService {
         };
         state.db.get_provider_by_id(&id, app.as_str())
     }
+}
+
+/// 接管自身可能新增的顶层键（`文件名`, `键`）。供应商配置里没有这些键时
+///（如 Gemini 用默认端点、Codex 官方供应商），接管会把它们加进 live，不算外部改动。
+const TAKEOVER_OWNED_KEYS: &[(AppType, &str, &str)] = &[
+    (AppType::Gemini, ".env", "GOOGLE_GEMINI_BASE_URL"),
+    (AppType::Gemini, ".env", "GEMINI_API_KEY"),
+    (AppType::Codex, "config.toml", "model_provider"),
+    (AppType::Codex, "config.toml", "model_providers"),
+    (AppType::Codex, "config.toml", "model"),
+    (AppType::Codex, "config.toml", "model_catalog_json"),
+    (AppType::Codex, "auth.json", "OPENAI_API_KEY"),
+];
+
+fn is_takeover_owned_key(app: &AppType, file: &str, key: &str) -> bool {
+    let file_name = Path::new(file).file_name().and_then(|name| name.to_str());
+    TAKEOVER_OWNED_KEYS
+        .iter()
+        .any(|(owner, owned_file, owned_key)| {
+            owner == app && file_name == Some(*owned_file) && key == *owned_key
+        })
 }
 
 fn ignored_key(app: &AppType) -> String {
