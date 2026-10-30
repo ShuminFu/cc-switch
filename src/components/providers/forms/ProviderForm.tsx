@@ -24,34 +24,22 @@ import type {
   PromptCacheRoutingMode,
   ClaudeApiKeyField,
 } from "@/types";
-import {
-  type ProviderPreset,
-} from "@/config/claudeProviderPresets";
-import {
-  type CodexProviderPreset,
-} from "@/config/codexProviderPresets";
-import {
-  type GeminiProviderPreset,
-} from "@/config/geminiProviderPresets";
-import {
-  type OpenCodeProviderPreset,
-} from "@/config/opencodeProviderPresets";
+import { type ProviderPreset } from "@/config/claudeProviderPresets";
+import { type CodexProviderPreset } from "@/config/codexProviderPresets";
+import { type GeminiProviderPreset } from "@/config/geminiProviderPresets";
+import { type OpenCodeProviderPreset } from "@/config/opencodeProviderPresets";
 import {
   rebaseOpenClawSuggestedDefaults,
   type OpenClawProviderPreset,
   type OpenClawSuggestedDefaults,
 } from "@/config/openclawProviderPresets";
-import {
-  type HermesProviderPreset,
-} from "@/config/hermesProviderPresets";
+import { type HermesProviderPreset } from "@/config/hermesProviderPresets";
 import { OpenCodeFormFields } from "./OpenCodeFormFields";
 import { OpenClawFormFields } from "./OpenClawFormFields";
 import { HermesFormFields } from "./HermesFormFields";
 import type { UniversalProviderPreset } from "@/config/universalProviderPresets";
-import {
-  applyTemplateValues,
-  hasApiKeyField,
-} from "@/utils/providerConfigUtils";
+import { applyTemplateValues } from "@/utils/providerConfigUtils";
+import { getProviderCodec, parseSettingsConfig } from "@/lib/providerCodecs";
 import { mergeProviderMeta } from "@/utils/providerMetaUtils";
 import {
   codexApiFormatFromWireApi,
@@ -1696,10 +1684,9 @@ function ProviderFormFull({
   const speedTestEndpoints = useSpeedTestEndpoints({
     appId,
     selectedPresetId,
-    presetEntries,
-    baseUrl,
-    codexBaseUrl,
+    baseUrl: appId === "codex" ? codexBaseUrl : baseUrl,
     initialData,
+    draftCustomEndpoints: isEditMode ? undefined : draftCustomEndpoints,
   });
 
   const handlePresetChange = (value: string) => {
@@ -2133,7 +2120,9 @@ function ProviderFormFull({
               providerId={providerId}
               shouldShowApiKey={
                 (category !== "cloud_provider" ||
-                  hasApiKeyField(watchedSettingsConfig, "claude")) &&
+                  getProviderCodec("claude").hasApiKeyField(
+                    parseSettingsConfig(watchedSettingsConfig),
+                  )) &&
                 shouldShowApiKey(watchedSettingsConfig, isEditMode)
               }
               apiKey={apiKey}

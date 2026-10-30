@@ -1,10 +1,15 @@
 import { useEffect, useState, useCallback } from "react";
 import type { ProviderCategory } from "@/types";
-import {
-  getApiKeyFromConfig,
-  setApiKeyInConfig,
-  hasApiKeyField,
-} from "@/utils/providerConfigUtils";
+import type { AppId } from "@/lib/api";
+import { getProviderCodec, parseSettingsConfig } from "@/lib/providerCodecs";
+
+const readApiKey = (json: string, appType?: string) => {
+  const config = parseSettingsConfig(json);
+  return config ? getProviderCodec(toAppId(appType)).getApiKey(config) : "";
+};
+
+const toAppId = (appType?: string): AppId =>
+  (appType as AppId | undefined) ?? "claude";
 
 interface UseApiKeyStateProps {
   initialConfig?: string;
@@ -29,7 +34,7 @@ export function useApiKeyState({
 }: UseApiKeyStateProps) {
   const [apiKey, setApiKey] = useState(() => {
     if (initialConfig) {
-      return getApiKeyFromConfig(initialConfig, appType);
+      return readApiKey(initialConfig, appType);
     }
     return "";
   });
@@ -46,7 +51,7 @@ export function useApiKeyState({
     }
 
     // 从配置中提取 API Key（如果不存在则返回空字符串）
-    const extracted = getApiKeyFromConfig(initialConfig, appType);
+    const extracted = readApiKey(initialConfig, appType);
     if (extracted !== apiKey) {
       setApiKey(extracted);
     }
@@ -56,31 +61,31 @@ export function useApiKeyState({
     (key: string) => {
       setApiKey(key);
 
-      const configString = setApiKeyInConfig(
-        initialConfig || "{}",
-        key.trim(),
-        {
-          // 最佳实践：仅在"非官方/非云厂商类别"时补齐缺失字段
-          // - 官方类别：不创建字段（UI 也会禁用输入框）
-          // - 云厂商类别：通常使用专用鉴权字段，不自动创建 Anthropic key
-          // - 未传入 category：按历史导入/自定义 provider 处理，允许补齐
-          createIfMissing:
-            category !== "official" && category !== "cloud_provider",
-          appType,
-          apiKeyField,
-        },
-      );
+      const raw = initialConfig || "{}";
+      const parsed = parseSettingsConfig(raw);
+      let configString = raw;
+      if (parsed) {
+        const updated = getProviderCodec(toAppId(appType)).setApiKey(
+          parsed,
+          key.trim(),
+          {
+            // 最佳实践：仅在"非官方/非云厂商类别"时补齐缺失字段
+            // - 官方类别：不创建字段（UI 也会禁用输入框）
+            // - 云厂商类别：通常使用专用鉴权字段，不自动创建 Anthropic key
+            // - 未传入 category：按历史导入/自定义 provider 处理，允许补齐
+            createIfMissing:
+              category !== "official" && category !== "cloud_provider",
+            apiKeyField,
+          },
+        );
+        if (updated !== parsed) {
+          configString = JSON.stringify(updated, null, 2);
+        }
+      }
 
       onConfigChange(configString);
     },
-    [
-      initialConfig,
-      selectedPresetId,
-      category,
-      appType,
-      apiKeyField,
-      onConfigChange,
-    ],
+    [initialConfig, category, appType, apiKeyField, onConfigChange],
   );
 
   const showApiKey = useCallback(
@@ -90,7 +95,10 @@ export function useApiKeyState({
         (isEditMode &&
           category !== "official" &&
           category !== "cloud_provider") ||
-        (isEditMode && hasApiKeyField(config, appType))
+        (isEditMode &&
+          getProviderCodec(toAppId(appType)).hasApiKeyField(
+            parseSettingsConfig(config),
+          ))
       );
     },
     [selectedPresetId, category, appType],

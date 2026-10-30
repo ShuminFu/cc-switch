@@ -140,3 +140,25 @@ export function getPresetCategory(
   if (preset.category) return preset.category;
   return "isOfficial" in preset && preset.isOfficial ? "official" : undefined;
 }
+
+/**
+ * A preset's config in the shape of a stored provider's `settingsConfig`, so
+ * provider codecs can read presets too (Codex/Grok Build presets keep the
+ * TOML in `config`, Claude Desktop presets carry a top-level `baseUrl`).
+ */
+export function presetSettingsConfig(preset: AnyProviderPreset): unknown {
+  const candidate = preset as {
+    settingsConfig?: unknown;
+    auth?: unknown;
+    config?: unknown;
+    baseUrl?: unknown;
+  };
+  if (candidate.settingsConfig !== undefined) return candidate.settingsConfig;
+  if (typeof candidate.config === "string") {
+    return { auth: candidate.auth ?? {}, config: candidate.config };
+  }
+  if (typeof candidate.baseUrl === "string") {
+    return { env: { ANTHROPIC_BASE_URL: candidate.baseUrl } };
+  }
+  return undefined;
+}
