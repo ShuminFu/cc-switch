@@ -426,30 +426,9 @@ pub(crate) struct DedupKey<'a> {
     pub created_at: i64,
 }
 
-/// session 日志写入前的统一去重判定。
+/// 会话行写入前的指纹去重：时间窗口内存在与 `key` 匹配的 proxy 日志。
 ///
-/// 命中以下任一条件即跳过插入：① `request_id` 已存在；② 时间窗口内存在
-/// 与 `key` 匹配的 proxy 日志（指纹去重）。
-pub(crate) fn should_skip_session_insert(
-    conn: &Connection,
-    request_id: &str,
-    key: &DedupKey,
-) -> Result<bool, AppError> {
-    if proxy_request_id_exists(conn, request_id)? {
-        return Ok(true);
-    }
-    has_matching_proxy_usage_log(conn, key)
-}
-
-fn proxy_request_id_exists(conn: &Connection, request_id: &str) -> Result<bool, AppError> {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM proxy_request_logs WHERE request_id = ?1)",
-        params![request_id],
-        |row| row.get::<_, bool>(0),
-    )
-    .map_err(|e| AppError::Database(format!("查询 request_id 失败: {e}")))
-}
-
+/// `request_id` 是否已存在由会话写入器（`session_usage::ingest`）按写入策略处理。
 pub(crate) fn has_matching_proxy_usage_log(
     conn: &Connection,
     key: &DedupKey,

@@ -11,18 +11,30 @@
 //!   → proxy_request_logs 表
 //! ```
 
-use crate::database::{lock_conn, Database};
+use crate::database::Database;
 use crate::error::AppError;
 use crate::opencode_config::get_opencode_db_path;
-use crate::proxy::usage::calculator::CostCalculator;
-use crate::proxy::usage::parser::TokenUsage;
-use crate::services::session_usage::{
-    get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
+use crate::services::session_usage::ingest::{
+    commit_session_rows, load_sync_cursors, now_secs, CursorUpdate, PricingCache, SessionSource,
+    SessionUsageRow, WritePolicy,
 };
-use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
-use rust_decimal::Decimal;
+use crate::services::session_usage::{
+    metadata_modified_nanos, update_sync_state, SessionSyncResult,
+};
 use std::fs;
-use std::time::SystemTime;
+use std::path::Path;
+use std::time::Duration;
+
+/// 只导入已完成的消息，写入后不再变化。
+const OPENCODE_SESSION_SOURCE: SessionSource = SessionSource {
+    app_type: "opencode",
+    provider_id: "_opencode_session",
+    data_source: "opencode_session",
+    policy: WritePolicy::InsertOnly,
+};
+
+/// opencode 运行时可能持有写锁；读取时最多等待这么久（与会话管理器一致）。
+const OPENCODE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// 从 opencode message.data JSON 中提取的 token 和费用数据
 struct OpenCodeMessageData {
@@ -41,17 +53,27 @@ struct OpenCodeMessageQueryResult {
     has_incomplete_usage: bool,
 }
 
+/// 以只读方式打开 opencode.db，并设置 busy timeout，避免 opencode 写入时立即 SQLITE_BUSY。
+fn open_opencode_db(db_path: &Path) -> Result<rusqlite::Connection, AppError> {
+    use rusqlite::OpenFlags;
+    let conn = rusqlite::Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| AppError::Database(format!("无法打开 opencode.db: {e}")))?;
+    conn.busy_timeout(OPENCODE_DB_BUSY_TIMEOUT)
+        .map_err(|e| AppError::Database(format!("设置 opencode.db busy timeout 失败: {e}")))?;
+    Ok(conn)
+}
+
 /// 同步 OpenCode 使用数据
 pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
-    let db_path = get_opencode_db_path();
+    sync_opencode_db(db, &get_opencode_db_path())
+}
 
+fn sync_opencode_db(db: &Database, db_path: &Path) -> Result<SessionSyncResult, AppError> {
     if !db_path.exists() {
-        return Ok(SessionSyncResult {
-            imported: 0,
-            skipped: 0,
-            files_scanned: 0,
-            errors: vec![],
-        });
+        return Ok(SessionSyncResult::default());
     }
 
     let db_path_str = db_path.to_string_lossy().to_string();
@@ -60,7 +82,7 @@ pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError>
     // opencode 的数据库运行在 WAL 模式：新提交先落在 -wal 文件里，
     // 主库文件只有在 checkpoint 时才更新。因此必须同时考虑 -wal 的
     // mtime，否则会在 checkpoint 之前漏掉刚写入的会话。
-    let metadata = fs::metadata(&db_path)
+    let metadata = fs::metadata(db_path)
         .map_err(|e| AppError::Config(format!("无法读取 opencode.db 元数据: {e}")))?;
     let mut file_modified = metadata_modified_nanos(&metadata);
 
@@ -69,29 +91,23 @@ pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError>
         file_modified = file_modified.max(metadata_modified_nanos(&wal_meta));
     }
 
-    let (last_modified, _last_offset) = get_sync_state(db, &db_path_str)?;
+    // 一次查询载入全部游标（含每个会话的游标）
+    let cursors = load_sync_cursors(db)?;
+    let last_modified = cursors.get(&db_path_str).map(|s| s.0).unwrap_or(0);
+
+    let mut result = SessionSyncResult {
+        files_scanned: 1,
+        ..Default::default()
+    };
 
     // 文件未变化则跳过
     if file_modified <= last_modified {
-        return Ok(SessionSyncResult {
-            imported: 0,
-            skipped: 0,
-            files_scanned: 1,
-            errors: vec![],
-        });
+        return Ok(result);
     }
 
-    // 打开 opencode 的 SQLite 数据库（只读）
-    let opencode_conn =
-        rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| AppError::Database(format!("无法打开 opencode.db: {e}")))?;
-
-    let mut result = SessionSyncResult {
-        imported: 0,
-        skipped: 0,
-        files_scanned: 1,
-        errors: vec![],
-    };
+    // 打开 opencode 的 SQLite 数据库（只读 + busy timeout）
+    let opencode_conn = open_opencode_db(db_path)?;
+    let mut pricing = PricingCache::default();
     let mut has_sync_errors = false;
 
     // 查询所有会话
@@ -100,57 +116,48 @@ pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError>
     for (session_id, time_updated) in &sessions {
         // 检查会话是否需要重新同步
         let sync_key = format!("{db_path_str}:{session_id}");
-        let (sess_last_modified, _) = get_sync_state(db, &sync_key)?;
+        let sess_last_modified = cursors.get(&sync_key).map(|s| s.0).unwrap_or(0);
         if *time_updated <= sess_last_modified {
             continue; // 会话未更新，跳过
         }
 
-        let mut session_had_error = false;
-
         // 查询该会话的所有 assistant 消息
-        let mut session_has_incomplete_usage = false;
-        match query_assistant_messages(&opencode_conn, session_id) {
-            Ok(query_result) => {
-                session_has_incomplete_usage = query_result.has_incomplete_usage;
-                for (message_id, msg_data) in &query_result.messages {
-                    let request_id = format!("opencode_session:{session_id}:{message_id}");
-
-                    match insert_opencode_message(db, &request_id, msg_data, session_id) {
-                        Ok(true) => result.imported += 1,
-                        Ok(false) => result.skipped += 1,
-                        Err(e) => {
-                            let msg = format!("OpenCode 消息插入失败 {request_id}: {e}");
-                            log::warn!("[OPENCODE-SYNC] {msg}");
-                            result.errors.push(msg);
-                            result.skipped += 1;
-                            session_had_error = true;
-                        }
-                    }
-                }
-            }
+        let query_result = match query_assistant_messages(&opencode_conn, session_id) {
+            Ok(query_result) => query_result,
             Err(e) => {
                 let msg = format!("OpenCode 会话消息查询失败 {session_id}: {e}");
                 log::warn!("[OPENCODE-SYNC] {msg}");
                 result.errors.push(msg);
-                session_had_error = true;
+                has_sync_errors = true;
+                continue;
             }
-        }
+        };
 
-        if session_had_error {
-            has_sync_errors = true;
-            continue;
-        }
+        let rows: Vec<SessionUsageRow> = query_result
+            .messages
+            .iter()
+            .map(|(message_id, msg_data)| opencode_row(session_id, message_id, msg_data))
+            .collect();
 
-        if session_has_incomplete_usage {
-            continue;
-        }
+        // 仍有未完成消息时不推进会话游标，下次同步会再读取它们。
+        let cursor = (!query_result.has_incomplete_usage).then(|| CursorUpdate {
+            key: &sync_key,
+            last_modified: *time_updated,
+            last_offset: 0,
+        });
 
-        // 更新会话级同步状态。失败时不要推进文件级状态，确保下次可重试。
-        if let Err(e) = update_sync_state(db, &sync_key, *time_updated, 0) {
-            let msg = format!("OpenCode 会话同步状态更新失败 {session_id}: {e}");
-            log::warn!("[OPENCODE-SYNC] {msg}");
-            result.errors.push(msg);
-            has_sync_errors = true;
+        // 消息与会话游标在同一事务内提交；失败时整体回滚，下次重试。
+        match commit_session_rows(db, &OPENCODE_SESSION_SOURCE, &rows, &mut pricing, cursor) {
+            Ok((imported, skipped)) => {
+                result.imported += imported;
+                result.skipped += skipped;
+            }
+            Err(e) => {
+                let msg = format!("OpenCode 会话写入失败 {session_id}: {e}");
+                log::warn!("[OPENCODE-SYNC] {msg}");
+                result.errors.push(msg);
+                has_sync_errors = true;
+            }
         }
     }
 
@@ -308,133 +315,92 @@ fn parse_message_data(value: &serde_json::Value) -> Option<OpenCodeMessageData> 
     })
 }
 
-/// 插入单条 OpenCode 消息记录到 proxy_request_logs
-fn insert_opencode_message(
-    db: &Database,
-    request_id: &str,
-    msg: &OpenCodeMessageData,
-    session_id: &str,
-) -> Result<bool, AppError> {
-    let conn = lock_conn!(db.conn);
-
-    let created_at = if msg.timestamp_ms > 0 {
-        msg.timestamp_ms / 1000
-    } else {
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0)
-    };
-
-    // OpenCode 使用 Anthropic 风格：input 是新鲜输入，cache 单独计
-    // output 包含 reasoning tokens（按输出计费）
-    let output_with_reasoning = msg.output_tokens + msg.reasoning_tokens;
-
-    let dedup_key = DedupKey {
-        app_type: "opencode",
-        model: &msg.model_id,
+/// 把一条 OpenCode 消息转换为待写入的用量行
+fn opencode_row(session_id: &str, message_id: &str, msg: &OpenCodeMessageData) -> SessionUsageRow {
+    SessionUsageRow {
+        request_id: format!("opencode_session:{session_id}:{message_id}"),
+        model: msg.model_id.clone(),
+        pricing_model: msg.model_id.clone(),
+        // OpenCode 使用 Anthropic 风格：input 是新鲜输入，cache 单独计
         input_tokens: msg.input_tokens,
-        output_tokens: output_with_reasoning,
+        // output 包含 reasoning tokens（按输出计费）
+        output_tokens: msg.output_tokens + msg.reasoning_tokens,
         cache_read_tokens: msg.cache_read_tokens,
         cache_creation_tokens: msg.cache_write_tokens,
-        created_at,
-    };
-    if should_skip_session_insert(&conn, request_id, &dedup_key)? {
-        return Ok(false);
-    }
-
-    // 如果 opencode 已经提供了费用，直接使用；否则从模型定价计算
-    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) =
-        if msg.cost > 0.0 {
-            // opencode 已计算费用，直接使用
-            // 简化处理：全部放入 total_cost（opencode 的 cost 是聚合值，无法精确拆分）
-            (
-                "0".to_string(),
-                "0".to_string(),
-                "0".to_string(),
-                "0".to_string(),
-                msg.cost.to_string(),
-            )
+        session_id: Some(session_id.to_string()),
+        created_at: if msg.timestamp_ms > 0 {
+            msg.timestamp_ms / 1000
         } else {
-            // opencode 费用为 0（如免费模型），尝试用 cc-switch 自带的模型定价计算
-            let usage = TokenUsage {
-                input_tokens: msg.input_tokens,
-                output_tokens: output_with_reasoning,
-                cache_read_tokens: msg.cache_read_tokens,
-                cache_creation_tokens: msg.cache_write_tokens,
-                model: Some(msg.model_id.clone()),
-                message_id: None,
-            };
-
-            match find_model_pricing(&conn, &msg.model_id) {
-                Some(pricing) => {
-                    let cost = CostCalculator::calculate_for_app(
-                        "opencode",
-                        &usage,
-                        &pricing,
-                        Decimal::from(1),
-                    );
-                    (
-                        cost.input_cost.to_string(),
-                        cost.output_cost.to_string(),
-                        cost.cache_read_cost.to_string(),
-                        cost.cache_creation_cost.to_string(),
-                        cost.total_cost.to_string(),
-                    )
-                }
-                None => (
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                ),
-            }
-        };
-
-    let inserted_rows = conn.execute(
-        "INSERT OR IGNORE INTO proxy_request_logs (
-            request_id, provider_id, app_type, model, request_model,
-            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-            latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
-        rusqlite::params![
-            request_id,
-            "_opencode_session",   // provider_id
-            "opencode",            // app_type
-            msg.model_id,
-            msg.model_id,          // request_model = model
-            msg.input_tokens,
-            output_with_reasoning,
-            msg.cache_read_tokens,
-            msg.cache_write_tokens,
-            input_cost,
-            output_cost,
-            cache_read_cost,
-            cache_creation_cost,
-            total_cost,
-            0i64,                  // latency_ms
-            Option::<i64>::None,   // first_token_ms
-            200i64,                // status_code
-            Option::<String>::None,// error_message
-            Some(session_id.to_string()),
-            Some("opencode_session"), // provider_type
-            1i64,                  // is_streaming
-            "1.0",                 // cost_multiplier
-            created_at,
-            "opencode_session",    // data_source
-        ],
-    )
-    .map_err(|e| AppError::Database(format!("插入 OpenCode 会话日志失败: {e}")))?;
-
-    Ok(inserted_rows > 0)
+            now_secs()
+        },
+        // opencode 已计算费用时直接使用（聚合值，无法拆分）；为 0 时按 cc-switch 定价计算
+        precomputed_total_cost: Some(msg.cost),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn opencode_fixture(dir: &Path) -> std::path::PathBuf {
+        let path = dir.join("opencode.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let done = serde_json::json!({
+            "role": "assistant",
+            "cost": 0.0,
+            "tokens": { "input": 1000, "output": 200, "reasoning": 50 },
+            "modelID": "m",
+            "time": { "created": 1_779_755_333_700i64, "completed": 1_779_755_350_639i64 }
+        })
+        .to_string();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT, time_updated INTEGER);
+             CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER,
+                                   time_updated INTEGER, data TEXT);
+             INSERT INTO session VALUES ('s1', 100);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message VALUES ('m1', 's1', 1, 100, ?1)",
+            [done],
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn test_sync_reads_db_read_only_and_is_idempotent() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = opencode_fixture(tmp.path());
+
+        let first = sync_opencode_db(&db, &path)?;
+        assert_eq!((first.imported, first.errors.len()), (1, 0));
+        {
+            let conn = db.conn.lock().unwrap();
+            let output: i64 = conn.query_row(
+                "SELECT output_tokens FROM proxy_request_logs
+                 WHERE request_id = 'opencode_session:s1:m1'",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(output, 250);
+        }
+
+        // 游标已推进：强制重读文件级状态后，会话级游标仍阻止重复导入
+        update_sync_state(&db, &path.to_string_lossy(), 0, 0)?;
+        let second = sync_opencode_db(&db, &path)?;
+        assert_eq!((second.imported, second.skipped), (0, 0));
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_opencode_db_is_read_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = opencode_fixture(tmp.path());
+        let conn = open_opencode_db(&path).unwrap();
+        assert!(conn.execute("DELETE FROM message", []).is_err());
+    }
 
     #[test]
     fn test_parse_message_data_full() {

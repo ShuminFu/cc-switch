@@ -7,31 +7,46 @@
 //! ```text
 //! ~/.claude/projects/*/*.jsonl → 增量解析 → 去重 → 费用计算 → proxy_request_logs 表
 //! ```
+//!
+//! 四个会话来源（Claude/Codex/Gemini/OpenCode）共用 [`ingest`] 中的写入逻辑，
+//! 并通过 [`sync_all_session_usage`] 以单飞方式统一调度。
 
 use crate::config::get_claude_config_dir;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
-use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
-use crate::proxy::usage::parser::TokenUsage;
-use crate::services::usage_stats::{
-    effective_usage_log_filter, find_model_pricing, should_skip_session_insert, DedupKey,
-};
-use rust_decimal::Decimal;
+use crate::services::usage_stats::effective_usage_log_filter;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::{Mutex, TryLockError};
+use std::time::{Instant, SystemTime};
+
+pub(crate) mod ingest;
+
+use ingest::{
+    commit_session_rows, created_at_from_rfc3339, load_sync_cursors, prune_missing_cursors,
+    update_sync_state_on, CursorUpdate, PricingCache, SessionSource, SessionUsageRow, WritePolicy,
+};
 
 /// 同步结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSyncResult {
     pub imported: u32,
     pub skipped: u32,
     pub files_scanned: u32,
     pub errors: Vec<String>,
+}
+
+impl SessionSyncResult {
+    fn merge(&mut self, other: SessionSyncResult) {
+        self.imported += other.imported;
+        self.skipped += other.skipped;
+        self.files_scanned += other.files_scanned;
+        self.errors.extend(other.errors);
+    }
 }
 
 /// 数据来源分布
@@ -57,32 +72,115 @@ struct ParsedAssistantUsage {
     session_id: Option<String>,
 }
 
+/// Claude 会话日志写入策略：同一 message.id 的流式快照以 output 最大者为准，
+/// 之后的同步读到更完整的快照时会更新已落库的行（SESS-35）。
+const CLAUDE_SESSION_SOURCE: SessionSource = SessionSource {
+    app_type: "claude",
+    provider_id: "_session",
+    data_source: "session_log",
+    policy: WritePolicy::KeepMaxOutput,
+};
+
+/// Who asked for a combined session-usage sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncTrigger {
+    /// Startup/periodic sync: skipped when another sync is already running.
+    Background,
+    /// User-initiated sync: waits for a running sync to finish, then runs.
+    Manual,
+}
+
+static SYNC_RUNNING: Mutex<()> = Mutex::new(());
+
+type SyncFn = fn(&Database) -> Result<SessionSyncResult, AppError>;
+
+/// Run all four session-usage importers once (single-flight, SESS-08).
+///
+/// Returns `None` when `trigger` is [`SyncTrigger::Background`] and another sync is
+/// already in progress. Usage events raised while importing are coalesced into one
+/// notification emitted when the run ends. This is blocking work: call it from
+/// `spawn_blocking` or a plain thread, never directly on the async runtime.
+pub fn sync_all_session_usage(db: &Database, trigger: SyncTrigger) -> Option<SessionSyncResult> {
+    let _running = match trigger {
+        SyncTrigger::Manual => SYNC_RUNNING.lock().unwrap_or_else(|e| e.into_inner()),
+        SyncTrigger::Background => match SYNC_RUNNING.try_lock() {
+            Ok(guard) => guard,
+            Err(TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                log::debug!("[SESSION-SYNC] 已有同步在运行，跳过本轮");
+                return None;
+            }
+        },
+    };
+    let _batch = crate::usage_events::begin_batch();
+    let started = Instant::now();
+
+    let sources: [(&str, SyncFn); 4] = [
+        ("Claude", sync_claude_session_logs),
+        (
+            "Codex",
+            crate::services::session_usage_codex::sync_codex_usage,
+        ),
+        (
+            "Gemini",
+            crate::services::session_usage_gemini::sync_gemini_usage,
+        ),
+        (
+            "OpenCode",
+            crate::services::session_usage_opencode::sync_opencode_usage,
+        ),
+    ];
+    let mut total = SessionSyncResult::default();
+    for (name, sync) in sources {
+        match sync(db) {
+            Ok(result) => total.merge(result),
+            Err(e) => {
+                log::warn!("[SESSION-SYNC] {name} 同步失败: {e}");
+                total.errors.push(format!("{name} 同步失败: {e}"));
+            }
+        }
+    }
+
+    log::debug!(
+        "[SESSION-SYNC] pass finished in {:?}: imported {}, skipped {}, files {}",
+        started.elapsed(),
+        total.imported,
+        total.skipped,
+        total.files_scanned
+    );
+    Some(total)
+}
+
 /// 同步 Claude Code 会话日志到使用统计数据库
 pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppError> {
     let projects_dir = get_claude_config_dir().join("projects");
+    sync_claude_projects_dir(db, &projects_dir)
+}
+
+fn sync_claude_projects_dir(
+    db: &Database,
+    projects_dir: &Path,
+) -> Result<SessionSyncResult, AppError> {
+    let mut result = SessionSyncResult::default();
     if !projects_dir.exists() {
-        return Ok(SessionSyncResult {
-            imported: 0,
-            skipped: 0,
-            files_scanned: 0,
-            errors: vec![],
-        });
+        return Ok(result);
     }
 
-    let mut result = SessionSyncResult {
-        imported: 0,
-        skipped: 0,
-        files_scanned: 0,
-        errors: vec![],
-    };
+    // 一次查询载入全部同步游标；未变化的文件只需一次 stat（PERF-10）
+    let cursors = load_sync_cursors(db)?;
+    let mut pricing = PricingCache::default();
 
     // 收集所有 .jsonl 文件
-    let jsonl_files = collect_jsonl_files(&projects_dir);
+    let jsonl_files = collect_jsonl_files(projects_dir);
+    let mut discovered = HashSet::with_capacity(jsonl_files.len());
 
     for file_path in &jsonl_files {
         result.files_scanned += 1;
+        let key = file_path.to_string_lossy().to_string();
+        let cursor = cursors.get(&key).copied().unwrap_or((0, 0));
+        discovered.insert(key);
 
-        match sync_single_file(db, file_path) {
+        match sync_claude_file(db, file_path, cursor, &mut pricing) {
             Ok((imported, skipped)) => {
                 result.imported += imported;
                 result.skipped += skipped;
@@ -93,6 +191,10 @@ pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppE
                 result.errors.push(msg);
             }
         }
+    }
+
+    if let Err(e) = prune_missing_cursors(db, projects_dir, &cursors, &discovered) {
+        log::warn!("[SESSION-SYNC] 清理失效同步状态失败: {e}");
     }
 
     if result.imported > 0 {
@@ -117,7 +219,7 @@ pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppE
 /// 最后一层是 Claude Code Workflow 功能产生的子 agent transcript，比普通子
 /// agent 多嵌套一层 `workflows/wf_<ID>/`。漏掉这一层会让 Workflow 的 token
 /// 用量完全不计入统计；`journal.jsonl` 不含 `type=="assistant"` 行，解析时
-/// 会被 `sync_single_file` 天然跳过，因此这里无需按文件名过滤。
+/// 会被 `sync_claude_file` 天然跳过，因此这里无需按文件名过滤。
 fn collect_jsonl_files(projects_dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
 
@@ -178,8 +280,42 @@ fn push_jsonl_children(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// 逐行读取 JSONL 文件中**以换行结尾**的完整行，回调参数为 (从 1 开始的行号, 行内容)。
+///
+/// 返回完整行的数量，作为新的行游标。末尾尚未写完（无换行）的行不会被读取，
+/// 也不计入游标，下次同步会重新读取它（SESS-36）。非 UTF-8 行占用行号但被跳过。
+pub(crate) fn for_each_complete_line(
+    file_path: &Path,
+    mut on_line: impl FnMut(i64, &str),
+) -> Result<i64, AppError> {
+    let file =
+        fs::File::open(file_path).map_err(|e| AppError::Config(format!("无法打开文件: {e}")))?;
+    let mut reader = BufReader::new(file);
+    let mut buf = Vec::new();
+    let mut line_no: i64 = 0;
+    loop {
+        buf.clear();
+        let read = reader
+            .read_until(b'\n', &mut buf)
+            .map_err(|e| AppError::Config(format!("读取文件失败: {e}")))?;
+        if read == 0 || buf.last() != Some(&b'\n') {
+            break;
+        }
+        line_no += 1;
+        if let Ok(line) = std::str::from_utf8(&buf) {
+            on_line(line_no, line.trim_end_matches(['\n', '\r']));
+        }
+    }
+    Ok(line_no)
+}
+
 /// 同步单个 JSONL 文件，返回 (imported, skipped)
-fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
+fn sync_claude_file(
+    db: &Database,
+    file_path: &Path,
+    (last_modified, last_offset): (i64, i64),
+    pricing: &mut PricingCache,
+) -> Result<(u32, u32), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
 
     // 获取文件元数据
@@ -187,43 +323,22 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
         .map_err(|e| AppError::Config(format!("无法读取文件元数据: {e}")))?;
     let file_modified = metadata_modified_nanos(&metadata);
 
-    // 检查同步状态
-    let (last_modified, last_offset) = get_sync_state(db, &file_path_str)?;
-
     // 文件未变化则跳过
     if file_modified <= last_modified {
         return Ok((0, 0));
     }
 
-    // 从上次偏移位置开始增量解析
-    let file =
-        fs::File::open(file_path).map_err(|e| AppError::Config(format!("无法打开文件: {e}")))?;
-    let reader = BufReader::new(file);
-
-    let mut line_offset: i64 = 0;
     let mut messages: HashMap<String, ParsedAssistantUsage> = HashMap::new();
     let mut current_session_id: Option<String> = None;
 
-    for line_result in reader.lines() {
-        line_offset += 1;
-
+    // 从上次偏移位置开始增量解析
+    let line_offset = for_each_complete_line(file_path, |line_no, line| {
         // 跳过已处理的行
-        if line_offset <= last_offset {
-            continue;
+        if line_no <= last_offset || line.trim().is_empty() {
+            return;
         }
-
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => continue, // 容忍不完整的最后一行
-        };
-
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let value: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            return;
         };
 
         // 提取 session ID (从 system 或首条消息)
@@ -233,132 +348,126 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
             }
         }
 
-        // 只处理 assistant 类型的消息
-        if value.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-            continue;
+        if let Some(parsed) = parse_assistant_usage(&value, current_session_id.as_ref()) {
+            merge_snapshot(&mut messages, parsed);
         }
+    })?;
 
-        let message = match value.get("message") {
-            Some(m) => m,
-            None => continue,
-        };
+    // 只要产生了真实计费 token 就导入，不再强制要求 stop_reason 或 output>0。
+    //
+    // Anthropic 在受理请求时即对 input + cache_read + cache_creation 计费
+    // （这些在请求开始就确定），output 按实际生成量计。Workflow / 子 agent 的
+    // 并行短命请求经常只写了 message_start 快照（output=1、stop_reason=None）
+    // 却没有写最终块，但其 cache/input 成本已被真实计费。旧逻辑用 stop_reason
+    // 非空 + output>0 双重过滤，会把这类请求整条丢弃，实测系统性低估约 4.1%，
+    // 且 92% 集中在 workflow/subagent。这里改为「任一计费维度 > 0 即导入」。
+    //
+    // request_id = session:msg_id 主键保证一个 message 只落库一次；若之后的同步
+    // 读到 output 更大的快照（流式回复跨越了同步时刻），KeepMaxOutput 会更新该行。
+    let rows: Vec<SessionUsageRow> = messages
+        .values()
+        .filter(|msg| {
+            msg.input_tokens > 0
+                || msg.output_tokens > 0
+                || msg.cache_read_tokens > 0
+                || msg.cache_creation_tokens > 0
+        })
+        .map(claude_row)
+        .collect();
 
-        let msg_id = match message.get("id").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => continue,
-        };
+    commit_session_rows(
+        db,
+        &CLAUDE_SESSION_SOURCE,
+        &rows,
+        pricing,
+        Some(CursorUpdate {
+            key: &file_path_str,
+            last_modified: file_modified,
+            last_offset: line_offset,
+        }),
+    )
+}
 
-        let usage = match message.get("usage") {
-            Some(u) => u,
-            None => continue,
-        };
-
-        let parsed = ParsedAssistantUsage {
-            message_id: msg_id.clone(),
-            model: message
-                .get("model")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string(),
-            input_tokens: usage
-                .get("input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            output_tokens: usage
-                .get("output_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            cache_read_tokens: usage
-                .get("cache_read_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            cache_creation_tokens: usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            stop_reason: message
-                .get("stop_reason")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            timestamp: value
-                .get("timestamp")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            session_id: current_session_id.clone(),
-        };
-
-        // 按 message.id 去重：优先保留有 stop_reason 的条目，否则保留最新的
-        let should_replace = match messages.get(&msg_id) {
-            None => true,
-            Some(existing) => {
-                // 新条目有 stop_reason 而旧条目没有 → 替换
-                if parsed.stop_reason.is_some() && existing.stop_reason.is_none() {
-                    true
-                }
-                // 两个都有或都没有 stop_reason → 取 output_tokens 更大的
-                else if parsed.stop_reason.is_some() == existing.stop_reason.is_some() {
-                    parsed.output_tokens > existing.output_tokens
-                } else {
-                    false
-                }
-            }
-        };
-
-        if should_replace {
-            messages.insert(msg_id, parsed);
-        }
+/// 从一行 JSONL 中提取 assistant 消息的 usage 快照
+fn parse_assistant_usage(
+    value: &serde_json::Value,
+    session_id: Option<&String>,
+) -> Option<ParsedAssistantUsage> {
+    // 只处理 assistant 类型的消息
+    if value.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+        return None;
     }
+    let message = value.get("message")?;
+    let msg_id = message.get("id").and_then(|v| v.as_str())?;
+    let usage = message.get("usage")?;
+    let token = |key: &str| usage.get(key).and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
-    // 写入数据库
-    let mut imported: u32 = 0;
-    let mut skipped: u32 = 0;
+    Some(ParsedAssistantUsage {
+        message_id: msg_id.to_string(),
+        model: message
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        input_tokens: token("input_tokens"),
+        output_tokens: token("output_tokens"),
+        cache_read_tokens: token("cache_read_input_tokens"),
+        cache_creation_tokens: token("cache_creation_input_tokens"),
+        stop_reason: message
+            .get("stop_reason")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        timestamp: value
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        session_id: session_id.cloned(),
+    })
+}
 
-    for msg in messages.values() {
-        // 只要产生了真实计费 token 就导入，不再强制要求 stop_reason 或 output>0。
-        //
-        // Anthropic 在受理请求时即对 input + cache_read + cache_creation 计费
-        // （这些在请求开始就确定），output 按实际生成量计。Workflow / 子 agent 的
-        // 并行短命请求经常只写了 message_start 快照（output=1、stop_reason=None）
-        // 却没有写最终块，但其 cache/input 成本已被真实计费。旧逻辑用 stop_reason
-        // 非空 + output>0 双重过滤，会把这类请求整条丢弃，实测系统性低估约 4.1%，
-        // 且 92% 集中在 workflow/subagent。这里改为「任一计费维度 > 0 即导入」。
-        //
-        // 去重选择逻辑（上方按 message.id 取 stop_reason 优先 / output 最大者）保持
-        // 不变：它选出的代表行的 input/cache 本就准确；request_id = session:msg_id
-        // 主键 + INSERT OR IGNORE 保证一个 message 仍只落库一次，放宽 gate 不会双算。
-        let has_billable_tokens = msg.input_tokens > 0
-            || msg.output_tokens > 0
-            || msg.cache_read_tokens > 0
-            || msg.cache_creation_tokens > 0;
-        if !has_billable_tokens {
-            continue;
+/// 按 message.id 去重：优先保留有 stop_reason 的条目，否则保留 output 最大的
+fn merge_snapshot(
+    messages: &mut HashMap<String, ParsedAssistantUsage>,
+    parsed: ParsedAssistantUsage,
+) {
+    let should_replace = match messages.get(&parsed.message_id) {
+        None => true,
+        Some(existing) => {
+            if parsed.stop_reason.is_some() && existing.stop_reason.is_none() {
+                true
+            } else if parsed.stop_reason.is_some() == existing.stop_reason.is_some() {
+                parsed.output_tokens > existing.output_tokens
+            } else {
+                false
+            }
         }
+    };
+    if should_replace {
+        messages.insert(parsed.message_id.clone(), parsed);
+    }
+}
 
-        let request_id = format!(
+fn claude_row(msg: &ParsedAssistantUsage) -> SessionUsageRow {
+    SessionUsageRow {
+        request_id: format!(
             "{}{}",
             crate::proxy::usage::parser::SESSION_REQUEST_ID_PREFIX,
             msg.message_id
-        );
-
-        match insert_session_log_entry(db, &request_id, msg) {
-            Ok(true) => imported += 1,
-            Ok(false) => skipped += 1,
-            Err(e) => {
-                log::warn!("[SESSION-SYNC] 插入失败 ({}): {e}", msg.message_id);
-                skipped += 1;
-            }
-        }
+        ),
+        model: msg.model.clone(),
+        pricing_model: msg.model.clone(),
+        input_tokens: msg.input_tokens,
+        output_tokens: msg.output_tokens,
+        cache_read_tokens: msg.cache_read_tokens,
+        cache_creation_tokens: msg.cache_creation_tokens,
+        session_id: msg.session_id.clone(),
+        created_at: created_at_from_rfc3339(msg.timestamp.as_deref()),
+        precomputed_total_cost: None,
     }
-
-    // 更新同步状态
-    update_sync_state(db, &file_path_str, file_modified, line_offset)?;
-
-    Ok((imported, skipped))
 }
 
-/// 获取 session_log_sync 表中某条目的同步进度。
-///
-/// Shared by all session_usage_* parsers.
+/// 获取 session_log_sync 表中某条目的同步进度（测试用；同步路径一次性预加载游标）。
+#[cfg(test)]
 pub(crate) fn get_sync_state(db: &Database, file_path: &str) -> Result<(i64, i64), AppError> {
     let conn = lock_conn!(db.conn);
     let result = conn.query_row(
@@ -391,142 +500,8 @@ pub(crate) fn update_sync_state(
     last_modified: i64,
     last_offset: i64,
 ) -> Result<(), AppError> {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-
     let conn = lock_conn!(db.conn);
-    conn.execute(
-        "INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at)
-         VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![file_path, last_modified, last_offset, now],
-    )
-    .map_err(|e| AppError::Database(format!("更新同步状态失败: {e}")))?;
-    Ok(())
-}
-
-/// 插入单条会话日志到 proxy_request_logs，返回是否成功插入 (true=新插入, false=已存在)
-fn insert_session_log_entry(
-    db: &Database,
-    request_id: &str,
-    msg: &ParsedAssistantUsage,
-) -> Result<bool, AppError> {
-    let conn = lock_conn!(db.conn);
-
-    let created_at = msg
-        .timestamp
-        .as_ref()
-        .and_then(|ts| {
-            chrono::DateTime::parse_from_rfc3339(ts)
-                .ok()
-                .map(|dt| dt.timestamp())
-        })
-        .unwrap_or_else(|| {
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0)
-        });
-
-    let dedup_key = DedupKey {
-        app_type: "claude",
-        model: &msg.model,
-        input_tokens: msg.input_tokens,
-        output_tokens: msg.output_tokens,
-        cache_read_tokens: msg.cache_read_tokens,
-        cache_creation_tokens: msg.cache_creation_tokens,
-        created_at,
-    };
-    if should_skip_session_insert(&conn, request_id, &dedup_key)? {
-        return Ok(false);
-    }
-
-    // 计算费用
-    let usage = TokenUsage {
-        input_tokens: msg.input_tokens,
-        output_tokens: msg.output_tokens,
-        cache_read_tokens: msg.cache_read_tokens,
-        cache_creation_tokens: msg.cache_creation_tokens,
-        model: Some(msg.model.clone()),
-        message_id: None,
-    };
-
-    let pricing = find_model_pricing_for_session(&conn, &msg.model);
-    let multiplier = Decimal::from(1);
-    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) = match pricing
-    {
-        Some(p) => {
-            let cost = CostCalculator::calculate(&usage, &p, multiplier);
-            (
-                cost.input_cost.to_string(),
-                cost.output_cost.to_string(),
-                cost.cache_read_cost.to_string(),
-                cost.cache_creation_cost.to_string(),
-                cost.total_cost.to_string(),
-            )
-        }
-        None => (
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-        ),
-    };
-
-    let inserted_rows = conn
-        .execute(
-            "INSERT OR IGNORE INTO proxy_request_logs (
-            request_id, provider_id, app_type, model, request_model,
-            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-            latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
-            rusqlite::params![
-                request_id,
-                "_session",         // provider_id: 标记为会话来源
-                "claude",           // app_type
-                msg.model,
-                msg.model,          // request_model = model
-                msg.input_tokens,
-                msg.output_tokens,
-                msg.cache_read_tokens,
-                msg.cache_creation_tokens,
-                input_cost,
-                output_cost,
-                cache_read_cost,
-                cache_creation_cost,
-                total_cost,
-                0i64,               // latency_ms: 会话日志无此数据
-                Option::<i64>::None, // first_token_ms
-                200i64,             // status_code: 会话日志中的请求只要产生计费 token 即视为成功
-                Option::<String>::None, // error_message
-                msg.session_id,
-                Some("session_log"), // provider_type
-                1i64,               // is_streaming: Claude Code 通常使用流式
-                "1.0",              // cost_multiplier
-                created_at,
-                "session_log",      // data_source
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("插入会话日志失败: {e}")))?;
-
-    // 仅在确实写入新行时通知前端，避免 INSERT OR IGNORE 跳过时产生空刷新
-    if inserted_rows > 0 {
-        crate::usage_events::notify_log_recorded();
-    }
-
-    Ok(true)
-}
-
-/// 从 model_pricing 表查找模型定价（支持模糊匹配）
-fn find_model_pricing_for_session(
-    conn: &rusqlite::Connection,
-    model_id: &str,
-) -> Option<ModelPricing> {
-    find_model_pricing(conn, model_id)
+    update_sync_state_on(&conn, file_path, last_modified, last_offset)
 }
 
 /// 查询数据来源分布统计
@@ -564,82 +539,101 @@ pub fn get_data_source_breakdown(db: &Database) -> Result<Vec<DataSourceSummary>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    /// 以当前持久化游标同步单个文件（测试辅助）。
+    fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
+        let cursor = get_sync_state(db, &file_path.to_string_lossy())?;
+        sync_claude_file(db, file_path, cursor, &mut PricingCache::default())
+    }
+
+    fn assistant_line(msg_id: &str, output: u32, stop_reason: Option<&str>) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "sessionId": "session-stream",
+            "timestamp": "2026-06-07T13:01:23Z",
+            "message": {
+                "id": msg_id,
+                "model": "claude-sonnet-4-5",
+                "stop_reason": stop_reason,
+                "usage": {
+                    "input_tokens": 3,
+                    "output_tokens": output,
+                    "cache_read_input_tokens": 5000,
+                    "cache_creation_input_tokens": 100
+                }
+            }
+        })
+        .to_string()
+    }
+
+    fn row_tokens_and_cost(db: &Database, request_id: &str) -> (i64, i64, String) {
+        let conn = db.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE request_id = ?1",
+                [request_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let (output, cost): (i64, String) = conn
+            .query_row(
+                "SELECT output_tokens, total_cost_usd FROM proxy_request_logs WHERE request_id = ?1",
+                [request_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        (count, output, cost)
+    }
+
+    /// 修改文件后确保 mtime 前进（部分文件系统 mtime 精度较粗）。
+    fn bump_mtime(path: &Path, previous: i64) {
+        for _ in 0..200 {
+            let now = metadata_modified_nanos(&fs::metadata(path).unwrap());
+            if now > previous {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            let f = fs::OpenOptions::new().append(true).open(path).unwrap();
+            f.set_modified(SystemTime::now()).unwrap();
+        }
+        panic!("mtime did not advance");
+    }
 
     #[test]
     fn test_parse_usage_from_jsonl_line() {
         let line = r#"{"type":"assistant","message":{"id":"msg_test123","model":"claude-opus-4-6","usage":{"input_tokens":3,"output_tokens":150,"cache_read_input_tokens":5000,"cache_creation_input_tokens":10000},"stop_reason":"end_turn"},"timestamp":"2026-04-05T12:00:00Z","sessionId":"session-abc"}"#;
 
         let value: serde_json::Value = serde_json::from_str(line).unwrap();
-        assert_eq!(
-            value.get("type").and_then(|t| t.as_str()),
-            Some("assistant")
-        );
-
-        let message = value.get("message").unwrap();
-        let usage = message.get("usage").unwrap();
-
-        assert_eq!(usage.get("input_tokens").unwrap().as_u64().unwrap(), 3);
-        assert_eq!(usage.get("output_tokens").unwrap().as_u64().unwrap(), 150);
-        assert_eq!(
-            usage
-                .get("cache_read_input_tokens")
-                .unwrap()
-                .as_u64()
-                .unwrap(),
-            5000
-        );
-        assert_eq!(
-            usage
-                .get("cache_creation_input_tokens")
-                .unwrap()
-                .as_u64()
-                .unwrap(),
-            10000
-        );
-        assert_eq!(
-            message.get("stop_reason").unwrap().as_str().unwrap(),
-            "end_turn"
-        );
+        let parsed = parse_assistant_usage(&value, None).unwrap();
+        assert_eq!(parsed.message_id, "msg_test123");
+        assert_eq!(parsed.input_tokens, 3);
+        assert_eq!(parsed.output_tokens, 150);
+        assert_eq!(parsed.cache_read_tokens, 5000);
+        assert_eq!(parsed.cache_creation_tokens, 10000);
+        assert_eq!(parsed.stop_reason.as_deref(), Some("end_turn"));
     }
 
     #[test]
     fn test_dedup_by_message_id() {
         // 同一个 message.id 有多条，应该取 stop_reason 有值的那条
         let mut messages: HashMap<String, ParsedAssistantUsage> = HashMap::new();
-
-        // 中间条目（无 stop_reason）
-        let intermediate = ParsedAssistantUsage {
+        let snapshot = |output, stop_reason: Option<&str>| ParsedAssistantUsage {
             message_id: "msg_1".to_string(),
             model: "claude-opus-4-6".to_string(),
             input_tokens: 3,
-            output_tokens: 26,
+            output_tokens: output,
             cache_read_tokens: 5000,
             cache_creation_tokens: 10000,
-            stop_reason: None,
-            timestamp: Some("2026-04-05T12:00:00Z".to_string()),
-            session_id: None,
-        };
-        messages.insert("msg_1".to_string(), intermediate);
-
-        // 最终条目（有 stop_reason）
-        let final_entry = ParsedAssistantUsage {
-            message_id: "msg_1".to_string(),
-            model: "claude-opus-4-6".to_string(),
-            input_tokens: 3,
-            output_tokens: 1349,
-            cache_read_tokens: 5000,
-            cache_creation_tokens: 10000,
-            stop_reason: Some("end_turn".to_string()),
+            stop_reason: stop_reason.map(str::to_string),
             timestamp: Some("2026-04-05T12:00:00Z".to_string()),
             session_id: None,
         };
 
-        // 应该替换
-        let should_replace = final_entry.stop_reason.is_some()
-            && messages.get("msg_1").unwrap().stop_reason.is_none();
-        assert!(should_replace);
-
-        messages.insert("msg_1".to_string(), final_entry);
+        merge_snapshot(&mut messages, snapshot(26, None));
+        merge_snapshot(&mut messages, snapshot(1349, Some("end_turn")));
+        // 有 stop_reason 的最终条目不会被之后的中间快照覆盖
+        merge_snapshot(&mut messages, snapshot(2000, None));
         assert_eq!(messages.get("msg_1").unwrap().output_tokens, 1349);
     }
 
@@ -685,8 +679,14 @@ mod tests {
             session_id: Some("session-1".to_string()),
         };
 
-        let inserted = insert_session_log_entry(&db, "session:msg_1", &msg)?;
-        assert!(!inserted);
+        let (imported, skipped) = commit_session_rows(
+            &db,
+            &CLAUDE_SESSION_SOURCE,
+            &[claude_row(&msg)],
+            &mut PricingCache::default(),
+            None,
+        )?;
+        assert_eq!((imported, skipped), (0, 1));
 
         let conn = lock_conn!(db.conn);
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| {
@@ -761,9 +761,8 @@ mod tests {
         // 子 agent 常见的「只有 message_start 快照、没写最终块」形态）必须被计入，
         // 不能因缺 stop_reason 或 output==0 而整条丢弃；全 0 token 的占位行仍应跳过。
         let db = Database::memory()?;
-        let tmp = std::env::temp_dir().join(format!("cc-switch-test-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&tmp).unwrap();
-        let file = tmp.join("agent-wf.jsonl");
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("agent-wf.jsonl");
 
         // 第一行：无 stop_reason、output=1，但 cache_read/cache_creation 很大 → 应导入
         // 第二行：全部 token 为 0 → 应跳过（无计费意义）
@@ -790,9 +789,100 @@ mod tests {
             |row| row.get(0),
         )?;
         assert!(!empty_exists, "全 0 token 的 message 应被跳过");
-        drop(conn);
-
-        fs::remove_dir_all(&tmp).ok();
         Ok(())
+    }
+
+    #[test]
+    fn test_later_streaming_snapshot_updates_stored_row() -> Result<(), AppError> {
+        // SESS-35：同步时刻落在流式回复中途，先导入了半截快照；
+        // 追加最终快照后再次同步，应更新同一行而不是被 INSERT OR IGNORE 冻结。
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("main.jsonl");
+        fs::write(&file, format!("{}\n", assistant_line("msg_1", 26, None))).unwrap();
+
+        assert_eq!(sync_single_file(&db, &file)?, (1, 0));
+        let (_, partial_output, partial_cost) = row_tokens_and_cost(&db, "session:msg_1");
+        assert_eq!(partial_output, 26);
+
+        let previous = get_sync_state(&db, &file.to_string_lossy())?.0;
+        let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        writeln!(f, "{}", assistant_line("msg_1", 1349, Some("end_turn"))).unwrap();
+        drop(f);
+        bump_mtime(&file, previous);
+
+        assert_eq!(sync_single_file(&db, &file)?, (1, 0));
+        let (count, output, cost) = row_tokens_and_cost(&db, "session:msg_1");
+        assert_eq!(count, 1);
+        assert_eq!(output, 1349);
+        let partial: f64 = partial_cost.parse().unwrap();
+        let final_cost: f64 = cost.parse().unwrap();
+        assert!(
+            final_cost > partial || final_cost == 0.0 && partial == 0.0,
+            "cost must be recomputed from the final snapshot ({partial} -> {final_cost})"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_partial_last_line_is_not_consumed() -> Result<(), AppError> {
+        // SESS-36：末行写到一半（无换行）时不能推进游标，补全后应被导入。
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("main.jsonl");
+        let line_a = assistant_line("msg_a", 10, Some("end_turn"));
+        let line_b = assistant_line("msg_b", 20, Some("end_turn"));
+        let (b_head, b_tail) = line_b.split_at(line_b.len() / 2);
+        fs::write(&file, format!("{line_a}\n{b_head}")).unwrap();
+
+        assert_eq!(sync_single_file(&db, &file)?, (1, 0));
+        let state = get_sync_state(&db, &file.to_string_lossy())?;
+        assert_eq!(state.1, 1, "cursor must stop before the truncated line");
+
+        let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        writeln!(f, "{b_tail}").unwrap();
+        drop(f);
+        bump_mtime(&file, state.0);
+
+        assert_eq!(sync_single_file(&db, &file)?, (1, 0));
+        assert_eq!(row_tokens_and_cost(&db, "session:msg_b").1, 20);
+        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_unchanged_files_are_skipped_and_missing_cursors_pruned() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let keep = project.join("keep.jsonl");
+        let gone = project.join("gone.jsonl");
+        fs::write(&keep, format!("{}\n", assistant_line("msg_k", 5, None))).unwrap();
+        fs::write(&gone, format!("{}\n", assistant_line("msg_g", 5, None))).unwrap();
+
+        let first = sync_claude_projects_dir(&db, tmp.path())?;
+        assert_eq!((first.imported, first.files_scanned), (2, 2));
+
+        // 未变化的文件不再解析、不再写入
+        let second = sync_claude_projects_dir(&db, tmp.path())?;
+        assert_eq!((second.imported, second.skipped), (0, 0));
+
+        // SESS-46：文件被删除后，其同步游标在下一轮被清理
+        fs::remove_file(&gone).unwrap();
+        sync_claude_projects_dir(&db, tmp.path())?;
+        let cursors = load_sync_cursors(&db)?;
+        assert!(cursors.contains_key(keep.to_string_lossy().as_ref()));
+        assert!(!cursors.contains_key(gone.to_string_lossy().as_ref()));
+        // 已导入的用量行保持不变
+        assert_eq!(row_tokens_and_cost(&db, "session:msg_g").0, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_background_sync_is_skipped_while_another_runs() {
+        let db = Database::memory().unwrap();
+        let _held = SYNC_RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(sync_all_session_usage(&db, SyncTrigger::Background).is_none());
     }
 }

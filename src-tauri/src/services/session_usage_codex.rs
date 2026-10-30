@@ -14,19 +14,27 @@
 //! - `event_msg` (type=token_count) → 提取累计 token 用量，计算 delta
 
 use crate::codex_config::get_codex_config_dir;
-use crate::database::{lock_conn, Database};
+use crate::database::Database;
 use crate::error::AppError;
-use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
-use crate::proxy::usage::parser::TokenUsage;
-use crate::services::session_usage::{
-    get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
+use crate::services::session_usage::ingest::{
+    commit_session_rows, created_at_from_rfc3339, load_sync_cursors, prune_missing_cursors,
+    CursorUpdate, PricingCache, SessionSource, SessionUsageRow, SyncCursors, WritePolicy,
 };
-use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
-use rust_decimal::Decimal;
+use crate::services::session_usage::{
+    for_each_complete_line, metadata_modified_nanos, update_sync_state, SessionSyncResult,
+};
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+
+/// Codex 的 token_count 是增量事件，一经写入不再变化。
+const CODEX_SESSION_SOURCE: SessionSource = SessionSource {
+    app_type: "codex",
+    provider_id: "_codex_session",
+    data_source: "codex_session",
+    policy: WritePolicy::InsertOnly,
+};
 
 const CODEX_THREAD_REQUEST_ID_PREFIX: &str = "codex_session:thread-v1";
 
@@ -168,9 +176,17 @@ fn is_history_snapshot_event(state: &FileParseState, line_offset: i64) -> bool {
         .is_some_and(|boundary| line_offset < boundary)
 }
 
-fn get_codex_sync_state(db: &Database, file_path: &Path) -> Result<(i64, i64), AppError> {
+/// 读取 Codex 文件的同步游标；归档文件首次出现时继承原 sessions/ 路径的游标。
+///
+/// 继承查找在本轮预加载的游标表中完成（不再对 session_log_sync 做后缀全表扫描），
+/// 继承结果立即持久化，原路径的游标随后可被安全清理。
+fn get_codex_sync_state(
+    db: &Database,
+    file_path: &Path,
+    cursors: &SyncCursors,
+) -> Result<(i64, i64), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
-    let state = get_sync_state(db, &file_path_str)?;
+    let state = cursors.get(&file_path_str).copied().unwrap_or((0, 0));
     if state != (0, 0)
         || file_path
             .parent()
@@ -186,29 +202,22 @@ fn get_codex_sync_state(db: &Database, file_path: &Path) -> Result<(i64, i64), A
     };
     let slash_suffix = format!("/{file_name}");
     let backslash_suffix = format!("\\{file_name}");
-    let conn = lock_conn!(db.conn);
-    let inherited = conn.query_row(
-        "SELECT last_modified, last_line_offset
-         FROM session_log_sync
-         WHERE file_path <> ?1
-           AND (substr(file_path, -length(?2)) = ?2
-                OR substr(file_path, -length(?3)) = ?3)
-         ORDER BY last_line_offset DESC, last_modified DESC
-         LIMIT 1",
-        rusqlite::params![file_path_str, slash_suffix, backslash_suffix],
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-    );
-    drop(conn);
+    let inherited = cursors
+        .iter()
+        .filter(|(key, _)| {
+            key.as_str() != file_path_str
+                && (key.ends_with(&slash_suffix) || key.ends_with(&backslash_suffix))
+        })
+        .map(|(_, (modified, offset))| (*offset, *modified))
+        .max()
+        .map(|(offset, modified)| (modified, offset));
 
     match inherited {
-        Ok(inherited) => {
+        Some(inherited) => {
             update_sync_state(db, &file_path_str, inherited.0, inherited.1)?;
             Ok(inherited)
         }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(state),
-        Err(error) => Err(AppError::Database(format!(
-            "查询 Codex 归档文件同步状态失败: {error}"
-        ))),
+        None => Ok(state),
     }
 }
 
@@ -298,23 +307,29 @@ fn parse_cumulative_tokens(total_usage: &serde_json::Value) -> Option<Cumulative
 
 /// 同步 Codex 使用数据（从 JSONL 会话日志）
 pub fn sync_codex_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
-    let codex_dir = get_codex_config_dir();
+    sync_codex_dir(db, &get_codex_config_dir())
+}
 
-    let files = collect_codex_session_files(&codex_dir);
+fn sync_codex_dir(db: &Database, codex_dir: &Path) -> Result<SessionSyncResult, AppError> {
+    let files = collect_codex_session_files(codex_dir);
 
     let mut result = SessionSyncResult {
-        imported: 0,
-        skipped: 0,
         files_scanned: files.len() as u32,
-        errors: vec![],
+        ..Default::default()
     };
 
     if files.is_empty() {
         return Ok(result);
     }
 
+    // 一次查询载入全部游标，每个模型的定价在本轮只解析一次（PERF-10）
+    let cursors = load_sync_cursors(db)?;
+    let mut pricing = PricingCache::default();
+    let mut discovered = HashSet::with_capacity(files.len());
+
     for file_path in &files {
-        match sync_single_codex_file(db, file_path) {
+        discovered.insert(file_path.to_string_lossy().to_string());
+        match sync_codex_file(db, file_path, &cursors, &mut pricing) {
             Ok((imported, skipped)) => {
                 result.imported += imported;
                 result.skipped += skipped;
@@ -324,6 +339,15 @@ pub fn sync_codex_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
                 log::warn!("[CODEX-SYNC] {msg}");
                 result.errors.push(msg);
             }
+        }
+    }
+
+    for root in [
+        codex_dir.join("sessions"),
+        codex_dir.join("archived_sessions"),
+    ] {
+        if let Err(e) = prune_missing_cursors(db, &root, &cursors, &discovered) {
+            log::warn!("[CODEX-SYNC] 清理失效同步状态失败: {e}");
         }
     }
 
@@ -383,7 +407,12 @@ fn collect_jsonl_recursive(dir: &Path, files: &mut Vec<PathBuf>, depth: u32, max
 }
 
 /// 同步单个 Codex JSONL 文件，返回 (imported, skipped)
-fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
+fn sync_codex_file(
+    db: &Database,
+    file_path: &Path,
+    cursors: &SyncCursors,
+    pricing: &mut PricingCache,
+) -> Result<(u32, u32), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
 
     // 获取文件元数据
@@ -392,7 +421,7 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
     let file_modified = metadata_modified_nanos(&metadata);
 
     // 检查同步状态
-    let (last_modified, last_offset) = get_codex_sync_state(db, file_path)?;
+    let (last_modified, last_offset) = get_codex_sync_state(db, file_path, cursors)?;
 
     // 文件未变化则跳过
     if file_modified <= last_modified {
@@ -400,11 +429,6 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
     }
 
     let identity = read_codex_session_identity(file_path);
-
-    // 打开文件逐行解析
-    let file =
-        fs::File::open(file_path).map_err(|e| AppError::Config(format!("无法打开文件: {e}")))?;
-    let reader = BufReader::new(file);
     let history_replay_boundary = codex_history_replay_boundary(file_path, identity.as_ref());
 
     let mut state = FileParseState {
@@ -414,307 +438,285 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
         event_index: 0,
         history_replay_boundary,
     };
+    // SESS-42：缺少 session_meta 时用文件名派生稳定的线程键，避免不同文件
+    // 共用 `unknown` 前缀而互相吞掉第 N 个事件。
+    let fallback_thread_id = codex_fallback_thread_id(file_path);
 
-    let mut line_offset: i64 = 0;
-    let mut imported: u32 = 0;
-    let mut skipped: u32 = 0;
+    let mut rows = Vec::new();
+    let mut replay_skipped: u32 = 0;
 
-    for line_result in reader.lines() {
-        line_offset += 1;
+    // 逐行解析（只读取以换行结尾的完整行，末尾半行留到下次）
+    let line_offset = for_each_complete_line(file_path, |line_offset, line| {
+        process_codex_line(
+            &mut state,
+            line,
+            line_offset,
+            last_offset,
+            &fallback_thread_id,
+            &mut rows,
+            &mut replay_skipped,
+        );
+    })?;
 
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => continue, // 容忍不完整的最后一行
-        };
+    if state.thread_id.is_none() && !rows.is_empty() {
+        log::warn!(
+            "[CODEX-SYNC] {} 缺少 session_meta，使用文件名作为线程标识",
+            file_path.display()
+        );
+    }
 
-        if line.trim().is_empty() {
-            continue;
+    let (imported, skipped) = commit_session_rows(
+        db,
+        &CODEX_SESSION_SOURCE,
+        &rows,
+        pricing,
+        Some(CursorUpdate {
+            key: &file_path_str,
+            last_modified: file_modified,
+            last_offset: line_offset,
+        }),
+    )?;
+    Ok((imported, skipped + replay_skipped))
+}
+
+fn codex_fallback_thread_id(file_path: &Path) -> String {
+    let stem = file_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("unknown");
+    format!("file-{stem}")
+}
+
+/// 处理一行 Codex 事件；新的非零 token delta 追加到 `rows`。
+fn process_codex_line(
+    state: &mut FileParseState,
+    line: &str,
+    line_offset: i64,
+    last_offset: i64,
+    fallback_thread_id: &str,
+    rows: &mut Vec<SessionUsageRow>,
+    replay_skipped: &mut u32,
+) {
+    if line.trim().is_empty() {
+        return;
+    }
+
+    // 快速过滤：在 JSON 反序列化前跳过无关行
+    let is_event_msg = line.contains("\"event_msg\"");
+    let is_turn_context = line.contains("\"turn_context\"");
+    let is_session_meta = line.contains("\"session_meta\"");
+
+    if !is_event_msg && !is_turn_context && !is_session_meta {
+        return;
+    }
+    if is_event_msg && !line.contains("\"token_count\"") {
+        return;
+    }
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
+    };
+    let Some(event_type) = value.get("type").and_then(|t| t.as_str()) else {
+        return;
+    };
+
+    match event_type {
+        "session_meta" if state.thread_id.is_none() => {
+            state.thread_id = value
+                .get("payload")
+                .and_then(parse_codex_session_identity)
+                .map(|identity| identity.thread_id);
         }
-
-        // 快速过滤：在 JSON 反序列化前跳过无关行
-        let is_event_msg = line.contains("\"event_msg\"");
-        let is_turn_context = line.contains("\"turn_context\"");
-        let is_session_meta = line.contains("\"session_meta\"");
-
-        if !is_event_msg && !is_turn_context && !is_session_meta {
-            continue;
-        }
-        if is_event_msg && !line.contains("\"token_count\"") {
-            continue;
-        }
-
-        let value: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let event_type = match value.get("type").and_then(|t| t.as_str()) {
-            Some(t) => t,
-            None => continue,
-        };
-
-        match event_type {
-            "session_meta" if state.thread_id.is_none() => {
-                state.thread_id = value
-                    .get("payload")
-                    .and_then(parse_codex_session_identity)
-                    .map(|identity| identity.thread_id);
-            }
-            "turn_context" => {
-                if let Some(payload) = value.get("payload") {
-                    // model 可能在 payload.model 或 payload.info.model
-                    if let Some(model) = payload
-                        .get("model")
-                        .or_else(|| payload.get("info").and_then(|info| info.get("model")))
-                        .and_then(|v| v.as_str())
-                    {
-                        state.current_model = normalize_codex_model(model);
-                    }
-                }
-            }
-            "event_msg" => {
-                let payload = match value.get("payload") {
-                    Some(p) => p,
-                    None => continue,
-                };
-
-                // 只处理 token_count 类型
-                if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
-                    continue;
-                }
-
-                let info = match payload.get("info") {
-                    Some(i) if !i.is_null() => i,
-                    _ => continue, // 跳过 info 为 null 的首个事件
-                };
-
-                // 提取模型（token_count 事件也可能携带 model）
-                if let Some(model) = info
+        "turn_context" => {
+            if let Some(payload) = value.get("payload") {
+                // model 可能在 payload.model 或 payload.info.model
+                if let Some(model) = payload
                     .get("model")
-                    .or_else(|| info.get("model_name"))
-                    .or_else(|| payload.get("model"))
+                    .or_else(|| payload.get("info").and_then(|info| info.get("model")))
                     .and_then(|v| v.as_str())
                 {
                     state.current_model = normalize_codex_model(model);
                 }
-
-                // 优先用 total_token_usage（累计值），fallback 到 last_token_usage（增量值）
-                let (cumulative, is_total) = if let Some(total) = info.get("total_token_usage") {
-                    (parse_cumulative_tokens(total), true)
-                } else if let Some(last) = info.get("last_token_usage") {
-                    (parse_cumulative_tokens(last), false)
-                } else {
-                    continue;
-                };
-
-                let cumulative = match cumulative {
-                    Some(c) => c,
-                    None => continue,
-                };
-
-                let delta = if is_total {
-                    // 累计值模式：计算与上次的 delta
-                    let d = compute_delta(&state.prev_total, &cumulative);
-                    state.prev_total = Some(cumulative);
-                    d
-                } else {
-                    // 增量值模式：直接使用 last_token_usage 的值
-                    DeltaTokens {
-                        input: cumulative.input as u32,
-                        cached_input: cumulative.cached_input as u32,
-                        output: cumulative.output as u32,
-                    }
-                };
-
-                // 钳制：cached 不应超过 input（防护异常数据）
-                let delta = DeltaTokens {
-                    cached_input: delta.cached_input.min(delta.input),
-                    ..delta
-                };
-
-                if delta.is_zero() {
-                    continue; // 跳过 task 边界的零 delta 事件
-                }
-
-                // 所有非零事件都占据稳定序号，包括已同步事件与 replay 快照。
-                state.event_index += 1;
-
-                // replay 快照更新了 prev_total，但不是当前线程的新用量。
-                if is_history_snapshot_event(&state, line_offset) {
-                    if line_offset > last_offset {
-                        skipped += 1;
-                    }
-                    continue;
-                }
-
-                // 跳过已处理的行（但仍需解析以恢复状态）
-                if line_offset <= last_offset {
-                    continue;
-                }
-
-                // 生成唯一 request_id
-                let thread_id = state.thread_id.as_deref().unwrap_or("unknown");
-                let request_id = format!(
-                    "{CODEX_THREAD_REQUEST_ID_PREFIX}:{thread_id}:{}",
-                    state.event_index
-                );
-
-                // 提取时间戳
-                let timestamp = value
-                    .get("timestamp")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                match insert_codex_session_entry(
-                    db,
-                    &request_id,
-                    &delta,
-                    &state.current_model,
-                    state.thread_id.as_deref(),
-                    timestamp.as_deref(),
-                ) {
-                    Ok(true) => imported += 1,
-                    Ok(false) => skipped += 1,
-                    Err(e) => {
-                        log::warn!("[CODEX-SYNC] 插入失败 ({}): {e}", request_id);
-                        skipped += 1;
-                    }
-                }
             }
-            _ => {}
         }
+        "event_msg" => {
+            let Some(payload) = value.get("payload") else {
+                return;
+            };
+
+            // 只处理 token_count 类型
+            if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
+                return;
+            }
+
+            // 跳过 info 为 null 的首个事件
+            let Some(info) = payload.get("info").filter(|i| !i.is_null()) else {
+                return;
+            };
+
+            // 提取模型（token_count 事件也可能携带 model）
+            if let Some(model) = info
+                .get("model")
+                .or_else(|| info.get("model_name"))
+                .or_else(|| payload.get("model"))
+                .and_then(|v| v.as_str())
+            {
+                state.current_model = normalize_codex_model(model);
+            }
+
+            // 优先用 total_token_usage（累计值），fallback 到 last_token_usage（增量值）
+            let (cumulative, is_total) = if let Some(total) = info.get("total_token_usage") {
+                (parse_cumulative_tokens(total), true)
+            } else if let Some(last) = info.get("last_token_usage") {
+                (parse_cumulative_tokens(last), false)
+            } else {
+                return;
+            };
+
+            let Some(cumulative) = cumulative else {
+                return;
+            };
+
+            let delta = if is_total {
+                // 累计值模式：计算与上次的 delta
+                let d = compute_delta(&state.prev_total, &cumulative);
+                state.prev_total = Some(cumulative);
+                d
+            } else {
+                // 增量值模式：直接使用 last_token_usage 的值
+                DeltaTokens {
+                    input: cumulative.input as u32,
+                    cached_input: cumulative.cached_input as u32,
+                    output: cumulative.output as u32,
+                }
+            };
+
+            // 钳制：cached 不应超过 input（防护异常数据）
+            let delta = DeltaTokens {
+                cached_input: delta.cached_input.min(delta.input),
+                ..delta
+            };
+
+            if delta.is_zero() {
+                return; // 跳过 task 边界的零 delta 事件
+            }
+
+            // 所有非零事件都占据稳定序号，包括已同步事件与 replay 快照。
+            state.event_index += 1;
+
+            // replay 快照更新了 prev_total，但不是当前线程的新用量。
+            if is_history_snapshot_event(state, line_offset) {
+                if line_offset > last_offset {
+                    *replay_skipped += 1;
+                }
+                return;
+            }
+
+            // 跳过已处理的行（但仍需解析以恢复状态）
+            if line_offset <= last_offset {
+                return;
+            }
+
+            let timestamp = value.get("timestamp").and_then(|v| v.as_str());
+            rows.push(codex_row(state, fallback_thread_id, &delta, timestamp));
+        }
+        _ => {}
     }
-
-    // 更新同步状态
-    update_sync_state(db, &file_path_str, file_modified, line_offset)?;
-
-    Ok((imported, skipped))
 }
 
-/// 插入单条 Codex 会话记录到 proxy_request_logs
-fn insert_codex_session_entry(
-    db: &Database,
-    request_id: &str,
+fn codex_row(
+    state: &FileParseState,
+    fallback_thread_id: &str,
     delta: &DeltaTokens,
-    model: &str,
-    session_id: Option<&str>,
     timestamp: Option<&str>,
-) -> Result<bool, AppError> {
-    let conn = lock_conn!(db.conn);
-
-    let created_at = timestamp
-        .and_then(|ts| {
-            chrono::DateTime::parse_from_rfc3339(ts)
-                .ok()
-                .map(|dt| dt.timestamp())
-        })
-        .unwrap_or_else(|| {
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0)
-        });
-
-    let dedup_key = DedupKey {
-        app_type: "codex",
-        model,
-        input_tokens: delta.input,
-        output_tokens: delta.output,
-        cache_read_tokens: delta.cached_input,
-        cache_creation_tokens: 0,
-        created_at,
-    };
-    if should_skip_session_insert(&conn, request_id, &dedup_key)? {
-        return Ok(false);
-    }
-
-    // 计算费用
-    let usage = TokenUsage {
-        input_tokens: delta.input,
-        output_tokens: delta.output,
-        cache_read_tokens: delta.cached_input,
-        cache_creation_tokens: 0,
-        model: Some(model.to_string()),
-        message_id: None,
-    };
-
-    let pricing = find_codex_pricing(&conn, model);
-    let multiplier = Decimal::from(1);
-    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) = match pricing
-    {
-        Some(p) => {
-            let cost = CostCalculator::calculate_for_app("codex", &usage, &p, multiplier);
-            (
-                cost.input_cost.to_string(),
-                cost.output_cost.to_string(),
-                cost.cache_read_cost.to_string(),
-                cost.cache_creation_cost.to_string(),
-                cost.total_cost.to_string(),
-            )
-        }
-        None => (
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
+) -> SessionUsageRow {
+    let thread_id = state.thread_id.as_deref().unwrap_or(fallback_thread_id);
+    SessionUsageRow {
+        request_id: format!(
+            "{CODEX_THREAD_REQUEST_ID_PREFIX}:{thread_id}:{}",
+            state.event_index
         ),
-    };
-
-    let inserted_rows = conn
-        .execute(
-            "INSERT OR IGNORE INTO proxy_request_logs (
-            request_id, provider_id, app_type, model, request_model,
-            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-            latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
-            rusqlite::params![
-                request_id,
-                "_codex_session",    // provider_id
-                "codex",             // app_type
-                model,
-                model,               // request_model = model
-                delta.input,
-                delta.output,
-                delta.cached_input,
-                0i64,                // cache_creation_tokens: Codex 日志无此数据
-                input_cost,
-                output_cost,
-                cache_read_cost,
-                cache_creation_cost,
-                total_cost,
-                0i64,                // latency_ms
-                Option::<i64>::None, // first_token_ms
-                200i64,              // status_code
-                Option::<String>::None, // error_message
-                session_id.map(|s| s.to_string()),
-                Some("codex_session"), // provider_type
-                1i64,                // is_streaming
-                "1.0",               // cost_multiplier
-                created_at,
-                "codex_session",     // data_source
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("插入 Codex 会话日志失败: {e}")))?;
-
-    if inserted_rows > 0 {
-        crate::usage_events::notify_log_recorded();
+        model: state.current_model.clone(),
+        pricing_model: normalize_codex_model(&state.current_model),
+        input_tokens: delta.input,
+        output_tokens: delta.output,
+        cache_read_tokens: delta.cached_input,
+        cache_creation_tokens: 0, // Codex 日志无此数据
+        session_id: state.thread_id.clone(),
+        created_at: created_at_from_rfc3339(timestamp),
+        precomputed_total_cost: None,
     }
-
-    Ok(true)
-}
-
-/// 查找 Codex 模型定价（带归一化）
-fn find_codex_pricing(conn: &rusqlite::Connection, model_id: &str) -> Option<ModelPricing> {
-    find_model_pricing(conn, &normalize_codex_model(model_id))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::lock_conn;
+    use crate::services::session_usage::get_sync_state;
     use tempfile::tempdir;
+
+    /// 以当前持久化游标同步单个文件（测试辅助）。
+    fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
+        let cursors = load_sync_cursors(db)?;
+        sync_codex_file(db, file_path, &cursors, &mut PricingCache::default())
+    }
+
+    #[test]
+    fn test_files_without_session_meta_do_not_collide() -> Result<(), AppError> {
+        // SESS-42：两个缺少 session_meta 的文件各有 3 个事件，应导入 6 行。
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        for name in ["rollout-a.jsonl", "rollout-b.jsonl"] {
+            write_jsonl(
+                &temp.path().join(name),
+                &[
+                    turn_context(),
+                    token_count(100, 10, 5),
+                    token_count(200, 20, 10),
+                    token_count(300, 30, 15),
+                ],
+            );
+        }
+        assert_eq!(
+            sync_single_codex_file(&db, &temp.path().join("rollout-a.jsonl"))?,
+            (3, 0)
+        );
+        assert_eq!(
+            sync_single_codex_file(&db, &temp.path().join("rollout-b.jsonl"))?,
+            (3, 0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_truncated_last_event_is_imported_after_completion() -> Result<(), AppError> {
+        // SESS-36：末行未写完时游标停在上一完整行，补全后导入该事件。
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = temp.path().join("rollout-t.jsonl");
+        let last = token_count(200, 20, 10).to_string();
+        let (head, tail) = last.split_at(last.len() / 2);
+        fs::write(
+            &file,
+            format!(
+                "{}\n{}\n{}\n{head}",
+                session_meta("t", "t"),
+                turn_context(),
+                token_count(100, 10, 5)
+            ),
+        )
+        .unwrap();
+        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 3);
+
+        let mut contents = fs::read_to_string(&file).unwrap();
+        contents.push_str(tail);
+        contents.push('\n');
+        fs::write(&file, contents).unwrap();
+        update_sync_state(&db, &file.to_string_lossy(), 0, 3)?; // force re-read regardless of mtime granularity
+        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        Ok(())
+    }
 
     fn write_jsonl(path: &Path, values: &[serde_json::Value]) {
         let contents = values
@@ -1062,15 +1064,22 @@ mod tests {
             cached_input: 1,
             output: 2,
         };
-        let inserted = insert_codex_session_entry(
+        let state = FileParseState {
+            thread_id: Some("session-1".to_string()),
+            current_model: "gpt-5.4".to_string(),
+            prev_total: None,
+            event_index: 1,
+            history_replay_boundary: None,
+        };
+        let row = codex_row(&state, "unused", &delta, Some("1970-01-01T00:16:45Z"));
+        let written = commit_session_rows(
             &db,
-            "codex-session-dup",
-            &delta,
-            "gpt-5.4",
-            Some("session-1"),
-            Some("1970-01-01T00:16:45Z"),
+            &CODEX_SESSION_SOURCE,
+            &[row],
+            &mut PricingCache::default(),
+            None,
         )?;
-        assert!(!inserted);
+        assert_eq!(written, (0, 1));
 
         let conn = lock_conn!(db.conn);
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |row| {

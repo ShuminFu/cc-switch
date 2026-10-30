@@ -1153,61 +1153,39 @@ pub fn run() {
                 // Session log usage sync: 启动时同步一次，之后每 60 秒检查
                 let db_for_session_sync = state.db.clone();
                 tauri::async_runtime::spawn(async move {
+                    use crate::services::session_usage::{sync_all_session_usage, SyncTrigger};
                     const SESSION_SYNC_INTERVAL_SECS: u64 = 60;
 
-                    fn run_step<T>(name: &str, result: Result<T, crate::error::AppError>) {
-                        if let Err(e) = result {
-                            log::warn!("{name} failed: {e}");
+                    // 文件扫描与 SQLite 写入是阻塞操作：放到 blocking 线程池，不占用 async worker；
+                    // 单飞：上一轮（或手动同步）尚未结束时跳过本轮（SESS-08）。
+                    let db = db_for_session_sync.clone();
+                    let initial = tauri::async_runtime::spawn_blocking(move || {
+                        // 回填与首次同步产生的 usage 事件合并为一次通知
+                        let _batch = crate::usage_events::begin_batch();
+                        if let Err(e) = db.backfill_missing_usage_costs() {
+                            log::warn!("Usage cost startup backfill failed: {e}");
                         }
+                        sync_all_session_usage(&db, SyncTrigger::Background);
+                    });
+                    if let Err(e) = initial.await {
+                        log::warn!("Session usage initial sync task failed: {e}");
                     }
-
-                    let db = &db_for_session_sync;
-
-                    // 首次同步
-                    run_step(
-                        "Usage cost startup backfill",
-                        db.backfill_missing_usage_costs(),
-                    );
-                    run_step(
-                        "Session usage initial sync",
-                        crate::services::session_usage::sync_claude_session_logs(db),
-                    );
-                    run_step(
-                        "Codex usage initial sync",
-                        crate::services::session_usage_codex::sync_codex_usage(db),
-                    );
-                    run_step(
-                        "Gemini usage initial sync",
-                        crate::services::session_usage_gemini::sync_gemini_usage(db),
-                    );
-                    run_step(
-                        "OpenCode usage initial sync",
-                        crate::services::session_usage_opencode::sync_opencode_usage(db),
-                    );
 
                     // 定期同步
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(
                         SESSION_SYNC_INTERVAL_SECS,
                     ));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     interval.tick().await; // skip immediate first tick
                     loop {
                         interval.tick().await;
-                        run_step(
-                            "Session usage periodic sync",
-                            crate::services::session_usage::sync_claude_session_logs(db),
-                        );
-                        run_step(
-                            "Codex usage periodic sync",
-                            crate::services::session_usage_codex::sync_codex_usage(db),
-                        );
-                        run_step(
-                            "Gemini usage periodic sync",
-                            crate::services::session_usage_gemini::sync_gemini_usage(db),
-                        );
-                        run_step(
-                            "OpenCode usage periodic sync",
-                            crate::services::session_usage_opencode::sync_opencode_usage(db),
-                        );
+                        let db = db_for_session_sync.clone();
+                        let pass = tauri::async_runtime::spawn_blocking(move || {
+                            sync_all_session_usage(&db, SyncTrigger::Background);
+                        });
+                        if let Err(e) = pass.await {
+                            log::warn!("Session usage periodic sync task failed: {e}");
+                        }
                     }
                 });
             });
