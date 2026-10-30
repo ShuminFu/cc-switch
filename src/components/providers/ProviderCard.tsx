@@ -19,7 +19,11 @@ import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
 import { BudgetLimitBadge } from "@/components/usage/BudgetLimitBadge";
-import { getProviderCodec, getProviderEndpoint } from "@/lib/providerCodecs";
+import {
+  getProviderCodec,
+  getProviderEndpoint,
+  getProviderModels,
+} from "@/lib/providerCodecs";
 import {
   extractCodexWireApi,
   isCodexAnthropicWireApi,
@@ -152,6 +156,11 @@ export function ProviderCard({
   const displayUrl = providerUrl ?? fallbackUrlText;
   const isClickableUrl = Boolean(providerUrl);
   const notes = provider.notes?.trim();
+  // Primary model chip; all configured models in the tooltip (FE-PROV-54).
+  const models = useMemo(
+    () => getProviderModels(appId, provider),
+    [appId, provider],
+  );
 
   const usageEnabled = provider.meta?.usage_script?.enabled ?? false;
   const isOfficial = isOfficialProvider(provider, appId);
@@ -455,6 +464,16 @@ export function ProviderCard({
               >
                 <span className="min-w-0 truncate">{displayUrl}</span>
               </button>
+            )}
+            {models.length > 0 && (
+              <span
+                className="inline-flex max-w-full items-center truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                title={models.join("\n")}
+                data-testid="provider-model-chip"
+              >
+                {models[0]}
+                {models.length > 1 ? ` +${models.length - 1}` : ""}
+              </span>
             )}
             {notes && (
               <p

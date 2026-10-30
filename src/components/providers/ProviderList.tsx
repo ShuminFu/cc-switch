@@ -46,6 +46,7 @@ import { useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
+import { getProviderEndpoint, getProviderModels } from "@/lib/providerCodecs";
 
 interface ProviderListProps {
   providers: Record<string, Provider>;
@@ -299,12 +300,19 @@ export function ProviderList({
     const keyword = searchTerm.trim().toLowerCase();
     if (!keyword) return sortedProviders;
     return sortedProviders.filter((provider) => {
-      const fields = [provider.name, provider.notes, provider.websiteUrl];
+      // Endpoint and configured models are searchable too (FE-PROV-54).
+      const fields = [
+        provider.name,
+        provider.notes,
+        provider.websiteUrl,
+        getProviderEndpoint(appId, provider),
+        ...getProviderModels(appId, provider),
+      ];
       return fields.some((field) =>
         field?.toString().toLowerCase().includes(keyword),
       );
     });
-  }, [searchTerm, sortedProviders]);
+  }, [appId, searchTerm, sortedProviders]);
 
   const claudeDesktopStatusMessages = useMemo(() => {
     if (appId !== "claude-desktop" || !claudeDesktopStatus) return [];

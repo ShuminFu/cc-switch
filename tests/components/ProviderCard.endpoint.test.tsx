@@ -117,3 +117,31 @@ describe("ProviderCard health query (FE-PROV-13)", () => {
     expect(callsTo("get_provider_health")).toHaveLength(0);
   });
 });
+
+describe("ProviderCard model chip (FE-PROV-54)", () => {
+  it("shows the Claude primary model", () => {
+    renderCard(
+      makeProvider({
+        env: {
+          ANTHROPIC_BASE_URL: "https://a.example.com",
+          ANTHROPIC_MODEL: "x",
+        },
+      }),
+      "claude",
+    );
+    expect(screen.getByTestId("provider-model-chip")).toHaveTextContent("x");
+  });
+
+  it("shows the Codex TOML model", () => {
+    renderCard(
+      makeProvider({
+        auth: { OPENAI_API_KEY: "k" },
+        config: 'model = "gpt-5"\n',
+      }),
+      "codex",
+    );
+    expect(screen.getByTestId("provider-model-chip")).toHaveTextContent(
+      "gpt-5",
+    );
+  });
+});
