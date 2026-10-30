@@ -348,6 +348,9 @@ fn infer_codex_chat_reasoning_config(
         .settings_config
         .get("base_url")
         .or_else(|| provider.settings_config.get("baseURL"))
+        // Claude-app providers routed through `openai_chat` keep their endpoint
+        // in env.ANTHROPIC_BASE_URL (PROV-04).
+        .or_else(|| provider.settings_config.pointer("/env/ANTHROPIC_BASE_URL"))
         .and_then(|v| v.as_str())
         .map(ToString::to_string)
         .or_else(|| {

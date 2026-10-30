@@ -334,6 +334,28 @@ fn should_preserve_reasoning_content_for_openai_chat(provider: &Provider, body: 
         .any(is_reasoning_vendor_identifier)
 }
 
+/// Express the Anthropic `thinking` / `output_config.effort` request in the
+/// Responses `reasoning.effort` shape consumed by
+/// `transform_codex_chat::apply_reasoning_options`.
+///
+/// Returns `None` when the request carries no reasoning intent at all, so a
+/// provider's default behaviour is left untouched.
+fn anthropic_reasoning_as_responses_request(body: &Value) -> Option<Value> {
+    let thinking_type = body
+        .get("thinking")
+        .and_then(|t| t.get("type"))
+        .and_then(|t| t.as_str());
+    if thinking_type == Some("disabled") {
+        return Some(json!({ "reasoning": { "effort": "none" } }));
+    }
+    let explicit_effort = body.pointer("/output_config/effort").is_some();
+    if !matches!(thinking_type, Some("enabled") | Some("adaptive")) && !explicit_effort {
+        return None;
+    }
+    let effort = super::transform::resolve_reasoning_effort(body).unwrap_or("high");
+    Some(json!({ "reasoning": { "effort": effort } }))
+}
+
 pub fn transform_claude_request_for_api_format(
     body: serde_json::Value,
     provider: &Provider,
@@ -410,10 +432,37 @@ pub fn transform_claude_request_for_api_format(
         "openai_chat" => {
             let preserve_reasoning_content =
                 should_preserve_reasoning_content_for_openai_chat(provider, &body);
+            // PROV-04: reuse the per-vendor Chat reasoning capability model that the
+            // Codex→Chat path already applies, so Claude Code's thinking toggle and
+            // effort reach DeepSeek/Qwen/GLM/Kimi/OpenRouter-style providers.
+            let reasoning_config =
+                super::codex::resolve_codex_chat_reasoning_config(provider, &body);
+            let reasoning_request = anthropic_reasoning_as_responses_request(&body);
+            let model = body
+                .get("model")
+                .and_then(|m| m.as_str())
+                .unwrap_or_default()
+                .to_string();
             let mut result = super::transform::anthropic_to_openai_with_reasoning_content(
                 body,
                 preserve_reasoning_content,
             )?;
+            if let (Some(config), Some(request)) =
+                (reasoning_config.as_ref(), reasoning_request.as_ref())
+            {
+                // The provider-declared config is authoritative: drop the generic
+                // OpenAI `reasoning_effort` so it never coexists with a vendor form
+                // such as OpenRouter's `reasoning.effort` (which would 400).
+                if let Some(obj) = result.as_object_mut() {
+                    obj.remove("reasoning_effort");
+                }
+                super::transform_codex_chat::apply_reasoning_options(
+                    &mut result,
+                    request,
+                    &model,
+                    Some(config),
+                );
+            }
             // Inject prompt_cache_key only if explicitly configured in meta
             if let Some(key) = provider
                 .meta
@@ -2558,5 +2607,112 @@ mod tests {
         assert!(changed);
         assert_eq!(body["thinking"]["type"], "disabled");
         assert!(body.get("output_config").is_none());
+    }
+
+    // ==================== PROV-04: Claude→openai_chat reasoning params ====================
+
+    fn chat_provider(base_url: &str) -> Provider {
+        create_provider(json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_API_KEY": "k"
+            }
+        }))
+    }
+
+    fn chat_body(model: &str, thinking: Value) -> Value {
+        json!({
+            "model": model,
+            "max_tokens": 1024,
+            "thinking": thinking,
+            "messages": [{ "role": "user", "content": "hi" }]
+        })
+    }
+
+    #[test]
+    fn test_openai_chat_deepseek_thinking_enabled_emits_vendor_fields() {
+        let provider = chat_provider("https://api.deepseek.com/v1");
+        let body = chat_body(
+            "deepseek-v4-pro",
+            json!({ "type": "enabled", "budget_tokens": 20000 }),
+        );
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["thinking"]["type"], "enabled");
+        assert_eq!(out["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn test_openai_chat_deepseek_thinking_disabled_emits_off_form() {
+        let provider = chat_provider("https://api.deepseek.com/v1");
+        let body = chat_body("deepseek-v4-pro", json!({ "type": "disabled" }));
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["thinking"]["type"], "disabled");
+        assert!(out.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn test_openai_chat_qwen_thinking_enabled_emits_enable_thinking() {
+        let provider = chat_provider("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        let body = chat_body("qwen3-coder-plus", json!({ "type": "enabled" }));
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["enable_thinking"], true);
+        assert!(out.get("thinking").is_none());
+
+        let body = chat_body("qwen3-coder-plus", json!({ "type": "disabled" }));
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["enable_thinking"], false);
+    }
+
+    #[test]
+    fn test_openai_chat_openrouter_emits_reasoning_object_without_reasoning_effort() {
+        let provider = chat_provider("https://openrouter.ai/api/v1");
+        let body = json!({
+            "model": "openai/gpt-5.4",
+            "max_tokens": 1024,
+            "thinking": { "type": "adaptive" },
+            "output_config": { "effort": "max" },
+            "messages": [{ "role": "user", "content": "hi" }]
+        });
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["reasoning"]["effort"], "xhigh");
+        assert!(out.get("reasoning_effort").is_none());
+        assert!(out.get("thinking").is_none());
+    }
+
+    #[test]
+    fn test_openai_chat_generic_provider_without_thinking_is_unchanged() {
+        let provider = chat_provider("https://api.deepseek.com/v1");
+        let body = json!({
+            "model": "deepseek-v4-pro",
+            "max_tokens": 1024,
+            "messages": [{ "role": "user", "content": "hi" }]
+        });
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert!(out.get("thinking").is_none());
+        assert!(out.get("reasoning_effort").is_none());
+
+        // Unknown vendor: still uses the generic o-series/gpt-5 reasoning_effort rule.
+        let provider = chat_provider("https://example.com/v1");
+        let body = chat_body(
+            "gpt-5.4",
+            json!({ "type": "enabled", "budget_tokens": 2000 }),
+        );
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["reasoning_effort"], "low");
+        assert!(out.get("thinking").is_none());
     }
 }

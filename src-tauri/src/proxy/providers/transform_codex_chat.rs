@@ -343,7 +343,7 @@ pub fn responses_to_chat_completions_with_reasoning(
     Ok(result)
 }
 
-fn apply_reasoning_options(
+pub(crate) fn apply_reasoning_options(
     result: &mut Value,
     body: &Value,
     model: &str,
