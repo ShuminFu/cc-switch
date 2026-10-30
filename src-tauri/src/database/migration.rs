@@ -3,7 +3,7 @@
 //! 将旧版 config.json (MultiAppConfig) 数据迁移到 SQLite 数据库。
 
 use super::{lock_conn, to_json_string, Database};
-use crate::app_config::{AppType, MultiAppConfig};
+use crate::app_config::{AppType, McpServer, MultiAppConfig};
 use crate::error::AppError;
 use rusqlite::{params, Connection};
 
@@ -123,25 +123,13 @@ impl Database {
     ) -> Result<(), AppError> {
         if let Some(servers) = &config.mcp.servers {
             for (id, server) in servers {
-                tx.execute(
-                    "INSERT OR REPLACE INTO mcp_servers (
-                        id, name, server_config, description, homepage, docs, tags,
-                        enabled_claude, enabled_codex, enabled_gemini
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
-                        id,
-                        server.name,
-                        to_json_string(&server.server)?,
-                        server.description,
-                        server.homepage,
-                        server.docs,
-                        to_json_string(&server.tags)?,
-                        server.apps.claude,
-                        server.apps.codex,
-                        server.apps.gemini,
-                    ],
-                )
-                .map_err(|e| AppError::Database(format!("Migrate mcp server failed: {e}")))?;
+                // 以 map 的键为主键（与旧实现一致），不信任条目内的 id 字段
+                let server = McpServer {
+                    id: id.clone(),
+                    ..server.clone()
+                };
+                Self::save_mcp_server_on_conn(tx, &server)
+                    .map_err(|e| AppError::Database(format!("Migrate mcp server failed: {e}")))?;
             }
         }
         Ok(())

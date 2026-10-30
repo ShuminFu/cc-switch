@@ -10,8 +10,8 @@ use std::fs;
 use serde_json::json;
 
 use cc_switch_lib::{
-    AppType, InstalledSkill, McpServer, McpService, ProfilePayload, ProfileScope, ProfileService,
-    Prompt, PromptService, Provider, ProviderService, SkillApps, SkillService,
+    AppSet, AppType, InstalledSkill, McpServer, McpService, ProfilePayload, ProfileScope,
+    ProfileService, Prompt, PromptService, Provider, ProviderService, SkillService,
 };
 
 #[path = "support.rs"]
@@ -79,9 +79,10 @@ fn installed_skill(id: &str, directory: &str, claude_enabled: bool) -> Installed
         repo_name: None,
         repo_branch: None,
         readme_url: None,
-        apps: SkillApps {
-            claude: claude_enabled,
-            ..Default::default()
+        apps: if claude_enabled {
+            AppSet::only(&AppType::Claude)
+        } else {
+            AppSet::default()
         },
         installed_at: 1_000,
         content_hash: None,
@@ -238,12 +239,30 @@ fn profile_snapshot_apply_roundtrip_restores_configuration() {
     );
 
     let servers = state.db.get_all_mcp_servers().expect("get mcp servers");
-    assert!(servers.get("m1").expect("m1").apps.claude, "m1 re-enabled");
-    assert!(!servers.get("m2").expect("m2").apps.claude, "m2 disabled");
+    assert!(
+        servers
+            .get("m1")
+            .expect("m1")
+            .apps
+            .is_enabled_for(&AppType::Claude),
+        "m1 re-enabled"
+    );
+    assert!(
+        !servers
+            .get("m2")
+            .expect("m2")
+            .apps
+            .is_enabled_for(&AppType::Claude),
+        "m2 disabled"
+    );
 
     let skills = state.db.get_all_installed_skills().expect("get skills");
     assert!(
-        skills.get("local:test-skill").expect("skill").apps.claude,
+        skills
+            .get("local:test-skill")
+            .expect("skill")
+            .apps
+            .is_enabled_for(&AppType::Claude),
         "skill re-enabled"
     );
 
@@ -338,7 +357,11 @@ fn shared_profile_sides_are_isolated_and_mergeable() {
     );
     let servers = state.db.get_all_mcp_servers().expect("get mcp servers");
     assert!(
-        servers.get("m1").expect("m1").apps.claude,
+        servers
+            .get("m1")
+            .expect("m1")
+            .apps
+            .is_enabled_for(&AppType::Claude),
         "claude MCP untouched"
     );
     assert_eq!(
@@ -365,7 +388,11 @@ fn shared_profile_sides_are_isolated_and_mergeable() {
     assert!(warnings[0].contains("no claude configuration captured"));
     let servers = state.db.get_all_mcp_servers().expect("get mcp servers");
     assert!(
-        servers.get("m1").expect("m1").apps.claude,
+        servers
+            .get("m1")
+            .expect("m1")
+            .apps
+            .is_enabled_for(&AppType::Claude),
         "claude MCP still untouched by uncaptured apply"
     );
     assert_eq!(
@@ -432,7 +459,11 @@ fn profile_apply_reports_dangling_references_and_continues() {
     // 有效条目照常生效：m1 被启用
     let servers = state.db.get_all_mcp_servers().expect("get mcp servers");
     assert!(
-        servers.get("m1").expect("m1").apps.claude,
+        servers
+            .get("m1")
+            .expect("m1")
+            .apps
+            .is_enabled_for(&AppType::Claude),
         "m1 enabled despite warnings"
     );
 
@@ -563,8 +594,22 @@ fn switching_profile_autosaves_previous_profile_state() {
         "provider switched to p2"
     );
     let servers = state.db.get_all_mcp_servers().expect("get mcp servers");
-    assert!(!servers.get("m1").expect("m1").apps.claude, "m1 disabled");
-    assert!(servers.get("m2").expect("m2").apps.claude, "m2 enabled");
+    assert!(
+        !servers
+            .get("m1")
+            .expect("m1")
+            .apps
+            .is_enabled_for(&AppType::Claude),
+        "m1 disabled"
+    );
+    assert!(
+        servers
+            .get("m2")
+            .expect("m2")
+            .apps
+            .is_enabled_for(&AppType::Claude),
+        "m2 enabled"
+    );
     let prompts = state
         .db
         .get_prompts(AppType::Claude.as_str())
@@ -606,11 +651,19 @@ fn switching_profile_autosaves_previous_profile_state() {
     );
     let servers = state.db.get_all_mcp_servers().expect("get mcp servers");
     assert!(
-        !servers.get("m1").expect("m1").apps.claude,
+        !servers
+            .get("m1")
+            .expect("m1")
+            .apps
+            .is_enabled_for(&AppType::Claude),
         "m1 stays disabled"
     );
     assert!(
-        servers.get("m2").expect("m2").apps.claude,
+        servers
+            .get("m2")
+            .expect("m2")
+            .apps
+            .is_enabled_for(&AppType::Claude),
         "m2 stays enabled"
     );
     let prompts = state

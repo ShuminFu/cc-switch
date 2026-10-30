@@ -4,7 +4,7 @@
 use serde_json::json;
 
 use cc_switch_lib::{
-    get_claude_settings_path, read_json_file, write_codex_live_atomic, AppError, AppType, McpApps,
+    get_claude_settings_path, read_json_file, write_codex_live_atomic, AppError, AppSet, AppType,
     McpServer, MultiAppConfig, Provider, ProviderMeta, ProviderService,
 };
 
@@ -159,14 +159,7 @@ command = "say"
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: true,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Codex]),
             description: None,
             homepage: None,
             docs: None,
@@ -915,14 +908,7 @@ fn reapply_codex_official_live_resyncs_mcp_servers() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: true,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Codex]),
             description: None,
             homepage: None,
             docs: None,
@@ -1012,14 +998,7 @@ fn reapply_codex_official_live_projects_mcp_despite_broken_claude_json() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: true,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Codex]),
             description: None,
             homepage: None,
             docs: None,
@@ -1103,14 +1082,7 @@ fn switch_codex_projects_mcp_despite_broken_claude_json() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: true,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Codex]),
             description: None,
             homepage: None,
             docs: None,
@@ -1165,14 +1137,7 @@ fn sync_all_enabled_reports_broken_app_but_projects_the_rest() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: true,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Codex]),
             description: None,
             homepage: None,
             docs: None,

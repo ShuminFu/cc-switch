@@ -966,19 +966,19 @@ fn test_import_prompt_allows_space_in_base64_content() {
 #[test]
 fn test_parse_mcp_apps() {
     let apps = parse_mcp_apps("claude,codex").unwrap();
-    assert!(apps.claude);
-    assert!(apps.codex);
-    assert!(!apps.gemini);
+    assert!(apps.is_enabled_for(&AppType::Claude));
+    assert!(apps.is_enabled_for(&AppType::Codex));
+    assert!(!apps.is_enabled_for(&AppType::Gemini));
 
     let apps = parse_mcp_apps("gemini").unwrap();
-    assert!(!apps.claude);
-    assert!(!apps.codex);
-    assert!(apps.gemini);
+    assert!(!apps.is_enabled_for(&AppType::Claude));
+    assert!(!apps.is_enabled_for(&AppType::Codex));
+    assert!(apps.is_enabled_for(&AppType::Gemini));
 
     let apps = parse_mcp_apps("grokbuild,opencode,hermes").unwrap();
-    assert!(apps.grokbuild);
-    assert!(apps.opencode);
-    assert!(apps.hermes);
+    assert!(apps.is_enabled_for(&AppType::GrokBuild));
+    assert!(apps.is_enabled_for(&AppType::OpenCode));
+    assert!(apps.is_enabled_for(&AppType::Hermes));
 
     let err = parse_mcp_apps("invalid").unwrap_err();
     assert!(err.to_string().contains("Invalid app"));
@@ -1277,7 +1277,7 @@ fn test_preview_provider_without_risk_writes_live_when_first() {
 #[serial_test::serial]
 fn test_preview_mcp_lists_commands_and_marks_existing_servers() {
     use super::preview::{preview_deeplink_import, PreviewRisk};
-    use crate::app_config::{McpApps, McpServer};
+    use crate::app_config::{AppSet, McpServer};
 
     let _test_home = TestHomeGuard::new();
     let state = preview_state();
@@ -1287,7 +1287,7 @@ fn test_preview_mcp_lists_commands_and_marks_existing_servers() {
             id: "known".to_string(),
             name: "known".to_string(),
             server: serde_json::json!({ "command": "old-cmd" }),
-            apps: McpApps::default(),
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,

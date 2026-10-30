@@ -4,7 +4,7 @@
 use std::fs;
 
 use cc_switch_lib::{
-    migrate_skills_to_ssot, AppType, ImportSkillSelection, InstalledSkill, SkillApps, SkillService,
+    migrate_skills_to_ssot, AppSet, AppType, ImportSkillSelection, InstalledSkill, SkillService,
 };
 
 #[path = "support.rs"]
@@ -54,10 +54,7 @@ fn import_from_apps_respects_explicit_app_selection() {
         &state.db,
         vec![ImportSkillSelection {
             directory: "shared-skill".to_string(),
-            apps: SkillApps {
-                opencode: true,
-                ..Default::default()
-            },
+            apps: AppSet::from_apps(&[AppType::OpenCode]),
         }],
     )
     .expect("import skills");
@@ -65,11 +62,13 @@ fn import_from_apps_respects_explicit_app_selection() {
     assert_eq!(imported.len(), 1, "expected exactly one imported skill");
     let skill = imported.first().expect("imported skill");
     assert!(
-        skill.apps.opencode,
+        skill.apps.is_enabled_for(&AppType::OpenCode),
         "explicitly selected OpenCode app should remain enabled"
     );
     assert!(
-        !skill.apps.claude && !skill.apps.codex && !skill.apps.gemini,
+        !skill.apps.is_enabled_for(&AppType::Claude)
+            && !skill.apps.is_enabled_for(&AppType::Codex)
+            && !skill.apps.is_enabled_for(&AppType::Gemini),
         "import should no longer infer apps from every matching source path"
     );
 }
@@ -93,17 +92,14 @@ fn import_from_apps_does_not_rewrite_selected_app_directory() {
         &state.db,
         vec![ImportSkillSelection {
             directory: "codex-skill".to_string(),
-            apps: SkillApps {
-                codex: true,
-                ..Default::default()
-            },
+            apps: AppSet::from_apps(&[AppType::Codex]),
         }],
     )
     .expect("import skills");
 
     assert_eq!(imported.len(), 1, "expected exactly one imported skill");
     assert!(
-        imported[0].apps.codex,
+        imported[0].apps.is_enabled_for(&AppType::Codex),
         "import should preserve the selected Codex app state"
     );
     assert_eq!(
@@ -148,7 +144,7 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
             repo_name: None,
             repo_branch: None,
             readme_url: None,
-            apps: SkillApps::default(),
+            apps: AppSet::default(),
             installed_at: 0,
             content_hash: None,
             updated_at: 0,
@@ -188,10 +184,7 @@ fn uninstall_skill_creates_backup_before_removing_ssot() {
             repo_name: None,
             repo_branch: None,
             readme_url: None,
-            apps: SkillApps {
-                claude: true,
-                ..Default::default()
-            },
+            apps: AppSet::from_apps(&[AppType::Claude]),
             installed_at: 123,
             content_hash: None,
             updated_at: 0,
@@ -255,10 +248,7 @@ fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
             repo_name: None,
             repo_branch: None,
             readme_url: None,
-            apps: SkillApps {
-                claude: true,
-                ..Default::default()
-            },
+            apps: AppSet::from_apps(&[AppType::Claude]),
             installed_at: 456,
             content_hash: None,
             updated_at: 0,
@@ -281,9 +271,14 @@ fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
         .expect("restore from backup");
 
     assert_eq!(restored.directory, "restore-skill");
-    assert!(restored.apps.claude, "restored skill should enable Claude");
     assert!(
-        !restored.apps.codex && !restored.apps.gemini && !restored.apps.opencode,
+        restored.apps.is_enabled_for(&AppType::Claude),
+        "restored skill should enable Claude"
+    );
+    assert!(
+        !restored.apps.is_enabled_for(&AppType::Codex)
+            && !restored.apps.is_enabled_for(&AppType::Gemini)
+            && !restored.apps.is_enabled_for(&AppType::OpenCode),
         "restore should only enable the selected app"
     );
     assert!(
@@ -335,10 +330,7 @@ fn delete_skill_backup_removes_backup_directory() {
             repo_name: None,
             repo_branch: None,
             readme_url: None,
-            apps: SkillApps {
-                claude: true,
-                ..Default::default()
-            },
+            apps: AppSet::from_apps(&[AppType::Claude]),
             installed_at: 789,
             content_hash: None,
             updated_at: 0,
@@ -413,11 +405,11 @@ fn migration_snapshot_overrides_multi_source_directory_inference() {
         .expect("migrated demo-skill");
 
     assert!(
-        migrated.apps.claude,
+        migrated.apps.is_enabled_for(&AppType::Claude),
         "legacy snapshot should preserve Claude enablement"
     );
     assert!(
-        !migrated.apps.opencode,
+        !migrated.apps.is_enabled_for(&AppType::OpenCode),
         "migration should no longer infer OpenCode enablement from a duplicate directory alone"
     );
 }

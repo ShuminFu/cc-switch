@@ -3,15 +3,38 @@
 //! 提供 Skills 和 Skill Repos 的 CRUD 操作。
 //!
 //! v3.10.0+ 统一管理架构：
-//! - Skills 使用统一的 id 主键，支持四应用启用标志
+//! - Skills 使用统一的 id 主键，应用启用状态存于关联表 `skill_apps`
+//!   （见 [`super::app_sets`]），本模块不按应用命名任何列
 //! - 实际文件存储在 ~/.cc-switch/skills/，同步到各应用目录
 
-use crate::app_config::{InstalledSkill, SkillApps};
+use super::app_sets::SKILL_APPS;
+use crate::app_config::{AppSet, InstalledSkill};
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::services::skill::SkillRepo;
 use indexmap::IndexMap;
-use rusqlite::params;
+use rusqlite::{params, Row};
+
+const SKILL_COLUMNS: &str = "id, name, description, directory, repo_owner, repo_name, repo_branch,
+                        readme_url, installed_at, content_hash, updated_at";
+
+/// 按列名读取一行 skills（`apps` 由调用方从关联表填入）
+fn skill_from_row(row: &Row<'_>) -> rusqlite::Result<InstalledSkill> {
+    Ok(InstalledSkill {
+        id: row.get("id")?,
+        name: row.get("name")?,
+        description: row.get("description")?,
+        directory: row.get("directory")?,
+        repo_owner: row.get("repo_owner")?,
+        repo_name: row.get("repo_name")?,
+        repo_branch: row.get("repo_branch")?,
+        readme_url: row.get("readme_url")?,
+        apps: AppSet::default(),
+        installed_at: row.get("installed_at")?,
+        content_hash: row.get("content_hash")?,
+        updated_at: row.get::<_, i64>("updated_at").unwrap_or(0),
+    })
+}
 
 impl Database {
     // ========== InstalledSkill CRUD ==========
@@ -19,44 +42,21 @@ impl Database {
     /// 获取所有已安装的 Skills
     pub fn get_all_installed_skills(&self) -> Result<IndexMap<String, InstalledSkill>, AppError> {
         let conn = lock_conn!(self.conn);
+        let mut app_sets = SKILL_APPS.read_all(&conn)?;
         let mut stmt = conn
-            .prepare(
-                "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
-                        readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild,
-                        enabled_opencode, enabled_hermes, installed_at, content_hash, updated_at
-                 FROM skills ORDER BY name ASC",
-            )
+            .prepare(&format!(
+                "SELECT {SKILL_COLUMNS} FROM skills ORDER BY name ASC"
+            ))
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let skill_iter = stmt
-            .query_map([], |row| {
-                Ok(InstalledSkill {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    directory: row.get(3)?,
-                    repo_owner: row.get(4)?,
-                    repo_name: row.get(5)?,
-                    repo_branch: row.get(6)?,
-                    readme_url: row.get(7)?,
-                    apps: SkillApps {
-                        claude: row.get(8)?,
-                        codex: row.get(9)?,
-                        gemini: row.get(10)?,
-                        grokbuild: row.get(11)?,
-                        opencode: row.get(12)?,
-                        hermes: row.get(13)?,
-                    },
-                    installed_at: row.get(14)?,
-                    content_hash: row.get(15)?,
-                    updated_at: row.get::<_, i64>(16).unwrap_or(0),
-                })
-            })
+            .query_map([], skill_from_row)
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let mut skills = IndexMap::new();
         for skill_res in skill_iter {
-            let skill = skill_res.map_err(|e| AppError::Database(e.to_string()))?;
+            let mut skill = skill_res.map_err(|e| AppError::Database(e.to_string()))?;
+            skill.apps = app_sets.remove(&skill.id).unwrap_or_default();
             skills.insert(skill.id.clone(), skill);
         }
         Ok(skills)
@@ -66,40 +66,16 @@ impl Database {
     pub fn get_installed_skill(&self, id: &str) -> Result<Option<InstalledSkill>, AppError> {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
-            .prepare(
-                "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
-                        readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild,
-                        enabled_opencode, enabled_hermes, installed_at, content_hash, updated_at
-                 FROM skills WHERE id = ?1",
-            )
+            .prepare(&format!("SELECT {SKILL_COLUMNS} FROM skills WHERE id = ?1"))
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let result = stmt.query_row([id], |row| {
-            Ok(InstalledSkill {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                directory: row.get(3)?,
-                repo_owner: row.get(4)?,
-                repo_name: row.get(5)?,
-                repo_branch: row.get(6)?,
-                readme_url: row.get(7)?,
-                apps: SkillApps {
-                    claude: row.get(8)?,
-                    codex: row.get(9)?,
-                    gemini: row.get(10)?,
-                    grokbuild: row.get(11)?,
-                    opencode: row.get(12)?,
-                    hermes: row.get(13)?,
-                },
-                installed_at: row.get(14)?,
-                content_hash: row.get(15)?,
-                updated_at: row.get::<_, i64>(16).unwrap_or(0),
-            })
-        });
+        let result = stmt.query_row([id], skill_from_row);
 
         match result {
-            Ok(skill) => Ok(Some(skill)),
+            Ok(mut skill) => {
+                skill.apps = SKILL_APPS.read(&conn, id)?;
+                Ok(Some(skill))
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(AppError::Database(e.to_string())),
         }
@@ -107,13 +83,15 @@ impl Database {
 
     /// 保存 Skill（添加或更新）
     pub fn save_skill(&self, skill: &InstalledSkill) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        conn.execute(
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .savepoint()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        tx.execute(
             "INSERT OR REPLACE INTO skills
              (id, name, description, directory, repo_owner, repo_name, repo_branch,
-              readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes,
-              installed_at, content_hash, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+              readme_url, installed_at, content_hash, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 skill.id,
                 skill.name,
@@ -123,48 +101,62 @@ impl Database {
                 skill.repo_name,
                 skill.repo_branch,
                 skill.readme_url,
-                skill.apps.claude,
-                skill.apps.codex,
-                skill.apps.gemini,
-                skill.apps.grokbuild,
-                skill.apps.opencode,
-                skill.apps.hermes,
                 skill.installed_at,
                 skill.content_hash,
                 skill.updated_at,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        SKILL_APPS.write(&tx, &skill.id, &skill.apps)?;
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
     /// 删除 Skill
     pub fn delete_skill(&self, id: &str) -> Result<bool, AppError> {
-        let conn = lock_conn!(self.conn);
-        let affected = conn
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .savepoint()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let affected = tx
             .execute("DELETE FROM skills WHERE id = ?1", params![id])
             .map_err(|e| AppError::Database(e.to_string()))?;
+        SKILL_APPS.delete(&tx, id)?;
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
     }
 
     /// 清空所有 Skills（用于迁移）
     pub fn clear_skills(&self) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        conn.execute("DELETE FROM skills", [])
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .savepoint()
             .map_err(|e| AppError::Database(e.to_string()))?;
+        tx.execute("DELETE FROM skills", [])
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        SKILL_APPS.clear(&tx)?;
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
     /// 更新 Skill 的应用启用状态
-    pub fn update_skill_apps(&self, id: &str, apps: &SkillApps) -> Result<bool, AppError> {
-        let conn = lock_conn!(self.conn);
-        let affected = conn
-            .execute(
-                "UPDATE skills SET enabled_claude = ?1, enabled_codex = ?2, enabled_gemini = ?3, enabled_grokbuild = ?4, enabled_opencode = ?5, enabled_hermes = ?6 WHERE id = ?7",
-                params![apps.claude, apps.codex, apps.gemini, apps.grokbuild, apps.opencode, apps.hermes, id],
-            )
+    pub fn update_skill_apps(&self, id: &str, apps: &AppSet) -> Result<bool, AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .savepoint()
             .map_err(|e| AppError::Database(e.to_string()))?;
-        Ok(affected > 0)
+        let exists = tx
+            .query_row("SELECT 1 FROM skills WHERE id = ?1", [id], |_| Ok(()))
+            .map(|_| true)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(false),
+                e => Err(AppError::Database(e.to_string())),
+            })?;
+        if exists {
+            SKILL_APPS.write(&tx, id, apps)?;
+        }
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(exists)
     }
 
     /// 更新 Skill 的内容哈希和更新时间

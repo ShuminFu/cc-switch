@@ -56,7 +56,7 @@ pub use apps::hermes::config as hermes_config;
 use apps::openclaw::config as openclaw_config;
 use apps::opencode::config as opencode_config;
 
-pub use app_config::{AppType, InstalledSkill, McpApps, McpServer, MultiAppConfig, SkillApps};
+pub use app_config::{AppSet, AppType, InstalledSkill, McpServer, MultiAppConfig};
 pub use codex_config::{get_codex_auth_path, get_codex_config_path, write_codex_live_atomic};
 pub use commands::open_provider_terminal;
 pub use commands::*;

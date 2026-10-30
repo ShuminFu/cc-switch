@@ -386,33 +386,21 @@ mod tests {
 
     #[test]
     fn mcp_and_skill_flags_respect_caps() {
-        use crate::app_config::{McpApps, SkillApps};
-        let mcp = McpApps {
-            claude: true,
-            codex: true,
-            gemini: true,
-            grokbuild: true,
-            opencode: true,
-            hermes: true,
-        };
-        let skills = SkillApps {
-            claude: true,
-            codex: true,
-            gemini: true,
-            grokbuild: true,
-            opencode: true,
-            hermes: true,
-        };
+        use crate::app_config::AppSet;
+        let all: Vec<AppType> = AppType::all().collect();
+        let set = AppSet::from_apps(&all);
         for d in APPS {
+            // AppSet 同时承载 MCP 与 Skills 的启用状态：两者能力位不一致的应用需要先让
+            // AppSet 按能力区分可接纳的应用，否则会把只支持其一的应用当作另一种也支持
             assert_eq!(
-                mcp.is_enabled_for(&d.app),
                 d.has(AppCaps::MCP),
-                "{}",
+                d.has(AppCaps::SKILLS),
+                "{}: MCP and SKILLS caps differ",
                 d.slug
             );
             assert_eq!(
-                skills.is_enabled_for(&d.app),
-                d.has(AppCaps::SKILLS),
+                set.is_enabled_for(&d.app),
+                d.has(AppCaps::MCP),
                 "{}",
                 d.slug
             );

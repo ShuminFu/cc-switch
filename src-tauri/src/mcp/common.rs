@@ -7,7 +7,7 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
-use crate::app_config::{AppType, McpApps, McpConfig, McpServer, MultiAppConfig};
+use crate::app_config::{AppSet, AppType, McpConfig, McpServer, MultiAppConfig};
 
 use super::validation::{extract_server_spec, validate_server_spec};
 
@@ -52,7 +52,7 @@ pub(crate) fn valid_imports(
 
 /// 从应用导入的新服务器：默认仅启用该应用
 pub(crate) fn imported_server(app: &AppType, id: String, spec: Value) -> McpServer {
-    let mut apps = McpApps::default();
+    let mut apps = AppSet::default();
     apps.set_enabled_for(app, true);
     McpServer {
         name: id.clone(),
@@ -142,7 +142,9 @@ mod tests {
         );
 
         let echo = &config.mcp.servers.as_ref().unwrap()["echo"];
-        assert!(echo.apps.claude && echo.apps.codex);
+        assert!(
+            echo.apps.is_enabled_for(&AppType::Claude) && echo.apps.is_enabled_for(&AppType::Codex)
+        );
         assert_eq!(echo.server, json!({"x": 1}));
         assert_eq!(echo.description.as_deref(), Some("keep"));
     }

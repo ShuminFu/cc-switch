@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use cc_switch_lib::{
-    write_codex_live_atomic, AppState, AppType, LivePreviewSkipReason, LiveWritePreview, McpApps,
+    write_codex_live_atomic, AppSet, AppState, AppType, LivePreviewSkipReason, LiveWritePreview,
     McpServer, MultiAppConfig, Provider, ProviderService,
 };
 
@@ -96,14 +96,7 @@ fn codex_mcp_server() -> McpServer {
         id: "echo-server".into(),
         name: "Echo Server".into(),
         server: json!({ "type": "stdio", "command": "echo" }),
-        apps: McpApps {
-            claude: false,
-            codex: true,
-            gemini: false,
-            grokbuild: false,
-            opencode: false,
-            hermes: false,
-        },
+        apps: AppSet::from_apps(&[AppType::Codex]),
         description: None,
         homepage: None,
         docs: None,

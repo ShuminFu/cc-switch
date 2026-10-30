@@ -97,7 +97,7 @@ pub async fn upsert_mcp_server_in_config(
         existing
     } else {
         // 创建新服务器
-        let mut apps = crate::app_config::McpApps::default();
+        let mut apps = crate::app_config::AppSet::default();
         apps.set_enabled_for(&app_ty, true);
 
         // 尝试从 spec 中提取 name，否则使用 id
@@ -121,10 +121,14 @@ pub async fn upsert_mcp_server_in_config(
 
     // 如果 sync_other_side 为 true，也启用其他应用
     if sync_other_side.unwrap_or(false) {
-        new_server.apps.claude = true;
-        new_server.apps.codex = true;
-        new_server.apps.gemini = true;
-        new_server.apps.opencode = true;
+        for app in [
+            AppType::Claude,
+            AppType::Codex,
+            AppType::Gemini,
+            AppType::OpenCode,
+        ] {
+            new_server.apps.set_enabled_for(&app, true);
+        }
     }
 
     McpService::upsert_server(&state, new_server)

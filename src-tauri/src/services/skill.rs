@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::timeout;
 
-use crate::app_config::{AppType, InstalledSkill, SkillApps, UnmanagedSkill};
+use crate::app_config::{AppSet, AppType, InstalledSkill, UnmanagedSkill};
 use crate::config::get_app_config_dir;
 use crate::database::Database;
 use crate::error::{ErrorCode, IpcError};
@@ -286,7 +286,7 @@ pub struct SkillMetadata {
 pub struct ImportSkillSelection {
     pub directory: String,
     #[serde(default)]
-    pub apps: SkillApps,
+    pub apps: AppSet,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -707,7 +707,7 @@ impl SkillService {
             repo_name: Some(skill.repo_name.clone()),
             repo_branch: Some(repo_branch),
             readme_url,
-            apps: SkillApps::only(current_app),
+            apps: AppSet::only(current_app),
             installed_at: chrono::Utc::now().timestamp(),
             content_hash,
             updated_at: 0,
@@ -1268,7 +1268,7 @@ impl SkillService {
 
         let mut restored_skill = metadata.skill;
         restored_skill.installed_at = Utc::now().timestamp();
-        restored_skill.apps = SkillApps::only(current_app);
+        restored_skill.apps = AppSet::only(current_app);
         restored_skill.updated_at = 0;
 
         Self::copy_dir_recursive(&backup_skill_dir, &restore_path)?;
@@ -2696,7 +2696,7 @@ impl SkillService {
                 repo_name: None,
                 repo_branch: None,
                 readme_url: None,
-                apps: SkillApps::only(current_app),
+                apps: AppSet::only(current_app),
                 installed_at: chrono::Utc::now().timestamp(),
                 content_hash,
                 updated_at: 0,
@@ -2999,7 +2999,7 @@ pub fn migrate_skills_to_ssot(db: &Arc<Database>) -> Result<usize> {
         };
 
     let has_snapshot = !snapshot.is_empty();
-    let mut discovered: HashMap<String, SkillApps> = HashMap::new();
+    let mut discovered: HashMap<String, AppSet> = HashMap::new();
 
     if has_snapshot {
         for row in &snapshot {

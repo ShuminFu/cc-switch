@@ -1,8 +1,10 @@
 //! MCP 服务器数据访问对象
 //!
-//! 提供 MCP 服务器的 CRUD 操作。
+//! 提供 MCP 服务器的 CRUD 操作。应用启用状态存于关联表 `mcp_server_apps`
+//! （见 [`super::app_sets`]），本模块不按应用命名任何列。
 
-use crate::app_config::{McpApps, McpServer};
+use super::app_sets::MCP_SERVER_APPS;
+use crate::app_config::McpServer;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use indexmap::IndexMap;
@@ -12,70 +14,61 @@ impl Database {
     /// 获取所有 MCP 服务器
     pub fn get_all_mcp_servers(&self) -> Result<IndexMap<String, McpServer>, AppError> {
         let conn = lock_conn!(self.conn);
-        let mut stmt = conn.prepare(
-            "SELECT id, name, server_config, description, homepage, docs, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes
-             FROM mcp_servers
-             ORDER BY name ASC, id ASC"
-        ).map_err(|e| AppError::Database(e.to_string()))?;
+        let mut app_sets = MCP_SERVER_APPS.read_all(&conn)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, server_config, description, homepage, docs, tags
+                 FROM mcp_servers
+                 ORDER BY name ASC, id ASC",
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         let server_iter = stmt
             .query_map([], |row| {
-                let id: String = row.get(0)?;
-                let name: String = row.get(1)?;
-                let server_config_str: String = row.get(2)?;
-                let description: Option<String> = row.get(3)?;
-                let homepage: Option<String> = row.get(4)?;
-                let docs: Option<String> = row.get(5)?;
-                let tags_str: String = row.get(6)?;
-                let enabled_claude: bool = row.get(7)?;
-                let enabled_codex: bool = row.get(8)?;
-                let enabled_gemini: bool = row.get(9)?;
-                let enabled_grokbuild: bool = row.get(10)?;
-                let enabled_opencode: bool = row.get(11)?;
-                let enabled_hermes: bool = row.get(12)?;
-
-                let server = serde_json::from_str(&server_config_str).unwrap_or_default();
-                let tags = serde_json::from_str(&tags_str).unwrap_or_default();
-
-                Ok((
-                    id.clone(),
-                    McpServer {
-                        id,
-                        name,
-                        server,
-                        apps: McpApps {
-                            claude: enabled_claude,
-                            codex: enabled_codex,
-                            gemini: enabled_gemini,
-                            grokbuild: enabled_grokbuild,
-                            opencode: enabled_opencode,
-                            hermes: enabled_hermes,
-                        },
-                        description,
-                        homepage,
-                        docs,
-                        tags,
-                    },
-                ))
+                let server_config_str: String = row.get("server_config")?;
+                let tags_str: String = row.get("tags")?;
+                Ok(McpServer {
+                    id: row.get("id")?,
+                    name: row.get("name")?,
+                    server: serde_json::from_str(&server_config_str).unwrap_or_default(),
+                    apps: Default::default(),
+                    description: row.get("description")?,
+                    homepage: row.get("homepage")?,
+                    docs: row.get("docs")?,
+                    tags: serde_json::from_str(&tags_str).unwrap_or_default(),
+                })
             })
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let mut servers = IndexMap::new();
         for server_res in server_iter {
-            let (id, server) = server_res.map_err(|e| AppError::Database(e.to_string()))?;
-            servers.insert(id, server);
+            let mut server = server_res.map_err(|e| AppError::Database(e.to_string()))?;
+            server.apps = app_sets.remove(&server.id).unwrap_or_default();
+            servers.insert(server.id.clone(), server);
         }
         Ok(servers)
     }
 
     /// 保存 MCP 服务器
     pub fn save_mcp_server(&self, server: &McpServer) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .savepoint()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Self::save_mcp_server_on_conn(&tx, server)?;
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 在给定连接（通常是事务）上保存 MCP 服务器及其应用启用状态
+    pub(crate) fn save_mcp_server_on_conn(
+        conn: &rusqlite::Connection,
+        server: &McpServer,
+    ) -> Result<(), AppError> {
         conn.execute(
             "INSERT OR REPLACE INTO mcp_servers (
-                id, name, server_config, description, homepage, docs, tags,
-                enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                id, name, server_config, description, homepage, docs, tags
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 server.id,
                 server.name,
@@ -87,23 +80,22 @@ impl Database {
                 server.docs,
                 serde_json::to_string(&server.tags)
                     .map_err(|e| AppError::Database(format!("Failed to serialize tags: {e}")))?,
-                server.apps.claude,
-                server.apps.codex,
-                server.apps.gemini,
-                server.apps.grokbuild,
-                server.apps.opencode,
-                server.apps.hermes,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
-        Ok(())
+        MCP_SERVER_APPS.write(conn, &server.id, &server.apps)
     }
 
     /// 删除 MCP 服务器
     pub fn delete_mcp_server(&self, id: &str) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        conn.execute("DELETE FROM mcp_servers WHERE id = ?1", params![id])
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .savepoint()
             .map_err(|e| AppError::Database(e.to_string()))?;
+        tx.execute("DELETE FROM mcp_servers WHERE id = ?1", params![id])
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        MCP_SERVER_APPS.delete(&tx, id)?;
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 }

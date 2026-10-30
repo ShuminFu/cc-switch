@@ -13,6 +13,7 @@
 mod baseline;
 mod legacy;
 mod v016;
+mod v017;
 
 use super::{Database, SCHEMA_VERSION};
 use crate::error::AppError;
@@ -155,6 +156,13 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "startup repairs as a numbered step and spend-limit window index",
         db_compat: DbCompatImpact::Additive,
         up: |conn, _| v016::apply(conn),
+    },
+    Migration {
+        version: 17,
+        name:
+            "mcp_server_apps / skill_apps join tables and proxy_config without the app_type CHECK",
+        db_compat: DbCompatImpact::Additive,
+        up: |conn, _| v017::apply(conn),
     },
 ];
 

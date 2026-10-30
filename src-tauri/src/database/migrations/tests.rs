@@ -388,3 +388,90 @@ fn migrate_v14_to_v15_adds_grokbuild_skill_and_mcp_flags() -> Result<(), AppErro
 
     Ok(())
 }
+
+#[test]
+fn migrate_v16_to_v17_backfills_join_tables_and_drops_proxy_config_check() -> Result<(), AppError> {
+    let conn = Connection::open_in_memory()?;
+    Database::apply_schema_migrations_up_to(&conn, 16)?;
+    conn.execute_batch(
+        "INSERT INTO mcp_servers (id, name, server_config, enabled_claude, enabled_codex, enabled_hermes)
+            VALUES ('m1', 'm1', '{}', 1, 0, 1), ('m2', 'm2', '{}', 0, 0, 0);
+         INSERT INTO skills (id, name, directory, installed_at, enabled_gemini, enabled_grokbuild)
+            VALUES ('s1', 's1', 's1', 1, 1, 1);
+         UPDATE proxy_config SET listen_port = 23456, max_retries = 9 WHERE app_type = 'codex';",
+    )?;
+    let proxy_before: Vec<(String, i64, i64)> = conn
+        .prepare("SELECT app_type, listen_port, max_retries FROM proxy_config ORDER BY app_type")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    assert!(
+        conn.execute("INSERT INTO proxy_config (app_type) VALUES ('ninth')", [])
+            .is_err(),
+        "v16 still has the app_type CHECK"
+    );
+
+    Database::apply_schema_migrations_on_conn(&conn)?;
+
+    let pairs = |sql: &str| -> Result<Vec<String>, AppError> {
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(rows)
+    };
+    assert_eq!(
+        pairs("SELECT server_id || ':' || app_type FROM mcp_server_apps ORDER BY 1")?,
+        ["m1:claude", "m1:hermes"]
+    );
+    assert_eq!(
+        pairs("SELECT skill_id || ':' || app_type FROM skill_apps ORDER BY 1")?,
+        ["s1:gemini", "s1:grokbuild"]
+    );
+    // 旧列保留不变（双写一个版本）
+    let legacy: (i64, i64) = conn.query_row(
+        "SELECT enabled_claude, enabled_hermes FROM mcp_servers WHERE id = 'm1'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(legacy, (1, 1));
+
+    let proxy_after: Vec<(String, i64, i64)> = conn
+        .prepare("SELECT app_type, listen_port, max_retries FROM proxy_config ORDER BY app_type")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    assert_eq!(
+        proxy_after, proxy_before,
+        "proxy_config rows survive the rebuild"
+    );
+    let ddl: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'proxy_config'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert!(!ddl.contains("CHECK"), "CHECK must be gone: {ddl}");
+    conn.execute("INSERT INTO proxy_config (app_type) VALUES ('ninth')", [])?;
+
+    Ok(())
+}
+
+/// 旧库可能缺少部分 `enabled_<slug>` 列（例如 v15 之前没有 grokbuild）：回填只用存在的列
+#[test]
+fn migrate_v16_to_v17_backfill_tolerates_missing_legacy_columns() -> Result<(), AppError> {
+    let conn = Connection::open_in_memory()?;
+    conn.execute_batch(
+        "CREATE TABLE mcp_servers (id TEXT PRIMARY KEY, enabled_codex BOOLEAN NOT NULL DEFAULT 0);
+         INSERT INTO mcp_servers (id, enabled_codex) VALUES ('m1', 1);",
+    )?;
+    Database::set_user_version(&conn, 16)?;
+
+    Database::apply_schema_migrations_on_conn(&conn)?;
+
+    let app: String = conn.query_row(
+        "SELECT app_type FROM mcp_server_apps WHERE server_id = 'm1'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(app, "codex");
+    assert!(Database::table_exists(&conn, "skill_apps")?);
+    Ok(())
+}

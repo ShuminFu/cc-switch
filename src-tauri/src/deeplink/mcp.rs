@@ -4,7 +4,7 @@
 
 use super::utils::decode_base64_param;
 use super::DeepLinkImportRequest;
-use crate::app_config::{McpApps, McpServer};
+use crate::app_config::{AppSet, AppType, McpServer};
 use crate::error::AppError;
 use crate::services::McpService;
 use crate::store::AppState;
@@ -55,7 +55,7 @@ pub fn import_mcp_from_deeplink(
         .as_ref()
         .ok_or_else(|| AppError::InvalidInput("Missing 'apps' parameter for MCP".to_string()))?;
 
-    // Parse apps into McpApps struct
+    // Parse apps into an AppSet
     let target_apps = parse_mcp_apps(apps_str)?;
 
     // Extract config
@@ -150,29 +150,22 @@ pub fn import_mcp_from_deeplink(
     })
 }
 
-/// Parse apps string into McpApps struct
-pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<McpApps, AppError> {
-    let mut apps = McpApps {
-        claude: false,
-        codex: false,
-        gemini: false,
-        grokbuild: false,
-        opencode: false,
-        hermes: false,
-    };
+/// Parse apps string into an AppSet
+pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<AppSet, AppError> {
+    let mut apps = AppSet::default();
 
     for app in apps_str.split(',') {
         match app.trim() {
-            "claude" => apps.claude = true,
-            "codex" => apps.codex = true,
-            "gemini" => apps.gemini = true,
-            "grokbuild" | "grok" => apps.grokbuild = true,
-            "opencode" => apps.opencode = true,
+            "claude" => apps.set_enabled_for(&AppType::Claude, true),
+            "codex" => apps.set_enabled_for(&AppType::Codex, true),
+            "gemini" => apps.set_enabled_for(&AppType::Gemini, true),
+            "grokbuild" | "grok" => apps.set_enabled_for(&AppType::GrokBuild, true),
+            "opencode" => apps.set_enabled_for(&AppType::OpenCode, true),
             "openclaw" => {
                 // OpenClaw doesn't support MCP, ignore silently
                 log::debug!("OpenClaw doesn't support MCP, ignoring in apps parameter");
             }
-            "hermes" => apps.hermes = true,
+            "hermes" => apps.set_enabled_for(&AppType::Hermes, true),
             other => {
                 return Err(AppError::InvalidInput(format!(
                     "Invalid app in 'apps': {other}"
@@ -190,12 +183,8 @@ pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<McpApps, AppError> {
     Ok(apps)
 }
 
-fn merge_mcp_apps(existing: &McpApps, target: &McpApps) -> McpApps {
-    let mut merged = existing.clone();
-    for app in target.enabled_apps() {
-        merged.set_enabled_for(&app, true);
-    }
-    merged
+fn merge_mcp_apps(existing: &AppSet, target: &AppSet) -> AppSet {
+    existing.union(target)
 }
 
 #[cfg(test)]
@@ -204,25 +193,18 @@ mod tests {
 
     #[test]
     fn enabled_apps_merge_covers_every_supported_mcp_client() {
-        let existing = McpApps {
-            claude: true,
-            ..McpApps::default()
-        };
-        let target = McpApps {
-            codex: true,
-            gemini: true,
-            grokbuild: true,
-            opencode: true,
-            hermes: true,
-            ..McpApps::default()
-        };
+        let existing = AppSet::only(&AppType::Claude);
+        let target = AppSet::from_apps(&[
+            AppType::Codex,
+            AppType::Gemini,
+            AppType::GrokBuild,
+            AppType::OpenCode,
+            AppType::Hermes,
+        ]);
         let merged = merge_mcp_apps(&existing, &target);
 
-        assert!(merged.claude);
-        assert!(merged.codex);
-        assert!(merged.gemini);
-        assert!(merged.grokbuild);
-        assert!(merged.opencode);
-        assert!(merged.hermes);
+        for d in crate::apps::registry::with_caps(crate::apps::AppCaps::MCP) {
+            assert!(merged.is_enabled_for(&d.app), "{}", d.slug);
+        }
     }
 }

@@ -55,6 +55,7 @@ const USER_DATA_TABLES: &[&str] = &[
     "providers",
     "provider_endpoints",
     "mcp_servers",
+    "mcp_server_apps",
     "prompts",
     "skill_repos",
     "settings",
@@ -65,6 +66,7 @@ const USER_DATA_TABLES: &[&str] = &[
     "session_log_sync",
     "profiles",
     "skills",
+    "skill_apps",
     "proxy_config",
     "schema_migrations",
 ];
@@ -978,4 +980,307 @@ fn legacy_config_json_v36_per_app_mcp_migrates() {
     drop(conn);
 
     assert_second_init_is_noop(name);
+}
+
+// ---------------------------------------------------------------------------
+// MCP / Skill 应用启用关联表（CCS-156）
+// ---------------------------------------------------------------------------
+
+mod dao {
+    use super::*;
+    use cc_switch_lib::{AppSet, AppType, InstalledSkill, McpServer};
+
+    /// v17 之前每应用一列的旧启用列 `enabled_<slug>`
+    const LEGACY_FLAG_APPS: &[&str] = &[
+        "claude",
+        "codex",
+        "gemini",
+        "grokbuild",
+        "opencode",
+        "hermes",
+    ];
+
+    /// v16 DAO 读取 MCP 启用状态的原始查询（较旧构建读取新 dump 时用的就是它）
+    const V16_MCP_SELECT: &str = "SELECT id, enabled_claude, enabled_codex, enabled_gemini, \
+        enabled_grokbuild, enabled_opencode, enabled_hermes FROM mcp_servers ORDER BY id";
+    /// v16 DAO 读取 Skill 启用状态的原始查询
+    const V16_SKILL_SELECT: &str = "SELECT id, enabled_claude, enabled_codex, enabled_gemini, \
+        enabled_grokbuild, enabled_opencode, enabled_hermes FROM skills ORDER BY id";
+
+    type Flags = BTreeMap<String, BTreeSet<String>>;
+
+    fn slugs(apps: &AppSet) -> BTreeSet<String> {
+        apps.iter().map(|app| app.as_str().to_string()).collect()
+    }
+
+    /// 按旧的 `enabled_<slug>` 列读取每行启用的应用（只看表中存在的列）
+    fn legacy_flags(conn: &Connection, table: &str) -> Flags {
+        if !table_exists(conn, table) {
+            return Flags::new();
+        }
+        let columns: BTreeSet<String> = {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info(\"{table}\")"))
+                .expect("table_info");
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .expect("query table_info")
+                .collect::<Result<_, _>>()
+                .expect("read table_info")
+        };
+        if !columns.contains("id") {
+            return Flags::new();
+        }
+        let mut flags = Flags::new();
+        let ids: Vec<String> = query_strings(conn, &format!("SELECT id FROM \"{table}\""));
+        for id in ids {
+            let mut enabled = BTreeSet::new();
+            for slug in LEGACY_FLAG_APPS {
+                let column = format!("enabled_{slug}");
+                if !columns.contains(&column) {
+                    continue;
+                }
+                let on: bool = conn
+                    .query_row(
+                        &format!("SELECT \"{column}\" FROM \"{table}\" WHERE id = ?1"),
+                        [&id],
+                        |row| row.get(0),
+                    )
+                    .expect("read legacy flag");
+                if on {
+                    enabled.insert(slug.to_string());
+                }
+            }
+            flags.insert(id, enabled);
+        }
+        flags
+    }
+
+    fn dao_flags(db: &Database) -> (Flags, Flags) {
+        let mcp = db
+            .get_all_mcp_servers()
+            .expect("read mcp servers")
+            .into_iter()
+            .map(|(id, server)| (id, slugs(&server.apps)))
+            .collect();
+        let skills = db
+            .get_all_installed_skills()
+            .expect("read skills")
+            .into_iter()
+            .map(|(id, skill)| (id, slugs(&skill.apps)))
+            .collect();
+        (mcp, skills)
+    }
+
+    /// 用 v16 DAO 的原始查询读取（不依赖关联表）
+    fn v16_reader_flags(conn: &Connection, sql: &str) -> Flags {
+        let mut stmt = conn.prepare(sql).expect("prepare v16 select");
+        stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let mut enabled = BTreeSet::new();
+            for (i, slug) in LEGACY_FLAG_APPS.iter().enumerate() {
+                if row.get::<_, bool>(i + 1)? {
+                    enabled.insert(slug.to_string());
+                }
+            }
+            Ok((id, enabled))
+        })
+        .expect("query v16 select")
+        .collect::<Result<_, _>>()
+        .expect("read v16 select")
+    }
+
+    fn server(id: &str, apps: &[AppType]) -> McpServer {
+        McpServer {
+            id: id.to_string(),
+            name: id.to_string(),
+            server: serde_json::json!({ "type": "stdio", "command": "echo" }),
+            apps: AppSet::from_apps(apps),
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        }
+    }
+
+    fn skill(id: &str, apps: &[AppType]) -> InstalledSkill {
+        InstalledSkill {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: None,
+            directory: id.to_string(),
+            repo_owner: None,
+            repo_name: None,
+            repo_branch: None,
+            readme_url: None,
+            apps: AppSet::from_apps(apps),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        }
+    }
+
+    /// 每个旧版本 fixture 升级后，DAO 读到的应用启用状态与 fixture 旧列一致（从旧列回填）
+    #[test]
+    fn every_fixture_keeps_mcp_and_skill_app_flags() {
+        for (version, sql_path) in db_fixtures() {
+            let label = format!("v{version} fixture");
+            let _env = TestEnv::new();
+            let path = db_path();
+            std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+            load_fixture(&open(&path), &sql_path);
+            let before = open(&path);
+            let expected_mcp = legacy_flags(&before, "mcp_servers");
+            let expected_skills = legacy_flags(&before, "skills");
+            drop(before);
+
+            let db = Database::init().unwrap_or_else(|e| panic!("{label}: init failed: {e}"));
+            let (mcp, skills) = dao_flags(&db);
+            assert_eq!(mcp, expected_mcp, "{label}: MCP app flags");
+            assert_eq!(skills, expected_skills, "{label}: skill app flags");
+            if version >= 3 {
+                assert!(
+                    mcp.values().chain(skills.values()).any(|s| !s.is_empty()),
+                    "{label}: fixture should have at least one enabled flag"
+                );
+            }
+        }
+    }
+
+    /// 较旧构建读取新构建的 dump：旧列被双写，v16 的原始查询读到的启用状态与 DAO 一致；
+    /// 由 v16 fixture 升级来的库导入这份 dump 后也保留启用状态
+    #[test]
+    fn older_readers_of_a_new_dump_keep_app_flags() {
+        let _env = TestEnv::new();
+        let db = Database::init().expect("init fresh database");
+        db.save_mcp_server(&server(
+            "m1",
+            &[AppType::Claude, AppType::Gemini, AppType::Hermes],
+        ))
+        .expect("save m1");
+        db.save_mcp_server(&server("m2", &[])).expect("save m2");
+        db.save_skill(&skill("s1", &[AppType::Codex, AppType::OpenCode]))
+            .expect("save s1");
+        db.update_skill_apps(
+            "s1",
+            &AppSet::from_apps(&[AppType::GrokBuild, AppType::OpenCode]),
+        )
+        .expect("update s1 apps");
+        let expected = dao_flags(&db);
+        let dump = db.export_sql_string().expect("export dump");
+        drop(db);
+
+        let raw = Connection::open_in_memory().expect("open memory db");
+        raw.execute_batch(&dump).expect("load dump");
+        assert_eq!(
+            v16_reader_flags(&raw, V16_MCP_SELECT),
+            expected.0,
+            "v16 MCP reader"
+        );
+        assert_eq!(
+            v16_reader_flags(&raw, V16_SKILL_SELECT),
+            expected.1,
+            "v16 skill reader"
+        );
+
+        let _env = TestEnv::new();
+        let path = db_path();
+        std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+        load_fixture(&open(&path), &fixtures_dir().join("db/v16.sql"));
+        let db = Database::init().expect("migrate v16 fixture");
+        db.import_sql_string(&dump).expect("import new dump");
+        assert_eq!(dao_flags(&db), expected, "after importing the new dump");
+    }
+
+    /// 较旧构建上传的 dump（只有旧列，没有关联表）被新构建导入时，启用状态从旧列回填
+    #[test]
+    fn new_build_importing_an_older_dump_keeps_app_flags() {
+        let fixture_path = fixtures_dir().join("db/v16.sql");
+        let fixture = std::fs::read_to_string(&fixture_path).expect("read v16");
+        let raw = Connection::open_in_memory().expect("open memory db");
+        load_fixture(&raw, &fixture_path);
+        let expected = (
+            legacy_flags(&raw, "mcp_servers"),
+            legacy_flags(&raw, "skills"),
+        );
+        assert!(!expected.0.is_empty(), "v16 fixture has MCP servers");
+
+        let _env = TestEnv::new();
+        let db = Database::init().expect("init fresh database");
+        // 改成 CC Switch 导出的形状：同样的头部、加载期间关闭外键检查，
+        // 且不含 sqlite_* 内部表（dump_sql 会跳过它们，导入也不允许写入）
+        let body: String = fixture
+            .lines()
+            .filter(|line| !line.contains("\"sqlite_sequence\""))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        db.import_sql_string(&format!(
+            "-- CC Switch SQLite 导出\nPRAGMA foreign_keys=OFF;\n{body}"
+        ))
+        .expect("import v16 dump");
+        assert_eq!(dao_flags(&db), expected);
+    }
+
+    /// 新增第 9 个应用不需要 Schema 迁移：关联表与 proxy_config 都接受任意 app_type，
+    /// 本构建保存时保留它不认识的应用的行，导出 / 导入也原样带上
+    #[test]
+    fn ninth_app_needs_no_migration() {
+        let _env = TestEnv::new();
+        let db = Database::init().expect("init fresh database");
+        db.save_mcp_server(&server("m1", &[AppType::Claude]))
+            .expect("save m1");
+        db.save_skill(&skill("s1", &[AppType::Claude]))
+            .expect("save s1");
+        let schema_before = schema_shape(&open(&db_path()));
+
+        let conn = open(&db_path());
+        conn.execute_batch(
+            "INSERT INTO mcp_server_apps (server_id, app_type) VALUES ('m1', 'ninth');
+             INSERT INTO skill_apps (skill_id, app_type) VALUES ('s1', 'ninth');
+             INSERT INTO proxy_config (app_type) VALUES ('ninth');",
+        )
+        .expect("a new app_type needs no DDL");
+        drop(conn);
+
+        // 本构建不认识 ninth：读取忽略，保存时保留
+        let servers = db.get_all_mcp_servers().expect("read servers");
+        assert_eq!(
+            slugs(&servers["m1"].apps),
+            BTreeSet::from(["claude".to_string()])
+        );
+        db.save_mcp_server(&server("m1", &[AppType::Codex]))
+            .expect("save m1 again");
+        db.update_skill_apps("s1", &AppSet::default())
+            .expect("update s1 apps");
+
+        let dump = db.export_sql_string().expect("export dump");
+        let _env2 = TestEnv::new();
+        let imported = Database::init().expect("init second database");
+        imported.import_sql_string(&dump).expect("import dump");
+        drop(imported);
+
+        let conn = open(&db_path());
+        assert_eq!(
+            query_strings(
+                &conn,
+                "SELECT server_id || ':' || app_type FROM mcp_server_apps ORDER BY 1"
+            ),
+            ["m1:codex", "m1:ninth"]
+        );
+        assert_eq!(
+            query_strings(
+                &conn,
+                "SELECT skill_id || ':' || app_type FROM skill_apps ORDER BY 1"
+            ),
+            ["s1:ninth"]
+        );
+        assert_eq!(
+            query_strings(
+                &conn,
+                "SELECT app_type FROM proxy_config WHERE app_type = 'ninth'"
+            ),
+            ["ninth"]
+        );
+        assert_eq!(user_version(&conn), SCHEMA_VERSION);
+        assert_schema_eq("ninth app", &schema_shape(&conn), &schema_before);
+    }
 }

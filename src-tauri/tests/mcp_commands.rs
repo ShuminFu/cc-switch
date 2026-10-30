@@ -8,8 +8,8 @@ use serde_json::json;
 
 use cc_switch_lib::{
     get_claude_mcp_path, get_claude_mcp_status, get_claude_settings_path,
-    import_default_config_test_hook, read_claude_mcp_config, update_settings, AppError,
-    AppSettings, AppType, McpApps, McpServer, McpService, MultiAppConfig,
+    import_default_config_test_hook, read_claude_mcp_config, update_settings, AppError, AppSet,
+    AppSettings, AppType, McpServer, McpService, MultiAppConfig,
 };
 
 #[path = "support.rs"]
@@ -137,7 +137,7 @@ fn import_mcp_from_claude_creates_config_and_enables_servers() {
         .get("echo")
         .expect("server imported into unified structure");
     assert!(
-        entry.apps.claude,
+        entry.apps.is_enabled_for(&AppType::Claude),
         "imported server should have Claude app enabled"
     );
 
@@ -219,14 +219,7 @@ command = "echo"
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: true,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Codex]),
             description: None,
             homepage: None,
             docs: None,
@@ -247,10 +240,13 @@ command = "echo"
     let servers = state.db.get_all_mcp_servers().expect("get all mcp servers");
     let shared = servers.get("shared").expect("shared server exists");
     assert!(
-        shared.apps.claude,
+        shared.apps.is_enabled_for(&AppType::Claude),
         "import should enable Claude in database"
     );
-    assert!(shared.apps.codex, "existing Codex flag should be preserved");
+    assert!(
+        shared.apps.is_enabled_for(&AppType::Codex),
+        "existing Codex flag should be preserved"
+    );
 }
 
 #[test]
@@ -327,7 +323,7 @@ fn import_from_all_apps_reports_broken_app_but_imports_the_rest() {
         .get("alpha")
         .expect("claude server imported despite codex failure");
     assert!(
-        entry.apps.claude,
+        entry.apps.is_enabled_for(&AppType::Claude),
         "imported server should have Claude app enabled"
     );
 }
@@ -361,14 +357,7 @@ fn set_mcp_enabled_for_codex_writes_live_config() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: false, // 初始未启用
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,
@@ -385,7 +374,7 @@ fn set_mcp_enabled_for_codex_writes_live_config() {
     let servers = state.db.get_all_mcp_servers().expect("get all mcp servers");
     let entry = servers.get("codex-server").expect("codex server exists");
     assert!(
-        entry.apps.codex,
+        entry.apps.is_enabled_for(&AppType::Codex),
         "server should have Codex app enabled after toggle"
     );
 
@@ -426,14 +415,7 @@ fn enabling_codex_mcp_skips_when_codex_dir_missing() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,
@@ -471,14 +453,7 @@ fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: true,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Claude]),
             description: None,
             homepage: None,
             docs: None,
@@ -506,14 +481,7 @@ fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,
@@ -570,8 +538,14 @@ command = "echo"
 
     let servers = state.db.get_all_mcp_servers().expect("get all mcp servers");
     let entry = servers.get("shared").expect("shared server exists");
-    assert!(entry.apps.claude, "shared should enable Claude");
-    assert!(entry.apps.codex, "shared should enable Codex");
+    assert!(
+        entry.apps.is_enabled_for(&AppType::Claude),
+        "shared should enable Claude"
+    );
+    assert!(
+        entry.apps.is_enabled_for(&AppType::Codex),
+        "shared should enable Codex"
+    );
 }
 
 #[test]
@@ -673,7 +647,10 @@ fn import_mcp_from_gemini_sse_url_only_is_valid() {
 
     let servers = state.db.get_all_mcp_servers().expect("get all mcp servers");
     let entry = servers.get("sse-server").expect("sse-server exists");
-    assert!(entry.apps.gemini, "imported server should enable Gemini");
+    assert!(
+        entry.apps.is_enabled_for(&AppType::Gemini),
+        "imported server should enable Gemini"
+    );
     assert_eq!(
         entry.server.get("type").and_then(|v| v.as_str()),
         Some("sse"),
@@ -706,14 +683,7 @@ fn enabling_gemini_mcp_skips_when_gemini_dir_missing() {
                 "type": "sse",
                 "url": "https://example.com/sse"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,
@@ -761,14 +731,7 @@ fn enabling_claude_mcp_skips_when_claude_config_absent() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,
@@ -816,14 +779,7 @@ fn explicit_default_claude_dir_keeps_default_split_mcp_path() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: true,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Claude]),
             description: None,
             homepage: None,
             docs: None,
@@ -872,14 +828,7 @@ fn custom_claude_dir_writes_mcp_inside_config_dir() {
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: true,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Claude]),
             description: None,
             homepage: None,
             docs: None,
@@ -951,14 +900,7 @@ fn custom_claude_dir_sync_does_not_copy_default_profile() {
                 "type": "stdio",
                 "command": "custom-command"
             }),
-            apps: McpApps {
-                claude: true,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Claude]),
             description: None,
             homepage: None,
             docs: None,
@@ -1088,14 +1030,7 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,
@@ -1111,14 +1046,7 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
                 "type": "stdio",
                 "command": "managed"
             }),
-            apps: McpApps {
-                claude: true,
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Claude]),
             description: None,
             homepage: None,
             docs: None,
@@ -1158,14 +1086,7 @@ fn upsert_mcp_server_rejects_stdio_spec_without_command_before_saving() {
         id: id.to_string(),
         name: id.to_string(),
         server,
-        apps: McpApps {
-            claude: false,
-            codex: false,
-            gemini: false,
-            grokbuild: false,
-            opencode: false,
-            hermes: false,
-        },
+        apps: AppSet::default(),
         description: None,
         homepage: None,
         docs: None,
