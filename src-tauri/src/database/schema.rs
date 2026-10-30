@@ -4,6 +4,7 @@
 
 use super::{lock_conn, Database, SCHEMA_VERSION};
 use crate::error::AppError;
+use crate::services::usage_stats::{backfill_dedup_hidden_sql, request_logs_dedup_trigger_sqls};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -207,18 +208,16 @@ impl Database {
             duration_ms INTEGER, status_code INTEGER NOT NULL, error_message TEXT, session_id TEXT,
             provider_type TEXT, is_streaming INTEGER NOT NULL DEFAULT 0,
             cost_multiplier TEXT NOT NULL DEFAULT '1.0', created_at INTEGER NOT NULL,
-            data_source TEXT NOT NULL DEFAULT 'proxy'
+            data_source TEXT NOT NULL DEFAULT 'proxy',
+            dedup_hidden INTEGER NOT NULL DEFAULT 0
         )", []).map_err(|e| AppError::Database(e.to_string()))?;
 
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON proxy_request_logs(provider_id, app_type)", [])
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        // (provider_id, app_type, created_at) 取代旧的 (provider_id, app_type) 索引，
+        // 让按 provider 的时间范围查询（额度检查）可以直接界定扫描范围。
+        // 旧索引与无人使用的 idx_request_logs_model 在 v15→v16 迁移中删除。
+        Self::create_request_logs_provider_index_if_supported(conn)?;
         conn.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON proxy_request_logs(created_at)", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_request_logs_model ON proxy_request_logs(model)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_request_logs_session ON proxy_request_logs(session_id)",
             [],
@@ -230,6 +229,7 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
         Self::create_request_logs_usage_indexes_if_supported(conn)?;
+        Self::create_request_logs_dedup_triggers_if_supported(conn)?;
 
         // 11. Model Pricing 表
         conn.execute(
@@ -505,6 +505,13 @@ impl Database {
                         log::info!("迁移数据库从 v14 到 v15（Skills/MCP 添加 Grok Build 支持）");
                         Self::migrate_v14_to_v15(conn)?;
                         Self::set_user_version(conn, 15)?;
+                    }
+                    15 => {
+                        log::info!(
+                            "迁移数据库从 v15 到 v16（持久化跨源去重标记，精简用量日志索引）"
+                        );
+                        Self::migrate_v15_to_v16(conn)?;
+                        Self::set_user_version(conn, 16)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -1506,6 +1513,43 @@ impl Database {
                 "enabled_grokbuild",
                 "BOOLEAN NOT NULL DEFAULT 0",
             )?;
+        }
+        Ok(())
+    }
+
+    /// v15 -> v16: persist the cross-source dedup decision and trim usage-log indexes.
+    ///
+    /// - 新增 `proxy_request_logs.dedup_hidden`，由 AFTER INSERT 触发器维护，并在此
+    ///   一次性回填，读侧聚合不再逐行执行相关子查询（PERF-08）；
+    /// - `idx_request_logs_provider(provider_id, app_type)` 被
+    ///   `idx_request_logs_provider_created_at` 取代；`idx_request_logs_model`
+    ///   没有任何查询使用（模型筛选走 COALESCE 表达式），删除以减少写放大（DB-04）；
+    /// - 新增零成本部分索引，成本回填只扫描候选行（DB-09）。
+    fn migrate_v15_to_v16(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "proxy_request_logs")? {
+            return Ok(());
+        }
+        Self::add_column_if_missing(
+            conn,
+            "proxy_request_logs",
+            "dedup_hidden",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        for index in ["idx_request_logs_provider", "idx_request_logs_model"] {
+            conn.execute(&format!("DROP INDEX IF EXISTS {index}"), [])
+                .map_err(|e| AppError::Database(format!("删除索引 {index} 失败: {e}")))?;
+        }
+        Self::create_request_logs_provider_index_if_supported(conn)?;
+        Self::create_request_logs_usage_indexes_if_supported(conn)?;
+        if !Self::create_request_logs_dedup_triggers_if_supported(conn)? {
+            return Ok(());
+        }
+
+        let hidden = conn
+            .execute(&backfill_dedup_hidden_sql(), [])
+            .map_err(|e| AppError::Database(format!("回填跨源去重标记失败: {e}")))?;
+        if hidden > 0 {
+            log::info!("已标记 {hidden} 条与 proxy 日志重复的会话用量行");
         }
         Ok(())
     }
@@ -2750,8 +2794,22 @@ impl Database {
 
     fn ensure_model_pricing_seeded_on_conn(conn: &Connection) -> Result<(), AppError> {
         // 每次启动都执行 INSERT OR IGNORE，增量追加新模型；仅修复仍等于旧内置值的定价。
-        Self::seed_model_pricing(conn)?;
-        Self::repair_current_model_pricing(conn)
+        // 数百条语句放进同一个 SAVEPOINT：只提交一次，而不是逐条 autocommit（DB-09）。
+        conn.execute("SAVEPOINT seed_model_pricing;", [])
+            .map_err(|e| AppError::Database(format!("开启定价种子 savepoint 失败: {e}")))?;
+        let result =
+            Self::seed_model_pricing(conn).and_then(|_| Self::repair_current_model_pricing(conn));
+        match result {
+            Ok(()) => conn
+                .execute("RELEASE seed_model_pricing;", [])
+                .map(|_| ())
+                .map_err(|e| AppError::Database(format!("提交定价种子失败: {e}"))),
+            Err(e) => {
+                conn.execute("ROLLBACK TO seed_model_pricing;", []).ok();
+                conn.execute("RELEASE seed_model_pricing;", []).ok();
+                Err(e)
+            }
+        }
     }
 
     // --- 辅助方法 ---
@@ -2816,7 +2874,67 @@ impl Database {
             [],
         )
         .map_err(|e| AppError::Database(format!("创建使用量去重表达式索引失败: {e}")))?;
+
+        if Self::has_column(conn, "proxy_request_logs", "total_cost_usd")? {
+            // 部分索引：只收录零成本行。WHERE 必须与
+            // `usage_stats::BACKFILL_ZERO_COST_CANDIDATES_SQL` 中的条件逐字一致，
+            // 规划器才会用它代替全表扫描。
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_request_logs_zero_cost
+                 ON proxy_request_logs(created_at)
+                 WHERE CAST(total_cost_usd AS REAL) <= 0",
+                [],
+            )
+            .map_err(|e| AppError::Database(format!("创建零成本用量索引失败: {e}")))?;
+        }
         Ok(())
+    }
+
+    fn create_request_logs_provider_index_if_supported(conn: &Connection) -> Result<(), AppError> {
+        for column in ["provider_id", "app_type", "created_at"] {
+            if !Self::has_column(conn, "proxy_request_logs", column)? {
+                return Ok(());
+            }
+        }
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_request_logs_provider_created_at
+             ON proxy_request_logs(provider_id, app_type, created_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(format!("创建 provider 时间索引失败: {e}")))?;
+        Ok(())
+    }
+
+    /// 创建维护 `dedup_hidden` 的触发器；旧表缺少所需列时跳过（由迁移补齐后再创建）。
+    /// 返回触发器是否已就绪。
+    pub(crate) fn create_request_logs_dedup_triggers_if_supported(
+        conn: &Connection,
+    ) -> Result<bool, AppError> {
+        if !Self::table_exists(conn, "proxy_request_logs")? {
+            return Ok(false);
+        }
+        let required_columns = [
+            "dedup_hidden",
+            "data_source",
+            "app_type",
+            "model",
+            "status_code",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_creation_tokens",
+            "created_at",
+        ];
+        for column in required_columns {
+            if !Self::has_column(conn, "proxy_request_logs", column)? {
+                return Ok(false);
+            }
+        }
+        for sql in request_logs_dedup_trigger_sqls() {
+            conn.execute(&sql, [])
+                .map_err(|e| AppError::Database(format!("创建跨源去重触发器失败: {e}")))?;
+        }
+        Ok(true)
     }
 
     fn validate_identifier(s: &str, kind: &str) -> Result<(), AppError> {
@@ -3019,6 +3137,107 @@ mod tests {
         assert_eq!(mcp_values, (1, 0));
         assert_eq!(skill_values, (1, 0));
 
+        Ok(())
+    }
+
+    fn request_log_index_names(conn: &Connection) -> Result<Vec<String>, AppError> {
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'index' AND tbl_name = 'proxy_request_logs' AND sql IS NOT NULL
+             ORDER BY name",
+        )?;
+        let names = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(names)
+    }
+
+    const EXPECTED_REQUEST_LOG_INDEXES: [&str; 7] = [
+        "idx_request_logs_app_created_at",
+        "idx_request_logs_created_at",
+        "idx_request_logs_dedup_lookup_expr",
+        "idx_request_logs_provider_created_at",
+        "idx_request_logs_session",
+        "idx_request_logs_status",
+        "idx_request_logs_zero_cost",
+    ];
+
+    #[test]
+    fn fresh_schema_has_expected_request_log_indexes_and_triggers() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        Database::create_tables_on_conn(&conn)?;
+        Database::apply_schema_migrations_on_conn(&conn)?;
+        assert_eq!(
+            request_log_index_names(&conn)?,
+            EXPECTED_REQUEST_LOG_INDEXES.to_vec()
+        );
+        let triggers: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'trigger' AND tbl_name = 'proxy_request_logs'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(triggers, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_v15_to_v16_backfills_dedup_flag_and_trims_indexes() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        // v15 形态：建表后去掉 dedup_hidden 相关对象，并恢复旧索引
+        Database::create_tables_on_conn(&conn)?;
+        conn.execute_batch(
+            "DROP TRIGGER trg_request_logs_dedup_session_insert;
+             DROP TRIGGER trg_request_logs_dedup_proxy_insert;
+             DROP INDEX idx_request_logs_provider_created_at;
+             DROP INDEX idx_request_logs_zero_cost;
+             ALTER TABLE proxy_request_logs DROP COLUMN dedup_hidden;
+             CREATE INDEX idx_request_logs_provider ON proxy_request_logs(provider_id, app_type);
+             CREATE INDEX idx_request_logs_model ON proxy_request_logs(model);",
+        )?;
+        let insert = "INSERT INTO proxy_request_logs (
+                request_id, provider_id, app_type, model, input_tokens, output_tokens,
+                cache_read_tokens, cache_creation_tokens, latency_ms, status_code,
+                created_at, data_source
+            ) VALUES (?1, 'p1', 'claude', 'claude-sonnet-4', 10, 20, 0, 0, 100, 200, ?2, ?3)";
+        conn.execute(insert, params!["proxy-1", 1_000_000i64, "proxy"])?;
+        conn.execute(insert, params!["session-dup", 1_000_030i64, "session_log"])?;
+        conn.execute(
+            insert,
+            params!["session-unique", 1_900_000i64, "session_log"],
+        )?;
+        Database::set_user_version(&conn, 15)?;
+
+        // 与启动顺序一致：先 create_tables（旧表缺列时不得建触发器），再迁移
+        Database::create_tables_on_conn(&conn)?;
+        Database::apply_schema_migrations_on_conn(&conn)?;
+
+        assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+        assert!(Database::has_column(
+            &conn,
+            "proxy_request_logs",
+            "dedup_hidden"
+        )?);
+        assert_eq!(
+            request_log_index_names(&conn)?,
+            EXPECTED_REQUEST_LOG_INDEXES.to_vec()
+        );
+        let mut stmt = conn.prepare(
+            "SELECT request_id FROM proxy_request_logs WHERE dedup_hidden = 1 ORDER BY request_id",
+        )?;
+        let hidden = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        assert_eq!(hidden, vec!["session-dup".to_string()]);
+
+        // 迁移后创建的触发器对新写入生效
+        conn.execute(insert, params!["proxy-2", 1_900_010i64, "proxy"])?;
+        let unique_hidden: i64 = conn.query_row(
+            "SELECT dedup_hidden FROM proxy_request_logs WHERE request_id = 'session-unique'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(unique_hidden, 1);
         Ok(())
     }
 }

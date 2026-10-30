@@ -47,12 +47,85 @@ use crate::error::AppError;
 use rusqlite::{hooks::Action, Connection};
 use serde::Serialize;
 use std::sync::Mutex;
+use std::time::Duration;
 
 // DAO 方法通过 impl Database 提供，无需额外导出
 
 /// 当前 Schema 版本号
 /// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-pub(crate) const SCHEMA_VERSION: i32 = 15;
+pub(crate) const SCHEMA_VERSION: i32 = 16;
+
+/// 主库连接的 busy_timeout：其它进程/连接（备份、外部工具）短暂持有写锁时等待而不是立即报错。
+pub(crate) const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// 页缓存大小（负数 = KiB），约 16 MiB。
+const DB_CACHE_SIZE_KIB: i64 = 16_000;
+/// WAL 文件在检查点后截断到的上限，避免长时间运行后 -wal 文件无限增长。
+const DB_JOURNAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
+/// 设为 `1`/`true` 时不启用 WAL（例如数据库目录位于不支持共享内存的网络盘上）。
+const DISABLE_WAL_ENV: &str = "CC_SWITCH_DISABLE_WAL";
+
+fn wal_disabled_by_env() -> bool {
+    std::env::var(DISABLE_WAL_ENV)
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+}
+
+/// 为每个主库连接应用统一的连接级 PRAGMA。
+///
+/// - 文件库：`journal_mode=WAL`（持久化在库文件中），读写互不阻塞，提交只需一次 fsync；
+///   WAL 下 `synchronous=NORMAL` 仍保证崩溃一致性（断电只可能丢最后几个事务）。
+///   若 WAL 不可用（或被环境变量禁用）则保持回滚日志 + `synchronous=FULL`，不降低持久性。
+/// - 内存库：journal_mode 固定为 memory，只应用其余设置。
+/// - 所有连接：`foreign_keys=ON`、`busy_timeout`、`cache_size`、`temp_store=MEMORY`。
+pub(crate) fn configure_connection(conn: &Connection, file_backed: bool) -> Result<(), AppError> {
+    let db_err = |e: rusqlite::Error| AppError::Database(format!("配置数据库连接失败: {e}"));
+
+    conn.busy_timeout(DB_BUSY_TIMEOUT).map_err(db_err)?;
+    conn.execute_batch(&format!(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA cache_size = -{DB_CACHE_SIZE_KIB};
+         PRAGMA temp_store = MEMORY;"
+    ))
+    .map_err(db_err)?;
+
+    let wal_active = if file_backed {
+        let requested = if wal_disabled_by_env() {
+            "DELETE"
+        } else {
+            "WAL"
+        };
+        match conn.query_row(&format!("PRAGMA journal_mode = {requested};"), [], |row| {
+            row.get::<_, String>(0)
+        }) {
+            Ok(mode) => {
+                let active = mode.eq_ignore_ascii_case("wal");
+                if requested == "WAL" && !active {
+                    log::warn!(
+                        "SQLite WAL 模式不可用（当前 journal_mode={mode}），继续使用回滚日志"
+                    );
+                }
+                active
+            }
+            Err(e) => {
+                log::warn!("设置 SQLite journal_mode={requested} 失败，保持默认: {e}");
+                false
+            }
+        }
+    } else {
+        false
+    };
+
+    let synchronous = if wal_active { "NORMAL" } else { "FULL" };
+    conn.execute_batch(&format!("PRAGMA synchronous = {synchronous};"))
+        .map_err(db_err)?;
+    if wal_active {
+        conn.execute_batch(&format!(
+            "PRAGMA journal_size_limit = {DB_JOURNAL_SIZE_LIMIT_BYTES};"
+        ))
+        .map_err(db_err)?;
+    }
+    Ok(())
+}
 
 /// 安全地序列化 JSON，避免 unwrap panic
 pub(crate) fn to_json_string<T: Serialize>(value: &T) -> Result<String, AppError> {
@@ -107,15 +180,15 @@ impl Database {
 
         let conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
 
-        // 启用外键约束
-        conn.execute("PRAGMA foreign_keys = ON;", [])
-            .map_err(|e| AppError::Database(e.to_string()))?;
         if !db_exists {
             // For a brand-new database, configure incremental auto-vacuum
-            // before creating any tables so no rebuild is needed later.
+            // before creating any tables (and before switching to WAL) so no
+            // rebuild is needed later.
             conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
+        // 外键、WAL、synchronous、busy_timeout、缓存等连接级设置
+        configure_connection(&conn, true)?;
         register_db_change_hook(&conn);
 
         let db = Self {
@@ -144,20 +217,10 @@ impl Database {
         }
         db.ensure_model_pricing_seeded()?;
 
-        // Startup cleanup: prune old logs and reclaim space
-        if let Err(e) = db.cleanup_old_stream_check_logs(7) {
-            log::warn!("Startup stream_check_logs cleanup failed: {e}");
-        }
-        if let Err(e) = db.rollup_and_prune(30) {
-            log::warn!("Startup rollup_and_prune failed: {e}");
-        }
-        // Reclaim disk space after cleanup
-        {
-            let conn = lock_conn!(db.conn);
-            if let Err(e) = conn.execute_batch("PRAGMA incremental_vacuum;") {
-                log::warn!("Startup incremental vacuum failed: {e}");
-            }
-        }
+        // 日志清理 / rollup+prune / 成本回填 / incremental_vacuum 不在这里同步执行：
+        // `periodic_backup_if_needed()` 会在启动后的后台任务里（lib.rs setup 的 async
+        // 块）以及每日定时器中执行同一套维护，init() 只做建表、迁移与定价种子，
+        // 避免启动耗时随 proxy_request_logs 规模增长（DB-09）。
 
         Ok(db)
     }
@@ -182,11 +245,9 @@ impl Database {
     pub fn memory() -> Result<Self, AppError> {
         let conn = Connection::open_in_memory().map_err(|e| AppError::Database(e.to_string()))?;
 
-        // 启用外键约束
-        conn.execute("PRAGMA foreign_keys = ON;", [])
-            .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
+        configure_connection(&conn, false)?;
         register_db_change_hook(&conn);
 
         let db = Self {
@@ -287,5 +348,97 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM prompts", [], |row| row.get(0))
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(count == 0)
+    }
+}
+
+#[cfg(test)]
+mod connection_pragma_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn pragma_i64(conn: &Connection, name: &str) -> i64 {
+        conn.query_row(&format!("PRAGMA {name};"), [], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("read PRAGMA {name}: {e}"))
+    }
+
+    fn pragma_string(conn: &Connection, name: &str) -> String {
+        conn.query_row(&format!("PRAGMA {name};"), [], |row| row.get(0))
+            .unwrap_or_else(|e| panic!("read PRAGMA {name}: {e}"))
+    }
+
+    #[test]
+    fn file_connection_uses_wal_and_tuned_pragmas() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("pragmas.db");
+        let conn = Connection::open(&path).expect("open file db");
+        configure_connection(&conn, true).expect("configure connection");
+
+        assert_eq!(pragma_string(&conn, "journal_mode"), "wal");
+        // synchronous: 1 = NORMAL
+        assert_eq!(pragma_i64(&conn, "synchronous"), 1);
+        assert_eq!(pragma_i64(&conn, "busy_timeout"), 5000);
+        assert_eq!(pragma_i64(&conn, "foreign_keys"), 1);
+        assert_eq!(pragma_i64(&conn, "cache_size"), -DB_CACHE_SIZE_KIB);
+        // temp_store: 2 = MEMORY
+        assert_eq!(pragma_i64(&conn, "temp_store"), 2);
+        assert_eq!(
+            pragma_i64(&conn, "journal_size_limit"),
+            DB_JOURNAL_SIZE_LIMIT_BYTES
+        );
+        drop(conn);
+
+        // WAL 持久化在库文件中：重新打开的连接（未调用 configure）仍是 WAL。
+        let reopened = Connection::open(&path).expect("reopen file db");
+        assert_eq!(pragma_string(&reopened, "journal_mode"), "wal");
+    }
+
+    #[test]
+    fn memory_connection_applies_pragmas_without_wal() {
+        let db = Database::memory().expect("memory db");
+        let conn = db.conn.lock().expect("lock");
+        assert_eq!(pragma_string(&conn, "journal_mode"), "memory");
+        // 非 WAL 时保持 FULL（2），不降低回滚日志模式下的持久性
+        assert_eq!(pragma_i64(&conn, "synchronous"), 2);
+        assert_eq!(pragma_i64(&conn, "busy_timeout"), 5000);
+        assert_eq!(pragma_i64(&conn, "foreign_keys"), 1);
+        assert_eq!(pragma_i64(&conn, "cache_size"), -DB_CACHE_SIZE_KIB);
+        assert_eq!(pragma_i64(&conn, "temp_store"), 2);
+        assert_eq!(
+            Database::get_auto_vacuum_mode(&conn).expect("auto_vacuum"),
+            2
+        );
+    }
+
+    #[test]
+    fn upgraded_file_db_switches_to_wal_and_can_still_enable_incremental_vacuum() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("legacy.db");
+        {
+            // 旧版本：回滚日志 + auto_vacuum=NONE，且已有表和数据
+            let conn = Connection::open(&path).expect("open legacy db");
+            conn.execute_batch("PRAGMA auto_vacuum = NONE;")
+                .expect("auto_vacuum none");
+            Database::create_tables_on_conn(&conn).expect("create tables");
+            Database::apply_schema_migrations_on_conn(&conn).expect("migrate");
+            assert_eq!(pragma_string(&conn, "journal_mode"), "delete");
+        }
+
+        let conn = Connection::open(&path).expect("reopen legacy db");
+        configure_connection(&conn, true).expect("configure connection");
+        assert_eq!(pragma_string(&conn, "journal_mode"), "wal");
+
+        // 启用 WAL 后仍可通过一次 VACUUM 切换到 INCREMENTAL auto_vacuum
+        let rebuilt =
+            Database::ensure_incremental_auto_vacuum_on_conn(&conn).expect("enable incremental");
+        assert!(rebuilt);
+        assert_eq!(
+            Database::get_auto_vacuum_mode(&conn).expect("auto_vacuum"),
+            2
+        );
+        assert_eq!(pragma_string(&conn, "journal_mode"), "wal");
+        assert_eq!(
+            Database::get_user_version(&conn).expect("user_version"),
+            SCHEMA_VERSION
+        );
     }
 }
