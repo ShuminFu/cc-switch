@@ -1,7 +1,7 @@
 # Secrets at rest and in sync
 
 This page covers how CC Switch protects credentials on disk and in cloud sync, what is
-already in place, and the remaining work for the provider API-key vault
+already in place, and how the opt-in provider API-key vault works
 (backlog items SEC-05, SEC-06, SVC-04, CMD-04, DB-02, PRODUCT-01).
 
 ## Threat model
@@ -102,68 +102,107 @@ Service `com.ccswitch.desktop`; accounts `sync.webdav.password`, `sync.s3.secret
 
 Code: `src-tauri/src/secrets/{mod.rs,sync_credentials.rs}`.
 
-## 4. Provider API-key vault (DB-02, PRODUCT-01): design and remaining steps
+## 4. Provider API-key vault (DB-02, PRODUCT-01)
 
-### Status
+Opt-in, in **Settings → Advanced → Data management → Store API keys in the system keychain**.
+Off by default. The setting (`providerSecretVault` in `settings.json`) is device-local and is
+never synced.
 
-`src-tauri/src/secrets/provider_vault.rs` implements and tests the building blocks:
+### What it does
 
-- Secret field detection (`*_API_KEY`, `*_AUTH_TOKEN`, `apiKey`, `access_token`,
-  `refresh_token`, `id_token`, `*_secret`, `password`, ...).
-- `extract`: moves the secrets of one `settings_config` into the keychain and replaces each one
-  with a string placeholder, `cc-switch-secret:v1:<app>/<provider id>/<JSON pointer>`. The JSON
-  keeps its shape, so readers never meet an unexpected type. All keychain writes happen first:
-  on failure the JSON is untouched and any entries already written are removed again.
-- `resolve`: returns a copy with the placeholders replaced, or fails as a whole if an entry is missing.
-- `restore`: the opposite migration. Placeholders are replaced and entries are deleted only
-  after every placeholder resolved.
-- `forget`: deletes a provider's entries.
-- `migrate_rows_to_vault` / `migrate_rows_from_vault`: bulk migration in either direction.
-  Each stops at the first failure and returns how many rows were done, so callers persist
-  exactly those rows.
+Secret fields of every provider's `settings_config` (`*_API_KEY`, `*_AUTH_TOKEN`, `apiKey`,
+`access_token`, `refresh_token`, `id_token`, `*_secret`, `password`, ...) and the `apiKey` of
+universal providers are stored in the OS keychain (same backend as section 3). The database
+keeps a string placeholder in their place:
 
-The vault is **not wired in** and there is **no user-facing setting yet**. A switch that does
-nothing would mislead users, so the setting is added together with the integration below.
-Once added, it must default to OFF.
+```text
+cc-switch-secret:v1:<app>/<provider id>/<JSON pointer>      (keychain account: provider/<ref>)
+cc-switch-secret:v1:universal/<id>/apiKey
+```
 
-### Remaining steps
+References are deterministic: the same provider and field map to the same keychain account on
+every device. The JSON keeps its shape, so code that expects a string never breaks.
 
-1. **Setting:** `providerSecretVault: bool` in `AppSettings`, default `false`. Device-local:
-   the setting is not synced.
-2. **DAO boundary** (`database/dao/providers.rs`). Read paths call `resolve` on
-   `settings_config` (cache resolved values per process). Write paths call `extract` when the
-   flag is on. Every other module keeps seeing plaintext. `universal_providers` and the
-   `settings` table (common-config snippets, `global_proxy_url` with `user:pass@`) need the
-   same treatment.
-3. **Toggle migration** (in a transaction, after a safety backup):
-   - On: `migrate_rows_to_vault`, then persist the migrated rows.
-   - Off: `migrate_rows_from_vault`, then persist.
-   - On partial failure, persist only the completed rows and report the rest. A mixed state
-     is valid, because placeholders and inline values can coexist.
-4. **Live files:** `services/provider/live.rs` and the per-app writers already receive
-   resolved configs through the DAO. Add a guard that refuses to write any string starting
-   with `cc-switch-secret:v1:` into a live file.
-5. **SQL export, sync and backups:** placeholders make these artifacts secret-free, but useless
-   on another machine. Options:
-   - (a) Resolve placeholders when exporting, and require sync encryption (section 2) when
-     the vault is on.
-   - (b) Add a `secrets.bin` artifact sealed with the sync key.
+### Where it is wired in
 
-   Option (a) is simpler and recommended. A backup restored on the same device works as long
-   as the keychain entries exist; `restore_from_backup` must check with `resolve` and warn
-   about missing entries.
+| Path                                                                                         | Behaviour                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DAO reads (`get_all_providers`, `get_provider_by_id`, `get_current_omo_provider`, universal) | `provider_vault::for_read` replaces placeholders with the real values, through a per-process cache. Live-config writers, the proxy, failover, usage scripts and the UI therefore always see real keys. A placeholder whose entry is missing stays as it is (an obviously invalid key) and a warning is logged. |
+| DAO writes (`save_provider`, `update_provider_settings_config`, universal save)              | With the vault on, `for_storage` writes the secrets to the keychain first and stores placeholders. If the keychain fails, the value is stored inline (as with the vault off) and a warning is logged; the settings panel reports it and **Retry** migrates it.                                                 |
+| Overwrite / field removed                                                                    | Keychain entries this provider owns that the new row no longer references are deleted (`forget_stale`).                                                                                                                                                                                                        |
+| Provider delete (incl. universal)                                                            | All entries owned by the provider (`<app>/<id>/...`) are deleted. Entries of other providers are never touched.                                                                                                                                                                                                |
+| Duplicate, deep-link import, usage scripts                                                   | They read through the DAO (real values) and save through it, so a duplicate gets its own entries under the new id; placeholders are never copied verbatim between providers.                                                                                                                                   |
 
-6. **Provider delete/duplicate:** call `forget` on delete. On duplicate, resolve and then
-   extract under the new id.
-7. **Deep-link import / usage scripts / proxy:** these already read through the DAO. Check
-   that none of them store placeholders back verbatim.
-8. **No-keychain fallback:** PRODUCT-01 asks for an encrypted file store when no Secret
-   Service exists. A file encrypted with a key stored next to it adds nothing against local
-   reads, so the recommended behaviour is to refuse enabling the vault when
-   `secrets::backend()` is unavailable, and to say so in the UI.
-9. **Tests:** DAO round-trip with the memory backend; toggle on/off migration over a seeded
-   DB; export/sync with the vault on; a guard test that no placeholder reaches a live file.
+### Switching on and off
 
-Even when complete, the vault does not remove plaintext keys from disk: the CLI config files
-that CC Switch writes for Claude Code, Codex, Gemini and others contain them by design. The
-vault mainly keeps keys out of `cc-switch.db`, its backups and SQL exports.
+`set_provider_secret_vault(enabled)` (`secrets::provider_vault_admin`):
+
+- **On:** probes the keychain (store, read back, delete). Without a working keychain — headless
+  Linux without a Secret Service, no D-Bus session, `CC_SWITCH_SECRET_BACKEND=none` — it is
+  **refused** with `secrets.vault.keychain_unavailable`, and the UI disables the switch with an
+  explanation. An encrypted file next to the database would add nothing against local reads,
+  so there is no file fallback. Otherwise: safety backup, flag on, then every row is migrated
+  (keychain writes first, then the rows in one transaction). If the keychain fails part-way,
+  the migrated rows are kept and the rest stays inline (reported, retry possible).
+- **Off:** flag off, safety backup, every resolvable placeholder is inlined and the rows are
+  persisted; only then are the keychain entries deleted. Placeholders whose entry cannot be
+  read stay and are listed in the panel: those keys must be re-entered.
+- Placeholders and inline values may coexist; every path handles the mixed state.
+- Whole-settings saves (`save_settings`) cannot change the flag; only this command does.
+
+`get_provider_secret_vault_status` reports the flag, the backend, keychain availability, and
+the number of vaulted, still-inline and unresolved secrets (with the affected providers).
+
+### SQL export, cloud sync and backups (decision)
+
+**Exports and sync bundles never contain resolved secrets while the vault is on.**
+
+- `export_sql_string` (Settings export) and `export_sql_string_for_sync` (WebDAV/S3) keep the
+  placeholders. Any secret still stored inline (keychain failure) is blanked in the export, never
+  written out. The live database is not changed by an export.
+- The SQL file starts with the usual header followed by an explicit warning:
+  `-- cc-switch-vault: N provider secret(s) live in the OS keychain of the exporting device ...`
+  and, if any were blanked, how many were left out.
+- **Keys are not carried to other devices.** On a device that does not have the keychain
+  entries, the user re-enters the keys. Section 2 encryption still protects everything else in
+  the bundle. A future `secrets.bin` artifact sealed with the sync key could carry them; it is
+  not implemented.
+
+Import, sync download and backup restore (`Database::adapt_imported_secrets`, run on the
+staging copy before it replaces the live database):
+
+- A placeholder whose entry is missing here takes the key **this device already holds** for the
+  same provider and field (inline, or from its own keychain). A sync download from a vault-on
+  device therefore never wipes the keys of a vault-off device.
+- With the vault on here, inline keys in the imported data move to this keychain.
+- With the vault off here, resolvable placeholders become inline values again.
+- What remains unresolved is logged and shown in the settings panel (re-enter those keys).
+
+Binary backups in `backups/` are copies of the database, so they hold placeholders. Restoring one
+on the same device works while the keychain entries exist; turning the vault off, or deleting a
+provider, removes entries, after which older backups show those keys as unresolved.
+
+### Not covered
+
+- The CLI config files that CC Switch writes for Claude Code, Codex, Gemini and others still
+  contain the active key by design. The vault keeps keys out of `cc-switch.db`, its backups,
+  SQL exports and sync bundles.
+- Secrets inside TOML strings (Codex `config` text, e.g. `experimental_bearer_token`), the
+  provider `meta` column (usage-script credentials), common-config snippets and
+  `global_proxy_url` (`user:pass@`, device-local and never synced) are not vaulted yet.
+- There is no write guard in the live-file writers: a placeholder can reach a live file only
+  when its entry is missing, and it is then an invalid key, not a crash.
+- Malware running as the same user can read the keychain entries (see the threat model).
+
+### Tests
+
+All tests use the in-memory backend (unit tests always; any process with
+`CC_SWITCH_TEST_HOME`, or `CC_SWITCH_SECRET_BACKEND=memory`). They cover: the
+placeholder/resolve/restore primitives, DAO round trips (reads return real values, rows hold
+placeholders), toggle on/off over a seeded database, deletion removing entries, universal
+providers, exports with the vault on (no secrets, warning present, inline secrets blanked), and a
+sync download onto a device that keeps its own key.
+
+Code: `src-tauri/src/secrets/{provider_vault.rs,provider_vault_admin.rs,commands.rs}`,
+`database/dao/{providers.rs,universal_providers.rs}`, `database/backup.rs`,
+`src/components/settings/SecretsVaultSettings.tsx`.

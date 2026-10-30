@@ -6,17 +6,19 @@
 //!   sync encryption passphrase out of `settings.json` into the OS keychain,
 //!   falling back to the previous plaintext behaviour (with a warning) when no
 //!   keychain is available.
-//! - [`provider_vault`]: the provider API-key vault abstraction (placeholders in
-//!   `settings_config`, values in the keychain). Not wired into the DAO yet; see
-//!   `docs/secrets-vault.md`.
+//! - [`provider_vault`]: the provider API-key vault (placeholders in
+//!   `settings_config`, values in the keychain), used by the provider DAO;
+//!   [`provider_vault_admin`] switches it on/off. See `docs/secrets-vault.md`.
 //!
 //! All keychain access goes through the [`SecretBackend`] trait so tests never
 //! touch the developer's real keychain: unit tests and any process with
 //! `CC_SWITCH_TEST_HOME` set use an in-memory backend unless
 //! `CC_SWITCH_SECRET_BACKEND=keyring` is set explicitly.
 
+pub mod commands;
 pub mod envelope;
 pub mod provider_vault;
+pub mod provider_vault_admin;
 pub mod sync_credentials;
 
 use std::collections::HashMap;

@@ -39,6 +39,18 @@ const withJson = async <T>(request: Request): Promise<T> => {
 
 const success = <T>(payload: T) => HttpResponse.json(payload as any);
 
+const secretsVaultStatus = (enabled: boolean) => ({
+  enabled,
+  backend: "memory",
+  available: true,
+  unavailableReason: null,
+  vaultedSecrets: 0,
+  inlineSecrets: 0,
+  unresolvedSecrets: 0,
+  unresolvedProviders: [],
+  warning: null,
+});
+
 export const handlers = [
   http.post(`${TAURI_ENDPOINT}/get_migration_result`, () => success(false)),
   http.post(`${TAURI_ENDPOINT}/get_skills_migration_result`, () =>
@@ -378,6 +390,16 @@ export const handlers = [
       storage: "none",
       minPassphraseLength: 8,
     }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_provider_secret_vault_status`, () =>
+    success(secretsVaultStatus(false)),
+  ),
+  http.post(
+    `${TAURI_ENDPOINT}/set_provider_secret_vault`,
+    async ({ request }) => {
+      const { enabled } = await withJson<{ enabled: boolean }>(request);
+      return success(secretsVaultStatus(enabled));
+    },
   ),
   http.post(`${TAURI_ENDPOINT}/get_usage_data_sources`, () => success([])),
   http.post(`${TAURI_ENDPOINT}/get_tool_versions`, () => success([])),
