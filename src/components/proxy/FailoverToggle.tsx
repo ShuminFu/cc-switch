@@ -65,16 +65,26 @@ export function FailoverToggle({ className, activeApp }: FailoverToggleProps) {
         <Shuffle
           className={cn(
             "h-4 w-4 transition-colors",
-            isEnabled
-              ? "text-emerald-500 animate-pulse"
-              : "text-muted-foreground",
+            isEnabled && takeoverEnabled
+              ? "text-emerald-500 animate-pulse motion-reduce:animate-none"
+              : isEnabled
+                ? "text-emerald-500/50"
+                : "text-muted-foreground",
           )}
         />
       )}
       <Switch
         checked={isEnabled}
         onCheckedChange={handleToggle}
-        disabled={setEnabled.isPending || isLoading || !takeoverEnabled}
+        // Turning failover off must always be possible, even after takeover
+        // was stopped and left the per-app flag on (FE-UI-56).
+        disabled={
+          setEnabled.isPending || isLoading || (!takeoverEnabled && !isEnabled)
+        }
+        aria-label={t("failover.toggleLabel", {
+          app: appLabel,
+          defaultValue: "{{app}} failover",
+        })}
       />
     </div>
   );
