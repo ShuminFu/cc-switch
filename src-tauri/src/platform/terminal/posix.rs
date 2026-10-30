@@ -80,15 +80,26 @@ pub(super) fn build_provider_command_line(
     cwd: Option<&Path>,
 ) -> String {
     let claude_command = format!("claude --settings {}", shell_single_quote(config_path));
+    build_user_shell_command_line(shell, &claude_command, cwd)
+}
+
+/// 在用户 shell 中（交互模式，加载用户 PATH）先进入 `cwd` 再执行一段已引用好的命令。
+/// provider 终端与会话恢复脚本共用。
+#[cfg_attr(windows, allow(dead_code))]
+pub(super) fn build_user_shell_command_line(
+    shell: &str,
+    command: &str,
+    cwd: Option<&Path>,
+) -> String {
     let command = cwd
         .map(|dir| {
             format!(
                 "cd {} && {}",
                 shell_single_quote(&dir.to_string_lossy()),
-                claude_command
+                command
             )
         })
-        .unwrap_or(claude_command);
+        .unwrap_or_else(|| command.to_string());
 
     format!(
         "{} {} {}",

@@ -1,6 +1,7 @@
 //! Windows 终端：写私有 `.bat` 后经 `cmd /C start` 交给 cmd / PowerShell / Windows Terminal。
 
-use super::tempfiles::write_private_temp_file;
+use super::resume::build_windows_resume_batch;
+use super::tempfiles::{private_launch_temp_dir, write_private_temp_file};
 use crate::platform::process::{decode_command_output, CREATE_NO_WINDOW};
 use crate::platform::shell::{
     build_windows_cwd_command_str, escape_windows_batch_value, powershell_single_quote,
@@ -68,6 +69,26 @@ pub(super) fn launch_running_terminal(
     // The .bat self-deletes (`del "%~f0"`) after it runs, but that only
     // fires if *some* terminal actually launched it. If every attempt
     // failed, sweep the temp file ourselves to avoid pollution.
+    if result.is_err() {
+        let _ = std::fs::remove_file(&bat_file);
+    }
+    result
+}
+
+/// Windows: 会话恢复——写出 resume `.bat` 后交给首选终端（见 `launch_resume_terminal`）
+pub(super) fn launch_resume_terminal(argv: &[String], cwd: Option<&Path>) -> Result<(), String> {
+    let cwd = cwd.map(|dir| dir.to_string_lossy().into_owned());
+    let content = build_windows_resume_batch(argv, cwd.as_deref())?;
+    let bat_file = write_private_temp_file(
+        &private_launch_temp_dir(),
+        "cc_switch_resume_",
+        ".bat",
+        content.as_bytes(),
+        false,
+    )
+    .map_err(|e| format!("写入批处理文件失败: {e}"))?;
+
+    let result = start_bat_in_preferred_terminal(&bat_file);
     if result.is_err() {
         let _ = std::fs::remove_file(&bat_file);
     }

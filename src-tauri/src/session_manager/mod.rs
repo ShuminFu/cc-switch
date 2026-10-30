@@ -97,15 +97,31 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
 /// 根据固定模板构建会话恢复命令。session id 作为单个 shell 参数被引用，
 /// 永远不会以原始字符串拼接进 shell；不支持 CLI 恢复的 provider 返回 None。
 pub fn build_resume_command(provider_id: &str, session_id: &str) -> Option<String> {
-    let program = match provider_id {
-        "claude" => "claude --resume",
-        "codex" => "codex resume",
-        "gemini" => "gemini --resume",
-        "grokbuild" => "grok --resume",
-        "opencode" => "opencode -s",
+    let program = resume_program(provider_id)?.join(" ");
+    Some(format!("{program} {}", shell_quote_arg(session_id)))
+}
+
+/// 与 `build_resume_command` 相同的固定模板，但以 argv 形式返回（未经任何 shell 引用），
+/// 供需要按目标 shell（如 Windows cmd）自行引用参数的终端启动器使用。
+pub fn build_resume_argv(provider_id: &str, session_id: &str) -> Option<Vec<String>> {
+    let mut argv: Vec<String> = resume_program(provider_id)?
+        .iter()
+        .map(|part| part.to_string())
+        .collect();
+    argv.push(session_id.to_string());
+    Some(argv)
+}
+
+fn resume_program(provider_id: &str) -> Option<&'static [&'static str]> {
+    let program: &'static [&'static str] = match provider_id {
+        "claude" => &["claude", "--resume"],
+        "codex" => &["codex", "resume"],
+        "gemini" => &["gemini", "--resume"],
+        "grokbuild" => &["grok", "--resume"],
+        "opencode" => &["opencode", "-s"],
         _ => return None,
     };
-    Some(format!("{program} {}", shell_quote_arg(session_id)))
+    Some(program)
 }
 
 /// 只由安全字符组成的参数保持原样（保证常见 UUID 形式的命令可读），
@@ -141,9 +157,12 @@ fn validate_resume_session_id(session_id: &str) -> Result<(), String> {
 }
 
 /// 恢复会话所需的终端参数：由后端生成的命令与会话元数据中的工作目录。
+/// `command` 是 POSIX shell 引用后的命令行（macOS / Linux），`argv` 是同一命令的
+/// 未引用参数列表（Windows 批处理按 cmd 规则自行引用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResumeTarget {
     pub command: String,
+    pub argv: Vec<String>,
     pub cwd: Option<String>,
 }
 
@@ -184,11 +203,13 @@ fn resume_target_from_sessions(
         .ok_or_else(|| format!("Session not found: {provider_id}/{session_id}"))?;
     let command = build_resume_command(provider_id, &meta.session_id)
         .ok_or_else(|| format!("Provider {provider_id} does not support terminal resume"))?;
+    let argv = build_resume_argv(provider_id, &meta.session_id)
+        .ok_or_else(|| format!("Provider {provider_id} does not support terminal resume"))?;
     let cwd = meta
         .project_dir
         .clone()
         .filter(|dir| !dir.trim().is_empty());
-    Ok(ResumeTarget { command, cwd })
+    Ok(ResumeTarget { command, argv, cwd })
 }
 
 pub fn load_messages(provider_id: &str, source_path: &str) -> Result<Vec<SessionMessage>, String> {
@@ -738,6 +759,27 @@ mod tests {
     }
 
     #[test]
+    fn resume_argv_matches_fixed_templates_without_quoting() {
+        assert_eq!(
+            build_resume_argv("claude", "abc-123"),
+            Some(vec![
+                "claude".to_string(),
+                "--resume".to_string(),
+                "abc-123".to_string()
+            ])
+        );
+        assert_eq!(
+            build_resume_argv("opencode", "ses 1"),
+            Some(vec![
+                "opencode".to_string(),
+                "-s".to_string(),
+                "ses 1".to_string()
+            ])
+        );
+        assert_eq!(build_resume_argv("hermes", "x"), None);
+    }
+
+    #[test]
     fn resume_command_single_quotes_shell_metacharacters_in_session_id() {
         assert_eq!(
             build_resume_command("claude", "abc;rm -rf ~").as_deref(),
@@ -763,6 +805,11 @@ mod tests {
             target,
             ResumeTarget {
                 command: "claude --resume 'abc;rm -rf ~'".to_string(),
+                argv: vec![
+                    "claude".to_string(),
+                    "--resume".to_string(),
+                    "abc;rm -rf ~".to_string(),
+                ],
                 cwd: Some("/tmp/other".to_string()),
             }
         );

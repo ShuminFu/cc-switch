@@ -1,7 +1,8 @@
 //! Linux 终端：按首选终端 + 常见终端列表依次尝试，`<terminal> <args> sh <script>`。
 
-use super::posix::{build_running_script, write_provider_launcher};
-use super::tempfiles::write_private_temp_file;
+use super::posix::{build_running_script, get_user_shell, write_provider_launcher};
+use super::resume::build_posix_resume_script;
+use super::tempfiles::{private_launch_temp_dir, write_private_temp_file};
 use std::path::Path;
 use std::process::Command;
 
@@ -32,6 +33,25 @@ pub(super) fn launch_running_terminal(
     let script_file = write_private_temp_file(
         temp_dir,
         file_prefix,
+        ".sh",
+        script_content.as_bytes(),
+        true,
+    )
+    .map_err(|e| format!("写入启动脚本失败: {e}"))?;
+
+    let result = spawn_script_in_preferred_terminal(&script_file);
+    if result.is_err() {
+        let _ = std::fs::remove_file(&script_file);
+    }
+    result
+}
+
+/// Linux: 会话恢复——写出 resume 启动脚本后交给首选终端（见 `launch_resume_terminal`）
+pub(super) fn launch_resume_terminal(command: &str, cwd: Option<&Path>) -> Result<(), String> {
+    let script_content = build_posix_resume_script(&get_user_shell(), command, cwd);
+    let script_file = write_private_temp_file(
+        &private_launch_temp_dir(),
+        "cc_switch_resume_",
         ".sh",
         script_content.as_bytes(),
         true,

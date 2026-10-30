@@ -273,6 +273,37 @@ describe("SessionManagerPage", () => {
     expect(await findUnnamedButtons(container)).toEqual([]);
   });
 
+  it("resumes the selected session in a terminal on non-macOS platforms", async () => {
+    // jsdom 的 UA 不是 macOS：恢复按钮仍应显示，并交给后端拉起终端
+    expect(navigator.userAgent).not.toMatch(/mac/i);
+    const launchSpy = vi
+      .spyOn(sessionsApi, "launchTerminal")
+      .mockResolvedValue(true);
+
+    try {
+      renderPage();
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("heading", { name: "Alpha Session" }),
+        ).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "恢复会话" }));
+
+      await waitFor(() =>
+        expect(launchSpy).toHaveBeenCalledWith({
+          providerId: "codex",
+          sessionId: "codex-session-1",
+        }),
+      );
+      await waitFor(() => expect(toastSuccessMock).toHaveBeenCalled());
+      expect(toastErrorMock).not.toHaveBeenCalled();
+    } finally {
+      launchSpy.mockRestore();
+    }
+  });
+
   it("removes a deleted session from filtered search results", async () => {
     renderPage();
 

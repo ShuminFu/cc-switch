@@ -1,23 +1,63 @@
-//! 会话恢复终端（`launch_session_terminal`）：在 macOS 首选终端中执行后端生成的 resume 命令。
+//! 会话恢复终端（`launch_session_terminal`）：在用户首选终端中执行后端生成的 resume 命令。
 //! 命令与工作目录由 `session_manager::resolve_resume_target` 按固定模板生成（CCS-074）。
+//! macOS 走下方按 target 区分的 AppleScript / `open` 启动器；Linux 写出 POSIX sh 启动脚本、
+//! Windows 写出 `.bat`，再交给与 provider 终端相同的首选终端选择逻辑（CCS-184）。
 
-use crate::platform::shell::shell_single_quote;
+// macOS 专属启动器在 Linux/Windows 非 test 编译下为死代码；脚本生成函数三平台都参与单测。
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
+use super::posix::{build_exec_line, build_final_shell_cd_command, build_user_shell_command_line};
+use crate::platform::shell::{build_windows_cwd_command_str, shell_single_quote};
+use crate::session_manager::ResumeTarget;
+use std::path::Path;
 use std::process::Command;
 
 pub(crate) fn launch_resume_terminal(
+    target: &str,
+    resume: &ResumeTarget,
+    custom_config: Option<&str>,
+) -> Result<(), String> {
+    if resume.command.trim().is_empty() || resume.argv.is_empty() {
+        return Err("Resume command is empty".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        launch_macos_resume_terminal(
+            target,
+            &resume.command,
+            resume.cwd.as_deref(),
+            custom_config,
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = (target, custom_config);
+        let cwd = super::resolve_launch_cwd(resume.cwd.clone())?;
+        super::linux::launch_resume_terminal(&resume.command, cwd.as_deref())
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (target, custom_config);
+        let cwd = super::resolve_launch_cwd(resume.cwd.clone())?;
+        super::windows::launch_resume_terminal(&resume.argv, cwd.as_deref())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        let _ = (target, custom_config);
+        Err("Terminal resume is not supported on this operating system".to_string())
+    }
+}
+
+fn launch_macos_resume_terminal(
     target: &str,
     command: &str,
     cwd: Option<&str>,
     custom_config: Option<&str>,
 ) -> Result<(), String> {
-    if command.trim().is_empty() {
-        return Err("Resume command is empty".to_string());
-    }
-
-    if !cfg!(target_os = "macos") {
-        return Err("Terminal resume is only supported on macOS".to_string());
-    }
-
     match target {
         "terminal" => launch_macos_terminal(command, cwd),
         "iTerm" | "iterm" => launch_iterm(command, cwd),
@@ -31,6 +71,62 @@ pub(crate) fn launch_resume_terminal(
         "custom" => launch_custom(command, cwd, custom_config),
         _ => Err(format!("Unsupported terminal target: {target}")),
     }
+}
+
+/// Linux（以及任何 POSIX 终端）的会话恢复脚本，总以 `sh <path>` 方式执行：
+/// 通过用户 shell 的交互模式运行 resume 命令（加载用户 PATH），退出后删除脚本自身，
+/// 再 `exec` 切回用户交互式 shell，让窗口保留在会话目录中。
+/// `exec` 会替换进程、EXIT trap 不再触发，因此在 exec 前显式删除；trap 仅兜底提前退出。
+pub(super) fn build_posix_resume_script(shell: &str, command: &str, cwd: Option<&Path>) -> String {
+    let resume_command = build_user_shell_command_line(shell, command, cwd);
+    let final_cd_command = build_final_shell_cd_command(shell, cwd);
+    let exec_line = build_exec_line(shell, cwd);
+
+    format!(
+        r#"#!/usr/bin/env sh
+trap 'rm -f "$0"' EXIT
+{resume_command}
+rm -f "$0"
+{final_cd_command}
+{exec_line}
+"#
+    )
+}
+
+/// Windows 会话恢复批处理（交给 `cmd /K` / PowerShell `-NoExit` / Windows Terminal 运行，
+/// 命令退出后窗口保留）。`call` 保证 npm 安装的 `claude.cmd` 之类的 shim 返回后继续执行。
+///
+/// cmd 的参数引用规则无法安全覆盖任意字符（`%`、`!`、`"`、`^` 在批处理与 shim 中会被再次解析），
+/// 因此只接受由 `[A-Za-z0-9._-]` 组成的参数；其他 session id 直接拒绝，前端回退为复制命令。
+pub(super) fn build_windows_resume_batch(
+    argv: &[String],
+    cwd: Option<&str>,
+) -> Result<String, String> {
+    if argv.is_empty() {
+        return Err("Resume command is empty".to_string());
+    }
+    if let Some(arg) = argv.iter().find(|arg| !is_plain_batch_arg(arg)) {
+        return Err(format!(
+            "Resume argument cannot be passed safely to cmd.exe: {arg}"
+        ));
+    }
+
+    let cwd_command = cwd
+        .filter(|dir| !dir.trim().is_empty())
+        .map(build_windows_cwd_command_str)
+        .unwrap_or_default();
+
+    Ok(format!(
+        "@echo off\r\n{cwd_command}call {command}\r\ndel \"%~f0\" >nul 2>&1\r\n",
+        command = argv.join(" "),
+    ))
+}
+
+fn is_plain_batch_arg(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 fn launch_macos_terminal(command: &str, cwd: Option<&str>) -> Result<(), String> {
@@ -326,6 +422,158 @@ fn escape_osascript(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    /// Linux：脚本在用户 shell 中进入会话目录执行 resume 命令，删除自身后切回交互式 shell。
+    #[test]
+    fn posix_resume_script_runs_command_in_session_dir_then_execs_shell() {
+        let script = build_posix_resume_script(
+            "/bin/bash",
+            "claude --resume abc-123",
+            Some(Path::new("/tmp/project O'Brien")),
+        );
+
+        assert_eq!(
+            script,
+            concat!(
+                "#!/usr/bin/env sh\n",
+                "trap 'rm -f \"$0\"' EXIT\n",
+                r#"'/bin/bash' -ic 'cd '"'"'/tmp/project O'"'"'"'"'"'"'"'"'Brien'"'"' && claude --resume abc-123'"#,
+                "\n",
+                "rm -f \"$0\"\n",
+                "cd '/tmp/project O'\"'\"'Brien' || exit 1\n",
+                "\n",
+                "exec '/bin/bash'\n",
+            )
+        );
+    }
+
+    #[test]
+    fn posix_resume_script_keeps_quoted_session_id_as_single_argument() {
+        // build_resume_command 已把含元字符的 id 单引号化；脚本再整体引用一次交给 `shell -ic`
+        let script = build_posix_resume_script("/bin/zsh", "claude --resume 'abc;rm -rf ~'", None);
+
+        assert!(
+            script.contains(r#"'/bin/zsh' -lic 'claude --resume '"'"'abc;rm -rf ~'"'"''"#),
+            "{script}"
+        );
+        assert!(
+            script.ends_with("rm -f \"$0\"\n\nexec '/bin/zsh' -l\n"),
+            "{script}"
+        );
+        assert!(!script.contains("\nabc;rm"), "{script}");
+    }
+
+    /// 真正用 `sh` 执行生成的脚本：resume 命令在会话目录中以单个参数收到 session id，
+    /// 脚本随后删除自身并 exec 回用户 shell（stdin 为空时立即退出）。
+    #[cfg(unix)]
+    #[test]
+    fn posix_resume_script_executes_resume_in_session_dir_and_self_deletes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let bin_dir = temp.path().join("bin");
+        let project_dir = temp.path().join("project dir");
+        std::fs::create_dir_all(&bin_dir).expect("bin dir should be created");
+        std::fs::create_dir_all(&project_dir).expect("project dir should be created");
+
+        let record = temp.path().join("record.txt");
+        let fake_claude = bin_dir.join("claude");
+        std::fs::write(
+            &fake_claude,
+            format!(
+                "#!/bin/sh\n{{ pwd; for arg in \"$@\"; do printf '[%s]\\n' \"$arg\"; done; }} > {}\n",
+                shell_single_quote(&record.to_string_lossy())
+            ),
+        )
+        .expect("fake claude should be written");
+        std::fs::set_permissions(&fake_claude, std::fs::Permissions::from_mode(0o755))
+            .expect("fake claude should be executable");
+
+        let script = build_posix_resume_script(
+            "/bin/sh",
+            "claude --resume 'abc;touch pwned'",
+            Some(&project_dir),
+        );
+        let script_file = temp.path().join("resume.sh");
+        std::fs::write(&script_file, script).expect("script should be written");
+
+        let path = format!(
+            "{}:{}",
+            bin_dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let status = Command::new("sh")
+            .arg(&script_file)
+            .env("PATH", path)
+            .current_dir(temp.path())
+            .stdin(std::process::Stdio::null())
+            .status()
+            .expect("script should run");
+
+        assert!(status.success());
+        let recorded = std::fs::read_to_string(&record).expect("fake claude should run");
+        let canonical_project = std::fs::canonicalize(&project_dir).expect("canonical dir");
+        assert_eq!(
+            recorded,
+            format!(
+                "{}\n[--resume]\n[abc;touch pwned]\n",
+                canonical_project.display()
+            )
+        );
+        assert!(!script_file.exists(), "script should delete itself");
+        assert!(!temp.path().join("pwned").exists());
+        assert!(!project_dir.join("pwned").exists());
+    }
+
+    /// Windows：cd /d 进入会话目录，`call` 运行 CLI shim，最后删除批处理自身。
+    #[test]
+    fn windows_resume_batch_changes_dir_and_calls_cli() {
+        let batch = build_windows_resume_batch(
+            &argv(&["claude", "--resume", "abc-123"]),
+            Some(r"C:\Users\me\proj (1)&x"),
+        )
+        .expect("plain argv should build");
+
+        assert_eq!(
+            batch,
+            "@echo off\r\ncd /d \"C:\\Users\\me\\proj ^(1^)^&x\" || exit /b 1\r\ncall claude --resume abc-123\r\ndel \"%~f0\" >nul 2>&1\r\n"
+        );
+    }
+
+    #[test]
+    fn windows_resume_batch_uses_pushd_for_unc_and_skips_missing_cwd() {
+        let unc = build_windows_resume_batch(
+            &argv(&["codex", "resume", "019a_x.y"]),
+            Some(r"\\wsl$\Ubuntu\home\me"),
+        )
+        .expect("unc cwd should build");
+        assert!(
+            unc.starts_with("@echo off\r\npushd \"\\\\wsl$\\Ubuntu\\home\\me\" || exit /b 1\r\n"),
+            "{unc}"
+        );
+
+        let no_cwd = build_windows_resume_batch(&argv(&["opencode", "-s", "ses_1"]), None)
+            .expect("no cwd should build");
+        assert_eq!(
+            no_cwd,
+            "@echo off\r\ncall opencode -s ses_1\r\ndel \"%~f0\" >nul 2>&1\r\n"
+        );
+    }
+
+    #[test]
+    fn windows_resume_batch_rejects_args_cmd_would_reinterpret() {
+        for id in ["abc&calc", "a%PATH%b", "a b", "a\"b", "a^b", "a!b", ""] {
+            assert!(
+                build_windows_resume_batch(&argv(&["claude", "--resume", id]), None).is_err(),
+                "{id:?} should be rejected"
+            );
+        }
+        assert!(build_windows_resume_batch(&[], None).is_err());
+    }
 
     #[test]
     fn build_shell_command_keeps_command_without_cwd_prefix_when_not_provided() {

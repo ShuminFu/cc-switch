@@ -35,17 +35,13 @@ pub async fn launch_session_terminal(
     let target = match preferred.as_deref() {
         Some("iterm2") => "iterm".to_string(),
         Some(t) => t.to_string(),
-        None => "terminal".to_string(), // Default to Terminal.app on macOS
+        // Default to Terminal.app on macOS; Linux/Windows resolve their own preferred terminal
+        None => "terminal".to_string(),
     };
 
     tauri::async_runtime::spawn_blocking(move || {
         let resume = session_manager::resolve_resume_target(&provider_id, &session_id)?;
-        crate::platform::terminal::launch_resume_terminal(
-            &target,
-            &resume.command,
-            resume.cwd.as_deref(),
-            None,
-        )
+        crate::platform::terminal::launch_resume_terminal(&target, &resume, None)
     })
     .await
     .map_err(|e| format!("Failed to launch terminal: {e}"))??;

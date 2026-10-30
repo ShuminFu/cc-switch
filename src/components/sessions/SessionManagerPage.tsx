@@ -54,7 +54,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { extractErrorMessage } from "@/utils/errorUtils";
-import { isMac } from "@/lib/platform";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { SessionItem } from "./SessionItem";
 import { SessionMessageItem } from "./SessionMessageItem";
@@ -399,14 +398,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
 
   const handleResume = async () => {
     if (!selectedSession?.resumeCommand) return;
-
-    if (!isMac()) {
-      await handleCopy(
-        selectedSession.resumeCommand,
-        t("sessionManager.resumeCommandCopied"),
-      );
-      return;
-    }
 
     try {
       await sessionsApi.launchTerminal({
@@ -1440,28 +1431,26 @@ export function SessionManagerPage({ appId }: { appId: string }) {
 
                       {/* 右侧：操作按钮组 */}
                       <div className="flex items-center gap-2 shrink-0">
-                        {isMac() && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                className="gap-1.5"
-                                onClick={() => void handleResume()}
-                                disabled={!selectedSession.resumeCommand}
-                              >
-                                <Play className="size-3.5" />
-                                <span className="hidden sm:inline">
-                                  {t("sessionManager.resume")}
-                                </span>
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {selectedSession.resumeCommand
-                                ? t("sessionManager.resumeTooltip")
-                                : t("sessionManager.noResumeCommand")}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="sm"
+                              className="gap-1.5"
+                              onClick={() => void handleResume()}
+                              disabled={!selectedSession.resumeCommand}
+                            >
+                              <Play className="size-3.5" />
+                              <span className="hidden sm:inline">
+                                {t("sessionManager.resume")}
+                              </span>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {selectedSession.resumeCommand
+                              ? t("sessionManager.resumeTooltip")
+                              : t("sessionManager.noResumeCommand")}
+                          </TooltipContent>
+                        </Tooltip>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
