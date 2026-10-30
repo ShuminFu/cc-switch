@@ -7,6 +7,7 @@ license = "MIT"
 repository = "https://github.com/farion1231/cc-switch"
 edition = "2021"
 rust-version = "1.95"
+default-run = "cc-switch"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,6 +15,11 @@ rust-version = "1.95"
 name = "cc_switch_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 doctest = false
+
+# PRODUCT-11: `ccs` command-line companion over the same SQLite store.
+[[bin]]
+name = "ccs"
+path = "src/bin/ccs.rs"
 
 [features]
 default = []
@@ -49,7 +55,7 @@ arboard = "3.6"
 flate2 = "1"
 brotli = "7"
 zstd = "0.13"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "signal"] }
 futures = "0.3"
 async-stream = "0.3"
 bytes = "1.5"
@@ -94,6 +100,8 @@ argon2 = "0.5"
 chacha20poly1305 = "0.10"
 keyring = { version = "3.6", default-features = false }
 zeroize = "1"
+# CLI argument parsing for `ccs` and `cc-switch --headless` (PRODUCT-10/11).
+clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"

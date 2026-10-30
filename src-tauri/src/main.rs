@@ -2,6 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // PRODUCT-10: `cc-switch --headless` runs the local proxy in the foreground
+    // without creating a window or tray (servers, WSL, SSH sessions).
+    if cc_switch_lib::cli::is_headless_invocation(std::env::args_os()) {
+        std::process::exit(cc_switch_lib::cli::run_headless(std::env::args_os()));
+    }
+
     // 在 Linux 上设置 WebKit 环境变量以解决 DMA-BUF 渲染问题
     // 某些 Linux 系统（如 Debian 13.2、Nvidia GPU）上 WebKitGTK 的 DMA-BUF 渲染器可能导致白屏/黑屏
     // 参考: https://github.com/tauri-apps/tauri/issues/9394
@@ -30,6 +36,10 @@ fn main() {
             }
         }
     }
+
+    // Hold the database writer lock while the app runs so `ccs` write
+    // commands refuse to modify live files underneath it (PRODUCT-11).
+    cc_switch_lib::cli::acquire_gui_writer_lock();
 
     cc_switch_lib::run();
 }
