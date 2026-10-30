@@ -87,15 +87,24 @@ hmac = "0.12"
 json5 = "0.4"
 json-five = "0.3.1"
 sys-locale = "0.3"
+# Secrets at rest and in sync (SEC-06, SVC-04, CMD-04): passphrase KDF, AEAD
+# for encrypted sync artifacts, and OS keychain access. Platform backends for
+# keyring are enabled per target below.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+keyring = { version = "3.6", default-features = false }
+zeroize = "1"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2.0.1", features = ["v2_16"] }
+keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
+keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
 windows-sys = { version = "0.61", features = ["Win32_Globalization", "Win32_UI_Shell"] }
 
 [target.'cfg(all(target_os = "windows", target_arch = "aarch64"))'.dependencies]
@@ -103,6 +112,7 @@ rquickjs = { version = "0.8", features = ["bindgen"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
+keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
 objc2-app-kit = { version = "0.2", features = ["NSColor"] }
 
 # Optimize release binary size to help reduce AppImage footprint

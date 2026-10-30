@@ -9,6 +9,7 @@ import {
 } from "./cloudSync/SyncTypeSelector";
 import { s3Adapter } from "./cloudSync/s3Adapter";
 import { webdavAdapter } from "./cloudSync/webdavAdapter";
+import { SyncEncryptionSettings } from "./SyncEncryptionSettings";
 
 interface WebdavSyncSectionProps {
   config?: WebDavSyncSettings;
@@ -54,6 +55,8 @@ export function WebdavSyncSection({
       </header>
 
       <SyncTypeSelector selection={selection} disabled={busy} />
+
+      <SyncEncryptionSettings />
 
       {selection.syncType === "webdav" ? (
         <CloudSyncPanel

@@ -14,13 +14,14 @@ use crate::services::s3::{self, S3Credentials};
 use crate::settings::{update_s3_sync_status, S3SyncSettings};
 
 use super::sync_protocol::{
-    apply_snapshot, build_local_snapshot, capture_local_fingerprint, ensure_local_unchanged,
-    evaluate_upload_precondition, is_insecure_remote_url, local_content_fingerprint, localized,
-    persist_sync_success_best_effort, remote_changed_error, sha256_hex, sync_status_from_baseline,
-    validate_artifact_size_limit, validate_manifest_compat, verify_artifact, warn_if_insecure,
-    ArtifactMeta, RemoteLayout, RemoteManifestView, SyncBaseline, SyncManifest, DB_COMPAT_VERSION,
-    MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST,
-    REMOTE_SKILLS_ZIP,
+    apply_snapshot, build_snapshot, capture_local_fingerprint, download_passphrase,
+    ensure_local_unchanged, ensure_no_encryption_downgrade, evaluate_upload_precondition,
+    is_insecure_remote_url, localized, open_artifact, persist_sync_success_best_effort,
+    remote_changed_error, remote_encryption_info, sha256_hex, sync_status_from_baseline,
+    unlock_remote, upload_key, upload_passphrase, validate_artifact_size_limit,
+    validate_manifest_compat, verify_artifact, warn_if_insecure, ArtifactMeta, RemoteLayout,
+    RemoteManifestView, SyncBaseline, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES,
+    MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
 };
 
 // ─── Sync lock ───────────────────────────────────────────────
@@ -61,8 +62,12 @@ pub async fn upload(
     let insecure = warn_if_insecure("S3", &settings.endpoint);
     let creds = creds_for(settings);
 
-    let snapshot = build_local_snapshot(db)?;
-    let local_fingerprint = local_content_fingerprint(&snapshot.db_sql, &snapshot.skills_zip);
+    // SEC-06 / SVC-04: encrypt the artifacts when sync encryption is enabled.
+    let encryption = upload_passphrase()?
+        .map(|passphrase| upload_key(&passphrase))
+        .transpose()?;
+    let snapshot = build_snapshot(db, encryption.as_ref())?;
+    let local_fingerprint = snapshot.local_fingerprint.clone();
 
     // Precondition: the remote must still be what this device last synced.
     let manifest_key = s3_key(settings, REMOTE_MANIFEST);
@@ -76,6 +81,7 @@ pub async fn upload(
             etag: etag.as_deref(),
             manifest: parsed.as_ref(),
         });
+        ensure_no_encryption_downgrade(parsed.as_ref(), encryption.is_some(), force)?;
         evaluate_upload_precondition(&settings.status, view.as_ref(), force)?
     };
     let if_match = if_match.filter(|_| s3::supports_conditional_put(&creds));
@@ -153,11 +159,15 @@ pub async fn download(
         })?;
 
     validate_manifest_compat(&manifest, RemoteLayout::Current)?;
+    // Encrypted snapshot: check the passphrase before downloading artifacts.
+    let key = unlock_remote(&manifest, download_passphrase().as_deref())?;
 
     // Download and verify artifacts
     let db_sql = download_and_verify(settings, &creds, REMOTE_DB_SQL, &manifest.artifacts).await?;
     let skills_zip =
         download_and_verify(settings, &creds, REMOTE_SKILLS_ZIP, &manifest.artifacts).await?;
+    let db_sql = open_artifact(key.as_ref(), REMOTE_DB_SQL, db_sql)?;
+    let skills_zip = open_artifact(key.as_ref(), REMOTE_SKILLS_ZIP, skills_zip)?;
 
     // Apply snapshot
     apply_snapshot(db, &db_sql, &skills_zip)?;
@@ -202,10 +212,13 @@ pub async fn fetch_remote_info(settings: &S3SyncSettings) -> Result<Option<Value
         false,
     )
     .is_err();
+    let encryption = remote_encryption_info(&manifest);
 
     let payload = serde_json::json!({
         "remoteChangedSinceLastSync": remote_changed,
         "insecureTransport": is_insecure_remote_url(&settings.endpoint),
+        "encrypted": encryption.encrypted,
+        "passphraseMatches": encryption.passphrase_matches,
         "deviceName": manifest.device_name,
         "createdAt": manifest.created_at,
         "snapshotId": manifest.snapshot_id,

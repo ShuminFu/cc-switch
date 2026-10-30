@@ -17,13 +17,15 @@ use crate::services::webdav::{
 use crate::settings::{update_webdav_sync_status, WebDavSyncSettings};
 
 use super::sync_protocol::{
-    apply_snapshot, build_local_snapshot, capture_local_fingerprint, effective_db_compat_version,
-    ensure_local_unchanged, evaluate_upload_precondition, is_insecure_remote_url,
-    local_content_fingerprint, localized, persist_sync_success_best_effort, remote_changed_error,
-    sha256_hex, sync_status_from_baseline, validate_artifact_size_limit, validate_manifest_compat,
-    verify_artifact, warn_if_insecure, ArtifactMeta, RemoteLayout, RemoteManifestView,
-    SyncBaseline, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES,
-    PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
+    apply_snapshot, build_snapshot, capture_local_fingerprint, download_passphrase,
+    effective_db_compat_version, ensure_local_unchanged, ensure_no_encryption_downgrade,
+    evaluate_upload_precondition, is_insecure_remote_url, localized, open_artifact,
+    persist_sync_success_best_effort, remote_changed_error, remote_encryption_info, sha256_hex,
+    sync_status_from_baseline, unlock_remote, upload_key, upload_passphrase,
+    validate_artifact_size_limit, validate_manifest_compat, verify_artifact, warn_if_insecure,
+    ArtifactMeta, RemoteLayout, RemoteManifestView, SyncBaseline, SyncManifest, DB_COMPAT_VERSION,
+    MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST,
+    REMOTE_SKILLS_ZIP,
 };
 
 pub(crate) mod archive;
@@ -78,8 +80,12 @@ pub async fn upload(
     let dir_segs = remote_dir_segments(settings, RemoteLayout::Current);
     ensure_remote_directories(&settings.base_url, &dir_segs, &auth).await?;
 
-    let snapshot = build_local_snapshot(db)?;
-    let local_fingerprint = local_content_fingerprint(&snapshot.db_sql, &snapshot.skills_zip);
+    // SEC-06 / SVC-04: encrypt the artifacts when sync encryption is enabled.
+    let encryption = upload_passphrase()?
+        .map(|passphrase| upload_key(&passphrase))
+        .transpose()?;
+    let snapshot = build_snapshot(db, encryption.as_ref())?;
+    let local_fingerprint = snapshot.local_fingerprint.clone();
 
     // Precondition: the remote must still be what this device last synced.
     let manifest_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_MANIFEST)?;
@@ -93,6 +99,7 @@ pub async fn upload(
             etag: etag.as_deref(),
             manifest: parsed.as_ref(),
         });
+        ensure_no_encryption_downgrade(parsed.as_ref(), encryption.is_some(), force)?;
         evaluate_upload_precondition(&settings.status, view.as_ref(), force)?
     };
 
@@ -161,6 +168,8 @@ pub async fn download(
         })?;
 
     validate_manifest_compat(&snapshot.manifest, snapshot.layout)?;
+    // Encrypted snapshot: check the passphrase before downloading artifacts.
+    let key = unlock_remote(&snapshot.manifest, download_passphrase().as_deref())?;
 
     // Download and verify artifacts
     let db_sql = download_and_verify(
@@ -179,6 +188,8 @@ pub async fn download(
         &snapshot.manifest.artifacts,
     )
     .await?;
+    let db_sql = open_artifact(key.as_ref(), REMOTE_DB_SQL, db_sql)?;
+    let skills_zip = open_artifact(key.as_ref(), REMOTE_SKILLS_ZIP, skills_zip)?;
 
     // Apply snapshot
     apply_snapshot(db, &db_sql, &skills_zip)?;
@@ -220,10 +231,13 @@ pub async fn fetch_remote_info(settings: &WebDavSyncSettings) -> Result<Option<V
         false,
     )
     .is_err();
+    let encryption = remote_encryption_info(&snapshot.manifest);
 
     let payload = serde_json::json!({
         "remoteChangedSinceLastSync": remote_changed,
         "insecureTransport": is_insecure_remote_url(&settings.base_url),
+        "encrypted": encryption.encrypted,
+        "passphraseMatches": encryption.passphrase_matches,
         "deviceName": snapshot.manifest.device_name,
         "createdAt": snapshot.manifest.created_at,
         "snapshotId": snapshot.manifest.snapshot_id,
@@ -596,5 +610,149 @@ mod tests {
         download(&db, &mut device, true)
             .await
             .expect("forced download allowed");
+    }
+
+    // ── End-to-end encryption (SEC-06 / SVC-04) ──
+
+    fn set_passphrase(passphrase: Option<&str>) {
+        crate::settings::set_sync_encryption_settings(passphrase.map(|p| {
+            crate::settings::SyncEncryptionSettings {
+                enabled: true,
+                passphrase: p.to_string(),
+                passphrase_in_keychain: false,
+            }
+        }))
+        .expect("set sync encryption");
+    }
+
+    fn remote_file(store: &fake_server::Store, name: &str) -> Vec<u8> {
+        store
+            .lock()
+            .unwrap()
+            .get(&format!("/dav/cc-switch-sync/v2/db-v6/default/{name}"))
+            .map(|(bytes, _)| bytes.clone())
+            .unwrap_or_else(|| panic!("remote {name} present"))
+    }
+
+    fn error_key(err: &AppError) -> Option<&'static str> {
+        match err {
+            AppError::Localized { key, .. } => Some(*key),
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn encrypted_snapshot_round_trip_and_passphrase_errors() {
+        use super::super::sync_protocol::{
+            ENCRYPTED_PROTOCOL_VERSION, ENCRYPTION_DOWNGRADE_KEY,
+            ENCRYPTION_PASSPHRASE_REQUIRED_KEY, ENCRYPTION_WRONG_PASSPHRASE_KEY,
+        };
+        isolate_test_home("cc-switch-webdav-encrypted-test");
+        let (base_url, store) = fake_server::start().await;
+        let db = crate::database::Database::memory().expect("memory db");
+        let provider = crate::provider::Provider::with_id(
+            "p1".to_string(),
+            "Provider".to_string(),
+            serde_json::json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "sk-very-secret-key" } }),
+            None,
+        );
+        db.save_provider("claude", &provider)
+            .expect("seed provider");
+
+        set_passphrase(Some("correct horse battery staple"));
+        let mut uploader = device_settings(&base_url);
+        upload(&db, &mut uploader, false)
+            .await
+            .expect("encrypted upload");
+
+        // The share holds ciphertext only.
+        let db_sql = remote_file(&store, REMOTE_DB_SQL);
+        assert!(crate::secrets::envelope::is_sealed(&db_sql));
+        assert!(!db_sql.windows(18).any(|w| w == b"sk-very-secret-key"));
+        let manifest: SyncManifest =
+            serde_json::from_slice(&remote_manifest(&store)).expect("manifest");
+        assert_eq!(manifest.version, ENCRYPTED_PROTOCOL_VERSION);
+        assert!(manifest.encryption.is_some());
+
+        let info = fetch_remote_info(&uploader).await.unwrap().unwrap();
+        assert_eq!(info["encrypted"], serde_json::json!(true));
+        assert_eq!(info["passphraseMatches"], serde_json::json!(true));
+        assert_eq!(info["compatible"], serde_json::json!(true));
+
+        // Same passphrase on another device: downloads and decrypts.
+        let mut device = device_settings(&base_url);
+        download(&db, &mut device, true)
+            .await
+            .expect("download with passphrase");
+        assert!(db
+            .get_provider_by_id("p1", "claude")
+            .expect("query")
+            .is_some());
+
+        // Wrong passphrase: clear, distinct error.
+        set_passphrase(Some("wrong passphrase!!"));
+        let err = download(&db, &mut device, true).await.unwrap_err();
+        assert_eq!(
+            error_key(&err),
+            Some(ENCRYPTION_WRONG_PASSPHRASE_KEY),
+            "{err}"
+        );
+        let info = fetch_remote_info(&device).await.unwrap().unwrap();
+        assert_eq!(info["passphraseMatches"], serde_json::json!(false));
+
+        // No passphrase at all.
+        set_passphrase(None);
+        let err = download(&db, &mut device, true).await.unwrap_err();
+        assert_eq!(
+            error_key(&err),
+            Some(ENCRYPTION_PASSPHRASE_REQUIRED_KEY),
+            "{err}"
+        );
+
+        // Encryption off: an automatic (non-forced) plaintext upload must not
+        // replace the encrypted snapshot; a forced manual upload may.
+        let mut plain = device_settings(&base_url);
+        plain.status = uploader.status.clone();
+        let err = upload(&db, &mut plain, false).await.unwrap_err();
+        assert_eq!(error_key(&err), Some(ENCRYPTION_DOWNGRADE_KEY), "{err}");
+        upload(&db, &mut plain, true)
+            .await
+            .expect("forced plaintext upload");
+        assert!(!crate::secrets::envelope::is_sealed(&remote_file(
+            &store,
+            REMOTE_DB_SQL
+        )));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn plaintext_snapshot_still_downloads_with_encryption_enabled() {
+        isolate_test_home("cc-switch-webdav-plaintext-compat-test");
+        let (base_url, _store) = fake_server::start().await;
+        let db = crate::database::Database::memory().expect("memory db");
+        let provider = crate::provider::Provider::with_id(
+            "p1".to_string(),
+            "Provider".to_string(),
+            serde_json::json!({ "env": { "API_KEY": "k" } }),
+            None,
+        );
+        db.save_provider("claude", &provider)
+            .expect("seed provider");
+
+        // Snapshot uploaded as by an older version (no encryption).
+        let mut old_device = device_settings(&base_url);
+        upload(&db, &mut old_device, false)
+            .await
+            .expect("plain upload");
+
+        set_passphrase(Some("a new passphrase"));
+        let mut device = device_settings(&base_url);
+        let info = fetch_remote_info(&device).await.unwrap().unwrap();
+        assert_eq!(info["encrypted"], serde_json::json!(false));
+        download(&db, &mut device, true)
+            .await
+            .expect("plaintext snapshots stay readable");
+        set_passphrase(None);
     }
 }

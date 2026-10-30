@@ -30,6 +30,7 @@ mod prompt_files;
 mod provider;
 mod provider_defaults;
 mod proxy;
+mod secrets;
 mod services;
 mod session_manager;
 mod settings;
@@ -952,6 +953,9 @@ pub fn run() {
             commands::s3_sync_download,
             commands::s3_sync_save_settings,
             commands::s3_sync_fetch_remote_info,
+            commands::sync_encryption_get_status,
+            commands::sync_encryption_set_passphrase,
+            commands::sync_encryption_disable,
             commands::save_file_dialog,
             commands::open_file_dialog,
             commands::open_zip_file_dialog,
