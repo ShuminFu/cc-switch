@@ -919,3 +919,360 @@ fn ensure_incremental_auto_vacuum_rebuilds_existing_file_db() {
         "file db should persist INCREMENTAL auto_vacuum after VACUUM rebuild"
     );
 }
+
+// ─── Backup restore / rotation (TEST-34, TEST-35, DB-10) ──────────────────
+
+mod backup_restore {
+    use super::super::backup::BackupKind;
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime};
+
+    /// A private config dir with an in-memory live database. Uses the explicit
+    /// `*_in` backup APIs so tests never touch process-global env or settings.
+    struct TestHome {
+        dir: tempfile::TempDir,
+        retain: usize,
+        db: Database,
+    }
+
+    impl TestHome {
+        fn new(retain: usize) -> Self {
+            let dir = tempfile::tempdir().expect("temp config dir");
+            // backup_database_file_in only runs when the live DB file exists.
+            std::fs::write(dir.path().join("cc-switch.db"), b"").expect("touch db");
+            Self {
+                dir,
+                retain,
+                db: Database::memory().expect("memory db"),
+            }
+        }
+
+        fn backups_dir(&self) -> PathBuf {
+            self.dir.path().join("backups")
+        }
+
+        fn backup(&self, kind: BackupKind) -> PathBuf {
+            self.db
+                .backup_database_file_in(self.dir.path(), self.retain, kind, None)
+                .expect("backup")
+                .expect("backup path")
+        }
+
+        fn restore(&self, filename: &str) -> Result<String, AppError> {
+            self.db
+                .restore_from_backup_in(self.dir.path(), self.retain, filename)
+        }
+    }
+
+    fn insert_provider(db: &Database, id: &str) {
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, meta)
+             VALUES (?1, 'claude', ?1, '{}', '{}')",
+            [id],
+        )
+        .expect("insert provider");
+    }
+
+    fn provider_ids(db: &Database) -> Vec<String> {
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id FROM providers ORDER BY id")
+            .expect("prepare");
+        let ids = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("rows");
+        ids
+    }
+
+    fn set_mtime(path: &Path, secs_ago: u64) {
+        let file = std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open backup");
+        file.set_modified(SystemTime::now() - Duration::from_secs(secs_ago))
+            .expect("set mtime");
+    }
+
+    fn file_name(path: &Path) -> String {
+        path.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    fn backup_names(home: &TestHome) -> Vec<String> {
+        let mut names = std::fs::read_dir(home.backups_dir())
+            .expect("read backups")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".db"))
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn restoring_oldest_backup_at_retention_limit_restores_its_data() {
+        let home = TestHome::new(2);
+        let db = &home.db;
+
+        insert_provider(db, "p-old");
+        let oldest = home.backup(BackupKind::Safety);
+        set_mtime(&oldest, 3600);
+
+        insert_provider(db, "p-new");
+        let newer = home.backup(BackupKind::Safety);
+        set_mtime(&newer, 1800);
+        insert_provider(db, "p-live");
+
+        // The safety backup taken by the restore pushes the safety pool over the
+        // retention limit; the oldest file is the one being restored.
+        home.restore(&file_name(&oldest)).expect("restore oldest");
+
+        assert_eq!(provider_ids(db), vec!["p-old".to_string()]);
+        assert!(
+            oldest.exists(),
+            "the restored backup must not be rotated away"
+        );
+        assert_eq!(
+            backup_names(&home).len(),
+            2,
+            "rotation still enforces the retention limit"
+        );
+    }
+
+    #[test]
+    fn restoring_a_missing_backup_errors_and_creates_nothing() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-live");
+        std::fs::create_dir_all(home.backups_dir()).unwrap();
+
+        let err = home
+            .restore("db_backup_20200101_000000.db")
+            .expect_err("missing backup must fail");
+        assert!(err.to_string().contains("not found"), "{err}");
+        assert!(!home
+            .backups_dir()
+            .join("db_backup_20200101_000000.db")
+            .exists());
+        assert_eq!(provider_ids(db), vec!["p-live".to_string()]);
+    }
+
+    #[test]
+    fn restoring_a_future_version_backup_leaves_live_db_unchanged() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-backup");
+        let backup = home.backup(BackupKind::Manual);
+        {
+            let conn = Connection::open(&backup).unwrap();
+            Database::set_user_version(&conn, SCHEMA_VERSION + 1).unwrap();
+        }
+        insert_provider(db, "p-live");
+        let before = backup_names(&home);
+        let version_before = Database::get_user_version(&db.conn.lock().unwrap()).unwrap();
+
+        let err = home
+            .restore(&file_name(&backup))
+            .expect_err("future version must be rejected");
+        assert!(err.to_string().contains("newer"), "{err}");
+
+        assert_eq!(
+            provider_ids(db),
+            vec!["p-backup".to_string(), "p-live".to_string()]
+        );
+        let conn = db.conn.lock().unwrap();
+        assert_eq!(Database::get_user_version(&conn).unwrap(), version_before);
+        drop(conn);
+        assert_eq!(backup_names(&home), before, "no safety backup on rejection");
+    }
+
+    #[test]
+    fn restoring_a_garbage_file_leaves_live_db_unchanged() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-live");
+        std::fs::create_dir_all(home.backups_dir()).unwrap();
+        std::fs::write(
+            home.backups_dir().join("garbage.db"),
+            b"this is definitely not an sqlite database file, just some bytes",
+        )
+        .unwrap();
+
+        home.restore("garbage.db")
+            .expect_err("garbage must be rejected");
+        assert_eq!(provider_ids(db), vec!["p-live".to_string()]);
+    }
+
+    #[test]
+    fn restoring_a_non_cc_switch_database_is_rejected() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-live");
+        std::fs::create_dir_all(home.backups_dir()).unwrap();
+        {
+            let conn = Connection::open(home.backups_dir().join("other.db")).unwrap();
+            conn.execute("CREATE TABLE notes (x TEXT)", []).unwrap();
+        }
+
+        home.restore("other.db")
+            .expect_err("foreign database must be rejected");
+        assert_eq!(provider_ids(db), vec!["p-live".to_string()]);
+    }
+
+    #[test]
+    fn restore_keeps_device_takeover_state_and_live_backups() {
+        let home = TestHome::new(10);
+        let db = &home.db;
+        insert_provider(db, "p-backup");
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE proxy_config SET enabled = 1, listen_port = 16000, max_retries = 7
+                 WHERE app_type = 'claude'",
+                [],
+            )
+            .unwrap();
+        }
+        let backup = home.backup(BackupKind::Manual);
+
+        // Live state on this device after the backup was taken.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE proxy_config SET enabled = 0, listen_port = 15721, max_retries = 3
+                 WHERE app_type = 'claude'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO proxy_live_backup (app_type, original_config, backed_up_at)
+                 VALUES ('codex', 'live-original', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        }
+
+        home.restore(&file_name(&backup)).expect("restore");
+
+        let conn = db.conn.lock().unwrap();
+        let (enabled, port, retries): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT enabled, listen_port, max_retries FROM proxy_config WHERE app_type = 'claude'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(enabled, 0, "takeover flag comes from this device");
+        assert_eq!(port, 15721, "listen port comes from this device");
+        assert_eq!(retries, 7, "shared proxy preferences come from the backup");
+        let live_backup: String = conn
+            .query_row(
+                "SELECT original_config FROM proxy_live_backup WHERE app_type = 'codex'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(live_backup, "live-original");
+    }
+
+    #[test]
+    fn rotation_never_deletes_manual_named_or_other_kinds() {
+        let home = TestHome::new(3);
+        let db = &home.db;
+        insert_provider(db, "p1");
+
+        let manual = home.backup(BackupKind::Manual);
+        let pre = home.backup(BackupKind::PreMigration);
+        let safety = home.backup(BackupKind::Safety);
+        let to_rename = home.backup(BackupKind::Auto);
+        let renamed = "before-big-change.db".to_string();
+        std::fs::rename(&to_rename, home.backups_dir().join(&renamed)).expect("rename");
+        for path in [&manual, &pre, &safety] {
+            set_mtime(path, 7200);
+        }
+        set_mtime(&home.backups_dir().join(&renamed), 7200);
+
+        for _ in 0..20 {
+            home.backup(BackupKind::Auto);
+        }
+
+        let names = backup_names(&home);
+        for kept in [
+            file_name(&manual),
+            file_name(&pre),
+            file_name(&safety),
+            renamed.clone(),
+        ] {
+            assert!(
+                names.contains(&kept),
+                "{kept} must survive rotation: {names:?}"
+            );
+        }
+        let auto_count = names
+            .iter()
+            .filter(|n| BackupKind::from_filename(n) == Some(BackupKind::Auto))
+            .count();
+        assert_eq!(
+            auto_count, 3,
+            "auto backups are rotated to the retain count"
+        );
+    }
+
+    #[test]
+    fn sql_import_accepts_export_from_v3_8_schema() {
+        // SEC-30: the import authorizer must still accept exports made by
+        // older app versions (legacy schema, legacy tables).
+        let legacy = Connection::open_in_memory().expect("open memory db");
+        legacy
+            .execute_batch(V3_8_SCHEMA_V1_SQL)
+            .expect("seed v3.8 schema v1");
+        Database::set_user_version(&legacy, 1).expect("set user_version=1");
+        legacy
+            .execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta, is_current)
+                 VALUES ('legacy-p', 'claude', 'Legacy', '{}', '{}', 1)",
+                [],
+            )
+            .expect("seed provider");
+        let sql = Database::dump_sql(&legacy, &[]).expect("dump legacy");
+
+        let target = Database::memory().expect("memory db");
+        target
+            .import_sql_string(&sql)
+            .expect("import legacy export");
+        assert_eq!(provider_ids(&target), vec!["legacy-p".to_string()]);
+    }
+
+    #[test]
+    fn backup_kind_is_parsed_from_filename() {
+        assert_eq!(
+            BackupKind::from_filename("db_backup_20260101_120000.db"),
+            Some(BackupKind::Auto)
+        );
+        assert_eq!(
+            BackupKind::from_filename("db_backup_20260101_120000_3.db"),
+            Some(BackupKind::Auto)
+        );
+        assert_eq!(
+            BackupKind::from_filename("db_manual_20260101_120000.db"),
+            Some(BackupKind::Manual)
+        );
+        assert_eq!(
+            BackupKind::from_filename("db_safety_20260101_120000.db"),
+            Some(BackupKind::Safety)
+        );
+        assert_eq!(
+            BackupKind::from_filename("db_premigration_20260101_120000_1.db"),
+            Some(BackupKind::PreMigration)
+        );
+        assert_eq!(BackupKind::from_filename("db_backup_mine.db"), None);
+        assert_eq!(
+            BackupKind::from_filename("db_backup_20260101_120000_.db"),
+            None
+        );
+        assert_eq!(BackupKind::from_filename("before-big-change.db"), None);
+    }
+}
