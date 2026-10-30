@@ -294,6 +294,15 @@ fn top_p_is_kept_without_temperature() {
 }
 
 #[test]
+fn temperature_is_clamped_to_the_anthropic_range() {
+    let request = decode(json!({
+        "contents": [{ "role": "user", "parts": [{ "text": "hi" }] }],
+        "generationConfig": { "temperature": 1.7 }
+    }));
+    assert_eq!(request.temperature, Some(1.0));
+}
+
+#[test]
 fn non_object_body_is_an_invalid_request() {
     assert!(GeminiClientCodec::new("m", false)
         .decode_request(&json!([1, 2]))

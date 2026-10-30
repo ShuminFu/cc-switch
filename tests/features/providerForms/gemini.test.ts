@@ -94,6 +94,21 @@ describe("gemini form module (CCS-191)", () => {
         ),
       ).toEqual([]);
     });
+
+    it("keeps the Anthropic upstream routing fields it does not edit", () => {
+      const meta = toGeminiAppMeta({
+        commonConfigEnabled: false,
+        baseMeta: {
+          apiFormat: "anthropic",
+          apiKeyField: "ANTHROPIC_AUTH_TOKEN",
+          maxOutputTokens: 16000,
+        },
+      });
+      expect(meta.apiFormat).toBe("anthropic");
+      expect(meta.apiKeyField).toBe("ANTHROPIC_AUTH_TOKEN");
+      expect(meta.maxOutputTokens).toBe(16000);
+      expect(meta.isFullUrl).toBeUndefined();
+    });
   });
 
   it("loads the presets lazily", async () => {

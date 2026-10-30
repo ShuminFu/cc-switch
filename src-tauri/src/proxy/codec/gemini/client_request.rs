@@ -13,7 +13,8 @@
 //!   回复侧装进首个 `functionCall` 的 `thoughtSignature` 的签名 thinking（见
 //!   [`super::client_response`]）在这里还原到助手消息开头；
 //! - 相邻的同角色 content 合并为一条消息，用户消息中的工具结果移到最前面；
-//! - 同时给出 `temperature` 与 `topP` 时只保留 `temperature`（较新的 Claude 模型拒绝两者并存）；
+//! - 同时给出 `temperature` 与 `topP` 时只保留 `temperature`（较新的 Claude 模型拒绝两者并存），
+//!   `temperature` 收紧到 Anthropic 的 `[0, 1]`；
 //! - `responseMimeType: application/json`（Gemini CLI 的结构化输出调用）没有对应字段，
 //!   改为在 system 提示末尾追加只输出 JSON 的约束（含 `responseJsonSchema` / `responseSchema`）。
 
@@ -40,7 +41,12 @@ pub(super) fn decode_request(body: &Value, model: &str, stream: bool) -> ChatReq
         request.max_tokens = field(generation, "maxOutputTokens", "max_output_tokens")
             .and_then(Value::as_u64)
             .filter(|value| *value > 0);
-        request.temperature = generation.get("temperature").and_then(Value::as_f64);
+        // Gemini 的 temperature 范围是 [0, 2]，Anthropic 只接受 [0, 1]，超出部分以不可重试的
+        // 400 拒绝：收紧到上游范围
+        request.temperature = generation
+            .get("temperature")
+            .and_then(Value::as_f64)
+            .map(|temperature| temperature.clamp(0.0, 1.0));
         // Gemini CLI 默认同时发送 temperature 与 topP；较新的 Claude 模型拒绝两者同时出现，
         // 有 temperature 时只保留 temperature
         request.top_p = field(generation, "topP", "top_p")

@@ -70,3 +70,9 @@ p5-codec-gemini
 - `cargo test --test proxy_e2e gemini`: 3 passed (non-stream, stream and 429 error scenarios). They check the outbound `/v1/messages` request, the headers, the Gemini-shaped reply and the `gemini` usage log row.
 - `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast`: 2900 passed, 0 failed (2898 at 0ddfcb2).
 - No frontend changes, so the pnpm checks are not affected.
+
+**Review.** Every acceptance item was checked against the code and re-run: 17 golden fixtures (stream and non-stream), three `proxy_e2e` scenarios, and `proxy_golden` passing. The full Rust suite passed with 2900 passed and 0 failed. The review fixed two gaps:
+- Editing a Gemini provider in the UI wrote `undefined` to every app-specific meta field (`toGeminiAppMeta`). One save therefore erased `apiFormat`, `apiKeyField` and `maxOutputTokens`, turning the Anthropic upstream off without notice, and the Gemini auth headers then went to the Anthropic URL. The form now keeps these three fields from the existing meta (`tests/features/providerForms/gemini.test.ts`).
+- Gemini accepts `temperature` in `[0, 2]`, but Anthropic accepts only `[0, 1]` and rejects other values with a 400 that is not retried. Request decode now clamps the value to `[0, 1]` (`client_tests::temperature_is_clamped_to_the_anthropic_range`).
+
+Still open as follow-ups: the UI does not yet say that proxy takeover is required for an Anthropic-format Gemini provider, and there is still no UI control to set `apiFormat`.
