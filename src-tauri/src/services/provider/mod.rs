@@ -2692,7 +2692,22 @@ impl ProviderService {
                 // no backfill needed (backfill is for exclusive mode apps like Claude/Codex/Gemini)
                 if !app_type.is_additive_mode() {
                     // Only backfill when switching to a different provider
-                    if let Ok(live_config) = read_live_settings(app_type.clone()) {
+                    let live_read = read_live_settings(app_type.clone());
+                    match &live_read {
+                        Err(AppError::Localized { key, .. }) if key.ends_with(".missing") => {
+                            log::debug!("Backfill skipped: live config missing ({key})");
+                        }
+                        Err(e) => {
+                            // The live file is overwritten below (a backup is taken first),
+                            // so tell the user their hand edits were not backfilled.
+                            log::warn!("Backfill skipped: live config unreadable: {e}");
+                            result
+                                .warnings
+                                .push(format!("backfill_skipped:{current_id}"));
+                        }
+                        Ok(_) => {}
+                    }
+                    if let Ok(live_config) = live_read {
                         if let Some(mut current_provider) = providers.get(&current_id).cloned() {
                             // 切走前先把 live 里的可共享改动（含用户直接在应用内
                             // 装插件/加 hook/改偏好）同步进通用配置片段，再做剥离回填。

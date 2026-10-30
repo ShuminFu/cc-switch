@@ -12,12 +12,8 @@ fn user_config_path() -> PathBuf {
 }
 
 fn read_json_value(path: &Path) -> Result<Value, AppError> {
-    if !path.exists() {
-        return Ok(serde_json::json!({}));
-    }
-    let content = fs::read_to_string(path).map_err(|e| AppError::io(path, e))?;
-    let value: Value = serde_json::from_str(&content).map_err(|e| AppError::json(path, e))?;
-    Ok(value)
+    // 与供应商切换共用同一读取逻辑：容忍注释，无法解析时报错而不是覆盖
+    crate::gemini_config::read_gemini_settings_value(path)
 }
 
 fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
@@ -26,6 +22,7 @@ fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
     }
     let json =
         serde_json::to_string_pretty(value).map_err(|e| AppError::JsonSerialize { source: e })?;
+    crate::config::backup_live_file("gemini", path);
     atomic_write(path, json.as_bytes())
 }
 

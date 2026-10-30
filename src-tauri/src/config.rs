@@ -272,6 +272,19 @@ fn sort_json_keys(value: &Value) -> Value {
 
 /// 写入 JSON 配置文件（键按字母排序，确保确定性输出）
 pub fn write_json_file<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
+    write_json_file_with_mode(path, data, NewFileMode::Default)
+}
+
+/// 写入携带密钥的 JSON 配置文件：新建文件权限为 0600（已有文件保留原权限）
+pub fn write_json_file_secret<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
+    write_json_file_with_mode(path, data, NewFileMode::Secret)
+}
+
+fn write_json_file_with_mode<T: Serialize>(
+    path: &Path,
+    data: &T,
+    mode: NewFileMode,
+) -> Result<(), AppError> {
     // 确保目录存在
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
@@ -282,7 +295,7 @@ pub fn write_json_file<T: Serialize>(path: &Path, data: &T) -> Result<(), AppErr
     let json = serde_json::to_string_pretty(&sorted_value)
         .map_err(|e| AppError::JsonSerialize { source: e })?;
 
-    atomic_write(path, json.as_bytes())
+    atomic_write_with_mode(path, json.as_bytes(), mode)
 }
 
 /// 原子写入文本文件（用于 TOML/纯文本）
@@ -293,16 +306,81 @@ pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
     atomic_write(path, data.as_bytes())
 }
 
+/// 原子写入携带密钥的文本文件：新建文件权限为 0600（已有文件保留原权限）
+pub fn write_text_file_secret(path: &Path, data: &str) -> Result<(), AppError> {
+    atomic_write_secret(path, data.as_bytes())
+}
+
+/// 目标文件不存在时新建文件的权限策略
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NewFileMode {
+    /// 遵循进程 umask（与 `File::create` 相同）
+    Default,
+    /// 仅所有者可读写（0600），用于携带 API Key / Token 的文件
+    Secret,
+}
+
 /// 原子写入：写入临时文件后 rename 替换，避免半写状态
+///
+/// - 临时文件在 rename 前 `sync_all()`；Unix 上 rename 后还会 fsync 父目录，
+///   避免断电后出现零长度的配置文件；
+/// - 任何失败路径都会删除临时文件，原文件保持不变；
+/// - Windows 上直接 `rename`（std 使用 `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`
+///   原子替换已有文件），不再预先删除目标；遇到共享冲突时短暂重试；
+/// - 目标为符号链接时写入其指向的真实文件，保留链接本身；
+/// - 已有文件保留原权限；新建文件遵循 umask。携带密钥的文件请用 [`atomic_write_secret`]。
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+    atomic_write_with_mode(path, data, NewFileMode::Default)
+}
+
+/// 与 [`atomic_write`] 相同，但新建文件的权限为 0600（Unix）。
+pub fn atomic_write_secret(path: &Path, data: &[u8]) -> Result<(), AppError> {
+    atomic_write_with_mode(path, data, NewFileMode::Secret)
+}
+
+/// 临时文件守卫：除非 rename 成功后 `disarm()`，否则在 drop 时删除临时文件
+struct TempFileGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
+        }
     }
+}
+
+/// 若 `path` 是符号链接，返回其最终指向的文件路径，以便替换真实文件而不是链接本身
+fn resolve_write_target(path: &Path) -> PathBuf {
+    let is_symlink = fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if !is_symlink {
+        return path.to_path_buf();
+    }
+    if let Ok(real) = fs::canonicalize(path) {
+        return real;
+    }
+    // 悬空链接：跟随一层链接内容
+    match fs::read_link(path) {
+        Ok(link) if link.is_absolute() => link,
+        Ok(link) => path.parent().map(|p| p.join(&link)).unwrap_or(link),
+        Err(_) => path.to_path_buf(),
+    }
+}
+
+fn atomic_write_with_mode(path: &Path, data: &[u8], mode: NewFileMode) -> Result<(), AppError> {
+    let target = resolve_write_target(path);
+    let path = target.as_path();
 
     let parent = path
         .parent()
         .ok_or_else(|| AppError::Config("无效的路径".to_string()))?;
-    let mut tmp = parent.to_path_buf();
+    if !parent.as_os_str().is_empty() {
+        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+    }
     let file_name = path
         .file_name()
         .ok_or_else(|| AppError::Config("无效的文件名".to_string()))?
@@ -312,43 +390,245 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), AppError> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    tmp.push(format!("{file_name}.tmp.{ts}"));
+    let tmp = parent.join(format!("{file_name}.tmp.{ts}"));
 
+    let existing_perms = fs::metadata(path).ok().map(|m| m.permissions());
+
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
     {
-        let mut f = fs::File::create(&tmp).map_err(|e| AppError::io(&tmp, e))?;
-        f.write_all(data).map_err(|e| AppError::io(&tmp, e))?;
-        f.flush().map_err(|e| AppError::io(&tmp, e))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        // 已有文件（权限稍后复制）或密钥文件：先以 0600 创建，避免写入期间被其他用户读取
+        if existing_perms.is_some() || mode == NewFileMode::Secret {
+            opts.mode(0o600);
+        }
     }
+    #[cfg(not(unix))]
+    let _ = mode;
+
+    let mut f = opts.open(&tmp).map_err(|e| AppError::io(&tmp, e))?;
+    let mut guard = TempFileGuard {
+        path: tmp.clone(),
+        armed: true,
+    };
+    f.write_all(data).map_err(|e| AppError::io(&tmp, e))?;
+    f.flush().map_err(|e| AppError::io(&tmp, e))?;
+    f.sync_all().map_err(|e| AppError::io(&tmp, e))?;
+    drop(f);
+
+    if let Some(perms) = existing_perms {
+        #[cfg(unix)]
+        fs::set_permissions(&tmp, perms).map_err(|e| AppError::io(&tmp, e))?;
+        #[cfg(not(unix))]
+        let _ = fs::set_permissions(&tmp, perms);
+    }
+
+    rename_replace(&tmp, path).map_err(|e| AppError::IoContext {
+        context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
+        source: e,
+    })?;
+    guard.armed = false;
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(path) {
-            let perm = meta.permissions().mode();
-            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(perm));
+        // fsync 父目录以持久化 rename（部分文件系统不支持，忽略错误）
+        let dir = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        if let Ok(dir) = fs::File::open(dir) {
+            let _ = dir.sync_all();
         }
     }
 
+    Ok(())
+}
+
+/// 用 `tmp` 原子替换 `path`。
+///
+/// Windows 上 `std::fs::rename` 使用 `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`，
+/// 可以直接覆盖已有文件；目标被其他进程短暂占用（杀毒软件、编辑器）时会返回
+/// 共享冲突/拒绝访问，这里有限次重试，最终失败时原文件保持不变。
+fn rename_replace(tmp: &Path, path: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
-        // Windows 上 rename 目标存在会失败，先移除再重命名（尽量接近原子性）
-        if path.exists() {
-            let _ = fs::remove_file(path);
+        const ERROR_ACCESS_DENIED: i32 = 5;
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        const ERROR_LOCK_VIOLATION: i32 = 33;
+        let mut attempt: u64 = 0;
+        loop {
+            match fs::rename(tmp, path) {
+                Ok(()) => return Ok(()),
+                Err(e)
+                    if attempt < 5
+                        && matches!(
+                            e.raw_os_error(),
+                            Some(ERROR_ACCESS_DENIED)
+                                | Some(ERROR_SHARING_VIOLATION)
+                                | Some(ERROR_LOCK_VIOLATION)
+                        ) =>
+                {
+                    attempt += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20 * attempt));
+                }
+                Err(e) => return Err(e),
+            }
         }
-        fs::rename(&tmp, path).map_err(|e| AppError::IoContext {
-            context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
-            source: e,
-        })?;
     }
 
     #[cfg(not(windows))]
     {
-        fs::rename(&tmp, path).map_err(|e| AppError::IoContext {
-            context: format!("原子替换失败: {} -> {}", tmp.display(), path.display()),
-            source: e,
-        })?;
+        fs::rename(tmp, path)
     }
-    Ok(())
+}
+
+// ============================================================================
+// Live 配置文件备份
+// ============================================================================
+
+/// 覆盖 live 配置文件前创建备份：`~/.cc-switch/backups/<app>/<stem>_<时间戳>.<ext>`
+///
+/// - 文件不存在时不备份；
+/// - 内容与最近一次备份相同时不重复备份；
+/// - 保留数量与 Hermes/OpenClaw 备份一致（`effective_backup_retain_count`）；
+/// - 备份失败只记录警告，不阻断写入。
+pub fn backup_live_file(app: &str, path: &Path) -> Option<PathBuf> {
+    let dir = get_app_config_dir().join("backups").join(app);
+    let retain = crate::settings::effective_backup_retain_count();
+    match backup_file_into_dir(path, &dir, retain) {
+        Ok(result) => {
+            if let Some(backup) = &result {
+                log::debug!("已备份 {} -> {}", path.display(), backup.display());
+            }
+            result
+        }
+        Err(e) => {
+            log::warn!("备份 live 配置文件失败 {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+/// 备份文件名的前缀与后缀：`settings.json` -> ("settings", ".json")，`.env` -> ("env", ".bak")
+fn backup_name_parts(path: &Path) -> Option<(String, String)> {
+    let name = path.file_name()?.to_string_lossy();
+    let trimmed = name.trim_start_matches('.');
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(match trimmed.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => {
+            (sanitize_provider_name(stem), format!(".{ext}"))
+        }
+        _ => (sanitize_provider_name(trimmed), ".bak".to_string()),
+    })
+}
+
+/// 备份排序键：(`YYYYmmdd_HHMMSS` 时间戳, 同一秒内的序号)
+type BackupKey = (String, u64);
+
+/// 解析备份文件名 `<stem>_<YYYYmmdd_HHMMSS>[_<n>]<suffix>`
+fn parse_backup_key(name: &str, stem: &str, suffix: &str) -> Option<BackupKey> {
+    let middle = name
+        .strip_prefix(stem)?
+        .strip_prefix('_')?
+        .strip_suffix(suffix)?;
+    let parts: Vec<&str> = middle.split('_').collect();
+    if parts.is_empty()
+        || parts
+            .iter()
+            .any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()))
+    {
+        return None;
+    }
+    match parts.as_slice() {
+        [date, time] => Some((format!("{date}_{time}"), 0)),
+        [date, time, n] => Some((format!("{date}_{time}"), n.parse().ok()?)),
+        _ => None,
+    }
+}
+
+/// 列出 `dir` 中属于 `stem`/`suffix` 的备份，按时间戳与序号升序
+fn list_backups_with_keys(dir: &Path, stem: &str, suffix: &str) -> Vec<(BackupKey, PathBuf)> {
+    let mut entries: Vec<(BackupKey, PathBuf)> = match fs::read_dir(dir) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let path = e.path();
+                let key = parse_backup_key(path.file_name()?.to_str()?, stem, suffix)?;
+                Some((key, path))
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    entries.sort();
+    entries
+}
+
+fn list_backups(dir: &Path, stem: &str, suffix: &str) -> Vec<PathBuf> {
+    list_backups_with_keys(dir, stem, suffix)
+        .into_iter()
+        .map(|(_, p)| p)
+        .collect()
+}
+
+pub(crate) fn backup_file_into_dir(
+    src: &Path,
+    dir: &Path,
+    retain: usize,
+) -> Result<Option<PathBuf>, AppError> {
+    if !src.is_file() {
+        return Ok(None);
+    }
+    let Some((stem, suffix)) = backup_name_parts(src) else {
+        return Ok(None);
+    };
+    let content = fs::read(src).map_err(|e| AppError::io(src, e))?;
+
+    let existing = list_backups_with_keys(dir, &stem, &suffix);
+    if let Some((_, latest)) = existing.last() {
+        if fs::read(latest).ok().as_deref() == Some(content.as_slice()) {
+            return Ok(Some(latest.clone()));
+        }
+    }
+
+    fs::create_dir_all(dir).map_err(|e| AppError::io(dir, e))?;
+    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    // 同一秒内的多次备份使用递增序号，保证新备份总是排在最后（即使旧序号已被清理）
+    let next_counter = existing
+        .iter()
+        .filter(|((t, _), _)| *t == ts)
+        .map(|((_, n), _)| n + 1)
+        .max();
+    let mut counter = next_counter.unwrap_or(0);
+    let name_for = |n: u64| {
+        if n == 0 {
+            format!("{stem}_{ts}{suffix}")
+        } else {
+            format!("{stem}_{ts}_{n}{suffix}")
+        }
+    };
+    let mut backup_path = dir.join(name_for(counter));
+    while backup_path.exists() {
+        counter += 1;
+        backup_path = dir.join(name_for(counter));
+    }
+    // 备份内容可能包含密钥
+    atomic_write_secret(&backup_path, &content)?;
+
+    let all = list_backups(dir, &stem, &suffix);
+    let retain = retain.max(1);
+    if all.len() > retain {
+        for old in &all[..all.len() - retain] {
+            if let Err(e) = fs::remove_file(old) {
+                log::warn!("删除旧备份失败 {}: {e}", old.display());
+            }
+        }
+    }
+
+    Ok(Some(backup_path))
 }
 
 #[cfg(test)]
@@ -519,6 +799,157 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&sorted_a).unwrap(),
             serde_json::to_string(&sorted_b).unwrap(),
+        );
+    }
+
+    fn leftover_tmp_files(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains(".tmp."))
+            .collect()
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_file_and_leaves_no_tmp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, b"old").unwrap();
+
+        atomic_write(&path, b"new").unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert!(leftover_tmp_files(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn atomic_write_failed_rename_keeps_original_and_cleans_tmp() {
+        let dir = tempfile::tempdir().unwrap();
+        // 目标是非空目录：rename 一定失败
+        let path = dir.path().join("config.toml");
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("keep.txt"), b"original").unwrap();
+
+        let err = atomic_write(&path, b"new content");
+        assert!(err.is_err(), "rename over a non-empty directory must fail");
+
+        assert!(path.is_dir());
+        assert_eq!(fs::read(path.join("keep.txt")).unwrap(), b"original");
+        assert!(
+            leftover_tmp_files(dir.path()).is_empty(),
+            "temp file must be removed on failure"
+        );
+    }
+
+    #[test]
+    fn atomic_write_failed_create_leaves_no_tmp() {
+        let dir = tempfile::tempdir().unwrap();
+        // 父路径是普通文件：创建目录/临时文件失败
+        let blocker = dir.path().join("blocker");
+        fs::write(&blocker, b"x").unwrap();
+        let path = blocker.join("settings.json");
+
+        assert!(atomic_write(&path, b"data").is_err());
+        assert_eq!(fs::read(&blocker).unwrap(), b"x");
+        assert!(leftover_tmp_files(dir.path()).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_through_symlink_updates_target_and_keeps_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles").join("settings.json");
+        fs::create_dir_all(real.parent().unwrap()).unwrap();
+        fs::write(&real, b"old").unwrap();
+        let link = dir.path().join("settings.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        atomic_write(&link, b"new").unwrap();
+
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read(&real).unwrap(), b"new");
+        assert!(leftover_tmp_files(dir.path()).is_empty());
+        assert!(leftover_tmp_files(real.parent().unwrap()).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_secret_creates_new_file_with_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("auth.json");
+
+        write_json_file_secret(&path, &serde_json::json!({"OPENAI_API_KEY": "sk"})).unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, b"a = 1").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        write_text_file_secret(&path, "a = 2").unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+
+        atomic_write(&path, b"a = 3").unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
+
+    #[test]
+    fn backup_file_into_dir_copies_dedupes_and_prunes() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("settings.json");
+        let backups = dir.path().join("backups").join("claude");
+
+        // 文件不存在：不备份
+        assert!(backup_file_into_dir(&src, &backups, 2).unwrap().is_none());
+
+        fs::write(&src, b"v1").unwrap();
+        let b1 = backup_file_into_dir(&src, &backups, 2).unwrap().unwrap();
+        assert_eq!(fs::read(&b1).unwrap(), b"v1");
+        let name = b1.file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.starts_with("settings_") && name.ends_with(".json"));
+
+        // 内容未变化：复用最近一次备份
+        let again = backup_file_into_dir(&src, &backups, 2).unwrap().unwrap();
+        assert_eq!(again, b1);
+
+        for v in ["v2", "v3", "v4"] {
+            fs::write(&src, v.as_bytes()).unwrap();
+            backup_file_into_dir(&src, &backups, 2).unwrap().unwrap();
+        }
+
+        let remaining = list_backups(&backups, "settings", ".json");
+        assert_eq!(remaining.len(), 2, "retention must prune old backups");
+        let contents: Vec<Vec<u8>> = remaining.iter().map(|p| fs::read(p).unwrap()).collect();
+        assert_eq!(contents, vec![b"v3".to_vec(), b"v4".to_vec()]);
+    }
+
+    #[test]
+    fn backup_name_parts_handles_dotfiles() {
+        assert_eq!(
+            backup_name_parts(Path::new("/x/.env")),
+            Some(("env".to_string(), ".bak".to_string()))
+        );
+        assert_eq!(
+            backup_name_parts(Path::new("/x/config.toml")),
+            Some(("config".to_string(), ".toml".to_string()))
         );
     }
 }
