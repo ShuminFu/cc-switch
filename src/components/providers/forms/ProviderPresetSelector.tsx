@@ -12,6 +12,7 @@ import {
   Heart,
   Layers,
   Settings2,
+  EyeOff,
 } from "lucide-react";
 import type { ProviderPreset } from "@/config/claudeProviderPresets";
 import type { CodexProviderPreset } from "@/config/codexProviderPresets";
@@ -26,6 +27,7 @@ import {
   type UniversalProviderPreset,
 } from "@/config/universalProviderPresets";
 import { ProviderIcon } from "@/components/ProviderIcon";
+import { settingsApi } from "@/lib/api/settings";
 
 type PresetTranslator = (key: string) => unknown;
 
@@ -50,6 +52,38 @@ export type PresetEntry = {
   id: string;
   preset: AnyPreset;
 };
+
+/** Public sponsor / affiliate policy linked from the preset picker (PRODUCT-08). */
+export const SPONSOR_POLICY_URL =
+  "https://github.com/farion1231/cc-switch/blob/main/docs/sponsor-policy.md";
+
+/** localStorage key for the "hide sponsored presets" preference. */
+export const HIDE_SPONSORED_STORAGE_KEY = "cc-switch:presets:hideSponsored";
+
+/** Partner and prime-partner presets are paid placements and may carry referral links. */
+export function isSponsoredPreset(preset: AnyPreset): boolean {
+  return Boolean(preset.isPartner || preset.primePartner);
+}
+
+export function readHideSponsoredPreference(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(HIDE_SPONSORED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeHideSponsoredPreference(hide: boolean): void {
+  try {
+    if (hide) {
+      globalThis.localStorage?.setItem(HIDE_SPONSORED_STORAGE_KEY, "1");
+    } else {
+      globalThis.localStorage?.removeItem(HIDE_SPONSORED_STORAGE_KEY);
+    }
+  } catch {
+    // storage unavailable: the preference simply does not persist
+  }
+}
 
 export function getPresetDisplayName(
   preset: AnyPreset,
@@ -116,15 +150,24 @@ export interface PresetVisibilityOptions {
   query: string;
   sortMode: PresetSortMode;
   t: PresetTranslator;
+  /** Drop sponsored (partner / prime partner) presets. */
+  hideSponsored?: boolean;
 }
 
 export function getVisiblePresetEntries(
   entries: PresetEntry[],
   options: PresetVisibilityOptions,
 ): PresetEntry[] {
-  const { query, sortMode, t } = options;
+  const { query, sortMode, t, hideSponsored = false } = options;
+  const candidates = hideSponsored
+    ? entries.filter((entry) => !isSponsoredPreset(entry.preset))
+    : entries;
 
-  return sortPresetEntries(filterPresetEntries(entries, query, t), sortMode, t);
+  return sortPresetEntries(
+    filterPresetEntries(candidates, query, t),
+    sortMode,
+    t,
+  );
 }
 
 interface ProviderPresetSelectorProps {
@@ -151,6 +194,9 @@ export function ProviderPresetSelector({
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<PresetSortMode>(
     PresetSortMode.Original,
+  );
+  const [hideSponsored, setHideSponsored] = useState(
+    readHideSponsoredPreference,
   );
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -198,9 +244,34 @@ export function ProviderPresetSelector({
         query: searchQuery,
         sortMode,
         t,
+        hideSponsored,
       }),
-    [presetEntries, searchQuery, sortMode, t],
+    [presetEntries, searchQuery, sortMode, t, hideSponsored],
   );
+
+  const hasSponsoredPresets = useMemo(
+    () => presetEntries.some((entry) => isSponsoredPreset(entry.preset)),
+    [presetEntries],
+  );
+
+  const toggleHideSponsored = () => {
+    setHideSponsored((current) => {
+      const next = !current;
+      writeHideSponsoredPreference(next);
+      return next;
+    });
+  };
+
+  const sponsoredTooltip = t("providerPreset.sponsoredTooltip", {
+    defaultValue:
+      "Sponsored placement: this partner supports CC Switch, and its sign-up links may earn CC Switch a referral commission.",
+  });
+
+  const openSponsorPolicy = () => {
+    void settingsApi.openExternal(SPONSOR_POLICY_URL).catch((error) => {
+      console.error("[ProviderPresetSelector] Failed to open policy", error);
+    });
+  };
 
   const getCategoryHint = (): ReactNode => {
     switch (category) {
@@ -349,6 +420,33 @@ export function ProviderPresetSelector({
             <Search className="size-4" />
           </Button>
 
+          {hasSponsoredPresets && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={t("providerPreset.hideSponsoredAriaLabel", {
+                defaultValue: "Hide sponsored presets",
+              })}
+              aria-pressed={hideSponsored}
+              onClick={toggleHideSponsored}
+              title={
+                hideSponsored
+                  ? t("providerPreset.showSponsoredTooltip", {
+                      defaultValue: "Show sponsored presets",
+                    })
+                  : t("providerPreset.hideSponsoredTooltip", {
+                      defaultValue: "Hide sponsored presets",
+                    })
+              }
+              className={
+                hideSponsored ? "size-8 bg-accent text-foreground" : "size-8"
+              }
+            >
+              <EyeOff className="size-4" />
+            </Button>
+          )}
+
           <Button
             type="button"
             variant="ghost"
@@ -404,6 +502,9 @@ export function ProviderPresetSelector({
           const isPartner = entry.preset.isPartner;
           const isPrimePartner = entry.preset.primePartner;
           const presetCategory = entry.preset.category ?? "others";
+          const categoryLabel =
+            presetCategoryLabels[presetCategory] ?? t("providerPreset.other");
+          const sponsored = isSponsoredPreset(entry.preset);
           return (
             <button
               key={entry.id}
@@ -412,9 +513,11 @@ export function ProviderPresetSelector({
               className={`${getPresetButtonClass(isSelected, entry.preset)} relative`}
               style={getPresetButtonStyle(isSelected, entry.preset)}
               title={
-                presetCategoryLabels[presetCategory] ??
-                t("providerPreset.other")
+                sponsored
+                  ? `${categoryLabel} · ${sponsoredTooltip}`
+                  : categoryLabel
               }
+              data-sponsored={sponsored ? "true" : undefined}
             >
               {renderPresetIcon(entry.preset)}
               <span className="truncate">
@@ -483,6 +586,27 @@ export function ProviderPresetSelector({
       )}
 
       <p className="text-xs text-muted-foreground">{getCategoryHint()}</p>
+
+      {hasSponsoredPresets && (
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="sponsor-disclosure"
+        >
+          {t("providerPreset.sponsorDisclosure", {
+            defaultValue:
+              "Presets marked with a star or heart are sponsored placements; their sign-up links may earn CC Switch a referral commission.",
+          })}{" "}
+          <button
+            type="button"
+            onClick={openSponsorPolicy}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {t("providerPreset.sponsorPolicyLink", {
+              defaultValue: "Sponsor policy",
+            })}
+          </button>
+        </p>
+      )}
     </div>
   );
 }
