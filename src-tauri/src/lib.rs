@@ -157,7 +157,12 @@ fn handle_deeplink_url(
                 request.name
             );
 
-            emit_or_buffer_deeplink(app, crate::commands::PendingDeepLink::Import { request });
+            emit_or_buffer_deeplink(
+                app,
+                crate::commands::PendingDeepLink::Import {
+                    request: Box::new(request),
+                },
+            );
 
             if focus_main_window {
                 if let Some(window) = app.get_webview_window("main") {

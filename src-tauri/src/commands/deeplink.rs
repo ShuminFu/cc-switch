@@ -19,7 +19,7 @@ use tauri::State;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PendingDeepLink {
-    Import { request: DeepLinkImportRequest },
+    Import { request: Box<DeepLinkImportRequest> },
     Error { url: String, error: String },
 }
 
@@ -197,10 +197,10 @@ mod inbox_tests {
 
     fn import(name: &str) -> PendingDeepLink {
         PendingDeepLink::Import {
-            request: DeepLinkImportRequest {
+            request: Box::new(DeepLinkImportRequest {
                 name: Some(name.to_string()),
                 ..Default::default()
-            },
+            }),
         }
     }
 
