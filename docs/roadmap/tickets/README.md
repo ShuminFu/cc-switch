@@ -189,7 +189,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-147](P4-app-adapters-persistence/CCS-147-p4-adapter-claude.md) | refactor | p2 | L | [apps] Migrate Claude and Claude Desktop to AppAdapter | CCS-146 | Done |
 | [CCS-148](P4-app-adapters-persistence/CCS-148-p4-adapter-codex.md) | refactor | p2 | L | [apps] Migrate Codex to AppAdapter, keeping the history-migration ids and markers stable | CCS-146 | Done |
 | [CCS-149](P4-app-adapters-persistence/CCS-149-p4-adapter-additive.md) | refactor | p2 | L | [apps] Migrate OpenCode, OpenClaw and Hermes to AppAdapter and remove the remaining fan-out | CCS-147, CCS-148 | Partial |
-| [CCS-150](P4-app-adapters-persistence/CCS-150-p4-adapter-conformance.md) | chore | p1 | M | [apps] Add an adapter conformance suite that loops over APPS, plus the dummy 9th-app test | CCS-149 | Partial |
+| [CCS-150](P4-app-adapters-persistence/CCS-150-p4-adapter-conformance.md) | chore | p1 | M | [apps] Add an adapter conformance suite that loops over APPS, plus the dummy 9th-app test | CCS-149 | Done |
 | [CCS-151](P4-app-adapters-persistence/CCS-151-p4-mcp-projector.md) | refactor | p2 | M | [mcp] Add McpProjector and generic MCP import loops | CCS-146, CCS-011 | Done |
 | [CCS-152](P4-app-adapters-persistence/CCS-152-p4-takeover-crash-e2e.md) | chore | p1 | M | [takeover] Add crash/restore E2E for each proxy-capable app and a legacy-path runtime flag | CCS-014, CCS-012 | Partial |
 | [CCS-153](P4-app-adapters-persistence/CCS-153-p4-services-proxy-split.md) | refactor | p2 | M | [proxy] Split services/proxy.rs (7.2k lines) into lifecycle, takeover, backup, hot_switch and config modules | CCS-152, CCS-054 | Done |
@@ -215,7 +215,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-173](P4-app-adapters-persistence/CCS-173-p4-sync-snapshot-auth.md) | feature | p2 | M | [sync] Authenticate WebDAV/S3 snapshots with an HMAC and refuse unsigned remote imports | CCS-086, CCS-172 | Partial |
 | [CCS-212](P4-app-adapters-persistence/CCS-212-p4-hot-switch-rollback-snapshot.md) | bug | p3 | S | [takeover] Keep the raw byte snapshot when a failed hot switch rolls back the live backup | CCS-152 | Done |
 | [CCS-232](P4-app-adapters-persistence/CCS-232-p4-apps-budget-ratchet.md) | chore | p2 | S | [apps-tests] Make the match-app counter skip test-only modules and ratchet both app budgets to today's counts |  | Open |
-| [CCS-233](P4-app-adapters-persistence/CCS-233-p4-apps-ninth-app-six-files.md) | refactor | p2 | M | [apps] Make a 9th app touch 6 or fewer backend files | CCS-232 | Open |
+| [CCS-233](P4-app-adapters-persistence/CCS-233-p4-apps-ninth-app-six-files.md) | refactor | p2 | M | [apps] Make a 9th app touch 6 or fewer backend files | CCS-232 | Done |
 | [CCS-234](P4-app-adapters-persistence/CCS-234-p4-takeover-dispatch-via-adapter.md) | refactor | p2 | L | [takeover] Route takeover per-app dispatch through ProxyTakeover instead of AppType matches | CCS-232 | Open |
 | [CCS-235](P4-app-adapters-persistence/CCS-235-p4-apps-config-profile-keyed-access.md) | refactor | p3 | M | [apps] Replace per-app field matches in app_config.rs and services/profile.rs with keyed access | CCS-232 | Open |
 | [CCS-236](P4-app-adapters-persistence/CCS-236-p4-apps-match-sites-under-15.md) | refactor | p3 | M | [apps] Move the remaining stream-check, terminal and proxy-provider dispatch into adapters and set the match-app budget to 15 or fewer | CCS-233, CCS-234, CCS-235 | Open |

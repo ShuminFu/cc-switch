@@ -13,7 +13,7 @@ Collapse the per-app fan-out (including services/provider/mod.rs, which the plan
 - [ ] live.rs, prompt_files.rs, skill.rs and commands/config.rs contain no match app_type; backend match-app sites outside apps/** number 15 or fewer. Partly met: the four files have no AppType match (asserted by `match_app_sites_outside_apps_stay_within_budget`). Not met: the same counter finds **30** sites today (40 after CCS-149, 56 before it), against a target of 15. See the closure audit.
 - [x] Conformance suite green for all 8 apps (credentials, MCP, prompt/skills paths, takeover apply/cleanup restores bytes, caps match traits, codex model_provider id stable). Evidence: `cargo test --test app_adapter_conformance` gives 13 passed. That includes `credentials_round_trip_for_every_app`, `mcp_upsert_and_remove_for_every_app`, `prompt_and_skills_paths_for_every_app`, `takeover_apply_then_cleanup_restores_original_bytes` (all 7 `PROXY_TAKEOVER` apps), `caps_match_implemented_traits_for_every_app` and `codex_model_provider_id_is_stable`.
 - [x] No services/proxy/ file exceeds 1500 lines of production code; crash/restore E2E green for claude, codex, gemini, grokbuild, opencode, openclaw and hermes. Evidence: the largest production file is `services/proxy/takeover/mod.rs` at 684 lines (`tests.rs`, 4718 lines, is `#[cfg(test)] mod tests;`). `cargo test --test takeover_crash` gives 10 passed, covering all 7 apps in `cases()`, on Linux. The 3-OS run is tracked by CCS-152 through the CI matrix.
-- [ ] Fresh and migrated DBs are schema-equivalent; a test-only 9th app touches 6 or fewer backend files and needs no migration. Partly met: schema equivalence holds (`every_released_schema_migrates_to_current` in `tests/migrations.rs`, 14 passed), and no migration is needed (`dummy_app_needs_no_schema_migration`, `dao::ninth_app_needs_no_migration`). Not met: `new_app_backend_touch_points_stay_within_budget` reports **9** files (budget constant 10), against a target of 6.
+- [x] Fresh and migrated DBs are schema-equivalent; a test-only 9th app touches 6 or fewer backend files and needs no migration. Met since CCS-233: `new_app_backend_touch_points_stay_within_budget` reports **5** files (budget 5). Audit text: Partly met: schema equivalence holds (`every_released_schema_migrates_to_current` in `tests/migrations.rs`, 14 passed), and no migration is needed (`dummy_app_needs_no_schema_migration`, `dao::ninth_app_needs_no_migration`). Not met: `new_app_backend_touch_points_stay_within_budget` reports **9** files (budget constant 10), against a target of 6.
 - [x] One cost function; the cost golden table (at least 50 rows) passes; backfill output equals ingest output. Evidence: `pricing::engine::cost` is the only `fn cost`. The golden table has 72 rows with a `>= 50` guard. The 7 `cost_golden_*` tests pass, including `cost_golden_backfill_output_equals_ingest_output`.
 - [x] No SQL outside database/ (CI grep); dashboard summary p95 is 50 ms or less on a 1M-row DB; superseded_by backfill is chunked and resumable. Evidence: `no_sql_outside_database` passes; its allowlist covers only foreign-DB readers and the test harness. CCS-160's 1M-row benchmark measured a "today" summary p95 of 24 ms after the backfill (`superseded_benchmark_one_million_rows`, ignored by default and not re-run here). `superseded_backfill_resumes_from_cursor_after_kill` and the parity tests pass.
 - [x] Killing the process mid-import causes no double counting; a downgraded app still reads current providers through dual-written keys. Evidence: `session_import_killed_between_files_does_not_double_count`, `new_settings_json_is_readable_by_the_old_struct` and `frontend_save_uses_flat_keys_for_legacy_apps` pass.
@@ -23,7 +23,7 @@ p4-migration-framework, p4-adapter-trait-gemini-grok, p4-adapter-claude, p4-adap
 
 ## Epic closure audit
 
-Audited 2026-10-30 on branch `claude/funny-carson-9c7j3e` against the current code and the child tickets' notes. Each measurement was re-run here: the targeted test binaries `app_adapter_conformance` (13 passed), `takeover_crash` (10 passed) and `migrations` (14 passed), plus filtered `--lib` runs of the migration, match-app, cost_golden, superseded, SQL-guard, import-kill and settings-downgrade tests (all passed). The full `cargo test` was not run. **Result: 6 of 8 exit criteria are met. Status: Partial.**
+Audited 2026-10-30 on branch `claude/funny-carson-9c7j3e` against the current code and the child tickets' notes. Each measurement was re-run here: the targeted test binaries `app_adapter_conformance` (13 passed), `takeover_crash` (10 passed) and `migrations` (14 passed), plus filtered `--lib` runs of the migration, match-app, cost_golden, superseded, SQL-guard, import-kill and settings-downgrade tests (all passed). The full `cargo test` was not run. **Result: 6 of 8 exit criteria are met (7 of 8 after CCS-233). Status: Partial.**
 
 ### Child tickets
 
@@ -34,7 +34,7 @@ Audited 2026-10-30 on branch `claude/funny-carson-9c7j3e` against the current co
 | CCS-147 | p4-adapter-claude | Done |
 | CCS-148 | p4-adapter-codex | Done |
 | CCS-149 | p4-adapter-additive | Partial (match-app sites ≤ 15 is not met) |
-| CCS-150 | p4-adapter-conformance | Partial (9th app ≤ 6 files is not met) |
+| CCS-150 | p4-adapter-conformance | Done (9th app touches 5 files since CCS-233) |
 | CCS-151 | p4-mcp-projector | Done |
 | CCS-152 | p4-takeover-crash-e2e | Partial (green on 3 OSes is not verified) |
 | CCS-153 | p4-services-proxy-split | Done |
@@ -87,7 +87,7 @@ Audited 2026-10-30 on branch `claude/funny-carson-9c7j3e` against the current co
    - Ratchet `MATCH_APP_SITE_BUDGET` from 40 to the measured 30.
 
    Note: `commands/terminal.rs` is reworked by lane 2's CCS-179 (`platform/terminal`), which is not merged yet.
-2. **A 9th app touches 9 backend files, target ≤ 6.** The remaining exhaustive matches are in `app_config.rs`, `deeplink/preview.rs`, `deeplink/provider.rs`, `paths.rs`, `proxy/providers/mod.rs` and `services/config.rs`, on top of the 3 fixed files plus the new adapter. At least 3 of these must drop their exhaustive `AppType` matches (catch-all arm or registry dispatch). `NEW_APP_BACKEND_FILE_BUDGET` can also be ratcheted from 10 to 9.
+2. **Resolved by CCS-233 (now 5 files).** **A 9th app touches 9 backend files, target ≤ 6.** The remaining exhaustive matches are in `app_config.rs`, `deeplink/preview.rs`, `deeplink/provider.rs`, `paths.rs`, `proxy/providers/mod.rs` and `services/config.rs`, on top of the 3 fixed files plus the new adapter. At least 3 of these must drop their exhaustive `AppType` matches (catch-all arm or registry dispatch). `NEW_APP_BACKEND_FILE_BUDGET` can also be ratcheted from 10 to 9.
 3. **Not exit criteria, but they keep child tickets Partial:**
    - CCS-152 needs a green 3-OS CI run of `takeover_crash` (ubuntu, windows and macos in `ci.yml`).
    - CCS-172 needs the manual keychain check on real macOS, Windows and Linux desktops (`docs/dev/SECRET_STORAGE.md`).

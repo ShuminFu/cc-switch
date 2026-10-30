@@ -1,6 +1,6 @@
 # CCS-150: [apps] Add an adapter conformance suite that loops over APPS, plus the dummy 9th-app test
 
-**Status:** Partial · **Kind:** chore · **Labels:** `chore`, `phase:P4`, `p1-high`, `area:apps-tests`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P4`, `p1-high`, `area:apps-tests`
 
 > **Ticket key:** `p4-adapter-conformance` · **Phase:** P4 · **Priority:** p1-high · **Effort:** M · **Depends on:** `p4-adapter-additive`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -18,7 +18,7 @@ Also add a test-only 9th app.
 
 ## Acceptance criteria / verification
 - [x] Passes for all 8 apps
-- [ ] The dummy app touches 6 or fewer backend files and needs no migration (documented in the PR). No migration: done. Files: it is 10 today, now tracked by a CI count; see below.
+- [x] The dummy app touches 6 or fewer backend files and needs no migration (documented in the PR). No migration: done. Files: 5 since [CCS-233](CCS-233-p4-apps-ninth-app-six-files.md) (`NEW_APP_BACKEND_FILE_BUDGET = 5`, enforced by a CI count); see below.
 - [x] `cargo test --manifest-path src-tauri/Cargo.toml --test app_adapter_conformance`
 
 ## Dependencies
@@ -85,3 +85,8 @@ All of that is outside this ticket's scope.
 - Follow-up [CCS-232](../P4-app-adapters-persistence/CCS-232-p4-apps-budget-ratchet.md): Make the match-app counter skip test-only modules and ratchet both app budgets to today's counts.
 - Follow-up [CCS-233](../P4-app-adapters-persistence/CCS-233-p4-apps-ninth-app-six-files.md): Make a 9th app touch 6 or fewer backend files.
 - Follow-up [CCS-236](../P4-app-adapters-persistence/CCS-236-p4-apps-match-sites-under-15.md): Move the remaining stream-check, terminal and proxy-provider dispatch into adapters and set the match-app budget to 15 or fewer.
+
+### Closed by CCS-233
+
+[CCS-233](CCS-233-p4-apps-ninth-app-six-files.md) (commit `2b10c68`) moved the `paths.rs`, `deeplink/preview.rs`, `deeplink/provider.rs` and `services/config.rs` dispatch onto the registry descriptor, adapter hooks and catch-all arms. `new_app_backend_touch_points_stay_within_budget` now measures 5 files: `app_config.rs`, `apps/registry.rs`, `apps/mod.rs`, `apps/<new app>/mod.rs` and `proxy/providers/mod.rs`. The budget is 5. Every criterion is met: Done.
+
