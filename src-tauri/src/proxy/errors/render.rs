@@ -6,11 +6,11 @@
 //!   附带供应商、模型、端点等现场信息
 
 use crate::proxy::{
+    codec::responses::errors::chat_error_to_response_error,
     error_mapper::{get_error_message, map_proxy_error_to_status},
     handler_context::RequestContext,
     hyper_client::ProxyResponse,
     protocol::WireFormat,
-    providers::transform_codex_chat,
     response_processor::{
         read_decoded_body, strip_entity_headers_for_rebuilt_body, strip_hop_by_hop_response_headers,
     },
@@ -150,7 +150,7 @@ pub(crate) async fn handle_codex_chat_error_response(
         }
     };
 
-    let responses_error = transform_codex_chat::chat_error_to_response_error(Some(&parsed_value));
+    let responses_error = chat_error_to_response_error(Some(&parsed_value));
 
     strip_entity_headers_for_rebuilt_body(&mut response_headers);
     strip_hop_by_hop_response_headers(&mut response_headers);
@@ -224,7 +224,7 @@ fn codex_proxy_error_json(
                 .as_deref()
                 .map(|body| serde_json::from_str::<Value>(body).unwrap_or_else(|_| json!(body)));
             (
-                transform_codex_chat::chat_error_to_response_error(parsed_body.as_ref()),
+                chat_error_to_response_error(parsed_body.as_ref()),
                 Some(*status),
             )
         }

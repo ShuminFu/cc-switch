@@ -29,11 +29,15 @@
 //! same event sequence as the unsplit input and satisfies the structural
 //! invariants. Every failure names the split offsets that produced it.
 
-use super::transform::inject_openai_stream_include_usage;
-use super::transform_codex_chat::{build_codex_tool_context_from_request, CodexToolContext};
-use super::transform_gemini::{extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints};
 use crate::pricing::engine::{self, InputBasis, TokenCounts};
 use crate::proxy::codec::bridge;
+use crate::proxy::codec::gemini::tool_calls::{
+    extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints,
+};
+use crate::proxy::codec::openai_chat::support::inject_openai_stream_include_usage;
+use crate::proxy::codec::responses::tools::{
+    build_codex_tool_context_from_request, CodexToolContext,
+};
 pub use crate::proxy::codec::CodecEngine;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};

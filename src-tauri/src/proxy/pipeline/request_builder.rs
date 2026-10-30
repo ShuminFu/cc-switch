@@ -20,7 +20,9 @@ use crate::proxy::error::ProxyError;
 use crate::proxy::forwarder::{ForwarderDeps, RequestScope};
 use crate::proxy::json_canonical::{canonicalize_value, short_value_hash};
 use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
-use crate::proxy::providers::{self, AuthStrategy, ProviderAdapter};
+use crate::proxy::providers::{
+    self, transform_claude_request_for_api_format, AuthStrategy, ProviderAdapter,
+};
 use crate::proxy::routing::{RoutePlan, SideStores, VendorQuirks};
 use crate::proxy::thinking_rectifier::normalize_thinking_type;
 use crate::proxy::types::{OptimizerConfig, RectifierConfig};
@@ -286,7 +288,7 @@ impl BodyStages<'_> {
             if self.adapter.name() == "Claude" {
                 let api_format =
                     api_format.unwrap_or_else(|| providers::get_claude_api_format(self.provider));
-                let request_body = providers::transform_claude_request_for_api_format(
+                let request_body = transform_claude_request_for_api_format(
                     body,
                     self.provider,
                     api_format,

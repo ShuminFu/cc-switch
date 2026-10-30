@@ -169,8 +169,7 @@ fn rewrite_claude_transform_endpoint(
     }
 
     if api_format == ClaudeApiFormat::GeminiNative {
-        let model = crate::proxy::providers::transform_gemini::extract_gemini_model(body)
-            .unwrap_or("unknown");
+        let model = crate::proxy::codec::gemini::extract_gemini_model(body).unwrap_or("unknown");
         // Accept both bare ids (`gemini-2.5-pro`) and the resource-name
         // form (`models/gemini-2.5-pro`) that Gemini SDKs emit. See
         // `normalize_gemini_model_id` for rationale.

@@ -579,7 +579,7 @@ fn merge_tool_call_delta(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proxy::providers::transform;
+    use crate::proxy::codec::{bridge, CodecEngine};
 
     #[test]
     fn body_looks_like_sse_detects_unlabeled_sse_prefixes() {
@@ -1090,18 +1090,21 @@ data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"boom\
 
     #[test]
     fn aggregated_chat_sse_round_trips_through_openai_to_anthropic() {
-        // 全链路：错标 Content-Type 的 SSE 体 → 聚合 → 既有非流转换器 → Anthropic JSON
+        // 全链路：错标 Content-Type 的 SSE 体 → 聚合 → 非流桥接（两种引擎） → Anthropic JSON
         let sse = "data: {\"id\":\"chatcmpl-9\",\"created\":1,\"model\":\"gpt-5.4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n\
 data: {\"id\":\"chatcmpl-9\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":1,\"total_tokens\":5}}\n\n\
 data: [DONE]\n\n";
 
         let aggregated = chat_sse_to_response_value(sse).unwrap();
-        let anthropic = transform::openai_to_anthropic(aggregated).unwrap();
+        for engine in [CodecEngine::Legacy, CodecEngine::Ir] {
+            let anthropic =
+                bridge::openai_chat_to_anthropic_response(aggregated.clone(), engine).unwrap();
 
-        assert_eq!(anthropic["model"], "gpt-5.4");
-        assert_eq!(anthropic["content"][0]["type"], "text");
-        assert_eq!(anthropic["content"][0]["text"], "Hi");
-        assert_eq!(anthropic["stop_reason"], "end_turn");
+            assert_eq!(anthropic["model"], "gpt-5.4", "{engine:?}");
+            assert_eq!(anthropic["content"][0]["type"], "text", "{engine:?}");
+            assert_eq!(anthropic["content"][0]["text"], "Hi", "{engine:?}");
+            assert_eq!(anthropic["stop_reason"], "end_turn", "{engine:?}");
+        }
     }
 
     #[test]

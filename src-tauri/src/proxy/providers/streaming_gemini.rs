@@ -689,19 +689,20 @@ mod tests {
                 .into_iter()
                 .map(|chunk| Ok::<Bytes, std::io::Error>(Bytes::from(chunk))),
         );
-        let hints = super::super::transform_gemini::extract_anthropic_tool_schema_hints(&json!({
-            "tools": [{
-                "name": "Bash",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "command": { "type": "string" },
-                        "timeout": { "type": "number" }
-                    },
-                    "required": ["command"]
-                }
-            }]
-        }));
+        let hints =
+            crate::proxy::codec::gemini::tool_calls::extract_anthropic_tool_schema_hints(&json!({
+                "tools": [{
+                    "name": "Bash",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "command": { "type": "string" },
+                            "timeout": { "type": "number" }
+                        },
+                        "required": ["command"]
+                    }
+                }]
+            }));
         let converted =
             create_anthropic_sse_stream_from_gemini(stream, None, None, None, Some(hints));
         let output = futures::executor::block_on(async move {
@@ -753,19 +754,20 @@ mod tests {
                 .into_iter()
                 .map(|chunk| Ok::<Bytes, std::io::Error>(Bytes::from(chunk))),
         );
-        let hints = super::super::transform_gemini::extract_anthropic_tool_schema_hints(&json!({
-            "tools": [{
-                "name": "Skill",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "skill": { "type": "string" },
-                        "args": { "type": "string" }
-                    },
-                    "required": ["skill"]
-                }
-            }]
-        }));
+        let hints =
+            crate::proxy::codec::gemini::tool_calls::extract_anthropic_tool_schema_hints(&json!({
+                "tools": [{
+                    "name": "Skill",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "skill": { "type": "string" },
+                            "args": { "type": "string" }
+                        },
+                        "required": ["skill"]
+                    }
+                }]
+            }));
         let converted =
             create_anthropic_sse_stream_from_gemini(stream, None, None, None, Some(hints));
         let output = futures::executor::block_on(async move {

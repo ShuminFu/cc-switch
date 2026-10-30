@@ -412,4 +412,59 @@ mod tests {
         let provider_type = ProviderType::from_app_type_and_config(&AppType::Gemini, &provider);
         assert_eq!(provider_type, ProviderType::GeminiCli);
     }
+
+    /// 旧转换器（`transform*` / `streaming*`）只允许被自身、`codec::bridge` 的回退分支
+    /// 与 `stream::codec` 的对照测试引用；其余代码须直接从 `codec::*` 导入，
+    /// 以便删除旧文件时只需移除文件（CCS-245）
+    #[test]
+    fn legacy_transform_modules_are_only_referenced_by_allowed_files() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let legacy_path = regex::Regex::new(concat!(
+            r"\b(transform|streaming)(_codex_anthropic|_codex_chat|_gemini|_responses)?\s*::",
+            r"|\b(providers|super)::\{?\s*(transform|streaming)",
+            r"(_codex_anthropic|_codex_chat|_gemini|_responses)?\b",
+        ))
+        .unwrap();
+        let allowed = |rel: &str| {
+            let file = rel.strip_prefix("proxy/providers/").unwrap_or("");
+            (file.starts_with("transform") || file.starts_with("streaming")) && !file.contains('/')
+                || rel == "proxy/codec/bridge.rs"
+                || rel.starts_with("proxy/codec/bridge/")
+                || rel == "proxy/stream/codec.rs"
+        };
+
+        let mut stack = vec![src.clone()];
+        let mut offenders = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                    continue;
+                }
+                let rel = path
+                    .strip_prefix(&src)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if allowed(&rel) {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (index, line) in text.lines().enumerate() {
+                    if !line.trim_start().starts_with("//") && legacy_path.is_match(line) {
+                        offenders.push(format!("{rel}:{}: {}", index + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "import these helpers from codec::* instead:\n{}",
+            offenders.join("\n")
+        );
+    }
 }

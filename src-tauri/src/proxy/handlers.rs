@@ -10,6 +10,13 @@
 
 use super::{
     capture::{tap_stream, CaptureBridge, CaptureSide},
+    codec::{
+        gemini::tool_calls::extract_anthropic_tool_schema_hints,
+        responses::{
+            tools::{build_codex_tool_context_from_request, CodexToolContext},
+            usage::build_anthropic_usage_from_responses,
+        },
+    },
     content_encoding::{decompress_body, get_content_encoding, is_supported_content_encoding},
     endpoints::{BodyDecoding, ClientEndpoint, UpstreamEndpoint},
     error_mapper::{get_error_message, map_proxy_error_to_status},
@@ -22,9 +29,7 @@ use super::{
     },
     handler_context::RequestContext,
     protocol::{ClaudeApiFormat, WireFormat},
-    providers::{
-        transform_codex_chat, transform_gemini, transform_responses, GeminiGenerateEndpoint,
-    },
+    providers::GeminiGenerateEndpoint,
     response_processor::{
         process_response, read_decoded_body, rebuilt_json_response, response_usage_log_task,
         spawn_response_usage_log, transformed_sse_response,
@@ -219,7 +224,7 @@ pub(crate) async fn handle_proxied(
     trace.record_client_headers(&headers);
     ctx.trace = Some(trace);
     let codex_tool_context = (client.client_format == WireFormat::OpenAiResponses)
-        .then(|| transform_codex_chat::build_codex_tool_context_from_request(&body));
+        .then(|| build_codex_tool_context_from_request(&body));
     // Claude 格式转换需要原始请求体（工具 schema 提示），其余端点直接移交给转发器
     let forward_body = if client.client_format == WireFormat::AnthropicMessages {
         body.clone()
@@ -440,7 +445,7 @@ async fn handle_claude_transform(
             is_codex_oauth,
         )
     };
-    let tool_schema_hints = transform_gemini::extract_anthropic_tool_schema_hints(original_body);
+    let tool_schema_hints = extract_anthropic_tool_schema_hints(original_body);
     let tool_schema_hints = (!tool_schema_hints.is_empty()).then_some(tool_schema_hints);
 
     if use_streaming {
@@ -508,7 +513,7 @@ async fn handle_claude_transform(
         json!({
             "id": upstream_response.get("id").cloned().unwrap_or(Value::Null),
             "model": upstream_response.get("model").cloned().unwrap_or(Value::Null),
-            "usage": transform_responses::build_anthropic_usage_from_responses(
+            "usage": build_anthropic_usage_from_responses(
                 upstream_response.get("usage")
             )
         })
@@ -637,7 +642,7 @@ async fn handle_codex_chat_to_responses_transform(
     state: &ProxyState,
     is_stream: bool,
     connection_guard: Option<ActiveConnectionGuard>,
-    tool_context: transform_codex_chat::CodexToolContext,
+    tool_context: CodexToolContext,
 ) -> Result<axum::response::Response, ProxyError> {
     let status = response.status();
 
@@ -733,7 +738,7 @@ async fn handle_codex_anthropic_to_responses_transform(
     state: &ProxyState,
     is_stream: bool,
     connection_guard: Option<ActiveConnectionGuard>,
-    codex_tool_context: transform_codex_chat::CodexToolContext,
+    codex_tool_context: CodexToolContext,
 ) -> Result<axum::response::Response, ProxyError> {
     let status = response.status();
 

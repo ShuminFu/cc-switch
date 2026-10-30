@@ -35,7 +35,6 @@ const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
     "user",
 ];
 
-pub use crate::proxy::codec::responses::errors::chat_error_to_response_error;
 pub(crate) use crate::proxy::codec::responses::tools::*;
 
 /// Convert an OpenAI Responses request into an OpenAI Chat Completions request.

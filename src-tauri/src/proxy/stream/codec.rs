@@ -18,13 +18,12 @@ use crate::proxy::codec::bridge::{
     chat_to_responses_sse, gemini_to_anthropic_sse, openai_chat_to_anthropic_sse,
     responses_to_anthropic_sse,
 };
-use crate::proxy::codec::gemini::GeminiShadowSink;
+use crate::proxy::codec::gemini::{AnthropicToolSchemaHints, GeminiShadowSink};
+use crate::proxy::codec::responses::CodexToolContext;
 use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
 use crate::proxy::providers::{
     codex_chat_history::{record_responses_sse_stream, CodexChatHistoryStore},
     gemini_shadow::GeminiShadowStore,
-    transform_codex_chat::CodexToolContext,
-    transform_gemini::AnthropicToolSchemaHints,
 };
 
 /// 装箱后的 SSE 字节流

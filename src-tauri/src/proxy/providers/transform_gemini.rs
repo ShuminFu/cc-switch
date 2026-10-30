@@ -6,7 +6,6 @@
 
 use super::gemini_schema::build_gemini_function_declaration;
 use super::gemini_shadow::{GeminiAssistantTurn, GeminiShadowStore};
-pub use crate::proxy::codec::gemini::extract_gemini_model;
 use crate::proxy::codec::side_store::{SessionSideStore, SideStoreScope};
 use crate::proxy::error::ProxyError;
 use crate::proxy::protocol::StopReason;
@@ -15,9 +14,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
 // functionCall 的共用处理已移到 Gemini 编解码，这里重新导出以保持既有调用路径
-pub use crate::proxy::codec::gemini::tool_calls::{
-    extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints,
-};
+pub use crate::proxy::codec::gemini::tool_calls::AnthropicToolSchemaHints;
 use crate::proxy::codec::gemini::tool_calls::{
     extract_tool_call_meta, is_synthesized_tool_call_id, rectify_tool_call_parts, shadow_parts,
     synthesize_tool_call_id,
@@ -843,6 +840,7 @@ pub(crate) fn build_anthropic_usage(usage: Option<&Value>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::codec::gemini::tool_calls::extract_anthropic_tool_schema_hints;
     use crate::proxy::providers::gemini_shadow::GeminiToolCallMeta;
 
     #[test]

@@ -403,7 +403,9 @@ pub fn transform_claude_request_for_api_format(
             // 流式请求必须注入 stream_options.include_usage，否则 OpenAI 兼容上游
             // 不在 SSE 末尾吐 usage → 转换出的 Anthropic message_delta 全 0 →
             // 整笔 input/output/cache 漏记（与 Codex Responses→Chat 路径同源）。
-            super::transform::inject_openai_stream_include_usage(&mut result);
+            crate::proxy::codec::openai_chat::support::inject_openai_stream_include_usage(
+                &mut result,
+            );
             Ok(result)
         }
         ClaudeApiFormat::GeminiNative => crate::proxy::codec::bridge::anthropic_to_gemini_request(

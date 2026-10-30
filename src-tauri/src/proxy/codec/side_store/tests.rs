@@ -85,9 +85,9 @@ fn gemini_shadow_is_scoped_by_provider_and_session() {
     assert_eq!(turn, gemini_turn("two", "call_2", "sig-2"));
 }
 
-/// 经 trait 写入的 shadow 能被旧转换器回放：thoughtSignature 补回 functionCall
+/// 经 trait 写入的 shadow 能被两种引擎的 Gemini 编码端回放：thoughtSignature 补回 functionCall
 #[test]
-fn gemini_shadow_recorded_through_trait_is_replayed_by_legacy_encoder() {
+fn gemini_shadow_recorded_through_trait_is_replayed_by_gemini_encoder() {
     let store = GeminiShadowStore::with_limits(8, 4);
     store.record(
         &SideStoreScope::new("prov", Some("sess")),
@@ -111,21 +111,27 @@ fn gemini_shadow_recorded_through_trait_is_replayed_by_legacy_encoder() {
             }
         ]
     });
-    let encoded = crate::proxy::providers::transform_gemini::anthropic_to_gemini_with_shadow(
-        request,
-        Some(&store),
-        Some("prov"),
-        Some("sess"),
-    )
-    .unwrap();
-    assert_eq!(
-        encoded["contents"][1]["parts"][1]["thoughtSignature"],
-        "sig-1"
-    );
-    assert_eq!(
-        encoded["contents"][2]["parts"][0]["functionResponse"]["name"],
-        "read_file"
-    );
+    for engine in [
+        crate::proxy::codec::CodecEngine::Legacy,
+        crate::proxy::codec::CodecEngine::Ir,
+    ] {
+        let encoded = crate::proxy::codec::bridge::anthropic_to_gemini_request(
+            request.clone(),
+            Some(&store),
+            Some("prov"),
+            Some("sess"),
+            engine,
+        )
+        .unwrap();
+        assert_eq!(
+            encoded["contents"][1]["parts"][1]["thoughtSignature"], "sig-1",
+            "{engine:?}"
+        );
+        assert_eq!(
+            encoded["contents"][2]["parts"][0]["functionResponse"]["name"], "read_file",
+            "{engine:?}"
+        );
+    }
 }
 
 #[test]
