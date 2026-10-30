@@ -21,3 +21,5 @@ set_default_account: error: 账号不存在: 1001
   },
   "future_store_field": "dropped?"
 }
+=== .cc-switch/secrets.json ===
+<absent>

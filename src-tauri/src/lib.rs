@@ -35,6 +35,7 @@ mod proxy;
 #[cfg(feature = "testkit")]
 #[doc(hidden)]
 pub mod proxy_harness;
+mod secret_store;
 mod services;
 mod session_manager;
 mod settings;
@@ -546,6 +547,13 @@ pub fn run() {
                 }
                 Ok(_) => {} // 未开启迁移标志，静默跳过
                 Err(e) => log::warn!("✗ Failed to read skills migration flag: {e}"),
+            }
+
+            // 1.4. 把 settings.json 中的明文 WebDAV/S3 凭据迁入系统钥匙串（或 0600 的 secrets.json）
+            match crate::settings::migrate_secrets() {
+                Ok(true) => log::info!("✓ WebDAV/S3 credentials moved to the secret store"),
+                Ok(false) => {}
+                Err(e) => log::warn!("✗ Failed to migrate WebDAV/S3 credentials: {e}"),
             }
 
             // 1.5. 自动导入 live 配置 + seed 官方预设供应商（Claude / Codex / Gemini）

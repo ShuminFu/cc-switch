@@ -852,7 +852,19 @@ mod tests {
                     .map(|m| m.completed_at.clone()),
                 Some(format!("marker-{last}"))
             );
-            assert_eq!(saved_file(), serde_json::to_value(&current).unwrap());
+            // 密码移入凭据存储（测试构建为目录内的 secrets.json），文件中只留空字段
+            let mut expected = current.clone();
+            if let Some(sync) = expected.webdav_sync.as_mut() {
+                sync.password.clear();
+            }
+            assert_eq!(saved_file(), serde_json::to_value(&expected).unwrap());
+            let secrets = std::fs::read_to_string(
+                paths::current()
+                    .settings_path()
+                    .with_file_name(crate::secret_store::SECRET_FILE_NAME),
+            )
+            .expect("read secrets.json");
+            assert!(secrets.contains(&format!("\"secret-{last}\"")), "{secrets}");
         }
     }
 }

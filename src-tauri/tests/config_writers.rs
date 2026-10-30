@@ -527,15 +527,19 @@ fn claude_plugin_config_json() {
 async fn copilot_token_store() {
     const W: &str = "copilot_auth";
     const STORE: &str = ".cc-switch/copilot_auth.json";
+    // Test homes never use the real OS keychain: tokens move to the 0600 file fallback.
+    const SECRETS: &str = ".cc-switch/secrets.json";
     for variant in VARIANTS {
         let env = LiveEnv::new();
         env.seed(STORE, &variant.apply(&fixture(W, "copilot_auth.json")));
         let manager = kit::CopilotAuthManager::new(env.path(".cc-switch"));
         let result = manager.set_default_account("1001").await;
-        let text = env.render_result("set_default_account", &result) + &env.render_files(&[STORE]);
+        let text = env.render_result("set_default_account", &result)
+            + &env.render_files(&[STORE, SECRETS]);
         assert_snapshot(W, variant, &text);
         if result.is_ok() {
             assert_private_mode(&env.path(STORE));
+            assert_private_mode(&env.path(SECRETS));
         }
     }
 }
@@ -544,15 +548,19 @@ async fn copilot_token_store() {
 async fn codex_oauth_token_store() {
     const W: &str = "codex_oauth";
     const STORE: &str = ".cc-switch/codex_oauth_auth.json";
+    // Test homes never use the real OS keychain: tokens move to the 0600 file fallback.
+    const SECRETS: &str = ".cc-switch/secrets.json";
     for variant in VARIANTS {
         let env = LiveEnv::new();
         env.seed(STORE, &variant.apply(&fixture(W, "codex_oauth_auth.json")));
         let manager = kit::CodexOAuthManager::new(env.path(".cc-switch"));
         let result = manager.set_default_account("acct-1").await;
-        let text = env.render_result("set_default_account", &result) + &env.render_files(&[STORE]);
+        let text = env.render_result("set_default_account", &result)
+            + &env.render_files(&[STORE, SECRETS]);
         assert_snapshot(W, variant, &text);
         if result.is_ok() {
             assert_private_mode(&env.path(STORE));
+            assert_private_mode(&env.path(SECRETS));
         }
     }
 }

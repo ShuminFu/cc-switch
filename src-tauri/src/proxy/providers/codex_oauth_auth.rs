@@ -17,6 +17,7 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
+use crate::secret_store::{self, SecretPolicy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -183,7 +184,9 @@ struct CodexAccountData {
     /// 账号邮箱（如果可获取）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
-    /// Refresh Token（持久化）
+    /// Refresh Token（持久化到系统钥匙串，不可用时为 0600 的 secrets.json，
+    /// 见 [`crate::secret_store`]；`codex_oauth_auth.json` 中落盘为空串）
+    #[serde(default)]
     pub refresh_token: String,
     /// 认证时间戳（秒）
     pub authenticated_at: i64,
@@ -233,11 +236,14 @@ pub struct CodexOAuthManager {
     /// 过期条目会在 start_device_flow 时被清理，防止放弃的登录流程导致无界增长
     pending_device_codes: Arc<RwLock<HashMap<String, PendingDeviceCode>>>,
     storage_path: PathBuf,
+    /// refresh token 的凭据存储策略
+    secrets: SecretPolicy,
 }
 
 impl CodexOAuthManager {
     pub fn new(data_dir: PathBuf) -> Self {
         let storage_path = data_dir.join("codex_oauth_auth.json");
+        let secrets = secret_store::policy_for_dir(&data_dir);
 
         let manager = Self {
             accounts: Arc::new(RwLock::new(HashMap::new())),
@@ -246,6 +252,7 @@ impl CodexOAuthManager {
             refresh_locks: Arc::new(RwLock::new(HashMap::new())),
             pending_device_codes: Arc::new(RwLock::new(HashMap::new())),
             storage_path,
+            secrets,
         };
 
         if let Err(e) = manager.load_from_disk_sync() {
@@ -666,8 +673,13 @@ impl CodexOAuthManager {
             pending.clear();
         }
 
+        let persisted = self.persisted_account_ids();
         if self.storage_path.exists() {
             std::fs::remove_file(&self.storage_path)?;
+        }
+        for account_id in persisted {
+            self.secrets
+                .forget(&secret_store::codex_refresh_token_key(&account_id));
         }
 
         Ok(())
@@ -801,8 +813,30 @@ impl CodexOAuthManager {
         }
 
         let content = std::fs::read_to_string(&self.storage_path)?;
-        let store: CodexOAuthStore = serde_json::from_str(&content)
+        let mut store: CodexOAuthStore = serde_json::from_str(&content)
             .map_err(|e| CodexOAuthError::ParseError(e.to_string()))?;
+
+        // 从凭据存储补全 refresh token；仍有明文时立即迁移（降级模式下反向写回明文）
+        let mut secrets_pending = false;
+        for (account_id, data) in store.accounts.iter_mut() {
+            secrets_pending |= self.secrets.hydrate(
+                &secret_store::codex_refresh_token_key(account_id),
+                &mut data.refresh_token,
+            );
+            if data.refresh_token.is_empty() {
+                log::warn!("[CodexOAuth] 账号 {account_id} 的 refresh token 缺失，需要重新登录");
+            }
+        }
+        if secrets_pending {
+            let default = store
+                .default_account_id
+                .clone()
+                .or_else(|| Self::fallback_default_account_id(&store.accounts));
+            match self.persist_store(store.accounts.clone(), default) {
+                Ok(()) => log::info!("[CodexOAuth] refresh token 已迁移到凭据存储"),
+                Err(e) => log::warn!("[CodexOAuth] 迁移 refresh token 到凭据存储失败: {e}"),
+            }
+        }
 
         if let Ok(mut accounts) = self.accounts.try_write() {
             *accounts = store.accounts;
@@ -823,6 +857,22 @@ impl CodexOAuthManager {
     async fn save_to_disk(&self) -> Result<(), CodexOAuthError> {
         let accounts = self.accounts.read().await.clone();
         let default = self.resolve_default_account_id().await;
+        self.persist_store(accounts, default)
+    }
+
+    /// 写入存储文件：refresh token 移入凭据存储、文件中留空，并删除已移除账号的令牌
+    fn persist_store(
+        &self,
+        mut accounts: HashMap<String, CodexAccountData>,
+        default: Option<String>,
+    ) -> Result<(), CodexOAuthError> {
+        let previous = self.persisted_account_ids();
+        for (account_id, data) in accounts.iter_mut() {
+            data.refresh_token = self.secrets.externalize(
+                &secret_store::codex_refresh_token_key(account_id),
+                &data.refresh_token,
+            );
+        }
 
         let store = CodexOAuthStore {
             version: 1,
@@ -835,12 +885,34 @@ impl CodexOAuthManager {
 
         self.write_store_atomic(&content)?;
 
+        let keys: Vec<String> = store
+            .accounts
+            .keys()
+            .map(|id| secret_store::codex_refresh_token_key(id))
+            .collect();
+        self.secrets.release(keys.iter().map(String::as_str));
+        for account_id in previous {
+            if !store.accounts.contains_key(&account_id) {
+                self.secrets
+                    .forget(&secret_store::codex_refresh_token_key(&account_id));
+            }
+        }
+
         log::info!(
             "[CodexOAuth] 保存到磁盘成功（{} 个账号）",
             store.accounts.len()
         );
 
         Ok(())
+    }
+
+    /// 存储文件中现有的账号 ID（用于清理已移除账号的令牌）；读取失败时为空
+    fn persisted_account_ids(&self) -> Vec<String> {
+        std::fs::read_to_string(&self.storage_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<CodexOAuthStore>(&content).ok())
+            .map(|store| store.accounts.into_keys().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -1085,7 +1157,92 @@ mod tests {
             .unwrap();
         assert_eq!(mode_of(&manager.storage_path), 0o600);
         let content = std::fs::read_to_string(&manager.storage_path).unwrap();
-        assert!(content.contains("rt-second"));
+        assert!(!content.contains("rt-second"), "token must not stay inline");
+        // 测试构建使用目录内的文件后端，同样仅属主可读写
+        let secrets_path = temp.path().join(crate::secret_store::SECRET_FILE_NAME);
+        assert_eq!(mode_of(&secrets_path), 0o600);
+        assert!(std::fs::read_to_string(&secrets_path)
+            .unwrap()
+            .contains("rt-second"));
+    }
+
+    mod secret_store {
+        use super::*;
+        use crate::secret_store::{
+            codex_refresh_token_key, scoped_policy, MemorySecretStore, SecretPolicy, SecretStore,
+        };
+
+        #[tokio::test]
+        async fn plaintext_refresh_token_is_migrated_on_load() {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("codex_oauth_auth.json");
+            let legacy = serde_json::json!({
+                "version": 1,
+                "accounts": {
+                    "acc-1": {
+                        "account_id": "acc-1",
+                        "refresh_token": "rt-plain",
+                        "authenticated_at": 1700000000
+                    }
+                }
+            });
+            std::fs::write(&path, legacy.to_string()).unwrap();
+            let store = Arc::new(MemorySecretStore::new());
+            let manager = {
+                let _policy = scoped_policy(SecretPolicy::new(store.clone(), false));
+                CodexOAuthManager::new(temp.path().to_path_buf())
+            };
+
+            assert_eq!(
+                store
+                    .get(&codex_refresh_token_key("acc-1"))
+                    .unwrap()
+                    .unwrap(),
+                "rt-plain"
+            );
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(!content.contains("rt-plain"), "{content}");
+            assert_eq!(
+                manager.accounts.read().await["acc-1"].refresh_token,
+                "rt-plain"
+            );
+
+            let reloaded = {
+                let _policy = scoped_policy(SecretPolicy::new(store.clone(), false));
+                CodexOAuthManager::new(temp.path().to_path_buf())
+            };
+            assert_eq!(
+                reloaded.accounts.read().await["acc-1"].refresh_token,
+                "rt-plain"
+            );
+        }
+
+        #[tokio::test]
+        async fn removing_accounts_deletes_their_tokens() {
+            let temp = tempfile::tempdir().unwrap();
+            let store = Arc::new(MemorySecretStore::new());
+            let manager = {
+                let _policy = scoped_policy(SecretPolicy::new(store.clone(), false));
+                CodexOAuthManager::new(temp.path().to_path_buf())
+            };
+            for (id, rt) in [("acc-1", "rt-1"), ("acc-2", "rt-2")] {
+                manager
+                    .add_account_internal(id.to_string(), rt.to_string(), None)
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(store.snapshot().len(), 2);
+
+            manager.remove_account("acc-1").await.unwrap();
+            assert_eq!(store.get(&codex_refresh_token_key("acc-1")).unwrap(), None);
+            assert!(store
+                .get(&codex_refresh_token_key("acc-2"))
+                .unwrap()
+                .is_some());
+
+            manager.clear_auth().await.unwrap();
+            assert!(store.snapshot().is_empty());
+        }
     }
 
     #[tokio::test]

@@ -8,7 +8,7 @@ set_default_account: ok
   "version": 3,
   "accounts": {
     "1001": {
-      "github_token": "gho_fixture_token",
+      "github_token": "",
       "user": {
         "login": "octocat",
         "id": 1001,
@@ -19,5 +19,13 @@ set_default_account: ok
     }
   },
   "default_account_id": "1001"
+}
+<no newline at end of file>
+=== .cc-switch/secrets.json ===
+{
+  "version": 1,
+  "secrets": {
+    "copilot.github_token.1001": "gho_fixture_token"
+  }
 }
 <no newline at end of file>

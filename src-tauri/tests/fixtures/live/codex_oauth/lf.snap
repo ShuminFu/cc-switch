@@ -10,10 +10,18 @@ set_default_account: ok
     "acct-1": {
       "account_id": "acct-1",
       "email": "user@example.com",
-      "refresh_token": "rt_fixture_token",
+      "refresh_token": "",
       "authenticated_at": 1700000000
     }
   },
   "default_account_id": "acct-1"
+}
+<no newline at end of file>
+=== .cc-switch/secrets.json ===
+{
+  "version": 1,
+  "secrets": {
+    "codex_oauth.refresh_token.acct-1": "rt_fixture_token"
+  }
 }
 <no newline at end of file>

@@ -4,11 +4,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::app_config::AppType;
 use crate::apps::registry;
 use crate::error::AppError;
+use crate::secret_store::{self, SecretPolicy};
 use crate::services::skill::{SkillStorageLocation, SyncMethod};
 
 /// 自定义端点配置（历史兼容，实际存储在 provider.meta.custom_endpoints）
@@ -762,14 +764,17 @@ impl AppSettings {
     /// 并附带 [`SettingsLoadFailure`]：解析失败会先把原始字节备份到
     /// `settings.json.corrupt-<ts>`，避免下一次保存静默覆盖 WebDAV/S3 凭据、
     /// 当前供应商和 `local_migrations` 标记。
-    fn load_from_file() -> (Self, Option<SettingsLoadFailure>) {
+    ///
+    /// WebDAV 密码与 S3 Secret Access Key 从 [`crate::secret_store`] 补全；返回的
+    /// `bool` 表示文件仍需重写（明文凭据待迁移，或降级模式下需写回明文）。
+    fn load_from_file() -> (Self, Option<SettingsLoadFailure>, bool) {
         let Some(path) = Self::settings_path() else {
-            return (Self::default(), None);
+            return (Self::default(), None, false);
         };
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return (Self::default(), None);
+                return (Self::default(), None, false);
             }
             Err(err) => {
                 log::error!(
@@ -782,13 +787,14 @@ impl AppSettings {
                     error: err.to_string(),
                     backup_path: None,
                 };
-                return (Self::default(), Some(failure));
+                return (Self::default(), Some(failure), false);
             }
         };
         match serde_json::from_slice::<AppSettings>(&bytes) {
             Ok(mut settings) => {
                 settings.normalize_paths();
-                (settings, None)
+                let secrets_pending = settings.hydrate_secrets(&settings_secret_policy(&path));
+                (settings, None, secrets_pending)
             }
             Err(err) => {
                 let backup_path = match backup_corrupt_settings(&path, &bytes) {
@@ -816,10 +822,54 @@ impl AppSettings {
                     error: err.to_string(),
                     backup_path,
                 };
-                (Self::default(), Some(failure))
+                (Self::default(), Some(failure), false)
             }
         }
     }
+
+    /// 从凭据存储补全为空的 WebDAV/S3 凭据，返回文件是否需要重写
+    fn hydrate_secrets(&mut self, policy: &SecretPolicy) -> bool {
+        let mut pending = false;
+        if let Some(sync) = &mut self.webdav_sync {
+            pending |= policy.hydrate(secret_store::WEBDAV_PASSWORD_KEY, &mut sync.password);
+        }
+        if let Some(s3) = &mut self.s3_sync {
+            pending |= policy.hydrate(
+                secret_store::S3_SECRET_ACCESS_KEY,
+                &mut s3.secret_access_key,
+            );
+        }
+        pending
+    }
+
+    /// 把 WebDAV/S3 凭据写入凭据存储，并把将要落盘的字段置空（写入失败或降级模式下保留明文）。
+    /// 对应配置已删除或凭据已清空时同时删除存储中的旧值。
+    fn externalize_secrets(&mut self, policy: &SecretPolicy) {
+        let password = self
+            .webdav_sync
+            .as_ref()
+            .map(|sync| sync.password.clone())
+            .unwrap_or_default();
+        let inline = policy.externalize(secret_store::WEBDAV_PASSWORD_KEY, &password);
+        if let Some(sync) = &mut self.webdav_sync {
+            sync.password = inline;
+        }
+
+        let secret = self
+            .s3_sync
+            .as_ref()
+            .map(|s3| s3.secret_access_key.clone())
+            .unwrap_or_default();
+        let inline = policy.externalize(secret_store::S3_SECRET_ACCESS_KEY, &secret);
+        if let Some(s3) = &mut self.s3_sync {
+            s3.secret_access_key = inline;
+        }
+    }
+}
+
+/// settings.json 所在目录对应的凭据策略
+fn settings_secret_policy(settings_path: &Path) -> SecretPolicy {
+    secret_store::policy_for_dir(settings_path.parent().unwrap_or_else(|| Path::new(".")))
 }
 
 /// settings.json 加载失败的记录（供前端提示用户）
@@ -878,25 +928,46 @@ fn save_settings_file(store: &SettingsStore, settings: &AppSettings) -> Result<(
         return Err(AppError::Config("无法获取用户主目录".to_string()));
     };
 
+    // WebDAV/S3 凭据移入系统钥匙串（或 0600 的 secrets.json），文件中仅留空字段
+    let policy = settings_secret_policy(&path);
+    normalized.externalize_secrets(&policy);
+
     let json = serde_json::to_string_pretty(&normalized)
         .map_err(|e| AppError::JsonSerialize { source: e })?;
-    // 设置中包含 WebDAV/S3 凭据：原子写入并强制仅属主可访问（unix 0600）
-    crate::config::atomic_write_secret(&path, json.as_bytes())
+    // 钥匙串写入失败或降级模式下文件仍可能含凭据：原子写入并强制仅属主可访问（unix 0600）
+    crate::config::atomic_write_secret(&path, json.as_bytes())?;
+    policy.release([
+        secret_store::WEBDAV_PASSWORD_KEY,
+        secret_store::S3_SECRET_ACCESS_KEY,
+    ]);
+    store.set_secrets_pending(false);
+    Ok(())
 }
 
 /// 进程级设置缓存及其加载状态
 struct SettingsStore {
     settings: RwLock<AppSettings>,
     load_failure: RwLock<Option<SettingsLoadFailure>>,
+    /// 文件中的凭据与当前凭据策略不一致（明文待迁移，或降级模式待写回）
+    secrets_pending: AtomicBool,
 }
 
 impl SettingsStore {
     fn load() -> Self {
-        let (settings, load_failure) = AppSettings::load_from_file();
+        let (settings, load_failure, secrets_pending) = AppSettings::load_from_file();
         Self {
             settings: RwLock::new(settings),
             load_failure: RwLock::new(load_failure),
+            secrets_pending: AtomicBool::new(secrets_pending),
         }
+    }
+
+    fn secrets_pending(&self) -> bool {
+        self.secrets_pending.load(Ordering::SeqCst)
+    }
+
+    fn set_secrets_pending(&self, pending: bool) {
+        self.secrets_pending.store(pending, Ordering::SeqCst);
     }
 
     fn load_failure(&self) -> Option<SettingsLoadFailure> {
@@ -1190,15 +1261,33 @@ pub fn clear_codex_unify_migrate_existing() -> Result<(), AppError> {
 /// 从文件重新加载设置到内存缓存
 /// 用于导入配置等场景，确保内存缓存与文件同步
 pub fn reload_settings() -> Result<(), AppError> {
-    let (fresh_settings, load_failure) = AppSettings::load_from_file();
+    let (fresh_settings, load_failure, secrets_pending) = AppSettings::load_from_file();
     let store = settings_store();
     store.set_load_failure(load_failure);
+    store.set_secrets_pending(secrets_pending);
     let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
     });
     *guard = fresh_settings;
     Ok(())
+}
+
+/// 启动时把 settings.json 中的明文 WebDAV/S3 凭据迁入凭据存储并清空对应字段
+/// （降级模式下反向写回明文）。无需迁移时不写文件；返回是否重写了文件。
+pub fn migrate_secrets() -> Result<bool, AppError> {
+    let store = settings_store();
+    let mut guard = store.write().unwrap_or_else(|e| {
+        log::warn!("设置锁已毒化，使用恢复值: {e}");
+        e.into_inner()
+    });
+    if !store.secrets_pending() {
+        return Ok(false);
+    }
+    let next = guard.clone();
+    save_settings_file(&store, &next)?;
+    *guard = next;
+    Ok(true)
 }
 
 /// 启动（或最近一次重新加载）时 settings.json 的加载失败记录，供前端提示用户
@@ -1918,6 +2007,188 @@ mod tests {
             assert_eq!(mode(&env.path), 0o600);
 
             assert_eq!(dir_entries(&dir), vec!["settings.json".to_string()]);
+        }
+    }
+
+    mod secret_store_migration {
+        use super::super::*;
+        use crate::paths::{self, Paths};
+        use crate::secret_store::{
+            scoped_policy, MemorySecretStore, ScopedSecretPolicy, SecretPolicy, SecretStore,
+            S3_SECRET_ACCESS_KEY, WEBDAV_PASSWORD_KEY,
+        };
+
+        struct Env {
+            _settings: ScopedSettingsStore,
+            _policy: ScopedSecretPolicy,
+            _paths: paths::ScopedPaths,
+            _temp: tempfile::TempDir,
+            path: PathBuf,
+        }
+
+        /// 隔离 home，写入 settings.json，并以 mock 凭据存储加载线程内设置缓存
+        fn env_with(
+            initial: serde_json::Value,
+            store: Arc<MemorySecretStore>,
+            inline: bool,
+        ) -> Env {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let paths_guard = paths::scoped(Paths::with_home(temp.path()));
+            let path = paths::current().settings_path();
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            crate::config::atomic_write(&path, initial.to_string().as_bytes()).unwrap();
+            let policy = scoped_policy(SecretPolicy::new(store, inline));
+            Env {
+                _settings: scoped_settings_store(),
+                _policy: policy,
+                _paths: paths_guard,
+                _temp: temp,
+                path,
+            }
+        }
+
+        fn legacy_settings(password: &str, secret: &str) -> serde_json::Value {
+            serde_json::json!({
+                "webdavSync": {
+                    "enabled": true,
+                    "baseUrl": "https://dav.example.com",
+                    "username": "alice",
+                    "password": password
+                },
+                "s3Sync": {
+                    "enabled": true,
+                    "region": "us-east-1",
+                    "bucket": "bucket",
+                    "accessKeyId": "AKIA",
+                    "secretAccessKey": secret
+                }
+            })
+        }
+
+        fn on_disk(path: &Path) -> serde_json::Value {
+            serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+        }
+
+        #[test]
+        fn migration_moves_secrets_and_blanks_settings_fields() {
+            let store = Arc::new(MemorySecretStore::new());
+            let env = env_with(
+                legacy_settings("dav-pass", "s3-secret"),
+                store.clone(),
+                false,
+            );
+
+            assert!(
+                migrate_secrets().expect("migrate"),
+                "plaintext must be migrated"
+            );
+
+            let disk = on_disk(&env.path);
+            assert_eq!(disk["webdavSync"]["password"], "");
+            assert_eq!(disk["webdavSync"]["baseUrl"], "https://dav.example.com");
+            assert_eq!(disk["s3Sync"]["secretAccessKey"], "");
+            assert_eq!(disk["s3Sync"]["accessKeyId"], "AKIA");
+            let raw = fs::read_to_string(&env.path).unwrap();
+            assert!(
+                !raw.contains("dav-pass") && !raw.contains("s3-secret"),
+                "{raw}"
+            );
+
+            let secrets = store.snapshot();
+            assert_eq!(secrets.get(WEBDAV_PASSWORD_KEY).unwrap(), "dav-pass");
+            assert_eq!(secrets.get(S3_SECRET_ACCESS_KEY).unwrap(), "s3-secret");
+
+            // 内存中的设置保持完整，同步逻辑照常可用
+            assert_eq!(get_webdav_sync_settings().unwrap().password, "dav-pass");
+            assert_eq!(
+                get_s3_sync_settings().unwrap().secret_access_key,
+                "s3-secret"
+            );
+
+            // 已迁移后不再重写；重新加载从凭据存储补全
+            assert!(!migrate_secrets().unwrap());
+            reload_settings().unwrap();
+            assert_eq!(get_webdav_sync_settings().unwrap().password, "dav-pass");
+            assert_eq!(
+                get_s3_sync_settings().unwrap().secret_access_key,
+                "s3-secret"
+            );
+            assert!(!migrate_secrets().unwrap());
+        }
+
+        #[test]
+        fn status_updates_keep_secrets_out_of_the_file() {
+            let store = Arc::new(MemorySecretStore::new());
+            let env = env_with(
+                legacy_settings("dav-pass", "s3-secret"),
+                store.clone(),
+                false,
+            );
+
+            update_webdav_sync_status(WebDavSyncStatus {
+                last_sync_at: Some(1),
+                ..Default::default()
+            })
+            .unwrap();
+            assert_eq!(on_disk(&env.path)["webdavSync"]["password"], "");
+            assert_eq!(store.get(WEBDAV_PASSWORD_KEY).unwrap().unwrap(), "dav-pass");
+            assert!(
+                !migrate_secrets().unwrap(),
+                "any save completes the migration"
+            );
+        }
+
+        #[test]
+        fn removing_sync_config_deletes_its_secret() {
+            let store = Arc::new(MemorySecretStore::new());
+            let _env = env_with(
+                legacy_settings("dav-pass", "s3-secret"),
+                store.clone(),
+                false,
+            );
+            migrate_secrets().unwrap();
+
+            set_webdav_sync_settings(None).unwrap();
+            assert_eq!(store.get(WEBDAV_PASSWORD_KEY).unwrap(), None);
+            assert_eq!(
+                store.get(S3_SECRET_ACCESS_KEY).unwrap().unwrap(),
+                "s3-secret"
+            );
+        }
+
+        #[test]
+        fn failed_store_write_keeps_plaintext_instead_of_losing_it() {
+            let store = Arc::new(MemorySecretStore::new());
+            store.fail_writes(true);
+            let env = env_with(
+                legacy_settings("dav-pass", "s3-secret"),
+                store.clone(),
+                false,
+            );
+
+            migrate_secrets().expect("save still succeeds");
+            let disk = on_disk(&env.path);
+            assert_eq!(disk["webdavSync"]["password"], "dav-pass");
+            assert_eq!(disk["s3Sync"]["secretAccessKey"], "s3-secret");
+            assert!(store.snapshot().is_empty());
+        }
+
+        #[test]
+        fn plaintext_mode_writes_secrets_back_for_downgrade() {
+            let store = Arc::new(MemorySecretStore::new());
+            store.set(WEBDAV_PASSWORD_KEY, "dav-pass").unwrap();
+            store.set(S3_SECRET_ACCESS_KEY, "s3-secret").unwrap();
+            let env = env_with(legacy_settings("", ""), store.clone(), true);
+
+            assert_eq!(get_webdav_sync_settings().unwrap().password, "dav-pass");
+            assert!(migrate_secrets().unwrap());
+            let disk = on_disk(&env.path);
+            assert_eq!(disk["webdavSync"]["password"], "dav-pass");
+            assert_eq!(disk["s3Sync"]["secretAccessKey"], "s3-secret");
+            assert!(
+                store.snapshot().is_empty(),
+                "secrets released after write-back"
+            );
         }
     }
 }

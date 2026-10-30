@@ -15,6 +15,7 @@
 //! - Provider 通过 meta.authBinding 关联账号
 //! - 自动迁移 v1 单账号格式到 v3 多账号 + 默认账号格式
 
+use crate::secret_store::{self, SecretPolicy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -372,8 +373,10 @@ pub struct CopilotAuthStatus {
 struct GitHubAccountData {
     /// GitHub OAuth Token
     ///
-    /// 安全说明：为了复用登录状态，本地会持久化该令牌。
-    /// 当前实现未接入系统钥匙串，依赖私有文件权限（Unix 下 0600）保护。
+    /// 安全说明：为了复用登录状态，本地会持久化该令牌。令牌保存在系统钥匙串
+    /// （不可用时为 0600 的 secrets.json，见 [`crate::secret_store`]），
+    /// `copilot_auth.json` 中该字段落盘为空串；仅钥匙串写入失败或降级模式下保留明文。
+    #[serde(default)]
     pub github_token: String,
     /// 用户信息
     pub user: GitHubUser,
@@ -425,6 +428,8 @@ pub struct CopilotAuthManager {
     endpoint_locks: Arc<RwLock<HashMap<String, Arc<Mutex<()>>>>>,
     /// 存储路径
     storage_path: PathBuf,
+    /// GitHub 令牌的凭据存储策略
+    secrets: SecretPolicy,
     /// 待迁移的旧格式 token
     pending_migration: Arc<RwLock<Option<String>>>,
     /// 旧认证数据迁移失败时的状态消息
@@ -438,6 +443,7 @@ impl CopilotAuthManager {
     /// 创建新的认证管理器
     pub fn new(data_dir: PathBuf) -> Self {
         let storage_path = data_dir.join("copilot_auth.json");
+        let secrets = secret_store::policy_for_dir(&data_dir);
 
         let manager = Self {
             accounts: Arc::new(RwLock::new(HashMap::new())),
@@ -448,6 +454,7 @@ impl CopilotAuthManager {
             api_endpoints: Arc::new(RwLock::new(HashMap::new())),
             endpoint_locks: Arc::new(RwLock::new(HashMap::new())),
             storage_path,
+            secrets,
             pending_migration: Arc::new(RwLock::new(None)),
             migration_error: Arc::new(RwLock::new(None)),
             #[cfg(test)]
@@ -1173,9 +1180,14 @@ impl CopilotAuthManager {
             endpoint_locks.clear();
         }
 
-        // 最后删除存储文件
+        // 最后删除存储文件，以及钥匙串中对应的令牌
+        let persisted = self.persisted_account_ids();
         if self.storage_path.exists() {
             std::fs::remove_file(&self.storage_path)?;
+        }
+        for account_id in persisted {
+            self.secrets
+                .forget(&secret_store::copilot_token_key(&account_id));
         }
 
         Ok(())
@@ -1377,10 +1389,32 @@ impl CopilotAuthManager {
         }
 
         let content = std::fs::read_to_string(&self.storage_path)?;
-        let store: CopilotAuthStore = serde_json::from_str(&content)
+        let mut store: CopilotAuthStore = serde_json::from_str(&content)
             .map_err(|e| CopilotAuthError::ParseError(e.to_string()))?;
 
         if store.version >= 2 {
+            // 从凭据存储补全令牌；仍有明文令牌时立即迁移（降级模式下反向写回明文）
+            let mut secrets_pending = false;
+            for (account_id, data) in store.accounts.iter_mut() {
+                secrets_pending |= self.secrets.hydrate(
+                    &secret_store::copilot_token_key(account_id),
+                    &mut data.github_token,
+                );
+                if data.github_token.is_empty() {
+                    log::warn!("[CopilotAuth] 账号 {account_id} 的令牌缺失，需要重新登录");
+                }
+            }
+            if secrets_pending {
+                let default_account_id = store
+                    .default_account_id
+                    .clone()
+                    .or_else(|| Self::fallback_default_account_id(&store.accounts));
+                match self.persist_store(store.accounts.clone(), default_account_id) {
+                    Ok(()) => log::info!("[CopilotAuth] 令牌已迁移到凭据存储"),
+                    Err(e) => log::warn!("[CopilotAuth] 迁移令牌到凭据存储失败: {e}"),
+                }
+            }
+
             // v2 多账号格式
             if let Ok(mut accounts) = self.accounts.try_write() {
                 *accounts = store.accounts;
@@ -1469,6 +1503,22 @@ impl CopilotAuthManager {
     async fn save_to_disk(&self) -> Result<(), CopilotAuthError> {
         let accounts = self.accounts.read().await.clone();
         let default_account_id = self.resolve_default_account_id().await;
+        self.persist_store(accounts, default_account_id)
+    }
+
+    /// 写入存储文件：令牌移入凭据存储、文件中留空，并删除已移除账号的令牌
+    fn persist_store(
+        &self,
+        mut accounts: HashMap<String, GitHubAccountData>,
+        default_account_id: Option<String>,
+    ) -> Result<(), CopilotAuthError> {
+        let previous = self.persisted_account_ids();
+        for (account_id, data) in accounts.iter_mut() {
+            data.github_token = self.secrets.externalize(
+                &secret_store::copilot_token_key(account_id),
+                &data.github_token,
+            );
+        }
 
         let store = CopilotAuthStore {
             version: 3,
@@ -1483,12 +1533,34 @@ impl CopilotAuthManager {
 
         self.write_store_atomic(&content)?;
 
+        let keys: Vec<String> = store
+            .accounts
+            .keys()
+            .map(|id| secret_store::copilot_token_key(id))
+            .collect();
+        self.secrets.release(keys.iter().map(String::as_str));
+        for account_id in previous {
+            if !store.accounts.contains_key(&account_id) {
+                self.secrets
+                    .forget(&secret_store::copilot_token_key(&account_id));
+            }
+        }
+
         log::info!(
             "[CopilotAuth] 保存到磁盘成功（{} 个账号）",
             store.accounts.len()
         );
 
         Ok(())
+    }
+
+    /// 存储文件中现有的账号 ID（用于清理已移除账号的令牌）；读取失败时为空
+    fn persisted_account_ids(&self) -> Vec<String> {
+        std::fs::read_to_string(&self.storage_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<CopilotAuthStore>(&content).ok())
+            .map(|store| store.accounts.into_keys().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -1920,7 +1992,125 @@ mod tests {
             .unwrap();
         assert_eq!(mode_of(&manager.storage_path), 0o600);
         let content = std::fs::read_to_string(&manager.storage_path).unwrap();
-        assert!(content.contains("gho_second"));
+        assert!(
+            !content.contains("gho_second"),
+            "token must not stay inline"
+        );
+        // 测试构建使用目录内的文件后端，同样仅属主可读写
+        let secrets_path = temp_dir.path().join(crate::secret_store::SECRET_FILE_NAME);
+        assert_eq!(mode_of(&secrets_path), 0o600);
+        assert!(std::fs::read_to_string(&secrets_path)
+            .unwrap()
+            .contains("gho_second"));
+    }
+
+    mod secret_store {
+        use super::*;
+        use crate::secret_store::{
+            copilot_token_key, scoped_policy, MemorySecretStore, SecretPolicy, SecretStore,
+        };
+
+        fn legacy_store_json(account_id: &str, token: &str) -> String {
+            serde_json::json!({
+                "version": 3,
+                "accounts": {
+                    account_id: {
+                        "github_token": token,
+                        "user": { "login": "alice", "id": 1, "avatar_url": null },
+                        "authenticated_at": 1700000000,
+                        "github_domain": "github.com"
+                    }
+                },
+                "default_account_id": account_id
+            })
+            .to_string()
+        }
+
+        #[tokio::test]
+        async fn plaintext_token_is_migrated_on_load() {
+            let temp_dir = tempdir().unwrap();
+            let path = temp_dir.path().join("copilot_auth.json");
+            std::fs::write(&path, legacy_store_json("1", "gho_plain")).unwrap();
+            let store = Arc::new(MemorySecretStore::new());
+            let manager = {
+                let _policy = scoped_policy(SecretPolicy::new(store.clone(), false));
+                CopilotAuthManager::new(temp_dir.path().to_path_buf())
+            };
+
+            assert_eq!(
+                store.get(&copilot_token_key("1")).unwrap().unwrap(),
+                "gho_plain"
+            );
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(!content.contains("gho_plain"), "{content}");
+            let on_disk: CopilotAuthStore = serde_json::from_str(&content).unwrap();
+            assert_eq!(on_disk.accounts["1"].github_token, "");
+            assert_eq!(on_disk.default_account_id.as_deref(), Some("1"));
+            assert_eq!(manager.accounts.read().await["1"].github_token, "gho_plain");
+
+            // 新实例从凭据存储补全
+            let reloaded = {
+                let _policy = scoped_policy(SecretPolicy::new(store.clone(), false));
+                CopilotAuthManager::new(temp_dir.path().to_path_buf())
+            };
+            assert_eq!(
+                reloaded.accounts.read().await["1"].github_token,
+                "gho_plain"
+            );
+            assert_eq!(reloaded.list_accounts().await.len(), 1);
+        }
+
+        #[tokio::test]
+        async fn removing_accounts_deletes_their_tokens() {
+            let temp_dir = tempdir().unwrap();
+            let store = Arc::new(MemorySecretStore::new());
+            let manager = {
+                let _policy = scoped_policy(SecretPolicy::new(store.clone(), false));
+                CopilotAuthManager::new(temp_dir.path().to_path_buf())
+            };
+            let user = |id: u64, login: &str| GitHubUser {
+                login: login.to_string(),
+                id,
+                avatar_url: None,
+            };
+            for (token, id, login) in [("gho_a", 1, "alice"), ("gho_b", 2, "bob")] {
+                manager
+                    .add_account_internal(
+                        token.to_string(),
+                        user(id, login),
+                        DEFAULT_GITHUB_DOMAIN.to_string(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            let ids: Vec<String> = manager.accounts.read().await.keys().cloned().collect();
+            assert_eq!(store.snapshot().len(), 2);
+
+            manager.remove_account(&ids[0]).await.unwrap();
+            assert_eq!(store.get(&copilot_token_key(&ids[0])).unwrap(), None);
+            assert!(store.get(&copilot_token_key(&ids[1])).unwrap().is_some());
+
+            manager.clear_auth().await.unwrap();
+            assert!(store.snapshot().is_empty());
+        }
+
+        #[tokio::test]
+        async fn plaintext_mode_writes_tokens_back_for_downgrade() {
+            let temp_dir = tempdir().unwrap();
+            let path = temp_dir.path().join("copilot_auth.json");
+            std::fs::write(&path, legacy_store_json("1", "")).unwrap();
+            let store = Arc::new(MemorySecretStore::new());
+            store.set(&copilot_token_key("1"), "gho_kept").unwrap();
+            let _manager = {
+                let _policy = scoped_policy(SecretPolicy::new(store.clone(), true));
+                CopilotAuthManager::new(temp_dir.path().to_path_buf())
+            };
+
+            let on_disk: CopilotAuthStore =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(on_disk.accounts["1"].github_token, "gho_kept");
+            assert!(store.snapshot().is_empty());
+        }
     }
 
     #[tokio::test]
