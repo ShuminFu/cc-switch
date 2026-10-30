@@ -5,9 +5,13 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Called by release.yml so every release commit passes CI first.
+  workflow_call:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # github.workflow is the caller's name when invoked via workflow_call, so a
+  # release run never shares (and cancels) a group with a regular CI run.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
