@@ -9,6 +9,11 @@ pub struct EnvConflict {
     pub var_value: String,
     pub source_type: String, // "system" | "file"
     pub source_path: String, // Registry path or file path
+    /// Exact text of the rc-file line this conflict was read from (without the
+    /// line terminator). Used to verify the line is unchanged before deleting it.
+    /// Absent for system/registry conflicts and for older clients/backups.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_line: Option<String>,
 }
 
 #[cfg(target_os = "windows")]
@@ -55,6 +60,7 @@ fn check_system_env(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
                     var_value: value.to_string(),
                     source_type: "system".to_string(),
                     source_path: "HKEY_CURRENT_USER\\Environment".to_string(),
+                    original_line: None,
                 });
             }
         }
@@ -71,6 +77,7 @@ fn check_system_env(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
                     var_value: value.to_string(),
                     source_type: "system".to_string(),
                     source_path: "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment".to_string(),
+                    original_line: None,
                 });
             }
         }
@@ -91,6 +98,7 @@ fn check_system_env(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
                 var_value: value,
                 source_type: "system".to_string(),
                 source_path: "Process Environment".to_string(),
+                original_line: None,
             });
         }
     }
@@ -98,13 +106,13 @@ fn check_system_env(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
     Ok(conflicts)
 }
 
-/// Check shell configuration files for environment variable exports (Unix only)
+/// The shell rc files cc-switch scans for conflicting exports (Unix only).
+///
+/// This is also the allow-list of files that delete/restore may rewrite.
 #[cfg(not(target_os = "windows"))]
-fn check_shell_configs(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
-    let mut conflicts = Vec::new();
-
+pub(crate) fn shell_config_files() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let config_files = vec![
+    vec![
         format!("{}/.bashrc", home),
         format!("{}/.bash_profile", home),
         format!("{}/.zshrc", home),
@@ -112,39 +120,60 @@ fn check_shell_configs(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
         format!("{}/.profile", home),
         "/etc/profile".to_string(),
         "/etc/bashrc".to_string(),
-    ];
+    ]
+}
 
-    for file_path in config_files {
+/// If `line` assigns a variable (`export NAME=value` or `NAME=value`), return
+/// `(name, raw_value)`. Comment lines are ignored.
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn parse_assignment(line: &str) -> Option<(&str, &str)> {
+    let trimmed = line.trim();
+    if trimmed.starts_with('#') {
+        return None;
+    }
+    let export_line = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    let eq_pos = export_line.find('=')?;
+    Some((
+        export_line[..eq_pos].trim(),
+        export_line[eq_pos + 1..].trim(),
+    ))
+}
+
+/// Scan one rc file's content for assignments whose name contains a keyword.
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn scan_shell_config(
+    file_path: &str,
+    content: &str,
+    keywords: &[&str],
+) -> Vec<EnvConflict> {
+    let mut conflicts = Vec::new();
+    // `str::lines` strips both "\n" and "\r\n", so line numbers match the
+    // `split_inclusive('\n')` indexing used by env_manager.
+    for (line_num, line) in content.lines().enumerate() {
+        let Some((var_name, var_value)) = parse_assignment(line) else {
+            continue;
+        };
+        if keywords.iter().any(|k| var_name.to_uppercase().contains(k)) {
+            conflicts.push(EnvConflict {
+                var_name: var_name.to_string(),
+                var_value: var_value.trim_matches('"').trim_matches('\'').to_string(),
+                source_type: "file".to_string(),
+                source_path: format!("{}:{}", file_path, line_num + 1),
+                original_line: Some(line.to_string()),
+            });
+        }
+    }
+    conflicts
+}
+
+/// Check shell configuration files for environment variable exports (Unix only)
+#[cfg(not(target_os = "windows"))]
+fn check_shell_configs(keywords: &[&str]) -> Result<Vec<EnvConflict>, String> {
+    let mut conflicts = Vec::new();
+
+    for file_path in shell_config_files() {
         if let Ok(content) = fs::read_to_string(&file_path) {
-            // Parse lines for export statements
-            for (line_num, line) in content.lines().enumerate() {
-                let trimmed = line.trim();
-
-                // Match patterns like: export VAR=value or VAR=value
-                if trimmed.starts_with("export ")
-                    || (!trimmed.starts_with('#') && trimmed.contains('='))
-                {
-                    let export_line = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-
-                    if let Some(eq_pos) = export_line.find('=') {
-                        let var_name = export_line[..eq_pos].trim();
-                        let var_value = export_line[eq_pos + 1..].trim();
-
-                        // Check if variable name contains any keyword
-                        if keywords.iter().any(|k| var_name.to_uppercase().contains(k)) {
-                            conflicts.push(EnvConflict {
-                                var_name: var_name.to_string(),
-                                var_value: var_value
-                                    .trim_matches('"')
-                                    .trim_matches('\'')
-                                    .to_string(),
-                                source_type: "file".to_string(),
-                                source_path: format!("{}:{}", file_path, line_num + 1),
-                            });
-                        }
-                    }
-                }
-            }
+            conflicts.extend(scan_shell_config(&file_path, &content, keywords));
         }
     }
 
@@ -164,5 +193,21 @@ mod tests {
             vec!["GEMINI", "GOOGLE_GEMINI"]
         );
         assert_eq!(get_keywords_for_app("unknown"), Vec::<&str>::new());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn scan_records_line_number_and_original_text() {
+        let content =
+            "# ANTHROPIC_API_KEY=commented\r\nexport ANTHROPIC_API_KEY=\"a b\"\r\nPATH=/bin\r\n";
+        let conflicts = scan_shell_config("/home/u/.zshrc", content, &["ANTHROPIC"]);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].var_name, "ANTHROPIC_API_KEY");
+        assert_eq!(conflicts[0].var_value, "a b");
+        assert_eq!(conflicts[0].source_path, "/home/u/.zshrc:2");
+        assert_eq!(
+            conflicts[0].original_line.as_deref(),
+            Some("export ANTHROPIC_API_KEY=\"a b\"")
+        );
     }
 }
