@@ -175,7 +175,8 @@
         "oauthHint": "Google 公式は OAuth 個人認証を使用するため API Key は不要です。初回利用時にブラウザが開きます。",
         "apiKeyPlaceholder": "Gemini API Key を入力"
       }
-    }
+    },
+    "loadFailed": "プロバイダーの読み込みに失敗しました"
   },
   "claudeCode": {
     "needsRouting": "ルーティングが必要",
@@ -477,7 +478,15 @@
       "deleteSuccess": "バックアップを削除しました",
       "deleteFailed": "削除に失敗しました",
       "deleteConfirmTitle": "バックアップの削除を確認",
-      "deleteConfirmMessage": "このバックアップは完全に削除されます。この操作は取り消せません。"
+      "deleteConfirmMessage": "このバックアップは完全に削除されます。この操作は取り消せません。",
+      "kind": {
+        "manual": "手動",
+        "manualHint": "「今すぐバックアップ」で作成。自動ローテーションで削除されません",
+        "premigration": "移行前",
+        "premigrationHint": "データベースのアップグレードまたは再構築の前に自動作成",
+        "safety": "安全",
+        "safetyHint": "インポート、復元、または同期ダウンロードでデータベースが置き換えられる前に自動作成"
+      }
     },
     "webdavSync": {
       "title": "WebDAV クラウド同期",
@@ -874,7 +883,54 @@
       "defaultCostMultiplierRequired": "デフォルト倍率は必須です",
       "defaultCostMultiplierInvalid": "デフォルト倍率の形式が正しくありません"
     },
-    "saveFailedGeneric": "保存に失敗しました。もう一度お試しください"
+    "saveFailedGeneric": "保存に失敗しました。もう一度お試しください",
+    "cloudSync": {
+      "conflict": {
+        "localChanged": "前回の同期以降、ローカルデータが変更されています。今ダウンロードすると、これらのローカルの変更はクラウドのデータで置き換えられます。残す場合は、キャンセルして先にアップロードしてください。",
+        "overwriteLocal": "ローカルデータを上書き",
+        "overwriteRemote": "クラウドデータを上書き",
+        "remoteChanged": "このデバイスの前回の同期以降、クラウドのデータが別のデバイスによって更新されています。今アップロードすると、そのデータはこのデバイスのデータで置き換えられます。残す場合は、キャンセルして先にダウンロードしてください。",
+        "title": "同期の競合"
+      },
+      "insecureTransport": "このエンドポイントは平文の HTTP を使用しています。認証情報と同期データは暗号化されずに送信されます。信頼できるローカルネットワークでない限り、HTTPS を使用してください。",
+      "remoteChangedNotice": "このデバイスの前回の同期以降、別のデバイスがアップロードしています。そのデータを上書きする前に確認します。"
+    },
+    "healthProbe": {
+      "description": "ルーティングサービスの実行中、サーキットが開いているフェイルオーバーキュー内のプロバイダーに定期的に軽量なリクエストを送信し、実際のリクエストを消費せずに復旧できるようにします",
+      "interval": "プローブ間隔",
+      "minutes": "{{count}} 分",
+      "seconds": "{{count}} 秒",
+      "title": "バックグラウンドのヘルスプローブ"
+    },
+    "notifications": {
+      "budgetExceeded": "予算上限に達しました",
+      "budgetExceededDescription": "プロバイダーが日次または月次の上限を超えたときに通知",
+      "circuitOpen": "サーキットブレーカーが開きました",
+      "circuitOpenDescription": "プロバイダーが連続失敗により一時停止されたときに通知",
+      "failover": "フェイルオーバーの切り替え",
+      "failoverDescription": "ルーティングサービスが別のプロバイダーにフェイルオーバーしたときに通知",
+      "hint": "ウィンドウを閉じていても表示されます。各プロバイダーにつき、カテゴリごとの通知は 5 分間に最大 1 回です。",
+      "quotaExhausted": "サブスクリプションのクォータを使い切りました",
+      "quotaExhaustedDescription": "サブスクリプションの利用枠が 100% に達したときに通知",
+      "syncError": "同期エラー",
+      "syncErrorDescription": "WebDAV または S3 の自動同期が失敗したときに通知",
+      "title": "システム通知"
+    },
+    "syncEncryption": {
+      "change": "パスフレーズを変更",
+      "confirm": "パスフレーズを再入力",
+      "description": "アップロード前に、同期するデータベース（API キーを含む）とスキルをパスフレーズで暗号化します。すべてのデバイスで同じパスフレーズが必要です。紛失するとリモートのコピーは復元できません。先にすべてのデバイスで CC Switch を更新してください。",
+      "disabled": "同期の暗号化はオフです。",
+      "mismatch": "パスフレーズが一致しません。",
+      "passphrase": "パスフレーズ",
+      "save": "パスフレーズを保存",
+      "saved": "同期の暗号化がオンになりました。次回のアップロードから暗号化されます。",
+      "storedInFile": "システムのキーチェーンが利用できないため、パスフレーズを settings.json に保存しました（所有者のみアクセス可）。",
+      "storedInKeychain": "パスフレーズをシステムのキーチェーンに保存しました。",
+      "title": "エンドツーエンド暗号化",
+      "tooShort": "{{count}} 文字以上で入力してください。",
+      "unavailable": "システムのキーチェーンからパスフレーズを読み取れません。再入力するまでアップロードは一時停止されます。"
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -1443,7 +1499,13 @@
     "sortAriaLabel": "プリセットの並び順を切り替え",
     "sortNameAscTooltip": "名前順 A-Z で並び替え",
     "sortOriginalTooltip": "元の順序に戻す",
-    "noSearchResults": "一致するプロバイダープリセットがありません。"
+    "noSearchResults": "一致するプロバイダープリセットがありません。",
+    "hideSponsoredAriaLabel": "スポンサープリセットを非表示",
+    "hideSponsoredTooltip": "スポンサープリセットを非表示",
+    "showSponsoredTooltip": "スポンサープリセットを表示",
+    "sponsorDisclosure": "星またはハートの付いたプリセットはスポンサー枠です。その登録リンク経由で登録すると、CC Switch が紹介報酬を受け取る場合があります。",
+    "sponsorPolicyLink": "スポンサーポリシー",
+    "sponsoredTooltip": "スポンサー枠：このパートナーは CC Switch を支援しており、その登録リンク経由で登録すると CC Switch が紹介報酬を受け取る場合があります。"
   },
   "usage": {
     "title": "利用統計",
@@ -1617,7 +1679,26 @@
     "modelsDevDefaultHint": "最新リリース順に {{shown}} 件を表示しています（全 {{total}} 件）。キーワード入力で全件検索できます",
     "cacheReadCostPerMillion": "キャッシュ読み取りコスト（100万トークンあたり、USD）",
     "cacheCreationCostPerMillion": "キャッシュ書き込みコスト（100万トークンあたり、USD）",
-    "unpriced": "価格未設定"
+    "unpriced": "価格未設定",
+    "budget": {
+      "daily": "日次上限（USD）",
+      "dailyTooltip": "日次: {{usage}} / {{limit}}",
+      "description": "プロバイダーごとに日次・月次の支出上限を設定し、上限に達したらリクエストをブロックすることもできます。",
+      "enforceDescription": "オフ：上限は進捗としてのみ表示されます。オン：プロバイダーが日次または月次の上限に達すると、ローカルルーティングサービスはそのプロバイダーへのリクエスト送信を停止し、明確なエラーを返します（またはキュー内の次のプロバイダーにフェイルオーバーします）。コストは料金表に基づく推定値です。",
+      "enforceTitle": "上限に達したらリクエストをブロック",
+      "exceededTooltip": "予算上限に達しました",
+      "invalid": "正の金額（USD）を入力するか、上限なしの場合は空欄にしてください。",
+      "monthLabel": "今月",
+      "monthly": "月次上限（USD）",
+      "monthlyTooltip": "月次: {{usage}} / {{limit}}",
+      "noProviders": "このアプリにはプロバイダーが設定されていません。",
+      "saveFailed": "予算上限の保存に失敗しました: {{error}}",
+      "saved": "予算上限を保存しました",
+      "thisMonth": "今月",
+      "title": "予算上限",
+      "today": "今日",
+      "todayLabel": "今日"
+    }
   },
   "usageScript": {
     "title": "利用状況を設定",
@@ -3024,5 +3105,49 @@
     "expiredHint": "{{tool}}コマンドを実行してログインを更新してください",
     "queryFailed": "クエリに失敗しました",
     "refresh": "更新"
+  },
+  "errorBoundary": {
+    "copyDiagnostics": "診断情報をコピー",
+    "description": "CC Switch のこの部分を表示できませんでした。設定は変更されていません。",
+    "openConfigFolder": "設定フォルダを開く",
+    "restart": "再起動",
+    "retry": "再試行",
+    "title": "問題が発生しました"
+  },
+  "onboarding": {
+    "back": "戻る",
+    "done": {
+      "description": "準備が完了しました。開いているターミナルセッションを再起動して、各ツールに新しい設定を読み込ませてください。",
+      "manual": "ユーザーマニュアルを開く",
+      "mcp": "MCP・プロンプト・スキル：一度管理するだけで、すべてのツールに同期できます。",
+      "proxy": "ルーティングとフェイルオーバー：ローカルルーティングサービス経由でリクエストを転送し、失敗時は次のプロバイダーへ自動で切り替えます。",
+      "usage": "利用状況：プロバイダーごとのコストを集計し、日次または月次の予算上限を設定できます。"
+    },
+    "finish": "完了",
+    "next": "次へ",
+    "providers": {
+      "add": "プロバイダーを追加",
+      "count": "{{count}} 件のプロバイダーを設定済み",
+      "description": "現在使用中の設定をインポートするか、プリセットからプロバイダーを追加してください。切り替えを行うには、各ツールに少なくとも 1 つのプロバイダーが必要です。",
+      "import": "現在の設定をインポート",
+      "imported": "既存の設定を「default」という名前のプロバイダーとして保存しました。",
+      "none": "まだプロバイダーがありません",
+      "nothingToImport": "既存の設定が見つかりませんでした。"
+    },
+    "reopen": "セットアップガイド",
+    "skip": "セットアップをスキップ",
+    "start": "セットアップを開始",
+    "stepOf": "ステップ {{current}} / {{total}}",
+    "tools": {
+      "description": "使用するツールを選択してください。ホーム画面には選択したツールのみが表示されます。後から設定で変更できます。",
+      "detected": "インストール済み",
+      "detecting": "検出中…",
+      "notDetected": "見つかりません",
+      "pickOne": "ツールを 1 つ以上選択してください。"
+    },
+    "welcome": {
+      "body": "CC Switch は Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw、Hermes のプロバイダー、MCP サーバー、プロンプト、スキルを管理します。これらのツールをすでに設定していた場合、CC Switch はその設定を「default」という名前のプロバイダーとして保存しているため、何も失われません。",
+      "wizardHint": "この簡単なセットアップでは、使用するツールの選択、既存設定のインポート、最初のプロバイダーの追加を行います。スキップしても、後で 設定 → バージョン情報 から再度開けます。"
+    }
   }
 }

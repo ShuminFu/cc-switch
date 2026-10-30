@@ -175,7 +175,8 @@
         "apiKeyPlaceholder": "Enter Gemini API Key"
       }
     },
-    "duplicateLiveIdsLoadFailed": "Failed to read provider keys from the config. Fix the config and try again"
+    "duplicateLiveIdsLoadFailed": "Failed to read provider keys from the config. Fix the config and try again",
+    "loadFailed": "Failed to load providers"
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",
@@ -477,7 +478,15 @@
       "deleteSuccess": "Backup deleted",
       "deleteFailed": "Delete failed",
       "deleteConfirmTitle": "Confirm Delete",
-      "deleteConfirmMessage": "This backup will be permanently deleted. This action cannot be undone."
+      "deleteConfirmMessage": "This backup will be permanently deleted. This action cannot be undone.",
+      "kind": {
+        "manual": "Manual",
+        "manualHint": "Created from Backup Now; never rotated automatically",
+        "premigration": "Pre-migration",
+        "premigrationHint": "Taken automatically before a database upgrade or rebuild",
+        "safety": "Safety",
+        "safetyHint": "Taken automatically before an import, restore or sync download replaced the database"
+      }
     },
     "webdavSync": {
       "title": "WebDAV Cloud Sync",
@@ -874,7 +883,54 @@
       "defaultCostMultiplierRequired": "Default multiplier is required",
       "defaultCostMultiplierInvalid": "Invalid multiplier format"
     },
-    "saveFailedGeneric": "Save failed, please try again"
+    "saveFailedGeneric": "Save failed, please try again",
+    "cloudSync": {
+      "conflict": {
+        "localChanged": "Local data changed since the last sync. Downloading now replaces those local changes with the cloud data. To keep them, cancel and upload first.",
+        "overwriteLocal": "Overwrite local data",
+        "overwriteRemote": "Overwrite cloud data",
+        "remoteChanged": "The cloud data was updated by another device since this device last synced. Uploading now replaces that data with this device's data. To keep it, cancel and download first.",
+        "title": "Sync conflict"
+      },
+      "insecureTransport": "This endpoint uses plain HTTP: credentials and synced data are sent unencrypted. Use HTTPS unless this is a trusted local network.",
+      "remoteChangedNotice": "Another device uploaded since this device last synced. You will be asked before that data is overwritten."
+    },
+    "healthProbe": {
+      "description": "While the proxy runs, periodically send a lightweight request to failover-queue providers whose circuit is open, so they recover without using one of your requests",
+      "interval": "Probe interval",
+      "minutes": "{{count}} min",
+      "seconds": "{{count}} s",
+      "title": "Background health probing"
+    },
+    "notifications": {
+      "budgetExceeded": "Budget limit reached",
+      "budgetExceededDescription": "Notify when a provider exceeds its daily or monthly limit",
+      "circuitOpen": "Circuit breaker opened",
+      "circuitOpenDescription": "Notify when a provider is paused after repeated failures",
+      "failover": "Failover switches",
+      "failoverDescription": "Notify when the proxy fails over to another provider",
+      "hint": "Shown even when the window is closed. Each provider triggers at most one notification per category every 5 minutes.",
+      "quotaExhausted": "Subscription quota exhausted",
+      "quotaExhaustedDescription": "Notify when a subscription usage window reaches 100%",
+      "syncError": "Sync errors",
+      "syncErrorDescription": "Notify when WebDAV or S3 auto sync fails",
+      "title": "System notifications"
+    },
+    "syncEncryption": {
+      "change": "Change passphrase",
+      "confirm": "Repeat passphrase",
+      "description": "Encrypt the synced database (including API keys) and skills with a passphrase before upload. Every device needs the same passphrase. If you lose it, the remote copy cannot be recovered. Update CC Switch on all devices first.",
+      "disabled": "Sync encryption is off.",
+      "mismatch": "The passphrases do not match.",
+      "passphrase": "Passphrase",
+      "save": "Save passphrase",
+      "saved": "Sync encryption is on. The next upload will be encrypted.",
+      "storedInFile": "No system keychain available: passphrase stored in settings.json (owner-only).",
+      "storedInKeychain": "Passphrase stored in the system keychain.",
+      "title": "End-to-end encryption",
+      "tooShort": "Use at least {{count}} characters.",
+      "unavailable": "The passphrase cannot be read from the system keychain. Uploads are paused until you enter it again."
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -1443,7 +1499,13 @@
     "sortAriaLabel": "Toggle preset sorting",
     "sortNameAscTooltip": "Sort by name A-Z",
     "sortOriginalTooltip": "Restore original order",
-    "noSearchResults": "No provider presets match your search."
+    "noSearchResults": "No provider presets match your search.",
+    "hideSponsoredAriaLabel": "Hide sponsored presets",
+    "hideSponsoredTooltip": "Hide sponsored presets",
+    "showSponsoredTooltip": "Show sponsored presets",
+    "sponsorDisclosure": "Presets marked with a star or heart are sponsored placements; their sign-up links may earn CC Switch a referral commission.",
+    "sponsorPolicyLink": "Sponsor policy",
+    "sponsoredTooltip": "Sponsored placement: this partner supports CC Switch, and its sign-up links may earn CC Switch a referral commission."
   },
   "usage": {
     "title": "Usage Statistics",
@@ -1617,7 +1679,26 @@
     "modelsDevDefaultHint": "Showing the {{shown}} most recently released models (of {{total}}) — type to search all",
     "cacheReadCostPerMillion": "Cache Read Cost (per million tokens, USD)",
     "cacheCreationCostPerMillion": "Cache Write Cost (per million tokens, USD)",
-    "unpriced": "Unpriced"
+    "unpriced": "Unpriced",
+    "budget": {
+      "daily": "Daily limit (USD)",
+      "dailyTooltip": "Daily: {{usage}} of {{limit}}",
+      "description": "Set daily and monthly spending limits per provider and optionally block requests once a limit is reached.",
+      "enforceDescription": "Off: limits are shown as progress only. On: the local proxy stops sending requests to a provider once its daily or monthly limit is reached and returns a clear error (or fails over to the next provider in the queue). Costs are estimates based on your pricing table.",
+      "enforceTitle": "Block requests when a limit is reached",
+      "exceededTooltip": "Budget limit reached",
+      "invalid": "Enter a positive amount in USD, or leave empty for no limit.",
+      "monthLabel": "This month",
+      "monthly": "Monthly limit (USD)",
+      "monthlyTooltip": "Monthly: {{usage}} of {{limit}}",
+      "noProviders": "No providers configured for this app.",
+      "saveFailed": "Failed to save budget limits: {{error}}",
+      "saved": "Budget limits saved",
+      "thisMonth": "this month",
+      "title": "Budget limits",
+      "today": "today",
+      "todayLabel": "Today"
+    }
   },
   "usageScript": {
     "title": "Configure Usage Query",
@@ -3024,5 +3105,49 @@
     "expiredHint": "Run the {{tool}} command to refresh your login",
     "queryFailed": "Query failed",
     "refresh": "Refresh"
+  },
+  "errorBoundary": {
+    "copyDiagnostics": "Copy diagnostics",
+    "description": "This part of CC Switch failed to render. Your configuration has not been changed.",
+    "openConfigFolder": "Open config folder",
+    "restart": "Restart",
+    "retry": "Try again",
+    "title": "Something went wrong"
+  },
+  "onboarding": {
+    "back": "Back",
+    "done": {
+      "description": "You're set. Restart any open terminal sessions so the tools pick up the new configuration.",
+      "manual": "Open the user manual",
+      "mcp": "MCP, prompts and skills: manage them once and sync them to every tool.",
+      "proxy": "Proxy & failover: route requests through the local proxy and fall back to the next provider automatically.",
+      "usage": "Usage: track cost per provider and set daily or monthly budget limits."
+    },
+    "finish": "Finish",
+    "next": "Next",
+    "providers": {
+      "add": "Add provider",
+      "count": "{{count}} provider(s) configured",
+      "description": "Import the configuration you already use, or add a provider from a preset. Each tool needs at least one provider to switch between.",
+      "import": "Import current config",
+      "imported": "Your existing configuration was saved as a provider named “default”.",
+      "none": "No providers yet",
+      "nothingToImport": "No existing configuration was found."
+    },
+    "reopen": "Setup guide",
+    "skip": "Skip setup",
+    "start": "Start setup",
+    "stepOf": "Step {{current}} of {{total}}",
+    "tools": {
+      "description": "Choose the tools you use. Only these appear on the home screen; you can change this later in Settings.",
+      "detected": "Installed",
+      "detecting": "Detecting…",
+      "notDetected": "Not found",
+      "pickOne": "Select at least one tool."
+    },
+    "welcome": {
+      "body": "CC Switch manages providers, MCP servers, prompts and skills for Claude Code, Claude Desktop, Codex, Gemini CLI, Grok Build, OpenCode, OpenClaw and Hermes. If you already had one of these tools configured, CC Switch saved that setup as a provider named “default”, so nothing is lost.",
+      "wizardHint": "This short setup picks the tools you use, imports your existing configs and helps you add a first provider. You can skip it and re-open it later from Settings → About."
+    }
   }
 }

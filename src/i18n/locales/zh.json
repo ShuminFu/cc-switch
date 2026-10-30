@@ -175,7 +175,8 @@
         "oauthHint": "Google 官方使用 OAuth 个人认证，无需填写 API Key。首次使用时会自动打开浏览器进行登录。",
         "apiKeyPlaceholder": "请输入 Gemini API Key"
       }
-    }
+    },
+    "loadFailed": "加载供应商失败"
   },
   "claudeCode": {
     "needsRouting": "需要路由",
@@ -477,7 +478,15 @@
       "deleteSuccess": "备份已删除",
       "deleteFailed": "删除失败",
       "deleteConfirmTitle": "确认删除备份",
-      "deleteConfirmMessage": "此备份将被永久删除，此操作无法撤消。"
+      "deleteConfirmMessage": "此备份将被永久删除，此操作无法撤消。",
+      "kind": {
+        "manual": "手动",
+        "manualHint": "通过“立即备份”创建，不会被自动轮换清理",
+        "premigration": "迁移前",
+        "premigrationHint": "在数据库升级或重建前自动创建",
+        "safety": "安全备份",
+        "safetyHint": "在导入、恢复或同步下载替换数据库前自动创建"
+      }
     },
     "webdavSync": {
       "title": "WebDAV 云同步",
@@ -874,7 +883,54 @@
       "defaultCostMultiplierRequired": "默认倍率不能为空",
       "defaultCostMultiplierInvalid": "默认倍率格式不正确"
     },
-    "saveFailedGeneric": "保存失败，请重试"
+    "saveFailedGeneric": "保存失败，请重试",
+    "cloudSync": {
+      "conflict": {
+        "localChanged": "自上次同步以来，本地数据已发生变化。现在下载将用云端数据替换这些本地更改。如需保留，请取消并先上传。",
+        "overwriteLocal": "覆盖本地数据",
+        "overwriteRemote": "覆盖云端数据",
+        "remoteChanged": "自本设备上次同步以来，云端数据已被其他设备更新。现在上传将用本设备的数据替换云端数据。如需保留，请取消并先下载。",
+        "title": "同步冲突"
+      },
+      "insecureTransport": "该端点使用明文 HTTP：凭据和同步数据将以未加密形式传输。除非是在受信任的本地网络中，否则请使用 HTTPS。",
+      "remoteChangedNotice": "自本设备上次同步以来，其他设备已上传过数据。覆盖这些数据前会先征求你的确认。"
+    },
+    "healthProbe": {
+      "description": "路由服务运行期间，定期向故障转移队列中处于熔断状态的供应商发送轻量请求，使其无需占用你的真实请求即可恢复",
+      "interval": "探测间隔",
+      "minutes": "{{count}} 分钟",
+      "seconds": "{{count}} 秒",
+      "title": "后台健康探测"
+    },
+    "notifications": {
+      "budgetExceeded": "已达到预算上限",
+      "budgetExceededDescription": "当供应商超出每日或每月上限时通知",
+      "circuitOpen": "熔断器已打开",
+      "circuitOpenDescription": "当供应商因连续失败被暂停时通知",
+      "failover": "故障转移切换",
+      "failoverDescription": "当路由服务故障转移到其他供应商时通知",
+      "hint": "即使窗口已关闭也会显示。每个供应商的每类通知每 5 分钟最多触发一次。",
+      "quotaExhausted": "订阅额度已用尽",
+      "quotaExhaustedDescription": "当订阅用量窗口达到 100% 时通知",
+      "syncError": "同步错误",
+      "syncErrorDescription": "当 WebDAV 或 S3 自动同步失败时通知",
+      "title": "系统通知"
+    },
+    "syncEncryption": {
+      "change": "更改密码短语",
+      "confirm": "再次输入密码短语",
+      "description": "上传前使用密码短语加密同步的数据库（包括 API 密钥）和技能。每台设备都需要使用相同的密码短语。一旦丢失，云端副本将无法恢复。请先在所有设备上更新 CC Switch。",
+      "disabled": "同步加密已关闭。",
+      "mismatch": "两次输入的密码短语不一致。",
+      "passphrase": "密码短语",
+      "save": "保存密码短语",
+      "saved": "同步加密已开启。下次上传将被加密。",
+      "storedInFile": "系统钥匙串不可用：密码短语已保存在 settings.json 中（仅所有者可访问）。",
+      "storedInKeychain": "密码短语已保存在系统钥匙串中。",
+      "title": "端到端加密",
+      "tooShort": "请至少使用 {{count}} 个字符。",
+      "unavailable": "无法从系统钥匙串读取密码短语。在你重新输入之前，上传将暂停。"
+    }
   },
   "apps": {
     "claude": "Claude",
@@ -1443,7 +1499,13 @@
     "sortAriaLabel": "切换预设排序",
     "sortNameAscTooltip": "按名称 A-Z 排序",
     "sortOriginalTooltip": "恢复原始顺序",
-    "noSearchResults": "没有匹配的预设供应商。"
+    "noSearchResults": "没有匹配的预设供应商。",
+    "hideSponsoredAriaLabel": "隐藏赞助预设",
+    "hideSponsoredTooltip": "隐藏赞助预设",
+    "showSponsoredTooltip": "显示赞助预设",
+    "sponsorDisclosure": "带有星标或爱心标记的预设为赞助推广位；通过其注册链接注册，CC Switch 可能获得推荐佣金。",
+    "sponsorPolicyLink": "赞助政策",
+    "sponsoredTooltip": "赞助推广位：该合作伙伴支持 CC Switch，通过其注册链接注册，CC Switch 可能获得推荐佣金。"
   },
   "usage": {
     "title": "使用统计",
@@ -1617,7 +1679,26 @@
     "modelsDevDefaultHint": "默认展示最新发布的 {{shown}} 个模型（共 {{total}} 个），输入关键字可全量搜索",
     "cacheReadCostPerMillion": "缓存读取成本 (每百万 tokens, USD)",
     "cacheCreationCostPerMillion": "缓存写入成本 (每百万 tokens, USD)",
-    "unpriced": "未定价"
+    "unpriced": "未定价",
+    "budget": {
+      "daily": "每日上限（USD）",
+      "dailyTooltip": "每日：{{usage}} / {{limit}}",
+      "description": "为每个供应商设置每日和每月支出上限，并可选择在达到上限后拦截请求。",
+      "enforceDescription": "关闭：上限仅以进度形式显示。开启：当供应商达到每日或每月上限后，本地路由服务将停止向其发送请求并返回明确的错误（或故障转移到队列中的下一个供应商）。成本为基于你的定价表的估算值。",
+      "enforceTitle": "达到上限时拦截请求",
+      "exceededTooltip": "已达到预算上限",
+      "invalid": "请输入大于 0 的美元金额，或留空表示不设上限。",
+      "monthLabel": "本月",
+      "monthly": "每月上限（USD）",
+      "monthlyTooltip": "每月：{{usage}} / {{limit}}",
+      "noProviders": "此应用尚未配置供应商。",
+      "saveFailed": "保存预算上限失败：{{error}}",
+      "saved": "预算上限已保存",
+      "thisMonth": "本月",
+      "title": "预算上限",
+      "today": "今日",
+      "todayLabel": "今日"
+    }
   },
   "usageScript": {
     "title": "配置用量查询",
@@ -3024,5 +3105,49 @@
     "expiredHint": "请运行 {{tool}} 命令刷新登录",
     "queryFailed": "查询失败",
     "refresh": "刷新"
+  },
+  "errorBoundary": {
+    "copyDiagnostics": "复制诊断信息",
+    "description": "CC Switch 的这部分界面渲染失败。你的配置未被更改。",
+    "openConfigFolder": "打开配置目录",
+    "restart": "重启",
+    "retry": "重试",
+    "title": "出错了"
+  },
+  "onboarding": {
+    "back": "上一步",
+    "done": {
+      "description": "设置完成。请重启已打开的终端会话，以便各工具加载新配置。",
+      "manual": "打开用户手册",
+      "mcp": "MCP、提示词与技能：统一管理一次，即可同步到所有工具。",
+      "proxy": "路由与故障转移：通过本地路由服务转发请求，并在失败时自动切换到下一个供应商。",
+      "usage": "用量：按供应商统计成本，并设置每日或每月预算上限。"
+    },
+    "finish": "完成",
+    "next": "下一步",
+    "providers": {
+      "add": "添加供应商",
+      "count": "已配置 {{count}} 个供应商",
+      "description": "导入你正在使用的配置，或从预设添加供应商。每个工具至少需要一个供应商才能进行切换。",
+      "import": "导入当前配置",
+      "imported": "你现有的配置已保存为名为“default”的供应商。",
+      "none": "还没有供应商",
+      "nothingToImport": "未找到现有配置。"
+    },
+    "reopen": "设置向导",
+    "skip": "跳过设置",
+    "start": "开始设置",
+    "stepOf": "第 {{current}} 步，共 {{total}} 步",
+    "tools": {
+      "description": "选择你使用的工具。首页只会显示这些工具，之后可在设置中修改。",
+      "detected": "已安装",
+      "detecting": "检测中…",
+      "notDetected": "未找到",
+      "pickOne": "请至少选择一个工具。"
+    },
+    "welcome": {
+      "body": "CC Switch 可为 Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw 和 Hermes 管理供应商、MCP 服务器、提示词和技能。如果你之前已配置过其中某个工具，CC Switch 已将该配置保存为名为“default”的供应商，不会有任何丢失。",
+      "wizardHint": "这个简短的设置会帮你选择所用的工具、导入现有配置，并添加第一个供应商。你可以跳过，之后在 设置 → 关于 中重新打开。"
+    }
   }
 }
