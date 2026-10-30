@@ -97,7 +97,8 @@ function portInUse(port) {
 
 export const config = {
   runner: "local",
-  specs: ["./specs/**/*.e2e.mjs"],
+  // The smoke goes first: it expects a first run on the fresh HOME.
+  specs: ["./specs/smoke.e2e.mjs", "./specs/**/*.e2e.mjs"],
   maxInstances: 1,
   hostname: "127.0.0.1",
   port: DRIVER_PORT,
