@@ -128,6 +128,12 @@ impl FailoverSwitchManager {
             if let Err(e) = app.emit("provider-switched", event_data) {
                 log::error!("[Failover] 发射事件失败: {e}");
             }
+            crate::services::notifications::notify_failover_switched(
+                app,
+                app_type,
+                provider_id,
+                provider_name,
+            );
         }
 
         Ok(switched)

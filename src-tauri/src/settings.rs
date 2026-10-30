@@ -491,6 +491,12 @@ pub struct AppSettings {
     // ===== 本机自动迁移状态 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_migrations: Option<LocalMigrations>,
+
+    // ===== 系统通知 / 后台健康探测 =====
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<crate::services::notifications::NotificationSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_probe: Option<crate::proxy::health::HealthProbeSettings>,
 }
 
 fn default_show_in_tray() -> bool {
@@ -554,6 +560,8 @@ impl Default for AppSettings {
             backup_retain_count: None,
             preferred_terminal: None,
             local_migrations: None,
+            notifications: None,
+            health_probe: None,
         }
     }
 }

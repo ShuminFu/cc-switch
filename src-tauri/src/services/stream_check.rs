@@ -15,6 +15,13 @@
 //! 连通性检查 **绝不** 触碰故障转移熔断器：一个返回 403/401 的供应商在本检查里
 //! 算"可达"，但它对真实流量是坏的。熔断器只由 `proxy/forwarder.rs` 转发真实流量
 //! 的成败驱动（被动）。两者职责分离——可达性回答"能不能到"，真实流量回答"能不能用"。
+//!
+//! The one exception is [`StreamCheckService::probe_for_recovery`], used by the
+//! opt-in background health prober (`proxy/health.rs`) for breakers that are
+//! already Open/HalfOpen. It reuses the same cheap GET but applies stricter
+//! semantics: it sends the provider's credentials and only treats a response as
+//! healthy when it is neither a 5xx nor an auth rejection (401/403); 429 is
+//! reported separately so the prober can back off.
 
 use reqwest::header::HeaderValue;
 use reqwest::Client;
@@ -78,6 +85,19 @@ pub struct StreamCheckResult {
     pub error_category: Option<String>,
 }
 
+/// Outcome of a background recovery probe (see [`StreamCheckService::probe_for_recovery`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecoveryProbe {
+    /// Upstream answered with a non-5xx, non-auth-rejection status.
+    Healthy { http_status: u16, latency_ms: u64 },
+    /// Network error, timeout, 5xx or auth rejection.
+    Unhealthy { reason: String },
+    /// Upstream answered 429: count as neither success nor failure, back off.
+    RateLimited,
+    /// Provider cannot be probed (official/OAuth provider, missing base URL).
+    Skipped { reason: String },
+}
+
 /// 连通性检查服务
 pub struct StreamCheckService;
 
@@ -128,6 +148,96 @@ impl StreamCheckService {
             retry_count: config.max_retries,
             error_category: None,
         }))
+    }
+
+    /// Cheap probe used by the background health prober to decide whether an
+    /// Open/HalfOpen breaker may recover. Sends one GET to the provider's
+    /// `base_url` with its credentials (no model call, no body read).
+    pub async fn probe_for_recovery(
+        app_type: &AppType,
+        provider: &Provider,
+        timeout: std::time::Duration,
+    ) -> RecoveryProbe {
+        // Runtime-token providers have no static credential to send; probing
+        // them without auth would make every probe look like a success or 401.
+        if provider.is_codex_oauth() || provider.is_github_copilot() {
+            return RecoveryProbe::Skipped {
+                reason: "OAuth-managed provider".to_string(),
+            };
+        }
+        let base_url = match Self::resolve_base_url(app_type, provider) {
+            Ok(url) => url,
+            Err(e) => {
+                return RecoveryProbe::Skipped {
+                    reason: e.to_string(),
+                }
+            }
+        };
+        let url = base_url.trim();
+        if url.is_empty() {
+            return RecoveryProbe::Skipped {
+                reason: "base_url is empty".to_string(),
+            };
+        }
+
+        let client = crate::proxy::http_client::get();
+        let mut req = client
+            .get(url)
+            .timeout(timeout)
+            .header("accept", "*/*")
+            .header("accept-encoding", "identity");
+        if let Some(ua) = Self::custom_user_agent(provider) {
+            req = req.header("user-agent", ua);
+        }
+        for (name, value) in Self::recovery_auth_headers(app_type, provider) {
+            req = req.header(name, value);
+        }
+
+        let start = Instant::now();
+        let result = req
+            .send()
+            .await
+            .map(|resp| resp.status().as_u16())
+            .map_err(|e| Self::map_request_error(e).to_string());
+        Self::classify_recovery(result, start.elapsed().as_millis() as u64)
+    }
+
+    /// Credentials for the recovery probe, from the same adapter the forwarder
+    /// uses. Strategies that need a runtime token are left out.
+    fn recovery_auth_headers(
+        app_type: &AppType,
+        provider: &Provider,
+    ) -> Vec<(http::HeaderName, http::HeaderValue)> {
+        use crate::proxy::providers::AuthStrategy;
+        let adapter = get_adapter(app_type);
+        let Some(auth) = adapter.extract_auth(provider) else {
+            return Vec::new();
+        };
+        match auth.strategy {
+            AuthStrategy::Anthropic
+            | AuthStrategy::ClaudeAuth
+            | AuthStrategy::Bearer
+            | AuthStrategy::Google => adapter.get_auth_headers(&auth).unwrap_or_default(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Map a raw probe result to a [`RecoveryProbe`].
+    fn classify_recovery(result: Result<u16, String>, latency_ms: u64) -> RecoveryProbe {
+        match result {
+            Ok(429) => RecoveryProbe::RateLimited,
+            Ok(status @ (401 | 403)) => RecoveryProbe::Unhealthy {
+                reason: format!("HTTP {status} (credentials rejected)"),
+            },
+            Ok(status) if status >= 500 => RecoveryProbe::Unhealthy {
+                reason: format!("HTTP {status}"),
+            },
+            Ok(status) => RecoveryProbe::Healthy {
+                http_status: status,
+                latency_ms,
+            },
+            Err(reason) => RecoveryProbe::Unhealthy { reason },
+        }
     }
 
     /// 单次连通性探测。
@@ -391,6 +501,54 @@ mod tests {
         assert_eq!(config.max_retries, 1);
         // 降级阈值沿用旧尺度，避免把 1 秒多的正常延迟误判为"较慢"
         assert_eq!(config.degraded_threshold_ms, 6000);
+    }
+
+    #[test]
+    fn recovery_probe_classification_is_stricter_than_reachability() {
+        assert_eq!(
+            StreamCheckService::classify_recovery(Ok(200), 12),
+            RecoveryProbe::Healthy {
+                http_status: 200,
+                latency_ms: 12
+            }
+        );
+        // A relay root commonly answers 404; the server is alive.
+        assert!(matches!(
+            StreamCheckService::classify_recovery(Ok(404), 1),
+            RecoveryProbe::Healthy { .. }
+        ));
+        assert_eq!(
+            StreamCheckService::classify_recovery(Ok(429), 1),
+            RecoveryProbe::RateLimited
+        );
+        for status in [401u16, 403, 500, 502, 503, 504] {
+            assert!(
+                matches!(
+                    StreamCheckService::classify_recovery(Ok(status), 1),
+                    RecoveryProbe::Unhealthy { .. }
+                ),
+                "status {status} must not close a breaker"
+            );
+        }
+        assert!(matches!(
+            StreamCheckService::classify_recovery(Err("Request timeout".into()), 8000),
+            RecoveryProbe::Unhealthy { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn recovery_probe_skips_official_providers() {
+        let mut official = make_provider(serde_json::json!({ "env": {} }));
+        official.category = Some("official".to_string());
+        assert!(matches!(
+            StreamCheckService::probe_for_recovery(
+                &AppType::Claude,
+                &official,
+                std::time::Duration::from_secs(1)
+            )
+            .await,
+            RecoveryProbe::Skipped { .. }
+        ));
     }
 
     #[test]

@@ -130,6 +130,7 @@ async fn run_auto_sync_upload(
         Err(err) => {
             persist_auto_sync_error(&mut sync_settings, &err);
             emit_auto_sync_status_updated(app, "error", Some(&err));
+            crate::services::notifications::notify_sync_error(app, "S3", &err.to_string());
             Err(err)
         }
     }

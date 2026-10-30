@@ -449,6 +449,25 @@ export interface Settings {
       migratedStateRows?: number;
     };
   };
+
+  // ===== 系统通知 / 后台健康探测（缺省时使用后端默认值）=====
+  notifications?: NotificationToggles;
+  healthProbe?: HealthProbeConfig;
+}
+
+// 系统通知开关：默认仅开启故障转移与熔断通知
+export interface NotificationToggles {
+  failover: boolean;
+  circuitOpen: boolean;
+  budgetExceeded: boolean;
+  quotaExhausted: boolean;
+  syncError: boolean;
+}
+
+// 后台健康探测：默认关闭
+export interface HealthProbeConfig {
+  enabled: boolean;
+  intervalSecs: number;
 }
 
 export interface SessionMeta {
