@@ -6,7 +6,7 @@ use cc_switch_lib::{
 
 #[path = "support.rs"]
 mod support;
-use support::{create_test_state, ensure_test_home, reset_test_fs, test_mutex};
+use support::{create_test_state, ensure_test_home, TestEnv};
 
 fn write_skill(dir: &std::path::Path, name: &str) {
     fs::create_dir_all(dir).expect("create skill dir");
@@ -29,8 +29,7 @@ fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) {
 
 #[test]
 fn import_from_apps_respects_explicit_app_selection() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     write_skill(
@@ -74,8 +73,7 @@ fn import_from_apps_respects_explicit_app_selection() {
 
 #[test]
 fn import_from_apps_does_not_rewrite_selected_app_directory() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("codex-skill");
@@ -121,8 +119,7 @@ fn import_from_apps_does_not_rewrite_selected_app_directory() {
 
 #[test]
 fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_dir = home.join(".cc-switch").join("skills");
@@ -169,8 +166,7 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
 
 #[test]
 fn uninstall_skill_creates_backup_before_removing_ssot() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("backup-skill");
@@ -237,8 +233,7 @@ fn uninstall_skill_creates_backup_before_removing_ssot() {
 
 #[test]
 fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("restore-skill");
@@ -316,8 +311,7 @@ fn restore_skill_backup_restores_files_to_ssot_and_current_app() {
 
 #[test]
 fn delete_skill_backup_removes_backup_directory() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home
@@ -381,8 +375,7 @@ fn delete_skill_backup_removes_backup_directory() {
 
 #[test]
 fn migration_snapshot_overrides_multi_source_directory_inference() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     write_skill(
@@ -448,8 +441,7 @@ fn skill_row(id: &str, directory: &str) -> InstalledSkill {
 
 #[test]
 fn uninstall_rejects_traversal_directory_from_db_without_touching_fs() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     // A directory outside the skills roots that hostile rows point at.
@@ -522,8 +514,7 @@ fn uninstall_rejects_traversal_directory_from_db_without_touching_fs() {
 
 #[test]
 fn uninstall_still_removes_valid_skill_after_directory_validation() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("valid-skill");
@@ -544,8 +535,7 @@ fn uninstall_still_removes_valid_skill_after_directory_validation() {
 
 #[test]
 fn restore_from_backup_rejects_traversal_directory_in_metadata() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let ssot_skill_dir = home.join(".cc-switch").join("skills").join("meta-skill");

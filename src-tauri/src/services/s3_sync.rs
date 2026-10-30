@@ -380,3 +380,8 @@ mod tests {
         assert_eq!(creds.endpoint, "minio.local:9000");
     }
 }
+
+// End-to-end tests against a fake S3 server (SVC-24).
+#[cfg(test)]
+#[path = "s3_sync_e2e_tests.rs"]
+mod e2e_tests;

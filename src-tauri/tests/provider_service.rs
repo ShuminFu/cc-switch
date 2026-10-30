@@ -9,7 +9,7 @@ use cc_switch_lib::{
 mod support;
 use support::{
     create_test_state, create_test_state_with_config, enable_codex_official_auth_preservation,
-    ensure_test_home, reset_test_fs, test_mutex,
+    ensure_test_home, TestEnv,
 };
 
 fn sanitize_provider_name(name: &str) -> String {
@@ -24,8 +24,7 @@ fn sanitize_provider_name(name: &str) -> String {
 
 #[test]
 fn migrate_legacy_common_config_usage_marks_historical_provider_enabled() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -98,8 +97,7 @@ fn migrate_legacy_common_config_usage_marks_historical_provider_enabled() {
 
 #[test]
 fn provider_service_switch_codex_updates_live_and_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
 
@@ -248,8 +246,7 @@ command = "say"
 
 #[test]
 fn provider_service_switch_codex_preserves_user_model_provider_id_after_migration() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let legacy_auth = json!({ "OPENAI_API_KEY": "rightcode-key" });
@@ -356,8 +353,7 @@ requires_openai_auth = true
 
 #[test]
 fn provider_service_switch_codex_preserves_oauth_and_backfills_api_key_from_live_token() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
 
@@ -530,8 +526,7 @@ requires_openai_auth = true
     reason = "this integration-style test must serialize global test HOME and settings mutations across async takeover calls"
 )]
 async fn codex_official_to_deepseek_then_takeover_enters_and_restores_proxy_managed_live_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
 
@@ -707,8 +702,7 @@ wire_api = "responses"
 
 #[test]
 fn provider_service_switch_codex_default_overwrites_official_auth_when_preservation_off() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     // Intentionally do NOT enable preservation: this locks the default opt-out
     // behavior where switching to a third-party provider rewrites auth.json,
     // discarding the user's ChatGPT OAuth login. It is the dual of
@@ -795,8 +789,7 @@ requires_openai_auth = true
 
 #[test]
 fn provider_service_switch_codex_supports_official_login_provider_without_auth_write() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let live_auth = json!({
@@ -884,8 +877,7 @@ requires_openai_auth = true
 
 #[test]
 fn reapply_codex_official_live_resyncs_mcp_servers() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let live_auth = json!({
@@ -983,8 +975,7 @@ fn reapply_codex_official_live_resyncs_mcp_servers() {
 /// Codex MCP 静默消失。这里用坏 JSON 的 ~/.claude.json 复现该场景。
 #[test]
 fn reapply_codex_official_live_projects_mcp_despite_broken_claude_json() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let live_auth = json!({
@@ -1088,8 +1079,7 @@ fn reapply_codex_official_live_projects_mcp_despite_broken_claude_json() {
 /// 落盘，切换事实上成功，报错只制造分裂假象。
 #[test]
 fn switch_codex_projects_mcp_despite_broken_claude_json() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     write_codex_live_atomic(&json!({ "OPENAI_API_KEY": "sk-old" }), Some(""))
@@ -1170,8 +1160,7 @@ fn switch_codex_projects_mcp_despite_broken_claude_json() {
 /// 状态永远陈旧。
 #[test]
 fn sync_all_enabled_reports_broken_app_but_projects_the_rest() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     write_codex_live_atomic(&json!({ "OPENAI_API_KEY": "sk" }), Some("")).expect("seed codex live");
@@ -1226,8 +1215,7 @@ fn sync_all_enabled_reports_broken_app_but_projects_the_rest() {
 
 #[test]
 fn provider_service_switch_codex_official_accounts_write_auth_json() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let live_auth_a = json!({
@@ -1319,8 +1307,7 @@ fn provider_service_switch_codex_official_accounts_write_auth_json() {
 
 #[test]
 fn provider_service_switch_codex_backfill_keeps_provider_specific_model_provider_id() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let legacy_auth = json!({ "OPENAI_API_KEY": "rightcode-key" });
@@ -1446,8 +1433,7 @@ requires_openai_auth = true
 
 #[test]
 fn sync_current_provider_for_app_keeps_live_takeover_and_updates_restore_backup() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -1545,8 +1531,7 @@ fn sync_current_provider_for_app_keeps_live_takeover_and_updates_restore_backup(
 
 #[test]
 fn switch_codex_provider_with_takeover_live_but_stopped_proxy_keeps_proxy_live_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     enable_codex_official_auth_preservation();
     let _home = ensure_test_home();
 
@@ -1697,8 +1682,7 @@ wire_api = "responses"
 
 #[test]
 fn explicitly_cleared_common_snippet_is_not_auto_extracted() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -1735,8 +1719,7 @@ fn explicitly_cleared_common_snippet_is_not_auto_extracted() {
 
 #[test]
 fn legacy_common_config_migration_flag_roundtrip() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -1776,8 +1759,7 @@ fn legacy_common_config_migration_flag_roundtrip() {
 
 #[test]
 fn switch_packycode_gemini_updates_security_selected_type() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -1829,8 +1811,7 @@ fn switch_packycode_gemini_updates_security_selected_type() {
 
 #[test]
 fn packycode_partner_meta_triggers_security_flag_even_without_keywords() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -1884,8 +1865,7 @@ fn packycode_partner_meta_triggers_security_flag_even_without_keywords() {
 
 #[test]
 fn switch_google_official_gemini_preserves_env_vars() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -1947,8 +1927,7 @@ fn switch_google_official_gemini_preserves_env_vars() {
 
 #[test]
 fn provider_service_switch_claude_updates_live_and_state() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let settings_path = get_claude_settings_path();
@@ -2043,8 +2022,7 @@ fn provider_service_switch_claude_updates_live_and_state() {
 /// （用户直接在应用内装插件/改偏好）捕获进通用配置片段，并带到下一个供应商。
 #[test]
 fn switch_claude_syncs_new_shared_keys_from_live_into_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let settings_path = get_claude_settings_path();
@@ -2167,8 +2145,7 @@ fn switch_claude_syncs_new_shared_keys_from_live_into_common_config() {
 /// 且不会在切到下一个供应商时被重新注入（否则会"删不掉"）。
 #[test]
 fn switch_claude_syncs_deletions_from_live_into_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let settings_path = get_claude_settings_path();
@@ -2259,8 +2236,7 @@ fn switch_claude_syncs_deletions_from_live_into_common_config() {
 /// 回填后旧供应商的存储配置不残留片段内容（autosync 先于 strip，值必然匹配）。
 #[test]
 fn switch_codex_syncs_shared_keys_from_live_into_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     // A 激活状态下的 live：A 专属路由 + 已共享的 [tui] + 用户刚加的
@@ -2437,8 +2413,7 @@ command = "ghost-cmd"
 /// 同步进通用配置，且不会在切到下一个供应商时被重新注入（否则"删不掉"）。
 #[test]
 fn switch_codex_syncs_deletions_from_live_into_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     // 片段里有两个共享键，但用户已在 live 里删掉 disable_response_storage
@@ -2519,8 +2494,7 @@ wire_api = "responses"
 /// 未勾选"写入通用配置"的供应商，其 live 改动不应自动污染通用配置片段。
 #[test]
 fn switch_claude_does_not_sync_common_config_for_opted_out_provider() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let settings_path = get_claude_settings_path();
@@ -2596,8 +2570,7 @@ fn switch_claude_does_not_sync_common_config_for_opted_out_provider() {
 /// 用户显式清空过通用配置（_cleared）后，切换不应把片段重新塞回来。
 #[test]
 fn switch_claude_respects_explicitly_cleared_common_config() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let settings_path = get_claude_settings_path();
@@ -2664,8 +2637,7 @@ fn switch_claude_respects_explicitly_cleared_common_config() {
 
 #[test]
 fn provider_service_switch_missing_provider_returns_error() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");
@@ -2685,8 +2657,7 @@ fn provider_service_switch_missing_provider_returns_error() {
 
 #[test]
 fn provider_service_switch_codex_missing_auth_returns_error() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -2722,8 +2693,7 @@ fn provider_service_switch_codex_missing_auth_returns_error() {
 
 #[test]
 fn provider_service_delete_codex_removes_provider_and_files() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -2785,8 +2755,7 @@ fn provider_service_delete_codex_removes_provider_and_files() {
 
 #[test]
 fn provider_service_delete_claude_removes_provider_files() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -2845,8 +2814,7 @@ fn provider_service_delete_claude_removes_provider_files() {
 
 #[test]
 fn provider_service_delete_current_provider_returns_error() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let mut config = MultiAppConfig::default();
@@ -2894,8 +2862,7 @@ fn provider_service_delete_current_provider_returns_error() {
 
 #[test]
 fn recover_from_crash_without_backup_cleans_placeholder_instead_of_writing_it_back() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     // 接管态 Claude Live，且 DB 中无备份（模拟切换 app_config_dir 后新库首启的场景）
@@ -2981,8 +2948,7 @@ fn restore_claude_live_file(content: &serde_json::Value) {
 /// credentials into B's record.
 #[test]
 fn switch_claude_failed_live_write_keeps_pointers_and_does_not_poison_backfill() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let settings_a = json!({ "env": { "ANTHROPIC_API_KEY": "key-a" } });
@@ -3048,8 +3014,7 @@ fn switch_claude_failed_live_write_keeps_pointers_and_does_not_poison_backfill()
 /// live, the row is kept but must not become current.
 #[test]
 fn add_first_claude_provider_with_failing_live_write_is_not_current() {
-    let _guard = test_mutex().lock().expect("acquire test mutex");
-    reset_test_fs();
+    let _env = TestEnv::new();
     let _home = ensure_test_home();
 
     let state = create_test_state().expect("create test state");

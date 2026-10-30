@@ -365,4 +365,25 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/reset_circuit_breaker`, () => success(true)),
   http.post(`${TAURI_ENDPOINT}/get_circuit_breaker_stats`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/deeplink_frontend_ready`, () => success(null)),
+
+  // Benign defaults for commands that settings/provider components fire on
+  // mount. Without them those invokes reject and the components silently
+  // render their error branches (TEST-04/TEST-40).
+  http.post(`${TAURI_ENDPOINT}/get_installed_skills`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/list_profiles`, () =>
+    success({
+      profiles: [],
+      currentIds: { claude: null, claudeDesktop: null, codex: null },
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_common_config_snippet`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/auth_get_status`, async ({ request }) => {
+    const { authProvider } = await withJson<{ authProvider?: string }>(request);
+    return success({
+      provider: authProvider ?? "github_copilot",
+      authenticated: false,
+      default_account_id: null,
+      accounts: [],
+    });
+  }),
 ];
