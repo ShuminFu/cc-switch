@@ -51,9 +51,11 @@ use std::time::Duration;
 
 // DAO 方法通过 impl Database 提供，无需额外导出
 
-/// 当前 Schema 版本号
-/// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-pub(crate) const SCHEMA_VERSION: i32 = 16;
+/// 当前 Schema 版本号：由 schema.rs 的迁移注册表 `MIGRATIONS` 推导（最后一个迁移的版本）。
+/// 修改表结构时在注册表末尾追加迁移，不要手动修改这里。
+pub(crate) const SCHEMA_VERSION: i32 = schema::LATEST_SCHEMA_VERSION;
+/// 同步协议的数据库兼容版本（`services::sync_protocol::DB_COMPAT_VERSION`），同样由注册表推导。
+pub(crate) const SYNC_DB_COMPAT_VERSION: u32 = schema::SYNC_DB_COMPAT_VERSION;
 
 /// 主库连接的 busy_timeout：其它进程/连接（备份、外部工具）短暂持有写锁时等待而不是立即报错。
 pub(crate) const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);

@@ -1,6 +1,24 @@
 //! Schema 定义和迁移
 //!
 //! 负责数据库表结构的创建和版本迁移。
+//!
+//! ## 两条路径，一套迁移
+//!
+//! - **全新数据库**（无用户表且 `user_version = 0`）：[`Database::create_tables_on_conn`]
+//!   在一个 savepoint 内执行冻结的基线 DDL（[`BASELINE_SCHEMA_VERSION`] 时的完整 schema），
+//!   写入默认数据行，把基线及之前的迁移以 `baseline` 记入迁移台账，再执行基线之后
+//!   注册的迁移，最终 `user_version = SCHEMA_VERSION`。
+//! - **已有数据库**：表结构只通过 [`MIGRATIONS`] 注册表按版本前进
+//!   （[`Database::apply_schema_migrations_on_conn`]），每一步记录到
+//!   [`MIGRATION_LEDGER_TABLE`] 台账（版本、名称、校验和、应用版本、时间、来源）。
+//!   低于基线版本的旧库在迁移链之前执行一次冻结的兼容预处理
+//!   （`prepare_pre_baseline_database`，即 v17 之前每次启动都会执行的建表/补列逻辑），
+//!   升级到基线之后不再执行。
+//!
+//! 修改 schema 时：**不要**修改基线 DDL 或已发布的迁移，而是在 [`MIGRATIONS`] 末尾追加
+//! `migrate_v{N-1}_to_v{N}`。`SCHEMA_VERSION` 与同步的 `DB_COMPAT_VERSION` 都由注册表推导；
+//! 测试会校验注册表完整性、已发布迁移的校验和、基线 schema 校验和，以及
+//! 「全新库 == 各历史版本升级后的库」。
 
 use super::{lock_conn, Database, SCHEMA_VERSION};
 use crate::error::AppError;
@@ -14,395 +32,588 @@ struct LegacySkillMigrationRow {
     app_type: String,
 }
 
+// ─── Migration registry ──────────────────────────────────────
+
+/// 迁移台账表名。它描述的是「这个数据库文件」的迁移历史，因此不进入 SQL 导出/同步快照
+/// （导入时由迁移框架按 `user_version` 回填）。
+pub(crate) const MIGRATION_LEDGER_TABLE: &str = "schema_migrations";
+
+/// 冻结的基线 DDL 对应的 schema 版本，也是引入迁移台账的版本。
+/// 低于该版本的数据库在迁移链之前执行一次兼容预处理。
+pub(crate) const BASELINE_SCHEMA_VERSION: i32 = 17;
+
+/// 引入迁移台账时（schema v17）同步协议的数据库兼容版本（`db-v6`）。
+/// 之后每个 `breaks_sync: true` 的迁移使其加一，见 [`SYNC_DB_COMPAT_VERSION`]。
+const SYNC_DB_COMPAT_AT_BASELINE: u32 = 6;
+
+/// 一个已注册的 schema 迁移：把数据库从 `version - 1` 升级到 `version`。
+pub(crate) struct Migration {
+    /// 迁移完成后的 `user_version`。注册表必须从 1 开始连续递增（编译期校验）。
+    pub(crate) version: i32,
+    /// 稳定的英文名称，写入台账。
+    pub(crate) name: &'static str,
+    /// 迁移函数 `migrate_v{version-1}_to_v{version}` 源码（去掉注释和空白后）的 SHA-256。
+    /// 已发布的迁移不可修改；源码变化时测试会失败。
+    pub(crate) checksum: &'static str,
+    /// 该迁移是否破坏同步快照兼容性（旧客户端无法导入新快照，或反之）。
+    /// 为 `true` 时同步的 `DB_COMPAT_VERSION` 加一。基线及之前的迁移不参与推导
+    /// （其影响已包含在 [`SYNC_DB_COMPAT_AT_BASELINE`] 中）。
+    pub(crate) breaks_sync: bool,
+    pub(crate) up: fn(&Connection) -> Result<(), AppError>,
+}
+
+/// 所有 schema 迁移，按版本排序。新增迁移只能追加到末尾。
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "backfill_missing_columns",
+        checksum: "ec508829247b959ace6a9a8011208e440bb9eef51d890ce91a7d0c3739a61cac",
+        breaks_sync: false,
+        up: Database::migrate_v0_to_v1,
+    },
+    Migration {
+        version: 2,
+        name: "usage_stats_and_per_app_proxy_config",
+        checksum: "b4d97a3523eaaeec92ee01f65e84d049937e4d81d292bee79c663f4843b0d7bf",
+        breaks_sync: false,
+        up: Database::migrate_v1_to_v2,
+    },
+    Migration {
+        version: 3,
+        name: "unified_skills",
+        checksum: "175a543126fe5423f8e6002506e93bd90c731d8adfa1eb2e15a4e6aba475a5e5",
+        breaks_sync: false,
+        up: Database::migrate_v2_to_v3,
+    },
+    Migration {
+        version: 4,
+        name: "opencode_support",
+        checksum: "3b8be73a7712643d45792433f8c7053e25f6c3f0dbb95f3365a94347507f8477",
+        breaks_sync: false,
+        up: Database::migrate_v3_to_v4,
+    },
+    Migration {
+        version: 5,
+        name: "pricing_model_source",
+        checksum: "dff73d696934859f37b854ca9710a0b3c6f2f23183437aaf276ef79a3d3de197",
+        breaks_sync: false,
+        up: Database::migrate_v4_to_v5,
+    },
+    Migration {
+        version: 6,
+        name: "usage_daily_rollups_and_copilot_template",
+        checksum: "dc806a76c299155e87abb083c9626e61a560540951aba56107a313b8572fb464",
+        breaks_sync: false,
+        up: Database::migrate_v5_to_v6,
+    },
+    Migration {
+        version: 7,
+        name: "skill_update_detection",
+        checksum: "d2507422d60fe164e7dd481fe568ee7cf37140d5fe20bdd6ceefaff38bbe6fdd",
+        breaks_sync: false,
+        up: Database::migrate_v6_to_v7,
+    },
+    Migration {
+        version: 8,
+        name: "session_log_usage_and_cny_pricing_fix",
+        checksum: "63e8a2a060e29fde2a03fe954f68213b6edf67c09a4a2eef40c8f500aa0a4b82",
+        breaks_sync: false,
+        up: Database::migrate_v7_to_v8,
+    },
+    Migration {
+        version: 9,
+        name: "refresh_model_pricing",
+        checksum: "d21f2b6359faae213beed261d341282e350dc965e70417fdc840e040d2b02eba",
+        breaks_sync: false,
+        up: Database::migrate_v8_to_v9,
+    },
+    Migration {
+        version: 10,
+        name: "hermes_support",
+        checksum: "af3a5a125e83207fc70fd162ac3314f74ca70df0f37cbc487da0c4b977a3eb14",
+        breaks_sync: false,
+        up: Database::migrate_v9_to_v10,
+    },
+    Migration {
+        version: 11,
+        name: "rollup_request_model_dimension",
+        checksum: "5a9c758d21e14a54926524d65155e6db3053d25ab5a5cd3278a824a35b254e2e",
+        breaks_sync: false,
+        up: Database::migrate_v10_to_v11,
+    },
+    Migration {
+        version: 12,
+        name: "profiles",
+        checksum: "058132d5ecd4ed5934904c28e41517e10ee61bf9ae8e6c40b1911fa827f5583e",
+        breaks_sync: false,
+        up: Database::migrate_v11_to_v12,
+    },
+    Migration {
+        version: 13,
+        name: "input_token_semantics",
+        checksum: "0a2341bccdeb7fa467be73ec958be6b85ace524dc94a51f28c20c810871c91a1",
+        breaks_sync: false,
+        up: Database::migrate_v12_to_v13,
+    },
+    Migration {
+        version: 14,
+        name: "grokbuild_proxy_config",
+        checksum: "6f2a3c81e624e651bda720d381922477a1ec0d6986069300ed9d4e824bbe8056",
+        breaks_sync: false,
+        up: Database::migrate_v13_to_v14,
+    },
+    Migration {
+        version: 15,
+        name: "grokbuild_skills_and_mcp",
+        checksum: "0610c23277e016af33349588c108cef726aff42550799b4fac2c3a2b6cf3ed89",
+        breaks_sync: false,
+        up: Database::migrate_v14_to_v15,
+    },
+    Migration {
+        version: 16,
+        name: "request_log_dedup_flag_and_index_trim",
+        checksum: "b842694101b79b4896b1bf9b1c54202d4b21a39d1dec41276532b73381d78f05",
+        breaks_sync: false,
+        up: Database::migrate_v15_to_v16,
+    },
+    Migration {
+        version: 17,
+        name: "migration_ledger_and_startup_repairs",
+        checksum: "6a88c17bbd2b5bf87dc456ea9353670249acfb98dda5285e7fa256a01333632e",
+        breaks_sync: false,
+        up: Database::migrate_v16_to_v17,
+    },
+];
+
+/// 注册表中最新的 schema 版本（即 `SCHEMA_VERSION`）。
+pub(crate) const LATEST_SCHEMA_VERSION: i32 = MIGRATIONS[MIGRATIONS.len() - 1].version;
+
+/// 同步协议的数据库兼容版本，由注册表推导：基线值 + 基线之后 `breaks_sync` 的迁移数。
+pub(crate) const SYNC_DB_COMPAT_VERSION: u32 = {
+    let mut compat = SYNC_DB_COMPAT_AT_BASELINE;
+    let mut i = 0;
+    while i < MIGRATIONS.len() {
+        if MIGRATIONS[i].version > BASELINE_SCHEMA_VERSION && MIGRATIONS[i].breaks_sync {
+            compat += 1;
+        }
+        i += 1;
+    }
+    compat
+};
+
+// 编译期校验：版本从 1 开始连续递增，基线版本已注册。
+const _: () = {
+    let mut i = 0;
+    while i < MIGRATIONS.len() {
+        assert!(
+            MIGRATIONS[i].version == i as i32 + 1,
+            "MIGRATIONS must be ordered and contiguous starting at version 1"
+        );
+        i += 1;
+    }
+    assert!(
+        BASELINE_SCHEMA_VERSION >= 1 && BASELINE_SCHEMA_VERSION <= LATEST_SCHEMA_VERSION,
+        "BASELINE_SCHEMA_VERSION must be a registered migration"
+    );
+};
+
+/// 台账中一行的来源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LedgerSource {
+    /// 迁移在这个数据库上实际执行过。
+    Migrated,
+    /// 全新数据库直接以基线 schema 创建，基线及之前的迁移无需执行。
+    Baseline,
+    /// 该版本在台账出现之前（或数据库由 SQL 导入重建之前）就已应用，执行细节未知。
+    Backfilled,
+}
+
+impl LedgerSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            LedgerSource::Migrated => "migrated",
+            LedgerSource::Baseline => "baseline",
+            LedgerSource::Backfilled => "backfilled",
+        }
+    }
+}
+
+// ─── Frozen baseline schema (v17) ────────────────────────────
+
+/// 基线 schema（[`BASELINE_SCHEMA_VERSION`]）的建表语句。**冻结**：
+/// 旧库的兼容预处理也执行这些语句来补齐缺失的表，修改它们会改变历史升级路径，
+/// 测试中的基线校验和也会失败。新的 schema 变更请写成迁移（全新库也会执行基线之后的迁移）。
+const BASELINE_TABLE_SQL: &[&str] = &[
+    // 1. Providers 表（cost_multiplier..provider_type 由 v1→v2 引入，全新库直接包含）
+    "CREATE TABLE IF NOT EXISTS providers (
+        id TEXT NOT NULL,
+        app_type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        settings_config TEXT NOT NULL,
+        website_url TEXT,
+        category TEXT,
+        created_at INTEGER,
+        sort_index INTEGER,
+        notes TEXT,
+        icon TEXT,
+        icon_color TEXT,
+        meta TEXT NOT NULL DEFAULT '{}',
+        is_current BOOLEAN NOT NULL DEFAULT 0,
+        in_failover_queue BOOLEAN NOT NULL DEFAULT 0,
+        cost_multiplier TEXT NOT NULL DEFAULT '1.0',
+        limit_daily_usd TEXT,
+        limit_monthly_usd TEXT,
+        provider_type TEXT,
+        PRIMARY KEY (id, app_type)
+    )",
+    // 2. Provider Endpoints 表
+    "CREATE TABLE IF NOT EXISTS provider_endpoints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_id TEXT NOT NULL,
+        app_type TEXT NOT NULL,
+        url TEXT NOT NULL,
+        added_at INTEGER,
+        FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
+    )",
+    // 3. MCP Servers 表
+    "CREATE TABLE IF NOT EXISTS mcp_servers (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, server_config TEXT NOT NULL,
+        description TEXT, homepage TEXT, docs TEXT, tags TEXT NOT NULL DEFAULT '[]',
+        enabled_claude BOOLEAN NOT NULL DEFAULT 0, enabled_codex BOOLEAN NOT NULL DEFAULT 0,
+        enabled_gemini BOOLEAN NOT NULL DEFAULT 0, enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
+        enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
+        enabled_hermes BOOLEAN NOT NULL DEFAULT 0
+    )",
+    // 4. Prompts 表
+    "CREATE TABLE IF NOT EXISTS prompts (
+        id TEXT NOT NULL, app_type TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL,
+        description TEXT, enabled BOOLEAN NOT NULL DEFAULT 1, created_at INTEGER, updated_at INTEGER,
+        PRIMARY KEY (id, app_type)
+    )",
+    // 5. Skills 表（v3.10.0+ 统一结构）
+    "CREATE TABLE IF NOT EXISTS skills (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        directory TEXT NOT NULL,
+        repo_owner TEXT,
+        repo_name TEXT,
+        repo_branch TEXT DEFAULT 'main',
+        readme_url TEXT,
+        enabled_claude BOOLEAN NOT NULL DEFAULT 0,
+        enabled_codex BOOLEAN NOT NULL DEFAULT 0,
+        enabled_gemini BOOLEAN NOT NULL DEFAULT 0,
+        enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
+        enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
+        enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
+        installed_at INTEGER NOT NULL DEFAULT 0,
+        content_hash TEXT,
+        updated_at INTEGER NOT NULL DEFAULT 0
+    )",
+    // 6. Skill Repos 表
+    "CREATE TABLE IF NOT EXISTS skill_repos (
+        owner TEXT NOT NULL, name TEXT NOT NULL, branch TEXT NOT NULL DEFAULT 'main',
+        enabled BOOLEAN NOT NULL DEFAULT 1, PRIMARY KEY (owner, name)
+    )",
+    // 7. Settings 表
+    "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)",
+    // 8. Proxy Config 表（每应用一行，app_type 主键）
+    "CREATE TABLE IF NOT EXISTS proxy_config (
+        app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
+        proxy_enabled INTEGER NOT NULL DEFAULT 0, listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
+        listen_port INTEGER NOT NULL DEFAULT 15721, enable_logging INTEGER NOT NULL DEFAULT 1,
+        enabled INTEGER NOT NULL DEFAULT 0, auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
+        max_retries INTEGER NOT NULL DEFAULT 3, streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60,
+        streaming_idle_timeout INTEGER NOT NULL DEFAULT 120, non_streaming_timeout INTEGER NOT NULL DEFAULT 600,
+        circuit_failure_threshold INTEGER NOT NULL DEFAULT 4, circuit_success_threshold INTEGER NOT NULL DEFAULT 2,
+        circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60, circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
+        circuit_min_requests INTEGER NOT NULL DEFAULT 10,
+        default_cost_multiplier TEXT NOT NULL DEFAULT '1',
+        pricing_model_source TEXT NOT NULL DEFAULT 'response',
+        live_takeover_active INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )",
+    // 9. Provider Health 表
+    "CREATE TABLE IF NOT EXISTS provider_health (
+        provider_id TEXT NOT NULL, app_type TEXT NOT NULL, is_healthy INTEGER NOT NULL DEFAULT 1,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0, last_success_at TEXT, last_failure_at TEXT,
+        last_error TEXT, updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider_id, app_type),
+        FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
+    )",
+    // 10. Proxy Request Logs 表
+    // pricing_model = 写入时实际用于计价的模型名（pricing_model_source 解析结果），
+    // 回填按它重算；NULL 表示 v11 之前的历史行，'' 表示未计价的错误行。
+    "CREATE TABLE IF NOT EXISTS proxy_request_logs (
+        request_id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, app_type TEXT NOT NULL, model TEXT NOT NULL,
+        request_model TEXT,
+        pricing_model TEXT,
+        input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+        input_token_semantics INTEGER NOT NULL DEFAULT 0,
+        input_cost_usd TEXT NOT NULL DEFAULT '0', output_cost_usd TEXT NOT NULL DEFAULT '0',
+        cache_read_cost_usd TEXT NOT NULL DEFAULT '0', cache_creation_cost_usd TEXT NOT NULL DEFAULT '0',
+        total_cost_usd TEXT NOT NULL DEFAULT '0', latency_ms INTEGER NOT NULL, first_token_ms INTEGER,
+        duration_ms INTEGER, status_code INTEGER NOT NULL, error_message TEXT, session_id TEXT,
+        provider_type TEXT, is_streaming INTEGER NOT NULL DEFAULT 0,
+        cost_multiplier TEXT NOT NULL DEFAULT '1.0', created_at INTEGER NOT NULL,
+        data_source TEXT NOT NULL DEFAULT 'proxy',
+        dedup_hidden INTEGER NOT NULL DEFAULT 0
+    )",
+    // 11. Model Pricing 表
+    "CREATE TABLE IF NOT EXISTS model_pricing (
+        model_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
+        input_cost_per_million TEXT NOT NULL, output_cost_per_million TEXT NOT NULL,
+        cache_read_cost_per_million TEXT NOT NULL DEFAULT '0',
+        cache_creation_cost_per_million TEXT NOT NULL DEFAULT '0'
+    )",
+    // 12. Stream Check Logs 表
+    "CREATE TABLE IF NOT EXISTS stream_check_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id TEXT NOT NULL, provider_name TEXT NOT NULL,
+        app_type TEXT NOT NULL, status TEXT NOT NULL, success INTEGER NOT NULL, message TEXT NOT NULL,
+        response_time_ms INTEGER, http_status INTEGER, model_used TEXT,
+        retry_count INTEGER DEFAULT 0, tested_at INTEGER NOT NULL
+    )",
+    // 注意：circuit_breaker_config 已合并到 proxy_config 表中
+    // 13. Proxy Live Backup 表 (Live 配置备份)
+    "CREATE TABLE IF NOT EXISTS proxy_live_backup (
+        app_type TEXT PRIMARY KEY, original_config TEXT NOT NULL, backed_up_at TEXT NOT NULL
+    )",
+    // 14. Usage Daily Rollups 表 (日聚合统计)
+    // request_model 保留路由接管的「客户端别名 → 真实模型」映射维度，
+    // pricing_model 保留写入时的计价基准（request 计价模式下与 model 分叉），
+    // 否则明细被 prune 后接管计费不可审计；历史行迁移时填 ''（未知）。
+    "CREATE TABLE IF NOT EXISTS usage_daily_rollups (
+        date TEXT NOT NULL,
+        app_type TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        request_model TEXT NOT NULL DEFAULT '',
+        pricing_model TEXT NOT NULL DEFAULT '',
+        request_count INTEGER NOT NULL DEFAULT 0,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+        input_token_semantics INTEGER NOT NULL DEFAULT 0,
+        total_cost_usd TEXT NOT NULL DEFAULT '0',
+        avg_latency_ms INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (date, app_type, provider_id, model, request_model, pricing_model)
+    )",
+    // 15. Session Log Sync 表 (会话日志同步状态)
+    "CREATE TABLE IF NOT EXISTS session_log_sync (
+        file_path TEXT PRIMARY KEY,
+        last_modified INTEGER NOT NULL,
+        last_line_offset INTEGER NOT NULL DEFAULT 0,
+        last_synced_at INTEGER NOT NULL
+    )",
+    // 16. Profiles 表（全应用共享的项目实体，payload 按 app 分槽快照
+    //     供应商/MCP/Skills/Prompt；各应用分组的 current 标记在 settings 表）
+    "CREATE TABLE IF NOT EXISTS profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        sort_order INTEGER,
+        created_at INTEGER,
+        updated_at INTEGER
+    )",
+];
+
+/// 每个应用的默认代理配置行：(app_type, max_retries, streaming_first_byte_timeout,
+/// streaming_idle_timeout, non_streaming_timeout, circuit_failure_threshold,
+/// circuit_success_threshold, circuit_timeout_seconds, circuit_error_rate_threshold,
+/// circuit_min_requests)
+type ProxyConfigDefaults = (&'static str, i64, i64, i64, i64, i64, i64, i64, f64, i64);
+const DEFAULT_PROXY_CONFIG_ROWS: &[ProxyConfigDefaults] = &[
+    ("claude", 6, 90, 180, 600, 8, 3, 90, 0.7, 15),
+    ("codex", 3, 60, 120, 600, 4, 2, 60, 0.6, 10),
+    ("gemini", 5, 60, 120, 600, 4, 2, 60, 0.6, 10),
+    ("grokbuild", 3, 60, 120, 600, 4, 2, 60, 0.6, 10),
+];
+
+/// v17 之前每次启动都会尝试补到 proxy_config 上的列（兼容 v3.9.0-2 等早期结构）。
+const LEGACY_PROXY_CONFIG_COLUMNS: &[(&str, &str)] = &[
+    ("live_takeover_active", "INTEGER NOT NULL DEFAULT 0"),
+    ("proxy_enabled", "INTEGER NOT NULL DEFAULT 0"),
+    ("listen_address", "TEXT NOT NULL DEFAULT '127.0.0.1'"),
+    ("listen_port", "INTEGER NOT NULL DEFAULT 15721"),
+    ("enable_logging", "INTEGER NOT NULL DEFAULT 1"),
+    (
+        "streaming_first_byte_timeout",
+        "INTEGER NOT NULL DEFAULT 60",
+    ),
+    ("streaming_idle_timeout", "INTEGER NOT NULL DEFAULT 120"),
+    ("non_streaming_timeout", "INTEGER NOT NULL DEFAULT 600"),
+];
+
+fn db_err(context: &'static str) -> impl Fn(rusqlite::Error) -> AppError {
+    move |e| AppError::Database(format!("{context}: {e}"))
+}
+
 impl Database {
-    /// 创建所有数据库表
+    /// 创建所有数据库表（见 [`Self::create_tables_on_conn`]）
     pub(crate) fn create_tables(&self) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         Self::create_tables_on_conn(&conn)
     }
 
-    /// 在指定连接上创建表（供迁移和测试使用）
+    /// 为全新数据库创建当前 schema；对已有数据库不做任何表结构变更。
+    ///
+    /// - 全新数据库（无用户表且 `user_version = 0`）：在一个 savepoint 内创建完整 schema、
+    ///   写入默认行和迁移台账，并把 `user_version` 设为 `SCHEMA_VERSION`。
+    /// - 已有数据库：表结构只通过 [`Self::apply_schema_migrations_on_conn`] 前进。这里只重建
+    ///   应用自有的派生对象（`trg_request_logs_dedup_*` 触发器）：SQL 导出不含触发器，
+    ///   SQL 导入/备份恢复会先删除所有触发器，再调用本函数恢复应用自有的触发器。
     pub(crate) fn create_tables_on_conn(conn: &Connection) -> Result<(), AppError> {
-        // 1. Providers 表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS providers (
-                id TEXT NOT NULL,
-                app_type TEXT NOT NULL,
-                name TEXT NOT NULL,
-                settings_config TEXT NOT NULL,
-                website_url TEXT,
-                category TEXT,
-                created_at INTEGER,
-                sort_index INTEGER,
-                notes TEXT,
-                icon TEXT,
-                icon_color TEXT,
-                meta TEXT NOT NULL DEFAULT '{}',
-                is_current BOOLEAN NOT NULL DEFAULT 0,
-                in_failover_queue BOOLEAN NOT NULL DEFAULT 0,
-                PRIMARY KEY (id, app_type)
-            )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 2. Provider Endpoints 表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS provider_endpoints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider_id TEXT NOT NULL,
-                app_type TEXT NOT NULL,
-                url TEXT NOT NULL,
-                added_at INTEGER,
-                FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
-            )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 3. MCP Servers 表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS mcp_servers (
-            id TEXT PRIMARY KEY, name TEXT NOT NULL, server_config TEXT NOT NULL,
-            description TEXT, homepage TEXT, docs TEXT, tags TEXT NOT NULL DEFAULT '[]',
-            enabled_claude BOOLEAN NOT NULL DEFAULT 0, enabled_codex BOOLEAN NOT NULL DEFAULT 0,
-            enabled_gemini BOOLEAN NOT NULL DEFAULT 0, enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
-            enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
-            enabled_hermes BOOLEAN NOT NULL DEFAULT 0
-        )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 4. Prompts 表
-        conn.execute("CREATE TABLE IF NOT EXISTS prompts (
-            id TEXT NOT NULL, app_type TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL,
-            description TEXT, enabled BOOLEAN NOT NULL DEFAULT 1, created_at INTEGER, updated_at INTEGER,
-            PRIMARY KEY (id, app_type)
-        )", []).map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 5. Skills 表（v3.10.0+ 统一结构）
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS skills (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            description TEXT,
-            directory TEXT NOT NULL,
-            repo_owner TEXT,
-            repo_name TEXT,
-            repo_branch TEXT DEFAULT 'main',
-            readme_url TEXT,
-            enabled_claude BOOLEAN NOT NULL DEFAULT 0,
-            enabled_codex BOOLEAN NOT NULL DEFAULT 0,
-            enabled_gemini BOOLEAN NOT NULL DEFAULT 0,
-            enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
-            enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
-            enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
-            installed_at INTEGER NOT NULL DEFAULT 0,
-            content_hash TEXT,
-            updated_at INTEGER NOT NULL DEFAULT 0
-        )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 6. Skill Repos 表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS skill_repos (
-            owner TEXT NOT NULL, name TEXT NOT NULL, branch TEXT NOT NULL DEFAULT 'main',
-            enabled BOOLEAN NOT NULL DEFAULT 1, PRIMARY KEY (owner, name)
-        )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 7. Settings 表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 8. Proxy Config 表（三行结构，app_type 主键）
-        conn.execute("CREATE TABLE IF NOT EXISTS proxy_config (
-            app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
-            proxy_enabled INTEGER NOT NULL DEFAULT 0, listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
-            listen_port INTEGER NOT NULL DEFAULT 15721, enable_logging INTEGER NOT NULL DEFAULT 1,
-            enabled INTEGER NOT NULL DEFAULT 0, auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
-            max_retries INTEGER NOT NULL DEFAULT 3, streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60,
-            streaming_idle_timeout INTEGER NOT NULL DEFAULT 120, non_streaming_timeout INTEGER NOT NULL DEFAULT 600,
-            circuit_failure_threshold INTEGER NOT NULL DEFAULT 4, circuit_success_threshold INTEGER NOT NULL DEFAULT 2,
-            circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60, circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
-            circuit_min_requests INTEGER NOT NULL DEFAULT 10,
-            default_cost_multiplier TEXT NOT NULL DEFAULT '1',
-            pricing_model_source TEXT NOT NULL DEFAULT 'response',
-            created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )", []).map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 初始化三行数据（每应用不同默认值）
-        //
-        // 兼容旧数据库：
-        // - 老版本 proxy_config 是单例表（没有 app_type 列），此时不能执行三行 seed insert；
-        // - 旧表会在 apply_schema_migrations() 中迁移为三行结构后再插入。
-        if Self::has_column(conn, "proxy_config", "app_type")? {
-            conn.execute(
-                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests)
-                VALUES ('claude', 6, 90, 180, 600, 8, 3, 90, 0.7, 15)",
-                [],
-            )
-            .map_err(|e| AppError::Database(e.to_string()))?;
-            conn.execute(
-                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests)
-                VALUES ('codex', 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
-                [],
-            )
-            .map_err(|e| AppError::Database(e.to_string()))?;
-            conn.execute(
-                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests)
-                VALUES ('gemini', 5, 60, 120, 600, 4, 2, 60, 0.6, 10)",
-                [],
-            )
-            .map_err(|e| AppError::Database(e.to_string()))?;
-            conn.execute(
-                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests)
-                VALUES ('grokbuild', 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
-                [],
-            )
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        if Self::is_brand_new_database(conn)? {
+            return Self::in_savepoint(conn, "create_schema", || Self::create_fresh_schema(conn));
         }
+        Self::create_request_logs_dedup_triggers_if_supported(conn)?;
+        Ok(())
+    }
 
-        // 9. Provider Health 表
-        conn.execute("CREATE TABLE IF NOT EXISTS provider_health (
-            provider_id TEXT NOT NULL, app_type TEXT NOT NULL, is_healthy INTEGER NOT NULL DEFAULT 1,
-            consecutive_failures INTEGER NOT NULL DEFAULT 0, last_success_at TEXT, last_failure_at TEXT,
-            last_error TEXT, updated_at TEXT NOT NULL,
-            PRIMARY KEY (provider_id, app_type),
-            FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
-        )", []).map_err(|e| AppError::Database(e.to_string()))?;
+    fn is_brand_new_database(conn: &Connection) -> Result<bool, AppError> {
+        Ok(Self::get_user_version(conn)? == 0 && !Self::has_user_tables(conn)?)
+    }
 
-        // 10. Proxy Request Logs 表
-        // pricing_model = 写入时实际用于计价的模型名（pricing_model_source 解析结果），
-        // 回填按它重算；NULL 表示 v11 之前的历史行，'' 表示未计价的错误行。
-        conn.execute("CREATE TABLE IF NOT EXISTS proxy_request_logs (
-            request_id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, app_type TEXT NOT NULL, model TEXT NOT NULL,
-            request_model TEXT,
-            pricing_model TEXT,
-            input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
-            cache_read_tokens INTEGER NOT NULL DEFAULT 0, cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
-            input_token_semantics INTEGER NOT NULL DEFAULT 0,
-            input_cost_usd TEXT NOT NULL DEFAULT '0', output_cost_usd TEXT NOT NULL DEFAULT '0',
-            cache_read_cost_usd TEXT NOT NULL DEFAULT '0', cache_creation_cost_usd TEXT NOT NULL DEFAULT '0',
-            total_cost_usd TEXT NOT NULL DEFAULT '0', latency_ms INTEGER NOT NULL, first_token_ms INTEGER,
-            duration_ms INTEGER, status_code INTEGER NOT NULL, error_message TEXT, session_id TEXT,
-            provider_type TEXT, is_streaming INTEGER NOT NULL DEFAULT 0,
-            cost_multiplier TEXT NOT NULL DEFAULT '1.0', created_at INTEGER NOT NULL,
-            data_source TEXT NOT NULL DEFAULT 'proxy',
-            dedup_hidden INTEGER NOT NULL DEFAULT 0
-        )", []).map_err(|e| AppError::Database(e.to_string()))?;
+    fn create_fresh_schema(conn: &Connection) -> Result<(), AppError> {
+        Self::create_baseline_schema(conn)?;
+        Self::seed_default_proxy_config_rows(conn)?;
+        Self::ensure_migration_ledger(conn)?;
+        for migration in MIGRATIONS
+            .iter()
+            .filter(|m| m.version <= BASELINE_SCHEMA_VERSION)
+        {
+            Self::record_migration(conn, migration, LedgerSource::Baseline)?;
+        }
+        Self::set_user_version(conn, BASELINE_SCHEMA_VERSION)?;
+        Self::run_pending_migrations(conn, BASELINE_SCHEMA_VERSION)
+    }
+
+    /// 执行冻结的基线 DDL（全部 `IF NOT EXISTS`）。旧表缺少所需列时跳过对应的索引/触发器，
+    /// 由后续迁移补齐列后再创建。
+    fn create_baseline_schema(conn: &Connection) -> Result<(), AppError> {
+        for sql in BASELINE_TABLE_SQL {
+            conn.execute(sql, []).map_err(db_err("创建表失败"))?;
+        }
 
         // (provider_id, app_type, created_at) 取代旧的 (provider_id, app_type) 索引，
         // 让按 provider 的时间范围查询（额度检查）可以直接界定扫描范围。
         // 旧索引与无人使用的 idx_request_logs_model 在 v15→v16 迁移中删除。
         Self::create_request_logs_provider_index_if_supported(conn)?;
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON proxy_request_logs(created_at)", [])
-            .map_err(|e| AppError::Database(e.to_string()))?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_request_logs_session ON proxy_request_logs(session_id)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_request_logs_status ON proxy_request_logs(status_code)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
+        for (index, column) in [
+            ("idx_request_logs_created_at", "created_at"),
+            ("idx_request_logs_session", "session_id"),
+            ("idx_request_logs_status", "status_code"),
+        ] {
+            if Self::has_column(conn, "proxy_request_logs", column)? {
+                conn.execute(
+                    &format!("CREATE INDEX IF NOT EXISTS {index} ON proxy_request_logs({column})"),
+                    [],
+                )
+                .map_err(|e| AppError::Database(format!("创建索引 {index} 失败: {e}")))?;
+            }
+        }
         Self::create_request_logs_usage_indexes_if_supported(conn)?;
         Self::create_request_logs_dedup_triggers_if_supported(conn)?;
 
-        // 11. Model Pricing 表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS model_pricing (
-            model_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
-            input_cost_per_million TEXT NOT NULL, output_cost_per_million TEXT NOT NULL,
-            cache_read_cost_per_million TEXT NOT NULL DEFAULT '0',
-            cache_creation_cost_per_million TEXT NOT NULL DEFAULT '0'
-        )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 12. Stream Check Logs 表
-        conn.execute("CREATE TABLE IF NOT EXISTS stream_check_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, provider_id TEXT NOT NULL, provider_name TEXT NOT NULL,
-            app_type TEXT NOT NULL, status TEXT NOT NULL, success INTEGER NOT NULL, message TEXT NOT NULL,
-            response_time_ms INTEGER, http_status INTEGER, model_used TEXT,
-            retry_count INTEGER DEFAULT 0, tested_at INTEGER NOT NULL
-        )", []).map_err(|e| AppError::Database(e.to_string()))?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_stream_check_logs_provider
-             ON stream_check_logs(app_type, provider_id, tested_at DESC)",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 注意：circuit_breaker_config 已合并到 proxy_config 表中
-
-        // 16. Proxy Live Backup 表 (Live 配置备份)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS proxy_live_backup (
-            app_type TEXT PRIMARY KEY, original_config TEXT NOT NULL, backed_up_at TEXT NOT NULL
-        )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 17. Usage Daily Rollups 表 (日聚合统计)
-        // request_model 保留路由接管的「客户端别名 → 真实模型」映射维度，
-        // pricing_model 保留写入时的计价基准（request 计价模式下与 model 分叉），
-        // 否则明细被 prune 后接管计费不可审计；历史行迁移时填 ''（未知）。
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS usage_daily_rollups (
-                date TEXT NOT NULL,
-                app_type TEXT NOT NULL,
-                provider_id TEXT NOT NULL,
-                model TEXT NOT NULL,
-                request_model TEXT NOT NULL DEFAULT '',
-                pricing_model TEXT NOT NULL DEFAULT '',
-                request_count INTEGER NOT NULL DEFAULT 0,
-                success_count INTEGER NOT NULL DEFAULT 0,
-                input_tokens INTEGER NOT NULL DEFAULT 0,
-                output_tokens INTEGER NOT NULL DEFAULT 0,
-                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
-                input_token_semantics INTEGER NOT NULL DEFAULT 0,
-                total_cost_usd TEXT NOT NULL DEFAULT '0',
-                avg_latency_ms INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (date, app_type, provider_id, model, request_model, pricing_model)
-            )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 18. Session Log Sync 表 (会话日志同步状态)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS session_log_sync (
-                file_path TEXT PRIMARY KEY,
-                last_modified INTEGER NOT NULL,
-                last_line_offset INTEGER NOT NULL DEFAULT 0,
-                last_synced_at INTEGER NOT NULL
-            )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 19. Profiles 表（全应用共享的项目实体，payload 按 app 分槽快照
-        //     供应商/MCP/Skills/Prompt；各应用分组的 current 标记在 settings 表）
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS profiles (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                sort_order INTEGER,
-                created_at INTEGER,
-                updated_at INTEGER
-            )",
-            [],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        // 修复跑过未发布开发版的库：current 标记曾是全局 key，现按应用分组
-        // （随 v12 定稿为 current_profile_id_<scope>，不单独 bump 版本）
-        if conn
-            .execute(
-                "INSERT OR REPLACE INTO settings (key, value)
-                 SELECT 'current_profile_id_claude', value FROM settings
-                 WHERE key = 'current_profile_id'",
+        if Self::has_columns(
+            conn,
+            "stream_check_logs",
+            &["app_type", "provider_id", "tested_at"],
+        )? {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stream_check_logs_provider
+                 ON stream_check_logs(app_type, provider_id, tested_at DESC)",
                 [],
             )
-            .is_ok()
-        {
-            let _ = conn.execute("DELETE FROM settings WHERE key = 'current_profile_id'", []);
+            .map_err(db_err("创建 stream_check_logs 索引失败"))?;
         }
 
-        // 尝试添加 live_takeover_active 列到 proxy_config 表
-        let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN live_takeover_active INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
+        Self::create_providers_failover_index_if_supported(conn)
+    }
 
-        // 尝试添加基础配置列到 proxy_config 表（兼容 v3.9.0-2 升级）
-        let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN proxy_enabled INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN listen_address TEXT NOT NULL DEFAULT '127.0.0.1'",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN listen_port INTEGER NOT NULL DEFAULT 15721",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN enable_logging INTEGER NOT NULL DEFAULT 1",
-            [],
-        );
-
-        // 尝试添加超时配置列到 proxy_config 表
-        let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN streaming_idle_timeout INTEGER NOT NULL DEFAULT 120",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN non_streaming_timeout INTEGER NOT NULL DEFAULT 600",
-            [],
-        );
-
-        // 兼容：若旧版 proxy_config 仍为单例结构（无 app_type），则在启动时直接转换为三行结构
-        // 说明：user_version=2 时不会再触发 v1->v2 迁移，但新代码查询依赖 app_type 列。
-        if Self::table_exists(conn, "proxy_config")?
-            && !Self::has_column(conn, "proxy_config", "app_type")?
-        {
-            Self::migrate_proxy_config_to_per_app(conn)?;
-        }
-
-        // 确保 in_failover_queue 列存在（对于已存在的 v2 数据库）
-        Self::add_column_if_missing(
+    /// 为故障转移队列创建索引（基于 providers 表）；旧表缺列时跳过。
+    fn create_providers_failover_index_if_supported(conn: &Connection) -> Result<(), AppError> {
+        if Self::has_columns(
             conn,
             "providers",
-            "in_failover_queue",
-            "BOOLEAN NOT NULL DEFAULT 0",
-        )?;
-
-        // 删除旧的 failover_queue 表（如果存在）
-        let _ = conn.execute("DROP INDEX IF EXISTS idx_failover_queue_order", []);
-        let _ = conn.execute("DROP TABLE IF EXISTS failover_queue", []);
-
-        // 为故障转移队列创建索引（基于 providers 表）
-        let _ = conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_providers_failover
-             ON providers(app_type, in_failover_queue, sort_index)",
-            [],
-        );
-
+            &["app_type", "in_failover_queue", "sort_index"],
+        )? {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_providers_failover
+                 ON providers(app_type, in_failover_queue, sort_index)",
+                [],
+            )
+            .map_err(db_err("创建 failover 索引失败"))?;
+        }
         Ok(())
+    }
+
+    /// 补齐每个应用的默认代理配置行（`INSERT OR IGNORE`，不覆盖已有行）。
+    /// 旧版单例结构（无 app_type 列）由迁移转换后再补。
+    fn seed_default_proxy_config_rows(conn: &Connection) -> Result<(), AppError> {
+        if !Self::has_column(conn, "proxy_config", "app_type")? {
+            return Ok(());
+        }
+        for (
+            app,
+            retries,
+            first_byte,
+            idle,
+            non_streaming,
+            cb_fail,
+            cb_ok,
+            cb_timeout,
+            cb_rate,
+            cb_min,
+        ) in DEFAULT_PROXY_CONFIG_ROWS
+        {
+            conn.execute(
+                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
+                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
+                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
+                circuit_error_rate_threshold, circuit_min_requests)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    app,
+                    retries,
+                    first_byte,
+                    idle,
+                    non_streaming,
+                    cb_fail,
+                    cb_ok,
+                    cb_timeout,
+                    cb_rate,
+                    cb_min
+                ],
+            )
+            .map_err(|e| AppError::Database(format!("初始化 {app} 代理配置失败: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// 低于 [`BASELINE_SCHEMA_VERSION`] 的数据库在迁移链之前执行一次的兼容预处理。
+    ///
+    /// v17 之前，`create_tables_on_conn` 在每次启动、导入和恢复时都会执行这段逻辑，
+    /// 历史迁移依赖它先补齐缺失的表（以当时的完整结构）和 proxy_config 的早期列。
+    /// 这里保持相同的效果（只是不再吞掉 DDL 错误、ALTER 先检查列），使任意历史版本的
+    /// 数据库升级结果不变；其余启动修复（默认行、旧 failover_queue 等）在 v17 迁移中执行。
+    /// 基线版本及之后的数据库不再执行本函数。
+    fn prepare_pre_baseline_database(conn: &Connection) -> Result<(), AppError> {
+        Self::create_baseline_schema(conn)?;
+
+        // 补齐 proxy_config 的早期列（兼容 v3.9.0-2 升级）
+        if Self::table_exists(conn, "proxy_config")? {
+            for (column, definition) in LEGACY_PROXY_CONFIG_COLUMNS {
+                Self::add_column_if_missing(conn, "proxy_config", column, definition)?;
+            }
+        }
+
+        // 兼容：若旧版 proxy_config 仍为单例结构（无 app_type），先转换为每应用一行。
+        // 说明：测试版 user_version=2 的库不会再触发 v1->v2 迁移，但后续迁移依赖 app_type 列。
+        Self::migrate_proxy_config_to_per_app(conn)
     }
 
     /// 应用 Schema 迁移
@@ -411,131 +622,180 @@ impl Database {
         Self::apply_schema_migrations_on_conn(&conn)
     }
 
-    /// 在指定连接上应用 Schema 迁移
+    /// 在指定连接上应用 Schema 迁移：把数据库从当前 `user_version` 按注册表前进到
+    /// `SCHEMA_VERSION`。整个过程在一个 savepoint 内，任何一步失败都会完整回滚。
     pub(crate) fn apply_schema_migrations_on_conn(conn: &Connection) -> Result<(), AppError> {
-        conn.execute("SAVEPOINT schema_migration;", [])
-            .map_err(|e| AppError::Database(format!("开启迁移 savepoint 失败: {e}")))?;
+        let version = Self::get_user_version(conn)?;
 
-        let mut version = Self::get_user_version(conn)?;
-
+        // 在执行任何 DDL 之前拒绝更新版本的数据库
         if version > SCHEMA_VERSION {
-            conn.execute("ROLLBACK TO schema_migration;", []).ok();
-            conn.execute("RELEASE schema_migration;", []).ok();
             return Err(AppError::Database(format!(
                 "数据库版本过新（{version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再尝试。"
             )));
         }
+        if version < 0 {
+            return Err(AppError::Database(format!(
+                "未知的数据库版本 {version}，无法迁移到 {SCHEMA_VERSION}"
+            )));
+        }
 
-        let result = (|| {
-            while version < SCHEMA_VERSION {
-                match version {
-                    0 => {
-                        log::info!("检测到 user_version=0，迁移到 1（补齐缺失列并设置版本）");
-                        Self::migrate_v0_to_v1(conn)?;
-                        Self::set_user_version(conn, 1)?;
-                    }
-                    1 => {
-                        log::info!(
-                            "迁移数据库从 v1 到 v2（添加使用统计表和完整字段，重构 skills 表）"
-                        );
-                        Self::migrate_v1_to_v2(conn)?;
-                        Self::set_user_version(conn, 2)?;
-                    }
-                    2 => {
-                        log::info!("迁移数据库从 v2 到 v3（Skills 统一管理架构）");
-                        Self::migrate_v2_to_v3(conn)?;
-                        Self::set_user_version(conn, 3)?;
-                    }
-                    3 => {
-                        log::info!("迁移数据库从 v3 到 v4（OpenCode 支持）");
-                        Self::migrate_v3_to_v4(conn)?;
-                        Self::set_user_version(conn, 4)?;
-                    }
-                    4 => {
-                        log::info!("迁移数据库从 v4 到 v5（计费模式支持）");
-                        Self::migrate_v4_to_v5(conn)?;
-                        Self::set_user_version(conn, 5)?;
-                    }
-                    5 => {
-                        log::info!("迁移数据库从 v5 到 v6（使用量聚合表 + Copilot 模板类型统一）");
-                        Self::migrate_v5_to_v6(conn)?;
-                        Self::set_user_version(conn, 6)?;
-                    }
-                    6 => {
-                        log::info!("迁移数据库从 v6 到 v7（Skills 更新检测支持）");
-                        Self::migrate_v6_to_v7(conn)?;
-                        Self::set_user_version(conn, 7)?;
-                    }
-                    7 => {
-                        log::info!("迁移数据库从 v7 到 v8（会话日志使用追踪 + 修正模型定价）");
-                        Self::migrate_v7_to_v8(conn)?;
-                        Self::set_user_version(conn, 8)?;
-                    }
-                    8 => {
-                        log::info!("迁移数据库从 v8 到 v9（全面补充模型定价）");
-                        Self::migrate_v8_to_v9(conn)?;
-                        Self::set_user_version(conn, 9)?;
-                    }
-                    9 => {
-                        log::info!("迁移数据库从 v9 到 v10（添加 Hermes Agent 支持）");
-                        Self::migrate_v9_to_v10(conn)?;
-                        Self::set_user_version(conn, 10)?;
-                    }
-                    10 => {
-                        log::info!("迁移数据库从 v10 到 v11（usage_daily_rollups 保留 request_model 维度）");
-                        Self::migrate_v10_to_v11(conn)?;
-                        Self::set_user_version(conn, 11)?;
-                    }
-                    11 => {
-                        log::info!("迁移数据库从 v11 到 v12（添加项目 Profiles 表）");
-                        Self::migrate_v11_to_v12(conn)?;
-                        Self::set_user_version(conn, 12)?;
-                    }
-                    12 => {
-                        log::info!("迁移数据库从 v12 到 v13（记录输入 token 缓存语义）");
-                        Self::migrate_v12_to_v13(conn)?;
-                        Self::set_user_version(conn, 13)?;
-                    }
-                    13 => {
-                        log::info!("迁移数据库从 v13 到 v14（添加 Grok Build 代理配置）");
-                        Self::migrate_v13_to_v14(conn)?;
-                        Self::set_user_version(conn, 14)?;
-                    }
-                    14 => {
-                        log::info!("迁移数据库从 v14 到 v15（Skills/MCP 添加 Grok Build 支持）");
-                        Self::migrate_v14_to_v15(conn)?;
-                        Self::set_user_version(conn, 15)?;
-                    }
-                    15 => {
-                        log::info!(
-                            "迁移数据库从 v15 到 v16（持久化跨源去重标记，精简用量日志索引）"
-                        );
-                        Self::migrate_v15_to_v16(conn)?;
-                        Self::set_user_version(conn, 16)?;
-                    }
-                    _ => {
-                        return Err(AppError::Database(format!(
-                            "未知的数据库版本 {version}，无法迁移到 {SCHEMA_VERSION}"
-                        )));
-                    }
-                }
-                version = Self::get_user_version(conn)?;
+        Self::in_savepoint(conn, "schema_migration", || {
+            if version < BASELINE_SCHEMA_VERSION {
+                Self::prepare_pre_baseline_database(conn)?;
             }
+            Self::ensure_migration_ledger(conn)?;
+            // 台账出现之前（或数据库由 SQL 导入重建之前）已应用的版本：回填记录
+            for migration in MIGRATIONS.iter().filter(|m| m.version <= version) {
+                Self::record_migration_if_missing(conn, migration, LedgerSource::Backfilled)?;
+            }
+            Self::run_pending_migrations(conn, version)?;
+            Self::warn_on_ledger_mismatch(conn);
             Ok(())
-        })();
+        })
+    }
 
-        match result {
-            Ok(_) => {
-                conn.execute("RELEASE schema_migration;", [])
-                    .map_err(|e| AppError::Database(format!("提交迁移 savepoint 失败: {e}")))?;
+    /// 依次执行版本大于 `from` 的迁移，每一步更新 `user_version` 并写入台账。
+    fn run_pending_migrations(conn: &Connection, from: i32) -> Result<(), AppError> {
+        for migration in MIGRATIONS.iter().filter(|m| m.version > from) {
+            log::info!(
+                "迁移数据库从 v{} 到 v{}（{}）",
+                migration.version - 1,
+                migration.version,
+                migration.name
+            );
+            (migration.up)(conn)?;
+            Self::set_user_version(conn, migration.version)?;
+            Self::record_migration(conn, migration, LedgerSource::Migrated)?;
+        }
+        Ok(())
+    }
+
+    /// 在 savepoint 中执行 `f`：成功则提交，失败则回滚并返回原错误。
+    fn in_savepoint(
+        conn: &Connection,
+        name: &str,
+        f: impl FnOnce() -> Result<(), AppError>,
+    ) -> Result<(), AppError> {
+        conn.execute(&format!("SAVEPOINT {name};"), [])
+            .map_err(|e| AppError::Database(format!("开启 savepoint {name} 失败: {e}")))?;
+        match f() {
+            Ok(()) => {
+                conn.execute(&format!("RELEASE {name};"), [])
+                    .map_err(|e| AppError::Database(format!("提交 savepoint {name} 失败: {e}")))?;
                 Ok(())
             }
             Err(e) => {
-                conn.execute("ROLLBACK TO schema_migration;", []).ok();
-                conn.execute("RELEASE schema_migration;", []).ok();
+                conn.execute(&format!("ROLLBACK TO {name};"), []).ok();
+                conn.execute(&format!("RELEASE {name};"), []).ok();
                 Err(e)
             }
         }
+    }
+
+    // --- 迁移台账 ---
+
+    fn ensure_migration_ledger(conn: &Connection) -> Result<(), AppError> {
+        conn.execute(
+            &format!(
+                "CREATE TABLE IF NOT EXISTS {MIGRATION_LEDGER_TABLE} (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    checksum TEXT NOT NULL,
+                    app_version TEXT NOT NULL,
+                    applied_at INTEGER NOT NULL,
+                    source TEXT NOT NULL
+                )"
+            ),
+            [],
+        )
+        .map_err(db_err("创建迁移台账失败"))?;
+        Ok(())
+    }
+
+    fn record_migration(
+        conn: &Connection,
+        migration: &Migration,
+        source: LedgerSource,
+    ) -> Result<(), AppError> {
+        conn.execute(
+            &format!(
+                "INSERT OR REPLACE INTO {MIGRATION_LEDGER_TABLE}
+                    (version, name, checksum, app_version, applied_at, source)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+            ),
+            params![
+                migration.version,
+                migration.name,
+                migration.checksum,
+                env!("CARGO_PKG_VERSION"),
+                chrono::Utc::now().timestamp(),
+                source.as_str()
+            ],
+        )
+        .map_err(db_err("写入迁移台账失败"))?;
+        Ok(())
+    }
+
+    fn record_migration_if_missing(
+        conn: &Connection,
+        migration: &Migration,
+        source: LedgerSource,
+    ) -> Result<(), AppError> {
+        let exists: bool = conn
+            .query_row(
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM {MIGRATION_LEDGER_TABLE} WHERE version = ?1)"
+                ),
+                [migration.version],
+                |row| row.get(0),
+            )
+            .map_err(db_err("读取迁移台账失败"))?;
+        if exists {
+            return Ok(());
+        }
+        Self::record_migration(conn, migration, source)
+    }
+
+    /// 台账中的名称/校验和与注册表不一致时记录警告（用于诊断，不阻止启动）。
+    fn warn_on_ledger_mismatch(conn: &Connection) {
+        let rows = match Self::read_migration_ledger(conn) {
+            Ok(rows) => rows,
+            Err(e) => {
+                log::warn!("读取迁移台账失败: {e}");
+                return;
+            }
+        };
+        for (version, name, checksum) in rows {
+            match MIGRATIONS.iter().find(|m| m.version == version) {
+                Some(m) if m.name == name && m.checksum == checksum => {}
+                Some(m) => log::warn!(
+                    "迁移台账 v{version} ({name}, {checksum}) 与当前注册的迁移 ({}, {}) 不一致",
+                    m.name,
+                    m.checksum
+                ),
+                None => log::warn!("迁移台账包含未注册的版本 v{version} ({name})"),
+            }
+        }
+    }
+
+    /// 读取迁移台账：(version, name, checksum)，按版本排序。
+    pub(crate) fn read_migration_ledger(
+        conn: &Connection,
+    ) -> Result<Vec<(i32, String, String)>, AppError> {
+        if !Self::table_exists(conn, MIGRATION_LEDGER_TABLE)? {
+            return Ok(Vec::new());
+        }
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT version, name, checksum FROM {MIGRATION_LEDGER_TABLE} ORDER BY version"
+            ))
+            .map_err(db_err("读取迁移台账失败"))?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .map_err(db_err("读取迁移台账失败"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db_err("解析迁移台账失败"))?;
+        Ok(rows)
     }
 
     /// v0 -> v1 迁移：补齐所有缺失列
@@ -1016,14 +1276,16 @@ impl Database {
         // 标记：需要在启动后从文件系统扫描并重建 Skills 数据
         // 说明：v3 结构将 Skills 的 SSOT 迁移到 ~/.cc-switch/skills/，
         // 旧表只存“安装记录”，无法直接无损迁移到新结构，因此改为启动后扫描 app 目录导入。
-        let _ = conn.execute(
+        conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('skills_ssot_migration_pending', 'true')",
             [],
-        );
-        let _ = conn.execute(
+        )
+        .map_err(|e| AppError::Database(format!("写入 skills 迁移标记失败: {e}")))?;
+        conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('skills_ssot_migration_snapshot', ?1)",
             [snapshot_json],
-        );
+        )
+        .map_err(|e| AppError::Database(format!("写入 skills 迁移快照失败: {e}")))?;
 
         // 2. 删除旧表
         conn.execute("DROP TABLE IF EXISTS skills", [])
@@ -1551,6 +1813,48 @@ impl Database {
         if hidden > 0 {
             log::info!("已标记 {hidden} 条与 proxy 日志重复的会话用量行");
         }
+        Ok(())
+    }
+
+    /// v16 -> v17: introduce the migration ledger and run the startup repairs that
+    /// `create_tables_on_conn` used to repeat on every start, one last time.
+    ///
+    /// The repairs are idempotent and order-independent with respect to v1..v16, so
+    /// running them after the chain gives the same result as the old every-start code.
+    fn migrate_v16_to_v17(conn: &Connection) -> Result<(), AppError> {
+        Self::ensure_migration_ledger(conn)?;
+
+        // 补齐缺失的默认代理配置行
+        Self::seed_default_proxy_config_rows(conn)?;
+
+        // 修复跑过未发布开发版的库：current 标记曾是全局 key，现按应用分组
+        // （随 v12 定稿为 current_profile_id_<scope>）
+        if Self::table_exists(conn, "settings")? {
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value)
+                 SELECT 'current_profile_id_claude', value FROM settings
+                 WHERE key = 'current_profile_id'",
+                [],
+            )
+            .map_err(|e| AppError::Database(format!("迁移全局 profile 标记失败: {e}")))?;
+            conn.execute("DELETE FROM settings WHERE key = 'current_profile_id'", [])
+                .map_err(|e| AppError::Database(format!("删除全局 profile 标记失败: {e}")))?;
+        }
+
+        // 故障转移队列：providers.in_failover_queue 取代旧的 failover_queue 表
+        if Self::table_exists(conn, "providers")? {
+            Self::add_column_if_missing(
+                conn,
+                "providers",
+                "in_failover_queue",
+                "BOOLEAN NOT NULL DEFAULT 0",
+            )?;
+        }
+        conn.execute("DROP INDEX IF EXISTS idx_failover_queue_order", [])
+            .map_err(|e| AppError::Database(format!("删除 failover_queue 索引失败: {e}")))?;
+        conn.execute("DROP TABLE IF EXISTS failover_queue", [])
+            .map_err(|e| AppError::Database(format!("删除 failover_queue 表失败: {e}")))?;
+        Self::create_providers_failover_index_if_supported(conn)?;
         Ok(())
     }
 
@@ -2995,6 +3299,16 @@ impl Database {
         Ok(false)
     }
 
+    /// 表存在且包含全部 `columns` 时返回 true。
+    fn has_columns(conn: &Connection, table: &str, columns: &[&str]) -> Result<bool, AppError> {
+        for column in columns {
+            if !Self::has_column(conn, table, column)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     fn add_column_if_missing(
         conn: &Connection,
         table: &str,
@@ -3024,6 +3338,178 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Migration registry ──────────────────────────────────
+
+    const SCHEMA_SOURCE: &str = include_str!("schema.rs");
+
+    /// Body of `fn {fn_name}(...)` with comments and insignificant whitespace removed:
+    /// whitespace outside string literals is dropped, runs of whitespace inside string
+    /// literals collapse to one space, and trailing commas are ignored, so rustfmt
+    /// reflows and comment edits do not change the checksum.
+    fn normalized_fn_body(source: &str, fn_name: &str) -> String {
+        let signature = format!("fn {fn_name}(");
+        let start = source
+            .find(&signature)
+            .unwrap_or_else(|| panic!("function `{fn_name}` not found in schema.rs"));
+        let open = start + source[start..].find('{').expect("function body");
+        let chars: Vec<char> = source[open..].chars().collect();
+
+        let mut out = String::new();
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if in_string {
+                if c == '\\' && i + 1 < chars.len() {
+                    out.push(c);
+                    out.push(chars[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                if c.is_whitespace() {
+                    if !out.ends_with(' ') {
+                        out.push(' ');
+                    }
+                } else {
+                    out.push(c);
+                    if c == '"' {
+                        in_string = false;
+                    }
+                }
+            } else if c == '/' && chars.get(i + 1) == Some(&'/') {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            } else if c == '"' {
+                in_string = true;
+                out.push(c);
+            } else if !c.is_whitespace() {
+                out.push(c);
+                if c == '{' {
+                    depth += 1;
+                } else if c == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+            i += 1;
+        }
+        out.replace(",)", ")").replace(",]", "]").replace(",}", "}")
+    }
+
+    fn migration_fn_name(version: i32) -> String {
+        format!("migrate_v{}_to_v{}", version - 1, version)
+    }
+
+    fn source_checksum(version: i32) -> String {
+        use sha2::{Digest, Sha256};
+        let body = normalized_fn_body(SCHEMA_SOURCE, &migration_fn_name(version));
+        format!("{:x}", Sha256::digest(body.as_bytes()))
+    }
+
+    #[test]
+    fn registered_migration_checksums_match_source() {
+        let mismatches: Vec<String> = MIGRATIONS
+            .iter()
+            .filter_map(|m| {
+                let actual = source_checksum(m.version);
+                (actual != m.checksum).then(|| {
+                    format!(
+                        "v{} {}: registered \"{}\", source \"{actual}\"",
+                        m.version, m.name, m.checksum
+                    )
+                })
+            })
+            .collect();
+        assert!(
+            mismatches.is_empty(),
+            "Released migrations must not change: a database that already ran a migration \
+             will never run the edited version. Add a new migration instead. If the change \
+             is intentional and does not alter behaviour (e.g. a log message), update the \
+             registered checksum:\n{}",
+            mismatches.join("\n")
+        );
+    }
+
+    #[test]
+    fn every_migration_function_is_registered() {
+        let mut found = Vec::new();
+        let mut rest = SCHEMA_SOURCE;
+        while let Some(pos) = rest.find("fn migrate_v") {
+            let tail = &rest[pos + "fn migrate_v".len()..];
+            let end = tail.find('(').expect("signature");
+            let name = &tail[..end];
+            if let Some((from, to)) = name.split_once("_to_v") {
+                if let (Ok(from), Ok(to)) = (from.parse::<i32>(), to.parse::<i32>()) {
+                    // Skip test functions named after migrations.
+                    if tail[end..].starts_with("(conn: &Connection)") {
+                        assert_eq!(to, from + 1, "migrate_v{from}_to_v{to} must step by one");
+                        found.push(to);
+                    }
+                }
+            }
+            rest = tail;
+        }
+        found.sort_unstable();
+        let registered: Vec<i32> = MIGRATIONS.iter().map(|m| m.version).collect();
+        assert_eq!(
+            found, registered,
+            "every migrate_vN_to_vM function must have exactly one MIGRATIONS entry"
+        );
+        assert_eq!(SCHEMA_VERSION, *registered.last().unwrap());
+        let mut names: Vec<&str> = MIGRATIONS.iter().map(|m| m.name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(
+            names.len(),
+            MIGRATIONS.len(),
+            "migration names must be unique"
+        );
+    }
+
+    #[test]
+    fn schema_version_and_sync_compat_version_move_together() {
+        // DB_COMPAT_VERSION is derived from the registry; this pin makes a schema bump
+        // an explicit decision about sync compatibility. When adding a migration, decide
+        // whether it sets `breaks_sync` (old clients can no longer import the new
+        // snapshot, or vice versa) and update this pair accordingly.
+        assert_eq!(
+            (
+                SCHEMA_VERSION,
+                crate::services::sync_protocol::DB_COMPAT_VERSION
+            ),
+            (17, 6),
+            "SCHEMA_VERSION changed without reviewing DB_COMPAT_VERSION (or vice versa)"
+        );
+        assert_eq!(
+            crate::services::sync_protocol::DB_COMPAT_VERSION,
+            SYNC_DB_COMPAT_VERSION
+        );
+        let derived = SYNC_DB_COMPAT_AT_BASELINE
+            + MIGRATIONS
+                .iter()
+                .filter(|m| m.version > BASELINE_SCHEMA_VERSION && m.breaks_sync)
+                .count() as u32;
+        assert_eq!(SYNC_DB_COMPAT_VERSION, derived);
+    }
+
+    #[test]
+    fn create_tables_propagates_ddl_errors() {
+        // A read-only connection makes every DDL statement fail; the fresh path must
+        // report it instead of silently leaving a half-created schema.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ro.db");
+        Connection::open(&path).expect("create file");
+        let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("open read-only");
+        assert!(Database::create_tables_on_conn(&conn).is_err());
+        assert!(Database::apply_schema_migrations_on_conn(&conn).is_err());
+    }
 
     #[test]
     fn migrate_v12_to_v13_adds_input_token_semantics_columns() -> Result<(), AppError> {
