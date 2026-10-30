@@ -206,7 +206,7 @@ TeamoRouter 还提供企业级功能，包括集中账单、团队管理、BYOK�
 - **系统托盘快速切换** — 从托盘菜单即时切换供应商，无需打开完整应用
 - **云同步** — 通过 Dropbox、OneDrive、iCloud 或 WebDAV 服务器在不同设备之间同步供应商数据
 - **跨平台** — 基于 Tauri 2 构建的原生桌面应用，支持 Windows、macOS 和 Linux
-- **小工具** - 内置了多种小工具来解决首次安装登录确认、禁止签名、插件拓展同步等多种功能
+- **小工具** - 内置了多种小工具：跳过 Claude Code 首次运行确认、通过通用配置片段关闭 Claude Code 提交中的 `Co-Authored-By` 署名、代理模式下自动修复 thinking 签名错误（Thinking 签名整流）、将供应商同步到 Claude Code VS Code 插件等
 
 ## 界面预览
 
@@ -216,7 +216,7 @@ TeamoRouter 还提供企业级功能，包括集中账单、团队管理、BYOK�
 
 ## 功能特性
 
-[完整更新日志](CHANGELOG.md) | [发布说明](docs/release-notes/v3.16.1-zh.md)
+[完整更新日志](CHANGELOG.md) | [发布说明](docs/release-notes/README.md)
 
 ### 供应商管理
 
@@ -323,6 +323,11 @@ CC_SWITCH_GDK_BACKEND=wayland ./CC-Switch-*.AppImage
 ## 文档
 
 如需了解各项功能的详细使用方法，请查阅 **[用户手册](docs/user-manual/zh/README.md)** — 涵盖供应商管理、MCP/Prompts/Skills、代理与故障转移等全部功能。
+
+- **[隐私与数据流向](PRIVACY.md)**（英文）— 本地存储的内容以及应用发出的全部网络请求
+- **[深度链接规范](docs/deeplink-spec.md)**（英文）— 面向链接制作者的 `ccswitch://` 导入协议
+- **[发布说明](docs/release-notes/README.md)** — 各版本的中英日发布说明
+- **[赞助商政策（提案）](docs/sponsor-policy.md)**（英文）— 赞助预设的收录、审核与下架规则
 
 ## 快速开始
 
@@ -442,10 +447,10 @@ paru -S cc-switch-bin
 
 ### 环境要求
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
-- Tauri CLI 2.8+
+- Node.js `^20.19.0` 或 `>=22.12.0`（`.node-version` 固定为 22.12.0）
+- pnpm 10（CI 使用 10.12.3）
+- Rust：由 rustup 根据 `rust-toolchain.toml`（1.95）自动安装
+- Tauri CLI 2.8+（已作为开发依赖提供）
 
 ### 开发命令
 
@@ -458,6 +463,9 @@ pnpm dev
 
 # 类型检查
 pnpm typecheck
+
+# 代码检查（ESLint）
+pnpm lint
 
 # 代码格式化
 pnpm format
@@ -553,7 +561,7 @@ pnpm test:unit --coverage
 │   ├── lib/
 │   │   ├── api/                # Tauri API 封装（类型安全）
 │   │   └── query/              # TanStack Query 配置
-│   ├── locales/                # 翻译 (zh/zh-TW/en/ja)
+│   ├── i18n/locales/           # 翻译 (en/zh/zh-TW/ja)
 │   ├── config/                 # 预设 (providers/mcp)
 │   └── types/                  # TypeScript 类型定义
 ├── src-tauri/                  # 后端 (Rust)

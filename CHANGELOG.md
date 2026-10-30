@@ -1891,6 +1891,31 @@ v3.7.0 represents a major evolution from "Provider Switcher" to **"All-in-One AI
 - Gemini CLI support requires Gemini CLI to be installed separately
 - MCP v3.7.0 unified structure is backward compatible with previous configs
 
+## [3.6.1] - 2025-11-10
+
+Stability and user-experience patch on top of v3.6.0. Full notes: [docs/release-notes/v3.6.1-en.md](docs/release-notes/v3.6.1-en.md).
+
+### Added
+
+- Usage queries can use their own API key and base URL instead of the provider's; credential fields follow the template type (General, NewAPI, Custom).
+- Show/hide toggle for API key and access token fields; usage-script form switched to shadcn/ui Switch and Input components.
+- Shared JSON/TOML form validators (`jsonConfigSchema`, `tomlConfigSchema`, `mcpJsonConfigSchema`); MCP `stdio` servers require `command`, `http` servers require `url`.
+- PackyCode added to the Claude and Codex provider presets as a partner.
+
+### Changed
+
+- Non-official provider categories pre-fill the Base URL field; misleading example text removed from model inputs.
+- Provider switch failures show a copyable error message.
+- Configs imported from the default live config are categorised as `custom`.
+
+### Fixed
+
+- Usage-script panel crashed to a white screen (`FormLabel` used outside a `FormField` context).
+- Full-width (CJK IME) quotes broke TOML parsing; quotes are now normalised before parsing.
+- Tray menu order did not follow drag-and-drop sorting (#179).
+- Editing a Codex MCP server in TOML dropped unknown fields such as `timeout_ms`.
+- Tray menu update failures no longer fail the main operation, and tray event handling no longer panics on `unwrap()`.
+
 ## [3.6.0] - 2025-11-07
 
 ### ✨ New Features

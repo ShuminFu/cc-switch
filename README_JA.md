@@ -205,7 +205,7 @@ TeamoRouter は、集中請求、チーム管理、BYOK、スマートルーテ�
 - **システムトレイでクイック切り替え** -- トレイメニューから即座にプロバイダを切り替え。アプリを開く必要なし
 - **クラウド同期** -- Dropbox、OneDrive、iCloud、または WebDAV サーバー経由でデバイス間のプロバイダデータを同期
 - **クロスプラットフォーム** -- Tauri 2 で構築された Windows、macOS、Linux 対応のネイティブデスクトップアプリ
-- **便利ツール内蔵** -- 初回起動時のログイン確認、署名バイパス、プラグイン拡張の同期など、さまざまなユーティリティを搭載
+- **便利ツール内蔵** -- Claude Code の初回起動確認のスキップ、共通設定スニペットによる Claude Code のコミット `Co-Authored-By` 表記の無効化、プロキシモードでの thinking 署名エラーの自動修正（Thinking 署名整流）、Claude Code VS Code 拡張へのプロバイダ同期など、さまざまなユーティリティを搭載
 
 ## スクリーンショット
 
@@ -215,7 +215,7 @@ TeamoRouter は、集中請求、チーム管理、BYOK、スマートルーテ�
 
 ## 特長
 
-[完全な更新履歴](CHANGELOG.md) | [リリースノート](docs/release-notes/v3.16.1-ja.md)
+[完全な更新履歴](CHANGELOG.md) | [リリースノート](docs/release-notes/README.md)
 
 ### プロバイダ管理
 
@@ -320,6 +320,11 @@ CC_SWITCH_GDK_BACKEND=wayland ./CC-Switch-*.AppImage
 ## ドキュメント
 
 各機能の詳しい使い方については、**[ユーザーマニュアル](docs/user-manual/ja/README.md)** をご覧ください。プロバイダ管理、MCP/Prompts/Skills、プロキシとフェイルオーバーなど、すべての機能を網羅しています。
+
+- **[プライバシーとデータの流れ](PRIVACY.md)**（英語）— ローカルに保存される内容と、アプリが行うすべてのネットワークリクエスト
+- **[ディープリンク仕様](docs/deeplink-spec.md)**（英語）— リンク作成者向けの `ccswitch://` インポートプロトコル
+- **[リリースノート](docs/release-notes/README.md)** — バージョンごとの英語・中国語・日本語のリリースノート
+- **[スポンサーポリシー（提案）](docs/sponsor-policy.md)**（英語）— スポンサープリセットの掲載・審査・削除のルール
 
 ## クイックスタート
 
@@ -439,10 +444,10 @@ paru -S cc-switch-bin
 
 ### 開発環境
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
-- Tauri CLI 2.8+
+- Node.js `^20.19.0` または `>=22.12.0`（`.node-version` は 22.12.0 を指定）
+- pnpm 10（CI は 10.12.3 を使用）
+- Rust：`rust-toolchain.toml`（1.95）に従い rustup が自動でインストール
+- Tauri CLI 2.8+（開発依存として同梱）
 
 ### 開発コマンド
 
@@ -455,6 +460,9 @@ pnpm dev
 
 # 型チェック
 pnpm typecheck
+
+# Lint（ESLint）
+pnpm lint
 
 # コード整形
 pnpm format
@@ -550,7 +558,7 @@ pnpm test:unit --coverage
 │   ├── lib/
 │   │   ├── api/                # Tauri API ラッパー（型安全）
 │   │   └── query/              # TanStack Query 設定
-│   ├── locales/                # 翻訳 (zh/zh-TW/en/ja)
+│   ├── i18n/locales/           # 翻訳 (en/zh/zh-TW/ja)
 │   ├── config/                 # プリセット (providers/mcp)
 │   └── types/                  # TypeScript 型定義
 ├── src-tauri/                  # バックエンド (Rust)

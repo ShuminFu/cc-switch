@@ -205,7 +205,7 @@ Modern AI-powered coding relies on tools like Claude Code, Claude Desktop, Codex
 - **System Tray Quick Switch** — Switch providers instantly from the tray menu, no need to open the full app
 - **Cloud Sync** — Sync provider data across devices via Dropbox, OneDrive, iCloud, or WebDAV servers
 - **Cross-Platform** — Native desktop app for Windows, macOS, and Linux, built with Tauri 2
-- **Built-in Utilities** — Includes various utilities for first-launch login confirmation, signature bypass, plugin extension sync, and more
+- **Built-in Utilities** — Skip Claude Code's first-run confirmation, turn off Claude Code's `Co-Authored-By` commit attribution via the common config snippet, automatically repair thinking-signature errors in proxy mode (thinking-signature rectifier), sync the provider to the Claude Code VS Code extension, and more
 
 ## Screenshots
 
@@ -215,7 +215,7 @@ Modern AI-powered coding relies on tools like Claude Code, Claude Desktop, Codex
 
 ## Features
 
-[Full Changelog](CHANGELOG.md) | [Release Notes](docs/release-notes/v3.16.1-en.md)
+[Full Changelog](CHANGELOG.md) | [Release Notes](docs/release-notes/README.md)
 
 ### Provider Management
 
@@ -320,6 +320,11 @@ If you launch from a desktop icon, add it to the `.desktop` `Exec=` line (e.g. `
 ## Documentation
 
 For detailed guides on every feature, check out the **[User Manual](docs/user-manual/en/README.md)** — covering provider management, MCP/Prompts/Skills, proxy & failover, and more.
+
+- **[Privacy & Data Flows](PRIVACY.md)** — what is stored locally and every network request the app makes
+- **[Deep Link Specification](docs/deeplink-spec.md)** — the `ccswitch://` import protocol for link authors
+- **[Release Notes](docs/release-notes/README.md)** — per-version notes in English, Chinese and Japanese
+- **[Sponsor Policy (proposal)](docs/sponsor-policy.md)** — how sponsored presets are listed, reviewed and removed
 
 ## Quick Start
 
@@ -439,10 +444,10 @@ Download the latest Linux build from the [Releases](../../releases) page:
 
 ### Environment Requirements
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
-- Tauri CLI 2.8+
+- Node.js `^20.19.0` or `>=22.12.0` (`.node-version` pins 22.12.0)
+- pnpm 10 (CI uses 10.12.3)
+- Rust: installed automatically by rustup from `rust-toolchain.toml` (1.95)
+- Tauri CLI 2.8+ (bundled as a dev dependency)
 
 ### Development Commands
 
@@ -455,6 +460,9 @@ pnpm dev
 
 # Type check
 pnpm typecheck
+
+# Lint (ESLint)
+pnpm lint
 
 # Format code
 pnpm format
@@ -550,7 +558,7 @@ pnpm test:unit --coverage
 │   ├── lib/
 │   │   ├── api/                # Tauri API wrapper (type-safe)
 │   │   └── query/              # TanStack Query config
-│   ├── locales/                # Translations (zh/zh-TW/en/ja)
+│   ├── i18n/locales/           # Translations (en/zh/zh-TW/ja)
 │   ├── config/                 # Presets (providers/mcp)
 │   └── types/                  # TypeScript definitions
 ├── src-tauri/                  # Backend (Rust)

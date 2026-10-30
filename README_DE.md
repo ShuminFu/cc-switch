@@ -205,7 +205,7 @@ Modernes KI-gestütztes Programmieren stützt sich auf Werkzeuge wie Claude Code
 - **Schnellumschaltung über System-Tray** — Wechseln Sie Anbieter sofort über das Tray-Menü, ohne die vollständige App öffnen zu müssen
 - **Cloud-Synchronisierung** — Synchronisieren Sie Anbieterdaten geräteübergreifend über Dropbox, OneDrive, iCloud oder WebDAV-Server
 - **Plattformübergreifend** — Native Desktop-App für Windows, macOS und Linux, gebaut mit Tauri 2
-- **Integrierte Hilfsprogramme** — Enthält diverse Hilfsprogramme für die Login-Bestätigung beim Erststart, das Umgehen von Signaturen, die Synchronisierung von Plugin-Erweiterungen und mehr
+- **Integrierte Hilfsprogramme** — Überspringen der Erststart-Bestätigung von Claude Code, Abschalten der `Co-Authored-By`-Commit-Angabe von Claude Code über das gemeinsame Konfigurations-Snippet, automatisches Beheben von Thinking-Signatur-Fehlern im Proxy-Modus (Thinking-Signatur-Gleichrichter), Synchronisierung des Anbieters mit der Claude Code VS-Code-Erweiterung und mehr
 
 ## Screenshots
 
@@ -215,7 +215,7 @@ Modernes KI-gestütztes Programmieren stützt sich auf Werkzeuge wie Claude Code
 
 ## Funktionen
 
-[Vollständiges Changelog](CHANGELOG.md) | [Release Notes](docs/release-notes/v3.16.1-en.md)
+[Vollständiges Changelog](CHANGELOG.md) | [Release Notes](docs/release-notes/README.md)
 
 ### Anbieterverwaltung
 
@@ -320,6 +320,11 @@ Wenn Sie über ein Desktop-Symbol starten, fügen Sie es der `Exec=`-Zeile der `
 ## Dokumentation
 
 Ausführliche Anleitungen zu jeder Funktion finden Sie im **[Benutzerhandbuch](docs/user-manual/en/README.md)** — es deckt Anbieterverwaltung, MCP/Prompts/Skills, Proxy & Failover und mehr ab.
+
+- **[Datenschutz & Datenflüsse](PRIVACY.md)** (Englisch) — was lokal gespeichert wird und welche Netzwerkanfragen die App stellt
+- **[Deep-Link-Spezifikation](docs/deeplink-spec.md)** (Englisch) — das `ccswitch://`-Importprotokoll für Link-Ersteller
+- **[Release Notes](docs/release-notes/README.md)** — Notizen pro Version auf Englisch, Chinesisch und Japanisch
+- **[Sponsoren-Richtlinie (Vorschlag)](docs/sponsor-policy.md)** (Englisch) — wie gesponserte Presets aufgenommen, geprüft und entfernt werden
 
 ## Schnellstart
 
@@ -439,10 +444,10 @@ Laden Sie den neuesten Linux-Build von der Seite [Releases](../../releases) heru
 
 ### Umgebungsanforderungen
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
-- Tauri CLI 2.8+
+- Node.js `^20.19.0` oder `>=22.12.0` (`.node-version` legt 22.12.0 fest)
+- pnpm 10 (CI verwendet 10.12.3)
+- Rust: wird von rustup anhand von `rust-toolchain.toml` (1.95) automatisch installiert
+- Tauri CLI 2.8+ (als Dev-Abhängigkeit enthalten)
 
 ### Entwicklungsbefehle
 
@@ -455,6 +460,9 @@ pnpm dev
 
 # Typprüfung
 pnpm typecheck
+
+# Linting (ESLint)
+pnpm lint
 
 # Code formatieren
 pnpm format
@@ -550,7 +558,7 @@ pnpm test:unit --coverage
 │   ├── lib/
 │   │   ├── api/                # Tauri-API-Wrapper (typsicher)
 │   │   └── query/              # TanStack-Query-Konfiguration
-│   ├── locales/                # Übersetzungen (zh/zh-TW/en/ja)
+│   ├── i18n/locales/           # Übersetzungen (en/zh/zh-TW/ja)
 │   ├── config/                 # Presets (providers/mcp)
 │   └── types/                  # TypeScript-Definitionen
 ├── src-tauri/                  # Backend (Rust)
