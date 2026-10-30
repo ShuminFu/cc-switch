@@ -350,6 +350,16 @@
   },
   "settings": {
     "title": "Settings",
+    "loadFailure": {
+      "backedUp": "settings.json could not be loaded; defaults are in use",
+      "backedUpDescription": "File: {{path}}\nThe original content was backed up to: {{backupPath}}\nError: {{error}}",
+      "blocked": "settings.json could not be loaded",
+      "blockedDescription": "The file could not be read or parsed and no backup could be made, so saving settings is blocked to avoid overwriting it. Defaults are in use for now.\n\nFile: {{path}}\nError: {{error}}\n\nFix or move the file and restart, or confirm to allow saving the current settings over it (its contents will be lost).",
+      "confirm": "Allow overwrite",
+      "keepBlocked": "Keep blocked",
+      "acknowledged": "Saving settings is allowed again",
+      "acknowledgeFailed": "Failed to confirm the settings reset"
+    },
     "general": "General",
     "tabGeneral": "General",
     "tabAuth": "Auth",

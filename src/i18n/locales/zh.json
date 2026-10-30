@@ -350,6 +350,16 @@
   },
   "settings": {
     "title": "设置",
+    "loadFailure": {
+      "backedUp": "settings.json 加载失败，当前使用默认设置",
+      "backedUpDescription": "文件：{{path}}\n原内容已备份到：{{backupPath}}\n错误：{{error}}",
+      "blocked": "settings.json 加载失败",
+      "blockedDescription": "该文件无法读取或解析，且未能备份，为避免覆盖其中的数据已禁止保存设置。当前使用默认设置。\n\n文件：{{path}}\n错误：{{error}}\n\n可修复或移走该文件后重启，或确认允许以当前设置覆盖它（原内容将丢失）。",
+      "confirm": "允许覆盖",
+      "keepBlocked": "保持禁止",
+      "acknowledged": "已允许保存设置",
+      "acknowledgeFailed": "确认重置设置失败"
+    },
     "general": "通用",
     "tabGeneral": "通用",
     "tabAuth": "认证",

@@ -32,6 +32,7 @@ import { WindowControlsBar } from "@/components/app-shell/WindowControlsBar";
 import {
   HermesLaunchConfirmDialog,
   ProviderConfirmDialog,
+  SettingsLoadFailureNotice,
   useProviderConfirm,
 } from "@/components/app-shell/AppConfirmDialogs";
 import { useShellPanelRefs } from "@/components/app-shell/panelRefs";
@@ -337,6 +338,7 @@ function App() {
         isOpen={launchDashboardOpen}
         onClose={() => setLaunchDashboardOpen(false)}
       />
+      <SettingsLoadFailureNotice />
 
       <CommandPalette
         open={isPaletteOpen}

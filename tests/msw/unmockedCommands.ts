@@ -26,8 +26,6 @@ export const UNMOCKED_COMMANDS = [
   "update_toml_common_config_snippet",
   "extract_common_config_snippet",
   "read_live_provider_settings",
-  "get_settings_load_failure",
-  "acknowledge_settings_load_failure",
   "has_codex_unify_history_backup",
   "restore_codex_unified_history",
   "get_rectifier_config",

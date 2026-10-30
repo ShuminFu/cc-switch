@@ -350,6 +350,16 @@
   },
   "settings": {
     "title": "設定",
+    "loadFailure": {
+      "backedUp": "settings.json 載入失敗，目前使用預設設定",
+      "backedUpDescription": "檔案：{{path}}\n原內容已備份至：{{backupPath}}\n錯誤：{{error}}",
+      "blocked": "settings.json 載入失敗",
+      "blockedDescription": "該檔案無法讀取或解析，且未能備份，為避免覆寫其中的資料已禁止儲存設定。目前使用預設設定。\n\n檔案：{{path}}\n錯誤：{{error}}\n\n可修復或移走該檔案後重新啟動，或確認允許以目前設定覆寫它（原內容將遺失）。",
+      "confirm": "允許覆寫",
+      "keepBlocked": "保持禁止",
+      "acknowledged": "已允許儲存設定",
+      "acknowledgeFailed": "確認重設設定失敗"
+    },
     "general": "通用",
     "tabGeneral": "通用",
     "tabAuth": "驗證",

@@ -350,6 +350,16 @@
   },
   "settings": {
     "title": "設定",
+    "loadFailure": {
+      "backedUp": "settings.json を読み込めなかったため、既定の設定を使用しています",
+      "backedUpDescription": "ファイル: {{path}}\n元の内容のバックアップ先: {{backupPath}}\nエラー: {{error}}",
+      "blocked": "settings.json を読み込めませんでした",
+      "blockedDescription": "ファイルを読み取りまたは解析できず、バックアップも作成できなかったため、上書きを防ぐために設定の保存をブロックしています。現在は既定の設定を使用しています。\n\nファイル: {{path}}\nエラー: {{error}}\n\nファイルを修復または移動して再起動するか、確認して現在の設定での上書きを許可してください（元の内容は失われます）。",
+      "confirm": "上書きを許可",
+      "keepBlocked": "ブロックを維持",
+      "acknowledged": "設定の保存を再び許可しました",
+      "acknowledgeFailed": "設定リセットの確認に失敗しました"
+    },
     "general": "一般",
     "tabGeneral": "一般",
     "tabAuth": "認証",

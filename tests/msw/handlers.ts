@@ -61,6 +61,8 @@ export const handlers = [
   command("get_migration_result", () => false),
   command("get_skills_migration_result", () => null),
   command("get_startup_report", () => ({ steps: [] })),
+  command("get_settings_load_failure", () => null),
+  command("acknowledge_settings_load_failure", () => true),
   command("get_providers", async (request) => {
     const { app } = await withJson<{ app: AppId }>(request);
     // 后端 `inFailoverQueue` 为 `#[serde(default)] bool`，序列化时总会带上
