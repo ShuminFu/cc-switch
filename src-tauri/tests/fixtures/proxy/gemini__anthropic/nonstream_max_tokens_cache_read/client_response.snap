@@ -1,0 +1,29 @@
+---
+source: tests/proxy_golden.rs
+description: max_tokens maps to MAX_TOKENS; Anthropic cache reads are folded into promptTokenCount and reported as cachedContentTokenCount.
+---
+# non-stream
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Once upon a time"
+          }
+        ]
+      },
+      "index": 0,
+      "finishReason": "MAX_TOKENS"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 1510,
+    "candidatesTokenCount": 16,
+    "totalTokenCount": 1526,
+    "cachedContentTokenCount": 1500
+  },
+  "modelVersion": "claude-sonnet-4-5",
+  "responseId": "msg_g1"
+}

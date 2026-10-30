@@ -1,0 +1,6 @@
+---
+source: tests/proxy_golden.rs
+description: An upstream stream cut off after partial text (no message_stop) is finished with MAX_TOKENS so the client does not treat it as a complete answer.
+---
+# stream
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"Cut off mid"}]},"index":0,"finishReason":"MAX_TOKENS"}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":1,"totalTokenCount":13},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}

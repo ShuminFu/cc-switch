@@ -1,0 +1,27 @@
+{
+  "responseId": "r_pfc",
+  "modelVersion": "gemini-2.5-pro",
+  "candidates": [
+    {
+      "finishReason": "STOP",
+      "content": {
+        "parts": [
+          {
+            "functionCall": {
+              "id": "call_p",
+              "name": "get_weather",
+              "args": {
+                "city": "Tokyo"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 7,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 11
+  }
+}

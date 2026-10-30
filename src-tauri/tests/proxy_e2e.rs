@@ -16,9 +16,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use cc_switch_lib::proxy_harness::{
-    db_read_statement_count, db_statement_count, HarnessCircuit, HarnessHealth, MockReply,
-    MockUpstream, ProxyHarness,
+    db_read_statement_count, db_statement_count, CircuitState, HarnessCircuit, HarnessHealth,
+    MockReply, MockUpstream, ProxyHarness, RawMockUpstream,
 };
+use cc_switch_lib::{update_settings, AppSettings};
 use serde_json::{json, Value};
 
 #[path = "support.rs"]
@@ -350,6 +351,176 @@ async fn breaker_opens_after_threshold_and_skips_the_provider() {
 }
 
 #[tokio::test]
+async fn retry_after_cools_the_provider_down_without_tripping_the_breaker() {
+    let _env = TestEnv::new();
+    // a: rate limited once with `Retry-After: 2`, healthy afterwards.
+    let a = MockUpstream::spawn(|index, _| {
+        if index == 0 {
+            MockReply::error(429, "rate limited").with_header("retry-after", "2")
+        } else {
+            MockReply::message("from a", 10, 5)
+        }
+    })
+    .await;
+    let b = MockUpstream::messages("from b", 10, 5).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            // One counted failure would open the breaker.
+            failure_threshold: 1,
+            success_threshold: 1,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await;
+
+    // 1. a answers 429 + Retry-After: the request fails over to b at once.
+    let started = Instant::now();
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 1);
+
+    // 2. During the cooldown a is not tried at all.
+    for _ in 0..3 {
+        let body = json_body(harness.messages(&simple_request()).await).await;
+        assert_eq!(first_text(&body), "from b");
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the cooldown window was missed"
+    );
+    assert_eq!(a.hits(), 1, "a is cooling down");
+    assert_eq!(b.hits(), 4);
+
+    // The rate limit is not a breaker failure, and a's health is untouched.
+    let stats = harness.circuit_stats("a").await.expect("a has a breaker");
+    assert_eq!(stats.state, CircuitState::Closed, "{stats:?}");
+    assert_eq!(stats.consecutive_failures, 0, "{stats:?}");
+    assert_eq!(harness.health("a").await, healthy());
+
+    // 3. Once Retry-After has elapsed, traffic goes back to a.
+    tokio::time::sleep(
+        Duration::from_secs(2).saturating_sub(started.elapsed()) + Duration::from_millis(200),
+    )
+    .await;
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!(a.hits(), 2);
+    assert_eq!(b.hits(), 4);
+
+    let stats = harness.circuit_stats("a").await.expect("a has a breaker");
+    assert_eq!(stats.state, CircuitState::Closed, "{stats:?}");
+    let status = harness.status().await;
+    assert_eq!(status.success_requests, 5);
+    assert_eq!(status.failover_count, 1);
+
+    harness.shutdown().await;
+}
+
+fn session_request(session_id: &str) -> Value {
+    let mut body = simple_request();
+    body["metadata"] = json!({ "session_id": session_id });
+    body
+}
+
+/// a fails once, then is healthy; b is healthy except for its fourth request.
+async fn sticky_session_upstreams() -> (MockUpstream, MockUpstream) {
+    let a = MockUpstream::spawn(|index, _| {
+        if index == 0 {
+            MockReply::error(500, "boom")
+        } else {
+            MockReply::message("from a", 10, 5)
+        }
+    })
+    .await;
+    let b = MockUpstream::spawn(|index, _| {
+        if index == 3 {
+            MockReply::error(500, "b boom")
+        } else {
+            MockReply::message("from b", 10, 5)
+        }
+    })
+    .await;
+    (a, b)
+}
+
+async fn sticky_session_harness(a: &MockUpstream, b: &MockUpstream) -> ProxyHarness {
+    ProxyHarness::builder()
+        .provider("a", a)
+        .provider("b", b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            // One failure does not open a breaker: only the sticky table moves traffic.
+            failure_threshold: 5,
+            success_threshold: 1,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await
+}
+
+#[tokio::test]
+async fn sticky_session_stays_on_the_failover_provider_until_it_fails() {
+    let _env = TestEnv::new();
+    update_settings(AppSettings {
+        sticky_session_routing: true,
+        ..AppSettings::default()
+    })
+    .expect("enable sticky session routing");
+    let (a, b) = sticky_session_upstreams().await;
+    let harness = sticky_session_harness(&a, &b).await;
+
+    // 1. a fails, s1 fails over to b.
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!((a.hits(), b.hits()), (1, 1));
+    let stats = harness.circuit_stats("a").await.expect("a has a breaker");
+    assert_eq!(stats.state, CircuitState::Closed, "{stats:?}");
+
+    // 2. a is healthy again, but s1 stays on b.
+    for _ in 0..2 {
+        let body = json_body(harness.messages(&session_request("s1")).await).await;
+        assert_eq!(first_text(&body), "from b");
+    }
+    assert_eq!((a.hits(), b.hits()), (1, 3));
+
+    // 3. Other sessions, and requests without a client session id, start at the head.
+    let body = json_body(harness.messages(&session_request("s2")).await).await;
+    assert_eq!(first_text(&body), "from a");
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!((a.hits(), b.hits()), (3, 3));
+
+    // 4. b fails: s1 fails over to a and now sticks there.
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!((a.hits(), b.hits()), (4, 4));
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!((a.hits(), b.hits()), (5, 4));
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn sticky_session_routing_is_off_by_default() {
+    let _env = TestEnv::new();
+    let (a, b) = sticky_session_upstreams().await;
+    let harness = sticky_session_harness(&a, &b).await;
+
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from b");
+    // Without the setting the session goes back to the head of the queue.
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!((a.hits(), b.hits()), (2, 1));
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
 async fn half_open_probe_failure_reopens_and_success_closes_the_breaker() {
     let _env = TestEnv::new();
     // a: fails, fails (the half-open probe), then recovers.
@@ -463,6 +634,91 @@ async fn client_abort_during_half_open_probe_releases_the_probe_slot() {
 
     let body = json_body(harness.messages(&simple_request()).await).await;
     assert_eq!(first_text(&body), "from a", "closed breaker serves a again");
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn probe_now_closes_an_open_breaker_against_a_healthy_upstream() {
+    let _env = TestEnv::new();
+    // a: fails once (→ Open), healthy from then on.
+    let a = MockUpstream::sequence(vec![
+        MockReply::error(500, "boom"),
+        MockReply::message("from a", 10, 5),
+    ])
+    .await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            failure_threshold: 1,
+            // A manual probe closes the breaker without waiting for the
+            // success threshold or the open timeout.
+            success_threshold: 3,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await;
+
+    // 1. Force Open: a fails once, b serves.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    let stats = harness.circuit_stats("a").await.expect("a has a breaker");
+    assert_eq!(stats.state, CircuitState::Open);
+    assert!(stats.open_remaining_secs.unwrap() > 500, "{stats:?}");
+
+    // 2. Probe now: one minimal request to a through the half-open path.
+    let probe = harness.probe_now("a").await;
+    assert!(probe.probed && probe.success, "{probe:?}");
+    assert_eq!(probe.stats.state, CircuitState::Closed);
+    assert_eq!(probe.stats.open_remaining_secs, None);
+    assert_eq!(a.hits(), 2, "the probe reached a");
+    assert_eq!(a.requests()[1].method, "GET");
+    assert_eq!(harness.health("a").await, healthy());
+
+    // 3. Closed: a serves real traffic again, well before the open timeout.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a");
+
+    // 4. A closed breaker is not probed again.
+    let probe = harness.probe_now("a").await;
+    assert!(!probe.probed, "{probe:?}");
+    assert_eq!(a.hits(), 3);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn probe_now_against_a_failing_upstream_keeps_the_breaker_open() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(503, "still down")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            failure_threshold: 1,
+            success_threshold: 1,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await;
+
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+
+    let probe = harness.probe_now("a").await;
+    assert!(probe.probed && !probe.success, "{probe:?}");
+    assert_eq!(probe.stats.state, CircuitState::Open);
+    assert_eq!(a.hits(), 2);
+
+    // Still open: real traffic keeps skipping a.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 2);
 
     harness.shutdown().await;
 }
@@ -601,6 +857,84 @@ async fn media_rectifier_replaces_images_when_upstream_rejects_them() {
     harness.shutdown().await;
 }
 
+#[tokio::test]
+async fn recovery_strategies_chain_on_the_same_provider() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::sequence(vec![
+        MockReply::error(400, "This model does not support image input"),
+        MockReply::error(
+            400,
+            "messages.0.content.0: Invalid `signature` in `thinking` block",
+        ),
+        MockReply::message("recovered", 10, 5),
+    ])
+    .await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let request = json!({
+        "model": MODEL,
+        "max_tokens": 64,
+        "messages": [{
+            "role": "assistant",
+            "content": [
+                { "type": "thinking", "thinking": "hmm", "signature": "forged" },
+                {
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo=" }
+                }
+            ]
+        }]
+    });
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(first_text(&json_body(response).await), "recovered");
+
+    let requests = upstream.requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "media downgrade, then signature rectifier"
+    );
+    let downgraded = requests[1].json()["messages"][0]["content"].to_string();
+    assert!(downgraded.contains("[Unsupported Image]"), "{downgraded}");
+    assert!(downgraded.contains("\"thinking\""), "{downgraded}");
+    let rectified = requests[2].json()["messages"][0]["content"].to_string();
+    assert!(rectified.contains("[Unsupported Image]"), "{rectified}");
+    assert!(!rectified.contains("\"thinking\""), "{rectified}");
+    assert_eq!(harness.wait_for_health("p1", &healthy()).await, healthy());
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn recovery_strategy_is_applied_at_most_once() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::error(
+        400,
+        "thinking.enabled.budget_tokens: Input should be greater than or equal to 1024",
+    ))
+    .await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let request = json!({
+        "model": MODEL,
+        "max_tokens": 512,
+        "thinking": { "type": "enabled", "budget_tokens": 256 },
+        "messages": [{ "role": "user", "content": "think" }]
+    });
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 400);
+    assert_eq!(
+        upstream.hits(),
+        2,
+        "the original request plus a single budget-rectified retry"
+    );
+    // Rectifier give-ups are client errors and leave provider health untouched.
+    assert_eq!(harness.health("p1").await, healthy());
+
+    harness.shutdown().await;
+}
+
 // ============================================================================
 // Streaming and usage logging
 // ============================================================================
@@ -680,6 +1014,291 @@ async fn sse_stream_passes_through_unchanged_and_logs_usage() {
     assert_eq!(row.input_tokens, 21);
     assert_eq!(row.output_tokens, 9);
     assert_eq!(row.provider_id, "p1");
+
+    harness.shutdown().await;
+}
+
+// ============================================================================
+// Gemini CLI -> Anthropic upstream (CCS-187)
+// ============================================================================
+
+/// A Gemini CLI style `generateContent` body (no model, no stream flag).
+fn gemini_cli_request() -> Value {
+    json!({
+        "systemInstruction": { "parts": [{ "text": "You are a CLI agent." }] },
+        "contents": [{ "role": "user", "parts": [{ "text": "hello" }] }],
+        "tools": [{ "functionDeclarations": [{
+            "name": "read_file",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": { "absolute_path": { "type": "STRING" } },
+                "required": ["absolute_path"]
+            }
+        }] }],
+        "generationConfig": { "temperature": 0, "topP": 1 }
+    })
+}
+
+async fn gemini_anthropic_harness(upstream: &MockUpstream) -> ProxyHarness {
+    ProxyHarness::builder()
+        .gemini_provider_with_meta("g1", upstream, json!({ "apiFormat": "anthropic" }))
+        .spawn()
+        .await
+}
+
+/// The Gemini-only request shape must not leak to the Anthropic upstream.
+fn assert_anthropic_upstream_request(request: &cc_switch_lib::proxy_harness::RecordedRequest) {
+    assert_eq!(
+        request.path, "/v1/messages",
+        "Gemini query is not forwarded"
+    );
+    assert_eq!(request.headers["x-api-key"], "sk-harness-g1");
+    assert_eq!(request.headers["anthropic-version"], "2023-06-01");
+    assert!(request.headers.get("x-goog-api-key").is_none());
+    assert!(request.headers.get("authorization").is_none());
+    let body = request.json();
+    assert_eq!(body["model"], MODEL, "model comes from the Gemini URL");
+    assert_eq!(body["system"], "You are a CLI agent.");
+    assert_eq!(
+        body["messages"],
+        json!([{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }])
+    );
+    assert_eq!(body["max_tokens"], 8192);
+    assert_eq!(body["temperature"], 0);
+    assert!(
+        body.get("top_p").is_none(),
+        "topP is dropped next to temperature"
+    );
+    assert_eq!(
+        body["tools"][0]["input_schema"]["properties"]["absolute_path"]["type"],
+        "string"
+    );
+    assert!(body.get("contents").is_none() && body.get("generationConfig").is_none());
+}
+
+#[tokio::test]
+async fn gemini_cli_generate_content_is_served_by_an_anthropic_upstream() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::message("hi from claude", 17, 6)).await;
+    let harness = gemini_anthropic_harness(&upstream).await;
+
+    let response = harness
+        .gemini(
+            &format!("/v1beta/models/{MODEL}:generateContent?key=client-key"),
+            &gemini_cli_request(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let body = json_body(response).await;
+    assert_eq!(
+        body["candidates"][0]["content"],
+        json!({ "role": "model", "parts": [{ "text": "hi from claude" }] })
+    );
+    assert_eq!(body["candidates"][0]["finishReason"], "STOP");
+    assert_eq!(
+        body["usageMetadata"],
+        json!({ "promptTokenCount": 17, "candidatesTokenCount": 6, "totalTokenCount": 23 })
+    );
+    assert_eq!(body["modelVersion"], MODEL);
+
+    assert_eq!(upstream.hits(), 1);
+    let sent = &upstream.requests()[0];
+    assert_anthropic_upstream_request(sent);
+    assert!(sent.json().get("stream").is_none());
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs.len(), 1);
+    let row = &logs[0];
+    assert_eq!(row.app_type, "gemini");
+    assert_eq!(row.provider_id, "g1");
+    assert_eq!(row.model, MODEL);
+    assert_eq!(row.status_code, 200);
+    assert_eq!((row.input_tokens, row.output_tokens), (17, 6));
+    assert!(!row.is_streaming);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn gemini_cli_stream_generate_content_streams_gemini_frames() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::sse(anthropic_sse_chunks())).await;
+    let harness = gemini_anthropic_harness(&upstream).await;
+
+    let response = harness
+        .gemini(
+            &format!("/v1beta/models/{MODEL}:streamGenerateContent?alt=sse"),
+            &gemini_cli_request(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let content_type = response.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "{content_type}"
+    );
+    let text = response.text().await.expect("read stream");
+    let frames: Vec<Value> = text
+        .split("\n\n")
+        .filter(|block| !block.trim().is_empty())
+        .map(|block| {
+            let data = block
+                .strip_prefix("data: ")
+                .unwrap_or_else(|| panic!("Gemini frames carry no event name: {block:?}"));
+            serde_json::from_str(data).expect("frame is JSON")
+        })
+        .collect();
+    let streamed: String = frames
+        .iter()
+        .filter_map(|frame| frame["candidates"][0]["content"]["parts"][0]["text"].as_str())
+        .collect();
+    assert_eq!(streamed, "Hello world");
+    let last = frames.last().expect("at least one frame");
+    assert_eq!(last["candidates"][0]["finishReason"], "STOP");
+    assert_eq!(last["usageMetadata"]["promptTokenCount"], 21);
+    assert_eq!(last["usageMetadata"]["candidatesTokenCount"], 9);
+    assert!(frames[..frames.len() - 1]
+        .iter()
+        .all(|frame| frame["candidates"][0].get("finishReason").is_none()));
+
+    let sent = &upstream.requests()[0];
+    assert_anthropic_upstream_request(sent);
+    assert_eq!(sent.json()["stream"], true);
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs.len(), 1);
+    let row = &logs[0];
+    assert_eq!(row.app_type, "gemini");
+    assert!(row.is_streaming);
+    assert_eq!((row.input_tokens, row.output_tokens), (21, 9));
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn gemini_cli_sees_anthropic_errors_in_gemini_shape() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::json(
+        429,
+        json!({ "type": "error", "error": { "type": "rate_limit_error", "message": "slow down" } }),
+    ))
+    .await;
+    let harness = gemini_anthropic_harness(&upstream).await;
+
+    let response = harness
+        .gemini(
+            &format!("/v1beta/models/{MODEL}:generateContent"),
+            &gemini_cli_request(),
+        )
+        .await;
+    assert_eq!(response.status(), 429);
+    assert_eq!(
+        json_body(response).await,
+        json!({ "error": { "code": 429, "message": "slow down", "status": "RESOURCE_EXHAUSTED" } })
+    );
+
+    harness.shutdown().await;
+}
+
+fn sse_frame(event: &str, data: Value) -> String {
+    format!("event: {event}\ndata: {data}\n\n")
+}
+
+fn anthropic_overloaded_event() -> String {
+    sse_frame(
+        "error",
+        json!({ "type": "error",
+                "error": { "type": "overloaded_error", "message": "gateway overloaded" } }),
+    )
+}
+
+#[tokio::test]
+async fn stream_error_before_content_fails_over_to_the_next_provider() {
+    let _env = TestEnv::new();
+    // P1 answers 200 + SSE headers, then reports an error before any content.
+    let early_error = vec![
+        anthropic_sse_chunks()[0].clone(),
+        sse_frame(
+            "content_block_start",
+            json!({ "type": "content_block_start", "index": 0,
+                    "content_block": { "type": "text", "text": "" } }),
+        ),
+        anthropic_overloaded_event(),
+    ];
+    let a = MockUpstream::always(MockReply::sse(early_error)).await;
+    let chunks = anthropic_sse_chunks();
+    let b = MockUpstream::always(MockReply::sse(chunks.clone())).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let mut request = simple_request();
+    request["stream"] = json!(true);
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.expect("read stream");
+    assert_eq!(
+        body,
+        chunks.concat(),
+        "the client receives P2's stream only"
+    );
+    assert!(!body.contains("overloaded_error"), "{body}");
+
+    assert_eq!(a.hits(), 1);
+    assert_eq!(b.hits(), 1);
+    harness
+        .wait_for_health(
+            "a",
+            &HarnessHealth {
+                is_healthy: true,
+                consecutive_failures: 1,
+            },
+        )
+        .await;
+    let status = harness.status().await;
+    assert_eq!(status.success_requests, 1);
+    assert_eq!(status.failover_count, 1);
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs[0].provider_id, "b");
+    assert_eq!(logs[0].status_code, 200);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn stream_error_after_content_is_passed_through() {
+    let _env = TestEnv::new();
+    let mut chunks = anthropic_sse_chunks()[..3].to_vec();
+    chunks.push(anthropic_overloaded_event());
+    let a = MockUpstream::always(MockReply::sse(chunks.clone())).await;
+    let b = MockUpstream::always(MockReply::sse(anthropic_sse_chunks())).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let mut request = simple_request();
+    request["stream"] = json!(true);
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.expect("read stream");
+    assert_eq!(
+        body,
+        chunks.concat(),
+        "content was already streamed, so the error reaches the client"
+    );
+
+    assert_eq!(a.hits(), 1);
+    assert_eq!(b.hits(), 0, "no failover once content has been streamed");
 
     harness.shutdown().await;
 }
@@ -1005,6 +1624,163 @@ async fn foreign_host_text_plain_post_is_rejected_on_the_wire() {
     let response = harness.messages(&simple_request()).await;
     assert_eq!(response.status(), 200);
     assert_eq!(upstream.hits(), 1);
+
+    harness.shutdown().await;
+}
+
+// ============================================================================
+// Header casing on the wire
+// ============================================================================
+
+/// Head of a raw `/v1/messages` request to the proxy; `extra` header lines go
+/// before the body framing headers.
+fn raw_messages_head(harness: &ProxyHarness, extra: &str, body: &str) -> String {
+    format!(
+        "POST /v1/messages HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nX-Api-Key: {}\r\n\
+         Anthropic-Version: 2023-06-01\r\n{extra}Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\r\n",
+        harness.port(),
+        harness.token(),
+        body.len()
+    )
+}
+
+/// Read one HTTP/1.1 response (Content-Length or chunked) and return its status.
+async fn read_raw_response(stream: &mut tokio::net::TcpStream, buf: &mut Vec<u8>) -> u16 {
+    use tokio::io::AsyncReadExt;
+
+    async fn fill(stream: &mut tokio::net::TcpStream, buf: &mut Vec<u8>) {
+        let mut chunk = [0u8; 8192];
+        let n = stream.read(&mut chunk).await.expect("read proxy response");
+        assert!(n > 0, "proxy closed the connection");
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    fn find(buf: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+        buf.get(from..)?
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .map(|pos| pos + from)
+    }
+
+    let head_end = loop {
+        if let Some(pos) = find(buf, 0, b"\r\n\r\n") {
+            break pos + 4;
+        }
+        fill(stream, buf).await;
+    };
+    let head = String::from_utf8_lossy(&buf[..head_end]).to_ascii_lowercase();
+    let status: u16 = head[9..12].parse().expect("status code");
+    let header = |name: &str| {
+        head.lines()
+            .find_map(|line| line.strip_prefix(name))
+            .map(|value| value.trim().to_string())
+    };
+    let end = if let Some(length) = header("content-length:") {
+        let end = head_end + length.parse::<usize>().expect("content length");
+        while buf.len() < end {
+            fill(stream, buf).await;
+        }
+        end
+    } else {
+        assert_eq!(header("transfer-encoding:").as_deref(), Some("chunked"));
+        let mut pos = head_end;
+        loop {
+            let line_end = loop {
+                if let Some(at) = find(buf, pos, b"\r\n") {
+                    break at;
+                }
+                fill(stream, buf).await;
+            };
+            let size_line = String::from_utf8_lossy(&buf[pos..line_end]).into_owned();
+            let size = usize::from_str_radix(size_line.split(';').next().unwrap().trim(), 16)
+                .expect("chunk size");
+            pos = line_end + 2;
+            if size == 0 {
+                // No trailers from the proxy: just the final CRLF.
+                while buf.len() < pos + 2 {
+                    fill(stream, buf).await;
+                }
+                break pos + 2;
+            }
+            while buf.len() < pos + size + 2 {
+                fill(stream, buf).await;
+            }
+            pos += size + 2;
+        }
+    };
+    buf.drain(..end);
+    status
+}
+
+#[tokio::test]
+async fn original_header_casing_is_captured_per_request_on_keep_alive_connections() {
+    use tokio::io::AsyncWriteExt;
+
+    let _env = TestEnv::new();
+    let upstream = RawMockUpstream::spawn().await;
+    let harness = ProxyHarness::builder()
+        .provider_url("raw", upstream.base_url())
+        .spawn()
+        .await;
+    let body = simple_request().to_string();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", harness.port()))
+        .await
+        .expect("connect to proxy");
+    stream.set_nodelay(true).expect("disable nagle");
+    let mut buf = Vec::new();
+
+    // A: the first request on the connection.
+    let a = raw_messages_head(&harness, "X-Foo-A: 1\r\n", &body) + &body;
+    stream.write_all(a.as_bytes()).await.expect("write A");
+    assert_eq!(read_raw_response(&mut stream, &mut buf).await, 200);
+
+    // B: a later keep-alive request whose head is larger than 8 KB.
+    let padding = format!("X-Padding: {}\r\n", "p".repeat(9_000));
+    let b = raw_messages_head(
+        &harness,
+        &format!("X-Bar-B: 1\r\n{padding}X-After-Eight-K: 1\r\n"),
+        &body,
+    ) + &body;
+    stream.write_all(b.as_bytes()).await.expect("write B");
+    assert_eq!(read_raw_response(&mut stream, &mut buf).await, 200);
+
+    // C: a head split across two writes, in the middle of a header name.
+    let c = raw_messages_head(&harness, "X-Split-Header: 1\r\n", &body) + &body;
+    let split = c.find("X-Split-He").expect("split marker") + "X-Split-He".len();
+    stream
+        .write_all(&c.as_bytes()[..split])
+        .await
+        .expect("write C part 1");
+    stream.flush().await.expect("flush C part 1");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    stream
+        .write_all(&c.as_bytes()[split..])
+        .await
+        .expect("write C part 2");
+    assert_eq!(read_raw_response(&mut stream, &mut buf).await, 200);
+
+    let heads = upstream.heads();
+    assert_eq!(heads.len(), 3, "upstream heads: {heads:#?}");
+    let a_names = upstream.header_names(0);
+    assert!(a_names.iter().any(|n| n == "X-Foo-A"), "A: {a_names:?}");
+    assert!(
+        a_names.iter().any(|n| n == "Anthropic-Version"),
+        "A: {a_names:?}"
+    );
+
+    let b_names = upstream.header_names(1);
+    assert!(b_names.iter().any(|n| n == "X-Bar-B"), "B: {b_names:?}");
+    assert!(
+        b_names.iter().any(|n| n == "X-After-Eight-K"),
+        "B: {b_names:?}"
+    );
+    assert!(!b_names.iter().any(|n| n == "X-Foo-A"), "B: {b_names:?}");
+
+    let c_names = upstream.header_names(2);
+    assert!(
+        c_names.iter().any(|n| n == "X-Split-Header"),
+        "C: {c_names:?}"
+    );
 
     harness.shutdown().await;
 }

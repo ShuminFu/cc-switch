@@ -1,0 +1,2 @@
+intent = "max_tokens maps to MAX_TOKENS; Anthropic cache reads are folded into promptTokenCount and reported as cachedContentTokenCount."
+source_commit = "0ddfcb2"

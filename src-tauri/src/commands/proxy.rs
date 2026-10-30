@@ -3,8 +3,12 @@
 //! 提供前端调用的 API 接口
 
 use crate::error::{AppError, IpcError};
+use crate::proxy::capture::{
+    CaptureStatus, CaptureStore, DEFAULT_CAPTURE_MINUTES, MAX_CAPTURE_MINUTES,
+};
+use crate::proxy::trace::{RequestTrace, TraceStore};
 use crate::proxy::types::*;
-use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
+use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats, CircuitProbeResult};
 use crate::store::AppState;
 use std::str::FromStr;
 
@@ -469,8 +473,114 @@ pub async fn get_circuit_breaker_stats(
     provider_id: String,
     app_type: String,
 ) -> Result<Option<CircuitBreakerStats>, IpcError> {
-    // 这个功能需要访问运行中的代理服务器的内存状态
-    // 目前先返回 None，后续可以通过 ProxyService 暴露接口来实现
-    let _ = (state, provider_id, app_type);
-    Ok(None)
+    // 熔断器只存在于运行中代理的内存里；代理未运行或尚无实例时返回 None
+    Ok(state
+        .proxy_service
+        .get_provider_circuit_breaker_stats(&provider_id, &app_type)
+        .await)
+}
+
+/// 立即探测熔断器（"probe now"）
+///
+/// 经 HalfOpen 路径发送一次最小探测请求（见 `StreamCheckService::probe_circuit_target`）：
+/// Open 状态下不等待超时；探测成功则熔断器直接 Closed，失败则重新 Open。
+/// 代理未运行时返回 None，不发请求。
+#[tauri::command]
+pub async fn probe_circuit_breaker(
+    state: tauri::State<'_, AppState>,
+    copilot_state: tauri::State<'_, crate::commands::copilot::CopilotAuthState>,
+    provider_id: String,
+    app_type: String,
+) -> Result<Option<CircuitProbeResult>, IpcError> {
+    let app = crate::app_config::AppType::from_str(&app_type).map_err(IpcError::from)?;
+    let providers = state.db.get_all_providers(&app_type)?;
+    let provider = providers
+        .get(&provider_id)
+        .ok_or_else(|| AppError::Message(format!("供应商 {provider_id} 不存在")))?;
+    let config = state.db.get_stream_check_config()?;
+    let base_url_override =
+        super::stream_check::resolve_copilot_base_url_override(provider, &copilot_state).await?;
+
+    let result = state
+        .proxy_service
+        .probe_provider_circuit_breaker(&provider_id, &app_type, || {
+            crate::services::stream_check::StreamCheckService::probe_circuit_target(
+                &app,
+                provider,
+                &config,
+                base_url_override,
+            )
+        })
+        .await?;
+    Ok(result)
+}
+
+// ==================== Bug Report Capture ====================
+
+/// 开启缺陷报告抓包：`minutes` 分钟后自动关闭（默认 10，上限 60）
+#[tauri::command]
+pub async fn start_proxy_capture(minutes: Option<u32>) -> Result<CaptureStatus, IpcError> {
+    let minutes = minutes
+        .unwrap_or(DEFAULT_CAPTURE_MINUTES)
+        .clamp(1, MAX_CAPTURE_MINUTES);
+    Ok(CaptureStore::global().arm(std::time::Duration::from_secs(u64::from(minutes) * 60)))
+}
+
+/// 立即关闭缺陷报告抓包（已抓到的记录保留，仍可导出）
+#[tauri::command]
+pub async fn stop_proxy_capture() -> Result<CaptureStatus, IpcError> {
+    Ok(CaptureStore::global().disarm())
+}
+
+/// 获取抓包状态与可导出的请求 ID
+#[tauri::command]
+pub async fn get_proxy_capture_status() -> Result<CaptureStatus, IpcError> {
+    Ok(CaptureStore::global().status())
+}
+
+/// 把请求日志中 `request_id` 对应的抓包导出为脱敏的 golden fixture zip
+///
+/// 保存位置由本命令弹出的系统对话框决定（不接受 webview 传入的路径）；
+/// 用户取消时返回 None，否则返回写入的文件路径。
+#[tauri::command]
+pub async fn export_proxy_bug_report<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    request_id: String,
+) -> Result<Option<String>, IpcError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    // 先生成 zip：没有抓包记录时直接报错，不弹对话框
+    let zip = CaptureStore::global().export_zip(&request_id)?;
+    let default_name = format!(
+        "cc-switch-bug-report-{}.zip",
+        request_id
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .take(48)
+            .collect::<String>()
+    );
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .add_filter("ZIP", &["zip"])
+        .set_file_name(&default_name)
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|e| AppError::Message(format!("无效的保存路径: {e}")))?;
+    crate::config::atomic_write(&path, &zip)?;
+    Ok(Some(path.display().to_string()))
+}
+
+// ==================== Request Trace ====================
+
+/// 获取请求日志中 `request_id` 对应的请求追踪（路由计划、各次尝试与原因）
+///
+/// 只保留最近的代理请求；更早的请求或非代理来源的日志返回 None。
+#[tauri::command]
+pub async fn get_proxy_request_trace(request_id: String) -> Result<Option<RequestTrace>, IpcError> {
+    Ok(TraceStore::global().find(&request_id))
 }

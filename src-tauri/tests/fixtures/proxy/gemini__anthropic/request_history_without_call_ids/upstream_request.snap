@@ -1,0 +1,143 @@
+---
+source: tests/proxy_golden.rs
+description: "A multi-turn Gemini history whose functionCall parts have no ids gets deterministic positional ids; functionResponse parts pair by name, output/error results map to tool_result content and is_error, unsigned thought parts are dropped, consecutive user contents merge and inline media become image/document blocks."
+---
+{
+  "model": "claude-sonnet-4-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Look at the screenshot and the log"
+        },
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUg=="
+          }
+        },
+        {
+          "type": "document",
+          "source": {
+            "type": "text",
+            "media_type": "text/plain",
+            "data": "log line 1"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "I'll check two things."
+        },
+        {
+          "type": "tool_use",
+          "id": "[generated-id:1]",
+          "name": "run_shell_command",
+          "input": {
+            "command": "ls"
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "[generated-id:2]",
+          "name": "read_file",
+          "input": {
+            "absolute_path": "/x"
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "[generated-id:2]",
+          "content": "file body"
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "[generated-id:1]",
+          "content": "permission denied",
+          "is_error": true
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The command failed."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Try again with sudo"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192,
+  "tools": [
+    {
+      "name": "read_file",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "absolute_path": {
+            "type": "string",
+            "description": "Absolute path"
+          },
+          "offset": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "absolute_path"
+        ]
+      },
+      "description": "Reads a file from the local filesystem."
+    },
+    {
+      "name": "run_shell_command",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "description": "Runs a shell command."
+    }
+  ],
+  "tool_choice": {
+    "type": "auto"
+  }
+}

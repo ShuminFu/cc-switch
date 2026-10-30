@@ -1,0 +1,6 @@
+intent = "finish_reason stop alongside tool_calls (Gemini-compatible/Ollama/vLLM) maps to tool_use on both the stream and non-stream paths."
+source_commit = "a738206"
+
+[parity]
+expected_diff = [
+]

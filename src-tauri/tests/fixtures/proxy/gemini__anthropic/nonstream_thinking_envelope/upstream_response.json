@@ -1,0 +1,39 @@
+{
+  "id": "msg_g1",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "I should run ls.",
+      "signature": "EqQBCkYIBxgCKkA="
+    },
+    {
+      "type": "redacted_thinking",
+      "data": "EmwKAhgBEgy3"
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01B",
+      "name": "run_shell_command",
+      "input": {
+        "command": "ls"
+      }
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01C",
+      "name": "read_file",
+      "input": {
+        "absolute_path": "/repo/README.md"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 400,
+    "output_tokens": 90
+  }
+}

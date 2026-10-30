@@ -1,0 +1,33 @@
+{
+  "systemInstruction": {
+    "role": "user",
+    "parts": [
+      {
+        "text": "You are a CLI agent."
+      },
+      {
+        "text": "Be concise."
+      }
+    ]
+  },
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Say hello"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "temperature": 0.3,
+    "topP": 0.95,
+    "topK": 64,
+    "maxOutputTokens": 2048,
+    "stopSequences": [
+      "<END>"
+    ],
+    "candidateCount": 1
+  }
+}

@@ -5,6 +5,7 @@
 //! carried in a versioned thinking signature/redacted-thinking payload and
 //! restored when the client replays the assistant message.
 
+use crate::proxy::codec::side_store::{SessionSideStore, SideStoreKind, SideStoreScope};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::{json, Value};
 
@@ -90,6 +91,46 @@ pub(crate) fn openai_reasoning_item_from_anthropic_block(block: &Value) -> Optio
             .and_then(Value::as_str)
             .and_then(decode_openai_reasoning_item),
         _ => None,
+    }
+}
+
+/// [`SessionSideStore`] 形式的 reasoning 桥：状态不留在代理里，而是装进 Anthropic
+/// thinking 签名 / redacted_thinking 数据，由客户端在下一次请求中原样带回。
+///
+/// - `record`：Responses `reasoning` 条目原地替换为携带它的 Anthropic 块
+/// - `restore`：携带条目的 Anthropic thinking / redacted_thinking 块原地还原为原条目
+///
+/// 无法转换时返回 0 且不改动载荷（例如没有摘要也没有加密内容的条目、不带信封的
+/// 普通 thinking 块）。与会话无关，忽略作用域。
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ReasoningBridge;
+
+impl SessionSideStore for ReasoningBridge {
+    type Record = Value;
+    type Restore = Value;
+
+    fn kind(&self) -> SideStoreKind {
+        SideStoreKind::ReasoningBridge
+    }
+
+    fn record(&self, _scope: &SideStoreScope<'_>, record: &mut Value) -> usize {
+        match anthropic_block_from_openai_reasoning_item(record) {
+            Some(block) => {
+                *record = block;
+                1
+            }
+            None => 0,
+        }
+    }
+
+    fn restore(&self, _scope: &SideStoreScope<'_>, restore: &mut Value) -> usize {
+        match openai_reasoning_item_from_anthropic_block(restore) {
+            Some(item) => {
+                *restore = item;
+                1
+            }
+            None => 0,
+        }
     }
 }
 

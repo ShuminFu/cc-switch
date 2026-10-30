@@ -1,0 +1,8 @@
+---
+source: tests/proxy_golden.rs
+description: Text deltas stream live as one frame each; finishReason and the final usageMetadata (cache reads included in promptTokenCount) ride on the last content frame.
+---
+# stream
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"Hel"}]},"index":0}],"usageMetadata":{"promptTokenCount":2003,"candidatesTokenCount":1,"totalTokenCount":2004,"cachedContentTokenCount":2000},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"lo"}]},"index":0}],"usageMetadata":{"promptTokenCount":2003,"candidatesTokenCount":1,"totalTokenCount":2004,"cachedContentTokenCount":2000},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"!"}]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2003,"candidatesTokenCount":3,"totalTokenCount":2006,"cachedContentTokenCount":2000},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}

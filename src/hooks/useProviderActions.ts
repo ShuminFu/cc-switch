@@ -56,9 +56,13 @@ export function useProviderActions(
       : undefined;
 
   // Claude 插件同步逻辑
-  const syncClaudePlugin = useCallback(
-    async (provider: Provider) => {
-      if (activeApp !== "claude") return;
+  // appId 显式传入：撤销按钮可能在切换到其他应用后才被点击
+  const syncClaudePluginFor = useCallback(
+    async (
+      appId: AppId,
+      resolveProvider: () => Promise<Provider | undefined>,
+    ) => {
+      if (appId !== "claude") return;
 
       try {
         const settings = await settingsApi.get();
@@ -66,6 +70,8 @@ export function useProviderActions(
           return;
         }
 
+        const provider = await resolveProvider();
+        if (!provider) return;
         const isOfficial = provider.category === "official";
         await settingsApi.applyClaudePluginConfig({ official: isOfficial });
 
@@ -77,7 +83,13 @@ export function useProviderActions(
         toast.error(detail, { duration: 4200 });
       }
     },
-    [activeApp, t],
+    [t],
+  );
+
+  const syncClaudePlugin = useCallback(
+    (provider: Provider) =>
+      syncClaudePluginFor(activeApp, async () => provider),
+    [activeApp, syncClaudePluginFor],
   );
 
   // 撤销最近一次切换（切换成功 toast 上的"撤销"按钮）
@@ -87,10 +99,12 @@ export function useProviderActions(
         const reverted = await providersApi.revertLastSwitch(appId);
         await invalidateProviderGraph(queryClient, appId);
         // Claude 插件配置不在 live 日志内，按恢复后的供应商重新同步
-        if (appId === "claude" && reverted?.providerId) {
-          const providers = await providersApi.getAll(appId);
-          const restored = providers[reverted.providerId];
-          if (restored) await syncClaudePlugin(restored);
+        const restoredId = reverted?.providerId;
+        if (restoredId) {
+          await syncClaudePluginFor(
+            appId,
+            async () => (await providersApi.getAll(appId))[restoredId],
+          );
         }
         try {
           await providersApi.updateTrayMenu();
@@ -112,7 +126,7 @@ export function useProviderActions(
         );
       }
     },
-    [queryClient, syncClaudePlugin, t],
+    [queryClient, syncClaudePluginFor, t],
   );
 
   // 添加供应商

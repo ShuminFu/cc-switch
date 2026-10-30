@@ -99,6 +99,7 @@ pub async fn open_hermes_web_ui(app: AppHandle, path: Option<String>) -> Result<
     // 401 when the session token is required — either way the server is live.
     // Only a connection error / timeout means the server isn't running.
     let probe_url = format!("{base}/api/status");
+    crate::proxy::http_client::ensure_tls_provider();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(1200))
         .no_proxy()

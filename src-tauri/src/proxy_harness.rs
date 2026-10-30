@@ -28,13 +28,22 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::app_config::AppType;
 use crate::database::Database;
 use crate::provider::Provider;
+use crate::proxy::capture::CaptureStore;
 use crate::proxy::server::ProxyServer;
+use crate::proxy::trace::TraceStore;
 use crate::proxy::types::{AppProxyConfig, ProxyConfig};
+pub use crate::proxy::{CircuitBreakerStats, CircuitProbeResult, CircuitState};
+use crate::services::stream_check::{StreamCheckConfig, StreamCheckService};
 
-/// App type every harness provider is registered under.
+/// App type every harness provider is registered under (except the Gemini
+/// providers added with [`ProxyHarnessBuilder::gemini_provider_with_meta`]).
 pub const HARNESS_APP_TYPE: &str = "claude";
+
+/// App type of the Gemini harness providers.
+pub const HARNESS_GEMINI_APP_TYPE: &str = "gemini";
 
 // ============================================================================
 // Mock upstream
@@ -67,6 +76,12 @@ pub enum MockReply {
     /// `reply`, sent only after `delay` (simulates a hanging upstream).
     Delayed {
         delay: Duration,
+        reply: Box<MockReply>,
+    },
+    /// `reply` with an extra response header.
+    WithHeader {
+        name: &'static str,
+        value: String,
         reply: Box<MockReply>,
     },
 }
@@ -115,6 +130,15 @@ impl MockReply {
     pub fn delayed(self, delay: Duration) -> Self {
         Self::Delayed {
             delay,
+            reply: Box::new(self),
+        }
+    }
+
+    /// This reply with an extra response header (e.g. `retry-after`).
+    pub fn with_header(self, name: &'static str, value: impl Into<String>) -> Self {
+        Self::WithHeader {
+            name,
+            value: value.into(),
             reply: Box::new(self),
         }
     }
@@ -254,17 +278,32 @@ async fn mock_handler(State(state): State<MockState>, request: Request) -> Respo
     };
 
     let mut reply = (state.responder)(index, &recorded);
-    while let MockReply::Delayed {
-        delay,
-        reply: inner,
-    } = reply
-    {
-        tokio::time::sleep(delay).await;
-        reply = *inner;
+    let mut extra_headers = Vec::new();
+    loop {
+        match reply {
+            MockReply::Delayed {
+                delay,
+                reply: inner,
+            } => {
+                tokio::time::sleep(delay).await;
+                reply = *inner;
+            }
+            MockReply::WithHeader {
+                name,
+                value,
+                reply: inner,
+            } => {
+                extra_headers.push((name, value));
+                reply = *inner;
+            }
+            _ => break,
+        }
     }
 
-    match reply {
-        MockReply::Delayed { .. } => unreachable!("delays are unwrapped above"),
+    let mut response = match reply {
+        MockReply::Delayed { .. } | MockReply::WithHeader { .. } => {
+            unreachable!("wrappers are unwrapped above")
+        }
         MockReply::Json { status, body } => Response::builder()
             .status(StatusCode::from_u16(status).expect("valid mock status"))
             .header("content-type", "application/json")
@@ -282,6 +321,126 @@ async fn mock_handler(State(state): State<MockState>, request: Request) -> Respo
                 .header("cache-control", "no-cache")
                 .body(Body::from_stream(stream))
                 .expect("mock sse response")
+        }
+    };
+    for (name, value) in extra_headers {
+        response.headers_mut().insert(
+            name,
+            axum::http::HeaderValue::from_str(&value).expect("valid mock header value"),
+        );
+    }
+    response
+}
+
+// ============================================================================
+// Raw-recording mock upstream
+// ============================================================================
+
+/// Mock upstream that records each request head exactly as it arrived on the
+/// wire (header-name casing and order included), which the axum-based
+/// [`MockUpstream`] cannot see. Every request on every connection, keep-alive
+/// included, gets a successful Anthropic message reply.
+pub struct RawMockUpstream {
+    addr: SocketAddr,
+    heads: Arc<Mutex<Vec<String>>>,
+    handle: JoinHandle<()>,
+}
+
+impl RawMockUpstream {
+    pub async fn spawn() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind raw mock upstream");
+        let addr = listener.local_addr().expect("raw mock upstream address");
+        let heads = Arc::new(Mutex::new(Vec::new()));
+        let recorded = heads.clone();
+        let handle = tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(raw_mock_connection(stream, recorded.clone()));
+            }
+        });
+        Self {
+            addr,
+            heads,
+            handle,
+        }
+    }
+
+    pub fn base_url(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
+    /// Raw request heads received so far (request line and header lines,
+    /// without the final empty line), in arrival order.
+    pub fn heads(&self) -> Vec<String> {
+        self.heads.lock().expect("raw mock heads lock").clone()
+    }
+
+    /// Header names of request `index` with their wire casing, in order.
+    pub fn header_names(&self, index: usize) -> Vec<String> {
+        self.heads()[index]
+            .lines()
+            .skip(1)
+            .filter_map(|line| line.split_once(':').map(|(name, _)| name.to_string()))
+            .collect()
+    }
+}
+
+impl Drop for RawMockUpstream {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+async fn raw_mock_connection(mut stream: tokio::net::TcpStream, heads: Arc<Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut buf = Vec::new();
+    loop {
+        let head_end = loop {
+            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos;
+            }
+            let mut chunk = [0u8; 8192];
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        };
+        let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
+        let content_length = head
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        let request_end = head_end + 4 + content_length;
+        while buf.len() < request_end {
+            let mut chunk = [0u8; 8192];
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        }
+        buf.drain(..request_end);
+
+        let index = {
+            let mut heads = heads.lock().expect("raw mock heads lock");
+            heads.push(head);
+            heads.len() - 1
+        };
+        let mut reply = MockReply::message("raw", 1, 1);
+        let MockReply::Json { body, .. } = &mut reply else {
+            unreachable!("message replies are JSON")
+        };
+        body["id"] = json!(format!("msg_raw_{index}"));
+        let body = body.to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        if stream.write_all(response.as_bytes()).await.is_err() {
+            return;
         }
     }
 }
@@ -358,6 +517,8 @@ impl Default for HarnessCircuit {
 pub struct ProxyHarnessBuilder {
     /// `(id, base_url, meta)`; `meta` is the provider's JSON `meta` object.
     providers: Vec<(String, String, Option<Value>)>,
+    /// Gemini providers, same shape as `providers`.
+    gemini_providers: Vec<(String, String, Option<Value>)>,
     auto_failover: bool,
     max_retries: u32,
     circuit: HarnessCircuit,
@@ -379,6 +540,27 @@ impl ProxyHarnessBuilder {
         self
     }
 
+    /// Add a Gemini provider pointing at `upstream` with the given JSON `meta`
+    /// (e.g. `{"apiFormat": "anthropic"}` for an Anthropic upstream). Its key is
+    /// `sk-harness-<id>`, sent as configured for the upstream format.
+    pub fn gemini_provider_with_meta(
+        mut self,
+        id: &str,
+        upstream: &MockUpstream,
+        meta: Value,
+    ) -> Self {
+        self.gemini_providers
+            .push((id.to_string(), upstream.base_url(), Some(meta)));
+        self
+    }
+
+    /// Add a Claude provider whose base URL is `base_url` (e.g. a
+    /// [`RawMockUpstream`]).
+    pub fn provider_url(mut self, id: &str, base_url: String) -> Self {
+        self.providers.push((id.to_string(), base_url, None));
+        self
+    }
+
     /// Enable auto failover across the providers (queue order = add order).
     pub fn failover(mut self, enabled: bool) -> Self {
         self.auto_failover = enabled;
@@ -396,43 +578,102 @@ impl ProxyHarnessBuilder {
     }
 
     pub async fn spawn(self) -> ProxyHarness {
-        assert!(!self.providers.is_empty(), "harness needs a provider");
+        assert!(
+            !self.providers.is_empty() || !self.gemini_providers.is_empty(),
+            "harness needs a provider"
+        );
         // Same process-level TLS provider the app installs at startup (lib.rs).
         let _ = rustls::crypto::ring::default_provider().install_default();
         let db = Arc::new(Database::memory().expect("in-memory database"));
         install_statement_counter(&db);
 
-        for (index, (id, base_url, meta)) in self.providers.iter().enumerate() {
-            let mut provider = Provider::with_id(
-                id.clone(),
-                format!("Harness {id}"),
+        for (app_type, providers) in [
+            (HARNESS_APP_TYPE, &self.providers),
+            (HARNESS_GEMINI_APP_TYPE, &self.gemini_providers),
+        ] {
+            if !providers.is_empty() {
+                self.register_providers(&db, app_type, providers).await;
+            }
+        }
+
+        let config = ProxyConfig {
+            listen_address: "127.0.0.1".to_string(),
+            listen_port: 0,
+            enable_logging: true,
+            ..ProxyConfig::default()
+        };
+        let mut server = ProxyServer::new(config, db.clone(), None);
+        // Private capture store: arming capture in one scenario must not record
+        // the requests of concurrent scenarios.
+        let capture = Arc::new(CaptureStore::default());
+        server.set_capture_store(capture.clone());
+        let traces = Arc::new(TraceStore::default());
+        server.set_trace_store(traces.clone());
+        let info = server.start().await.expect("start proxy server");
+        let token = crate::proxy::inbound_auth::get_or_create_inbound_token(&db)
+            .expect("read proxy inbound token");
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("harness http client");
+
+        ProxyHarness {
+            server,
+            db,
+            capture,
+            traces,
+            base_url: format!("http://127.0.0.1:{}", info.port),
+            port: info.port,
+            token,
+            client,
+        }
+    }
+
+    /// Save `providers` under `app_type` (queue order = add order), make the
+    /// first one current and enable the proxy for the app.
+    async fn register_providers(
+        &self,
+        db: &Database,
+        app_type: &str,
+        providers: &[(String, String, Option<Value>)],
+    ) {
+        for (index, (id, base_url, meta)) in providers.iter().enumerate() {
+            let settings = if app_type == HARNESS_GEMINI_APP_TYPE {
+                json!({
+                    "env": {
+                        "GOOGLE_GEMINI_BASE_URL": base_url,
+                        "GEMINI_API_KEY": format!("sk-harness-{id}"),
+                    }
+                })
+            } else {
                 json!({
                     "env": {
                         "ANTHROPIC_BASE_URL": base_url,
                         "ANTHROPIC_AUTH_TOKEN": format!("sk-harness-{id}"),
                     }
-                }),
-                None,
-            );
+                })
+            };
+            let mut provider =
+                Provider::with_id(id.clone(), format!("Harness {id}"), settings, None);
             provider.sort_index = Some(index);
             if let Some(meta) = meta {
                 provider.meta = Some(
                     serde_json::from_value(meta.clone()).expect("valid harness provider meta"),
                 );
             }
-            db.save_provider(HARNESS_APP_TYPE, &provider)
+            db.save_provider(app_type, &provider)
                 .expect("save harness provider");
             if self.auto_failover {
-                db.add_to_failover_queue(HARNESS_APP_TYPE, id)
+                db.add_to_failover_queue(app_type, id)
                     .expect("queue harness provider");
             }
         }
-        db.set_current_provider(HARNESS_APP_TYPE, &self.providers[0].0)
+        db.set_current_provider(app_type, &providers[0].0)
             .expect("set current harness provider");
 
         // Reading the row first creates the per-app defaults.
         let defaults = db
-            .get_proxy_config_for_app(HARNESS_APP_TYPE)
+            .get_proxy_config_for_app(app_type)
             .await
             .expect("read app proxy config");
         db.update_proxy_config_for_app(AppProxyConfig {
@@ -453,30 +694,6 @@ impl ProxyHarnessBuilder {
         })
         .await
         .expect("write app proxy config");
-
-        let config = ProxyConfig {
-            listen_address: "127.0.0.1".to_string(),
-            listen_port: 0,
-            enable_logging: true,
-            ..ProxyConfig::default()
-        };
-        let server = ProxyServer::new(config, db.clone(), None);
-        let info = server.start().await.expect("start proxy server");
-        let token = crate::proxy::inbound_auth::get_or_create_inbound_token(&db)
-            .expect("read proxy inbound token");
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .build()
-            .expect("harness http client");
-
-        ProxyHarness {
-            server,
-            db,
-            base_url: format!("http://127.0.0.1:{}", info.port),
-            port: info.port,
-            token,
-            client,
-        }
     }
 }
 
@@ -524,6 +741,8 @@ pub struct HarnessHealth {
 pub struct ProxyHarness {
     server: ProxyServer,
     db: Arc<Database>,
+    capture: Arc<CaptureStore>,
+    traces: Arc<TraceStore>,
     base_url: String,
     port: u16,
     token: String,
@@ -539,6 +758,7 @@ impl ProxyHarness {
     pub fn builder() -> ProxyHarnessBuilder {
         ProxyHarnessBuilder {
             providers: Vec::new(),
+            gemini_providers: Vec::new(),
             auto_failover: false,
             max_retries: 3,
             circuit: HarnessCircuit::default(),
@@ -551,6 +771,16 @@ impl ProxyHarness {
 
     pub fn db(&self) -> &Database {
         &self.db
+    }
+
+    /// Bug report capture store of this proxy (disarmed until a test arms it).
+    pub fn capture(&self) -> &CaptureStore {
+        &self.capture
+    }
+
+    /// Request trace ring buffer of this proxy.
+    pub fn traces(&self) -> &TraceStore {
+        &self.traces
     }
 
     /// Port the proxy listens on.
@@ -578,6 +808,20 @@ impl ProxyHarness {
             .header("content-type", "application/json")
             .header("anthropic-version", "2023-06-01")
             .header("x-api-key", &self.token)
+            .json(body)
+            .send()
+            .await
+            .expect("send request to proxy")
+    }
+
+    /// POST a JSON body to `path` as a Gemini client does (`x-goog-api-key`
+    /// carries the proxy token).
+    pub async fn gemini(&self, path: &str, body: &Value) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("content-type", "application/json")
+            .header("x-goog-api-key", &self.token)
+            .header("x-goog-api-client", "google-genai-sdk/1.0.0 gl-node/v22")
             .json(body)
             .send()
             .await
@@ -674,6 +918,34 @@ impl ProxyHarness {
             failed_requests: status.failed_requests,
             failover_count: status.failover_count,
         }
+    }
+
+    /// In-memory breaker state of a provider (`None` before its first request).
+    pub async fn circuit_stats(&self, provider_id: &str) -> Option<CircuitBreakerStats> {
+        self.server
+            .provider_router()
+            .get_circuit_breaker_stats(provider_id, HARNESS_APP_TYPE)
+            .await
+    }
+
+    /// "Probe now": the same minimal request the `probe_circuit_breaker`
+    /// command sends, recorded through the breaker's half-open path.
+    pub async fn probe_now(&self, provider_id: &str) -> CircuitProbeResult {
+        let provider = self
+            .db
+            .get_all_providers(HARNESS_APP_TYPE)
+            .expect("read harness providers")
+            .get(provider_id)
+            .cloned()
+            .expect("harness provider exists");
+        let config = StreamCheckConfig::default();
+        self.server
+            .provider_router()
+            .probe_provider(provider_id, HARNESS_APP_TYPE, || {
+                StreamCheckService::probe_circuit_target(&AppType::Claude, &provider, &config, None)
+            })
+            .await
+            .expect("probe provider")
     }
 
     pub async fn shutdown(self) {

@@ -374,6 +374,8 @@
         "enableFeatureDescription": "有効にすると、メインページ上部にルーティングとフェイルオーバーの切り替えが表示されます",
         "enableFailoverToggle": "メインページにフェイルオーバー切り替えを表示",
         "enableFailoverToggleDescription": "有効にすると、メインページ上部にフェイルオーバー切り替えが独立して表示されます",
+        "stickySessionRouting": "セッション固定ルーティング",
+        "stickySessionRoutingDescription": "フェイルオーバー有効時、各セッションを前回応答したプロバイダーに固定します（そのサーキットブレーカーが許可している間）。フェイルオーバー後もプロンプトキャッシュが維持されます",
         "running": "実行中",
         "stopped": "停止中"
       },
@@ -1684,6 +1686,56 @@
     "withMultiplier": "倍率込み",
     "requestDetail": "リクエスト詳細",
     "requestNotFound": "リクエストが見つかりません",
+    "bugReport": {
+      "captureStart": "不具合報告用にキャプチャ",
+      "captureActive": "キャプチャ中 · 残り {{minutes}} 分",
+      "captureHint": "今後 {{minutes}} 分間、プロトコル変換を経由したリクエストを（秘匿化して）記録し、不具合報告としてエクスポートできるようにします",
+      "captureStopHint": "キャプチャを停止",
+      "captureFailed": "キャプチャの切り替えに失敗しました: {{error}}",
+      "export": "不具合報告をエクスポート",
+      "exported": "不具合報告を {{path}} に保存しました",
+      "exportFailed": "不具合報告のエクスポートに失敗しました: {{error}}"
+    },
+    "trace": {
+      "inspect": "ルーティングを確認",
+      "title": "リクエストトレース",
+      "notFound": "このリクエストのトレースはありません。直近 {{count}} 件のプロキシリクエストのみ保持され、アプリの再起動で消去されます。",
+      "attempts": "試行（{{count}}）",
+      "noAttempts": "どのプロバイダーも試行されませんでした",
+      "droppedAttempts": "ほかに {{count}} 件の試行は記録されていません",
+      "reason": "理由",
+      "recovery": "適用したリカバリー",
+      "route": "ルート",
+      "auth": "認証",
+      "flags": "フラグ",
+      "clientHeaders": "クライアントのヘッダー",
+      "upstreamHeaders": "上流へのヘッダー",
+      "ttfb": "TTFB",
+      "firstToken": "最初のトークン",
+      "usageSource": "使用量の取得元",
+      "request": "リクエスト",
+      "status": {
+        "in_flight": "処理中",
+        "succeeded": "成功",
+        "failed": "失敗",
+        "skipped": "スキップ（サーキット遮断）"
+      },
+      "usageSourceValue": {
+        "stream_events": "ストリームイベント",
+        "response_body": "レスポンスボディ",
+        "missing": "なし"
+      }
+    },
+    "parity": {
+      "badge": "使用量の不一致",
+      "detail": "課金 {{normalized}} トークン、上流の報告 {{raw}}（入力 {{input}}、キャッシュ {{cache}}）",
+      "detailNoRaw": "課金 {{normalized}} トークン、上流から usage が返されていません",
+      "issue": {
+        "zero_usage": "成功したリクエストに課金対象の使用量がありません",
+        "cache_exceeds_input": "キャッシュトークンが報告された入力を超えています（二重計上の可能性）",
+        "total_mismatch": "上流の合計が課金合計と一致しません"
+      }
+    },
     "basicInfo": "基本情報",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "キャッシュ作成コスト",
@@ -2651,7 +2703,17 @@
     "degraded": "低下",
     "failed": "失敗",
     "circuitOpen": "サーキットオープン",
-    "consecutiveFailures": "{{count}} 回連続失敗"
+    "consecutiveFailures": "{{count}} 回連続失敗",
+    "circuitClosed": "サーキットクローズ",
+    "circuitHalfOpen": "ハーフオープン",
+    "circuitOpenRemaining": "サーキットオープン · {{seconds}} 秒",
+    "circuitStateTitle": "サーキットブレーカー: {{state}}",
+    "probeNow": "今すぐプローブ",
+    "probing": "プローブ中…",
+    "probeSucceeded": "プローブ成功、サーキットをクローズしました",
+    "probeFailed": "プローブ失敗: {{detail}}",
+    "probeSkipped": "プローブをスキップ: {{detail}}",
+    "probeProxyStopped": "プロキシが起動していません"
   },
   "failover": {
     "enabled": "{{app}} フェイルオーバーが有効になりました",

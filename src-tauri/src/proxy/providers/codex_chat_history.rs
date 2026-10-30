@@ -1,11 +1,11 @@
 use super::codex_chat_common::{is_empty_value, response_item_call_id};
+use crate::proxy::codec::side_store::{SessionSideStore, SideStoreKind, SideStoreScope};
 use crate::proxy::sse::{append_utf8_safe, strip_sse_field, take_sse_block};
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 const MAX_CACHED_RESPONSES: usize = 512;
 
@@ -45,7 +45,7 @@ pub struct CodexChatHistoryStore {
 }
 
 impl CodexChatHistoryStore {
-    pub async fn record_response(&self, response: &Value) -> usize {
+    pub fn record_response(&self, response: &Value) -> usize {
         let Some(response_id) = response
             .get("id")
             .and_then(|value| value.as_str())
@@ -69,16 +69,15 @@ impl CodexChatHistoryStore {
             return 0;
         }
 
-        let mut inner = self.inner.write().await;
-        inner.insert_calls(response_id, calls)
+        self.write_inner().insert_calls(response_id, calls)
     }
 
-    async fn record_call_item(&self, response_id: Option<&str>, item: &Value) -> bool {
+    fn record_call_item(&self, response_id: Option<&str>, item: &Value) -> bool {
         let Some(call) = cached_call_item(item) else {
             return false;
         };
 
-        let mut inner = self.inner.write().await;
+        let mut inner = self.write_inner();
         if let Some(response_id) = response_id.filter(|value| !value.is_empty()) {
             inner.insert_calls(response_id, vec![call]) > 0
         } else {
@@ -86,7 +85,7 @@ impl CodexChatHistoryStore {
         }
     }
 
-    pub async fn enrich_request(&self, body: &mut Value) -> usize {
+    pub fn enrich_request(&self, body: &mut Value) -> usize {
         let previous_response_id = body
             .get("previous_response_id")
             .and_then(|value| value.as_str())
@@ -129,9 +128,7 @@ impl CodexChatHistoryStore {
             .union(&existing_call_ids)
             .cloned()
             .collect::<HashSet<_>>();
-        let lookup = self
-            .lookup(previous_response_id.as_deref(), &requested_call_ids)
-            .await;
+        let lookup = self.lookup(previous_response_id.as_deref(), &requested_call_ids);
 
         let restore_group = lookup.restore_group(&output_call_ids, &existing_call_ids);
 
@@ -193,15 +190,49 @@ impl CodexChatHistoryStore {
         changed
     }
 
-    async fn lookup(
+    fn lookup(
         &self,
         previous_response_id: Option<&str>,
         requested_call_ids: &HashSet<String>,
     ) -> CachedLookup {
-        let inner = self.inner.read().await;
+        let inner = self.read_inner();
         let previous = previous_response_id.and_then(|id| inner.responses.get(id).cloned());
         let fallback = inner.unique_fallback_calls(requested_call_ids, previous.as_ref());
         CachedLookup { previous, fallback }
+    }
+
+    fn read_inner(&self) -> RwLockReadGuard<'_, CodexChatHistoryInner> {
+        self.inner.read().unwrap_or_else(|poisoned| {
+            log::warn!("[CodexChatHistory] recovering poisoned read lock");
+            poisoned.into_inner()
+        })
+    }
+
+    fn write_inner(&self) -> RwLockWriteGuard<'_, CodexChatHistoryInner> {
+        self.inner.write().unwrap_or_else(|poisoned| {
+            log::warn!("[CodexChatHistory] recovering poisoned write lock");
+            poisoned.into_inner()
+        })
+    }
+}
+
+/// 回复侧记录 Responses 回复（`id` + `output`）里的 function call，请求侧补全
+/// Responses 请求 `input` 中缺失的历史 function call。按 `previous_response_id` /
+/// `call_id` 查找，与 provider、会话无关（Codex 子代理等流程会改写会话标识）。
+impl SessionSideStore for CodexChatHistoryStore {
+    type Record = Value;
+    type Restore = Value;
+
+    fn kind(&self) -> SideStoreKind {
+        SideStoreKind::CodexChatHistory
+    }
+
+    fn record(&self, _scope: &SideStoreScope<'_>, record: &mut Value) -> usize {
+        self.record_response(record)
+    }
+
+    fn restore(&self, _scope: &SideStoreScope<'_>, restore: &mut Value) -> usize {
+        self.enrich_request(restore)
     }
 }
 
@@ -380,7 +411,7 @@ pub fn record_responses_sse_stream(
                 Ok(bytes) => {
                     append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
                     while let Some(block) = take_sse_block(&mut buffer) {
-                        inspect_sse_block(&block, &mut current_response_id, history.as_ref()).await;
+                        inspect_sse_block(&block, &mut current_response_id, history.as_ref());
                     }
                     yield Ok(bytes);
                 }
@@ -390,7 +421,7 @@ pub fn record_responses_sse_stream(
     }
 }
 
-async fn inspect_sse_block(
+fn inspect_sse_block(
     block: &str,
     current_response_id: &mut Option<String>,
     history: &CodexChatHistoryStore,
@@ -426,14 +457,12 @@ async fn inspect_sse_block(
     match value.get("type").and_then(|value| value.as_str()) {
         Some("response.output_item.done") => {
             if let Some(item) = value.get("item") {
-                history
-                    .record_call_item(current_response_id.as_deref(), item)
-                    .await;
+                history.record_call_item(current_response_id.as_deref(), item);
             }
         }
         Some("response.completed") => {
             if let Some(response) = value.get("response") {
-                history.record_response(response).await;
+                history.record_response(response);
             }
         }
         _ => {}
@@ -498,23 +527,21 @@ mod tests {
     use futures::StreamExt;
     use serde_json::json;
 
-    #[tokio::test]
-    async fn enriches_tool_output_with_cached_function_call_from_previous_response() {
+    #[test]
+    fn enriches_tool_output_with_cached_function_call_from_previous_response() {
         let history = CodexChatHistoryStore::default();
-        history
-            .record_response(&json!({
-                "id": "resp_1",
-                "output": [
-                    {
-                        "type": "function_call",
-                        "call_id": "call_1",
-                        "name": "read_file",
-                        "arguments": "{\"path\":\"README.md\"}",
-                        "reasoning_content": "Need to inspect the file."
-                    }
-                ]
-            }))
-            .await;
+        history.record_response(&json!({
+            "id": "resp_1",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"README.md\"}",
+                    "reasoning_content": "Need to inspect the file."
+                }
+            ]
+        }));
 
         let mut request = json!({
             "previous_response_id": "resp_1",
@@ -527,30 +554,28 @@ mod tests {
             ]
         });
 
-        assert_eq!(history.enrich_request(&mut request).await, 1);
+        assert_eq!(history.enrich_request(&mut request), 1);
         let input = request["input"].as_array().unwrap();
         assert_eq!(input[0]["type"], "function_call");
         assert_eq!(input[0]["reasoning_content"], "Need to inspect the file.");
         assert_eq!(input[1]["type"], "function_call_output");
     }
 
-    #[tokio::test]
-    async fn restores_unique_call_id_without_matching_previous_response() {
+    #[test]
+    fn restores_unique_call_id_without_matching_previous_response() {
         let history = CodexChatHistoryStore::default();
-        history
-            .record_response(&json!({
-                "id": "resp_1",
-                "output": [
-                    {
-                        "type": "function_call",
-                        "call_id": "call_1",
-                        "name": "read_file",
-                        "arguments": "{}",
-                        "reasoning_content": "This is the only cached call."
-                    }
-                ]
-            }))
-            .await;
+        history.record_response(&json!({
+            "id": "resp_1",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "read_file",
+                    "arguments": "{}",
+                    "reasoning_content": "This is the only cached call."
+                }
+            ]
+        }));
 
         let mut missing_previous = json!({
             "input": [
@@ -561,7 +586,7 @@ mod tests {
                 }
             ]
         });
-        assert_eq!(history.enrich_request(&mut missing_previous).await, 1);
+        assert_eq!(history.enrich_request(&mut missing_previous), 1);
         assert_eq!(missing_previous["input"][0]["type"], "function_call");
         assert_eq!(
             missing_previous["input"][0]["reasoning_content"],
@@ -579,7 +604,7 @@ mod tests {
                 }
             ]
         });
-        assert_eq!(history.enrich_request(&mut different_previous).await, 1);
+        assert_eq!(history.enrich_request(&mut different_previous), 1);
         assert_eq!(different_previous["input"][0]["type"], "function_call");
         assert_eq!(
             different_previous["input"][0]["reasoning_content"],
@@ -591,27 +616,25 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn does_not_restore_ambiguous_call_id_without_previous_response() {
+    #[test]
+    fn does_not_restore_ambiguous_call_id_without_previous_response() {
         let history = CodexChatHistoryStore::default();
         for (response_id, reasoning) in [
             ("resp_1", "This belongs to the first response."),
             ("resp_2", "This belongs to the second response."),
         ] {
-            history
-                .record_response(&json!({
-                    "id": response_id,
-                    "output": [
-                        {
-                            "type": "function_call",
-                            "call_id": "call_1",
-                            "name": "read_file",
-                            "arguments": "{}",
-                            "reasoning_content": reasoning
-                        }
-                    ]
-                }))
-                .await;
+            history.record_response(&json!({
+                "id": response_id,
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "read_file",
+                        "arguments": "{}",
+                        "reasoning_content": reasoning
+                    }
+                ]
+            }));
         }
 
         let mut missing_previous = json!({
@@ -623,7 +646,7 @@ mod tests {
                 }
             ]
         });
-        assert_eq!(history.enrich_request(&mut missing_previous).await, 0);
+        assert_eq!(history.enrich_request(&mut missing_previous), 0);
         assert_eq!(missing_previous["input"][0]["type"], "function_call_output");
 
         let mut different_previous = json!({
@@ -636,30 +659,28 @@ mod tests {
                 }
             ]
         });
-        assert_eq!(history.enrich_request(&mut different_previous).await, 0);
+        assert_eq!(history.enrich_request(&mut different_previous), 0);
         assert_eq!(
             different_previous["input"][0]["type"],
             "function_call_output"
         );
     }
 
-    #[tokio::test]
-    async fn enriches_existing_function_call_missing_reasoning() {
+    #[test]
+    fn enriches_existing_function_call_missing_reasoning() {
         let history = CodexChatHistoryStore::default();
-        history
-            .record_response(&json!({
-                "id": "resp_1",
-                "output": [
-                    {
-                        "type": "function_call",
-                        "call_id": "call_1",
-                        "name": "read_file",
-                        "arguments": "{}",
-                        "reasoning_content": "Need to inspect the file."
-                    }
-                ]
-            }))
-            .await;
+        history.record_response(&json!({
+            "id": "resp_1",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "read_file",
+                    "arguments": "{}",
+                    "reasoning_content": "Need to inspect the file."
+                }
+            ]
+        }));
 
         let mut request = json!({
             "previous_response_id": "resp_1",
@@ -678,29 +699,27 @@ mod tests {
             ]
         });
 
-        assert_eq!(history.enrich_request(&mut request).await, 1);
+        assert_eq!(history.enrich_request(&mut request), 1);
         let input = request["input"].as_array().unwrap();
         assert_eq!(input[0]["reasoning_content"], "Need to inspect the file.");
         assert_eq!(input.len(), 2);
     }
 
-    #[tokio::test]
-    async fn enriches_existing_function_call_missing_name_and_arguments() {
+    #[test]
+    fn enriches_existing_function_call_missing_name_and_arguments() {
         let history = CodexChatHistoryStore::default();
-        history
-            .record_response(&json!({
-                "id": "resp_1",
-                "output": [
-                    {
-                        "type": "function_call",
-                        "call_id": "call_1",
-                        "name": "read_file",
-                        "arguments": "{\"path\":\"README.md\"}",
-                        "reasoning_content": "Need to inspect the file."
-                    }
-                ]
-            }))
-            .await;
+        history.record_response(&json!({
+            "id": "resp_1",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "read_file",
+                    "arguments": "{\"path\":\"README.md\"}",
+                    "reasoning_content": "Need to inspect the file."
+                }
+            ]
+        }));
 
         let mut request = json!({
             "previous_response_id": "resp_1",
@@ -717,7 +736,7 @@ mod tests {
             ]
         });
 
-        assert_eq!(history.enrich_request(&mut request).await, 1);
+        assert_eq!(history.enrich_request(&mut request), 1);
         let input = request["input"].as_array().unwrap();
         assert_eq!(input[0]["type"], "function_call");
         assert_eq!(input[0]["name"], "read_file");
@@ -726,30 +745,28 @@ mod tests {
         assert_eq!(input[1]["type"], "function_call_output");
     }
 
-    #[tokio::test]
-    async fn restores_parallel_tool_calls_as_one_assistant_group() {
+    #[test]
+    fn restores_parallel_tool_calls_as_one_assistant_group() {
         let history = CodexChatHistoryStore::default();
-        history
-            .record_response(&json!({
-                "id": "resp_1",
-                "output": [
-                    {
-                        "type": "function_call",
-                        "call_id": "call_1",
-                        "name": "first",
-                        "arguments": "{}",
-                        "reasoning_content": "Need both tools."
-                    },
-                    {
-                        "type": "function_call",
-                        "call_id": "call_2",
-                        "name": "second",
-                        "arguments": "{}",
-                        "reasoning_content": "Need both tools."
-                    }
-                ]
-            }))
-            .await;
+        history.record_response(&json!({
+            "id": "resp_1",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "first",
+                    "arguments": "{}",
+                    "reasoning_content": "Need both tools."
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "second",
+                    "arguments": "{}",
+                    "reasoning_content": "Need both tools."
+                }
+            ]
+        }));
 
         let mut request = json!({
             "previous_response_id": "resp_1",
@@ -767,7 +784,7 @@ mod tests {
             ]
         });
 
-        assert_eq!(history.enrich_request(&mut request).await, 2);
+        assert_eq!(history.enrich_request(&mut request), 2);
         let input = request["input"].as_array().unwrap();
         assert_eq!(input[0]["type"], "function_call");
         assert_eq!(input[0]["call_id"], "call_1");
@@ -777,31 +794,29 @@ mod tests {
         assert_eq!(input[3]["type"], "function_call_output");
     }
 
-    #[tokio::test]
-    async fn restores_custom_and_tool_search_calls_from_previous_response() {
+    #[test]
+    fn restores_custom_and_tool_search_calls_from_previous_response() {
         let history = CodexChatHistoryStore::default();
-        history
-            .record_response(&json!({
-                "id": "resp_1",
-                "output": [
-                    {
-                        "type": "custom_tool_call",
-                        "call_id": "call_patch",
-                        "name": "apply_patch",
-                        "input": "*** Begin Patch\n*** End Patch",
-                        "reasoning_content": "Need to patch the file."
-                    },
-                    {
-                        "type": "tool_search_call",
-                        "call_id": "call_search",
-                        "status": "completed",
-                        "execution": "client",
-                        "arguments": {"query": "Gmail tools"},
-                        "reasoning_content": "Need to discover tools."
-                    }
-                ]
-            }))
-            .await;
+        history.record_response(&json!({
+            "id": "resp_1",
+            "output": [
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_patch",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** End Patch",
+                    "reasoning_content": "Need to patch the file."
+                },
+                {
+                    "type": "tool_search_call",
+                    "call_id": "call_search",
+                    "status": "completed",
+                    "execution": "client",
+                    "arguments": {"query": "Gmail tools"},
+                    "reasoning_content": "Need to discover tools."
+                }
+            ]
+        }));
 
         let mut request = json!({
             "previous_response_id": "resp_1",
@@ -819,7 +834,7 @@ mod tests {
             ]
         });
 
-        assert_eq!(history.enrich_request(&mut request).await, 2);
+        assert_eq!(history.enrich_request(&mut request), 2);
         let input = request["input"].as_array().unwrap();
         assert_eq!(input[0]["type"], "custom_tool_call");
         assert_eq!(input[0]["call_id"], "call_patch");
@@ -857,7 +872,7 @@ mod tests {
             ]
         });
 
-        assert_eq!(history.enrich_request(&mut request).await, 1);
+        assert_eq!(history.enrich_request(&mut request), 1);
         assert_eq!(request["input"][0]["reasoning_content"], "Need a file.");
     }
 }

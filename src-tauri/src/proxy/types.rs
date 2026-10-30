@@ -88,6 +88,9 @@ pub struct ProxyStatus {
     pub last_error: Option<String>,
     /// Provider故障转移次数
     pub failover_count: u64,
+    /// 回到更高优先级 Provider 的恢复次数（首个尝试即成功，但不是请求开始时的当前供应商）
+    #[serde(default)]
+    pub recovery_count: u64,
     /// 当前活跃的代理目标列表
     #[serde(default)]
     pub active_targets: Vec<ActiveTarget>,

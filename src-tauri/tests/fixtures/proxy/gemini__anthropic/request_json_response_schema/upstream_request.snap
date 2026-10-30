@@ -1,0 +1,24 @@
+---
+source: tests/proxy_golden.rs
+description: "A structured-output call (responseMimeType application/json with responseJsonSchema, as Gemini CLI's utility calls send) adds a JSON-only instruction with the schema to the system prompt; thinkingBudget 0 disables thinking."
+---
+{
+  "model": "claude-haiku-4-5",
+  "system": "Decide who speaks next.\n\nRespond with a single valid JSON value only: no prose, no explanations and no Markdown code fences. The JSON must conform to this JSON Schema: {\"properties\":{\"next_speaker\":{\"enum\":[\"user\",\"model\"],\"type\":\"string\"},\"reasoning\":{\"type\":\"string\"}},\"required\":[\"reasoning\",\"next_speaker\"],\"type\":\"object\"}",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Analyze the last turn"
+        }
+      ]
+    }
+  ],
+  "thinking": {
+    "type": "disabled"
+  },
+  "max_tokens": 8192,
+  "temperature": 0
+}

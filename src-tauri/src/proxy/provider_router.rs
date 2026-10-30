@@ -7,14 +7,56 @@ use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 use crate::proxy::circuit_breaker::{
-    AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
+    AllowResult, CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitProbeResult,
+    CircuitState, HalfOpenPermit,
 };
 use crate::proxy::protocol::{AppRef, BreakerKey};
 use crate::proxy::runtime_config::RuntimeConfigStore;
+use indexmap::IndexMap;
 use std::collections::HashMap;
+use std::future::Future;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+
+/// 会话粘性路由表的容量上限：超出后淘汰最久未使用的会话
+pub const STICKY_SESSION_CAPACITY: usize = 1024;
+
+/// 会话粘性路由表：有界 LRU，(应用, session_id) → 上次成功服务该会话的 provider_id
+///
+/// 让故障转移后的会话继续留在接手的 provider 上，避免回到队首时丢失上游 prompt 缓存。
+struct StickySessions {
+    capacity: usize,
+    /// 按最近使用排序：队首最久未使用，队尾最近使用
+    entries: IndexMap<(AppRef, String), String>,
+}
+
+impl StickySessions {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            entries: IndexMap::new(),
+        }
+    }
+
+    /// 查询并把命中的会话标记为最近使用
+    fn get(&mut self, key: &(AppRef, String)) -> Option<String> {
+        let index = self.entries.get_index_of(key)?;
+        let last = self.entries.len() - 1;
+        self.entries.move_index(index, last);
+        self.entries.get_index(last).map(|(_, id)| id.clone())
+    }
+
+    /// 写入（或刷新）会话映射；超出容量时淘汰最久未使用的会话
+    fn insert(&mut self, key: (AppRef, String), provider_id: String) {
+        self.entries.shift_remove(&key);
+        self.entries.insert(key, provider_id);
+        while self.entries.len() > self.capacity {
+            self.entries.shift_remove_index(0);
+        }
+    }
+}
 
 /// 供应商路由器
 pub struct ProviderRouter {
@@ -24,6 +66,10 @@ pub struct ProviderRouter {
     runtime_config: Arc<RuntimeConfigStore>,
     /// 熔断器管理器 - 每个（应用, 供应商）一个熔断器
     circuit_breakers: Arc<RwLock<HashMap<BreakerKey, Arc<CircuitBreaker>>>>,
+    /// 限流冷却截止时间 - 上游 429/529 带 Retry-After 时写入，与熔断器相互独立
+    cooldowns: Arc<Mutex<HashMap<BreakerKey, Instant>>>,
+    /// 会话粘性路由表（仅在开启「会话粘性路由」时读写）
+    sticky_sessions: Mutex<StickySessions>,
 }
 
 impl ProviderRouter {
@@ -40,6 +86,8 @@ impl ProviderRouter {
             db,
             runtime_config,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
+            cooldowns: Arc::new(Mutex::new(HashMap::new())),
+            sticky_sessions: Mutex::new(StickySessions::new(STICKY_SESSION_CAPACITY)),
         }
     }
 
@@ -47,11 +95,26 @@ impl ProviderRouter {
     ///
     /// 返回按优先级排序的可用供应商列表：
     /// - 故障转移关闭时：仅返回当前供应商
-    /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）
+    /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）；
+    ///   处于限流冷却中的 provider 被跳过，只有其余 provider 都不可用时才按队列顺序兜底返回
     pub async fn select_providers(&self, app_type: &str) -> Result<Vec<Provider>, AppError> {
+        self.select_providers_for_session(app_type, None).await
+    }
+
+    /// 与 [`Self::select_providers`] 相同，但带会话粘性：
+    ///
+    /// `sticky_session` 为 `Some` 且故障转移开启时，若该会话上次成功使用的 provider
+    /// 仍可用（熔断器放行且不在限流冷却中），把它移到队首，其余 provider 保持队列顺序。
+    /// 调用方只在用户开启「会话粘性路由」且 session_id 由客户端提供时传入 `Some`。
+    pub async fn select_providers_for_session(
+        &self,
+        app_type: &str,
+        sticky_session: Option<&str>,
+    ) -> Result<Vec<Provider>, AppError> {
         let mut result = Vec::new();
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
+        let mut cooling_down = Vec::new();
 
         // 检查该应用的自动故障转移开关是否开启（proxy_config，经运行时配置快照）
         let auto_failover_enabled = match self.runtime_config.app_proxy_config(app_type).await {
@@ -77,11 +140,23 @@ impl ProviderRouter {
                 let circuit_key = BreakerKey::new(app_type, provider.id.as_str());
                 let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
-                if breaker.is_available().await {
-                    result.push(provider);
-                } else {
+                if !breaker.is_available().await {
                     circuit_open_count += 1;
+                } else if self.cooldown_remaining(&provider.id, app_type).is_some() {
+                    cooling_down.push(provider);
+                } else {
+                    result.push(provider);
                 }
+            }
+
+            if result.is_empty() && !cooling_down.is_empty() {
+                log::info!(
+                    "[{app_type}] 可用供应商均处于限流冷却中，按队列顺序继续尝试 ({} 个)",
+                    cooling_down.len()
+                );
+                result = cooling_down;
+            } else if let Some(session_id) = sticky_session {
+                self.prefer_sticky_provider(app_type, session_id, &mut result);
             }
         } else {
             // 故障转移关闭：仅使用当前供应商，跳过熔断器检查
@@ -109,6 +184,46 @@ impl ProviderRouter {
         }
 
         Ok(result)
+    }
+
+    /// 把会话的粘性 provider（若在可用列表中）移到队首
+    fn prefer_sticky_provider(&self, app_type: &str, session_id: &str, result: &mut Vec<Provider>) {
+        let Some(sticky_id) = self.sticky_session_provider(app_type, session_id) else {
+            return;
+        };
+        if let Some(index) = result.iter().position(|p| p.id == sticky_id) {
+            if index > 0 {
+                log::debug!(
+                    "[{app_type}] 会话粘性路由: session={session_id} 优先使用 provider_id={sticky_id}"
+                );
+                let sticky = result.remove(index);
+                result.insert(0, sticky);
+            }
+        }
+    }
+
+    /// 记录成功服务该会话的 provider（会话粘性路由）
+    pub fn remember_session_provider(&self, app_type: &str, session_id: &str, provider_id: &str) {
+        if session_id.is_empty() {
+            return;
+        }
+        let mut sticky = self
+            .sticky_sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        sticky.insert(
+            (AppRef::from(app_type), session_id.to_string()),
+            provider_id.to_string(),
+        );
+    }
+
+    /// 该会话当前粘住的 provider（并标记为最近使用）
+    pub fn sticky_session_provider(&self, app_type: &str, session_id: &str) -> Option<String> {
+        let mut sticky = self
+            .sticky_sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        sticky.get(&(AppRef::from(app_type), session_id.to_string()))
     }
 
     /// 请求执行前获取熔断器“放行许可”
@@ -139,14 +254,7 @@ impl ProviderRouter {
 
         // 1. 按应用独立获取熔断器配置；读取失败时回退到熔断器自身的阈值，
         //    保证数据库健康状态与熔断器使用同一个阈值
-        let failure_threshold = match self.runtime_config.app_proxy_config(app_type).await {
-            Ok(app_config) => app_config.circuit_failure_threshold,
-            Err(e) => {
-                let fallback = breaker.failure_threshold().await;
-                log::warn!("[{app_type}] 读取 proxy_config 失败: {e}，使用熔断器阈值 {fallback}");
-                fallback
-            }
-        };
+        let failure_threshold = self.failure_threshold_for(app_type, &breaker).await;
 
         // 2. 更新熔断器状态
 
@@ -168,6 +276,115 @@ impl ProviderRouter {
             .await?;
 
         Ok(())
+    }
+
+    /// 手动探测（"立即探测"）：经 HalfOpen 路径发送一次探测请求并记录结果
+    ///
+    /// - Closed：不发请求，直接返回当前状态（`probed = false`）
+    /// - Open：不等待超时，立即切到 HalfOpen 并占用探测名额
+    /// - HalfOpen：已有探测在途时不发请求（`probed = false`）
+    ///
+    /// `probe` 发出实际请求，`Ok(())` 表示供应商已恢复。成功后熔断器直接 Closed，
+    /// 失败则重新 Open；结果同步写入数据库健康状态。
+    pub async fn probe_provider<F, Fut>(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        probe: F,
+    ) -> Result<CircuitProbeResult, AppError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<(), String>>,
+    {
+        let circuit_key = BreakerKey::new(app_type, provider_id);
+        let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
+
+        let allow = breaker.begin_manual_probe().await;
+        if !allow.allowed {
+            let stats = breaker.get_stats().await;
+            let reason = match stats.state {
+                CircuitState::Closed => "circuit breaker is closed",
+                _ => "a half-open probe is already in flight",
+            };
+            return Ok(CircuitProbeResult {
+                probed: false,
+                success: false,
+                message: Some(reason.to_string()),
+                stats,
+            });
+        }
+
+        let failure_threshold = self.failure_threshold_for(app_type, &breaker).await;
+        let outcome = probe().await;
+        let success = outcome.is_ok();
+        let error_msg = outcome.err();
+        log::info!(
+            "[{app_type}] 手动探测 provider_id={provider_id}: {}",
+            if success { "成功" } else { "失败" }
+        );
+
+        breaker
+            .record_manual_probe_result(allow.permit.as_ref(), success)
+            .await;
+        self.db
+            .update_provider_health_with_threshold(
+                provider_id,
+                app_type,
+                success,
+                error_msg.clone(),
+                failure_threshold,
+            )
+            .await?;
+
+        Ok(CircuitProbeResult {
+            probed: true,
+            success,
+            message: error_msg,
+            stats: breaker.get_stats().await,
+        })
+    }
+
+    /// 健康状态使用的失败阈值：按应用读取配置，失败时回退到熔断器自身的阈值
+    async fn failure_threshold_for(&self, app_type: &str, breaker: &CircuitBreaker) -> u32 {
+        match self.runtime_config.app_proxy_config(app_type).await {
+            Ok(app_config) => app_config.circuit_failure_threshold,
+            Err(e) => {
+                let fallback = breaker.failure_threshold().await;
+                log::warn!("[{app_type}] 读取 proxy_config 失败: {e}，使用熔断器阈值 {fallback}");
+                fallback
+            }
+        }
+    }
+
+    /// 让 provider 进入限流冷却（上游 429/529 的 Retry-After）
+    ///
+    /// 冷却只影响 [`Self::select_providers`] 的选择顺序，不改变熔断器状态；
+    /// 已有更晚的冷却截止时间时保留较晚者。`duration` 为零时不做任何事。
+    pub fn start_cooldown(&self, provider_id: &str, app_type: &str, duration: Duration) {
+        if duration.is_zero() {
+            return;
+        }
+        let until = Instant::now() + duration;
+        let mut cooldowns = self.cooldowns.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = cooldowns
+            .entry(BreakerKey::new(app_type, provider_id))
+            .or_insert(until);
+        if *entry < until {
+            *entry = until;
+        }
+    }
+
+    /// provider 剩余的限流冷却时长（未在冷却中时返回 `None`，并清理已过期的记录）
+    pub fn cooldown_remaining(&self, provider_id: &str, app_type: &str) -> Option<Duration> {
+        let key = BreakerKey::new(app_type, provider_id);
+        let mut cooldowns = self.cooldowns.lock().unwrap_or_else(|e| e.into_inner());
+        let until = *cooldowns.get(&key)?;
+        let remaining = until.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            cooldowns.remove(&key);
+            return None;
+        }
+        Some(remaining)
     }
 
     /// 重置熔断器（手动恢复）
@@ -219,13 +436,12 @@ impl ProviderRouter {
         }
     }
 
-    /// 获取熔断器状态
-    #[allow(dead_code)] // reserved for the breaker UI probe (p3-breaker-ui-probe)
+    /// 获取熔断器状态（该供应商尚无熔断器实例时返回 `None`）
     pub async fn get_circuit_breaker_stats(
         &self,
         provider_id: &str,
         app_type: &str,
-    ) -> Option<crate::proxy::circuit_breaker::CircuitBreakerStats> {
+    ) -> Option<CircuitBreakerStats> {
         let circuit_key = BreakerKey::new(app_type, provider_id);
         let breakers = self.circuit_breakers.read().await;
 
@@ -468,6 +684,162 @@ mod tests {
         // 故障转移开启时：仅按队列顺序选择（忽略当前供应商）
         assert_eq!(providers[0].id, "b");
         assert_eq!(providers[1].id, "a");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_cooldown_skips_provider_until_it_expires() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        for id in ["a", "b"] {
+            let provider = Provider::with_id(id.to_string(), id.to_string(), json!({}), None);
+            db.save_provider("claude", &provider).unwrap();
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        let ids = |providers: Vec<Provider>| -> Vec<String> {
+            providers.into_iter().map(|p| p.id).collect()
+        };
+
+        // 零时长不进入冷却；更短的冷却不会覆盖更长的
+        router.start_cooldown("a", "claude", Duration::ZERO);
+        assert!(router.cooldown_remaining("a", "claude").is_none());
+        router.start_cooldown("a", "claude", Duration::from_millis(200));
+        router.start_cooldown("a", "claude", Duration::from_millis(1));
+        assert!(router.cooldown_remaining("a", "claude").unwrap() > Duration::from_millis(100));
+        assert!(
+            router.cooldown_remaining("a", "codex").is_none(),
+            "cooldowns are per app"
+        );
+
+        assert_eq!(ids(router.select_providers("claude").await.unwrap()), ["b"]);
+
+        // 其余 provider 也都在冷却中：按队列顺序兜底，而不是报「未配置供应商」
+        router.start_cooldown("b", "claude", Duration::from_millis(200));
+        assert_eq!(
+            ids(router.select_providers("claude").await.unwrap()),
+            ["a", "b"]
+        );
+
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(router.cooldown_remaining("a", "claude").is_none());
+        assert_eq!(
+            ids(router.select_providers("claude").await.unwrap()),
+            ["a", "b"]
+        );
+        let breaker = router
+            .get_circuit_breaker_stats("a", "claude")
+            .await
+            .unwrap();
+        assert_eq!(breaker.state, CircuitState::Closed);
+    }
+
+    #[test]
+    fn test_sticky_sessions_evicts_least_recently_used() {
+        let key = |s: &str| (AppRef::from("claude"), s.to_string());
+        let mut sticky = StickySessions::new(2);
+        sticky.insert(key("s1"), "a".to_string());
+        sticky.insert(key("s2"), "b".to_string());
+        // 读取 s1 让它变成最近使用，下一次写入淘汰 s2
+        assert_eq!(sticky.get(&key("s1")).as_deref(), Some("a"));
+        sticky.insert(key("s3"), "c".to_string());
+        assert_eq!(sticky.entries.len(), 2);
+        assert!(sticky.get(&key("s2")).is_none());
+        assert_eq!(sticky.get(&key("s1")).as_deref(), Some("a"));
+        assert_eq!(sticky.get(&key("s3")).as_deref(), Some("c"));
+        // 覆盖写入不增加条目
+        sticky.insert(key("s1"), "b".to_string());
+        assert_eq!(sticky.entries.len(), 2);
+        assert_eq!(sticky.get(&key("s1")).as_deref(), Some("b"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_sticky_session_table_is_bounded() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = ProviderRouter::new(db);
+
+        for i in 0..=STICKY_SESSION_CAPACITY {
+            router.remember_session_provider("claude", &format!("s{i}"), "a");
+        }
+        let len = router.sticky_sessions.lock().unwrap().entries.len();
+        assert_eq!(len, STICKY_SESSION_CAPACITY);
+        assert!(router.sticky_session_provider("claude", "s0").is_none());
+        assert_eq!(
+            router
+                .sticky_session_provider("claude", &format!("s{STICKY_SESSION_CAPACITY}"))
+                .as_deref(),
+            Some("a")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_sticky_session_prefers_its_provider_while_available() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        db.update_circuit_breaker_config(&CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 600,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        for id in ["a", "b", "c"] {
+            let provider = Provider::with_id(id.to_string(), id.to_string(), json!({}), None);
+            db.save_provider("claude", &provider).unwrap();
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        let ids = |providers: Vec<Provider>| -> Vec<String> {
+            providers.into_iter().map(|p| p.id).collect()
+        };
+        let select = |session: Option<&'static str>| {
+            let router = &router;
+            async move {
+                ids(router
+                    .select_providers_for_session("claude", session)
+                    .await
+                    .unwrap())
+            }
+        };
+
+        router.remember_session_provider("claude", "s1", "b");
+        assert_eq!(select(Some("s1")).await, ["b", "a", "c"]);
+        // 其他会话、未开启粘性（None）与其他应用均不受影响
+        assert_eq!(select(Some("s2")).await, ["a", "b", "c"]);
+        assert_eq!(select(None).await, ["a", "b", "c"]);
+        assert!(router.sticky_session_provider("codex", "s1").is_none());
+
+        // 粘性 provider 处于限流冷却中：回到队列顺序
+        router.start_cooldown("b", "claude", Duration::from_secs(60));
+        assert_eq!(select(Some("s1")).await, ["a", "c"]);
+
+        // 粘性 provider 熔断：回到队列顺序
+        let router = ProviderRouter::new(db.clone());
+        router.remember_session_provider("claude", "s1", "b");
+        router
+            .record_result("b", "claude", None, false, Some("fail".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(router
+                .select_providers_for_session("claude", Some("s1"))
+                .await
+                .unwrap()),
+            ["a", "c"]
+        );
     }
 
     #[tokio::test]

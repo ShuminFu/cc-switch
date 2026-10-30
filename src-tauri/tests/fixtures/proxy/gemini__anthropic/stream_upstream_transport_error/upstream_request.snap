@@ -1,0 +1,20 @@
+---
+source: tests/proxy_golden.rs
+description: An upstream transport error after partial output ends the client stream with a Gemini error frame (500 INTERNAL).
+---
+{
+  "model": "claude-sonnet-4-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192,
+  "stream": true
+}

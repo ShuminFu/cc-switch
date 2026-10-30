@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: An upstream stream cut off after partial text (no message_stop) is finished with MAX_TOKENS so the client does not treat it as a complete answer.
+---
+# stream
+{
+  "input_tokens": 12,
+  "output_tokens": 1,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude-sonnet-4-5",
+  "message_id": null,
+  "billable": true
+}

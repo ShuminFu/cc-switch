@@ -1,0 +1,7 @@
+---
+source: tests/proxy_golden.rs
+description: An upstream transport error after partial output ends the client stream with a Gemini error frame (500 INTERNAL).
+---
+# stream
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},"index":0}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":1,"totalTokenCount":13},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"error":{"code":500,"message":"Stream error: upstream disconnected","status":"INTERNAL"}}

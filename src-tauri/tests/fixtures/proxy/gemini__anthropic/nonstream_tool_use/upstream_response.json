@@ -1,0 +1,26 @@
+{
+  "id": "msg_g1",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "Reading the file."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01A",
+      "name": "read_file",
+      "input": {
+        "absolute_path": "/tmp/a.txt"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 310,
+    "output_tokens": 40
+  }
+}

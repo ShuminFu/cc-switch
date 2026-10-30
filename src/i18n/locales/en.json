@@ -374,6 +374,8 @@
         "enableFeatureDescription": "When enabled, the routing and failover toggles will appear at the top of the main page",
         "enableFailoverToggle": "Show Failover Toggle on Main Page",
         "enableFailoverToggleDescription": "When enabled, the failover toggle will appear independently at the top of the main page",
+        "stickySessionRouting": "Sticky Session Routing",
+        "stickySessionRoutingDescription": "With failover on, keep each session on the provider that last served it while that provider's circuit breaker allows requests, so prompt caches survive a failover",
         "running": "Running",
         "stopped": "Stopped"
       },
@@ -1684,6 +1686,56 @@
     "withMultiplier": "with multiplier",
     "requestDetail": "Request Detail",
     "requestNotFound": "Request not found",
+    "bugReport": {
+      "captureStart": "Capture bug reports",
+      "captureActive": "Capturing · {{minutes}} min left",
+      "captureHint": "Record bridged requests (redacted) for {{minutes}} minutes so they can be exported as bug reports",
+      "captureStopHint": "Stop capturing requests",
+      "captureFailed": "Failed to change bug report capture: {{error}}",
+      "export": "Export bug report",
+      "exported": "Bug report saved to {{path}}",
+      "exportFailed": "Failed to export bug report: {{error}}"
+    },
+    "trace": {
+      "inspect": "Inspect route",
+      "title": "Request trace",
+      "notFound": "No trace for this request. Only the last {{count}} proxied requests are kept, and traces are cleared when the app restarts.",
+      "attempts": "Attempts ({{count}})",
+      "noAttempts": "No provider was attempted",
+      "droppedAttempts": "{{count}} more attempts were not recorded",
+      "reason": "Reason",
+      "recovery": "Recovery applied",
+      "route": "Route",
+      "auth": "Auth",
+      "flags": "Flags",
+      "clientHeaders": "Client headers",
+      "upstreamHeaders": "Upstream headers",
+      "ttfb": "TTFB",
+      "firstToken": "First token",
+      "usageSource": "Usage source",
+      "request": "Request",
+      "status": {
+        "in_flight": "In flight",
+        "succeeded": "Succeeded",
+        "failed": "Failed",
+        "skipped": "Skipped (circuit open)"
+      },
+      "usageSourceValue": {
+        "stream_events": "Stream events",
+        "response_body": "Response body",
+        "missing": "Missing"
+      }
+    },
+    "parity": {
+      "badge": "Usage mismatch",
+      "detail": "billed {{normalized}} tokens, upstream reported {{raw}} (input {{input}}, cache {{cache}})",
+      "detailNoRaw": "billed {{normalized}} tokens, upstream sent no usage block",
+      "issue": {
+        "zero_usage": "No billable usage on a successful request",
+        "cache_exceeds_input": "Cached tokens exceed the reported input (possible double count)",
+        "total_mismatch": "Upstream total differs from the billed total"
+      }
+    },
     "basicInfo": "Basic Info",
     "tokenUsage": "Token Usage",
     "cacheCreationCost": "Cache Creation Cost",
@@ -2651,7 +2703,17 @@
     "degraded": "Degraded",
     "failed": "Failed",
     "circuitOpen": "Circuit Open",
-    "consecutiveFailures": "{{count}} consecutive failures"
+    "consecutiveFailures": "{{count}} consecutive failures",
+    "circuitClosed": "Circuit Closed",
+    "circuitHalfOpen": "Half-Open",
+    "circuitOpenRemaining": "Circuit Open · {{seconds}}s",
+    "circuitStateTitle": "Circuit breaker: {{state}}",
+    "probeNow": "Probe now",
+    "probing": "Probing…",
+    "probeSucceeded": "Probe succeeded, circuit closed",
+    "probeFailed": "Probe failed: {{detail}}",
+    "probeSkipped": "Probe skipped: {{detail}}",
+    "probeProxyStopped": "The proxy is not running"
   },
   "failover": {
     "enabled": "{{app}} failover enabled",

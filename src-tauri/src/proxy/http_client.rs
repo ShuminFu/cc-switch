@@ -162,8 +162,17 @@ pub fn get_current_proxy_url() -> Option<String> {
         .and_then(|url| url.clone())
 }
 
+/// 确保进程级 rustls provider 已安装（ring，与 lib.rs 启动时一致）
+///
+/// reqwest 以 `rustls-no-provider` 编译，未安装 provider 时构建客户端会 panic；
+/// 构建任何 reqwest 客户端前调用此函数。重复调用是无害的。
+pub fn ensure_tls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// 构建 HTTP 客户端
 fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
+    ensure_tls_provider();
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(600))
         .connect_timeout(Duration::from_secs(30))
@@ -353,6 +362,25 @@ mod tests {
     fn test_build_client_direct() {
         let result = build_client(None);
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_build_client_uses_ring_provider() {
+        // reqwest 以 rustls-no-provider 编译：build_client 须自行确保 ring
+        // provider 已安装，否则构建客户端会 panic。
+        let client = build_client(None).expect("client builds with ring provider");
+        assert!(
+            rustls::crypto::CryptoProvider::get_default().is_some(),
+            "build_client must install the process-level rustls provider"
+        );
+        // 只校验 TLS 后端可用：请求本机未监听端口，应以连接错误结束而非构建错误
+        let err = client
+            .get("https://127.0.0.1:9/")
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+            .expect_err("nothing listens on the discard port");
+        assert!(!err.is_builder(), "unexpected builder error: {err}");
     }
 
     #[test]

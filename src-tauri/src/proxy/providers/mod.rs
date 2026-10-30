@@ -58,7 +58,7 @@ pub use codex::{
     resolve_codex_catalog_tool_profile, resolve_codex_chat_reasoning_config,
     should_convert_codex_responses_to_anthropic, should_convert_codex_responses_to_chat,
 };
-pub use gemini::GeminiAdapter;
+pub use gemini::{should_convert_gemini_to_anthropic, GeminiAdapter, GeminiGenerateEndpoint};
 
 /// 供应商类型枚举
 ///

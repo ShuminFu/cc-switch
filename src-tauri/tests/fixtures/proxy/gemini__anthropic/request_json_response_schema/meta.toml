@@ -1,0 +1,6 @@
+intent = "A structured-output call (responseMimeType application/json with responseJsonSchema, as Gemini CLI's utility calls send) adds a JSON-only instruction with the schema to the system prompt; thinkingBudget 0 disables thinking."
+source_commit = "0ddfcb2"
+
+[options]
+client_model = "claude-haiku-4-5"
+client_stream = false

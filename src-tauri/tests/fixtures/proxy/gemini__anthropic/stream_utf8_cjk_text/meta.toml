@@ -1,0 +1,2 @@
+intent = "Multi-byte CJK and emoji text survives every chunk split and reaches the client unchanged."
+source_commit = "0ddfcb2"

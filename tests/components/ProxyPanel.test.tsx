@@ -52,6 +52,8 @@ vi.mock("@/lib/query/failover", () => ({
   useProviderHealth: () => ({
     data: { consecutive_failures: 0, is_healthy: true },
   }),
+  useCircuitBreakerStats: () => ({ data: null, dataUpdatedAt: 0 }),
+  useProbeCircuitBreaker: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 const baseConfig: GlobalProxyConfig = {

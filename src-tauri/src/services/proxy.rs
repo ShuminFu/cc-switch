@@ -3338,6 +3338,51 @@ impl ProxyService {
         }
         Ok(())
     }
+
+    /// 获取指定 Provider 的熔断器状态
+    ///
+    /// 代理未运行或该 Provider 尚无熔断器实例时返回 `None`
+    pub async fn get_provider_circuit_breaker_stats(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> Option<crate::proxy::CircuitBreakerStats> {
+        let router = self.provider_router().await?;
+        router
+            .get_circuit_breaker_stats(provider_id, app_type)
+            .await
+    }
+
+    /// 手动探测指定 Provider 的熔断器
+    ///
+    /// 代理未运行时没有内存中的熔断器，返回 `Ok(None)` 且不发出请求
+    pub async fn probe_provider_circuit_breaker<F, Fut>(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        probe: F,
+    ) -> Result<Option<crate::proxy::CircuitProbeResult>, crate::error::AppError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<(), String>>,
+    {
+        let Some(router) = self.provider_router().await else {
+            return Ok(None);
+        };
+        router
+            .probe_provider(provider_id, app_type, probe)
+            .await
+            .map(Some)
+    }
+
+    /// 运行中代理的 ProviderRouter（克隆后立即释放服务器读锁）
+    async fn provider_router(&self) -> Option<Arc<crate::proxy::ProviderRouter>> {
+        self.server
+            .read()
+            .await
+            .as_ref()
+            .map(ProxyServer::provider_router)
+    }
 }
 
 #[cfg(test)]

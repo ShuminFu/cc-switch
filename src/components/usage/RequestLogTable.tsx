@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useRequestLogs } from "@/lib/query/usage";
+import { useProxyCaptureStatus } from "@/lib/query/proxy";
 import { usageApi } from "@/lib/api/usage";
 import { resolveUsageRange } from "@/lib/usageRange";
 import {
@@ -28,8 +29,14 @@ import {
   type LogFilters,
   type UsageRangeSelection,
 } from "@/types/usage";
-import { ChevronLeft, ChevronRight, Download, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Plus, Route } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
+import { RequestTracePanel } from "./RequestTracePanel";
+import { UsageParityBadge } from "./UsageParityBadge";
+import {
+  BugReportCaptureToggle,
+  ExportBugReportButton,
+} from "./BugReportCapture";
 import { PricingEditModal } from "./PricingEditModal";
 import { buildUnpricedModelsCsv, unpricedCsvFileName } from "./unpricedExport";
 import {
@@ -69,6 +76,7 @@ export function RequestLogTable({
   const [pricingModelId, setPricingModelId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [pageInput, setPageInput] = useState("");
+  const [traceRequestId, setTraceRequestId] = useState<string | null>(null);
   const pageSize = 20;
 
   const effectiveFilters: LogFilters = {
@@ -91,6 +99,11 @@ export function RequestLogTable({
       refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
     },
   });
+
+  const { data: captureStatus } = useProxyCaptureStatus(
+    refreshIntervalMs > 0 ? Math.min(refreshIntervalMs, 5000) : 5000,
+  );
+  const capturedRequestIds = new Set(captureStatus?.capturedRequestIds ?? []);
 
   const logs = result?.data ?? [];
   const total = result?.total ?? 0;
@@ -206,6 +219,10 @@ export function RequestLogTable({
               onApply={onRangeChange}
             />
           )}
+
+          <div className="ml-auto">
+            <BugReportCaptureToggle status={captureStatus} />
+          </div>
         </div>
       </div>
 
@@ -386,6 +403,31 @@ export function RequestLogTable({
                           >
                             {log.statusCode}
                           </span>
+                          {log.usageParity && (
+                            <UsageParityBadge parity={log.usageParity} />
+                          )}
+                          {(log.dataSource || "proxy") === "proxy" && (
+                            <span className="ml-1 inline-flex align-middle">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0"
+                                aria-label={t("usage.trace.inspect")}
+                                title={t("usage.trace.inspect")}
+                                onClick={() => setTraceRequestId(log.requestId)}
+                              >
+                                <Route className="h-3.5 w-3.5" />
+                              </Button>
+                            </span>
+                          )}
+                          {capturedRequestIds.has(log.requestId) && (
+                            <span className="ml-1 inline-flex align-middle">
+                              <ExportBugReportButton
+                                requestId={log.requestId}
+                              />
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="text-center text-xs text-muted-foreground">
                           {log.dataSource || "proxy"}
@@ -478,6 +520,13 @@ export function RequestLogTable({
             </div>
           </div>
         </>
+      )}
+
+      {traceRequestId && (
+        <RequestTracePanel
+          requestId={traceRequestId}
+          onClose={() => setTraceRequestId(null)}
+        />
       )}
 
       {pricingModelId !== null && (

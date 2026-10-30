@@ -1,0 +1,8 @@
+intent = "An upstream transport error after partial output ends the client stream with a Gemini error frame (500 INTERNAL)."
+source_commit = "0ddfcb2"
+
+[options]
+upstream_error = "upstream disconnected"
+
+[invariants]
+terminal = "error"

@@ -40,8 +40,26 @@ fn render_anthropic_error(error: ProxyError) -> axum::response::Response {
     error.into_response()
 }
 
-/// Gemini Native 客户端：与 Anthropic 共用 [`ProxyError`] 的默认错误形状
+/// Gemini Native 客户端：与 Anthropic 共用 [`ProxyError`] 的默认错误形状；
+/// Anthropic 上游（Gemini CLI → Anthropic，CCS-187）的错误信封改写为 Gemini 错误体
+/// `{"error": {code, message, status}}`，保留 HTTP 状态码
 fn render_gemini_error(error: ProxyError) -> axum::response::Response {
+    if let ProxyError::UpstreamError {
+        status,
+        body: Some(body),
+    } = &error
+    {
+        let gemini_body = serde_json::from_str::<Value>(body).ok().and_then(|body| {
+            crate::proxy::codec::gemini::client_response::gemini_error_from_anthropic(
+                &body, *status,
+            )
+        });
+        if let Some(gemini_body) = gemini_body {
+            let status = axum::http::StatusCode::from_u16(*status)
+                .unwrap_or(axum::http::StatusCode::BAD_GATEWAY);
+            return (status, axum::Json(gemini_body)).into_response();
+        }
+    }
     error.into_response()
 }
 

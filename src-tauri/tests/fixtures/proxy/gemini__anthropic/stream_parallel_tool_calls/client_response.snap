@@ -1,0 +1,7 @@
+---
+source: tests/proxy_golden.rs
+description: "Parallel tool_use blocks whose input arrives as input_json_delta fragments are emitted as complete functionCall frames when each block stops, in block order."
+---
+# stream
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"toolu_X1","name":"read_file","args":{"absolute_path":"/a"}}}]},"index":0}],"usageMetadata":{"promptTokenCount":80,"candidatesTokenCount":1,"totalTokenCount":81},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"toolu_X2","name":"read_file","args":{"absolute_path":"/b","limit":10}}}]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":80,"candidatesTokenCount":30,"totalTokenCount":110},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}

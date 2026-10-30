@@ -4,7 +4,9 @@
 
 pub mod body_filter;
 pub mod cache_injector;
+pub(crate) mod capture;
 pub mod circuit_breaker;
+pub mod codec;
 pub(crate) mod content_encoding;
 pub mod copilot_optimizer;
 pub(crate) mod endpoints;
@@ -17,6 +19,7 @@ pub mod gemini_url;
 pub mod handler_config;
 pub mod handler_context;
 mod handlers;
+pub(crate) mod header_case;
 pub mod http_client;
 pub mod hyper_client;
 pub mod inbound_auth;
@@ -24,6 +27,7 @@ pub(crate) mod json_canonical;
 pub mod log_codes;
 pub mod media_sanitizer;
 pub mod model_mapper;
+pub(crate) mod pipeline;
 pub mod protocol;
 pub mod provider_router;
 pub mod providers;
@@ -33,17 +37,19 @@ pub(crate) mod runtime_config;
 pub(crate) mod server;
 pub mod session;
 pub(crate) mod sse;
+pub(crate) mod stream;
 pub(crate) mod switch_lock;
 pub mod thinking_budget_rectifier;
 pub mod thinking_optimizer;
 pub mod thinking_rectifier;
+pub(crate) mod trace;
 pub(crate) mod types;
 pub mod usage;
 
 // 公开导出给外部使用（commands, services等模块需要）
 #[allow(unused_imports)]
 pub use circuit_breaker::{
-    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
+    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitProbeResult, CircuitState,
 };
 #[allow(unused_imports)]
 pub use error::ProxyError;

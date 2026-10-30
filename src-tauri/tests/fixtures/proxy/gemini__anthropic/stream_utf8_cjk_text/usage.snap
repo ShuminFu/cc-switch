@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: Multi-byte CJK and emoji text survives every chunk split and reaches the client unchanged.
+---
+# stream
+{
+  "input_tokens": 5,
+  "output_tokens": 6,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude-sonnet-4-5",
+  "message_id": null,
+  "billable": true
+}

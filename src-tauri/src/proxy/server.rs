@@ -9,6 +9,7 @@
 //! a direct (non-proxied) CLI request.
 
 use super::{
+    capture::CaptureStore,
     endpoints::{RouteMethod, CLIENT_ENDPOINTS},
     failover_switch::FailoverSwitchManager,
     forwarder::ForwarderDeps,
@@ -18,6 +19,7 @@ use super::{
     provider_router::ProviderRouter,
     providers::{codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore},
     runtime_config::RuntimeConfigStore,
+    trace::TraceStore,
     types::*,
     ProxyError,
 };
@@ -56,6 +58,10 @@ pub struct ProxyState {
     pub runtime_config: Arc<RuntimeConfigStore>,
     /// forwarder 的共享依赖（含 AppHandle 与故障转移切换管理器；每个请求只克隆这一个 `Arc`）
     pub forwarder_deps: Arc<ForwarderDeps>,
+    /// 缺陷报告抓包（默认为应用级共享存储，见 [`CaptureStore::global`]）
+    pub capture: Arc<CaptureStore>,
+    /// 最近请求的追踪（默认为应用级共享存储，见 [`TraceStore::global`]）
+    pub traces: Arc<TraceStore>,
 }
 
 impl ProxyState {
@@ -92,6 +98,8 @@ impl ProxyState {
             codex_chat_history,
             runtime_config,
             forwarder_deps,
+            capture: CaptureStore::global(),
+            traces: TraceStore::global(),
         }
     }
 
@@ -159,6 +167,18 @@ impl ProxyServer {
             shutdown_tx: Arc::new(RwLock::new(None)),
             server_handle: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// 替换抓包存储（须在 [`start`](Self::start) 之前调用；测试用独立存储隔离彼此）
+    #[cfg_attr(not(feature = "testkit"), allow(dead_code))]
+    pub(crate) fn set_capture_store(&mut self, store: Arc<CaptureStore>) {
+        self.state.capture = store;
+    }
+
+    /// 替换追踪存储（须在 [`start`](Self::start) 之前调用；测试用独立存储隔离彼此）
+    #[cfg_attr(not(feature = "testkit"), allow(dead_code))]
+    pub(crate) fn set_trace_store(&mut self, store: Arc<TraceStore>) {
+        self.state.traces = store;
     }
 
     pub async fn start(&self) -> Result<ProxyServerInfo, ProxyError> {
@@ -246,30 +266,15 @@ impl ProxyServer {
 
                         let app = app.clone();
                         tokio::spawn(async move {
-                            // Peek raw TCP bytes to capture original header casing
-                            // before hyper parses (and lowercases) the header names.
-                            let original_cases = {
-                                let mut peek_buf = vec![0u8; 8192];
-                                match stream.peek(&mut peek_buf).await {
-                                    Ok(n) => {
-                                        let cases = super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..n]);
-                                        log::debug!(
-                                            "[ProxyServer] Peeked {} bytes, captured {} header casings",
-                                            n, cases.cases.len()
-                                        );
-                                        cases
-                                    }
-                                    Err(e) => {
-                                        log::debug!("[ProxyServer] peek failed (non-fatal): {e}");
-                                        super::hyper_client::OriginalHeaderCases::default()
-                                    }
-                                }
-                            };
+                            // Record each request head's original header casing from
+                            // the bytes hyper reads, before hyper lowercases the names.
+                            let recorder = super::header_case::SharedHeaderCaseRecorder::default();
+                            let io = super::header_case::RecordingIo::new(stream, recorder.clone());
 
                             // service_fn 将 axum Router（tower::Service）桥接到 hyper
                             let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                                 let mut router = app.clone();
-                                let cases = original_cases.clone();
+                                let cases = super::header_case::take_cases(&recorder, &req);
                                 async move {
                                     // 将 hyper::body::Incoming 转为 axum::body::Body，保留 extensions
                                     let (mut parts, body) = req.into_parts();
@@ -285,7 +290,7 @@ impl ProxyServer {
 
                             if let Err(e) = hyper::server::conn::http1::Builder::new()
                                 .preserve_header_case(true)
-                                .serve_connection(TokioIo::new(stream), service)
+                                .serve_connection(TokioIo::new(io), service)
                                 .await
                             {
                                 // Connection reset / broken pipe 等在代理场景下很常见，debug 级别
@@ -471,5 +476,13 @@ impl ProxyServer {
             .provider_router
             .reset_provider_breaker(provider_id, app_type)
             .await;
+    }
+
+    /// 共享的 ProviderRouter（持有熔断器状态）
+    ///
+    /// 供熔断器状态查询与手动探测使用：调用方克隆 `Arc` 后即可释放对服务器的借用，
+    /// 避免探测请求期间一直占用 `ProxyService` 的服务器锁。
+    pub fn provider_router(&self) -> Arc<ProviderRouter> {
+        self.state.provider_router.clone()
     }
 }

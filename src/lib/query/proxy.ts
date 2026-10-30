@@ -245,3 +245,86 @@ export function useUpdateAppProxyConfig() {
     },
   });
 }
+
+// ========== 缺陷报告抓包 Hooks ==========
+
+/** 开启抓包时的默认时长（分钟），与后端 DEFAULT_CAPTURE_MINUTES 一致 */
+export const BUG_REPORT_CAPTURE_MINUTES = 10;
+
+const proxyCaptureStatusKey = ["proxyCaptureStatus"] as const;
+
+/**
+ * 获取缺陷报告抓包状态（是否开启、剩余时间、可导出的请求 ID）
+ */
+export function useProxyCaptureStatus(refetchIntervalMs = 5000) {
+  return useQuery({
+    queryKey: proxyCaptureStatusKey,
+    queryFn: () => proxyApi.getCaptureStatus(),
+    refetchInterval: refetchIntervalMs > 0 ? refetchIntervalMs : false,
+  });
+}
+
+/**
+ * 开启（限时）或关闭缺陷报告抓包
+ */
+export function useToggleProxyCapture() {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      enabled
+        ? proxyApi.startCapture(BUG_REPORT_CAPTURE_MINUTES)
+        : proxyApi.stopCapture(),
+    onSuccess: (status) => {
+      queryClient.setQueryData(proxyCaptureStatusKey, status);
+    },
+    onError: (error: Error) => {
+      toast.error(
+        t("usage.bugReport.captureFailed", {
+          error: error.message,
+        }),
+      );
+    },
+  });
+}
+
+/**
+ * 导出请求的缺陷报告（脱敏的 golden fixture zip）
+ */
+export function useExportBugReport() {
+  const { t } = useTranslation();
+
+  return useMutation({
+    mutationFn: (requestId: string) => proxyApi.exportBugReport(requestId),
+    onSuccess: (path) => {
+      if (!path) return;
+      toast.success(
+        t("usage.bugReport.exported", {
+          path,
+        }),
+        { closeButton: true },
+      );
+    },
+    onError: (error: Error) => {
+      toast.error(
+        t("usage.bugReport.exportFailed", {
+          error: error.message,
+        }),
+      );
+    },
+  });
+}
+
+// ========== 请求追踪 Hooks ==========
+
+/**
+ * 获取请求日志行对应的请求追踪（路由计划、各次尝试与原因）
+ */
+export function useProxyRequestTrace(requestId: string | null) {
+  return useQuery({
+    queryKey: ["proxyRequestTrace", requestId],
+    queryFn: () => proxyApi.getRequestTrace(requestId as string),
+    enabled: requestId != null,
+  });
+}

@@ -40,13 +40,15 @@ tauri-plugin-store = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-notification = "2"
-dirs = "5.0"
+dirs = "6.0"
 toml = "0.8"
 toml_edit = "0.22"
-reqwest = { version = "0.12", features = ["rustls-tls", "json", "stream", "socks"] }
+# rustls-no-provider: reuse the ring provider installed at startup (see http_client)
+# instead of linking reqwest's aws-lc-rs default; verification uses the OS trust store.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "charset", "http2", "system-proxy", "json", "stream", "socks", "query", "form"] }
 arboard = "3.6"
 flate2 = "1"
-brotli = "7"
+brotli = "8"
 zstd = "0.13"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "process"] }
 futures = "0.3"
@@ -63,7 +65,7 @@ http-body-util = "0.1"
 httparse = "1"
 tokio-rustls = "0.26"
 rustls = "0.23"
-webpki-roots = "0.26"
+webpki-roots = "1.0"
 rustls-native-certs = "0.8"
 regex = "1.10"
 rquickjs = { version = "0.8", features = ["array-buffer", "classes"] }
@@ -134,6 +136,7 @@ serial_test = "3"
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
 insta = "1"
+proptest = { version = "1", default-features = false, features = ["std"] }
 # Self dev-dependency: integration tests (tests/proxy_golden.rs) link the lib with `testkit` enabled.
 cc-switch = { path = ".", features = ["testkit"] }
 # CCS-116 bindings spike: only linked into test builds; see docs/dev/adr/bindings.md.

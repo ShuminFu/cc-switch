@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "An Anthropic overloaded_error event mid-stream flushes the pending text frame and ends the stream with a Gemini error frame (503 UNAVAILABLE), without a finishReason."
+---
+# stream
+{
+  "input_tokens": 12,
+  "output_tokens": 1,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude-sonnet-4-5",
+  "message_id": null,
+  "billable": true
+}

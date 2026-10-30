@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: "The same Chat text reply converts to the same Anthropic content, stop_reason and usage in stream and non-stream mode."
+---
+# stream
+{
+  "input_tokens": 9,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_par",
+  "billable": true
+}
+
+# non-stream
+{
+  "input_tokens": 9,
+  "output_tokens": 4,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "gpt-4o",
+  "message_id": "chatcmpl_par",
+  "billable": true
+}

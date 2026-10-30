@@ -1,0 +1,98 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Summarize the README"
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "functionCall": {
+            "id": "toolu_R1",
+            "name": "read_file",
+            "args": {
+              "absolute_path": "/README.md"
+            }
+          },
+          "thoughtSignature": "ccswitch-anthropic-thinking-list-v1:W3sidHlwZSI6InRoaW5raW5nIiwidGhpbmtpbmciOiJOZWVkIHRoZSBSRUFETUUuIiwic2lnbmF0dXJlIjoiRXFRQnNpZ1JFUExBWSJ9XQ"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "toolu_R1",
+            "name": "read_file",
+            "response": {
+              "output": "# Project"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "read_file",
+          "description": "Reads a file from the local filesystem.",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "absolute_path": {
+                "type": "STRING",
+                "description": "Absolute path"
+              },
+              "offset": {
+                "type": "NUMBER",
+                "nullable": true
+              },
+              "limit": {
+                "type": "NUMBER"
+              }
+            },
+            "required": [
+              "absolute_path"
+            ]
+          }
+        },
+        {
+          "name": "run_shell_command",
+          "description": "Runs a shell command.",
+          "parametersJsonSchema": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "directory": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      ]
+    },
+    {
+      "googleSearch": {}
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 24000,
+    "thinkingConfig": {
+      "thinkingBudget": 8000
+    }
+  }
+}

@@ -17,7 +17,8 @@ use std::sync::OnceLock;
 /// This is a backup mechanism independent of hyper's internal `HeaderCaseMap` (which is
 /// `pub(crate)` and cannot be directly inspected or constructed from outside hyper).
 ///
-/// Populated in `server.rs` by peeking at raw TCP bytes before hyper parses them.
+/// Populated per request in `server.rs` from the raw bytes hyper reads (see
+/// `header_case::RecordingIo`).
 /// Used in `send_request` to manually write headers with original casing when hyper's
 /// own mechanism fails.
 #[derive(Clone, Debug, Default)]
@@ -28,9 +29,13 @@ pub(crate) struct OriginalHeaderCases {
 }
 
 impl OriginalHeaderCases {
-    /// Parse raw HTTP request bytes (from TcpStream::peek) to extract original header casings.
+    /// Parse raw HTTP request bytes to extract original header casings (test helper;
+    /// the server records casing per request through `header_case::RecordingIo`).
+    #[cfg(test)]
     pub fn from_raw_bytes(buf: &[u8]) -> Self {
-        let mut headers_buf = [httparse::EMPTY_HEADER; 128];
+        // Every header occupies at least one line, so this never runs out.
+        let line_count = buf.iter().filter(|&&b| b == b'\n').count();
+        let mut headers_buf = vec![httparse::EMPTY_HEADER; line_count];
         let mut req = httparse::Request::new(&mut headers_buf);
         // We don't care if parsing is partial — we just want the header names we can get
         let _ = req.parse(buf);
@@ -230,7 +235,7 @@ impl ProxyResponse {
 ///
 /// Uses a two-tier strategy:
 /// 1. Primary: raw HTTP/1.1 write via TLS stream with exact original header casing
-///    (from `OriginalHeaderCases` captured by peek in server.rs), then hand off to
+///    (from `OriginalHeaderCases` recorded per request in server.rs), then hand off to
 ///    hyper for response parsing.
 /// 2. Fallback: hyper-util Client with `title_case_headers(true)` when raw write
 ///    isn't feasible (e.g., missing original cases).

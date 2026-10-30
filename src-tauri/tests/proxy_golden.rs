@@ -1,4 +1,4 @@
-//! Golden tests for the protocol bridges (Anthropic and Responses clients).
+//! Golden tests for the protocol bridges (Anthropic, Responses and Gemini clients).
 //!
 //! Each directory under `tests/fixtures/proxy/<bridge>/<case>/` is one case
 //! (see `proxy::providers::testkit` for the layout). For every case this test
@@ -6,11 +6,15 @@
 //! usage with insta, re-splits stream inputs at every chunk boundary, and
 //! checks the structural invariants of every output.
 //!
+//! Bridges migrated to codecs (see `proxy::codec::bridge`) run every fixture
+//! under both conversion engines against the same snapshots, and the parity
+//! checker compares the two engines' raw outputs case by case.
+//!
 //! Update snapshots after an intended behaviour change with
 //! `INSTA_UPDATE=always cargo test --test proxy_golden` (or `cargo insta review`)
 //! and review the diff.
 
-use cc_switch_lib::proxy_testkit::{self as testkit, Bridge, Fixture};
+use cc_switch_lib::proxy_testkit::{self as testkit, Bridge, CodecEngine, Fixture};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
@@ -50,6 +54,10 @@ fn assert_snapshots(fixture: &Fixture, outcome: &testkit::FixtureOutcome) {
 }
 
 fn run_bridge(bridge: Bridge) {
+    run_bridge_with(bridge, CodecEngine::Legacy);
+}
+
+fn run_bridge_with(bridge: Bridge, engine: CodecEngine) {
     let fixtures = load(bridge);
     assert!(
         !fixtures.is_empty(),
@@ -59,7 +67,7 @@ fn run_bridge(bridge: Bridge) {
 
     let mut report = Vec::new();
     for fixture in &fixtures {
-        let outcome = testkit::run_fixture(fixture);
+        let outcome = testkit::run_fixture_with(fixture, engine);
         for failure in &outcome.failures {
             report.push(format!("{}: {failure}", fixture.id()));
         }
@@ -74,7 +82,7 @@ fn run_bridge(bridge: Bridge) {
 
     assert!(
         report.is_empty(),
-        "{} golden failure(s) for {}:\n{}",
+        "{} golden failure(s) for {} ({engine:?} engine):\n{}",
         report.len(),
         bridge.dir_name(),
         report.join("\n")
@@ -87,8 +95,132 @@ fn golden_anthropic_openai_chat() {
 }
 
 #[test]
+fn golden_anthropic_openai_chat_ir() {
+    run_bridge_with(Bridge::AnthropicOpenAiChat, CodecEngine::Ir);
+}
+
+/// Prefix of the random tool-call ids the Gemini bridge synthesizes.
+const SYNTHESIZED_ID_PREFIX: &[u8] = b"gemini_synth_";
+/// Length of the UUID (simple encoding) after the prefix.
+const SYNTHESIZED_ID_HEX_LEN: usize = 32;
+
+/// Replace each distinct synthesized tool-call id with `gemini_synth_<n>`
+/// (numbered by first appearance), so two runs compare byte for byte.
+fn normalize_synthesized_ids(bytes: &[u8], seen: &mut Vec<Vec<u8>>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut rest = bytes;
+    while let Some(at) = rest
+        .windows(SYNTHESIZED_ID_PREFIX.len())
+        .position(|window| window == SYNTHESIZED_ID_PREFIX)
+    {
+        let id_end = at + SYNTHESIZED_ID_PREFIX.len() + SYNTHESIZED_ID_HEX_LEN;
+        out.extend_from_slice(&rest[..at]);
+        if rest.len() < id_end {
+            out.extend_from_slice(&rest[at..]);
+            return out;
+        }
+        let id = rest[at..id_end].to_vec();
+        let number = match seen.iter().position(|known| *known == id) {
+            Some(number) => number,
+            None => {
+                seen.push(id);
+                seen.len() - 1
+            }
+        };
+        out.extend_from_slice(format!("gemini_synth_{number}").as_bytes());
+        rest = &rest[id_end..];
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// Raw client SSE output (bytes, or the error text of an `Err` item), with
+/// synthesized tool-call ids normalized.
+fn raw_stream(fixture: &Fixture, engine: CodecEngine) -> Option<Vec<Result<Vec<u8>, String>>> {
+    let input = fixture.upstream_sse.as_deref()?;
+    let mut seen = Vec::new();
+    Some(
+        testkit::stream_output_with(fixture, &[input], engine)
+            .into_iter()
+            .map(|item| {
+                item.map(|bytes| normalize_synthesized_ids(&bytes, &mut seen))
+                    .map_err(|e| e.to_string())
+            })
+            .collect(),
+    )
+}
+
+/// Parity checker for a bridge migrated to codecs: every fixture must give the
+/// same upstream request, the same raw client stream bytes, the same client
+/// response, usage and check failures under the legacy converters and the IR
+/// codecs. Split-point fuzzing runs inside `run_fixture_with` for both engines.
+fn assert_codec_parity(bridge: Bridge) {
+    let mut mismatches = Vec::new();
+    for fixture in &load(bridge) {
+        let legacy = testkit::run_fixture_with(fixture, CodecEngine::Legacy);
+        let ir = testkit::run_fixture_with(fixture, CodecEngine::Ir);
+        let fields = [
+            (
+                "upstream_request",
+                &legacy.upstream_request,
+                &ir.upstream_request,
+            ),
+            (
+                "client_response",
+                &legacy.client_response,
+                &ir.client_response,
+            ),
+            ("usage", &legacy.usage, &ir.usage),
+        ];
+        for (name, legacy, ir) in fields {
+            if legacy != ir {
+                mismatches.push(format!(
+                    "{}: {name} differs\n--- legacy\n{}\n--- ir\n{}",
+                    fixture.id(),
+                    legacy.as_deref().unwrap_or("<none>"),
+                    ir.as_deref().unwrap_or("<none>")
+                ));
+            }
+        }
+        if legacy.failures != ir.failures {
+            mismatches.push(format!(
+                "{}: check failures differ\n  legacy: {:#?}\n  ir: {:#?}",
+                fixture.id(),
+                legacy.failures,
+                ir.failures
+            ));
+        }
+        if raw_stream(fixture, CodecEngine::Legacy) != raw_stream(fixture, CodecEngine::Ir) {
+            mismatches.push(format!("{}: raw client stream bytes differ", fixture.id()));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "{} legacy/IR parity mismatch(es) for {}:\n{}",
+        mismatches.len(),
+        bridge.dir_name(),
+        mismatches.join("\n")
+    );
+}
+
+#[test]
+fn codec_parity_anthropic_openai_chat() {
+    assert_codec_parity(Bridge::AnthropicOpenAiChat);
+}
+
+#[test]
 fn golden_anthropic_gemini() {
     run_bridge(Bridge::AnthropicGemini);
+}
+
+#[test]
+fn golden_anthropic_gemini_ir() {
+    run_bridge_with(Bridge::AnthropicGemini, CodecEngine::Ir);
+}
+
+#[test]
+fn codec_parity_anthropic_gemini() {
+    assert_codec_parity(Bridge::AnthropicGemini);
 }
 
 #[test]
@@ -97,13 +229,96 @@ fn golden_anthropic_responses() {
 }
 
 #[test]
+fn golden_anthropic_responses_ir() {
+    run_bridge_with(Bridge::AnthropicResponses, CodecEngine::Ir);
+}
+
+#[test]
+fn codec_parity_anthropic_responses() {
+    assert_codec_parity(Bridge::AnthropicResponses);
+}
+
+#[test]
 fn golden_responses_chat() {
     run_bridge(Bridge::ResponsesChat);
 }
 
 #[test]
+fn golden_responses_chat_ir() {
+    run_bridge_with(Bridge::ResponsesChat, CodecEngine::Ir);
+}
+
+#[test]
+fn codec_parity_responses_chat() {
+    assert_codec_parity(Bridge::ResponsesChat);
+}
+
+#[test]
 fn golden_responses_anthropic() {
     run_bridge(Bridge::ResponsesAnthropic);
+}
+
+#[test]
+fn golden_responses_anthropic_ir() {
+    run_bridge_with(Bridge::ResponsesAnthropic, CodecEngine::Ir);
+}
+
+#[test]
+fn codec_parity_responses_anthropic() {
+    assert_codec_parity(Bridge::ResponsesAnthropic);
+}
+
+/// Minimum number of fixtures pinning the Gemini CLI -> Anthropic combination
+/// (CCS-187), across stream and non-stream cases.
+const MIN_GEMINI_ANTHROPIC_FIXTURES: usize = 10;
+
+/// Gemini CLI -> Anthropic (CCS-187) is a new combination with no legacy
+/// converter: both engines run the same IR codecs, so it runs once and checks
+/// its own fixture floor.
+#[test]
+fn golden_gemini_anthropic() {
+    let fixtures = load(Bridge::GeminiAnthropic);
+    assert!(
+        fixtures.len() >= MIN_GEMINI_ANTHROPIC_FIXTURES,
+        "expected at least {MIN_GEMINI_ANTHROPIC_FIXTURES} gemini__anthropic fixtures, found {}",
+        fixtures.len()
+    );
+    assert!(fixtures.iter().filter(|f| f.has_stream()).count() >= 5);
+    assert!(fixtures.iter().filter(|f| f.has_non_stream()).count() >= 5);
+    run_bridge(Bridge::GeminiAnthropic);
+}
+
+/// Minimum number of upstream bodies with a raw usage block that the usage
+/// parity checker must cover, so the check cannot pass vacuously.
+const MIN_USAGE_PARITY_BODIES: usize = 100;
+
+/// Usage parity over the whole corpus (CCS-186): for every fixture and both
+/// conversion engines, the UsageIR-normalized usage and the recorded usage
+/// must match the raw upstream usage block and price identically in every row
+/// of the per-semantics cost table. Any mismatch fails CI.
+#[test]
+fn usage_parity_golden_corpus() {
+    for engine in [CodecEngine::Legacy, CodecEngine::Ir] {
+        let mut checked = 0;
+        let mut failures = Vec::new();
+        for bridge in Bridge::ALL {
+            for fixture in &load(bridge) {
+                let outcome = testkit::usage_parity_with(fixture, engine);
+                checked += outcome.checked;
+                failures.extend(outcome.failures);
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} usage parity mismatch(es) ({engine:?} engine):\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+        assert!(
+            checked >= MIN_USAGE_PARITY_BODIES,
+            "usage parity checked only {checked} upstream bodies with usage ({engine:?} engine)"
+        );
+    }
 }
 
 #[test]
@@ -126,6 +341,15 @@ fn golden_fixture_inventory() {
         assert!(
             fixtures.iter().any(Fixture::has_non_stream),
             "{} needs at least one non-stream fixture",
+            bridge.dir_name()
+        );
+        // Stream vs non-stream parity (incl. stop_reason) is only checked on
+        // fixtures that carry both upstream bodies.
+        assert!(
+            fixtures
+                .iter()
+                .any(|fixture| fixture.has_stream() && fixture.has_non_stream()),
+            "{} needs at least one stream/non-stream parity fixture",
             bridge.dir_name()
         );
         for fixture in &fixtures {

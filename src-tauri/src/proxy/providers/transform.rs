@@ -3,70 +3,17 @@
 //! 实现 Anthropic ↔ OpenAI 格式转换，用于 OpenRouter 支持
 //! 参考: anthropic-proxy-rs
 
+use crate::proxy::protocol::StopReason;
+use crate::proxy::usage::ir::UsageIR;
 use crate::proxy::{error::ProxyError, json_canonical::canonical_json_string};
 use serde_json::{json, Value};
 
-const ANTHROPIC_BILLING_HEADER_PREFIX: &str = "x-anthropic-billing-header:";
-
-/// Strip only a leading Claude Code attribution line from system text.
-///
-/// Claude Code can send dynamic `x-anthropic-billing-header` metadata at the
-/// start of `system`. If forwarded into OpenAI Chat messages or Responses
-/// `instructions`, the rotating `cch=` value changes the prompt prefix on every
-/// request and prevents prefix cache reuse (#2350). Later occurrences are kept
-/// to avoid deleting user-authored prompt text.
-pub(crate) fn strip_leading_anthropic_billing_header(text: &str) -> &str {
-    if !text.starts_with(ANTHROPIC_BILLING_HEADER_PREFIX) {
-        return text;
-    }
-
-    let Some(line_end) = text
-        .as_bytes()
-        .iter()
-        .position(|byte| *byte == b'\n' || *byte == b'\r')
-    else {
-        return "";
-    };
-
-    let bytes = text.as_bytes();
-    let mut rest_start = line_end + 1;
-    if bytes[line_end] == b'\r' && bytes.get(line_end + 1) == Some(&b'\n') {
-        rest_start += 1;
-    }
-
-    let rest = &text[rest_start..];
-    if let Some(stripped) = rest.strip_prefix("\r\n") {
-        stripped
-    } else if let Some(stripped) = rest.strip_prefix('\n') {
-        stripped
-    } else if let Some(stripped) = rest.strip_prefix('\r') {
-        stripped
-    } else {
-        rest
-    }
-}
-
-/// Detect OpenAI o-series reasoning models (o1, o3, o4-mini, etc.)
-/// These models require `max_completion_tokens` instead of `max_tokens`.
-pub fn is_openai_o_series(model: &str) -> bool {
-    model.len() > 1
-        && model.starts_with('o')
-        && model.as_bytes().get(1).is_some_and(|b| b.is_ascii_digit())
-}
-
-/// Detect OpenAI models that support reasoning_effort.
-///
-/// Supported families:
-/// - o-series: o1, o3, o4-mini, etc.
-/// - GPT-5+: gpt-5, gpt-5.1, gpt-5.4, gpt-5-codex, etc.
-pub fn supports_reasoning_effort(model: &str) -> bool {
-    is_openai_o_series(model)
-        || model
-            .to_lowercase()
-            .strip_prefix("gpt-")
-            .and_then(|rest| rest.chars().next())
-            .is_some_and(|c| c.is_ascii_digit() && c >= '5')
-}
+pub use crate::proxy::codec::openai_chat::support::{
+    clean_schema, is_openai_o_series, supports_reasoning_effort,
+};
+pub(crate) use crate::proxy::codec::openai_chat::support::{
+    inject_openai_stream_include_usage, strip_leading_anthropic_billing_header,
+};
 
 /// Resolve the appropriate OpenAI `reasoning_effort` from an Anthropic request body.
 ///
@@ -227,33 +174,6 @@ pub fn anthropic_to_openai_with_reasoning_content(
     }
 
     Ok(result)
-}
-
-/// 为 OpenAI Chat Completions 流式请求注入 `stream_options.include_usage`。
-///
-/// OpenAI 兼容上游在流式下默认不在 SSE 里返回 usage，必须显式声明 include_usage
-/// 才会在末尾吐 usage chunk。缺这一注入会导致流式请求的 token/成本/缓存全部漏记
-/// （input/output/cache 全为 0）。保留客户端可能透传的其它 stream_options 字段，
-/// 仅补 include_usage；非流式请求不动。
-///
-/// 由 Claude→openai_chat（claude.rs）与 Codex Responses→Chat（transform_codex_chat.rs）
-/// 两条转换路径共用，确保两个客户端方向行为一致。
-pub(crate) fn inject_openai_stream_include_usage(result: &mut Value) {
-    let is_stream = result
-        .get("stream")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    if !is_stream {
-        return;
-    }
-    match result.get_mut("stream_options") {
-        Some(Value::Object(opts)) => {
-            opts.insert("include_usage".to_string(), json!(true));
-        }
-        _ => {
-            result["stream_options"] = json!({ "include_usage": true });
-        }
-    }
 }
 
 /// Translate an Anthropic `tool_choice` into the OpenAI Chat Completions form.
@@ -657,40 +577,6 @@ fn tool_result_content_to_text(content: Option<&Value>, image_parts: &mut Vec<Va
     parts.join("\n")
 }
 
-/// 清理工具参数的 JSON schema，并为根 schema 补齐 OpenAI 要求的 object 类型。
-pub fn clean_schema(schema: Value) -> Value {
-    clean_schema_inner(schema, true)
-}
-
-fn clean_schema_inner(mut schema: Value, is_root: bool) -> Value {
-    if let Some(obj) = schema.as_object_mut() {
-        let missing_type = is_root && !obj.contains_key("type");
-        if missing_type {
-            obj.insert("type".to_string(), json!("object"));
-        }
-        if missing_type && !obj.contains_key("properties") {
-            obj.insert("properties".to_string(), json!({}));
-        }
-
-        // 移除 "format": "uri"
-        if obj.get("format").and_then(|v| v.as_str()) == Some("uri") {
-            obj.remove("format");
-        }
-
-        // 递归清理嵌套 schema
-        if let Some(properties) = obj.get_mut("properties").and_then(|v| v.as_object_mut()) {
-            for (_, value) in properties.iter_mut() {
-                *value = clean_schema_inner(value.clone(), false);
-            }
-        }
-
-        if let Some(items) = obj.get_mut("items") {
-            *items = clean_schema_inner(items.clone(), false);
-        }
-    }
-    schema
-}
-
 /// OpenAI 响应 → Anthropic 响应
 pub fn openai_to_anthropic(body: Value) -> Result<Value, ProxyError> {
     let choices = body
@@ -807,76 +693,26 @@ pub fn openai_to_anthropic(body: Value) -> Result<Value, ProxyError> {
         }
     }
 
-    // 映射 finish_reason → stop_reason
+    // 映射 finish_reason → stop_reason（与流式路径共用 StopReason 表）
     // Gemini 兼容层 / Ollama / vLLM 会在携带 tool_calls 时返回 "stop"，
     // 此时同样映射为 tool_use，否则 Claude Code 会结束回合而不执行工具。
     let stop_reason = choice
         .get("finish_reason")
         .and_then(|r| r.as_str())
-        .map(|r| match r {
-            "stop" if has_tool_use => "tool_use",
-            "stop" => "end_turn",
-            "length" => "max_tokens",
-            "tool_calls" | "function_call" => "tool_use",
-            "content_filter" => "end_turn",
-            other => {
-                log::warn!(
-                    "[Claude/OpenAI] Unknown finish_reason in non-streaming response: {other}"
-                );
-                "end_turn"
-            }
-        })
+        .map(|r| StopReason::from_chat_finish_reason(r, has_tool_use).as_anthropic_str())
         .or(if has_tool_use { Some("tool_use") } else { None });
 
     // usage — map cache tokens from OpenAI format to Anthropic format
-    let usage = body.get("usage").cloned().unwrap_or(json!({}));
-    // OpenAI prompt_tokens 含缓存命中，Anthropic input_tokens 不含 → 减去 cache_read 与
+    // OpenAI prompt_tokens 含缓存命中，Anthropic input_tokens 不含 → UsageIR 减去 cache_read 与
     // cache_creation，使 input 成为 fresh input。本路径以 app_type="claude" 记账（calculator
     // 不再扣减），若不减则缓存会被计入 input 与各 cache 桶两次。三桶互斥，恒等：
     // input + cache_read + cache_creation == prompt_tokens（inclusive 上游）。
-    // 与流式 build_anthropic_usage_json (#2774) 及 transform_gemini 的 saturating_sub 对称。
-    // 最终 cache_read/cache_creation：直传字段优先于 OpenAI nested details。
-    let cached = usage
-        .get("cache_read_input_tokens")
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            usage
-                .pointer("/prompt_tokens_details/cached_tokens")
-                .and_then(|v| v.as_u64())
-        })
-        .unwrap_or(0);
-    let cache_creation = usage
-        .get("cache_creation_input_tokens")
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            usage
-                .pointer("/prompt_tokens_details/cache_write_tokens")
-                .or_else(|| usage.pointer("/input_tokens_details/cache_write_tokens"))
-                .and_then(|v| v.as_u64())
-        })
-        .unwrap_or(0);
-    let input_tokens = usage
-        .get("prompt_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0)
-        .saturating_sub(cached)
-        .saturating_sub(cache_creation) as u32;
-    let output_tokens = usage
-        .get("completion_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-
-    let mut usage_json = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens
-    });
-
-    if cached > 0 {
-        usage_json["cache_read_input_tokens"] = json!(cached);
-    }
-    if cache_creation > 0 {
-        usage_json["cache_creation_input_tokens"] = json!(cache_creation);
-    }
+    // 与流式 build_anthropic_usage_json (#2774) 及 transform_gemini 共用同一 IR。
+    let usage_json = body
+        .get("usage")
+        .map(UsageIR::from_chat_completions)
+        .unwrap_or_default()
+        .to_anthropic();
 
     let result = json!({
         "id": body.get("id").and_then(|i| i.as_str()).unwrap_or(""),
@@ -1063,31 +899,6 @@ mod tests {
         let result = anthropic_to_openai(input).unwrap();
         let parameters = &result["tools"][0]["function"]["parameters"];
         assert_eq!(parameters, &json!({"type": "object", "properties": {}}));
-    }
-
-    #[test]
-    fn test_clean_schema_only_defaults_root_to_object() {
-        let schema = json!({
-            "properties": {
-                "nullable_value": {
-                    "anyOf": [{"type": "string"}, {"type": "null"}]
-                },
-                "list": {
-                    "items": {"type": "string"}
-                }
-            }
-        });
-
-        let result = clean_schema(schema);
-        assert_eq!(result["type"], json!("object"));
-        assert_eq!(
-            result["properties"]["nullable_value"],
-            json!({"anyOf": [{"type": "string"}, {"type": "null"}]})
-        );
-        assert_eq!(
-            result["properties"]["list"],
-            json!({"items": {"type": "string"}})
-        );
     }
 
     #[test]
@@ -1899,6 +1710,30 @@ mod tests {
     }
 
     #[test]
+    fn test_openai_to_anthropic_reads_responses_style_cache_details() {
+        // 非流式桥曾只读 prompt_tokens_details 的缓存命中，与计费解析（同时认
+        // input_tokens_details）漂移；统一走 UsageIR 后两者一致。
+        let input = json!({
+            "id": "chatcmpl-123",
+            "model": "gpt-4",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hello!"},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "input_tokens_details": {"cached_tokens": 70}
+            }
+        });
+
+        let result = openai_to_anthropic(input).unwrap();
+        assert_eq!(result["usage"]["input_tokens"], 30);
+        assert_eq!(result["usage"]["cache_read_input_tokens"], 70);
+    }
+
+    #[test]
     fn test_openai_to_anthropic_with_direct_cache_fields() {
         let input = json!({
             "id": "chatcmpl-123",
@@ -2017,31 +1852,6 @@ mod tests {
         assert_eq!(result["content"][0]["text"], "Hello");
         assert_eq!(result["content"][1]["type"], "text");
         assert_eq!(result["content"][1]["text"], "I can't do that");
-    }
-
-    #[test]
-    fn test_is_openai_o_series() {
-        assert!(is_openai_o_series("o1"));
-        assert!(is_openai_o_series("o1-preview"));
-        assert!(is_openai_o_series("o1-mini"));
-        assert!(is_openai_o_series("o3"));
-        assert!(is_openai_o_series("o3-mini"));
-        assert!(is_openai_o_series("o4-mini"));
-        assert!(!is_openai_o_series("gpt-4o"));
-        assert!(!is_openai_o_series("openai-gpt"));
-        assert!(!is_openai_o_series("o"));
-        assert!(!is_openai_o_series(""));
-    }
-
-    #[test]
-    fn test_supports_reasoning_effort() {
-        assert!(supports_reasoning_effort("o1"));
-        assert!(supports_reasoning_effort("o3-mini"));
-        assert!(supports_reasoning_effort("gpt-5"));
-        assert!(supports_reasoning_effort("gpt-5.4"));
-        assert!(supports_reasoning_effort("gpt-5-codex"));
-        assert!(!supports_reasoning_effort("gpt-4o"));
-        assert!(!supports_reasoning_effort("claude-sonnet-4-6"));
     }
 
     // ── resolve_reasoning_effort unit tests ──

@@ -14,6 +14,7 @@ use crate::pricing::resolver::{
     clean_model_id_for_pricing, find_model_pricing_row, is_placeholder_pricing_model,
     model_pricing_candidates, should_try_pricing_prefix_match,
 };
+use crate::proxy::usage::parity::decode_log_metadata;
 use crate::services::sql_helpers::{
     fresh_input_sql, input_token_semantics_for_app_type, rollup_cost_usd_sum_sql,
 };
@@ -55,6 +56,8 @@ fn derive_real_total_and_hit_rate(
 ///
 /// 不需要 provider_name 时（如 backfill）SELECT `NULL AS provider_name` 占位即可。
 fn row_to_request_log_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<RequestLogDetail> {
+    let status_code = row.get::<_, i64>(20)? as u16;
+    let (error_message, usage_parity) = decode_log_metadata(status_code, row.get(21)?);
     Ok(RequestLogDetail {
         request_id: row.get(0)?,
         provider_id: row.get(1)?,
@@ -78,12 +81,13 @@ fn row_to_request_log_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reques
         latency_ms: row.get::<_, i64>(17)? as u64,
         first_token_ms: row.get::<_, Option<i64>>(18)?.map(|v| v as u64),
         duration_ms: row.get::<_, Option<i64>>(19)?.map(|v| v as u64),
-        status_code: row.get::<_, i64>(20)? as u16,
-        error_message: row.get(21)?,
+        status_code,
+        error_message,
         created_at: row.get(22)?,
         data_source: row.get(23)?,
         pricing_model: row.get(24)?,
         input_token_semantics: row.get::<_, i64>(25)?,
+        usage_parity,
     })
 }
 

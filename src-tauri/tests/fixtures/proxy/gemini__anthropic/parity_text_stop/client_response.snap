@@ -1,0 +1,32 @@
+---
+source: tests/proxy_golden.rs
+description: "The same Anthropic text reply converts to the same Gemini parts, finishReason and usage in stream and non-stream mode."
+---
+# stream
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},"index":0}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":1,"totalTokenCount":10},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":" there"}]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":4,"totalTokenCount":13},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+
+# non-stream
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Hi there"
+          }
+        ]
+      },
+      "index": 0,
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 9,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 13
+  },
+  "modelVersion": "claude-sonnet-4-5",
+  "responseId": "msg_g1"
+}

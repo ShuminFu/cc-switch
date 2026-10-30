@@ -374,6 +374,8 @@
         "enableFeatureDescription": "開啟後，主頁面頂部將顯示路由和故障轉移開關",
         "enableFailoverToggle": "在主頁面顯示故障轉移開關",
         "enableFailoverToggleDescription": "開啟後，主頁面頂部將獨立顯示故障轉移開關",
+        "stickySessionRouting": "會話黏性路由",
+        "stickySessionRoutingDescription": "故障轉移開啟時，同一會話優先留在上次成功服務它的供應商上（只要其熔斷器可用），避免故障轉移後遺失提示快取",
         "running": "執行中",
         "stopped": "已停止"
       },
@@ -1684,6 +1686,56 @@
     "withMultiplier": "含倍率",
     "requestDetail": "請求詳情",
     "requestNotFound": "請求未找到",
+    "bugReport": {
+      "captureStart": "擷取以回報問題",
+      "captureActive": "擷取中 · 剩餘 {{minutes}} 分鐘",
+      "captureHint": "在接下來的 {{minutes}} 分鐘內記錄經過協定轉換的請求（已遮蔽敏感資訊），可匯出為缺陷報告",
+      "captureStopHint": "停止擷取",
+      "captureFailed": "切換擷取失敗：{{error}}",
+      "export": "匯出缺陷報告",
+      "exported": "缺陷報告已儲存到 {{path}}",
+      "exportFailed": "匯出缺陷報告失敗：{{error}}"
+    },
+    "trace": {
+      "inspect": "查看路由過程",
+      "title": "請求追蹤",
+      "notFound": "沒有此請求的追蹤記錄。只保留最近 {{count}} 個代理請求，應用程式重新啟動後清空。",
+      "attempts": "嘗試（{{count}}）",
+      "noAttempts": "沒有嘗試任何供應商",
+      "droppedAttempts": "另有 {{count}} 次嘗試未記錄",
+      "reason": "原因",
+      "recovery": "已套用的復原策略",
+      "route": "路由",
+      "auth": "認證",
+      "flags": "特性",
+      "clientHeaders": "用戶端請求標頭",
+      "upstreamHeaders": "上游請求標頭",
+      "ttfb": "首位元組",
+      "firstToken": "首個 token",
+      "usageSource": "用量來源",
+      "request": "請求",
+      "status": {
+        "in_flight": "進行中",
+        "succeeded": "成功",
+        "failed": "失敗",
+        "skipped": "已略過（熔斷）"
+      },
+      "usageSourceValue": {
+        "stream_events": "串流事件",
+        "response_body": "回應內容",
+        "missing": "缺失"
+      }
+    },
+    "parity": {
+      "badge": "用量不一致",
+      "detail": "計費 {{normalized}} tokens，上游回報 {{raw}}（輸入 {{input}}，快取 {{cache}}）",
+      "detailNoRaw": "計費 {{normalized}} tokens，上游未回傳 usage",
+      "issue": {
+        "zero_usage": "成功的請求沒有可計費用量",
+        "cache_exceeds_input": "快取 token 超過上游回報的輸入（可能重複計數）",
+        "total_mismatch": "上游總量與計費總量不一致"
+      }
+    },
     "basicInfo": "基本資訊",
     "tokenUsage": "Token 使用量",
     "cacheCreationCost": "快取寫入成本",
@@ -2651,7 +2703,17 @@
     "degraded": "降級",
     "failed": "失敗",
     "circuitOpen": "斷路",
-    "consecutiveFailures": "連續失敗 {{count}} 次"
+    "consecutiveFailures": "連續失敗 {{count}} 次",
+    "circuitClosed": "斷路器關閉",
+    "circuitHalfOpen": "半開",
+    "circuitOpenRemaining": "斷路 · {{seconds}} 秒",
+    "circuitStateTitle": "斷路器：{{state}}",
+    "probeNow": "立即探測",
+    "probing": "探測中…",
+    "probeSucceeded": "探測成功，斷路器已關閉",
+    "probeFailed": "探測失敗：{{detail}}",
+    "probeSkipped": "未探測：{{detail}}",
+    "probeProxyStopped": "代理未執行"
   },
   "failover": {
     "enabled": "{{app}} 故障轉移已啟用",

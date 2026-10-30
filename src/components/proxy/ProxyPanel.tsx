@@ -19,6 +19,7 @@ import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { toast } from "sonner";
 import { useFailoverQueue } from "@/lib/query/failover";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
+import { CircuitBreakerBadge } from "@/components/proxy/CircuitBreakerBadge";
 import { useProviderHealth } from "@/lib/query/failover";
 import {
   useProxyTakeoverStatus,
@@ -684,11 +685,15 @@ function ProviderQueueItem({
           </span>
         )}
       </div>
-      {/* 健康徽章 */}
-      <ProviderHealthBadge
-        consecutiveFailures={health?.consecutive_failures ?? 0}
-        isHealthy={health?.is_healthy}
-      />
+      <div className="flex items-center gap-2">
+        {/* 熔断器实时状态与"立即探测" */}
+        <CircuitBreakerBadge providerId={provider.id} appType={appType} />
+        {/* 健康徽章 */}
+        <ProviderHealthBadge
+          consecutiveFailures={health?.consecutive_failures ?? 0}
+          isHealthy={health?.is_healthy}
+        />
+      </div>
     </div>
   );
 }

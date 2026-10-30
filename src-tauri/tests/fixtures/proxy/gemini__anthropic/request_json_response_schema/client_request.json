@@ -1,0 +1,45 @@
+{
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "Decide who speaks next."
+      }
+    ]
+  },
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Analyze the last turn"
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "temperature": 0,
+    "responseMimeType": "application/json",
+    "responseJsonSchema": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string"
+        },
+        "next_speaker": {
+          "type": "string",
+          "enum": [
+            "user",
+            "model"
+          ]
+        }
+      },
+      "required": [
+        "reasoning",
+        "next_speaker"
+      ]
+    },
+    "thinkingConfig": {
+      "thinkingBudget": 0
+    }
+  }
+}

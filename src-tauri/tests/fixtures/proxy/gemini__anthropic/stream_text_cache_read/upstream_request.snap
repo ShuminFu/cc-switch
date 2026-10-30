@@ -1,0 +1,20 @@
+---
+source: tests/proxy_golden.rs
+description: Text deltas stream live as one frame each; finishReason and the final usageMetadata (cache reads included in promptTokenCount) ride on the last content frame.
+---
+{
+  "model": "claude-sonnet-4-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192,
+  "stream": true
+}

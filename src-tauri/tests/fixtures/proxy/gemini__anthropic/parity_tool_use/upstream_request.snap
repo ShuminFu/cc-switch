@@ -1,0 +1,66 @@
+---
+source: tests/proxy_golden.rs
+description: The same Anthropic tool_use reply converts to the same functionCall parts and STOP finishReason in stream and non-stream mode.
+---
+{
+  "model": "claude-sonnet-4-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "status?"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192,
+  "stream": true,
+  "tools": [
+    {
+      "name": "read_file",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "absolute_path": {
+            "type": "string",
+            "description": "Absolute path"
+          },
+          "offset": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "absolute_path"
+        ]
+      },
+      "description": "Reads a file from the local filesystem."
+    },
+    {
+      "name": "run_shell_command",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "description": "Runs a shell command."
+    }
+  ]
+}

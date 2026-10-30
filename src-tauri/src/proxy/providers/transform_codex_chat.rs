@@ -6,19 +6,17 @@
 
 use super::codex_chat_common::{
     append_reasoning_content, extract_reasoning_field_text, extract_reasoning_summary_text,
-    response_function_call_item, response_function_call_item_with_namespace,
     split_leading_think_block,
 };
 use crate::provider::CodexChatReasoningConfig;
+use crate::proxy::usage::ir::UsageIR;
 use crate::proxy::{
     error::ProxyError,
     json_canonical::{
         canonical_json_string, canonicalize_json_string_if_parseable, canonicalize_tool_arguments,
-        short_sha256_hex,
     },
 };
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
 
 const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
     "frequency_penalty",
@@ -37,217 +35,8 @@ const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
     "user",
 ];
 
-const TOOL_SEARCH_PROXY_NAME: &str = "tool_search";
-const CUSTOM_TOOL_INPUT_FIELD: &str = "input";
-const CHAT_TOOL_NAME_MAX_LEN: usize = 64;
-const CUSTOM_TOOL_INPUT_DESCRIPTION: &str = "Raw string input for the original custom tool. Preserve formatting exactly and follow the original tool definition embedded in the description.";
-const CUSTOM_TOOL_PRESERVED_METADATA_HEADING: &str = "Original tool definition:";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CodexToolKind {
-    Function,
-    Namespace,
-    Custom,
-    ToolSearch,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CodexToolSpec {
-    pub(crate) kind: CodexToolKind,
-    pub(crate) name: String,
-    pub(crate) namespace: Option<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct CodexToolContext {
-    chat_tools: Vec<Value>,
-    seen_chat_names: HashSet<String>,
-    chat_name_to_spec: HashMap<String, CodexToolSpec>,
-    namespace_name_to_chat_name: HashMap<(String, String), String>,
-}
-
-impl CodexToolContext {
-    pub(crate) fn chat_tools(&self) -> &[Value] {
-        &self.chat_tools
-    }
-
-    pub(crate) fn lookup_chat_name(&self, chat_name: &str) -> Option<&CodexToolSpec> {
-        self.chat_name_to_spec.get(chat_name)
-    }
-
-    pub(crate) fn is_custom_tool_chat_name(&self, chat_name: &str) -> bool {
-        self.lookup_chat_name(chat_name)
-            .is_some_and(|spec| matches!(&spec.kind, CodexToolKind::Custom))
-    }
-
-    pub(crate) fn chat_name_for_response_function(
-        &self,
-        name: &str,
-        namespace: Option<&str>,
-    ) -> String {
-        if let Some(namespace) = namespace.filter(|value| !value.is_empty()) {
-            if let Some(chat_name) = self
-                .namespace_name_to_chat_name
-                .get(&(namespace.to_string(), name.to_string()))
-            {
-                return chat_name.clone();
-            }
-            return flatten_namespace_tool_name(namespace, name);
-        }
-
-        name.to_string()
-    }
-
-    fn add_chat_tool(&mut self, chat_name: String, spec: CodexToolSpec, chat_tool: Value) {
-        if chat_name.trim().is_empty() || self.seen_chat_names.contains(&chat_name) {
-            return;
-        }
-        self.seen_chat_names.insert(chat_name.clone());
-        if let Some(namespace) = spec.namespace.as_ref() {
-            self.namespace_name_to_chat_name
-                .insert((namespace.clone(), spec.name.clone()), chat_name.clone());
-        }
-        self.chat_name_to_spec.insert(chat_name, spec);
-        self.chat_tools.push(chat_tool);
-    }
-
-    fn add_function_tool(&mut self, tool: &Value, namespace: Option<&str>) {
-        let Some(original_name) = responses_tool_name(tool) else {
-            return;
-        };
-        let chat_name = namespace
-            .map(|namespace| flatten_namespace_tool_name(namespace, &original_name))
-            .unwrap_or_else(|| original_name.clone());
-
-        let Some(chat_tool) = responses_function_tool_to_chat_tool(tool, &chat_name) else {
-            return;
-        };
-        let spec = CodexToolSpec {
-            kind: if namespace.is_some() {
-                CodexToolKind::Namespace
-            } else {
-                CodexToolKind::Function
-            },
-            name: original_name,
-            namespace: namespace.map(ToString::to_string),
-        };
-        self.add_chat_tool(chat_name, spec, chat_tool);
-    }
-
-    fn add_custom_tool(&mut self, tool: &Value) {
-        let Some(name) = responses_tool_name(tool) else {
-            return;
-        };
-        let description = json!(responses_custom_tool_description(tool));
-        let chat_tool = json!({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        CUSTOM_TOOL_INPUT_FIELD: {
-                            "type": "string",
-                            "description": CUSTOM_TOOL_INPUT_DESCRIPTION
-                        }
-                    },
-                    "required": [CUSTOM_TOOL_INPUT_FIELD]
-                }
-            }
-        });
-        let spec = CodexToolSpec {
-            kind: CodexToolKind::Custom,
-            name: name.clone(),
-            namespace: None,
-        };
-        self.add_chat_tool(name, spec, chat_tool);
-    }
-
-    fn add_tool_search_tool(&mut self) {
-        let chat_tool = json!({
-            "type": "function",
-            "function": {
-                "name": TOOL_SEARCH_PROXY_NAME,
-                "description": "Search and load Codex tools, plugins, connectors, and MCP namespaces for the current task.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query for tools or connectors to load."
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum number of tool groups to return."
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
-        });
-        let spec = CodexToolSpec {
-            kind: CodexToolKind::ToolSearch,
-            name: TOOL_SEARCH_PROXY_NAME.to_string(),
-            namespace: None,
-        };
-        self.add_chat_tool(TOOL_SEARCH_PROXY_NAME.to_string(), spec, chat_tool);
-    }
-
-    fn add_namespace_tool(&mut self, namespace_tool: &Value) {
-        let Some(namespace) = namespace_tool.get("name").and_then(|v| v.as_str()) else {
-            return;
-        };
-        let Some(children) = namespace_tool
-            .get("tools")
-            .or_else(|| namespace_tool.get("children"))
-            .and_then(|v| v.as_array())
-        else {
-            return;
-        };
-
-        for child in children {
-            if child.get("type").and_then(|v| v.as_str()) == Some("function") {
-                self.add_function_tool(child, Some(namespace));
-            }
-        }
-    }
-
-    fn add_response_tool(&mut self, tool: &Value) {
-        match tool {
-            Value::String(name) => {
-                self.add_custom_tool(&json!({
-                    "type": "custom",
-                    "name": name
-                }));
-            }
-            Value::Object(_) => match tool.get("type").and_then(|v| v.as_str()) {
-                Some("function") => self.add_function_tool(tool, None),
-                Some("custom") => self.add_custom_tool(tool),
-                Some("tool_search") => self.add_tool_search_tool(),
-                Some("namespace") => self.add_namespace_tool(tool),
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-}
-
-pub(crate) fn build_codex_tool_context_from_request(body: &Value) -> CodexToolContext {
-    let mut context = CodexToolContext::default();
-
-    if let Some(tools) = body.get("tools").and_then(|v| v.as_array()) {
-        for tool in tools {
-            context.add_response_tool(tool);
-        }
-    }
-
-    if let Some(input) = body.get("input") {
-        collect_tool_search_output_tools(input, &mut context);
-    }
-
-    context
-}
+pub use crate::proxy::codec::responses::errors::chat_error_to_response_error;
+pub(crate) use crate::proxy::codec::responses::tools::*;
 
 /// Convert an OpenAI Responses request into an OpenAI Chat Completions request.
 #[cfg(test)]
@@ -1071,139 +860,6 @@ fn responses_input_file_to_chat_file(part: &Value) -> Option<Value> {
     Some(Value::Object(file))
 }
 
-fn collect_tool_search_output_tools(value: &Value, context: &mut CodexToolContext) {
-    match value {
-        Value::Array(items) => {
-            for item in items {
-                collect_tool_search_output_tools(item, context);
-            }
-        }
-        Value::Object(obj) => {
-            if obj.get("type").and_then(|v| v.as_str()) == Some("tool_search_output") {
-                if let Some(tools) = obj.get("tools").and_then(|v| v.as_array()) {
-                    for tool in tools {
-                        context.add_response_tool(tool);
-                    }
-                }
-            }
-            for value in obj.values() {
-                collect_tool_search_output_tools(value, context);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn flatten_namespace_tool_name(namespace: &str, name: &str) -> String {
-    let full_name = format!("{namespace}__{name}");
-    if full_name.len() <= CHAT_TOOL_NAME_MAX_LEN {
-        return full_name;
-    }
-
-    let hash = short_sha256_hex(full_name.as_bytes());
-    let suffix = format!("__{hash}");
-    let prefix_len = CHAT_TOOL_NAME_MAX_LEN.saturating_sub(suffix.len());
-    let mut prefix = String::new();
-    for ch in full_name.chars() {
-        if prefix.len() + ch.len_utf8() > prefix_len {
-            break;
-        }
-        prefix.push(ch);
-    }
-    format!("{prefix}{suffix}")
-}
-
-fn responses_tool_name(tool: &Value) -> Option<String> {
-    tool.get("function")
-        .and_then(|function| function.get("name"))
-        .or_else(|| tool.get("name"))
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-fn responses_custom_tool_description(tool: &Value) -> String {
-    let mut description = String::new();
-    description.push_str(CUSTOM_TOOL_PRESERVED_METADATA_HEADING);
-    description.push_str("\n```json\n");
-    description.push_str(&serialize_tool_definition_for_description(tool));
-    description.push_str("\n```");
-    description
-}
-
-fn serialize_tool_definition_for_description(tool: &Value) -> String {
-    // Keep the embedded definition compact to reduce tool-description token
-    // overhead for chat-only upstreams, while remaining stable across map
-    // storage order.
-    canonical_json_string(tool)
-}
-
-/// Normalize a function's `parameters` JSON Schema so `type` is always `"object"`.
-///
-/// Some Responses tools carry `parameters: null` or `parameters: {"type": null}`,
-/// but OpenAI Chat Completions strictly requires `{"type": "object", "properties": {...}}`.
-fn normalize_function_parameters(params: Option<&Value>) -> Value {
-    let mut params = match params {
-        Some(Value::Object(obj)) => Value::Object(obj.clone()),
-        _ => json!({"type": "object", "properties": {}}),
-    };
-    if let Some(obj) = params.as_object_mut() {
-        match obj.get("type").and_then(|v| v.as_str()) {
-            Some("object") => {}
-            _ => {
-                obj.insert("type".to_string(), json!("object"));
-            }
-        }
-    }
-    params
-}
-
-fn responses_function_tool_to_chat_tool(tool: &Value, chat_name: &str) -> Option<Value> {
-    if tool.get("type").and_then(|v| v.as_str()) != Some("function") {
-        return None;
-    }
-
-    if let Some(function) = tool.get("function") {
-        let mut chat_tool = json!({
-            "type": "function",
-            "function": function.clone()
-        });
-        if let Some(obj) = chat_tool
-            .get_mut("function")
-            .and_then(|value| value.as_object_mut())
-        {
-            // Ensure parameters.type is "object" for strict OpenAI-compatible providers
-            if let Some(params) = obj.get("parameters") {
-                let normalized = normalize_function_parameters(Some(params));
-                if normalized != *params {
-                    obj.insert("parameters".to_string(), normalized);
-                }
-            }
-
-            obj.insert("name".to_string(), json!(chat_name));
-            if let Some(strict) = tool.get("strict").cloned() {
-                obj.entry("strict".to_string()).or_insert(strict);
-            }
-        }
-        return Some(chat_tool);
-    }
-
-    let mut function = json!({
-        "name": chat_name,
-        "description": tool.get("description").cloned().unwrap_or(Value::Null),
-        "parameters": normalize_function_parameters(tool.get("parameters"))
-    });
-    if let Some(strict) = tool.get("strict") {
-        function["strict"] = strict.clone();
-    }
-
-    Some(json!({
-        "type": "function",
-        "function": function
-    }))
-}
-
 fn responses_function_call_to_chat_tool_call(
     item: &Value,
     tool_context: &CodexToolContext,
@@ -1563,164 +1219,25 @@ fn chat_legacy_function_call_to_response_item(
     ))
 }
 
-pub(crate) fn response_tool_call_item_id_from_chat_name(
-    call_id: &str,
-    chat_name: &str,
-    tool_context: &CodexToolContext,
-) -> String {
-    if tool_context.is_custom_tool_chat_name(chat_name) {
-        format!("ctc_{call_id}")
-    } else {
-        format!("fc_{call_id}")
-    }
-}
-
-pub(crate) fn response_tool_call_item_from_chat_name(
-    item_id: &str,
-    status: &str,
-    call_id: &str,
-    chat_name: &str,
-    arguments: &str,
-    reasoning: Option<&str>,
-    tool_context: &CodexToolContext,
-) -> Value {
-    match tool_context.lookup_chat_name(chat_name) {
-        Some(spec) if spec.kind == CodexToolKind::ToolSearch => {
-            response_tool_search_call_item(call_id, status, arguments, reasoning)
-        }
-        Some(spec) if spec.kind == CodexToolKind::Custom => response_custom_tool_call_item(
-            item_id, status, call_id, &spec.name, arguments, reasoning,
-        ),
-        Some(spec) => response_function_call_item_with_namespace(
-            item_id,
-            status,
-            call_id,
-            &spec.name,
-            spec.namespace.as_deref(),
-            arguments,
-            reasoning,
-        ),
-        None => {
-            response_function_call_item(item_id, status, call_id, chat_name, arguments, reasoning)
-        }
-    }
-}
-
-fn response_tool_search_call_item(
-    call_id: &str,
-    status: &str,
-    arguments: &str,
-    reasoning: Option<&str>,
-) -> Value {
-    let parsed_arguments = parse_tool_arguments_object(arguments);
-    let mut item = json!({
-        "type": "tool_search_call",
-        "call_id": call_id,
-        "status": status,
-        "execution": "client",
-        "arguments": parsed_arguments
-    });
-    super::codex_chat_common::attach_optional_reasoning_content_field(&mut item, reasoning);
-    item
-}
-
-fn response_custom_tool_call_item(
-    item_id: &str,
-    status: &str,
-    call_id: &str,
-    name: &str,
-    arguments: &str,
-    reasoning: Option<&str>,
-) -> Value {
-    let input = custom_tool_input_from_chat_arguments(arguments);
-    let mut item = json!({
-        "id": item_id,
-        "type": "custom_tool_call",
-        "status": status,
-        "call_id": call_id,
-        "name": name,
-        "input": input
-    });
-    super::codex_chat_common::attach_optional_reasoning_content_field(&mut item, reasoning);
-    item
-}
-
-fn parse_tool_arguments_object(arguments: &str) -> Value {
-    if arguments.trim().is_empty() {
-        return json!({});
-    }
-    serde_json::from_str::<Value>(arguments)
-        .ok()
-        .filter(|value| value.is_object())
-        .unwrap_or_else(|| json!({ "query": arguments }))
-}
-
-pub(crate) fn custom_tool_input_from_chat_arguments(arguments: &str) -> String {
-    if arguments.trim().is_empty() {
-        return String::new();
-    }
-    match serde_json::from_str::<Value>(arguments) {
-        Ok(Value::Object(obj)) => obj
-            .get(CUSTOM_TOOL_INPUT_FIELD)
-            .and_then(|value| value.as_str())
-            .unwrap_or(arguments)
-            .to_string(),
-        _ => arguments.to_string(),
-    }
-}
-
 pub(crate) fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Value {
     let Some(usage) = usage.filter(|value| value.is_object() && !value.is_null()) else {
-        return json!({
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "output_tokens_details": { "reasoning_tokens": 0 }
-        });
+        return UsageIR::default().to_responses();
     };
 
-    let input_tokens = usage
-        .get("prompt_tokens")
-        .or_else(|| usage.get("input_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("completion_tokens")
-        .or_else(|| usage.get("output_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let total_tokens = usage
-        .get("total_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(input_tokens + output_tokens);
-
+    let ir_usage = UsageIR::from_chat_completions(usage).to_responses();
+    // 按既有字段顺序重组（客户端快照依赖顺序）；上游明确给出的 total_tokens 优先于 IR 推导值
     let mut result = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens
+        "input_tokens": ir_usage["input_tokens"],
+        "output_tokens": ir_usage["output_tokens"],
+        "total_tokens": usage
+            .get("total_tokens")
+            .and_then(|v| v.as_u64())
+            .map_or_else(|| ir_usage["total_tokens"].clone(), |total| json!(total))
     });
-
-    let cached = usage
-        .pointer("/prompt_tokens_details/cached_tokens")
-        .or_else(|| usage.pointer("/input_tokens_details/cached_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_write = usage
-        .pointer("/prompt_tokens_details/cache_write_tokens")
-        .or_else(|| usage.pointer("/input_tokens_details/cache_write_tokens"))
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-        })
-        .unwrap_or(0);
-    if cached > 0 || cache_write > 0 {
-        result["input_tokens_details"] = json!({
-            "cached_tokens": cached,
-            "cache_write_tokens": cache_write
-        });
+    if let Some(details) = ir_usage.get("input_tokens_details") {
+        result["input_tokens_details"] = details.clone();
     }
+    result["output_tokens_details"] = ir_usage["output_tokens_details"].clone();
 
     if let Some(details) = usage
         .get("completion_tokens_details")
@@ -1731,15 +1248,13 @@ pub(crate) fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Value {
             details["reasoning_tokens"] = json!(0);
         }
         result["output_tokens_details"] = details;
-    } else {
-        result["output_tokens_details"] = json!({ "reasoning_tokens": 0 });
     }
 
     if let Some(cache_read) = usage.get("cache_read_input_tokens") {
         result["cache_read_input_tokens"] = cache_read.clone();
     }
-    if cache_write > 0 {
-        result["cache_creation_input_tokens"] = json!(cache_write);
+    if let Some(cache_write) = ir_usage.get("cache_creation_input_tokens") {
+        result["cache_creation_input_tokens"] = cache_write.clone();
     }
 
     result
@@ -1759,80 +1274,6 @@ pub(crate) fn response_status_from_finish_reason(finish_reason: Option<&str>) ->
         Some("length") => "incomplete",
         _ => "completed",
     }
-}
-
-/// 把 Chat Completions 上游的错误体规整成 OpenAI Responses API 风格的错误对象。
-///
-/// 兼容三类输入：
-/// 1. 标准 OpenAI 形式 `{"error": {"message": "...", "type": "...", "code": ...}}`
-/// 2. MiniMax 等非标形式（如 `{"base_resp": {"status_code": 2013, "status_msg": "..."}}`）
-/// 3. 顶层只有 `message` / `detail` / 裸字符串的最小错误
-///
-/// 输出统一为 `{"error": {"message", "type", "code", "param"}}`，与 OpenAI Responses
-/// API 错误响应一致；Codex 客户端的错误处理只识别这个形状。
-pub fn chat_error_to_response_error(body: Option<&Value>) -> Value {
-    let Some(value) = body else {
-        return json!({
-            "error": {
-                "message": "Upstream returned an empty error response",
-                "type": "upstream_error",
-                "code": serde_json::Value::Null,
-                "param": serde_json::Value::Null,
-            }
-        });
-    };
-
-    if let Some(text) = value.as_str() {
-        return json!({
-            "error": {
-                "message": text,
-                "type": "upstream_error",
-                "code": serde_json::Value::Null,
-                "param": serde_json::Value::Null,
-            }
-        });
-    }
-
-    let source = value.get("error").unwrap_or(value);
-
-    let message = source
-        .get("message")
-        .or_else(|| source.get("detail"))
-        .or_else(|| source.get("status_msg"))
-        .or_else(|| source.pointer("/base_resp/status_msg"))
-        .and_then(|v| v.as_str())
-        .map(ToString::to_string)
-        .or_else(|| source.as_str().map(ToString::to_string))
-        .unwrap_or_else(|| {
-            // 没法从字段提取出文本，就把整个 JSON 序列化回去，方便用户排查。
-            serde_json::to_string(source).unwrap_or_else(|_| "Upstream error".to_string())
-        });
-
-    let error_type = source
-        .get("type")
-        .and_then(|v| v.as_str())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| "upstream_error".to_string());
-
-    let code = source
-        .get("code")
-        .cloned()
-        .or_else(|| source.pointer("/base_resp/status_code").cloned())
-        .unwrap_or(serde_json::Value::Null);
-
-    let param = source
-        .get("param")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-
-    json!({
-        "error": {
-            "message": message,
-            "type": error_type,
-            "code": code,
-            "param": param,
-        }
-    })
 }
 
 #[cfg(test)]
@@ -2989,6 +2430,21 @@ mod tests {
     }
 
     #[test]
+    fn chat_usage_direct_cache_read_field_reaches_responses_details() {
+        // 兼容上游只给 Anthropic 风格直传字段：与计费解析（UsageIR）同源，
+        // Responses 客户端也必须在 input_tokens_details 中看到这部分缓存。
+        let usage = chat_usage_to_responses_usage(Some(&json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 5,
+            "cache_read_input_tokens": 40
+        })));
+        assert_eq!(usage["input_tokens"], 100);
+        assert_eq!(usage["input_tokens_details"]["cached_tokens"], 40);
+        assert_eq!(usage["input_tokens_details"]["cache_write_tokens"], 0);
+        assert_eq!(usage["cache_read_input_tokens"], 40);
+    }
+
+    #[test]
     fn chat_response_to_responses_restores_loaded_namespace_tool_call() {
         let request = json!({
             "model": "gpt-5.4",
@@ -3217,81 +2673,6 @@ mod tests {
         assert_eq!(result["incomplete_details"]["reason"], "max_output_tokens");
     }
 
-    #[test]
-    fn chat_error_to_response_error_normalizes_standard_openai_shape() {
-        let input = json!({
-            "error": {
-                "message": "Invalid API key",
-                "type": "invalid_request_error",
-                "code": "invalid_api_key",
-                "param": "api_key"
-            }
-        });
-
-        let result = chat_error_to_response_error(Some(&input));
-
-        assert_eq!(result["error"]["message"], "Invalid API key");
-        assert_eq!(result["error"]["type"], "invalid_request_error");
-        assert_eq!(result["error"]["code"], "invalid_api_key");
-        assert_eq!(result["error"]["param"], "api_key");
-    }
-
-    #[test]
-    fn chat_error_to_response_error_normalizes_minimax_base_resp() {
-        // MiniMax 把错误塞在 base_resp 里，code 是数字而不是字符串
-        let input = json!({
-            "base_resp": {
-                "status_code": 2013,
-                "status_msg": "invalid params, chat content has invalid message role: system"
-            }
-        });
-
-        let result = chat_error_to_response_error(Some(&input));
-
-        assert_eq!(
-            result["error"]["message"],
-            "invalid params, chat content has invalid message role: system"
-        );
-        assert_eq!(result["error"]["code"], 2013);
-        // type 没有显式给出，应该回落到 upstream_error
-        assert_eq!(result["error"]["type"], "upstream_error");
-    }
-
-    #[test]
-    fn chat_error_to_response_error_handles_plain_text_body() {
-        let input = json!("Upstream timeout");
-
-        let result = chat_error_to_response_error(Some(&input));
-
-        assert_eq!(result["error"]["message"], "Upstream timeout");
-        assert_eq!(result["error"]["type"], "upstream_error");
-        assert!(result["error"]["code"].is_null());
-        assert!(result["error"]["param"].is_null());
-    }
-
-    #[test]
-    fn chat_error_to_response_error_handles_missing_body() {
-        let result = chat_error_to_response_error(None);
-
-        assert_eq!(
-            result["error"]["message"],
-            "Upstream returned an empty error response"
-        );
-        assert_eq!(result["error"]["type"], "upstream_error");
-    }
-
-    #[test]
-    fn chat_error_to_response_error_falls_back_to_detail_field() {
-        // 部分中转把错误塞在顶层 detail 字段（OpenAI 兼容层常见）
-        let input = json!({
-            "detail": "rate limit exceeded"
-        });
-
-        let result = chat_error_to_response_error(Some(&input));
-
-        assert_eq!(result["error"]["message"], "rate limit exceeded");
-        assert_eq!(result["error"]["type"], "upstream_error");
-    }
     // Regression tests for tool_choice without tools guard
     // https://github.com/farion1231/cc-switch/issues/3557
 

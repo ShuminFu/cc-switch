@@ -15,6 +15,11 @@ export interface ConfigTransferResult {
   backupId?: string;
 }
 
+export interface SyncSnapshotKeyStatus {
+  configured: boolean;
+  keyId: string | null;
+}
+
 export interface WebDavTestResult {
   success: boolean;
   message?: string;
@@ -234,6 +239,17 @@ export const settingsApi = {
 
   async s3SyncFetchRemoteInfo(): Promise<RemoteSnapshotInfo | { empty: true }> {
     return await invoke("s3_sync_fetch_remote_info");
+  },
+
+  // ===== Sync snapshot signing key (shared by WebDAV and S3) =====
+
+  async getSyncSnapshotKeyStatus(): Promise<SyncSnapshotKeyStatus> {
+    return await invoke("get_sync_snapshot_key_status");
+  },
+
+  /** 传空字符串或 null 清除密钥 */
+  async setSyncSnapshotKey(key: string | null): Promise<SyncSnapshotKeyStatus> {
+    return await invoke("set_sync_snapshot_key", { key });
   },
 
   async syncCurrentProvidersLive(): Promise<void> {

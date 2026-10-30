@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Server, Activity, Zap, Globe, ShieldAlert } from "lucide-react";
+import { Server, Activity, Zap, Globe, ShieldAlert, Pin } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import {
@@ -159,6 +159,18 @@ export function ProxyTabContent({
                 )}
                 checked={settings?.enableFailoverToggle ?? false}
                 onCheckedChange={handleFailoverToggleChange}
+              />
+
+              <ToggleRow
+                icon={<Pin className="h-4 w-4 text-orange-500" />}
+                title={t("settings.advanced.proxy.stickySessionRouting")}
+                description={t(
+                  "settings.advanced.proxy.stickySessionRoutingDescription",
+                )}
+                checked={settings?.stickySessionRouting ?? false}
+                onCheckedChange={(checked) =>
+                  void onAutoSave({ stickySessionRouting: checked })
+                }
               />
 
               {!isRunning && (

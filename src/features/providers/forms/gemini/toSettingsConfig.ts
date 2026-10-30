@@ -30,20 +30,29 @@ export const toGeminiSettingsConfig = ({
   config: Record<string, unknown>;
 }): string => JSON.stringify({ env: geminiEnvToObject(env), config });
 
-/** Gemini 只管理通用配置开关；其余应用专属 meta 字段写 undefined */
+/**
+ * Gemini 只管理通用配置开关；其余应用专属 meta 字段写 undefined。
+ * 例外：Anthropic 上游（`apiFormat = anthropic`）的路由字段表单不编辑，沿用已有值，
+ * 否则编辑一次就会关掉该转换
+ */
 export const toGeminiAppMeta = ({
   commonConfigEnabled,
+  baseMeta,
 }: {
   commonConfigEnabled: boolean;
+  baseMeta?: Pick<
+    AppProviderMeta,
+    "apiFormat" | "apiKeyField" | "maxOutputTokens"
+  >;
 }): AppProviderMeta => ({
   commonConfigEnabled,
   codexChatReasoning: undefined,
   promptCacheRouting: undefined,
   customUserAgent: undefined,
   localProxyRequestOverrides: undefined,
-  apiFormat: undefined,
-  apiKeyField: undefined,
+  apiFormat: baseMeta?.apiFormat,
+  apiKeyField: baseMeta?.apiKeyField,
   impersonateClaudeCode: undefined,
-  maxOutputTokens: undefined,
+  maxOutputTokens: baseMeta?.maxOutputTokens,
   isFullUrl: undefined,
 });

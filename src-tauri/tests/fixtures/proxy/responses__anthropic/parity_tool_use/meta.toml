@@ -1,0 +1,6 @@
+intent = "The same Anthropic tool_use reply converts to the same Responses output and status in stream and non-stream mode."
+source_commit = "a738206"
+
+[parity]
+expected_diff = [
+]

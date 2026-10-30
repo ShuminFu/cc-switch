@@ -348,7 +348,10 @@ export function GeminiProviderForm({
         codexFastMode: initial.codexFastMode,
       },
       pricing: pricingConfig,
-      app: toGeminiAppMeta({ commonConfigEnabled: useCommonConfig }),
+      app: toGeminiAppMeta({
+        commonConfigEnabled: useCommonConfig,
+        baseMeta,
+      }),
     });
 
     await onSubmit(payload);

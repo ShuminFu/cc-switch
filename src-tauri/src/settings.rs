@@ -10,6 +10,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::app_config::AppType;
 use crate::apps::registry;
 use crate::error::AppError;
+use crate::proxy::codec::CodecEngine;
 use crate::secret_store::{self, SecretPolicy};
 use crate::services::skill::{SkillStorageLocation, SyncMethod};
 use crate::services::sync_protocol::SyncKey;
@@ -539,6 +540,16 @@ pub struct AppSettings {
     /// Whether to show the failover toggle independently on the main page
     #[serde(default)]
     pub enable_failover_toggle: bool,
+    /// Keep each client session on the provider that last served it while that
+    /// provider's breaker is available, so upstream prompt caches survive a
+    /// failover. Only applies when auto failover is on. Opt-in: defaults to false.
+    #[serde(default)]
+    pub sticky_session_routing: bool,
+    /// Protocol conversion engine for proxy bridges (`codecEngine`): `legacy`
+    /// keeps the original per-bridge converters, `ir` uses the IR codecs for
+    /// bridges that have been migrated. Kept for one release as a fallback.
+    #[serde(default, skip_serializing_if = "CodecEngine::is_legacy")]
+    pub codec_engine: CodecEngine,
     /// Whether to show the project profile switcher on the main page header
     #[serde(default = "default_show_profile_switcher")]
     pub show_profile_switcher: bool,
@@ -652,6 +663,8 @@ impl Default for AppSettings {
             usage_confirmed: None,
             usage_dashboard_refresh_interval_ms: None,
             enable_failover_toggle: false,
+            sticky_session_routing: false,
+            codec_engine: CodecEngine::Legacy,
             show_profile_switcher: true,
             preserve_codex_official_auth_on_switch: false,
             unify_codex_session_history: false,
@@ -1334,6 +1347,29 @@ pub fn unify_codex_session_history() -> bool {
             e.into_inner()
         })
         .unify_codex_session_history
+}
+
+/// Whether sticky session routing is on (see [`AppSettings::sticky_session_routing`]).
+pub fn sticky_session_routing_enabled() -> bool {
+    settings_store()
+        .read()
+        .unwrap_or_else(|e| {
+            log::warn!("设置锁已毒化，使用恢复值: {e}");
+            e.into_inner()
+        })
+        .sticky_session_routing
+}
+
+/// The proxy protocol conversion engine (see [`AppSettings::codec_engine`]),
+/// read on the request path by the bridges migrated to codecs.
+pub fn codec_engine() -> CodecEngine {
+    settings_store()
+        .read()
+        .unwrap_or_else(|e| {
+            log::warn!("设置锁已毒化，使用恢复值: {e}");
+            e.into_inner()
+        })
+        .codec_engine
 }
 
 // ===== 当前供应商管理函数 =====

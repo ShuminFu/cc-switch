@@ -1,0 +1,2 @@
+intent = "A functionCall whose thoughtSignature carries the cc-switch thinking envelope replays the signed thinking block at the start of the assistant turn, so the tool-result continuation keeps Anthropic thinking enabled; client-provided ids pair functionResponse parts by id."
+source_commit = "0ddfcb2"

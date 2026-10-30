@@ -1,0 +1,7 @@
+---
+source: tests/proxy_golden.rs
+description: Multi-byte CJK and emoji text survives every chunk split and reaches the client unchanged.
+---
+# stream
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"你好，"}]},"index":0}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":1,"totalTokenCount":6},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"世界🌏"}]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":6,"totalTokenCount":11},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}

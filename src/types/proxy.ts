@@ -59,6 +59,17 @@ export interface CircuitBreakerStats {
   consecutiveSuccesses: number;
   totalRequests: number;
   failedRequests: number;
+  /** Open 状态下距离允许 HalfOpen 探测的剩余秒数；其余状态为 null */
+  openRemainingSecs: number | null;
+}
+
+/** "立即探测" 结果 */
+export interface CircuitProbeResult {
+  /** 是否真正发出了探测请求（熔断器为 Closed 或已有探测在途时为 false） */
+  probed: boolean;
+  success: boolean;
+  message: string | null;
+  stats: CircuitBreakerStats;
 }
 
 // 供应商健康状态枚举
@@ -117,4 +128,75 @@ export interface AppProxyConfig {
   circuitTimeoutSeconds: number;
   circuitErrorRateThreshold: number;
   circuitMinRequests: number;
+}
+
+// 缺陷报告抓包状态（CCS-138）
+export interface CaptureStatus {
+  active: boolean;
+  // 自动关闭时间（Unix 毫秒）
+  expiresAt: number | null;
+  remainingSecs: number;
+  // 可导出的请求 ID（最新的在前）
+  capturedRequestIds: string[];
+}
+
+// 请求追踪（CCS-139）
+export interface TraceHeader {
+  name: string;
+  value: string;
+}
+
+export interface TraceRoutePlan {
+  client: string;
+  upstream: string;
+  apiFormat: string | null;
+  decode: string;
+  url: string;
+  auth: string | null;
+  quirks: string[];
+  sideStores: string[];
+}
+
+export type TraceAttemptStatus =
+  | "in_flight"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface TraceAttempt {
+  providerId: string;
+  providerName: string;
+  status: TraceAttemptStatus;
+  // 失败或跳过的原因（已脱敏）
+  reason: string | null;
+  upstreamStatus: number | null;
+  plan: TraceRoutePlan | null;
+  // 按顺序应用的恢复策略
+  recovery: string[];
+  upstreamHeaders: TraceHeader[];
+  // 相对请求开始的毫秒数
+  startedMs: number;
+  durationMs: number | null;
+}
+
+export type TraceUsageSource = "stream_events" | "response_body" | "missing";
+
+export interface RequestTrace {
+  traceId: string;
+  requestId: string | null;
+  // Unix 毫秒
+  startedAt: number;
+  appType: string;
+  method: string;
+  path: string;
+  isStream: boolean;
+  clientHeaders: TraceHeader[];
+  attempts: TraceAttempt[];
+  droppedAttempts: number;
+  statusCode: number | null;
+  error: string | null;
+  ttfbMs: number | null;
+  firstTokenMs: number | null;
+  latencyMs: number | null;
+  usageSource: TraceUsageSource | null;
 }

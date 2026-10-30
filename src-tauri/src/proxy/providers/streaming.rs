@@ -2,7 +2,9 @@
 //!
 //! 实现 OpenAI SSE → Anthropic SSE 格式转换
 
+use crate::proxy::protocol::StopReason;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
+use crate::proxy::usage::ir::UsageIR;
 use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -18,8 +20,9 @@ struct OpenAIStreamChunk {
     model: String,
     #[serde(default)]
     choices: Vec<StreamChoice>,
+    /// OpenAI usage（含缓存明细），交由 UsageIR 统一解析
     #[serde(default)]
-    usage: Option<Usage>,
+    usage: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,31 +74,6 @@ where
     Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
-/// OpenAI 流式响应的 usage 信息（完整版）
-#[derive(Debug, Deserialize)]
-struct Usage {
-    #[serde(default)]
-    prompt_tokens: u32,
-    #[serde(default)]
-    completion_tokens: u32,
-    #[serde(default)]
-    prompt_tokens_details: Option<PromptTokensDetails>,
-    /// Some compatible servers return Anthropic-style cache fields directly
-    #[serde(default)]
-    cache_read_input_tokens: Option<u32>,
-    #[serde(default)]
-    cache_creation_input_tokens: Option<u32>,
-}
-
-/// Nested token details from OpenAI format
-#[derive(Debug, Deserialize)]
-struct PromptTokensDetails {
-    #[serde(default)]
-    cached_tokens: u32,
-    #[serde(default)]
-    cache_write_tokens: u32,
-}
-
 #[derive(Debug, Clone)]
 struct ToolBlockState {
     anthropic_index: u32,
@@ -113,26 +91,10 @@ struct ToolBlockState {
 /// 无限空白 bug 的连续空白字符阈值
 const INFINITE_WHITESPACE_THRESHOLD: usize = 500;
 
-fn build_anthropic_usage_json(usage: &Usage) -> Value {
-    // OpenAI prompt_tokens 含缓存，Anthropic input_tokens 不含，需减去 cache_read 与 cache_creation
-    // （三桶互斥，恒等 input + cache_read + cache_creation == prompt_tokens）。
-    let cached = extract_cache_read_tokens(usage).unwrap_or(0);
-    let cache_creation = extract_cache_write_tokens(usage).unwrap_or(0);
-    let input_tokens = usage
-        .prompt_tokens
-        .saturating_sub(cached)
-        .saturating_sub(cache_creation);
-    let mut usage_json = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": usage.completion_tokens
-    });
-    if cached > 0 {
-        usage_json["cache_read_input_tokens"] = json!(cached);
-    }
-    if cache_creation > 0 {
-        usage_json["cache_creation_input_tokens"] = json!(cache_creation);
-    }
-    usage_json
+fn build_anthropic_usage_json(usage: &Value) -> Value {
+    // OpenAI prompt_tokens 含缓存，Anthropic input_tokens 不含，UsageIR 减去 cache_read 与
+    // cache_creation（三桶互斥，恒等 input + cache_read + cache_creation == prompt_tokens）。
+    UsageIR::from_chat_completions(usage).to_anthropic()
 }
 
 fn default_anthropic_usage_json() -> Value {
@@ -452,8 +414,9 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         current_model = Some(chunk.model.clone());
                                     }
 
-                                    let chunk_usage_json =
-                                        chunk.usage.as_ref().map(build_anthropic_usage_json);
+                                    // 非对象 usage（如字符串）视为缺失，避免以零值覆盖已收到的有效 usage
+                                    let chunk_usage = chunk.usage.as_ref().filter(|u| u.is_object());
+                                    let chunk_usage_json = chunk_usage.map(build_anthropic_usage_json);
                                     if let Some(usage_json) = &chunk_usage_json {
                                         latest_usage = Some(usage_json.clone());
                                         if let Some((_, pending_usage)) = pending_message_delta.as_mut() {
@@ -468,22 +431,9 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                 "input_tokens": 0,
                                                 "output_tokens": 0
                                             });
-                                            if let Some(u) = &chunk.usage {
-                                                let cached = extract_cache_read_tokens(u).unwrap_or(0);
-                                                let cache_creation =
-                                                    extract_cache_write_tokens(u).unwrap_or(0);
-                                                let input = u
-                                                    .prompt_tokens
-                                                    .saturating_sub(cached)
-                                                    .saturating_sub(cache_creation);
-                                                start_usage["input_tokens"] = json!(input);
-                                                if cached > 0 {
-                                                    start_usage["cache_read_input_tokens"] = json!(cached);
-                                                }
-                                                if cache_creation > 0 {
-                                                    start_usage["cache_creation_input_tokens"] =
-                                                        json!(cache_creation);
-                                                }
+                                            if let Some(u) = chunk_usage {
+                                                start_usage = build_anthropic_usage_json(u);
+                                                start_usage["output_tokens"] = json!(0);
                                             }
 
                                             let event = build_message_start_event(
@@ -746,7 +696,6 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         // （第一个 usage 为 null，后续才补全）。此处只做缓存，不立即发送，
                                         // 等到 [DONE] 或流末尾再统一发出，确保 usage 完整且只发一次。
                                         if let Some(finish_reason) = &choice.finish_reason {
-                                            let mut stop_reason = map_stop_reason(Some(finish_reason));
                                             let usage_json =
                                                 chunk_usage_json.clone().or_else(|| latest_usage.clone());
 
@@ -769,13 +718,15 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             }
 
                                             // Gemini 兼容层 / Ollama / vLLM 会在携带 tool_calls 时返回
-                                            // finish_reason "stop"；若映射为 end_turn，Claude Code 会直接结束
-                                            // 回合而不执行工具。已发出工具块时改为 tool_use（length 保持 max_tokens）。
-                                            if stop_reason.as_deref() == Some("end_turn")
-                                                && tool_blocks_by_index.values().any(|state| state.started)
-                                            {
-                                                stop_reason = Some("tool_use".to_string());
-                                            }
+                                            // finish_reason "stop"；StopReason 表在已发出工具块时把 end_turn
+                                            // 改为 tool_use（length 保持 max_tokens），与非流式路径一致。
+                                            let has_tool_use =
+                                                tool_blocks_by_index.values().any(|state| state.started);
+                                            let stop_reason = Some(
+                                                StopReason::from_chat_finish_reason(finish_reason, has_tool_use)
+                                                    .as_anthropic_str()
+                                                    .to_string(),
+                                            );
 
                                             // 缓存 message_delta，等到 [DONE] 时发送（以便收集完整的 usage）
                                             pending_message_delta = Some((stop_reason, usage_json));
@@ -859,49 +810,6 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
     }
 }
 
-/// Extract cache_read tokens from Usage, checking both direct field and nested details
-fn extract_cache_read_tokens(usage: &Usage) -> Option<u32> {
-    // Direct field takes priority (compatible servers)
-    if let Some(v) = usage.cache_read_input_tokens {
-        return Some(v);
-    }
-    // OpenAI standard: prompt_tokens_details.cached_tokens
-    usage
-        .prompt_tokens_details
-        .as_ref()
-        .map(|d| d.cached_tokens)
-        .filter(|&v| v > 0)
-}
-
-/// Extract cache-write tokens from direct compatibility fields or OpenAI details.
-fn extract_cache_write_tokens(usage: &Usage) -> Option<u32> {
-    if let Some(value) = usage.cache_creation_input_tokens {
-        return Some(value);
-    }
-    usage
-        .prompt_tokens_details
-        .as_ref()
-        .map(|details| details.cache_write_tokens)
-        .filter(|value| *value > 0)
-}
-
-/// 映射停止原因
-fn map_stop_reason(finish_reason: Option<&str>) -> Option<String> {
-    finish_reason.map(|r| {
-        match r {
-            "tool_calls" | "function_call" => "tool_use",
-            "stop" => "end_turn",
-            "length" => "max_tokens",
-            "content_filter" => "end_turn",
-            other => {
-                log::warn!("[Claude/OpenRouter] Unknown finish_reason in streaming: {other}");
-                "end_turn"
-            }
-        }
-        .to_string()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -939,12 +847,12 @@ mod tests {
     #[test]
     fn test_map_stop_reason_legacy_and_filtered_values() {
         assert_eq!(
-            map_stop_reason(Some("function_call")),
-            Some("tool_use".to_string())
+            StopReason::from_chat_finish_reason("function_call", false).as_anthropic_str(),
+            "tool_use"
         );
         assert_eq!(
-            map_stop_reason(Some("content_filter")),
-            Some("end_turn".to_string())
+            StopReason::from_chat_finish_reason("content_filter", false).as_anthropic_str(),
+            "end_turn"
         );
     }
 
@@ -1328,6 +1236,43 @@ mod tests {
                 .pointer("/usage/cache_creation_input_tokens")
                 .and_then(|v| v.as_u64()),
             Some(50)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_non_object_usage_chunk_does_not_overwrite_earlier_usage() {
+        // usage 交由 UsageIR 按 Value 解析后，非对象 usage 不再导致整个 chunk 解析失败；
+        // 它必须被当作缺失，而不是以零值覆盖之前收到的有效 usage。
+        let input = concat!(
+            "data: {\"id\":\"chatcmpl_bad\",\"model\":\"glm-5.1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":7,\"prompt_tokens_details\":{\"cached_tokens\":40}}}\n\n",
+            "data: {\"id\":\"chatcmpl_bad\",\"model\":\"glm-5.1\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":\"n/a\"}\n\n",
+            "data: [DONE]\n\n"
+        );
+
+        let events = collect_anthropic_events(input).await;
+        let message_delta = events
+            .iter()
+            .find(|event| event_type(event) == Some("message_delta"))
+            .expect("should emit message_delta with usage");
+
+        assert_eq!(
+            message_delta
+                .pointer("/usage/input_tokens")
+                .and_then(|v| v.as_u64()),
+            Some(60)
+        );
+        assert_eq!(
+            message_delta
+                .pointer("/usage/cache_read_input_tokens")
+                .and_then(|v| v.as_u64()),
+            Some(40)
+        );
+        assert_eq!(
+            message_delta
+                .pointer("/usage/output_tokens")
+                .and_then(|v| v.as_u64()),
+            Some(7)
         );
     }
 

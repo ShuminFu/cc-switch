@@ -5,10 +5,12 @@
 use crate::app_config::AppType;
 use crate::provider::Provider;
 use crate::proxy::{
+    capture::CaptureHandle,
     extract_session_id,
     forwarder::{RequestForwarder, RequestScope},
     protocol::WireFormat,
     server::ProxyState,
+    trace::TraceHandle,
     types::{AppProxyConfig, CopilotOptimizerConfig, OptimizerConfig, RectifierConfig},
     ProxyError,
 };
@@ -80,12 +82,19 @@ pub struct RequestContext {
     pub session_id: String,
     /// Session ID 是否由客户端提供。生成的 UUID 不能作为上游缓存 key，否则每个请求都会换 key。
     pub session_client_provided: bool,
+    /// 会话粘性路由使用的 session_id：仅在开启「会话粘性路由」、故障转移开启
+    /// 且 session_id 由客户端提供时存在
+    pub sticky_session: Option<String>,
     /// 整流器配置
     pub rectifier_config: RectifierConfig,
     /// 优化器配置
     pub optimizer_config: OptimizerConfig,
     /// Copilot 优化器配置
     pub copilot_optimizer_config: CopilotOptimizerConfig,
+    /// 缺陷报告抓包句柄（仅在用户开启抓包期间存在）
+    pub capture: Option<CaptureHandle>,
+    /// 请求追踪句柄（由 handler 在转发前创建）
+    pub trace: Option<TraceHandle>,
 }
 
 impl RequestContext {
@@ -146,11 +155,17 @@ impl RequestContext {
             session_result.client_provided
         );
 
+        // 会话粘性路由：生成的 UUID 每个请求都不同，粘住它没有意义
+        let sticky_session = (app_config.auto_failover_enabled
+            && session_result.client_provided
+            && crate::settings::sticky_session_routing_enabled())
+        .then(|| session_id.clone());
+
         // 使用共享的 ProviderRouter 选择 Provider（熔断器状态跨请求保持）
         // 注意：只在这里调用一次，结果传递给 forwarder，避免重复消耗 HalfOpen 名额
         let providers = state
             .provider_router
-            .select_providers(app_type_str)
+            .select_providers_for_session(app_type_str, sticky_session.as_deref())
             .await
             .map_err(|e| match e {
                 crate::error::AppError::AllProvidersCircuitOpen => {
@@ -186,9 +201,12 @@ impl RequestContext {
             app_type_str,
             session_id,
             session_client_provided: session_result.client_provided,
+            sticky_session,
             rectifier_config,
             optimizer_config,
             copilot_optimizer_config,
+            capture: None,
+            trace: None,
         })
     }
 
@@ -249,12 +267,15 @@ impl RequestContext {
                 current_provider_id_at_start: self.current_provider_id.clone(),
                 session_id: self.session_id.clone(),
                 session_client_provided: self.session_client_provided,
+                sticky_session: self.sticky_session.clone(),
                 rectifier_config: self.rectifier_config.clone(),
                 optimizer_config: self.optimizer_config.clone(),
                 copilot_optimizer_config: self.copilot_optimizer_config.clone(),
                 non_streaming_timeout: Duration::from_secs(non_streaming_timeout),
                 streaming_first_byte_timeout: Duration::from_secs(first_byte_timeout),
                 max_attempts: RequestScope::max_attempts_for(max_retries),
+                capture: self.capture.clone(),
+                trace: self.trace.clone(),
             },
         )
     }

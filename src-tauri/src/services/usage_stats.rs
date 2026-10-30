@@ -3,6 +3,7 @@
 //! 提供使用量数据的聚合查询功能。这里只定义 DTO；查询 SQL 在
 //! [`crate::database::repo::usage`]（`impl Database` 的 Dashboard 查询方法也在那里）。
 
+use crate::proxy::usage::parity::UsageParity;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use crate::database::repo::usage::{
@@ -164,6 +165,9 @@ pub struct RequestLogDetail {
     /// 写入时实际用于计价的模型名。None = v11 前的历史行，"" = 未计价的错误行。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing_model: Option<String>,
+    /// 规范化 usage 与上游原始 usage 不一致时的标记（拆自成功行的 JSON 元数据）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_parity: Option<UsageParity>,
 }
 
 /// Provider 限额状态

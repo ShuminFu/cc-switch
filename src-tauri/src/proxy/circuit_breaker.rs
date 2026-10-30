@@ -5,6 +5,7 @@
 use super::log_codes::cb as log_cb;
 use super::types::AppProxyConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -15,6 +16,13 @@ use tokio::sync::RwLock;
 /// 正常情况下名额由 `HalfOpenPermit` 在记录结果或 Drop 时释放；这里只是兜底：
 /// 若某个名额被占用超过该时长（远超上游超时上限），视为已失效，允许新的探测。
 const HALF_OPEN_PERMIT_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
+
+/// 错误率滑动窗口大小：只统计最近这么多次请求的结果
+///
+/// 错误率若按 Closed 以来的全部请求计算，长时间的成功历史会掩盖间歇性故障；
+/// 改为最近 N 次结果后，旧的成功/失败会随新请求移出窗口。
+/// `min_requests` 也作用于窗口内的请求数（超过窗口大小时按窗口大小截断）。
+const ERROR_RATE_WINDOW_SIZE: usize = 100;
 
 /// 熔断器状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,7 +64,7 @@ pub struct CircuitBreakerConfig {
     pub timeout_seconds: u64,
     /// 错误率阈值 - 错误率超过此值时打开熔断器 (0.0-1.0)
     pub error_rate_threshold: f64,
-    /// 最小请求数 - 计算错误率前的最小请求数
+    /// 最小请求数 - 计算错误率前滑动窗口内的最小请求数
     pub min_requests: u32,
 }
 
@@ -92,10 +100,8 @@ pub struct CircuitBreaker {
     consecutive_failures: Arc<AtomicU32>,
     /// 连续成功计数（半开状态）
     consecutive_successes: Arc<AtomicU32>,
-    /// 总请求计数
-    total_requests: Arc<AtomicU32>,
-    /// 失败请求计数
-    failed_requests: Arc<AtomicU32>,
+    /// 最近请求结果的滑动窗口（用于计算错误率）
+    outcomes: Arc<Mutex<OutcomeWindow>>,
     /// 上次打开时间
     last_opened_at: Arc<RwLock<Option<Instant>>>,
     /// 配置（支持热更新）
@@ -111,6 +117,49 @@ pub struct CircuitBreaker {
 struct HalfOpenSlot {
     id: u64,
     acquired_at: Instant,
+}
+
+/// 最近 `ERROR_RATE_WINDOW_SIZE` 次请求结果的环形缓冲区
+#[derive(Debug)]
+struct OutcomeWindow {
+    /// `true` 表示失败
+    outcomes: VecDeque<bool>,
+    failures: usize,
+}
+
+impl OutcomeWindow {
+    fn new() -> Self {
+        Self {
+            outcomes: VecDeque::with_capacity(ERROR_RATE_WINDOW_SIZE),
+            failures: 0,
+        }
+    }
+
+    /// 记录一次结果，窗口已满时淘汰最旧的结果；返回 (窗口内请求数, 窗口内失败数)
+    fn record(&mut self, failed: bool) -> (usize, usize) {
+        if self.outcomes.len() == ERROR_RATE_WINDOW_SIZE && self.outcomes.pop_front() == Some(true)
+        {
+            self.failures -= 1;
+        }
+        self.outcomes.push_back(failed);
+        if failed {
+            self.failures += 1;
+        }
+        (self.outcomes.len(), self.failures)
+    }
+
+    fn clear(&mut self) {
+        self.outcomes.clear();
+        self.failures = 0;
+    }
+
+    fn len(&self) -> usize {
+        self.outcomes.len()
+    }
+}
+
+fn lock_outcomes(outcomes: &Mutex<OutcomeWindow>) -> MutexGuard<'_, OutcomeWindow> {
+    outcomes.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn lock_slot(slot: &Mutex<Option<HalfOpenSlot>>) -> MutexGuard<'_, Option<HalfOpenSlot>> {
@@ -199,8 +248,7 @@ impl CircuitBreaker {
             state: Arc::new(RwLock::new(CircuitState::Closed)),
             consecutive_failures: Arc::new(AtomicU32::new(0)),
             consecutive_successes: Arc::new(AtomicU32::new(0)),
-            total_requests: Arc::new(AtomicU32::new(0)),
-            failed_requests: Arc::new(AtomicU32::new(0)),
+            outcomes: Arc::new(Mutex::new(OutcomeWindow::new())),
             last_opened_at: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(config)),
             half_open_slot: Arc::new(Mutex::new(None)),
@@ -295,7 +343,7 @@ impl CircuitBreaker {
 
         // 重置失败计数
         self.consecutive_failures.store(0, Ordering::SeqCst);
-        self.total_requests.fetch_add(1, Ordering::SeqCst);
+        lock_outcomes(&self.outcomes).record(false);
 
         if state == CircuitState::HalfOpen {
             let successes = self.consecutive_successes.fetch_add(1, Ordering::SeqCst) + 1;
@@ -322,8 +370,7 @@ impl CircuitBreaker {
 
         // 更新计数器
         let failures = self.consecutive_failures.fetch_add(1, Ordering::SeqCst) + 1;
-        self.total_requests.fetch_add(1, Ordering::SeqCst);
-        self.failed_requests.fetch_add(1, Ordering::SeqCst);
+        let (total, failed) = lock_outcomes(&self.outcomes).record(true);
 
         // 重置成功计数
         self.consecutive_successes.store(0, Ordering::SeqCst);
@@ -349,11 +396,10 @@ impl CircuitBreaker {
                     drop(config); // 释放读锁再转换状态
                     self.transition_to_open().await;
                 } else {
-                    // 检查错误率
-                    let total = self.total_requests.load(Ordering::SeqCst);
-                    let failed = self.failed_requests.load(Ordering::SeqCst);
+                    // 检查滑动窗口内的错误率
+                    let min_requests = (config.min_requests as usize).min(ERROR_RATE_WINDOW_SIZE);
 
-                    if total >= config.min_requests {
+                    if total >= min_requests {
                         let error_rate = failed as f64 / total as f64;
 
                         if error_rate >= config.error_rate_threshold {
@@ -373,19 +419,83 @@ impl CircuitBreaker {
     }
 
     /// 获取当前状态
-    #[allow(dead_code)] // reserved for the breaker UI probe (p3-breaker-ui-probe)
     pub async fn get_state(&self) -> CircuitState {
         *self.state.read().await
     }
 
     /// 获取统计信息
+    ///
+    /// `total_requests` / `failed_requests` 为错误率滑动窗口内的计数。
     pub async fn get_stats(&self) -> CircuitBreakerStats {
+        let (total_requests, failed_requests) = {
+            let outcomes = lock_outcomes(&self.outcomes);
+            (outcomes.len() as u32, outcomes.failures as u32)
+        };
+        let state = *self.state.read().await;
+        let open_remaining_secs = if state == CircuitState::Open {
+            let timeout_seconds = self.config.read().await.timeout_seconds;
+            let elapsed = self
+                .last_opened_at
+                .read()
+                .await
+                .map_or(0, |opened_at| opened_at.elapsed().as_secs());
+            Some(timeout_seconds.saturating_sub(elapsed))
+        } else {
+            None
+        };
         CircuitBreakerStats {
-            state: *self.state.read().await,
+            state,
             consecutive_failures: self.consecutive_failures.load(Ordering::SeqCst),
             consecutive_successes: self.consecutive_successes.load(Ordering::SeqCst),
-            total_requests: self.total_requests.load(Ordering::SeqCst),
-            failed_requests: self.failed_requests.load(Ordering::SeqCst),
+            total_requests,
+            failed_requests,
+            open_remaining_secs,
+        }
+    }
+
+    /// 手动探测（"立即探测"）：获取 HalfOpen 探测名额
+    ///
+    /// 与 `allow_request` 的区别：Open 状态下不等待超时，直接切到 HalfOpen 并占用探测名额。
+    /// - Closed：无需探测，返回不放行
+    /// - Open / HalfOpen：按 HalfOpen 限流规则占用名额（已有探测在途时不放行）
+    ///
+    /// 放行时调用方必须把返回的名额传给 `record_manual_probe_result`。
+    pub async fn begin_manual_probe(&self) -> AllowResult {
+        let state = self.get_state().await;
+        if state == CircuitState::Closed {
+            return AllowResult::denied();
+        }
+        if state == CircuitState::Open {
+            log::info!(
+                "[{}] 熔断器 Open → HalfOpen (手动探测)",
+                log_cb::OPEN_TO_HALF_OPEN
+            );
+            self.transition_to_half_open().await;
+        }
+
+        match self.get_state().await {
+            CircuitState::HalfOpen => self.allow_half_open_probe(),
+            CircuitState::Closed | CircuitState::Open => AllowResult::denied(),
+        }
+    }
+
+    /// 记录手动探测结果
+    ///
+    /// 成功：用户主动验证供应商已恢复，直接 HalfOpen → Closed（不再等待 `success_threshold`）；
+    /// 失败：与 HalfOpen 探测失败一致，重新 Open 并重新计时。
+    pub async fn record_manual_probe_result(&self, permit: Option<&HalfOpenPermit>, success: bool) {
+        if !success {
+            self.record_failure(permit).await;
+            return;
+        }
+
+        self.record_success(permit).await;
+        if self.get_state().await == CircuitState::HalfOpen {
+            log::info!(
+                "[{}] 熔断器 HalfOpen → Closed (手动探测成功)",
+                log_cb::HALF_OPEN_TO_CLOSED
+            );
+            self.transition_to_closed().await;
         }
     }
 
@@ -457,9 +567,8 @@ impl CircuitBreaker {
         *self.state.write().await = CircuitState::Closed;
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
-        // 重置计数器
-        self.total_requests.store(0, Ordering::SeqCst);
-        self.failed_requests.store(0, Ordering::SeqCst);
+        // 重置错误率窗口
+        lock_outcomes(&self.outcomes).clear();
         // Closed 状态不需要探测名额，清空避免遗留占用
         self.clear_half_open_slot();
     }
@@ -474,6 +583,22 @@ pub struct CircuitBreakerStats {
     pub consecutive_successes: u32,
     pub total_requests: u32,
     pub failed_requests: u32,
+    /// Open 状态下距离允许 HalfOpen 探测的剩余秒数（0 表示下一个请求即会探测）；其余状态为 `None`
+    pub open_remaining_secs: Option<u64>,
+}
+
+/// 手动探测（"立即探测"）结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitProbeResult {
+    /// 是否真正发出了探测请求（熔断器为 Closed、或已有探测在途时为 `false`）
+    pub probed: bool,
+    /// 探测请求是否成功
+    pub success: bool,
+    /// 探测失败原因或未探测原因
+    pub message: Option<String>,
+    /// 探测后的熔断器状态
+    pub stats: CircuitBreakerStats,
 }
 
 #[cfg(test)]
@@ -671,6 +796,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_intermittent_failures_after_long_clean_history_open_breaker() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 1000,
+            error_rate_threshold: 0.3,
+            ..Default::default()
+        });
+
+        for _ in 0..1000 {
+            breaker.record_success(None).await;
+        }
+
+        // 30 次失败/成功交替：窗口内错误率达到 30%，而全量错误率仅约 3%
+        for _ in 0..30 {
+            breaker.record_failure(None).await;
+            if breaker.get_state().await == CircuitState::Open {
+                break;
+            }
+            breaker.record_success(None).await;
+        }
+
+        assert_eq!(
+            breaker.get_state().await,
+            CircuitState::Open,
+            "a recent burst of failures must not be hidden by a long clean history"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_failures_that_left_the_window_do_not_trip_breaker() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 1000,
+            error_rate_threshold: 0.5,
+            ..Default::default()
+        });
+
+        // 窗口内错误率 49%，未触发熔断
+        for _ in 0..51 {
+            breaker.record_success(None).await;
+        }
+        for _ in 0..49 {
+            breaker.record_failure(None).await;
+        }
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+
+        // 一整个窗口的成功把旧失败全部挤出窗口
+        for _ in 0..ERROR_RATE_WINDOW_SIZE {
+            breaker.record_success(None).await;
+        }
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.total_requests, ERROR_RATE_WINDOW_SIZE as u32);
+        assert_eq!(stats.failed_requests, 0);
+
+        // 新的少量失败只按窗口计算（2/100），不会叠加已移出窗口的 49 次失败
+        breaker.record_failure(None).await;
+        breaker.record_failure(None).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+        assert_eq!(breaker.get_stats().await.failed_requests, 2);
+    }
+
+    #[tokio::test]
+    async fn test_min_requests_applies_to_window_and_is_capped_at_window_size() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 1000,
+            error_rate_threshold: 0.6,
+            min_requests: 10_000,
+            ..Default::default()
+        });
+
+        // min_requests 超过窗口大小时按窗口大小截断，否则错误率永远不会被检查
+        for _ in 0..ERROR_RATE_WINDOW_SIZE {
+            breaker.record_failure(None).await;
+            if breaker.get_state().await == CircuitState::Open {
+                break;
+            }
+        }
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+    }
+
+    #[tokio::test]
     async fn test_circuit_breaker_reset() {
         let config = CircuitBreakerConfig {
             failure_threshold: 2,
@@ -687,5 +891,92 @@ mod tests {
         breaker.reset().await;
         assert_eq!(breaker.get_state().await, CircuitState::Closed);
         assert!(breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_stats_report_open_remaining_secs() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 600,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+
+        assert_eq!(breaker.get_stats().await.open_remaining_secs, None);
+
+        breaker.record_failure(None).await;
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.state, CircuitState::Open);
+        let remaining = stats
+            .open_remaining_secs
+            .expect("open breaker reports time left");
+        assert!((599..=600).contains(&remaining), "remaining={remaining}");
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_manual_probe_success_closes_without_waiting() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            success_threshold: 3,
+            timeout_seconds: 600,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+        breaker.record_failure(None).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+        assert!(
+            !breaker.allow_request().await.allowed,
+            "timeout not reached"
+        );
+
+        let probe = breaker.begin_manual_probe().await;
+        assert!(probe.allowed);
+        assert!(probe.used_half_open_permit());
+        assert_eq!(breaker.get_state().await, CircuitState::HalfOpen);
+
+        // 探测在途时，第二次手动探测与普通请求都不放行
+        assert!(!breaker.begin_manual_probe().await.allowed);
+        assert!(!breaker.allow_request().await.allowed);
+
+        breaker
+            .record_manual_probe_result(probe.permit.as_ref(), true)
+            .await;
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.state, CircuitState::Closed);
+        assert_eq!(stats.open_remaining_secs, None);
+        assert!(breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_manual_probe_failure_reopens_and_restarts_timer() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 600,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+        breaker.record_failure(None).await;
+
+        let probe = breaker.begin_manual_probe().await;
+        assert!(probe.allowed);
+        breaker
+            .record_manual_probe_result(probe.permit.as_ref(), false)
+            .await;
+
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.state, CircuitState::Open);
+        assert!(stats.open_remaining_secs.unwrap() >= 599);
+        // 名额已释放：可再次手动探测
+        let again = breaker.begin_manual_probe().await;
+        assert!(again.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_manual_probe_is_noop_when_closed() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig::default());
+        let probe = breaker.begin_manual_probe().await;
+        assert!(!probe.allowed);
+        assert!(probe.permit.is_none());
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
     }
 }

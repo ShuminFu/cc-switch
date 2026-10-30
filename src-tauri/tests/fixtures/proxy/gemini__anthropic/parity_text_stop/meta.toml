@@ -1,0 +1,6 @@
+intent = "The same Anthropic text reply converts to the same Gemini parts, finishReason and usage in stream and non-stream mode."
+source_commit = "0ddfcb2"
+
+[parity]
+expected_diff = [
+]
