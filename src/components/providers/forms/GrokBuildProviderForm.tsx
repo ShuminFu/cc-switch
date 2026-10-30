@@ -32,16 +32,14 @@ import type { ProviderFormProps, ProviderFormValues } from "./ProviderForm";
 import { BasicFormFields } from "./BasicFormFields";
 import { CodexFormFields } from "./CodexFormFields";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
-import {
-  codexProviderPresets,
-  type CodexProviderPreset,
-} from "@/config/codexProviderPresets";
+import type { CodexProviderPreset } from "@/config/codexProviderPresets";
 import {
   codexApiFormatFromWireApi,
   extractCodexBaseUrl,
   extractCodexModelName,
   extractCodexWireApi,
 } from "@/utils/providerConfigUtils";
+import { getPresetEntries } from "@/config/presetRegistry";
 import {
   buildGrokBuildConfig,
   parseGrokBuildConfig,
@@ -55,9 +53,7 @@ type GrokBuildProviderFormProps = Omit<ProviderFormProps, "appId">;
 const grokPresetEntries: Array<{
   id: string;
   preset: CodexProviderPreset;
-}> = codexProviderPresets
-  .map((preset, index) => ({ id: `grokbuild-${index}`, preset }))
-  .filter(({ preset }) => preset.category !== "official" && !preset.isOfficial);
+}> = getPresetEntries("grokbuild");
 
 export const grokApiBackendFromApiFormat = (format: CodexApiFormat): string => {
   if (format === "openai_chat") return "chat_completions";
