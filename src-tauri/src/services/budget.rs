@@ -15,6 +15,7 @@ use crate::services::usage_stats::ProviderLimitStatus;
 pub const BUDGET_ENFORCEMENT_KEY: &str = "budget_hard_limit_enforcement";
 
 /// Stable i18n key carried by the localized error returned on a breach.
+#[allow(dead_code)] // used by the proxy forwarder once enforcement is wired in
 pub const BUDGET_EXCEEDED_ERROR_KEY: &str = "budget.hardLimitExceeded";
 
 /// Whether hard-limit enforcement is turned on (off by default).
@@ -32,6 +33,7 @@ pub fn set_enforcement_enabled(db: &Database, enabled: bool) -> Result<(), AppEr
 
 /// Build the user-facing error for an exceeded limit, or `None` when the
 /// provider is still within its limits.
+#[allow(dead_code)] // used by check_hard_limit
 pub fn exceeded_error(status: &ProviderLimitStatus) -> Option<AppError> {
     let (period_zh, period_en, usage, limit) = if status.daily_exceeded {
         (
@@ -77,6 +79,7 @@ pub fn exceeded_error(status: &ProviderLimitStatus) -> Option<AppError> {
 ///
 /// Intended call site: the proxy forwarder, once per provider attempt, before
 /// the upstream request is sent (see the PRODUCT-05 report for details).
+#[allow(dead_code)] // called by the proxy forwarder once enforcement is wired in
 pub fn check_hard_limit(db: &Database, app_type: &str, provider_id: &str) -> Result<(), AppError> {
     if !is_enforcement_enabled(db)? {
         return Ok(());
