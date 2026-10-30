@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { useRequestDetail } from "@/lib/query/usage";
 import { getFreshInputTokens, isUnpricedUsage } from "@/types/usage";
+import { getLocaleFromLanguage } from "./format";
 
 interface RequestDetailPanelProps {
   requestId: string;
@@ -19,20 +20,13 @@ export function RequestDetailPanel({
 }: RequestDetailPanelProps) {
   const { t, i18n } = useTranslation();
   const { data: request, isLoading } = useRequestDetail(requestId);
-  const dateLocale =
-    i18n.language === "zh"
-      ? "zh-CN"
-      : i18n.language === "zh-TW"
-        ? "zh-TW"
-        : i18n.language === "ja"
-          ? "ja-JP"
-          : "en-US";
+  const dateLocale = getLocaleFromLanguage(i18n.language);
 
   if (isLoading) {
     return (
       <Dialog open onOpenChange={onClose}>
         <DialogContent className="max-w-2xl">
-          <div className="h-[400px] animate-pulse rounded bg-gray-100" />
+          <div className="h-[400px] animate-pulse rounded bg-muted" />
         </DialogContent>
       </Dialog>
     );
@@ -142,8 +136,8 @@ export function RequestDetailPanel({
                   <span
                     className={`inline-flex rounded-full px-2 py-1 text-xs ${
                       request.statusCode >= 200 && request.statusCode < 300
-                        ? "bg-green-100 text-green-800"
-                        : "bg-red-100 text-red-800"
+                        ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                        : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
                     }`}
                   >
                     {request.statusCode}
@@ -310,11 +304,13 @@ export function RequestDetailPanel({
 
           {/* 错误信息 */}
           {request.errorMessage && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-              <h3 className="mb-2 font-semibold text-red-800">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-500/50 dark:bg-red-950/30">
+              <h3 className="mb-2 font-semibold text-red-800 dark:text-red-200">
                 {t("usage.errorMessage", "错误信息")}
               </h3>
-              <p className="text-sm text-red-700">{request.errorMessage}</p>
+              <p className="text-sm text-red-700 break-all whitespace-pre-wrap dark:text-red-300">
+                {request.errorMessage}
+              </p>
             </div>
           )}
         </div>
