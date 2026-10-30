@@ -8,6 +8,7 @@ import {
 } from "@/components/providers/ProviderCard";
 import type { Provider } from "@/types";
 import type { AppId } from "@/lib/api";
+import { mockInvoke } from "../msw/invokeRecorder";
 
 function renderWithClient(node: ReactNode) {
   const client = new QueryClient({
@@ -100,5 +101,19 @@ describe("ProviderCard endpoint line (FE-PROV-09)", () => {
       ),
     ).toBe("https://site.example.com");
     expect(getProviderCardUrl(makeProvider({}), "hermes")).toBeUndefined();
+  });
+});
+
+describe("ProviderCard health query (FE-PROV-13)", () => {
+  it("does not query provider health while the proxy is stopped", async () => {
+    const { callsTo } = mockInvoke({
+      get_provider_health: { is_healthy: true, consecutive_failures: 0 },
+    });
+    renderCard(
+      makeProvider({ env: { ANTHROPIC_BASE_URL: "https://a.example.com" } }),
+      "claude",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(callsTo("get_provider_health")).toHaveLength(0);
   });
 });

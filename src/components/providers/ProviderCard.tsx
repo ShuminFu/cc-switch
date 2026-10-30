@@ -130,7 +130,13 @@ export function ProviderCard({
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
   const isAdditiveMode = appId === "opencode" && !isAnyOmo;
 
-  const { data: health } = useProviderHealth(provider.id, appId);
+  // The health badge only renders for queued providers while the proxy runs,
+  // so do not query (or poll) health for every other card (FE-PROV-13).
+  const { data: health } = useProviderHealth(
+    provider.id,
+    appId,
+    isProxyRunning && Boolean(isInFailoverQueue),
+  );
 
   const fallbackUrlText = t("provider.notConfigured", {
     defaultValue: "未配置接口地址",
