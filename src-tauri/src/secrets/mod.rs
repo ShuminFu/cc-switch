@@ -16,6 +16,7 @@
 //! `CC_SWITCH_SECRET_BACKEND=keyring` is set explicitly.
 
 pub mod envelope;
+pub mod provider_vault;
 pub mod sync_credentials;
 
 use std::collections::HashMap;
