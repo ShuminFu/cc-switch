@@ -364,6 +364,8 @@
         "enableFeatureDescription": "有効にすると、メインページ上部にルーティングとフェイルオーバーの切り替えが表示されます",
         "enableFailoverToggle": "メインページにフェイルオーバー切り替えを表示",
         "enableFailoverToggleDescription": "有効にすると、メインページ上部にフェイルオーバー切り替えが独立して表示されます",
+        "stickySessionRouting": "セッション固定ルーティング",
+        "stickySessionRoutingDescription": "フェイルオーバー有効時、各セッションを前回応答したプロバイダーに固定します（そのサーキットブレーカーが許可している間）。フェイルオーバー後もプロンプトキャッシュが維持されます",
         "running": "実行中",
         "stopped": "停止中"
       },

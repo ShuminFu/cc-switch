@@ -16,6 +16,7 @@ use cc_switch_lib::proxy_harness::{
     db_read_statement_count, db_statement_count, CircuitState, HarnessCircuit, HarnessHealth,
     MockReply, MockUpstream, ProxyHarness, RawMockUpstream,
 };
+use cc_switch_lib::{update_settings, AppSettings};
 use serde_json::{json, Value};
 
 #[path = "support.rs"]
@@ -411,6 +412,107 @@ async fn retry_after_cools_the_provider_down_without_tripping_the_breaker() {
     let status = harness.status().await;
     assert_eq!(status.success_requests, 5);
     assert_eq!(status.failover_count, 1);
+
+    harness.shutdown().await;
+}
+
+fn session_request(session_id: &str) -> Value {
+    let mut body = simple_request();
+    body["metadata"] = json!({ "session_id": session_id });
+    body
+}
+
+/// a fails once, then is healthy; b is healthy except for its fourth request.
+async fn sticky_session_upstreams() -> (MockUpstream, MockUpstream) {
+    let a = MockUpstream::spawn(|index, _| {
+        if index == 0 {
+            MockReply::error(500, "boom")
+        } else {
+            MockReply::message("from a", 10, 5)
+        }
+    })
+    .await;
+    let b = MockUpstream::spawn(|index, _| {
+        if index == 3 {
+            MockReply::error(500, "b boom")
+        } else {
+            MockReply::message("from b", 10, 5)
+        }
+    })
+    .await;
+    (a, b)
+}
+
+async fn sticky_session_harness(a: &MockUpstream, b: &MockUpstream) -> ProxyHarness {
+    ProxyHarness::builder()
+        .provider("a", a)
+        .provider("b", b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            // One failure does not open a breaker: only the sticky table moves traffic.
+            failure_threshold: 5,
+            success_threshold: 1,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await
+}
+
+#[tokio::test]
+async fn sticky_session_stays_on_the_failover_provider_until_it_fails() {
+    let _env = TestEnv::new();
+    update_settings(AppSettings {
+        sticky_session_routing: true,
+        ..AppSettings::default()
+    })
+    .expect("enable sticky session routing");
+    let (a, b) = sticky_session_upstreams().await;
+    let harness = sticky_session_harness(&a, &b).await;
+
+    // 1. a fails, s1 fails over to b.
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!((a.hits(), b.hits()), (1, 1));
+    let stats = harness.circuit_stats("a").await.expect("a has a breaker");
+    assert_eq!(stats.state, CircuitState::Closed, "{stats:?}");
+
+    // 2. a is healthy again, but s1 stays on b.
+    for _ in 0..2 {
+        let body = json_body(harness.messages(&session_request("s1")).await).await;
+        assert_eq!(first_text(&body), "from b");
+    }
+    assert_eq!((a.hits(), b.hits()), (1, 3));
+
+    // 3. Other sessions, and requests without a client session id, start at the head.
+    let body = json_body(harness.messages(&session_request("s2")).await).await;
+    assert_eq!(first_text(&body), "from a");
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!((a.hits(), b.hits()), (3, 3));
+
+    // 4. b fails: s1 fails over to a and now sticks there.
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!((a.hits(), b.hits()), (4, 4));
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!((a.hits(), b.hits()), (5, 4));
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn sticky_session_routing_is_off_by_default() {
+    let _env = TestEnv::new();
+    let (a, b) = sticky_session_upstreams().await;
+    let harness = sticky_session_harness(&a, &b).await;
+
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from b");
+    // Without the setting the session goes back to the head of the queue.
+    let body = json_body(harness.messages(&session_request("s1")).await).await;
+    assert_eq!(first_text(&body), "from a");
+    assert_eq!((a.hits(), b.hits()), (2, 1));
 
     harness.shutdown().await;
 }

@@ -104,6 +104,7 @@ fn forwarder(client_format: WireFormat) -> RequestForwarder {
             current_provider_id_at_start: String::new(),
             session_id: String::new(),
             session_client_provided: false,
+            sticky_session: None,
             rectifier_config: RectifierConfig::default(),
             optimizer_config: OptimizerConfig::default(),
             copilot_optimizer_config: CopilotOptimizerConfig::default(),

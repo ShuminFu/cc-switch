@@ -364,6 +364,8 @@
         "enableFeatureDescription": "开启后，主页面顶部将显示路由和故障转移开关",
         "enableFailoverToggle": "在主页面显示故障转移开关",
         "enableFailoverToggleDescription": "开启后，主页面顶部将独立显示故障转移开关",
+        "stickySessionRouting": "会话粘性路由",
+        "stickySessionRoutingDescription": "故障转移开启时，同一会话优先留在上次成功服务它的供应商上（只要其熔断器可用），避免故障转移后丢失提示缓存",
         "running": "运行中",
         "stopped": "已停止"
       },

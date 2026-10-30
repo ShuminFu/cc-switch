@@ -364,6 +364,8 @@
         "enableFeatureDescription": "When enabled, the routing and failover toggles will appear at the top of the main page",
         "enableFailoverToggle": "Show Failover Toggle on Main Page",
         "enableFailoverToggleDescription": "When enabled, the failover toggle will appear independently at the top of the main page",
+        "stickySessionRouting": "Sticky Session Routing",
+        "stickySessionRoutingDescription": "With failover on, keep each session on the provider that last served it while that provider's circuit breaker allows requests, so prompt caches survive a failover",
         "running": "Running",
         "stopped": "Stopped"
       },

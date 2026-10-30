@@ -125,6 +125,8 @@ pub struct RequestScope {
     pub session_id: String,
     /// Session ID 是否由客户端提供；生成值不能作为上游缓存身份。
     pub session_client_provided: bool,
+    /// 会话粘性路由的 session_id：请求成功后记录服务它的 provider（未开启时为 `None`）
+    pub sticky_session: Option<String>,
     /// 整流器配置
     pub rectifier_config: RectifierConfig,
     /// 优化器配置
@@ -291,6 +293,13 @@ impl RequestForwarder {
                         strategy.log_retry_succeeded(app_type_str);
                     }
                     attempt.succeed().await;
+                    if let Some(session_id) = &self.req.sticky_session {
+                        self.shared.router.remember_session_provider(
+                            app_type_str,
+                            session_id,
+                            &provider.id,
+                        );
+                    }
                     return Ok(ForwardResult {
                         response,
                         provider: provider.clone(),

@@ -364,6 +364,8 @@
         "enableFeatureDescription": "開啟後，主頁面頂部將顯示路由和故障轉移開關",
         "enableFailoverToggle": "在主頁面顯示故障轉移開關",
         "enableFailoverToggleDescription": "開啟後，主頁面頂部將獨立顯示故障轉移開關",
+        "stickySessionRouting": "會話黏性路由",
+        "stickySessionRoutingDescription": "故障轉移開啟時，同一會話優先留在上次成功服務它的供應商上（只要其熔斷器可用），避免故障轉移後遺失提示快取",
         "running": "執行中",
         "stopped": "已停止"
       },

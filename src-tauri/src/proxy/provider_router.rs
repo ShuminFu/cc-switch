@@ -12,12 +12,51 @@ use crate::proxy::circuit_breaker::{
 };
 use crate::proxy::protocol::{AppRef, BreakerKey};
 use crate::proxy::runtime_config::RuntimeConfigStore;
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::future::Future;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+
+/// 会话粘性路由表的容量上限：超出后淘汰最久未使用的会话
+pub const STICKY_SESSION_CAPACITY: usize = 1024;
+
+/// 会话粘性路由表：有界 LRU，(应用, session_id) → 上次成功服务该会话的 provider_id
+///
+/// 让故障转移后的会话继续留在接手的 provider 上，避免回到队首时丢失上游 prompt 缓存。
+struct StickySessions {
+    capacity: usize,
+    /// 按最近使用排序：队首最久未使用，队尾最近使用
+    entries: IndexMap<(AppRef, String), String>,
+}
+
+impl StickySessions {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            entries: IndexMap::new(),
+        }
+    }
+
+    /// 查询并把命中的会话标记为最近使用
+    fn get(&mut self, key: &(AppRef, String)) -> Option<String> {
+        let index = self.entries.get_index_of(key)?;
+        let last = self.entries.len() - 1;
+        self.entries.move_index(index, last);
+        self.entries.get_index(last).map(|(_, id)| id.clone())
+    }
+
+    /// 写入（或刷新）会话映射；超出容量时淘汰最久未使用的会话
+    fn insert(&mut self, key: (AppRef, String), provider_id: String) {
+        self.entries.shift_remove(&key);
+        self.entries.insert(key, provider_id);
+        while self.entries.len() > self.capacity {
+            self.entries.shift_remove_index(0);
+        }
+    }
+}
 
 /// 供应商路由器
 pub struct ProviderRouter {
@@ -29,6 +68,8 @@ pub struct ProviderRouter {
     circuit_breakers: Arc<RwLock<HashMap<BreakerKey, Arc<CircuitBreaker>>>>,
     /// 限流冷却截止时间 - 上游 429/529 带 Retry-After 时写入，与熔断器相互独立
     cooldowns: Arc<Mutex<HashMap<BreakerKey, Instant>>>,
+    /// 会话粘性路由表（仅在开启「会话粘性路由」时读写）
+    sticky_sessions: Mutex<StickySessions>,
 }
 
 impl ProviderRouter {
@@ -46,6 +87,7 @@ impl ProviderRouter {
             runtime_config,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
             cooldowns: Arc::new(Mutex::new(HashMap::new())),
+            sticky_sessions: Mutex::new(StickySessions::new(STICKY_SESSION_CAPACITY)),
         }
     }
 
@@ -56,6 +98,19 @@ impl ProviderRouter {
     /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）；
     ///   处于限流冷却中的 provider 被跳过，只有其余 provider 都不可用时才按队列顺序兜底返回
     pub async fn select_providers(&self, app_type: &str) -> Result<Vec<Provider>, AppError> {
+        self.select_providers_for_session(app_type, None).await
+    }
+
+    /// 与 [`Self::select_providers`] 相同，但带会话粘性：
+    ///
+    /// `sticky_session` 为 `Some` 且故障转移开启时，若该会话上次成功使用的 provider
+    /// 仍可用（熔断器放行且不在限流冷却中），把它移到队首，其余 provider 保持队列顺序。
+    /// 调用方只在用户开启「会话粘性路由」且 session_id 由客户端提供时传入 `Some`。
+    pub async fn select_providers_for_session(
+        &self,
+        app_type: &str,
+        sticky_session: Option<&str>,
+    ) -> Result<Vec<Provider>, AppError> {
         let mut result = Vec::new();
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
@@ -100,6 +155,8 @@ impl ProviderRouter {
                     cooling_down.len()
                 );
                 result = cooling_down;
+            } else if let Some(session_id) = sticky_session {
+                self.prefer_sticky_provider(app_type, session_id, &mut result);
             }
         } else {
             // 故障转移关闭：仅使用当前供应商，跳过熔断器检查
@@ -127,6 +184,46 @@ impl ProviderRouter {
         }
 
         Ok(result)
+    }
+
+    /// 把会话的粘性 provider（若在可用列表中）移到队首
+    fn prefer_sticky_provider(&self, app_type: &str, session_id: &str, result: &mut Vec<Provider>) {
+        let Some(sticky_id) = self.sticky_session_provider(app_type, session_id) else {
+            return;
+        };
+        if let Some(index) = result.iter().position(|p| p.id == sticky_id) {
+            if index > 0 {
+                log::debug!(
+                    "[{app_type}] 会话粘性路由: session={session_id} 优先使用 provider_id={sticky_id}"
+                );
+                let sticky = result.remove(index);
+                result.insert(0, sticky);
+            }
+        }
+    }
+
+    /// 记录成功服务该会话的 provider（会话粘性路由）
+    pub fn remember_session_provider(&self, app_type: &str, session_id: &str, provider_id: &str) {
+        if session_id.is_empty() {
+            return;
+        }
+        let mut sticky = self
+            .sticky_sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        sticky.insert(
+            (AppRef::from(app_type), session_id.to_string()),
+            provider_id.to_string(),
+        );
+    }
+
+    /// 该会话当前粘住的 provider（并标记为最近使用）
+    pub fn sticky_session_provider(&self, app_type: &str, session_id: &str) -> Option<String> {
+        let mut sticky = self
+            .sticky_sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        sticky.get(&(AppRef::from(app_type), session_id.to_string()))
     }
 
     /// 请求执行前获取熔断器“放行许可”
@@ -640,6 +737,109 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(breaker.state, CircuitState::Closed);
+    }
+
+    #[test]
+    fn test_sticky_sessions_evicts_least_recently_used() {
+        let key = |s: &str| (AppRef::from("claude"), s.to_string());
+        let mut sticky = StickySessions::new(2);
+        sticky.insert(key("s1"), "a".to_string());
+        sticky.insert(key("s2"), "b".to_string());
+        // 读取 s1 让它变成最近使用，下一次写入淘汰 s2
+        assert_eq!(sticky.get(&key("s1")).as_deref(), Some("a"));
+        sticky.insert(key("s3"), "c".to_string());
+        assert_eq!(sticky.entries.len(), 2);
+        assert!(sticky.get(&key("s2")).is_none());
+        assert_eq!(sticky.get(&key("s1")).as_deref(), Some("a"));
+        assert_eq!(sticky.get(&key("s3")).as_deref(), Some("c"));
+        // 覆盖写入不增加条目
+        sticky.insert(key("s1"), "b".to_string());
+        assert_eq!(sticky.entries.len(), 2);
+        assert_eq!(sticky.get(&key("s1")).as_deref(), Some("b"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_sticky_session_table_is_bounded() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = ProviderRouter::new(db);
+
+        for i in 0..=STICKY_SESSION_CAPACITY {
+            router.remember_session_provider("claude", &format!("s{i}"), "a");
+        }
+        let len = router.sticky_sessions.lock().unwrap().entries.len();
+        assert_eq!(len, STICKY_SESSION_CAPACITY);
+        assert!(router.sticky_session_provider("claude", "s0").is_none());
+        assert_eq!(
+            router
+                .sticky_session_provider("claude", &format!("s{STICKY_SESSION_CAPACITY}"))
+                .as_deref(),
+            Some("a")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_sticky_session_prefers_its_provider_while_available() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        db.update_circuit_breaker_config(&CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 600,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        for id in ["a", "b", "c"] {
+            let provider = Provider::with_id(id.to_string(), id.to_string(), json!({}), None);
+            db.save_provider("claude", &provider).unwrap();
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        let ids = |providers: Vec<Provider>| -> Vec<String> {
+            providers.into_iter().map(|p| p.id).collect()
+        };
+        let select = |session: Option<&'static str>| {
+            let router = &router;
+            async move {
+                ids(router
+                    .select_providers_for_session("claude", session)
+                    .await
+                    .unwrap())
+            }
+        };
+
+        router.remember_session_provider("claude", "s1", "b");
+        assert_eq!(select(Some("s1")).await, ["b", "a", "c"]);
+        // 其他会话、未开启粘性（None）与其他应用均不受影响
+        assert_eq!(select(Some("s2")).await, ["a", "b", "c"]);
+        assert_eq!(select(None).await, ["a", "b", "c"]);
+        assert!(router.sticky_session_provider("codex", "s1").is_none());
+
+        // 粘性 provider 处于限流冷却中：回到队列顺序
+        router.start_cooldown("b", "claude", Duration::from_secs(60));
+        assert_eq!(select(Some("s1")).await, ["a", "c"]);
+
+        // 粘性 provider 熔断：回到队列顺序
+        let router = ProviderRouter::new(db.clone());
+        router.remember_session_provider("claude", "s1", "b");
+        router
+            .record_result("b", "claude", None, false, Some("fail".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(
+            ids(router
+                .select_providers_for_session("claude", Some("s1"))
+                .await
+                .unwrap()),
+            ["a", "c"]
+        );
     }
 
     #[tokio::test]
