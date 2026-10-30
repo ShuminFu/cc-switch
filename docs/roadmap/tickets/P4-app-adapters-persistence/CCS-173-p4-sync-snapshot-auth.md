@@ -84,6 +84,21 @@ docs/dev/SECRET_STORAGE.md.
 - `vitest tests/msw/handlers.test.ts`: 4 passed.
 - prettier check on the touched TS: clean.
 
+**Review**
+- Re-checked both acceptance criteria against the code: `tampered_manifest_is_rejected` and
+  `signed_manifest_is_accepted_after_a_json_round_trip` assert the right error keys, and
+  WebDAV/S3 `download` authorize the manifest before any artifact is fetched.
+- Fixed: a full `save_settings` (`merge_settings_for_save`) took `webdavSync`/`s3Sync.status`
+  from the frontend payload, so a stale or field-stripped copy (e.g. `UsageScriptModal`
+  and `FirstRunNoticeDialog` drop only `webdavSync` and send `s3Sync` back) could reset
+  `signedSync` and silently lift the downgrade guard. The merge now always keeps the
+  backend value. Test: `save_settings_should_keep_backend_signed_sync_flag`.
+- Status stays Partial: the sync-key UI and the migration prompt are still missing.
+- More notes for later: the signature does not bind the remote location or profile, so a
+  signed snapshot from another profile with the same key would verify, which is the same
+  class of problem as rollback. Also, a future manifest field added to `SyncManifest` will
+  make older apps fail the MAC check, so treat any new field as a protocol version bump.
+
 **Remaining / follow-ups**
 - Frontend:
   - add a sync-key field in WebdavSyncSection (one key shared by WebDAV and S3), using
