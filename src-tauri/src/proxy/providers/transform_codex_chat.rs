@@ -286,24 +286,21 @@ pub fn responses_to_chat_completions_with_reasoning(
     result["messages"] = json!(messages);
 
     let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("");
-    if let Some(max_tokens) = body.get("max_output_tokens") {
-        if super::transform::is_openai_o_series(model) {
-            result["max_completion_tokens"] = max_tokens.clone();
-        } else {
-            result["max_tokens"] = max_tokens.clone();
-        }
-    }
-    if let Some(max_tokens) = body.get("max_tokens") {
-        result["max_tokens"] = max_tokens.clone();
-    }
+    // o-series / gpt-5+ reasoning models need max_completion_tokens and reject
+    // custom temperature/top_p (PROV-05).
+    super::transform::apply_chat_token_limit_and_sampling(
+        &mut result,
+        model,
+        body.get("max_tokens")
+            .or_else(|| body.get("max_output_tokens")),
+        body.get("temperature"),
+        body.get("top_p"),
+    );
     if let Some(max_tokens) = body.get("max_completion_tokens") {
         result["max_completion_tokens"] = max_tokens.clone();
     }
-
-    for key in ["temperature", "top_p", "stream"] {
-        if let Some(value) = body.get(key) {
-            result[key] = value.clone();
-        }
+    if let Some(value) = body.get("stream") {
+        result["stream"] = value.clone();
     }
 
     apply_reasoning_options(&mut result, &body, model, reasoning_config);
@@ -1840,6 +1837,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn responses_request_for_reasoning_model_uses_max_completion_tokens_without_sampling() {
+        for model in ["gpt-5.4", "gpt-5-mini", "o4-mini"] {
+            let input = json!({
+                "model": model,
+                "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+                "max_output_tokens": 100,
+                "temperature": 0,
+                "top_p": 0.9
+            });
+
+            let result = responses_to_chat_completions(input).unwrap();
+
+            assert_eq!(result["max_completion_tokens"], 100, "{model}");
+            assert!(result.get("max_tokens").is_none(), "{model}");
+            assert!(result.get("temperature").is_none(), "{model}");
+            assert!(result.get("top_p").is_none(), "{model}");
+        }
+    }
+
+    #[test]
+    fn responses_request_for_gpt41_keeps_max_tokens_and_sampling() {
+        let input = json!({
+            "model": "gpt-4.1",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            "max_output_tokens": 100,
+            "temperature": 0,
+            "top_p": 0.5
+        });
+
+        let result = responses_to_chat_completions(input).unwrap();
+
+        assert_eq!(result["max_tokens"], 100);
+        assert!(result.get("max_completion_tokens").is_none());
+        assert_eq!(result["temperature"], 0);
+        assert_eq!(result["top_p"], 0.5);
+    }
+
+    #[test]
     fn responses_request_with_stream_injects_include_usage() {
         let input = json!({
             "model": "kimi-k2.6",
@@ -2050,7 +2085,9 @@ mod tests {
         assert_eq!(result["tools"][0]["function"]["name"], "get_weather");
         assert_eq!(result["tools"][0]["function"]["strict"], true);
         assert_eq!(result["tool_choice"]["function"]["name"], "get_weather");
-        assert_eq!(result["max_tokens"], 100);
+        // gpt-5.4 is a reasoning model: Chat Completions requires max_completion_tokens.
+        assert_eq!(result["max_completion_tokens"], 100);
+        assert!(result.get("max_tokens").is_none());
         assert_eq!(result["reasoning_effort"], "high");
     }
 

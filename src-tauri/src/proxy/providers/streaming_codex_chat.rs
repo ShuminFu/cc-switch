@@ -1,5 +1,6 @@
 //! OpenAI Chat Completions SSE → OpenAI Responses SSE conversion.
 
+use super::chat_tool_call_slots::ChatToolCallSlots;
 use super::codex_responses_sse as sse;
 use super::{
     codex_chat_common::{
@@ -75,6 +76,7 @@ struct ChatToResponsesState {
     reasoning: ReasoningItemState,
     inline_think: InlineThinkState,
     tools: BTreeMap<usize, ToolCallState>,
+    tool_slots: ChatToolCallSlots,
     next_tool_index_to_add: usize,
     output_items: Vec<(u32, Value)>,
     latest_usage: Option<Value>,
@@ -95,6 +97,7 @@ impl Default for ChatToResponsesState {
             reasoning: ReasoningItemState::default(),
             inline_think: InlineThinkState::default(),
             tools: BTreeMap::new(),
+            tool_slots: ChatToolCallSlots::default(),
             next_tool_index_to_add: 0,
             output_items: Vec::new(),
             latest_usage: None,
@@ -333,7 +336,6 @@ impl ChatToResponsesState {
     }
 
     fn push_tool_call_delta(&mut self, tool_call: &Value, reasoning: Option<&str>) -> Vec<Bytes> {
-        let chat_index = tool_call.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let id_delta = tool_call
             .get("id")
             .and_then(|v| v.as_str())
@@ -343,6 +345,16 @@ impl ChatToResponsesState {
             .get("name")
             .and_then(|v| v.as_str())
             .map(str::to_string);
+        // Index-less fragments are routed by id / position instead of all
+        // collapsing into slot 0 (PROV-02).
+        let chat_index = self.tool_slots.resolve(
+            tool_call
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize),
+            id_delta.as_deref(),
+            name_delta.as_deref(),
+        );
         let args_delta = function
             .get("arguments")
             .and_then(|v| v.as_str())
@@ -1009,6 +1021,36 @@ mod tests {
         assert_eq!(items[1]["name"], "second_tool");
         assert_eq!(items[1]["call_id"], "call_second");
         assert_eq!(items[1]["arguments"], r#"{"value":2}"#);
+    }
+
+    #[tokio::test]
+    async fn keeps_parallel_tool_calls_without_index_distinct() {
+        let output = collect(vec![
+            "data: {\"id\":\"chatcmpl_noidx\",\"model\":\"local\",\"choices\":[{\"delta\":{\"content\":\"Working\",\"tool_calls\":[{\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_noidx\",\"model\":\"local\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"arguments\":\"\\\"a.md\\\"}\"}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_noidx\",\"model\":\"local\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_b\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"date\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ])
+        .await;
+        let events = parse_sse_events(&output);
+        let completed = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+        let items = completed["response"]["output"].as_array().unwrap();
+        let calls = items
+            .iter()
+            .filter(|item| item["type"] == "function_call")
+            .collect::<Vec<_>>();
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["call_id"], "call_a");
+        assert_eq!(calls[0]["name"], "read_file");
+        assert_eq!(calls[0]["arguments"], r#"{"path":"a.md"}"#);
+        assert_eq!(calls[1]["call_id"], "call_b");
+        assert_eq!(calls[1]["name"], "exec_command");
+        assert_eq!(calls[1]["arguments"], r#"{"cmd":"date"}"#);
+        assert!(output.contains("Working"));
     }
 
     #[tokio::test]
