@@ -16,9 +16,9 @@ Apart from the 5 legacy files, three files outside codec/ and usage/ use the tok
 - Remove the three entries from the CCS-243 allowlist. Add a fixture change or `no-fixture-needed` label (CCS-034).
 
 ## Acceptance criteria / verification
-- [ ] `grep -rln 'cached_tokens\|cache_creation_input_tokens' src-tauri/src --include=*.rs | grep -v 'codec/\|usage/'` lists only the 5 legacy files.
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --test proxy_golden` stays 18/18 (usage_parity_golden_corpus included); `cargo test --lib session_usage` passes.
-- [ ] The CCS-243 check passes with the shortened allowlist.
+- [x] `grep -rln 'cached_tokens\|cache_creation_input_tokens' src-tauri/src --include=*.rs | grep -v 'codec/\|usage/'` lists only the 5 legacy files.
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --test proxy_golden` stays 18/18 (usage_parity_golden_corpus included); `cargo test --lib session_usage` passes.
+- [x] The CCS-243 check passes with the shortened allowlist.
 
 ## Dependencies
 CCS-243 (`p5-usage-token-name-check`).
@@ -40,3 +40,5 @@ No golden fixture under `tests/fixtures/proxy/` changed and no snapshot moved, s
 - `cargo test --lib session_usage`: 56 passed; `cargo test --lib -- anthropic_fields taps testkit`: 27 passed (incl. 2 new `anthropic_fields` tests).
 - `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2857 passed, 0 failed, 3 ignored.
 - `cargo fmt`, `cargo clippy -- -D warnings`, `cargo clippy --all-targets --features testkit -- -D warnings`: clean.
+
+**Review.** Re-checked b7835b1 against each criterion: the acceptance grep lists only the 5 legacy files, `node scripts/check-usage-token-names.mjs` passes with the shortened allowlist, and the tap (`message_start` / `message_delta`) and session-log reads keep the old `as_u64` / `as u32` / missing-as-0 and delta-precedence rules. The rebuilt test fixtures carry the same counts as the old literals (an absent `stop_reason` now serialises as `null`, which the importer already reads as `None`). Re-ran `cargo fmt --check`, both clippy invocations, `--test proxy_golden` (18/18), `--lib` (2857 passed, 0 failed, 3 ignored) and the vitest check (5/5): all clean. The only change in this review is ticking the acceptance checkboxes.
