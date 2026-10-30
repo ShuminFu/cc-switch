@@ -73,6 +73,11 @@ describe("AutoFailoverConfigPanel", () => {
       "proxy.autoFailover.validationFailed",
     );
     expect(api.callsTo("update_proxy_config_for_app")).toHaveLength(0);
+    // The offending field is flagged inline (FE-UI-20).
+    expect(maxRetries()).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getAllByText("proxy.autoFailover.rangeError")).toHaveLength(
+      1,
+    );
   });
 
   it("saves the full config, converting the error rate back to a ratio", async () => {

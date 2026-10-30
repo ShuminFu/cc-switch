@@ -7,6 +7,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Save, Loader2, Info } from "lucide-react";
 import { toast } from "sonner";
 import { useAppProxyConfig, useUpdateAppProxyConfig } from "@/lib/query/proxy";
+import {
+  AUTO_FAILOVER_RANGES,
+  validateAutoFailoverForm,
+  type AutoFailoverNumericField,
+} from "./autoFailoverSchema";
 
 export interface AutoFailoverConfigPanelProps {
   appType: string;
@@ -35,8 +40,25 @@ export function AutoFailoverConfigPanel({
     circuitMinRequests: "10",
   });
 
+  // Fields that failed validation on the last save (shown inline, FE-UI-20).
+  const [invalidFields, setInvalidFields] = useState<
+    Set<AutoFailoverNumericField>
+  >(new Set());
+
+  const rangeError = (field: AutoFailoverNumericField) =>
+    invalidFields.has(field) ? (
+      <p className="text-xs text-destructive" role="alert">
+        {t("proxy.autoFailover.rangeError", {
+          min: AUTO_FAILOVER_RANGES[field].min,
+          max: AUTO_FAILOVER_RANGES[field].max,
+          defaultValue: "Enter a whole number from {{min}} to {{max}}.",
+        })}
+      </p>
+    ) : null;
+
   useEffect(() => {
     if (config) {
+      setInvalidFields(new Set());
       setFormData({
         autoFailoverEnabled: config.autoFailoverEnabled,
         maxRetries: String(config.maxRetries),
@@ -56,99 +78,40 @@ export function AutoFailoverConfigPanel({
 
   const handleSave = async () => {
     if (!config) return;
-    // 解析数字，返回 NaN 表示无效输入
-    const parseNum = (val: string) => {
-      const trimmed = val.trim();
-      // 必须是纯数字
-      if (!/^-?\d+$/.test(trimmed)) return NaN;
-      return parseInt(trimmed);
+    const labels: Record<AutoFailoverNumericField, string> = {
+      maxRetries: t("proxy.autoFailover.maxRetries", "最大重试次数"),
+      streamingFirstByteTimeout: t(
+        "proxy.autoFailover.streamingFirstByte",
+        "流式首字节超时",
+      ),
+      streamingIdleTimeout: t(
+        "proxy.autoFailover.streamingIdle",
+        "流式静默超时",
+      ),
+      nonStreamingTimeout: t("proxy.autoFailover.nonStreaming", "非流式超时"),
+      circuitFailureThreshold: t(
+        "proxy.autoFailover.failureThreshold",
+        "失败阈值",
+      ),
+      circuitSuccessThreshold: t(
+        "proxy.autoFailover.successThreshold",
+        "恢复成功阈值",
+      ),
+      circuitTimeoutSeconds: t("proxy.autoFailover.timeout", "恢复等待时间"),
+      circuitErrorRateThreshold: t(
+        "proxy.autoFailover.errorRate",
+        "错误率阈值",
+      ),
+      circuitMinRequests: t("proxy.autoFailover.minRequests", "最小请求数"),
     };
 
-    // 定义各字段的有效范围
-    const ranges = {
-      maxRetries: { min: 0, max: 10 },
-      streamingFirstByteTimeout: { min: 1, max: 120 },
-      streamingIdleTimeout: { min: 0, max: 600 },
-      nonStreamingTimeout: { min: 60, max: 1200 },
-      circuitFailureThreshold: { min: 1, max: 20 },
-      circuitSuccessThreshold: { min: 1, max: 10 },
-      circuitTimeoutSeconds: { min: 0, max: 300 },
-      circuitErrorRateThreshold: { min: 0, max: 100 },
-      circuitMinRequests: { min: 5, max: 100 },
-    };
-
-    // 解析原始值
-    const raw = {
-      maxRetries: parseNum(formData.maxRetries),
-      streamingFirstByteTimeout: parseNum(formData.streamingFirstByteTimeout),
-      streamingIdleTimeout: parseNum(formData.streamingIdleTimeout),
-      nonStreamingTimeout: parseNum(formData.nonStreamingTimeout),
-      circuitFailureThreshold: parseNum(formData.circuitFailureThreshold),
-      circuitSuccessThreshold: parseNum(formData.circuitSuccessThreshold),
-      circuitTimeoutSeconds: parseNum(formData.circuitTimeoutSeconds),
-      circuitErrorRateThreshold: parseNum(formData.circuitErrorRateThreshold),
-      circuitMinRequests: parseNum(formData.circuitMinRequests),
-    };
-
-    // 校验是否超出范围（NaN 也视为无效）
-    const errors: string[] = [];
-    const checkRange = (
-      value: number,
-      range: { min: number; max: number },
-      label: string,
-    ) => {
-      if (isNaN(value) || value < range.min || value > range.max) {
-        errors.push(`${label}: ${range.min}-${range.max}`);
-      }
-    };
-
-    checkRange(
-      raw.maxRetries,
-      ranges.maxRetries,
-      t("proxy.autoFailover.maxRetries", "最大重试次数"),
-    );
-    checkRange(
-      raw.streamingFirstByteTimeout,
-      ranges.streamingFirstByteTimeout,
-      t("proxy.autoFailover.streamingFirstByte", "流式首字节超时"),
-    );
-    checkRange(
-      raw.streamingIdleTimeout,
-      ranges.streamingIdleTimeout,
-      t("proxy.autoFailover.streamingIdle", "流式静默超时"),
-    );
-    checkRange(
-      raw.nonStreamingTimeout,
-      ranges.nonStreamingTimeout,
-      t("proxy.autoFailover.nonStreaming", "非流式超时"),
-    );
-    checkRange(
-      raw.circuitFailureThreshold,
-      ranges.circuitFailureThreshold,
-      t("proxy.autoFailover.failureThreshold", "失败阈值"),
-    );
-    checkRange(
-      raw.circuitSuccessThreshold,
-      ranges.circuitSuccessThreshold,
-      t("proxy.autoFailover.successThreshold", "恢复成功阈值"),
-    );
-    checkRange(
-      raw.circuitTimeoutSeconds,
-      ranges.circuitTimeoutSeconds,
-      t("proxy.autoFailover.timeout", "恢复等待时间"),
-    );
-    checkRange(
-      raw.circuitErrorRateThreshold,
-      ranges.circuitErrorRateThreshold,
-      t("proxy.autoFailover.errorRate", "错误率阈值"),
-    );
-    checkRange(
-      raw.circuitMinRequests,
-      ranges.circuitMinRequests,
-      t("proxy.autoFailover.minRequests", "最小请求数"),
-    );
-
-    if (errors.length > 0) {
+    const validation = validateAutoFailoverForm(formData);
+    if (!validation.success) {
+      setInvalidFields(new Set(validation.invalidFields));
+      const errors = validation.invalidFields.map((field) => {
+        const { min, max } = AUTO_FAILOVER_RANGES[field];
+        return `${labels[field]}: ${min}-${max}`;
+      });
       toast.error(
         t("proxy.autoFailover.validationFailed", {
           fields: errors.join("; "),
@@ -157,6 +120,8 @@ export function AutoFailoverConfigPanel({
       );
       return;
     }
+    setInvalidFields(new Set());
+    const raw = validation.data;
 
     try {
       await updateConfig.mutateAsync({
@@ -253,7 +218,9 @@ export function AutoFailoverConfigPanel({
                   setFormData({ ...formData, maxRetries: e.target.value })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("maxRetries")}
               />
+              {rangeError("maxRetries")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.maxRetriesHint",
@@ -279,7 +246,9 @@ export function AutoFailoverConfigPanel({
                   })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("circuitFailureThreshold")}
               />
+              {rangeError("circuitFailureThreshold")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.failureThresholdHint",
@@ -317,7 +286,9 @@ export function AutoFailoverConfigPanel({
                   })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("streamingFirstByteTimeout")}
               />
+              {rangeError("streamingFirstByteTimeout")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.streamingFirstByteHint",
@@ -343,7 +314,9 @@ export function AutoFailoverConfigPanel({
                   })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("streamingIdleTimeout")}
               />
+              {rangeError("streamingIdleTimeout")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.streamingIdleHint",
@@ -369,7 +342,9 @@ export function AutoFailoverConfigPanel({
                   })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("nonStreamingTimeout")}
               />
+              {rangeError("nonStreamingTimeout")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.nonStreamingHint",
@@ -404,7 +379,9 @@ export function AutoFailoverConfigPanel({
                   })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("circuitSuccessThreshold")}
               />
+              {rangeError("circuitSuccessThreshold")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.successThresholdHint",
@@ -430,7 +407,9 @@ export function AutoFailoverConfigPanel({
                   })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("circuitTimeoutSeconds")}
               />
+              {rangeError("circuitTimeoutSeconds")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.timeoutHint",
@@ -457,7 +436,9 @@ export function AutoFailoverConfigPanel({
                   })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("circuitErrorRateThreshold")}
               />
+              {rangeError("circuitErrorRateThreshold")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.errorRateHint",
@@ -483,7 +464,9 @@ export function AutoFailoverConfigPanel({
                   })
                 }
                 disabled={isDisabled}
+                aria-invalid={invalidFields.has("circuitMinRequests")}
               />
+              {rangeError("circuitMinRequests")}
               <p className="text-xs text-muted-foreground">
                 {t(
                   "proxy.autoFailover.minRequestsHint",
