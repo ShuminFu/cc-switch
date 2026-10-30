@@ -63,9 +63,11 @@ pub struct TrayTexts {
 /// 镜像前端 `i18n/getInitialLanguage` 的判定顺序，确保首次安装
 /// （`settings.language` 尚未写入）时托盘语言与界面语言一致：
 /// 繁中系统（zh-TW/HK/MO/Hant）→ `zh-TW`，其余 zh → `zh`，
-/// 日文 → `ja`，英文 → `en`，未知区域回退到 `zh`（与前端默认一致）。
+/// 日文 → `ja`，英文 → `en`，其余未知区域（de/fr/ko 等）回退到 `en`
+/// （与前端默认一致）。
 fn map_locale_to_tray_language(locale: &str) -> &'static str {
-    let locale = locale.to_lowercase();
+    // 部分平台返回 POSIX 风格的 `zh_TW`，统一成 BCP 47 的连字符形式。
+    let locale = locale.to_lowercase().replace('_', "-");
     if locale == "zh" {
         "zh"
     } else if locale.starts_with("zh-tw")
@@ -78,19 +80,20 @@ fn map_locale_to_tray_language(locale: &str) -> &'static str {
         "zh"
     } else if locale.starts_with("ja") {
         "ja"
-    } else if locale.starts_with("en") {
-        "en"
     } else {
-        "zh"
+        // 英文以及所有未知区域
+        "en"
     }
 }
 
-/// 读取系统区域并映射为托盘语言码；取不到区域时回退到 `zh`。
-fn detect_system_tray_language() -> &'static str {
+/// 读取系统区域并映射为应用语言码；取不到区域时回退到 `en`。
+///
+/// 后端其它在 `settings.language` 未设置时需要选择提示语言的地方也复用它。
+pub(crate) fn detect_system_tray_language() -> &'static str {
     sys_locale::get_locale()
         .as_deref()
         .map(map_locale_to_tray_language)
-        .unwrap_or("zh")
+        .unwrap_or("en")
 }
 
 impl TrayTexts {
@@ -1176,16 +1179,25 @@ mod tests {
     }
 
     #[test]
-    fn locale_unknown_falls_back_to_zh() {
+    fn locale_unknown_falls_back_to_en() {
         use super::map_locale_to_tray_language;
-        // 与前端 getInitialLanguage 的默认值保持一致。
-        for locale in ["de-DE", "fr", "ko-KR", ""] {
+        // 与前端 getInitialLanguage 的默认值保持一致：未知区域回退到英文。
+        for locale in ["de-DE", "fr", "ko-KR", "es-ES", "pt-BR", "ru-RU", ""] {
             assert_eq!(
                 map_locale_to_tray_language(locale),
-                "zh",
-                "expected {locale} -> zh (default)"
+                "en",
+                "expected {locale} -> en (default)"
             );
         }
+    }
+
+    #[test]
+    fn locale_accepts_posix_underscore_form() {
+        use super::map_locale_to_tray_language;
+        assert_eq!(map_locale_to_tray_language("zh_TW"), "zh-TW");
+        assert_eq!(map_locale_to_tray_language("zh_CN"), "zh");
+        assert_eq!(map_locale_to_tray_language("ja_JP"), "ja");
+        assert_eq!(map_locale_to_tray_language("de_DE"), "en");
     }
 
     #[test]
