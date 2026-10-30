@@ -41,7 +41,9 @@ toml = "0.8"
 toml_edit = "0.22"
 # TLS: rustls + ring only (no native-tls/OpenSSL, no aws-lc-rs). lib.rs installs
 # the ring provider as the process default; keep these crates on the same provider.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset", "http2", "system-proxy", "json", "stream", "socks"] }
+# rustls-tls-native-roots keeps OS-installed (e.g. corporate) CAs trusted, as the
+# previous native-tls default did; webpki roots remain as the baseline.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "charset", "http2", "system-proxy", "json", "stream", "socks"] }
 arboard = "3.6"
 flate2 = "1"
 brotli = "7"
