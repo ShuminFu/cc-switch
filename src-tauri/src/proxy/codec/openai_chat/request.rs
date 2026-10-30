@@ -237,7 +237,7 @@ fn encode_message(message: &Message, preserve_reasoning_content: bool) -> Vec<Va
 }
 
 /// 图片 → `image_url` part；URL 原样，base64 拼 data URL（缺省 image/png）；空数据跳过
-fn image_part(source: &MediaSource) -> Option<Value> {
+pub(super) fn image_part(source: &MediaSource) -> Option<Value> {
     match source {
         MediaSource::Url { url } => {
             if url.is_empty() {
@@ -261,8 +261,8 @@ fn image_part(source: &MediaSource) -> Option<Value> {
                 "image_url": {"url": format!("data:{media_type};base64,{data}")}
             }))
         }
-        MediaSource::Text { .. } => {
-            log::warn!("[Codec/OpenAiChat] Skipping image block with a text source");
+        MediaSource::Text { .. } | MediaSource::File { .. } => {
+            log::warn!("[Codec/OpenAiChat] Skipping image block with a text or file source");
             None
         }
     }
@@ -273,8 +273,22 @@ fn image_part(source: &MediaSource) -> Option<Value> {
 /// - 文本源转为 text part（有标题时加 `[document: 标题]` 前缀）；
 /// - base64 PDF 转为 `file` part；
 /// - 其他情况（URL、非 PDF、空内容）插入占位文本，避免文档被静默丢弃。
-fn document_part(source: &MediaSource, title: Option<&str>) -> Value {
+pub(super) fn document_part(source: &MediaSource, title: Option<&str>) -> Value {
     match source {
+        // OpenAI 文件引用原样转为 `file` part
+        MediaSource::File { file_id, file_data } => {
+            let mut file = serde_json::Map::new();
+            if let Some(file_id) = file_id {
+                file.insert("file_id".into(), json!(file_id));
+            }
+            if let Some(file_data) = file_data {
+                file.insert("file_data".into(), json!(file_data));
+            }
+            if let Some(title) = title {
+                file.insert("filename".into(), json!(title));
+            }
+            return json!({"type": "file", "file": file});
+        }
         MediaSource::Text { data } if !data.is_empty() => {
             let text = match title {
                 Some(title) => format!("[document: {title}]\n{data}"),

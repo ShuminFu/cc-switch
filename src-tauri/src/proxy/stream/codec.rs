@@ -14,15 +14,14 @@ use futures::Stream;
 use serde_json::Value;
 
 use crate::proxy::codec::bridge::{
-    anthropic_message_to_responses_sse, anthropic_to_responses_sse, gemini_to_anthropic_sse,
-    openai_chat_to_anthropic_sse, responses_to_anthropic_sse,
+    anthropic_message_to_responses_sse, anthropic_to_responses_sse, chat_to_responses_sse,
+    gemini_to_anthropic_sse, openai_chat_to_anthropic_sse, responses_to_anthropic_sse,
 };
 use crate::proxy::codec::gemini::GeminiShadowSink;
 use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
 use crate::proxy::providers::{
     codex_chat_history::{record_responses_sse_stream, CodexChatHistoryStore},
     gemini_shadow::GeminiShadowStore,
-    streaming_codex_chat::create_responses_sse_stream_from_chat_with_context,
     transform_codex_chat::CodexToolContext,
     transform_gemini::AnthropicToolSchemaHints,
 };
@@ -128,7 +127,7 @@ impl StreamDecoder for ChatToResponses {
     fn decode(self: Box<Self>, upstream: ByteStream) -> ByteStream {
         let this = *self;
         let converted =
-            create_responses_sse_stream_from_chat_with_context(upstream, this.tool_context);
+            chat_to_responses_sse(upstream, this.tool_context, crate::settings::codec_engine());
         Box::pin(record_responses_sse_stream(converted, this.history))
     }
 }

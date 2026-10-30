@@ -365,7 +365,11 @@ impl ResponsesEventEncoder {
             ItemKind::Tool => {
                 let is_custom = self.tool_context.is_custom_tool_chat_name(&state.name);
                 let arguments = if chat {
-                    canonicalize_tool_arguments_str(&state.accum)
+                    // 结束时才开始的调用把已累积的参数放在开始事件里
+                    canonicalize_tool_arguments_str(&format!(
+                        "{}{}",
+                        state.start_arguments, state.accum
+                    ))
                 } else {
                     // 优先用流式增量；没有增量时用开始事件携带的 input
                     let raw = if state.accum.trim().is_empty() {

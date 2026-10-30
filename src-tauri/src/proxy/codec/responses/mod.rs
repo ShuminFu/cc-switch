@@ -169,4 +169,6 @@ impl StreamCodec for ResponsesCodec {
 #[cfg(test)]
 mod client_anthropic_tests;
 #[cfg(test)]
+mod client_chat_tests;
+#[cfg(test)]
 mod tests;

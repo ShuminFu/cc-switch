@@ -28,12 +28,8 @@
 //! same event sequence as the unsplit input and satisfies the structural
 //! invariants. Every failure names the split offsets that produced it.
 
-use super::streaming_codex_chat;
 use super::transform::inject_openai_stream_include_usage;
-use super::transform_codex_chat::{
-    build_codex_tool_context_from_request, chat_completion_to_response_with_context,
-    responses_to_chat_completions_with_reasoning, CodexToolContext,
-};
+use super::transform_codex_chat::{build_codex_tool_context_from_request, CodexToolContext};
 use super::transform_gemini::{extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints};
 use crate::proxy::codec::bridge;
 pub use crate::proxy::codec::CodecEngine;
@@ -479,7 +475,7 @@ pub fn convert_request_with(
         // The proxy first restores cached tool calls from the session history
         // (`codex_chat_history`) and applies provider reasoning config; fixtures
         // carry their full history and run without provider config.
-        Bridge::ResponsesChat => responses_to_chat_completions_with_reasoning(body, None),
+        Bridge::ResponsesChat => bridge::responses_to_chat_request(body, None, engine),
         // Same default max_tokens as the forwarder. The forwarder's later cache
         // breakpoint injection and Claude Code system prompt are provider config.
         Bridge::ResponsesAnthropic => {
@@ -513,7 +509,7 @@ pub fn convert_non_stream_with(
         ),
         Bridge::AnthropicResponses => bridge::responses_to_anthropic_response(body, engine),
         Bridge::ResponsesChat => {
-            chat_completion_to_response_with_context(body, &fixture.codex_tool_context())
+            bridge::chat_to_responses_response(body, &fixture.codex_tool_context(), engine)
         }
         Bridge::ResponsesAnthropic => {
             bridge::anthropic_to_responses_response(body, &fixture.codex_tool_context(), engine)
@@ -563,11 +559,7 @@ pub fn stream_output_with(
             bridge::responses_to_anthropic_sse(upstream, engine).collect(),
         ),
         Bridge::ResponsesChat => futures::executor::block_on(
-            streaming_codex_chat::create_responses_sse_stream_from_chat_with_context(
-                upstream,
-                fixture.codex_tool_context(),
-            )
-            .collect(),
+            bridge::chat_to_responses_sse(upstream, fixture.codex_tool_context(), engine).collect(),
         ),
         Bridge::ResponsesAnthropic => futures::executor::block_on(
             bridge::anthropic_to_responses_sse(upstream, fixture.codex_tool_context(), engine)

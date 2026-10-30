@@ -300,11 +300,11 @@ impl BodyStages<'_> {
         }
         providers::apply_codex_chat_upstream_model(self.provider, &mut body);
         let reasoning_config = providers::resolve_codex_chat_reasoning_config(self.provider, &body);
-        let mut chat_body =
-            providers::transform_codex_chat::responses_to_chat_completions_with_reasoning(
-                body,
-                reasoning_config.as_ref(),
-            )?;
+        let mut chat_body = crate::proxy::codec::bridge::responses_to_chat_request(
+            body,
+            reasoning_config.as_ref(),
+            crate::settings::codec_engine(),
+        )?;
         providers::inject_codex_chat_prompt_cache_key(
             self.provider,
             &mut chat_body,

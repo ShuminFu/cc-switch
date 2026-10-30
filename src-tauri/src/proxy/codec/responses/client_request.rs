@@ -9,7 +9,13 @@
 //!   工具结果排在用户消息的其他块之前，回放的 thinking 排在助手消息开头），
 //!   system / developer 条目的文本裁剪后并入 system，空白文本丢弃，
 //!   `incomplete` 的历史工具调用丢弃，参数不是 JSON 对象的工具调用是无效请求；
-//!   带本桥接信封的 reasoning 还原为签名 thinking，其余 reasoning 丢弃。
+//!   带本桥接信封的 reasoning 还原为签名 thinking，其余 reasoning 丢弃；
+//! - Chat 上游：每个条目对应一条 Chat 消息（相邻的工具调用合并为一条助手消息），
+//!   system / developer 消息并入 system；reasoning 条目（以及条目自带的
+//!   `reasoning_content`）向后附加到下一条助手消息或工具调用消息，遇到用户消息或
+//!   输入结束时回溯附加到上一条助手消息；工具输出预先渲染为 Chat tool 消息的文本。
+
+mod chat;
 
 use serde_json::{json, Value};
 
@@ -27,7 +33,8 @@ use crate::proxy::protocol::ir::{
 };
 
 /// 已由 IR 字段建模的顶层字段；其余字段原样进入 [`ChatRequest::extra`]
-const MODELED_FIELDS: [&str; 10] = [
+/// （`reasoning` 对象也保留在其中：Chat 上游需要区分「带了 reasoning 但没有 effort」）
+const MODELED_FIELDS: [&str; 9] = [
     "model",
     "instructions",
     "input",
@@ -37,7 +44,6 @@ const MODELED_FIELDS: [&str; 10] = [
     "stream",
     "tools",
     "tool_choice",
-    "reasoning",
 ];
 
 pub(super) fn decode_request(
@@ -85,7 +91,20 @@ pub(super) fn decode_request(
                 .map(|tool_choice| anthropic_tool_choice(tool_choice, &tool_context));
         }
         ResponsesFlavor::ChatUpstream => {
-            return Err(super::unsupported("request decoding for a Chat upstream"));
+            let (system, messages) = chat::messages(body, &tool_context);
+            request.system = system;
+            request.messages = messages;
+            match body
+                .get("tool_choice")
+                .map(|tool_choice| chat::tool_choice(tool_choice, &tool_context))
+            {
+                Some(Ok(tool_choice)) => request.tool_choice = Some(tool_choice),
+                // 无法用 IR 表达的取值原样转发
+                Some(Err(raw)) => {
+                    request.extra.insert("tool_choice".into(), raw);
+                }
+                None => {}
+            }
         }
     }
     Ok(request)

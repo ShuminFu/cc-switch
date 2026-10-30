@@ -362,6 +362,7 @@ fn inline_data(
         })),
         MediaSource::Url { .. } => Err(unsupported_source(kind, "url")),
         MediaSource::Text { .. } => Err(unsupported_source(kind, "text")),
+        MediaSource::File { .. } => Err(unsupported_source(kind, "file")),
     }
 }
 
@@ -400,6 +401,7 @@ fn anthropic_block(part: &Part) -> Option<Value> {
         MediaSource::Text { data } => {
             json!({ "type": "text", "media_type": "text/plain", "data": data })
         }
+        MediaSource::File { file_id, .. } => json!({ "type": "file", "file_id": file_id }),
     };
     match part {
         Part::Image { source: media } => Some(json!({ "type": "image", "source": source(media) })),

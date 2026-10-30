@@ -5,12 +5,18 @@
 //! - 响应解码（Chat Completions 响应体 → [`ChatResponse`]）
 //! - 流式解码（Chat Completions SSE → [`StreamEvent`]）
 //!
-//! 没有客户端直接说 Chat 协议，反方向返回 [`CodecError::Unsupported`]；
-//! Responses→Chat 桥接迁移时只会用到同一侧的方向。
+//! 没有客户端直接说 Chat 协议，反方向返回 [`CodecError::Unsupported`]。
+//!
+//! 两个旧桥接（Anthropic ← Chat、Codex ← Chat）对 Chat 上游的规则不同（reasoning 的
+//! 携带、`<think>` 标签、工具调用顺序、透传字段等），迁移期间 Codex 客户端使用
+//! [`encode_responses_client_request`]、[`decode_responses_client_response`] 与
+//! [`OpenAiChatResponsesDecoder`] 保留旧 `transform_codex_chat` / `streaming_codex_chat` 的形状。
 
 pub(crate) mod request;
+mod request_responses;
 mod response;
 mod stream;
+mod stream_responses;
 
 use serde_json::Value;
 
@@ -19,6 +25,20 @@ use crate::proxy::protocol::ir::{ChatRequest, ChatResponse};
 use crate::proxy::protocol::WireFormat;
 
 pub use stream::OpenAiChatEventDecoder;
+pub use stream_responses::OpenAiChatResponsesDecoder;
+
+/// Codex Responses 客户端的 Chat 请求编码（见 [`request_responses`]）
+pub fn encode_responses_client_request(
+    request: &ChatRequest,
+    reasoning_config: Option<&crate::provider::CodexChatReasoningConfig>,
+) -> Value {
+    request_responses::encode_request(request, reasoning_config)
+}
+
+/// Codex Responses 客户端的 Chat 响应解码（见 [`response::decode_response_for_responses`]）
+pub fn decode_responses_client_response(body: &Value) -> Result<ChatResponse, CodecError> {
+    response::decode_response_for_responses(body)
+}
 
 /// OpenAI Chat Completions 编解码
 #[derive(Debug, Clone, Copy, Default)]

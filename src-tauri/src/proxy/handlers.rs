@@ -659,9 +659,10 @@ async fn handle_codex_chat_to_responses_transform(
         "Failed to parse upstream chat response",
     )?;
     let upstream_usage = raw_usage_block(&chat_response).cloned();
-    let responses_response = transform_codex_chat::chat_completion_to_response_with_context(
+    let responses_response = crate::proxy::codec::bridge::chat_to_responses_response(
         chat_response,
         &tool_context,
+        crate::settings::codec_engine(),
     )
     .map_err(|e| {
         log::error!("[Codex] Chat → Responses 响应转换失败: {e}");

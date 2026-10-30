@@ -47,6 +47,11 @@ pub enum MediaSource {
     /// 内联纯文本（Anthropic 文档的 `text` / `content` 源）；无法读取内容的
     /// 文档来源也以空文本表示，由目标编解码决定如何占位
     Text { data: String },
+    /// OpenAI 的文件引用：`file_id` 与 / 或原样的 `file_data`（data URL）
+    File {
+        file_id: Option<String>,
+        file_data: Option<String>,
+    },
 }
 
 /// 消息内容块

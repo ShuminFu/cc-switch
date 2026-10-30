@@ -237,6 +237,7 @@ fn media_source(source: &MediaSource) -> Value {
         MediaSource::Text { data } => {
             json!({ "type": "text", "media_type": "text/plain", "data": data })
         }
+        MediaSource::File { file_id, .. } => json!({ "type": "file", "file_id": file_id }),
     }
 }
 

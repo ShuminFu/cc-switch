@@ -14,7 +14,10 @@ use super::anthropic::{
     message_events, AnthropicCodec, AnthropicEventDecoder, AnthropicEventEncoder,
 };
 use super::gemini::{AnthropicToolSchemaHints, GeminiCodec, GeminiEventDecoder, GeminiShadowSink};
-use super::openai_chat::{OpenAiChatCodec, OpenAiChatEventDecoder};
+use super::openai_chat::{
+    decode_responses_client_response, encode_responses_client_request, OpenAiChatCodec,
+    OpenAiChatEventDecoder, OpenAiChatResponsesDecoder,
+};
 use super::responses::{
     CodexToolContext, ResponsesCodec, ResponsesEventDecoder, ResponsesEventEncoder,
     ResponsesFlavor, ResponsesUpstreamOptions,
@@ -25,12 +28,14 @@ use super::transcode::{
     TranscodeOptions, TransportErrors,
 };
 use super::{CodecEngine, CodecError, EventEncoder, RequestCodec, ResponseCodec};
+use crate::provider::CodexChatReasoningConfig;
 use crate::proxy::error::ProxyError;
 use crate::proxy::protocol::ir::StreamEvent;
 use crate::proxy::providers::gemini_shadow::GeminiShadowStore;
 use crate::proxy::providers::{
-    streaming, streaming_codex_anthropic, streaming_gemini, streaming_responses, transform,
-    transform_codex_anthropic, transform_gemini, transform_responses,
+    streaming, streaming_codex_anthropic, streaming_codex_chat, streaming_gemini,
+    streaming_responses, transform, transform_codex_anthropic, transform_codex_chat,
+    transform_gemini, transform_responses,
 };
 
 /// Anthropic ← OpenAI Chat 桥接已迁移（CCS-176）
@@ -44,6 +49,9 @@ pub const ANTHROPIC_RESPONSES_MIGRATED: bool = true;
 
 /// OpenAI Responses（Codex）← Anthropic Messages 桥接已迁移（CCS-178）
 pub const RESPONSES_ANTHROPIC_MIGRATED: bool = true;
+
+/// OpenAI Responses（Codex）← OpenAI Chat 桥接已迁移（CCS-178）
+pub const RESPONSES_CHAT_MIGRATED: bool = true;
 
 /// 装箱后的客户端 SSE 字节流
 pub type ClientSseStream = Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>;
@@ -419,6 +427,66 @@ pub fn anthropic_to_responses_sse<E: std::error::Error + Send + 'static>(
             transport_errors: TransportErrors::AsEvent,
             flush_final_event: true,
         },
+    ))
+}
+
+/// OpenAI Responses 请求（Codex）→ OpenAI Chat Completions 请求
+///
+/// `reasoning_config`：供应商声明的 thinking / effort 能力；`stream_options.include_usage`
+/// 在流式请求中注入。会话历史的恢复与 `prompt_cache_key` 依赖调用方上下文，仍由调用方处理。
+pub fn responses_to_chat_request(
+    body: Value,
+    reasoning_config: Option<&CodexChatReasoningConfig>,
+    engine: CodecEngine,
+) -> Result<Value, ProxyError> {
+    if !engine.uses_ir(RESPONSES_CHAT_MIGRATED) {
+        return transform_codex_chat::responses_to_chat_completions_with_reasoning(
+            body,
+            reasoning_config,
+        );
+    }
+    let request = ResponsesCodec::for_client(ResponsesFlavor::ChatUpstream, Default::default())
+        .decode_request(&body)
+        .map_err(invalid_request_error)?;
+    Ok(encode_responses_client_request(&request, reasoning_config))
+}
+
+/// OpenAI Chat Completions 非流式响应 → OpenAI Responses 响应
+pub fn chat_to_responses_response(
+    body: Value,
+    tool_context: &CodexToolContext,
+    engine: CodecEngine,
+) -> Result<Value, ProxyError> {
+    if !engine.uses_ir(RESPONSES_CHAT_MIGRATED) {
+        return transform_codex_chat::chat_completion_to_response_with_context(body, tool_context);
+    }
+    let response = decode_responses_client_response(&body).map_err(transform_error)?;
+    ResponsesCodec::for_client(ResponsesFlavor::ChatUpstream, tool_context.clone())
+        .encode_response(&response)
+        .map_err(transform_error)
+}
+
+/// OpenAI Chat Completions SSE → OpenAI Responses SSE
+pub fn chat_to_responses_sse<E: std::error::Error + Send + 'static>(
+    upstream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
+    tool_context: CodexToolContext,
+    engine: CodecEngine,
+) -> ClientSseStream {
+    if !engine.uses_ir(RESPONSES_CHAT_MIGRATED) {
+        return Box::pin(
+            streaming_codex_chat::create_responses_sse_stream_from_chat_with_context(
+                upstream,
+                tool_context,
+            ),
+        );
+    }
+    Box::pin(transcode_sse_stream(
+        upstream,
+        Box::new(OpenAiChatResponsesDecoder::new()),
+        Box::new(ResponsesEventEncoder::new(
+            ResponsesFlavor::ChatUpstream,
+            tool_context,
+        )),
     ))
 }
 

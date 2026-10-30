@@ -244,6 +244,16 @@ fn golden_responses_chat() {
 }
 
 #[test]
+fn golden_responses_chat_ir() {
+    run_bridge_with(Bridge::ResponsesChat, CodecEngine::Ir);
+}
+
+#[test]
+fn codec_parity_responses_chat() {
+    assert_codec_parity(Bridge::ResponsesChat);
+}
+
+#[test]
 fn golden_responses_anthropic() {
     run_bridge(Bridge::ResponsesAnthropic);
 }

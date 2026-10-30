@@ -299,6 +299,7 @@ fn media_block_json(kind: &str, source: &MediaSource, title: Option<&str>) -> St
             json!({ "type": "base64", "media_type": media_type, "data": data })
         }
         MediaSource::Text { data } => json!({ "type": "text", "data": data }),
+        MediaSource::File { file_id, .. } => json!({ "type": "file", "file_id": file_id }),
     };
     let mut block = json!({ "type": kind, "source": source });
     if let Some(title) = title {
