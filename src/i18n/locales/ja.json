@@ -293,7 +293,14 @@
     "windowControlFailed": "ウィンドウ操作に失敗しました: {{error}}",
     "officialBlockedByProxy": "ローカルルーティングモード中は公式プロバイダーに切り替えできません。ルーティング経由で公式 API にアクセスするとアカウントが停止される可能性があります。",
     "proxyOfficialWarning": "現在のプロバイダー {{name}} は公式です。ローカルルーティングを使用する前にサードパーティプロバイダーに切り替えてください。",
-    "proxyReasonClaudeDesktop": "Claude Desktop ローカルルーティングモードを使用しており"
+    "proxyReasonClaudeDesktop": "Claude Desktop ローカルルーティングモードを使用しており",
+    "liveDriftPlaceholder": "{{app}} の設定がまだローカルルーティングを指していますが、ルーティングは引き継いでいません（異常終了の残りと思われます）。",
+    "liveDriftExternal": "{{app}} の設定が CC Switch の外で編集されました（{{fields}}）。次にプロバイダーを切り替えるとこれらの変更は失われます。",
+    "liveDriftRepair": "修復",
+    "liveDriftFold": "共通設定に取り込む",
+    "liveDriftIgnore": "無視",
+    "liveDriftResolved": "{{app}} の設定を処理しました",
+    "liveDriftResolveFailed": "{{app}} の設定の処理に失敗しました: {{error}}"
   },
   "confirm": {
     "deleteProvider": "プロバイダーを削除",

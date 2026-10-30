@@ -1873,6 +1873,24 @@ impl ProxyService {
             .await
     }
 
+    /// 修复 Live 中残留的接管占位符（漂移检测的 reconcile 动作）。
+    ///
+    /// 走与关闭接管相同的 备份 → SSOT → 清理占位符 三层兜底，然后删除该应用的
+    /// 备份（避免长期存储敏感 Token）。`proxy_config.enabled` 保持不变：与
+    /// `stop_with_restore_keep_state` 一致，下次启动代理时仍会重新接管。
+    pub async fn repair_takeover_leftover_for_app(&self, app_type: &AppType) -> Result<(), String> {
+        let app_type_str = app_type.as_str();
+        let _guard = self.switch_locks.lock_for_app(app_type_str).await;
+        self.restore_live_config_for_app_with_fallback_inner(app_type)
+            .await?;
+        self.db
+            .delete_live_backup(app_type_str)
+            .await
+            .map_err(|e| format!("删除 {app_type_str} Live 备份失败: {e}"))?;
+        log::info!("{app_type_str} Live 残留接管占位符已修复");
+        Ok(())
+    }
+
     pub(crate) async fn restore_live_config_for_app_with_fallback_inner(
         &self,
         app_type: &AppType,

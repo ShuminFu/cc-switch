@@ -181,8 +181,10 @@ impl ProviderService {
         Self::capture_live_write(state, app_type, &provider, false)
     }
 
-    /// 在捕获模式下执行写 live（可选随后重投影 MCP），汇总为预览
-    fn capture_live_write(
+    /// 在捕获模式下执行写 live（可选随后重投影 MCP），汇总为预览。
+    ///
+    /// 漂移检测（[`crate::services::drift`]）用它取得当前供应商的预期 live 输出。
+    pub(crate) fn capture_live_write(
         state: &AppState,
         app_type: &AppType,
         provider: &Provider,

@@ -935,6 +935,7 @@ pub fn run() {
             );
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
+            app.manage(crate::services::drift::watcher::DriftWatcherState::default());
 
             // 从数据库加载日志配置并应用
             {
@@ -1037,6 +1038,26 @@ pub fn run() {
 
                 // 检查 settings 表中的代理状态，自动恢复代理服务
                 restore_proxy_state_on_startup(&state).await;
+
+                // live 配置漂移检测：恢复完成后检测一次，并监听应用外的改动（CCS-166）
+                let drift_handle = app_handle.clone();
+                match tauri::async_runtime::spawn_blocking(move || {
+                    crate::services::drift::watcher::start(drift_handle)
+                })
+                .await
+                {
+                    Ok(Ok(watcher)) => {
+                        if let Some(slot) = app_handle
+                            .try_state::<crate::services::drift::watcher::DriftWatcherState>()
+                        {
+                            if let Ok(mut slot) = slot.0.lock() {
+                                *slot = Some(watcher);
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => log::warn!("启动 live 配置漂移监听失败: {e}"),
+                    Err(e) => log::warn!("启动 live 配置漂移监听任务失败: {e}"),
+                }
 
                 // Periodic backup check (on startup)
                 if let Err(e) = state.db.periodic_backup_if_needed() {
@@ -1375,6 +1396,9 @@ pub fn run() {
             commands::stop_proxy_with_restore,
             commands::get_proxy_takeover_status,
             commands::set_proxy_takeover_for_app,
+            commands::get_live_config_drift,
+            commands::get_all_live_config_drift,
+            commands::resolve_live_config_drift,
             commands::get_proxy_status,
             commands::get_proxy_config,
             commands::update_proxy_config,

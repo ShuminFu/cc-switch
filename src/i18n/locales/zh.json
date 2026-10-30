@@ -293,7 +293,14 @@
     "windowControlFailed": "窗口控制失败：{{error}}",
     "officialBlockedByProxy": "本地路由模式下不能切换到官方供应商，使用路由访问官方 API 可能导致账号被封禁",
     "proxyOfficialWarning": "当前供应商 {{name}} 是官方供应商，建议切换到第三方供应商后再使用本地路由",
-    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式"
+    "proxyReasonClaudeDesktop": "使用 Claude Desktop 本地路由模式",
+    "liveDriftPlaceholder": "{{app}} 配置仍指向本地路由，但本地路由并未接管它（可能是异常退出的残留）。",
+    "liveDriftExternal": "{{app}} 配置在 CC Switch 之外被修改（{{fields}}），下次切换供应商时这些改动会丢失。",
+    "liveDriftRepair": "修复",
+    "liveDriftFold": "并入通用配置",
+    "liveDriftIgnore": "忽略",
+    "liveDriftResolved": "{{app}} 配置已处理",
+    "liveDriftResolveFailed": "处理 {{app}} 配置失败：{{error}}"
   },
   "confirm": {
     "deleteProvider": "删除供应商",

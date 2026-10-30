@@ -10,6 +10,7 @@ import {
 } from "@/lib/api";
 import { providerKeys } from "@/entities/provider/keys";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { useLiveConfigDrift } from "@/hooks/useLiveConfigDrift";
 
 interface SyncStatusUpdatedPayload {
   source?: string;
@@ -19,7 +20,7 @@ interface SyncStatusUpdatedPayload {
 
 /**
  * 主窗口级的后端事件订阅与启动时一次性提示：
- * 供应商切换 / 统一供应商同步 / 项目应用 / 云同步状态 / 代理官方供应商警告，
+ * 供应商切换 / 统一供应商同步 / 项目应用 / 云同步状态 / 代理官方供应商警告 / live 配置漂移，
  * 以及配置迁移与 Skills 迁移结果。
  */
 export function useAppShellEvents(
@@ -117,6 +118,9 @@ export function useAppShellEvents(
       );
     },
   );
+
+  // live 配置漂移（残留占位符 / 外部改动）提示
+  useLiveConfigDrift();
 
   useTauriEvent<{ appType: string; providerName: string }>(
     "proxy-official-warning",
