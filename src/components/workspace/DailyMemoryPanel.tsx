@@ -20,6 +20,7 @@ import {
   type DailyMemorySearchResult,
 } from "@/lib/api/workspace";
 import { useDarkMode } from "@/hooks/useDarkMode";
+import { useWorkspacePath } from "./useWorkspacePath";
 
 interface DailyMemoryPanelProps {
   isOpen: boolean;
@@ -77,6 +78,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
 
   // Dark mode
   const isDarkMode = useDarkMode();
+  const memoryPath = useWorkspacePath("memory");
 
   // Whether we are in active search mode (search open with a non-empty term)
   const isActiveSearch = useMemo(
@@ -375,7 +377,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
               onClick={() => workspaceApi.openDirectory("memory")}
               title={t("workspace.openDirectory")}
             >
-              ~/.openclaw/workspace/memory/
+              {memoryPath}
               <FolderOpen className="w-3.5 h-3.5" />
             </button>
             <div className="flex items-center gap-1.5">

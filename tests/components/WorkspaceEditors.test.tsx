@@ -21,6 +21,11 @@ const api = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/workspace", () => ({ workspaceApi: api }));
 
+// Settings with an OpenClaw directory override (FE-UI-35).
+vi.mock("@/lib/query/queries", () => ({
+  useSettingsQuery: () => ({ data: { openclawConfigDir: "/custom/oc/" } }),
+}));
+
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -268,5 +273,20 @@ describe("WorkspaceFileEditor unsaved-changes guard (FE-UI-34)", () => {
     );
     fireEvent.click(screen.getByText("panel-back"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("workspace paths (FE-UI-35)", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+    api.listDailyMemoryFiles.mockResolvedValue([]);
+  });
+
+  it("shows the overridden OpenClaw directory instead of ~/.openclaw", async () => {
+    render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
+    expect(
+      await screen.findByText("/custom/oc/workspace/memory/"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/~\/\.openclaw/)).not.toBeInTheDocument();
   });
 });
