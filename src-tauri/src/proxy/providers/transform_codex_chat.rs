@@ -1353,8 +1353,8 @@ pub(crate) fn chat_completion_to_response_with_context(
         "usage": chat_usage_to_responses_usage(body.get("usage"))
     });
 
-    if finish_reason == Some("length") {
-        response["incomplete_details"] = json!({ "reason": "max_output_tokens" });
+    if let Some(reason) = incomplete_reason_from_finish_reason(finish_reason) {
+        response["incomplete_details"] = json!({ "reason": reason });
     }
 
     Ok(response)
@@ -1753,8 +1753,21 @@ pub(crate) fn response_id_from_chat_id(id: Option<&str>) -> String {
 
 pub(crate) fn response_status_from_finish_reason(finish_reason: Option<&str>) -> &'static str {
     match finish_reason {
-        Some("length") => "incomplete",
+        Some("length") | Some("content_filter") => "incomplete",
         _ => "completed",
+    }
+}
+
+/// `incomplete_details.reason` for a Chat `finish_reason` that maps to an
+/// incomplete Responses status (PROV-24: `content_filter` is no longer reported
+/// as a clean `completed`).
+pub(crate) fn incomplete_reason_from_finish_reason(
+    finish_reason: Option<&str>,
+) -> Option<&'static str> {
+    match finish_reason {
+        Some("length") => Some("max_output_tokens"),
+        Some("content_filter") => Some("content_filter"),
+        _ => None,
     }
 }
 
@@ -3252,6 +3265,23 @@ mod tests {
 
         assert_eq!(result["status"], "incomplete");
         assert_eq!(result["incomplete_details"]["reason"], "max_output_tokens");
+    }
+
+    #[test]
+    fn chat_response_content_filter_maps_to_incomplete_content_filter() {
+        let input = json!({
+            "id": "chatcmpl_cf",
+            "model": "gpt-5.4",
+            "choices": [{
+                "message": {"role": "assistant", "content": ""},
+                "finish_reason": "content_filter"
+            }]
+        });
+
+        let result = chat_completion_to_response(input).unwrap();
+
+        assert_eq!(result["status"], "incomplete");
+        assert_eq!(result["incomplete_details"]["reason"], "content_filter");
     }
 
     #[test]
