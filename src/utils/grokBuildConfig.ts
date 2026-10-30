@@ -165,7 +165,7 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
 };
 
 const sectionHeaderName = (line: string): string | null => {
-  const match = line.trim().match(/^\[\s*([^\[\]]+?)\s*\](?:\s*#.*)?$/);
+  const match = line.trim().match(/^\[\s*([^[\]]+?)\s*\](?:\s*#.*)?$/);
   if (!match) return null;
   // Quote-aware split: [model."grok-4.5"] has a dot inside the quoted key.
   const parts: string[] = [];
