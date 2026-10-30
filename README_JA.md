@@ -215,7 +215,7 @@ TeamoRouter は、集中請求、チーム管理、BYOK、スマートルーテ�
 
 ## 特長
 
-[完全な更新履歴](CHANGELOG.md) | [リリースノート](docs/release-notes/v3.16.1-ja.md)
+[完全な更新履歴](CHANGELOG.md) | [リリースノート](docs/release-notes/README.md)
 
 ### プロバイダ管理
 

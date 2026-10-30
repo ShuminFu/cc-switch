@@ -215,7 +215,7 @@ Modern AI-powered coding relies on tools like Claude Code, Claude Desktop, Codex
 
 ## Features
 
-[Full Changelog](CHANGELOG.md) | [Release Notes](docs/release-notes/v3.16.1-en.md)
+[Full Changelog](CHANGELOG.md) | [Release Notes](docs/release-notes/README.md)
 
 ### Provider Management
 
