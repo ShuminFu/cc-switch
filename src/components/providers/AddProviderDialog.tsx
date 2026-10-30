@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { Provider, CustomEndpoint, UniversalProvider } from "@/types";
 import type { AppId } from "@/lib/api";
-import { universalProvidersApi } from "@/lib/api";
+import { saveUniversalProvider } from "@/components/universal/saveUniversalProvider";
 import {
   ProviderForm,
   type ProviderFormValues,
@@ -53,43 +53,17 @@ export function AddProviderDialog({
 
   const handleUniversalProviderSave = useCallback(
     async (provider: UniversalProvider) => {
-      try {
-        await universalProvidersApi.upsert(provider);
-      } catch (error) {
-        console.error(
-          "[AddProviderDialog] Failed to save universal provider",
-          error,
-        );
-        toast.error(
-          t("universalProvider.addFailed", {
-            defaultValue: "统一供应商添加失败",
-          }),
-        );
-        return;
-      }
-
-      try {
-        await universalProvidersApi.sync(provider.id);
-        toast.success(
-          t("universalProvider.addedAndSynced", {
-            defaultValue: "统一供应商已添加并同步",
-          }),
-        );
-      } catch (error) {
-        console.error(
-          "[AddProviderDialog] Provider saved but sync failed",
-          error,
-        );
-        toast.warning(
-          t("universalProvider.addedButSyncFailed", {
-            defaultValue: "统一供应商已添加，但同步失败",
-          }),
-        );
-      }
+      const result = await saveUniversalProvider(provider, {
+        sync: true,
+        isEdit: false,
+        t,
+      });
+      if (result === "saveFailed") return false;
 
       setUniversalFormOpen(false);
       setSelectedUniversalPreset(null);
       onOpenChange(false);
+      return true;
     },
     [t, onOpenChange],
   );
