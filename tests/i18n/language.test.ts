@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import i18next from "i18next";
 import {
@@ -55,5 +57,15 @@ describe("syncDocumentLanguage", () => {
     await instance.changeLanguage("zh-TW");
     expect(document.documentElement.lang).toBe("zh-TW");
     expect(document.documentElement.lang).toBe(instance.language);
+  });
+});
+
+describe("index.html", () => {
+  it("ships a neutral default <html lang> that i18n replaces at runtime", () => {
+    const html = readFileSync(
+      path.resolve(__dirname, "../../src/index.html"),
+      "utf8",
+    );
+    expect(html).toMatch(/<html lang="en">/);
   });
 });

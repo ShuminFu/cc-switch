@@ -71,18 +71,8 @@ pub(crate) async fn execute_and_format_usage_result(
 
             let lang = settings::get_settings()
                 .language
-                .unwrap_or_else(|| "zh".to_string());
-
-            let msg = match err {
-                AppError::Localized { zh, en, .. } => {
-                    if lang == "en" {
-                        en
-                    } else {
-                        zh
-                    }
-                }
-                other => other.to_string(),
-            };
+                .unwrap_or_else(|| crate::tray::detect_system_tray_language().to_string());
+            let msg = localized_error_message(err, &lang);
 
             Ok(UsageResult {
                 success: false,
@@ -90,6 +80,21 @@ pub(crate) async fn execute_and_format_usage_result(
                 error: Some(msg),
             })
         }
+    }
+}
+
+/// Pick the message for the UI language: Chinese for `zh*`, English otherwise
+/// (Japanese and other locales previously got the Chinese text).
+fn localized_error_message(err: AppError, lang: &str) -> String {
+    match err {
+        AppError::Localized { zh, en, .. } => {
+            if lang.starts_with("zh") {
+                zh
+            } else {
+                en
+            }
+        }
+        other => other.to_string(),
     }
 }
 
@@ -247,10 +252,20 @@ pub(crate) fn validate_usage_script(script: &UsageScript) -> Result<(), AppError
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_script_credentials;
+    use super::{localized_error_message, resolve_script_credentials};
     use crate::app_config::AppType;
+    use crate::error::AppError;
     use crate::provider::Provider;
     use serde_json::json;
+
+    #[test]
+    fn localized_error_message_uses_english_unless_chinese() {
+        let err = || AppError::localized("k", "中文", "English");
+        assert_eq!(localized_error_message(err(), "zh"), "中文");
+        assert_eq!(localized_error_message(err(), "zh-TW"), "中文");
+        assert_eq!(localized_error_message(err(), "en"), "English");
+        assert_eq!(localized_error_message(err(), "ja"), "English");
+    }
 
     fn provider_with_settings(settings_config: serde_json::Value) -> Provider {
         Provider::with_id(

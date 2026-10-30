@@ -9,6 +9,7 @@
 //! a direct (non-proxied) CLI request.
 
 mod access_guard;
+mod header_capture;
 
 use super::{
     failover_switch::FailoverSwitchManager,
@@ -194,36 +195,29 @@ impl ProxyServer {
                         let app = app.clone();
                         tokio::spawn(async move {
                             let _permit = permit;
-                            // Peek raw TCP bytes to capture original header casing
-                            // before hyper parses (and lowercases) the header names.
-                            // Bounded by the header timeout so silent connections
-                            // cannot park here forever.
-                            let original_cases = {
-                                let mut peek_buf = vec![0u8; 8192];
-                                match tokio::time::timeout(HEADER_READ_TIMEOUT, stream.peek(&mut peek_buf)).await {
-                                    Err(_) => {
-                                        log::debug!("[ProxyServer] connection from {remote_addr} sent nothing before timeout");
-                                        return;
-                                    }
-                                    Ok(Ok(n)) => {
-                                        let cases = super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..n]);
-                                        log::debug!(
-                                            "[ProxyServer] Peeked {} bytes, captured {} header casings",
-                                            n, cases.cases.len()
-                                        );
-                                        cases
-                                    }
-                                    Ok(Err(e)) => {
-                                        log::debug!("[ProxyServer] peek failed (non-fatal): {e}");
-                                        super::hyper_client::OriginalHeaderCases::default()
-                                    }
-                                }
-                            };
+                            // Wait (bounded by the header timeout) for the client to
+                            // send something so silent connections cannot park here.
+                            if tokio::time::timeout(HEADER_READ_TIMEOUT, stream.readable()).await.is_err() {
+                                log::debug!("[ProxyServer] connection from {remote_addr} sent nothing before timeout");
+                                return;
+                            }
+                            // Record the raw bytes hyper reads so each request's
+                            // original header casing/order is captured when it is
+                            // dispatched (per request, not per connection: SEC-25).
+                            let recorder = header_capture::HeaderRecorder::default();
+                            let recorder_io = recorder.clone();
 
                             // service_fn 将 axum Router（tower::Service）桥接到 hyper
                             let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
                                 let mut router = app.clone();
-                                let cases = original_cases.clone();
+                                let cases = recorder.take_request_cases(
+                                    req.method().as_str(),
+                                    &req.uri().to_string(),
+                                );
+                                log::debug!(
+                                    "[ProxyServer] captured {} header casings",
+                                    cases.cases.len()
+                                );
                                 async move {
                                     // 将 hyper::body::Incoming 转为 axum::body::Body，保留 extensions
                                     let (mut parts, body) = req.into_parts();
@@ -243,7 +237,10 @@ impl ProxyServer {
                                 .preserve_header_case(true)
                                 .timer(TokioTimer::new())
                                 .header_read_timeout(HEADER_READ_TIMEOUT)
-                                .serve_connection(TokioIo::new(stream), service)
+                                .serve_connection(
+                                    TokioIo::new(header_capture::RecordingIo::new(stream, recorder_io)),
+                                    service,
+                                )
                                 .await
                             {
                                 // Connection reset / broken pipe 等在代理场景下很常见，debug 级别
