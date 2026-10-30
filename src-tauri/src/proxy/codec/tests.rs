@@ -300,12 +300,13 @@ fn codec_errors_surface_unsupported_parts_and_bad_streams() {
 
 #[test]
 fn codec_engine_setting_parses_leniently() {
-    assert_eq!(CodecEngine::default(), CodecEngine::Legacy);
+    assert_eq!(CodecEngine::default(), CodecEngine::Ir);
     for (raw, expected) in [
         ("legacy", CodecEngine::Legacy),
+        (" Legacy ", CodecEngine::Legacy),
         ("ir", CodecEngine::Ir),
         (" IR ", CodecEngine::Ir),
-        ("something-new", CodecEngine::Legacy),
+        ("something-new", CodecEngine::Ir),
     ] {
         let parsed: CodecEngine = serde_json::from_value(json!(raw)).unwrap();
         assert_eq!(parsed, expected, "{raw}");
@@ -348,32 +349,43 @@ proptest! {
 }
 
 #[test]
-fn settings_codec_engine_defaults_to_legacy_and_tolerates_unknown_values() {
+fn settings_codec_engine_defaults_to_ir_and_tolerates_unknown_values() {
     use crate::settings::AppSettings;
 
+    // 缺省 codecEngine 的设置文件（含升级前写出的文件）走 IR
     let settings: AppSettings = serde_json::from_value(json!({})).unwrap();
-    assert_eq!(settings.codec_engine, CodecEngine::Legacy);
-    // 默认值不写出，旧版本读取新文件不受影响
+    assert_eq!(settings.codec_engine, CodecEngine::Ir);
+    assert_eq!(AppSettings::default().codec_engine, CodecEngine::Ir);
+    // 默认值不写出
     let saved = serde_json::to_value(&settings).unwrap();
     assert!(saved.get("codecEngine").is_none());
 
     let settings: AppSettings = serde_json::from_value(json!({"codecEngine": "ir"})).unwrap();
     assert_eq!(settings.codec_engine, CodecEngine::Ir);
-    assert_eq!(
-        serde_json::to_value(&settings).unwrap()["codecEngine"],
-        json!("ir")
-    );
+
+    // 显式的 legacy 回退必须照常保存，重新读取后仍是 legacy
+    let settings: AppSettings = serde_json::from_value(json!({"codecEngine": "legacy"})).unwrap();
+    assert_eq!(settings.codec_engine, CodecEngine::Legacy);
+    let saved = serde_json::to_value(&settings).unwrap();
+    assert_eq!(saved["codecEngine"], json!("legacy"));
+    let reloaded: AppSettings = serde_json::from_value(saved).unwrap();
+    assert_eq!(reloaded.codec_engine, CodecEngine::Legacy);
 
     let settings: AppSettings =
         serde_json::from_value(json!({"codecEngine": "v2", "language": "en"})).unwrap();
-    assert_eq!(settings.codec_engine, CodecEngine::Legacy);
+    assert_eq!(settings.codec_engine, CodecEngine::Ir);
     assert_eq!(settings.language.as_deref(), Some("en"));
 
     // 非字符串取值同样不影响其余设置
-    for raw in [json!(null), json!(1), json!({"engine": "ir"}), json!(true)] {
+    for raw in [
+        json!(null),
+        json!(1),
+        json!({"engine": "legacy"}),
+        json!(true),
+    ] {
         let settings: AppSettings =
             serde_json::from_value(json!({"codecEngine": raw, "language": "en"})).unwrap();
-        assert_eq!(settings.codec_engine, CodecEngine::Legacy, "{raw}");
+        assert_eq!(settings.codec_engine, CodecEngine::Ir, "{raw}");
         assert_eq!(settings.language.as_deref(), Some("en"));
     }
 }

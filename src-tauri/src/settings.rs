@@ -546,10 +546,11 @@ pub struct AppSettings {
     /// failover. Only applies when auto failover is on. Opt-in: defaults to false.
     #[serde(default)]
     pub sticky_session_routing: bool,
-    /// Protocol conversion engine for proxy bridges (`codecEngine`): `legacy`
-    /// keeps the original per-bridge converters, `ir` uses the IR codecs for
-    /// bridges that have been migrated. Kept for one release as a fallback.
-    #[serde(default, skip_serializing_if = "CodecEngine::is_legacy")]
+    /// Protocol conversion engine for proxy bridges (`codecEngine`): `ir`
+    /// (default) uses the IR codecs for bridges that have been migrated,
+    /// `legacy` keeps the original per-bridge converters. Kept for one release
+    /// as a fallback.
+    #[serde(default, skip_serializing_if = "CodecEngine::is_default")]
     pub codec_engine: CodecEngine,
     /// Proxy takeover engine (`takeoverEngine`): `unified` (default) also keeps
     /// the original bytes of each live file and restores them verbatim, `legacy`
@@ -670,7 +671,7 @@ impl Default for AppSettings {
             usage_dashboard_refresh_interval_ms: None,
             enable_failover_toggle: false,
             sticky_session_routing: false,
-            codec_engine: CodecEngine::Legacy,
+            codec_engine: CodecEngine::Ir,
             takeover_engine: TakeoverEngine::default(),
             show_profile_switcher: true,
             preserve_codex_official_auth_on_switch: false,

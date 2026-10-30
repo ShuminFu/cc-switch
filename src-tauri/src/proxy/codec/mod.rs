@@ -45,9 +45,9 @@ pub mod transcode;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodecEngine {
     /// 原有的逐桥接转换器
-    #[default]
     Legacy,
     /// 基于 IR 的编解码（仅对已迁移的桥接生效）
+    #[default]
     Ir,
 }
 
@@ -60,21 +60,22 @@ impl CodecEngine {
         }
     }
 
-    /// 宽松解析：未知值回退为 [`CodecEngine::Legacy`]，避免一个未知取值
+    /// 宽松解析：未知值回退为默认的 [`CodecEngine::Ir`]，避免一个未知取值
     /// 让整个设置文件解析失败
     pub fn from_setting(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "ir" => Self::Ir,
             "legacy" => Self::Legacy,
             other => {
-                log::warn!("[Codec] Unknown codecEngine `{other}`, using legacy");
-                Self::Legacy
+                log::warn!("[Codec] Unknown codecEngine `{other}`, using ir");
+                Self::Ir
             }
         }
     }
 
-    pub fn is_legacy(&self) -> bool {
-        matches!(self, Self::Legacy)
+    /// 默认值不写入设置文件；显式的 `legacy` 照常保存
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
     }
 
     /// 某个桥接是否应走 IR 编解码：桥接已迁移且未强制使用 legacy
@@ -91,12 +92,12 @@ impl Serialize for CodecEngine {
 
 impl<'de> Deserialize<'de> for CodecEngine {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // 非字符串（null、数字等）同样回退为 legacy，而不是让整个设置解析失败
+        // 非字符串（null、数字等）同样回退为默认值，而不是让整个设置解析失败
         match Value::deserialize(deserializer)? {
             Value::String(value) => Ok(Self::from_setting(&value)),
             other => {
-                log::warn!("[Codec] Non-string codecEngine `{other}`, using legacy");
-                Ok(Self::Legacy)
+                log::warn!("[Codec] Non-string codecEngine `{other}`, using ir");
+                Ok(Self::default())
             }
         }
     }

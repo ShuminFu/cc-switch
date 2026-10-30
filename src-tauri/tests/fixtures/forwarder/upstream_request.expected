@@ -45,9 +45,9 @@ anthropic-beta: claude-code-20250219,context-1m-2025-08-07
 anthropic-version: 2023-06-01
 content-type: application/json
 host: 127.0.0.1:<PORT>
-content-length: 333
+content-length: 318
 
-{"max_tokens":4096,"messages":[{"content":[{"cache_control":{"type":"ephemeral"},"text":"hi","type":"text"}],"role":"user"}],"model":"claude-sonnet-4-5","stream":false,"system":[{"text":"You are Claude Code, Anthropic's official CLI for Claude.","type":"text"},{"cache_control":{"type":"ephemeral"},"text":"Be terse","type":"text"}]}
+{"max_tokens":4096,"messages":[{"content":[{"cache_control":{"type":"ephemeral"},"text":"hi","type":"text"}],"role":"user"}],"model":"claude-sonnet-4-5","system":[{"text":"You are Claude Code, Anthropic's official CLI for Claude.","type":"text"},{"cache_control":{"type":"ephemeral"},"text":"Be terse","type":"text"}]}
 ===== codex_to_anthropic_plain_full_endpoint =====
 POST /v1/messages HTTP/1.1
 x-app: codex

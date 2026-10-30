@@ -568,11 +568,15 @@ fn ir_engine_emits_nothing_after_a_completed_message() {
 }
 
 #[test]
-fn legacy_engine_is_the_default_fallback() {
-    assert_eq!(CodecEngine::default(), CodecEngine::Legacy);
+fn ir_engine_is_the_default_and_legacy_stays_a_fallback() {
+    assert_eq!(CodecEngine::default(), CodecEngine::Ir);
     let body = json!({"model": "gpt-4o", "temperature": 1.0, "messages": []});
     assert_eq!(
         request(&body, false, CodecEngine::default()),
+        request(&body, false, CodecEngine::Ir)
+    );
+    assert_eq!(
+        request(&body, false, CodecEngine::Legacy),
         transform::anthropic_to_openai_with_reasoning_content(body, false).unwrap()
     );
 }
