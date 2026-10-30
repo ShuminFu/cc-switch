@@ -15,7 +15,7 @@
 //! 供应商 API Key 仍保留在各 CLI 的 live 配置中（CLI 需要直接读取），不在此处管理。
 
 use crate::error::AppError;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -235,6 +235,7 @@ impl SecretStore for FileSecretStore {
 pub struct MemorySecretStore {
     secrets: Mutex<BTreeMap<String, String>>,
     fail_writes: std::sync::atomic::AtomicBool,
+    fail_reads: std::sync::atomic::AtomicBool,
 }
 
 #[cfg(test)]
@@ -246,6 +247,12 @@ impl MemorySecretStore {
     /// 之后的 set/delete 全部返回错误（模拟钥匙串被锁定或拒绝访问）
     pub fn fail_writes(&self, fail: bool) {
         self.fail_writes
+            .store(fail, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// 之后的 get 全部返回错误（模拟钥匙串暂时无法读取）
+    pub fn fail_reads(&self, fail: bool) {
+        self.fail_reads
             .store(fail, std::sync::atomic::Ordering::SeqCst);
     }
 
@@ -272,6 +279,9 @@ impl SecretStore for MemorySecretStore {
     }
 
     fn get(&self, key: &str) -> Result<Option<String>, AppError> {
+        if self.fail_reads.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(secret_error("memory", "读取", key, "read refused"));
+        }
         Ok(self
             .secrets
             .lock()
@@ -300,6 +310,16 @@ impl SecretStore for MemorySecretStore {
 }
 
 // ===== 策略 =====
+
+/// 本进程内读取失败的凭据键。读取失败时内存中的值为空，但存储中的凭据可能仍在；
+/// 之后保存时不能把这个“空值”当作用户清除而删除存储中的凭据。
+fn unreadable_keys() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    static UNREADABLE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    UNREADABLE
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
 
 /// 某个目录下数据的凭据处理方式
 #[derive(Clone)]
@@ -331,16 +351,22 @@ impl SecretPolicy {
             return !self.inline;
         }
         match self.store.get(key) {
-            Ok(Some(value)) if !value.is_empty() => {
-                *inline_value = value;
-                self.inline
+            Ok(value) => {
+                unreadable_keys().remove(key);
+                match value {
+                    Some(value) if !value.is_empty() => {
+                        *inline_value = value;
+                        self.inline
+                    }
+                    _ => false,
+                }
             }
-            Ok(_) => false,
             Err(e) => {
                 log::warn!(
-                    "读取凭据失败（{}），按未配置处理: {e}",
+                    "读取凭据失败（{}），按未配置处理，存储中的凭据保留: {e}",
                     self.store.backend()
                 );
+                unreadable_keys().insert(key.to_string());
                 false
             }
         }
@@ -348,20 +374,25 @@ impl SecretPolicy {
 
     /// 保存时外置凭据，返回应写入文件的内联值：
     /// - 外置模式：写入存储成功返回空串；写入失败时保留明文（0600 文件），不丢数据；
-    ///   值为空表示已清除，同时删除存储中的旧值；
+    ///   值为空表示已清除，同时删除存储中的旧值（加载时读取失败的键除外，避免误删）；
     /// - 内联模式：原样返回，存储中的副本在文件写成功后由 [`Self::release`] 删除。
     pub fn externalize(&self, key: &str, value: &str) -> String {
         if self.inline {
             return value.to_string();
         }
         if value.is_empty() {
-            if let Err(e) = self.store.delete(key) {
+            if unreadable_keys().contains(key) {
+                log::warn!("凭据 {key} 加载时读取失败，保留存储中的值");
+            } else if let Err(e) = self.store.delete(key) {
                 log::warn!("删除凭据失败: {e}");
             }
             return String::new();
         }
         match self.store.set(key, value) {
-            Ok(()) => String::new(),
+            Ok(()) => {
+                unreadable_keys().remove(key);
+                String::new()
+            }
             Err(e) => {
                 log::warn!("写入凭据存储失败，暂以明文保留在文件中: {e}");
                 value.to_string()
@@ -383,8 +414,11 @@ impl SecretPolicy {
 
     /// 删除不再使用的凭据（账号被移除等），失败只记录日志
     pub fn forget(&self, key: &str) {
-        if let Err(e) = self.store.delete(key) {
-            log::warn!("删除凭据失败: {e}");
+        match self.store.delete(key) {
+            Ok(()) => {
+                unreadable_keys().remove(key);
+            }
+            Err(e) => log::warn!("删除凭据失败: {e}"),
         }
     }
 }
@@ -566,6 +600,30 @@ mod tests {
 
         store.fail_writes(true);
         assert_eq!(policy.externalize("k", "kept"), "kept");
+    }
+
+    #[test]
+    fn failed_read_does_not_delete_the_stored_secret_on_save() {
+        // 使用独立的键，避免与其他并行测试共享“读取失败”标记
+        let key = "test.unreadable.failed_read";
+        let store = Arc::new(MemorySecretStore::new());
+        store.set(key, "kept").unwrap();
+        let policy = SecretPolicy::new(store.clone(), false);
+
+        store.fail_reads(true);
+        let mut value = String::new();
+        assert!(!policy.hydrate(key, &mut value));
+        assert!(value.is_empty());
+        store.fail_reads(false);
+
+        // 保存时内存中的值为空：不能当作用户清除而删除存储中的凭据
+        assert_eq!(policy.externalize(key, &value), "");
+        assert_eq!(store.get(key).unwrap().as_deref(), Some("kept"));
+
+        // 重新写入后恢复正常：之后清空会删除
+        assert_eq!(policy.externalize(key, "new"), "");
+        assert_eq!(policy.externalize(key, ""), "");
+        assert_eq!(store.get(key).unwrap(), None);
     }
 
     #[test]

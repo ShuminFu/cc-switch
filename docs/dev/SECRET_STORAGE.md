@@ -38,7 +38,9 @@ Migration runs automatically and needs no user action:
 
 The JSON keeps every other field, so the files stay valid for older versions. If a
 keychain write fails, the secret stays in plaintext in the 0600 file and nothing is
-lost. The next save tries again.
+lost. The next save tries again. If a keychain read fails (for example the keychain is
+locked or access was denied), the secret is treated as missing for that run but is not
+deleted from the keychain by later saves.
 
 ## Choosing a backend: `CC_SWITCH_SECRET_STORE`
 
@@ -59,8 +61,8 @@ accounts would ask you to log in again. To downgrade without re-entering anythin
    - macOS: `CC_SWITCH_SECRET_STORE=plaintext /Applications/CC\ Switch.app/Contents/MacOS/cc-switch`
    - Linux: `CC_SWITCH_SECRET_STORE=plaintext cc-switch` (or the AppImage path)
    - Windows (PowerShell): `$env:CC_SWITCH_SECRET_STORE="plaintext"; & "C:\Program Files\CC Switch\cc-switch.exe"`
-3. If you use Copilot or Codex OAuth accounts, open the corresponding provider or
-   settings page so their token stores load. Loading them rewrites the token files.
+3. Wait for the main window to appear. The Copilot and Codex OAuth token stores load at
+   startup, and loading them rewrites the token files with the tokens inline.
 4. Quit, then install the older version.
 
 If you skip these steps, re-enter the WebDAV/S3 password in **Settings → Sync** and log in to

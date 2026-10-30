@@ -99,3 +99,20 @@ file and present in `secrets.json`), plus `docs/dev/SECRET_STORAGE.md` (new).
 - Not in scope and unchanged: the legacy `webdavBackup` value in settings.json, and the v1
   single-account Copilot `github_token`. The v1 token is externalized on its first save after the
   existing v1→v3 migration.
+
+### Review
+An independent review checked each acceptance criterion against `22e3b3e`. Mock-store migration
+tests, the downgrade documentation and the `secret_store` test filter are all in place, and the
+`keyring` 4.2 `v1` feature does select the native store on each platform. One data-loss gap was
+fixed. When a keychain read failed at load (locked keychain, access denied, D-Bus timeout), the
+secret was hydrated as `""`. The next save of settings or of a token store then took that empty
+value as "cleared" and deleted the stored secret. `SecretPolicy` now records keys whose read
+failed in this process, and `externalize` no longer deletes them. A later successful write, or
+an explicit `forget` (account removal, `clear_auth`), clears that record. The new test
+`secret_store::tests::failed_read_does_not_delete_the_stored_secret_on_save` covers this, and
+`MemorySecretStore` gained `fail_reads`. `docs/dev/SECRET_STORAGE.md` now explains this
+behaviour and drops a downgrade step that was not needed: both token stores already load at
+startup. Re-verified with `cargo test secret_store` (17 passed), the full
+`cargo test --no-fail-fast` (2684 passed, 0 failed), `cargo clippy --all-targets -- -D warnings`
+and `cargo fmt --check`. Status stays **Partial** until the manual check runs on macOS, Windows
+and Linux.
