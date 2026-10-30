@@ -23,7 +23,7 @@ interface SkillCardProps {
 }
 
 export function SkillCard({ skill, onInstall, installs }: SkillCardProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [loading, setLoading] = useState(false);
 
   const handleInstall = async () => {
@@ -78,7 +78,7 @@ export function SkillCard({ skill, onInstall, installs }: SkillCardProps) {
                   className="shrink-0 text-[10px] px-1.5 py-0 h-4"
                 >
                   <Download className="h-2.5 w-2.5 mr-0.5" />
-                  {installs.toLocaleString()}
+                  {installs.toLocaleString(i18n.language)}
                 </Badge>
               )}
             </div>

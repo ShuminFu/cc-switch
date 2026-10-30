@@ -244,7 +244,12 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
         setConfigError("");
       } catch (err: any) {
         const errorMessage = err?.message || String(err);
-        setConfigError(t("mcp.error.jsonInvalid") + ": " + errorMessage);
+        setConfigError(
+          t("mcp.error.jsonInvalidDetail", {
+            error: errorMessage,
+            defaultValue: "Invalid JSON: {{error}}",
+          }),
+        );
       }
     }
   };
@@ -325,7 +330,12 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
           serverSpec = result.config as McpServerSpec;
         } catch (e: any) {
           const errorMessage = e?.message || String(e);
-          setConfigError(t("mcp.error.jsonInvalid") + ": " + errorMessage);
+          setConfigError(
+            t("mcp.error.jsonInvalidDetail", {
+              error: errorMessage,
+              defaultValue: "Invalid JSON: {{error}}",
+            }),
+          );
           toast.error(t("mcp.error.jsonInvalid"), { duration: 4000 });
           return;
         }

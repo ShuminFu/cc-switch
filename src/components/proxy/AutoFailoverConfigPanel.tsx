@@ -178,9 +178,9 @@ export function AutoFailoverConfigPanel({
         { closeButton: true },
       );
     } catch (e) {
-      toast.error(
-        t("proxy.autoFailover.configSaveFailed", "保存失败") + ": " + String(e),
-      );
+      toast.error(t("proxy.autoFailover.configSaveFailed", "保存失败"), {
+        description: String(e),
+      });
     }
   };
 
