@@ -8,7 +8,10 @@ import type { OpenCodeProviderPreset } from "@/config/opencodeProviderPresets";
 import { parseOmoOtherFieldsObject } from "@/types/omo";
 import { OmoFormFields } from "../OmoFormFields";
 import { OpenCodeFormFields } from "../OpenCodeFormFields";
-import { OPENCODE_DEFAULT_CONFIG } from "../helpers/opencodeFormUtils";
+import {
+  OPENCODE_DEFAULT_CONFIG,
+  stripOpencodeModelDrafts,
+} from "../helpers/opencodeFormUtils";
 import {
   useOmoDraftState,
   useOmoModelSource,
@@ -104,7 +107,8 @@ function OpenCodeAdapterBody({ ctx }: { ctx: ProviderFormAdapterContext }) {
       }
       const keyError = keyState.getSubmitError();
       if (keyError) return { error: keyError };
-      return Object.keys(opencodeForm.opencodeModels).length === 0
+      return Object.keys(stripOpencodeModelDrafts(opencodeForm.opencodeModels))
+        .length === 0
         ? { issues: [t("opencode.modelsRequired")] }
         : {};
     },

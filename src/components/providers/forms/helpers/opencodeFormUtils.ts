@@ -55,6 +55,42 @@ export const OPENCODE_KNOWN_OPTION_KEYS = [
 // collide with a legitimate custom header from an existing configuration.
 export const OPENCODE_HEADER_DRAFT_PREFIX = "draft-header:";
 export const OPENCODE_EXTRA_OPTION_DRAFT_PREFIX = "draft-option:";
+/** Unsaved new model rows (no id typed yet); never written to opencode.json. */
+export const OPENCODE_MODEL_DRAFT_PREFIX = "draft-model:";
+/** Unsaved new per-model option / extra-field rows. */
+export const OPENCODE_MODEL_FIELD_DRAFT_PREFIX = "draft-model-field:";
+
+const isDraftKey = (key: string, prefix: string) => key.startsWith(prefix);
+
+/**
+ * Drop draft rows before models are written to the config: untouched new
+ * model rows and unnamed option / extra-field rows (FE-PROV-20, FE-PROV-28).
+ */
+export function stripOpencodeModelDrafts(
+  models: Record<string, OpenCodeModel>,
+): Record<string, OpenCodeModel> {
+  const result: Record<string, OpenCodeModel> = {};
+  for (const [id, model] of Object.entries(models)) {
+    if (isDraftKey(id, OPENCODE_MODEL_DRAFT_PREFIX)) continue;
+    const next: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(model)) {
+      if (isDraftKey(key, OPENCODE_MODEL_FIELD_DRAFT_PREFIX)) continue;
+      if (key === "options" && value && typeof value === "object") {
+        const options = Object.fromEntries(
+          Object.entries(value as Record<string, unknown>).filter(
+            ([optionKey]) =>
+              !isDraftKey(optionKey, OPENCODE_MODEL_FIELD_DRAFT_PREFIX),
+          ),
+        );
+        if (Object.keys(options).length > 0) next.options = options;
+        continue;
+      }
+      next[key] = value;
+    }
+    result[id] = next as OpenCodeModel;
+  }
+  return result;
+}
 
 export const OPENCLAW_DEFAULT_CONFIG = JSON.stringify(
   {
