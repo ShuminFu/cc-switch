@@ -420,7 +420,9 @@ describe("useSettings hook", () => {
     });
 
     // 修复生效：读的是缓存实时值 true，payload=false，差异触发 clear_claude_config
-    expect(applyClaudePluginConfigMock).toHaveBeenCalledWith({ official: true });
+    expect(applyClaudePluginConfigMock).toHaveBeenCalledWith({
+      official: true,
+    });
     expect(syncCurrentProvidersLiveMock).toHaveBeenCalled();
   });
 
@@ -502,5 +504,85 @@ describe("useSettings hook", () => {
 
     expect(setAppConfigDirOverrideMock).not.toHaveBeenCalled();
     expect(metadataMock.setRequiresRestart).not.toHaveBeenCalledWith(true);
+  });
+
+  it("autosave never persists unsaved directory overrides from the form", async () => {
+    settingsFormMock = createSettingsFormMock({
+      settings: {
+        ...serverSettings,
+        claudeConfigDir: "/half/typed",
+        hermesConfigDir: "/draft/hermes",
+        language: "zh",
+      },
+    });
+
+    const { result } = renderHook(() => useSettings());
+
+    await act(async () => {
+      await result.current.autoSaveSettings({ minimizeToTrayOnClose: false });
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    const payload = mutateAsyncMock.mock.calls[0][0] as Settings;
+    expect(payload.minimizeToTrayOnClose).toBe(false);
+    expect(payload.claudeConfigDir).toBe("/server/claude");
+    expect(payload.hermesConfigDir).toBeUndefined();
+    expect(syncCurrentProvidersLiveMock).not.toHaveBeenCalled();
+  });
+
+  it("explicit save still persists the directory draft and syncs live config", async () => {
+    settingsFormMock = createSettingsFormMock({
+      settings: {
+        ...serverSettings,
+        claudeConfigDir: "/edited/claude",
+        language: "zh",
+      },
+    });
+
+    const { result } = renderHook(() => useSettings());
+
+    await act(async () => {
+      await result.current.saveSettings(undefined, { silent: true });
+    });
+
+    const payload = mutateAsyncMock.mock.calls[0][0] as Settings;
+    expect(payload.claudeConfigDir).toBe("/edited/claude");
+    expect(syncCurrentProvidersLiveMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("changing hermesConfigDir triggers live sync and is sanitised", async () => {
+    settingsFormMock = createSettingsFormMock({
+      settings: {
+        ...serverSettings,
+        hermesConfigDir: "  /custom/hermes  ",
+        language: "zh",
+      },
+    });
+
+    const { result } = renderHook(() => useSettings());
+
+    await act(async () => {
+      await result.current.saveSettings(undefined, { silent: true });
+    });
+
+    const payload = mutateAsyncMock.mock.calls[0][0] as Settings;
+    expect(payload.hermesConfigDir).toBe("/custom/hermes");
+    expect(syncCurrentProvidersLiveMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("whitespace-only hermesConfigDir is saved as no override", async () => {
+    settingsFormMock = createSettingsFormMock({
+      settings: { ...serverSettings, hermesConfigDir: "   ", language: "zh" },
+    });
+
+    const { result } = renderHook(() => useSettings());
+
+    await act(async () => {
+      await result.current.saveSettings(undefined, { silent: true });
+    });
+
+    const payload = mutateAsyncMock.mock.calls[0][0] as Settings;
+    expect(payload.hermesConfigDir).toBeUndefined();
+    expect(syncCurrentProvidersLiveMock).not.toHaveBeenCalled();
   });
 });

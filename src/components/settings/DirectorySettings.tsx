@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { FolderSearch, Undo2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,6 +6,19 @@ import type { AppId } from "@/lib/api";
 import type { ResolvedDirectories } from "@/hooks/useSettings";
 
 type DirectoryAppId = Exclude<AppId, "claude-desktop">;
+
+// Directory inputs keep the raw text while typing (so paths containing spaces
+// can be typed) and are only trimmed when the field loses focus. An empty
+// field means "no override": the resolved default is shown as placeholder.
+function commitTrimmed(
+  raw: string,
+  current: string | undefined,
+  onChange: (value?: string) => void,
+) {
+  const trimmed = raw.trim();
+  const next = trimmed.length > 0 ? trimmed : undefined;
+  if (next !== current) onChange(next);
+}
 
 interface DirectorySettingsProps {
   appConfigDir?: string;
@@ -58,10 +70,16 @@ export function DirectorySettings({
 
         <div className="flex items-center gap-2">
           <Input
-            value={appConfigDir ?? resolvedDirs.appConfig ?? ""}
-            placeholder={t("settings.browsePlaceholderApp")}
+            aria-label={t("settings.appConfigDir")}
+            value={appConfigDir ?? ""}
+            placeholder={
+              resolvedDirs.appConfig || t("settings.browsePlaceholderApp")
+            }
             className="text-xs"
             onChange={(event) => onAppConfigChange(event.target.value)}
+            onBlur={(event) =>
+              commitTrimmed(event.target.value, appConfigDir, onAppConfigChange)
+            }
           />
           <Button
             type="button"
@@ -198,10 +216,6 @@ function DirectoryInput({
   onReset,
 }: DirectoryInputProps) {
   const { t } = useTranslation();
-  const displayValue = useMemo(
-    () => value ?? resolvedValue ?? "",
-    [value, resolvedValue],
-  );
 
   return (
     <div className="space-y-1.5">
@@ -213,10 +227,12 @@ function DirectoryInput({
       </div>
       <div className="flex items-center gap-2">
         <Input
-          value={displayValue}
-          placeholder={placeholder}
+          aria-label={label}
+          value={value ?? ""}
+          placeholder={resolvedValue || placeholder}
           className="text-xs"
           onChange={(event) => onChange(event.target.value)}
+          onBlur={(event) => commitTrimmed(event.target.value, value, onChange)}
         />
         <Button
           type="button"

@@ -397,6 +397,57 @@ type = "stdio"
     expect(onSave).toHaveBeenCalledWith();
   });
 
+  it("does not rename the server ID when the wizard is applied in edit mode", async () => {
+    const initialData: McpServer = {
+      id: "a",
+      name: "A",
+      enabled: true,
+      server: { type: "stdio", command: "old" },
+      apps: { claude: true, codex: false, gemini: false },
+    } as McpServer;
+
+    renderForm({
+      editingId: "a",
+      initialData,
+      existingIds: ["a", "wizard-id"],
+    });
+
+    fireEvent.click(screen.getByText("mcp.form.useWizard"));
+    const applyButton = await screen.findByTestId("wizard-apply");
+    await act(async () => {
+      fireEvent.click(applyButton);
+    });
+
+    const idInput = screen.getByPlaceholderText(
+      "mcp.form.titlePlaceholder",
+    ) as HTMLInputElement;
+    expect(idInput.value).toBe("a");
+
+    fireEvent.click(screen.getByText("common.save"));
+
+    await waitFor(() => expect(upsertMock).toHaveBeenCalledTimes(1));
+    const [entry] = upsertMock.mock.calls.at(-1) ?? [];
+    expect(entry.id).toBe("a");
+    expect(entry.server.command).toBe("wizard-cmd");
+    expect(
+      upsertMock.mock.calls.some(([e]) => (e as McpServer).id === "wizard-id"),
+    ).toBe(false);
+  });
+
+  it("flags a wizard title that collides with an existing ID in add mode", async () => {
+    renderForm({ existingIds: ["wizard-id"] });
+
+    fireEvent.click(screen.getByText("mcp.form.useWizard"));
+    const applyButton = await screen.findByTestId("wizard-apply");
+    await act(async () => {
+      fireEvent.click(applyButton);
+    });
+
+    expect(screen.getByText("mcp.error.idExists")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("common.add"));
+    await waitFor(() => expect(upsertMock).not.toHaveBeenCalled());
+  });
+
   it("允许未选择任何应用保存配置，并保持 apps 全 false", async () => {
     const { onSave } = renderForm();
 

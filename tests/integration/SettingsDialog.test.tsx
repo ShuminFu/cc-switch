@@ -152,10 +152,14 @@ describe("SettingsPage integration", () => {
     );
     fireEvent.click(screen.getByText("settings.tabAdvanced"));
     fireEvent.click(screen.getByText("settings.advanced.configDir.title"));
-    const appInput = await screen.findByPlaceholderText(
-      "settings.browsePlaceholderApp",
+    const appInput = (await screen.findByLabelText(
+      "settings.appConfigDir",
+    )) as HTMLInputElement;
+    // No override: the field is empty and the resolved default is the placeholder.
+    expect(appInput.value).toBe("");
+    await waitFor(() =>
+      expect(appInput.placeholder).toBe("/home/mock/.cc-switch"),
     );
-    expect((appInput as HTMLInputElement).value).toBe("/home/mock/.cc-switch");
   });
 
   it("imports configuration and triggers success callback", async () => {
@@ -192,9 +196,7 @@ describe("SettingsPage integration", () => {
 
     fireEvent.click(screen.getByText("settings.tabAdvanced"));
     fireEvent.click(screen.getByText("settings.advanced.configDir.title"));
-    const appInput = await screen.findByPlaceholderText(
-      "settings.browsePlaceholderApp",
-    );
+    const appInput = await screen.findByLabelText("settings.appConfigDir");
     fireEvent.change(appInput, { target: { value: "/custom/app" } });
     fireEvent.click(screen.getByText("common.save"));
 
@@ -223,10 +225,13 @@ describe("SettingsPage integration", () => {
     const browseButtons = screen.getAllByTitle("settings.browseDirectory");
     const resetButtons = screen.getAllByTitle("settings.resetDefault");
 
-    const appInput = (await screen.findByPlaceholderText(
-      "settings.browsePlaceholderApp",
+    const appInput = (await screen.findByLabelText(
+      "settings.appConfigDir",
     )) as HTMLInputElement;
-    expect(appInput.value).toBe("/home/mock/.cc-switch");
+    expect(appInput.value).toBe("");
+    await waitFor(() =>
+      expect(appInput.placeholder).toBe("/home/mock/.cc-switch"),
+    );
 
     fireEvent.click(browseButtons[0]);
     await waitFor(() =>
@@ -234,10 +239,11 @@ describe("SettingsPage integration", () => {
     );
 
     fireEvent.click(resetButtons[0]);
-    await waitFor(() => expect(appInput.value).toBe("/home/mock/.cc-switch"));
+    await waitFor(() => expect(appInput.value).toBe(""));
+    expect(appInput.placeholder).toBe("/home/mock/.cc-switch");
 
-    const claudeInput = (await screen.findByPlaceholderText(
-      "settings.browsePlaceholderClaude",
+    const claudeInput = (await screen.findByLabelText(
+      "settings.claudeConfigDir",
     )) as HTMLInputElement;
     fireEvent.change(claudeInput, { target: { value: "/custom/claude" } });
     await waitFor(() => expect(claudeInput.value).toBe("/custom/claude"));
@@ -248,7 +254,8 @@ describe("SettingsPage integration", () => {
     );
 
     fireEvent.click(resetButtons[1]);
-    await waitFor(() => expect(claudeInput.value).toBe("/home/mock/.claude"));
+    await waitFor(() => expect(claudeInput.value).toBe(""));
+    expect(claudeInput.placeholder).toBe("/home/mock/.claude");
   });
 
   it("notifies when export fails", async () => {

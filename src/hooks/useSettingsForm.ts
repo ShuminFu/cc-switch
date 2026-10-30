@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsQuery } from "@/lib/query";
 import type { Settings } from "@/types";
+import {
+  DIRECTORY_SETTINGS_FIELDS,
+  sanitizeDir,
+  sanitizeDirectoryFields,
+} from "./settingsDirectoryFields";
 
 type Language = "zh" | "zh-TW" | "en" | "ja";
 
@@ -45,12 +50,6 @@ const isSupportedLanguage = (lang?: string | null): boolean => {
   );
 };
 
-const sanitizeDir = (value?: string | null): string | undefined => {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-};
-
 export interface UseSettingsFormResult {
   settings: SettingsFormState | null;
   isLoading: boolean;
@@ -78,6 +77,7 @@ export function useSettingsForm(): UseSettingsFormResult {
   );
 
   const initialLanguageRef = useRef<Language>("zh");
+  const lastServerDataRef = useRef<Settings | null>(null);
 
   const readPersistedLanguage = useCallback((): Language => {
     if (typeof window !== "undefined") {
@@ -119,16 +119,26 @@ export function useSettingsForm(): UseSettingsFormResult {
       preserveCodexOfficialAuthOnSwitch:
         data.preserveCodexOfficialAuthOnSwitch ?? false,
       unifyCodexSessionHistory: data.unifyCodexSessionHistory ?? false,
-      claudeConfigDir: sanitizeDir(data.claudeConfigDir),
-      codexConfigDir: sanitizeDir(data.codexConfigDir),
-      geminiConfigDir: sanitizeDir(data.geminiConfigDir),
-      grokConfigDir: sanitizeDir(data.grokConfigDir),
-      opencodeConfigDir: sanitizeDir(data.opencodeConfigDir),
-      openclawConfigDir: sanitizeDir(data.openclawConfigDir),
+      ...sanitizeDirectoryFields(data),
       language: normalizedLanguage,
     };
 
-    setSettingsState(normalized);
+    // 目录覆盖是 Advanced 标签页上需要显式保存的草稿：其它设置自动保存后
+    // 会触发 settings 重新拉取，此时保留用户尚未保存的目录编辑，
+    // 否则 Save 时就丢失了这些修改（以及对应的 live 同步）。
+    const previousServer = lastServerDataRef.current;
+    lastServerDataRef.current = data;
+    setSettingsState((prev) => {
+      if (!prev || !previousServer) return normalized;
+      const next = { ...normalized };
+      for (const field of DIRECTORY_SETTINGS_FIELDS) {
+        const draft = prev[field];
+        if (sanitizeDir(draft) !== sanitizeDir(previousServer[field])) {
+          next[field] = draft;
+        }
+      }
+      return next;
+    });
     initialLanguageRef.current = normalizedLanguage;
     syncLanguage(normalizedLanguage);
   }, [data, readPersistedLanguage, syncLanguage]);
@@ -186,15 +196,11 @@ export function useSettingsForm(): UseSettingsFormResult {
         preserveCodexOfficialAuthOnSwitch:
           serverData.preserveCodexOfficialAuthOnSwitch ?? false,
         unifyCodexSessionHistory: serverData.unifyCodexSessionHistory ?? false,
-        claudeConfigDir: sanitizeDir(serverData.claudeConfigDir),
-        codexConfigDir: sanitizeDir(serverData.codexConfigDir),
-        geminiConfigDir: sanitizeDir(serverData.geminiConfigDir),
-        grokConfigDir: sanitizeDir(serverData.grokConfigDir),
-        opencodeConfigDir: sanitizeDir(serverData.opencodeConfigDir),
-        openclawConfigDir: sanitizeDir(serverData.openclawConfigDir),
+        ...sanitizeDirectoryFields(serverData),
         language: normalizedLanguage,
       };
 
+      lastServerDataRef.current = serverData;
       setSettingsState(normalized);
       syncLanguage(initialLanguageRef.current);
     },

@@ -217,19 +217,13 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   );
 
   // Create today's note (deferred — file is only persisted on save)
+  // Always read from disk instead of trusting the in-memory list (which is
+  // empty while loading or after a failed list load): a missing file reads
+  // as null and opens an empty editor, a read error closes the editor, so an
+  // existing note can never be overwritten with an empty buffer.
   const handleCreateToday = useCallback(async () => {
-    const filename = getTodayFilename();
-    // Check if already exists in the list
-    const existing = files.find((f) => f.filename === filename);
-    if (existing) {
-      // Just open it
-      await openFile(filename);
-      return;
-    }
-    // Open editor with empty content — no file created until user saves
-    setEditingFile(filename);
-    setContent("");
-  }, [files, openFile]);
+    await openFile(getTodayFilename());
+  }, [openFile]);
 
   // Save current file
   const handleSave = useCallback(async () => {
