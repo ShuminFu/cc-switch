@@ -163,6 +163,17 @@ jobs:
       - name: Run tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      # tests/proxy_e2e.rs::perf_baseline_non_streaming_request writes its
+      # per-OS measurement to CARGO_TARGET_TMPDIR (CCS-014); keep it even when
+      # a test fails so the numbers can be compared across the matrix (CCS-213).
+      - name: Upload proxy e2e perf artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proxy-e2e-perf-${{ matrix.os }}
+          path: src-tauri/target/tmp/proxy-e2e-perf.json
+          if-no-files-found: warn
+
   # Proves the declared rust-version in src-tauri/Cargo.toml is real: the
   # lockfile must still build on the MSRV, not only on the pinned channel
   # (CCS-025). Keep the version here in sync with `rust-version`.

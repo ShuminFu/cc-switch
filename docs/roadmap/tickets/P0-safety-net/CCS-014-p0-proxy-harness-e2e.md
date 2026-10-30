@@ -64,4 +64,4 @@ Baseline recorded (linux-x86_64, debug): p50 2.87 ms, p95 3.18 ms, 17 SQL statem
 
 - Blocked: proxy_e2e green on macOS and Windows in the backend matrix. Needs a windows-latest/macos-latest run of the ci.yml backend matrix, or real machines (cross-compiling to windows-gnu/apple fails on aws-lc-sys).
 - Blocked: Confirming the perf artifact actually uploads. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history).
-- Follow-up [CCS-213](../P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md): Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix.
+- Follow-up [CCS-213](../P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md): Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix. Done: ci.yml `backend` now has an `Upload proxy e2e perf artifact` step (`if: always()`, artifact `proxy-e2e-perf-${{ matrix.os }}`) after "Run tests". Only the real-run confirmation above stays blocked on GitHub Actions.
