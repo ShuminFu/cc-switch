@@ -234,6 +234,214 @@ fn encode_sse(event_name: &str, payload: &Value) -> Bytes {
     ))
 }
 
+fn encode_error(error_type: &str, message: &str) -> Bytes {
+    encode_sse(
+        "error",
+        &json!({
+            "type": "error",
+            "error": {
+                "type": error_type,
+                "message": message
+            }
+        }),
+    )
+}
+
+/// Returns `(error_type, message)` for a Gemini error payload delivered inside
+/// a 200 SSE body (`{"error": {"code": 429, "message": "...", "status": "..."}}`).
+fn extract_gemini_stream_error(chunk: &Value) -> Option<(String, String)> {
+    let error = chunk.get("error").filter(|value| !value.is_null())?;
+    let message = error
+        .as_str()
+        .map(ToString::to_string)
+        .or_else(|| {
+            error
+                .get("message")
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| error.to_string());
+    let status = error.get("status").and_then(|value| value.as_str());
+    let code = error.get("code").and_then(|value| value.as_i64());
+    let error_type = match (status, code) {
+        (Some("RESOURCE_EXHAUSTED"), _) | (_, Some(429)) => "rate_limit_error",
+        (Some("UNAVAILABLE"), _) | (_, Some(503)) => "overloaded_error",
+        (Some("UNAUTHENTICATED"), _) | (_, Some(401)) => "authentication_error",
+        (Some("PERMISSION_DENIED"), _) | (_, Some(403)) => "permission_error",
+        (Some("INVALID_ARGUMENT"), _) | (_, Some(400)) => "invalid_request_error",
+        _ => "api_error",
+    };
+    let detail = match (status, code) {
+        (Some(status), Some(code)) => format!("{message} ({code} {status})"),
+        (Some(status), None) => format!("{message} ({status})"),
+        (None, Some(code)) => format!("{message} ({code})"),
+        (None, None) => message,
+    };
+    Some((error_type.to_string(), detail))
+}
+
+/// How the upstream delivers visible text across stream chunks.
+///
+/// The Gemini API streams *incremental* text (each chunk carries only new
+/// text), but some relays resend the *cumulative* text snapshot on every chunk.
+/// A per-chunk "does it start with what we have" test cannot tell the two
+/// apart (`"}"` then `"}\n"` is valid in both), so the mode is decided once per
+/// stream.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GeminiTextStreamMode {
+    /// Decide once per stream. Text is held back until the stream proves to be
+    /// incremental (a chunk that does not extend the previous one) or
+    /// cumulative (two consecutive chunks that each strictly extend the
+    /// previous snapshot). A stream that ends undecided is treated as
+    /// incremental, the documented Gemini API behaviour.
+    #[default]
+    Auto,
+    /// Every chunk carries new text only; always append.
+    Incremental,
+    /// Every chunk carries the full text so far; emit only the new suffix.
+    Cumulative,
+}
+
+/// Number of consecutive strict-prefix extensions required before `Auto`
+/// commits to cumulative mode. An incremental stream would need each of
+/// three consecutive chunks to start with the whole previous chunk.
+const CUMULATIVE_EXTENSIONS_REQUIRED: usize = 2;
+
+#[derive(Debug)]
+struct GeminiTextAccumulator {
+    mode: GeminiTextStreamMode,
+    /// Full visible text emitted so far (the shadow-store text).
+    emitted: String,
+    /// `Auto` only: chunks held back while the mode is undecided.
+    pending: Vec<String>,
+    extensions: usize,
+}
+
+impl GeminiTextAccumulator {
+    fn new(mode: GeminiTextStreamMode) -> Self {
+        Self {
+            mode,
+            emitted: String::new(),
+            pending: Vec::new(),
+            extensions: 0,
+        }
+    }
+
+    /// Feed one chunk's visible text; returns the text to emit now.
+    fn push(&mut self, chunk: String) -> String {
+        match self.mode {
+            GeminiTextStreamMode::Incremental => {
+                self.emitted.push_str(&chunk);
+                chunk
+            }
+            GeminiTextStreamMode::Cumulative => {
+                if let Some(delta) = chunk.strip_prefix(self.emitted.as_str()) {
+                    let delta = delta.to_string();
+                    self.emitted = chunk;
+                    delta
+                } else if self.emitted.starts_with(&chunk) {
+                    // A shorter (or repeated) snapshot carries nothing new.
+                    String::new()
+                } else {
+                    log::warn!(
+                        "[Gemini] cumulative text snapshot diverged from emitted text; appending chunk"
+                    );
+                    self.emitted.push_str(&chunk);
+                    chunk
+                }
+            }
+            GeminiTextStreamMode::Auto => {
+                let Some(previous) = self.pending.last() else {
+                    self.pending.push(chunk);
+                    return String::new();
+                };
+                if !chunk.starts_with(previous.as_str()) {
+                    self.pending.push(chunk);
+                    return self.commit_incremental();
+                }
+                if chunk.len() > previous.len() {
+                    self.extensions += 1;
+                }
+                if self.extensions >= CUMULATIVE_EXTENSIONS_REQUIRED {
+                    self.mode = GeminiTextStreamMode::Cumulative;
+                    self.pending.clear();
+                    self.emitted.clone_from(&chunk);
+                    return chunk;
+                }
+                self.pending.push(chunk);
+                String::new()
+            }
+        }
+    }
+
+    fn commit_incremental(&mut self) -> String {
+        self.mode = GeminiTextStreamMode::Incremental;
+        let text = std::mem::take(&mut self.pending).concat();
+        self.emitted.push_str(&text);
+        text
+    }
+
+    /// Flush text still held back at the end of the stream.
+    fn finish(&mut self) -> String {
+        if self.mode == GeminiTextStreamMode::Auto && !self.pending.is_empty() {
+            self.commit_incremental()
+        } else {
+            String::new()
+        }
+    }
+
+    fn text(&self) -> &str {
+        &self.emitted
+    }
+
+    fn has_text(&self) -> bool {
+        !self.emitted.is_empty() || self.pending.iter().any(|chunk| !chunk.is_empty())
+    }
+}
+
+/// Emit a text delta into the (single) text block, opening it on first use.
+fn text_delta_events(
+    delta: &str,
+    text_block_index: &mut Option<u32>,
+    next_content_index: &mut u32,
+    open_indices: &mut HashSet<u32>,
+) -> Vec<Bytes> {
+    let mut events = Vec::new();
+    if delta.is_empty() {
+        return events;
+    }
+    let index = *text_block_index.get_or_insert_with(|| {
+        let assigned = *next_content_index;
+        *next_content_index += 1;
+        assigned
+    });
+    if open_indices.insert(index) {
+        events.push(encode_sse(
+            "content_block_start",
+            &json!({
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {
+                    "type": "text",
+                    "text": ""
+                }
+            }),
+        ));
+    }
+    events.push(encode_sse(
+        "content_block_delta",
+        &json!({
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {
+                "type": "text_delta",
+                "text": delta
+            }
+        }),
+    ));
+    events
+}
+
 pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
     shadow_store: Option<Arc<GeminiShadowStore>>,
@@ -241,13 +449,35 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
     session_id: Option<String>,
     tool_schema_hints: Option<AnthropicToolSchemaHints>,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+    create_anthropic_sse_stream_from_gemini_with_text_mode(
+        stream,
+        shadow_store,
+        provider_id,
+        session_id,
+        tool_schema_hints,
+        GeminiTextStreamMode::Auto,
+    )
+}
+
+/// Like [`create_anthropic_sse_stream_from_gemini`], with an explicit
+/// [`GeminiTextStreamMode`] for upstreams whose text chunking is known.
+pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
+    E: std::error::Error + Send + 'static,
+>(
+    stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
+    shadow_store: Option<Arc<GeminiShadowStore>>,
+    provider_id: Option<String>,
+    session_id: Option<String>,
+    tool_schema_hints: Option<AnthropicToolSchemaHints>,
+    text_mode: GeminiTextStreamMode,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
         let mut buffer = String::new();
         let mut utf8_remainder = Vec::new();
         let mut message_id: Option<String> = None;
         let mut current_model: Option<String> = None;
         let mut has_sent_message_start = false;
-        let mut accumulated_text = String::new();
+        let mut text_acc = GeminiTextAccumulator::new(text_mode);
         let mut text_block_index: Option<u32> = None;
         let mut next_content_index: u32 = 0;
         let mut open_indices: HashSet<u32> = HashSet::new();
@@ -286,8 +516,19 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
 
                         let chunk_json: Value = match serde_json::from_str(&data) {
                             Ok(value) => value,
-                            Err(_) => continue,
+                            Err(error) => {
+                                log::warn!("[Gemini] skipping unparsable SSE payload: {error}");
+                                continue;
+                            }
                         };
+
+                        // An upstream error delivered inside the 200 SSE body: surface it
+                        // and stop. No success terminal events and no shadow turn.
+                        if let Some((error_type, message)) = extract_gemini_stream_error(&chunk_json) {
+                            log::warn!("[Gemini] upstream stream error ({error_type}): {message}");
+                            yield Ok(encode_error(&error_type, &message));
+                            return;
+                        }
 
                         if message_id.is_none() {
                             message_id = chunk_json
@@ -355,47 +596,14 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                                 );
                                 let visible_text = extract_visible_text(&rectified_parts);
                                 if !visible_text.is_empty() {
-                                    let is_cumulative = visible_text.starts_with(&accumulated_text);
-                                    let delta = if is_cumulative {
-                                        visible_text[accumulated_text.len()..].to_string()
-                                    } else {
-                                        visible_text.clone()
-                                    };
-
-                                    if !delta.is_empty() {
-                                        let index = *text_block_index.get_or_insert_with(|| {
-                                            let assigned = next_content_index;
-                                            next_content_index += 1;
-                                            assigned
-                                        });
-
-                                        if !open_indices.contains(&index) {
-                                            let start_event = json!({
-                                                "type": "content_block_start",
-                                                "index": index,
-                                                "content_block": {
-                                                    "type": "text",
-                                                    "text": ""
-                                                }
-                                            });
-                                            yield Ok(encode_sse("content_block_start", &start_event));
-                                            open_indices.insert(index);
-                                        }
-
-                                        let delta_event = json!({
-                                            "type": "content_block_delta",
-                                            "index": index,
-                                            "delta": {
-                                                "type": "text_delta",
-                                                "text": delta
-                                            }
-                                        });
-                                        yield Ok(encode_sse("content_block_delta", &delta_event));
-                                        if is_cumulative {
-                                            accumulated_text = visible_text;
-                                        } else {
-                                            accumulated_text.push_str(&delta);
-                                        }
+                                    let delta = text_acc.push(visible_text);
+                                    for event in text_delta_events(
+                                        &delta,
+                                        &mut text_block_index,
+                                        &mut next_content_index,
+                                        &mut open_indices,
+                                    ) {
+                                        yield Ok(event);
                                     }
                                 }
                             }
@@ -403,10 +611,36 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
                     }
                 }
                 Err(error) => {
-                    yield Err(std::io::Error::other(error.to_string()));
+                    log::warn!("[Gemini] upstream stream error: {error}");
+                    yield Ok(encode_error("stream_error", &format!("Stream error: {error}")));
                     return;
                 }
             }
+        }
+
+        let tail = text_acc.finish();
+        for event in text_delta_events(
+            &tail,
+            &mut text_block_index,
+            &mut next_content_index,
+            &mut open_indices,
+        ) {
+            yield Ok(event);
+        }
+
+        // Clean EOF without any finishReason: the upstream connection ended early.
+        // Never present it as a normal `end_turn` completion.
+        let truncated = latest_finish_reason.is_none() && blocked_text.is_none();
+        if truncated && !text_acc.has_text() && tool_call_snapshots.is_empty() {
+            log::warn!("[Gemini] stream ended before any content or finishReason");
+            yield Ok(encode_error(
+                "stream_truncated",
+                "Upstream Gemini stream ended before sending any content",
+            ));
+            return;
+        }
+        if truncated {
+            log::warn!("[Gemini] stream ended without finishReason; reporting max_tokens");
         }
 
         if !has_sent_message_start {
@@ -423,7 +657,7 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
             yield Ok(encode_sse("message_start", &event));
         }
 
-        if accumulated_text.is_empty() {
+        if text_acc.text().is_empty() {
             if let Some(blocked_text) = blocked_text.clone() {
                 let index = *text_block_index.get_or_insert_with(|| {
                     let assigned = next_content_index;
@@ -472,10 +706,10 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
             session_id.as_deref(),
         ) {
             let tool_calls = tool_call_snapshots.clone();
-            let shadow_text = if accumulated_text.is_empty() {
+            let shadow_text = if text_acc.text().is_empty() {
                 blocked_text.as_deref()
             } else {
-                Some(accumulated_text.as_str())
+                Some(text_acc.text())
             };
             let shadow_parts = build_shadow_assistant_parts(
                 shadow_text,
@@ -552,11 +786,15 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
             yield Ok(encode_sse("content_block_stop", &stop_event));
         }
 
-        let stop_reason = map_finish_reason(
-            latest_finish_reason.as_deref(),
-            !tool_calls.is_empty(),
-            blocked_text.is_some(),
-        );
+        let stop_reason = if truncated {
+            "max_tokens"
+        } else {
+            map_finish_reason(
+                latest_finish_reason.as_deref(),
+                !tool_calls.is_empty(),
+                blocked_text.is_some(),
+            )
+        };
         let usage = build_anthropic_usage(latest_usage.as_ref());
         let message_delta = json!({
             "type": "message_delta",
@@ -581,13 +819,19 @@ mod tests {
     use std::sync::Arc;
 
     fn collect_stream_output(chunks: Vec<&str>) -> String {
+        collect_stream_output_with_mode(chunks, GeminiTextStreamMode::Auto)
+    }
+
+    fn collect_stream_output_with_mode(chunks: Vec<&str>, mode: GeminiTextStreamMode) -> String {
         let owned_chunks: Vec<String> = chunks.into_iter().map(ToString::to_string).collect();
         let stream = futures::stream::iter(
             owned_chunks
                 .into_iter()
                 .map(|chunk| Ok::<Bytes, std::io::Error>(Bytes::from(chunk))),
         );
-        let converted = create_anthropic_sse_stream_from_gemini(stream, None, None, None, None);
+        let converted = create_anthropic_sse_stream_from_gemini_with_text_mode(
+            stream, None, None, None, None, mode,
+        );
         futures::executor::block_on(async move {
             converted
                 .collect::<Vec<_>>()
@@ -631,10 +875,11 @@ mod tests {
 
     #[test]
     fn converts_text_stream_to_anthropic_sse() {
-        let output = collect_stream_output(vec![
+        // Cumulative-snapshot relay fixture: requires the explicit mode.
+        let output = collect_stream_output_with_mode(vec![
             "data: {\"responseId\":\"resp_1\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hel\"}]}}],\"usageMetadata\":{\"promptTokenCount\":10,\"totalTokenCount\":13}}\n\n",
             "data: {\"responseId\":\"resp_1\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}],\"usageMetadata\":{\"promptTokenCount\":10,\"totalTokenCount\":15}}\n\n",
-        ]);
+        ], GeminiTextStreamMode::Cumulative);
 
         assert!(output.contains("event: message_start"));
         assert!(output.contains("\"type\":\"text_delta\""));
@@ -658,10 +903,11 @@ mod tests {
 
     #[test]
     fn converts_crlf_delimited_stream_to_anthropic_sse() {
-        let output = collect_stream_output(vec![
+        // Cumulative-snapshot relay fixture: requires the explicit mode.
+        let output = collect_stream_output_with_mode(vec![
             "data: {\"responseId\":\"resp_3\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]}}],\"usageMetadata\":{\"promptTokenCount\":4,\"totalTokenCount\":6}}\r\n\r\n",
             "data: {\"responseId\":\"resp_3\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"Hi there\"}]}}],\"usageMetadata\":{\"promptTokenCount\":4,\"totalTokenCount\":9}}\r\n\r\n",
-        ]);
+        ], GeminiTextStreamMode::Cumulative);
 
         assert!(output.contains("event: message_start"));
         assert!(output.contains("\"type\":\"text_delta\""));
@@ -721,8 +967,9 @@ mod tests {
             "session-1",
         );
 
-        assert!(output.contains("\"text\":\"Hel\""));
-        assert!(output.contains("\"text\":\"lo\""));
+        // Auto mode holds the first chunk until the stream proves incremental,
+        // so both deltas may be flushed together; the text must be exact.
+        assert_eq!(streamed_text(&output), "Hello");
 
         let shadow = store
             .latest_assistant_content("provider-a", "session-1")
@@ -1050,5 +1297,194 @@ mod tests {
             shadow["parts"][0]["thoughtSignature"], "sig-keep",
             "prior thoughtSignature must survive a later chunk that omits it: {shadow}"
         );
+    }
+
+    fn text_chunk(text: &str) -> String {
+        format!(
+            "data: {}\n\n",
+            json!({
+                "responseId": "resp_text",
+                "modelVersion": "gemini-2.5-pro",
+                "candidates": [{"content": {"parts": [{"text": text}]}}]
+            })
+        )
+    }
+
+    fn finish_chunk() -> String {
+        format!(
+            "data: {}\n\n",
+            json!({
+                "responseId": "resp_text",
+                "candidates": [{"finishReason": "STOP", "content": {"parts": []}}],
+                "usageMetadata": {"promptTokenCount": 3, "totalTokenCount": 5}
+            })
+        )
+    }
+
+    fn sse_payloads(output: &str) -> Vec<Value> {
+        output
+            .split("\n\n")
+            .filter_map(|block| {
+                let data = block
+                    .lines()
+                    .find_map(|line| strip_sse_field(line, "data"))?;
+                serde_json::from_str::<Value>(data).ok()
+            })
+            .collect()
+    }
+
+    fn streamed_text(output: &str) -> String {
+        sse_payloads(output)
+            .iter()
+            .filter(|event| {
+                event.pointer("/delta/type").and_then(|v| v.as_str()) == Some("text_delta")
+            })
+            .filter_map(|event| event.pointer("/delta/text").and_then(|v| v.as_str()))
+            .collect()
+    }
+
+    fn text_of(texts: &[&str], mode: GeminiTextStreamMode) -> String {
+        let mut chunks: Vec<String> = texts.iter().map(|text| text_chunk(text)).collect();
+        chunks.push(finish_chunk());
+        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        streamed_text(&collect_stream_output_with_mode(refs, mode))
+    }
+
+    // PROV-03
+    #[test]
+    fn repeated_delta_chunks_are_not_dropped() {
+        assert_eq!(text_of(&["a", "a"], GeminiTextStreamMode::Auto), "aa");
+        assert_eq!(
+            text_of(&["\n\n", "\n\n"], GeminiTextStreamMode::Auto),
+            "\n\n\n\n"
+        );
+    }
+
+    #[test]
+    fn delta_chunk_extending_previous_chunk_is_not_truncated() {
+        assert_eq!(text_of(&["}", "}\n"], GeminiTextStreamMode::Auto), "}}\n");
+    }
+
+    #[test]
+    fn incremental_stream_is_appended() {
+        assert_eq!(
+            text_of(&["Hel", "lo", " world"], GeminiTextStreamMode::Auto),
+            "Hello world"
+        );
+        assert_eq!(
+            text_of(&["Hel", "Hello"], GeminiTextStreamMode::Incremental),
+            "HelHello"
+        );
+    }
+
+    #[test]
+    fn cumulative_mode_only_when_requested_for_ambiguous_streams() {
+        assert_eq!(
+            text_of(&["Hel", "Hello"], GeminiTextStreamMode::Auto),
+            "HelHello"
+        );
+        assert_eq!(
+            text_of(&["Hel", "Hello"], GeminiTextStreamMode::Cumulative),
+            "Hello"
+        );
+    }
+
+    #[test]
+    fn auto_mode_detects_unambiguous_cumulative_snapshots() {
+        assert_eq!(
+            text_of(
+                &["Hel", "Hello", "Hello wor", "Hello world", "Hello world"],
+                GeminiTextStreamMode::Auto
+            ),
+            "Hello world"
+        );
+    }
+
+    #[test]
+    fn auto_mode_shadow_text_matches_streamed_text() {
+        let store = Arc::new(GeminiShadowStore::with_limits(8, 4));
+        let chunks = [text_chunk("}"), text_chunk("}\n"), finish_chunk()];
+        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        let output = collect_stream_output_with_shadow(refs, store.clone(), "p", "s");
+        assert_eq!(streamed_text(&output), "}}\n");
+        let shadow = store.latest_assistant_content("p", "s").unwrap();
+        assert_eq!(shadow["parts"][0]["text"], "}}\n");
+    }
+
+    // PROV-34
+    #[test]
+    fn upstream_error_payload_emits_error_without_message_stop_or_shadow() {
+        let store = Arc::new(GeminiShadowStore::with_limits(8, 4));
+        let output = collect_stream_output_with_shadow(
+            vec!["data: {\"error\":{\"code\":429,\"message\":\"quota exhausted\",\"status\":\"RESOURCE_EXHAUSTED\"}}\n\n"],
+            store.clone(),
+            "p",
+            "s",
+        );
+        let events = sse_payloads(&output);
+        let error = events
+            .iter()
+            .find(|event| event["type"] == "error")
+            .expect("error event");
+        assert!(error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("quota"));
+        assert_eq!(error["error"]["type"], "rate_limit_error");
+        assert!(!output.contains("message_stop"));
+        assert!(!output.contains("message_delta"));
+        assert!(store.latest_assistant_content("p", "s").is_none());
+    }
+
+    #[test]
+    fn mid_stream_error_payload_stops_without_success_events() {
+        let first = text_chunk("partial");
+        let output = collect_stream_output(vec![
+            first.as_str(),
+            "data: {\"error\":{\"code\":503,\"message\":\"overloaded\",\"status\":\"UNAVAILABLE\"}}\n\n",
+        ]);
+        assert!(output.contains("event: error"));
+        assert!(output.contains("overloaded"));
+        assert!(!output.contains("message_stop"));
+    }
+
+    #[test]
+    fn partial_text_without_finish_reason_reports_max_tokens() {
+        let first = text_chunk("Hel");
+        let second = text_chunk("lo");
+        let output = collect_stream_output(vec![first.as_str(), second.as_str()]);
+        assert_eq!(streamed_text(&output), "Hello");
+        assert!(output.contains("\"stop_reason\":\"max_tokens\""));
+        assert!(!output.contains("\"stop_reason\":\"end_turn\""));
+        assert!(output.contains("event: message_stop"));
+    }
+
+    #[test]
+    fn stream_without_content_or_finish_reason_reports_truncation() {
+        let output = collect_stream_output(vec![
+            "data: {\"responseId\":\"r\",\"usageMetadata\":{\"promptTokenCount\":3}}\n\n",
+        ]);
+        assert!(output.contains("event: error"));
+        assert!(output.contains("stream_truncated"));
+        assert!(!output.contains("message_stop"));
+    }
+
+    #[test]
+    fn upstream_transport_error_becomes_error_event() {
+        let first = text_chunk("Hel");
+        let stream = futures::stream::iter(vec![
+            Ok::<Bytes, std::io::Error>(Bytes::from(first)),
+            Err(std::io::Error::other("connection reset")),
+        ]);
+        let converted = create_anthropic_sse_stream_from_gemini(stream, None, None, None, None);
+        let items = futures::executor::block_on(converted.collect::<Vec<_>>());
+        assert!(items.iter().all(Result::is_ok));
+        let output = items
+            .into_iter()
+            .map(|item| String::from_utf8(item.unwrap().to_vec()).unwrap())
+            .collect::<String>();
+        assert!(output.contains("event: error"));
+        assert!(output.contains("connection reset"));
+        assert!(!output.contains("message_stop"));
     }
 }
