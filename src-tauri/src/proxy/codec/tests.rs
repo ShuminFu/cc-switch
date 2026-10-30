@@ -364,4 +364,12 @@ fn settings_codec_engine_defaults_to_legacy_and_tolerates_unknown_values() {
         serde_json::from_value(json!({"codecEngine": "v2", "language": "en"})).unwrap();
     assert_eq!(settings.codec_engine, CodecEngine::Legacy);
     assert_eq!(settings.language.as_deref(), Some("en"));
+
+    // 非字符串取值同样不影响其余设置
+    for raw in [json!(null), json!(1), json!({"engine": "ir"}), json!(true)] {
+        let settings: AppSettings =
+            serde_json::from_value(json!({"codecEngine": raw, "language": "en"})).unwrap();
+        assert_eq!(settings.codec_engine, CodecEngine::Legacy, "{raw}");
+        assert_eq!(settings.language.as_deref(), Some("en"));
+    }
 }

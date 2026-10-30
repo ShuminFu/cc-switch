@@ -78,8 +78,14 @@ impl Serialize for CodecEngine {
 
 impl<'de> Deserialize<'de> for CodecEngine {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        Ok(Self::from_setting(&value))
+        // 非字符串（null、数字等）同样回退为 legacy，而不是让整个设置解析失败
+        match Value::deserialize(deserializer)? {
+            Value::String(value) => Ok(Self::from_setting(&value)),
+            other => {
+                log::warn!("[Codec] Non-string codecEngine `{other}`, using legacy");
+                Ok(Self::Legacy)
+            }
+        }
     }
 }
 

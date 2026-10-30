@@ -81,3 +81,5 @@ p3-stream-traits-taps, p3-stop-reason-table
 - `pnpm typecheck`: clean
 - `pnpm test:unit`: 159 files / 1547 tests passed
 - `prettier --check src/types.ts`: clean
+
+**Review.** All acceptance criteria hold: the IR unit tests and proptests pass, and `cargo test protocol::ir` passes. The flag is the top-level `codecEngine` settings key, not a nested `proxy.codecEngine`. It sits next to the other proxy toggles such as `stickySessionRouting`, and the frontend saves it through the full-settings spread, so the value is kept. Fix applied: `CodecEngine` only fell back to legacy for unknown *string* values. A non-string `codecEngine` (null, a number or an object, for example from a hand-edited settings.json) still made the whole `AppSettings` parse fail. The deserializer now reads any JSON value and falls back to legacy with a warning for anything that is not a string. A test covers this.
