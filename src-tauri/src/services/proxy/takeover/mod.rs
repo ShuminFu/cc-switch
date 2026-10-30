@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use std::str::FromStr;
 use tauri::Emitter;
 
+mod additive;
 mod claude;
 mod codex;
 mod engine;
@@ -16,13 +17,19 @@ mod gemini;
 mod grok;
 mod legacy;
 
+pub(crate) use additive::write_entry_respecting_takeover;
+
+/// 是否为条目级接管的累加模式应用（OpenCode / OpenClaw / Hermes）
+pub(in crate::services::proxy) fn is_entry_takeover_app(app_type: &AppType) -> bool {
+    additive::entry_takeover(app_type).is_some()
+}
 pub(crate) use engine::{TakeoverError, TakeoverMode};
 
 impl ProxyService {
     /// 获取各应用的接管状态（是否改写该应用的 Live 配置指向本地代理）
     ///
     /// 由注册表生成：具备 `PROXY_TAKEOVER` 能力的应用读取 `proxy_config.enabled`，
-    /// 其余应用（Claude Desktop、OpenCode、OpenClaw、Hermes）恒为 `false`。
+    /// 其余应用（Claude Desktop）恒为 `false`。
     pub async fn get_takeover_status(&self) -> Result<ProxyTakeoverStatus, String> {
         let mut enabled = std::collections::HashSet::new();
         for descriptor in crate::apps::registry::with_caps(crate::apps::AppCaps::PROXY_TAKEOVER) {
@@ -296,6 +303,7 @@ impl ProxyService {
             AppType::Codex => self.read_codex_live(),
             AppType::Gemini => self.read_gemini_live(),
             AppType::GrokBuild => self.read_grok_live(),
+            _ if additive::entry_takeover(app_type).is_some() => self.read_entries_live(app_type),
             _ => Err("该应用不支持代理功能".to_string()),
         }
     }
@@ -584,6 +592,9 @@ impl ProxyService {
             AppType::Codex => self.write_codex_live(config),
             AppType::Gemini => self.write_gemini_live(config),
             AppType::GrokBuild => self.write_grok_live(config),
+            _ if additive::entry_takeover(app_type).is_some() => {
+                self.write_entries_live(app_type, config)
+            }
             _ => Err("该应用不支持代理功能".to_string()),
         }
     }
@@ -602,7 +613,7 @@ impl ProxyService {
             AppType::Codex => self.cleanup_codex_takeover_placeholders_in_live(),
             AppType::Gemini => self.cleanup_gemini_takeover_placeholders_in_live(),
             AppType::GrokBuild => self.cleanup_grok_takeover_placeholders_in_live(),
-            _ => Ok(()),
+            _ => self.cleanup_entry_placeholders_in_live(app_type),
         }
     }
 

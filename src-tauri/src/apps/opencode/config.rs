@@ -141,6 +141,32 @@ pub fn set_provider(id: &str, config: Value) -> Result<(), AppError> {
     write_opencode_config(&full_config)
 }
 
+/// 只改写 `provider.<id>.options` 中的 `baseURL` / `apiKey`（代理接管用），
+/// 条目的其余字段保持原样
+pub fn set_provider_endpoint(
+    id: &str,
+    endpoint: &crate::apps::adapter::EntryEndpoint,
+) -> Result<(), AppError> {
+    let mut full_config = read_opencode_config()?;
+    let entry = full_config
+        .get_mut("provider")
+        .and_then(|providers| providers.get_mut(id))
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            AppError::Config(format!("OpenCode provider '{id}' not found in live config"))
+        })?;
+    let options = entry
+        .entry("options".to_string())
+        .or_insert_with(|| json!({}));
+    let options = options.as_object_mut().ok_or_else(|| {
+        AppError::Config(format!("OpenCode provider '{id}' options is not an object"))
+    })?;
+    crate::apps::adapter::apply_endpoint_field(options, "baseURL", endpoint.base_url.as_deref());
+    crate::apps::adapter::apply_endpoint_field(options, "apiKey", endpoint.api_key.as_deref());
+
+    write_opencode_config(&full_config)
+}
+
 pub fn remove_provider(id: &str) -> Result<(), AppError> {
     let mut config = read_opencode_config()?;
 

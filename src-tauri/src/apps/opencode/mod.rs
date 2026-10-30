@@ -12,8 +12,8 @@ use serde_json::Value;
 
 use self::config::{get_opencode_config_path, get_opencode_dir, read_opencode_config};
 use super::adapter::{
-    str_or_empty, AppAdapter, CommonSnippet, Credentials, ExtractOnlySnippet, McpProjector,
-    SessionSource,
+    entries_have_placeholder, str_or_empty, AppAdapter, CommonSnippet, Credentials, EntryEndpoint,
+    EntryTakeover, ExtractOnlySnippet, McpProjector, ProxyTakeover, SessionSource,
 };
 use crate::app_config::AppType;
 use crate::config::get_home_dir;
@@ -197,9 +197,83 @@ impl AppAdapter for OpenCodeAdapter {
         Some(self)
     }
 
+    fn takeover(&self) -> Option<&dyn ProxyTakeover> {
+        Some(self)
+    }
+
     fn session_source(&self) -> Option<&dyn SessionSource> {
         Some(self)
     }
+}
+
+/// 本地代理挂载的 OpenAI 兼容 SDK（Chat Completions / Responses）；缺省 `npm`
+/// 时 OpenCode 按 OpenAI 兼容处理
+const PROXYABLE_NPM_PACKAGES: [&str; 2] = ["@ai-sdk/openai-compatible", "@ai-sdk/openai"];
+
+impl ProxyTakeover for OpenCodeAdapter {
+    fn has_placeholder(&self, settings: &Value) -> bool {
+        entries_have_placeholder(self, settings)
+    }
+
+    fn entry_takeover(&self) -> Option<&dyn EntryTakeover> {
+        Some(self)
+    }
+}
+
+/// `provider.<id>` 条目，凭据在 `options.baseURL` / `options.apiKey`
+impl EntryTakeover for OpenCodeAdapter {
+    fn entries(&self, live: &Value) -> Vec<(String, Value)> {
+        live.get("provider")
+            .and_then(Value::as_object)
+            .map(|providers| {
+                providers
+                    .iter()
+                    .map(|(id, entry)| (id.clone(), entry.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// 顶层 `model` 为 `<provider>/<model>`
+    fn default_entry(&self, live: &Value) -> Option<String> {
+        model_ref_provider(live.get("model"))
+    }
+
+    fn endpoint(&self, entry: &Value) -> EntryEndpoint {
+        let options = entry.get("options");
+        let field = |key: &str| {
+            options
+                .and_then(|options| options.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        EntryEndpoint {
+            base_url: field("baseURL"),
+            api_key: field("apiKey"),
+        }
+    }
+
+    fn proxyable(&self, entry: &Value) -> bool {
+        match entry.get("npm") {
+            None => true,
+            Some(npm) => npm
+                .as_str()
+                .is_some_and(|npm| PROXYABLE_NPM_PACKAGES.contains(&npm.trim())),
+        }
+    }
+
+    fn write_endpoint(&self, id: &str, endpoint: &EntryEndpoint) -> Result<(), AppError> {
+        config::set_provider_endpoint(id, endpoint)
+    }
+}
+
+/// `<provider>/<model>` 形式的模型引用中的供应商部分
+pub(crate) fn model_ref_provider(model: Option<&Value>) -> Option<String> {
+    model
+        .and_then(Value::as_str)
+        .and_then(|model| model.split_once('/'))
+        .map(|(provider, _)| provider.trim().to_string())
+        .filter(|provider| !provider.is_empty())
 }
 
 impl McpProjector for OpenCodeAdapter {
@@ -265,6 +339,41 @@ mod tests {
 
         let missing = Provider::with_id("p".to_string(), "P".to_string(), json!({}), None);
         assert!(OpenCodeAdapter.credentials(&missing).is_err());
+    }
+
+    #[test]
+    fn entry_takeover_reads_provider_options_and_the_default_model() {
+        let takeover = OpenCodeAdapter.takeover().expect("takeover");
+        let entries = takeover.entry_takeover().expect("entry takeover");
+        let live = json!({
+            "model": "b/gpt-5",
+            "provider": {
+                "a": { "npm": "@ai-sdk/anthropic", "options": { "baseURL": "https://a.example.com", "apiKey": "sk-a" } },
+                "b": { "npm": "@ai-sdk/openai-compatible", "options": { "baseURL": "https://b.example.com/v1", "apiKey": "PROXY_MANAGED" } },
+                "c": { "options": {} }
+            }
+        });
+        assert_eq!(entries.default_entry(&live).as_deref(), Some("b"));
+        assert_eq!(entries.default_entry(&json!({ "model": "gpt-5" })), None);
+        let all = entries.entries(&live);
+        assert_eq!(all.len(), 3);
+        assert!(
+            !entries.proxyable(&all[0].1),
+            "@ai-sdk/anthropic is not mounted"
+        );
+        assert!(entries.proxyable(&all[1].1));
+        assert!(
+            entries.proxyable(&all[2].1),
+            "npm defaults to openai-compatible"
+        );
+        assert_eq!(
+            entries.endpoint(&all[2].1),
+            EntryEndpoint::default(),
+            "missing fields are None"
+        );
+        assert!(takeover.has_placeholder(&live));
+        assert!(takeover.has_placeholder(&all[1].1));
+        assert!(!takeover.has_placeholder(&all[0].1));
     }
 
     #[test]

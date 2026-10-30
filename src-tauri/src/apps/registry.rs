@@ -173,10 +173,12 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.opencode",
         display_name: "OpenCode",
         sync_mode: SyncMode::Additive,
+        // 接管只改写选中供应商条目的地址（见 ProxyTakeover::entry_takeover）
         caps: CORE_CAPS
+            .union(AppCaps::PROXY_TAKEOVER)
             .union(AppCaps::USAGE)
             .union(AppCaps::SESSION_RESUME),
-        proxy_route: None,
+        proxy_route: Some("/opencode"),
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
     },
@@ -187,8 +189,11 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.openclaw",
         display_name: "OpenClaw",
         sync_mode: SyncMode::Additive,
-        caps: AppCaps::MCP.union(AppCaps::PROMPTS),
-        proxy_route: None,
+        caps: AppCaps::MCP
+            .union(AppCaps::PROMPTS)
+            .union(AppCaps::PROXY_TAKEOVER)
+            .union(AppCaps::USAGE),
+        proxy_route: Some("/openclaw"),
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
     },
@@ -199,8 +204,10 @@ pub static APPS: &[AppDescriptor] = &[
         label_key: "apps.hermes",
         display_name: "Hermes",
         sync_mode: SyncMode::Additive,
-        caps: CORE_CAPS,
-        proxy_route: None,
+        caps: CORE_CAPS
+            .union(AppCaps::PROXY_TAKEOVER)
+            .union(AppCaps::USAGE),
+        proxy_route: Some("/hermes"),
         input_token_semantics: InputTokenSemantics::Fresh,
         // 默认不显示，需用户手动启用
         default_visible: false,
@@ -368,7 +375,15 @@ mod tests {
         let slugs = |caps| with_caps(caps).map(|d| d.slug).collect::<Vec<_>>();
         assert_eq!(
             slugs(AppCaps::PROXY_TAKEOVER),
-            vec!["claude", "codex", "gemini", "grokbuild"]
+            vec![
+                "claude",
+                "codex",
+                "gemini",
+                "grokbuild",
+                "opencode",
+                "openclaw",
+                "hermes"
+            ]
         );
         assert_eq!(
             slugs(AppCaps::TRAY),

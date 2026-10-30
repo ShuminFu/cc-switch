@@ -137,6 +137,9 @@ vi.mock("@/components/AppSwitcher", () => ({
       <button onClick={() => onSwitch("claude")}>switch-claude</button>
       <button onClick={() => onSwitch("codex")}>switch-codex</button>
       <button onClick={() => onSwitch("openclaw")}>switch-openclaw</button>
+      <button onClick={() => onSwitch("claude-desktop")}>
+        switch-claude-desktop
+      </button>
     </div>
   ),
 }));
@@ -525,11 +528,27 @@ describe("App integration with MSW", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
 
-    // 累加模式应用（OpenClaw 等）头部不显示代理开关，面板也不应提供接管操作
+    // 累加模式应用（OpenClaw 等）只接管选中的供应商条目，同样提供接管操作
     fireEvent.click(screen.getByText("switch-openclaw"));
     await waitFor(() =>
       expect(screen.getByTestId("app-switcher").textContent).toContain(
         "openclaw",
+      ),
+    );
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(
+      await screen.findByText("commandPalette.enableTakeover"),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+
+    // Claude Desktop 头部不显示代理开关，面板也不应提供接管操作
+    fireEvent.click(screen.getByText("switch-claude-desktop"));
+    await waitFor(() =>
+      expect(screen.getByTestId("app-switcher").textContent).toContain(
+        "claude-desktop",
       ),
     );
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });

@@ -20,7 +20,7 @@ export interface AppCaps {
   mcp: boolean;
   /** 累加模式：多个供应商同时写入 live 配置（而非切换单一当前供应商） */
   additive: boolean;
-  /** 支持本地代理接管 live 配置（Claude Desktop 走独立路由，累加模式应用不支持） */
+  /** 支持本地代理接管 live 配置（Claude Desktop 走独立路由；累加模式应用只接管选中的供应商条目） */
   proxyTakeover: boolean;
   /** 提供配置健康检查（显示健康警告横幅） */
   healthCheck: boolean;
@@ -78,7 +78,7 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
   {
     id: "opencode",
     label: "OpenCode",
-    caps: caps({ additive: true, proxyTakeover: false }),
+    caps: caps({ additive: true }),
   },
   {
     id: "openclaw",
@@ -87,7 +87,6 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
       skills: false,
       mcp: true,
       additive: true,
-      proxyTakeover: false,
       healthCheck: true,
       setDefault: true,
     }),
@@ -97,7 +96,6 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
     label: "Hermes",
     caps: caps({
       additive: true,
-      proxyTakeover: false,
       setDefault: true,
       defaultIsSwitch: true,
     }),

@@ -248,6 +248,75 @@ pub trait ProxyTakeover {
     fn base_url(&self, proxy_origin: &str, proxy_route: &str) -> String {
         format!("{proxy_origin}{proxy_route}/v1")
     }
+
+    /// 累加模式应用的条目级接管；切换模式应用（接管整份 live）返回 `None`
+    fn entry_takeover(&self) -> Option<&dyn EntryTakeover> {
+        None
+    }
+}
+
+/// 供应商条目的端点字段（缺失的字段为 `None`）
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EntryEndpoint {
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+}
+
+/// 累加模式应用的条目级接管（OpenCode / OpenClaw / Hermes）。
+///
+/// 这些应用的 live 同时承载多个供应商条目，接管只改写应用当前选中条目的
+/// 基础地址与 API Key，其余条目与配置保持原样。`live` 参数均为
+/// [`AppAdapter::read_live`] 返回的整份配置。
+pub trait EntryTakeover {
+    /// live 中 CC Switch 可写的供应商条目（id, 条目）
+    fn entries(&self, live: &Value) -> Vec<(String, Value)>;
+
+    /// 应用默认模型引用的供应商条目 id（OpenCode `model`、OpenClaw
+    /// `agents.defaults.model.primary`、Hermes `model.provider`）
+    fn default_entry(&self, live: &Value) -> Option<String>;
+
+    /// 条目（或供应商 `settings_config`）的端点字段
+    fn endpoint(&self, entry: &Value) -> EntryEndpoint;
+
+    /// 条目说的是否为本地代理挂载的 OpenAI 兼容协议（Chat Completions / Responses）
+    fn proxyable(&self, entry: &Value) -> bool;
+
+    /// 只改写 live 中该条目的端点字段；`None` 表示删除该字段
+    fn write_endpoint(&self, id: &str, endpoint: &EntryEndpoint) -> Result<(), AppError>;
+}
+
+/// 把端点字段写入 JSON 对象：`Some` 覆盖（保留键位置），`None` 删除
+pub(crate) fn apply_endpoint_field(
+    object: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    match value {
+        Some(value) => {
+            object.insert(key.to_string(), Value::String(value.to_string()));
+        }
+        None => {
+            object.remove(key);
+        }
+    }
+}
+
+/// 端点字段是否为 CC Switch 写入的代理 token
+pub(crate) fn endpoint_has_proxy_token(endpoint: &EntryEndpoint) -> bool {
+    endpoint
+        .api_key
+        .as_deref()
+        .is_some_and(crate::proxy::inbound_auth::is_proxy_token)
+}
+
+/// 累加模式应用的占位符判定：`settings` 可以是整份 live（任一条目带 token）
+/// 或单个条目 / 供应商 `settings_config`
+pub(crate) fn entries_have_placeholder(entries: &dyn EntryTakeover, settings: &Value) -> bool {
+    endpoint_has_proxy_token(&entries.endpoint(settings))
+        || entries
+            .entries(settings)
+            .iter()
+            .any(|(_, entry)| endpoint_has_proxy_token(&entries.endpoint(entry)))
 }
 
 /// 会话历史扫描入口

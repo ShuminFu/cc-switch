@@ -863,6 +863,49 @@ pub fn set_provider(
     write_yaml_section_to_config_locked("custom_providers", &providers_value)
 }
 
+/// Rewrite only `base_url` / `api_key` of a `custom_providers:` entry (proxy
+/// takeover). Every other field of the entry, and every other entry, is kept
+/// as is; `None` removes the field.
+pub fn set_provider_endpoint(
+    name: &str,
+    endpoint: &crate::apps::adapter::EntryEndpoint,
+) -> Result<HermesWriteOutcome, AppError> {
+    let _guard = hermes_write_lock().lock()?;
+    let config = read_hermes_config()?;
+    ensure_provider_writable(&config, name, "edit")?;
+
+    let mut providers: Vec<serde_norway::Value> = config
+        .get("custom_providers")
+        .and_then(|v| v.as_sequence())
+        .cloned()
+        .unwrap_or_default();
+    let entry = providers
+        .iter_mut()
+        .find(|p| p.get("name").and_then(|n| n.as_str()) == Some(name))
+        .and_then(|p| p.as_mapping_mut())
+        .ok_or_else(|| {
+            AppError::Config(format!("Hermes provider '{name}' not found in live config"))
+        })?;
+
+    for (key, value) in [
+        ("base_url", endpoint.base_url.as_deref()),
+        ("api_key", endpoint.api_key.as_deref()),
+    ] {
+        let key = serde_norway::Value::String(key.to_string());
+        match value {
+            Some(value) => {
+                entry.insert(key, serde_norway::Value::String(value.to_string()));
+            }
+            None => {
+                entry.remove(&key);
+            }
+        }
+    }
+
+    let providers_value = serde_norway::Value::Sequence(providers);
+    write_yaml_section_to_config_locked("custom_providers", &providers_value)
+}
+
 /// Remove a custom provider by name.
 ///
 /// Filters out the matching entry from the `custom_providers:` sequence.

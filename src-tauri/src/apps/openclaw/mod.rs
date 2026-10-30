@@ -12,8 +12,8 @@ use self::config::{
     get_openclaw_config_path, get_openclaw_dir, read_openclaw_config, OpenClawProviderConfig,
 };
 use super::adapter::{
-    str_or_empty, AppAdapter, CommonSnippet, Credentials, ExtractOnlySnippet, McpProjector,
-    SessionSource,
+    entries_have_placeholder, str_or_empty, AppAdapter, CommonSnippet, Credentials, EntryEndpoint,
+    EntryTakeover, ExtractOnlySnippet, McpProjector, ProxyTakeover, SessionSource,
 };
 use crate::app_config::AppType;
 use crate::config::get_home_dir;
@@ -142,8 +142,71 @@ impl AppAdapter for OpenClawAdapter {
         Some(self)
     }
 
+    fn takeover(&self) -> Option<&dyn ProxyTakeover> {
+        Some(self)
+    }
+
     fn session_source(&self) -> Option<&dyn SessionSource> {
         Some(self)
+    }
+}
+
+/// 本地代理挂载的 OpenAI 兼容协议；缺省 `api` 时 OpenClaw 按 Chat Completions 处理
+const PROXYABLE_APIS: [&str; 2] = ["openai-completions", "openai-responses"];
+
+impl ProxyTakeover for OpenClawAdapter {
+    fn has_placeholder(&self, settings: &Value) -> bool {
+        entries_have_placeholder(self, settings)
+    }
+
+    fn entry_takeover(&self) -> Option<&dyn EntryTakeover> {
+        Some(self)
+    }
+}
+
+/// `models.providers.<id>` 条目，凭据平铺在 `baseUrl` / `apiKey`
+impl EntryTakeover for OpenClawAdapter {
+    fn entries(&self, live: &Value) -> Vec<(String, Value)> {
+        live.get("models")
+            .and_then(|models| models.get("providers"))
+            .and_then(Value::as_object)
+            .map(|providers| {
+                providers
+                    .iter()
+                    .map(|(id, entry)| (id.clone(), entry.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// `agents.defaults.model` 为 `<provider>/<model>` 字符串或 `{ primary }` 对象
+    fn default_entry(&self, live: &Value) -> Option<String> {
+        let model = live
+            .get("agents")
+            .and_then(|agents| agents.get("defaults"))
+            .and_then(|defaults| defaults.get("model"))?;
+        crate::apps::opencode::model_ref_provider(model.get("primary").or(Some(model)))
+    }
+
+    fn endpoint(&self, entry: &Value) -> EntryEndpoint {
+        let field = |key: &str| entry.get(key).and_then(Value::as_str).map(str::to_string);
+        EntryEndpoint {
+            base_url: field("baseUrl"),
+            api_key: field("apiKey"),
+        }
+    }
+
+    fn proxyable(&self, entry: &Value) -> bool {
+        match entry.get("api") {
+            None => true,
+            Some(api) => api
+                .as_str()
+                .is_some_and(|api| PROXYABLE_APIS.contains(&api.trim())),
+        }
+    }
+
+    fn write_endpoint(&self, id: &str, endpoint: &EntryEndpoint) -> Result<(), AppError> {
+        config::set_provider_endpoint(id, endpoint).map(|_| ())
     }
 }
 
@@ -249,9 +312,38 @@ mod tests {
     }
 
     #[test]
-    fn has_mcp_but_no_takeover() {
+    fn has_mcp_and_entry_level_takeover() {
         assert!(OpenClawAdapter.mcp().is_some());
-        assert!(OpenClawAdapter.takeover().is_none());
         assert!(OpenClawAdapter.omo_variant(Some("omo")).is_none());
+        let takeover = OpenClawAdapter.takeover().expect("takeover");
+        assert!(takeover.entry_takeover().is_some());
+    }
+
+    #[test]
+    fn entry_takeover_reads_model_providers_and_the_default_model() {
+        let entries = OpenClawAdapter
+            .takeover()
+            .unwrap()
+            .entry_takeover()
+            .unwrap();
+        let live = json!({
+            "models": { "providers": {
+                "a": { "baseUrl": "https://a.example.com/v1", "apiKey": "sk-a", "api": "openai-responses" },
+                "b": { "baseUrl": "https://b.example.com", "api": "anthropic-messages" }
+            } },
+            "agents": { "defaults": { "model": { "primary": "a/gpt-5" } } }
+        });
+        assert_eq!(entries.default_entry(&live).as_deref(), Some("a"));
+        let as_string = json!({ "agents": { "defaults": { "model": "b/claude" } } });
+        assert_eq!(entries.default_entry(&as_string).as_deref(), Some("b"));
+        let all = entries.entries(&live);
+        assert_eq!(all.len(), 2);
+        assert_eq!(entries.endpoint(&all[0].1).api_key.as_deref(), Some("sk-a"));
+        assert!(entries.proxyable(&all[0].1));
+        assert!(
+            !entries.proxyable(&all[1].1),
+            "anthropic-messages is not mounted"
+        );
+        assert!(!OpenClawAdapter.takeover().unwrap().has_placeholder(&live));
     }
 }

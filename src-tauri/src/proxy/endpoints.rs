@@ -178,6 +178,63 @@ pub(crate) static CLIENT_ENDPOINTS: &[ClientEndpoint] = &[
         UpstreamEndpoint::Fixed("/responses/compact"),
     )
     .content_encoded(),
+    // 累加模式应用（OpenCode / OpenClaw / Hermes）：接管只改写选中供应商条目的
+    // 地址为 `/<app>/v1`，条目说 OpenAI 兼容协议，按应用独立的供应商命名空间与
+    // 故障转移队列转发。
+    ClientEndpoint::new(
+        &["/opencode/v1/chat/completions"],
+        WireFormat::OpenAiChat,
+        AppType::OpenCode,
+        "OpenCode",
+        "opencode",
+        UpstreamEndpoint::Fixed("/chat/completions"),
+    )
+    .content_encoded(),
+    ClientEndpoint::new(
+        &["/opencode/v1/responses"],
+        WireFormat::OpenAiResponses,
+        AppType::OpenCode,
+        "OpenCode",
+        "opencode",
+        UpstreamEndpoint::Fixed("/responses"),
+    )
+    .content_encoded(),
+    ClientEndpoint::new(
+        &["/openclaw/v1/chat/completions"],
+        WireFormat::OpenAiChat,
+        AppType::OpenClaw,
+        "OpenClaw",
+        "openclaw",
+        UpstreamEndpoint::Fixed("/chat/completions"),
+    )
+    .content_encoded(),
+    ClientEndpoint::new(
+        &["/openclaw/v1/responses"],
+        WireFormat::OpenAiResponses,
+        AppType::OpenClaw,
+        "OpenClaw",
+        "openclaw",
+        UpstreamEndpoint::Fixed("/responses"),
+    )
+    .content_encoded(),
+    ClientEndpoint::new(
+        &["/hermes/v1/chat/completions"],
+        WireFormat::OpenAiChat,
+        AppType::Hermes,
+        "Hermes",
+        "hermes",
+        UpstreamEndpoint::Fixed("/chat/completions"),
+    )
+    .content_encoded(),
+    ClientEndpoint::new(
+        &["/hermes/v1/responses"],
+        WireFormat::OpenAiResponses,
+        AppType::Hermes,
+        "Hermes",
+        "hermes",
+        UpstreamEndpoint::Fixed("/responses"),
+    )
+    .content_encoded(),
     // Gemini API (支持带前缀和不带前缀；GA 版本 /v1 给原 SDK 留一条出口)
     //
     // 用 `any(..)` 覆盖所有 HTTP 方法：除了 POST `:generateContent` /
@@ -264,6 +321,36 @@ mod tests {
             (
                 "/grokbuild/v1/responses/compact",
                 "grokbuild",
+                WireFormat::OpenAiResponses,
+            ),
+            (
+                "/opencode/v1/chat/completions",
+                "opencode",
+                WireFormat::OpenAiChat,
+            ),
+            (
+                "/opencode/v1/responses",
+                "opencode",
+                WireFormat::OpenAiResponses,
+            ),
+            (
+                "/openclaw/v1/chat/completions",
+                "openclaw",
+                WireFormat::OpenAiChat,
+            ),
+            (
+                "/openclaw/v1/responses",
+                "openclaw",
+                WireFormat::OpenAiResponses,
+            ),
+            (
+                "/hermes/v1/chat/completions",
+                "hermes",
+                WireFormat::OpenAiChat,
+            ),
+            (
+                "/hermes/v1/responses",
+                "hermes",
                 WireFormat::OpenAiResponses,
             ),
             ("/v1beta/*path", "gemini", WireFormat::GeminiNative),

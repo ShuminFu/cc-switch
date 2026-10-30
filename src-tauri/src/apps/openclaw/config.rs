@@ -775,6 +775,33 @@ pub fn set_provider(id: &str, provider_config: Value) -> Result<OpenClawWriteOut
     write_root_section("models", &models_value)
 }
 
+/// 只改写 `models.providers.<id>` 的 `baseUrl` / `apiKey`（代理接管用），
+/// 条目的其余字段保持原样
+pub fn set_provider_endpoint(
+    id: &str,
+    endpoint: &crate::apps::adapter::EntryEndpoint,
+) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut config = read_openclaw_config()?;
+    let entry = config
+        .get_mut("models")
+        .and_then(|models| models.get_mut("providers"))
+        .and_then(|providers| providers.get_mut(id))
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            AppError::Config(format!("OpenClaw provider '{id}' not found in live config"))
+        })?;
+    crate::apps::adapter::apply_endpoint_field(entry, "baseUrl", endpoint.base_url.as_deref());
+    crate::apps::adapter::apply_endpoint_field(entry, "apiKey", endpoint.api_key.as_deref());
+
+    let models_value = config.get("models").cloned().unwrap_or_else(|| {
+        json!({
+            "mode": "merge",
+            "providers": {}
+        })
+    });
+    write_root_section("models", &models_value)
+}
+
 /// 删除供应商配置
 pub fn remove_provider(id: &str) -> Result<OpenClawWriteOutcome, AppError> {
     let mut config = read_openclaw_config()?;

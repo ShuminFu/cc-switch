@@ -123,7 +123,7 @@ describe("CapabilityMatrix", () => {
       "| app | mcp | skills | prompts | proxyTakeover | usage | sessionResume |",
     );
     expect(text).toContain("| claude | yes | yes | yes | yes | yes | yes |");
-    expect(text).toContain("| openclaw | yes | no | yes | no | no | no |");
+    expect(text).toContain("| openclaw | yes | no | yes | yes | yes | no |");
     for (const id of ALL_APP_IDS) {
       expect(text).toContain(`| ${id} |`);
     }

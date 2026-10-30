@@ -118,7 +118,10 @@ pub(crate) fn write_live_with_common_config(
     effective_provider.settings_config =
         build_effective_settings_with_common_config(db, app_type, provider)?;
 
-    crate::apps::adapter(app_type).write_effective_provider(db, &effective_provider)
+    // 累加模式应用：被代理接管的条目写入后保留代理端点（并刷新接管备份）
+    crate::services::proxy::write_entry_respecting_takeover(db, app_type, &provider.id, || {
+        crate::apps::adapter(app_type).write_effective_provider(db, &effective_provider)
+    })
 }
 
 /// 代理接管期间该应用的 live 是否由接管备份托管（见 [`crate::apps::AppAdapter::takeover_uses_live_backup`]）

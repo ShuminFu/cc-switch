@@ -10,7 +10,10 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use self::config::{get_hermes_config_path, get_hermes_dir, read_hermes_config, yaml_to_json};
-use super::adapter::{str_or_empty, AppAdapter, Credentials, McpProjector, SessionSource};
+use super::adapter::{
+    entries_have_placeholder, str_or_empty, AppAdapter, Credentials, EntryEndpoint, EntryTakeover,
+    McpProjector, ProxyTakeover, SessionSource,
+};
 use crate::app_config::AppType;
 use crate::error::AppError;
 use crate::provider::Provider;
@@ -124,8 +127,75 @@ impl AppAdapter for HermesAdapter {
         Some(self)
     }
 
+    fn takeover(&self) -> Option<&dyn ProxyTakeover> {
+        Some(self)
+    }
+
     fn session_source(&self) -> Option<&dyn SessionSource> {
         Some(self)
+    }
+}
+
+/// 本地代理挂载的 OpenAI 兼容协议；缺省 `api_mode` 时 Hermes 按 Chat Completions 处理
+const PROXYABLE_API_MODES: [&str; 2] = ["chat_completions", "codex_responses"];
+
+impl ProxyTakeover for HermesAdapter {
+    fn has_placeholder(&self, settings: &Value) -> bool {
+        entries_have_placeholder(self, settings)
+    }
+
+    fn entry_takeover(&self) -> Option<&dyn EntryTakeover> {
+        Some(self)
+    }
+}
+
+/// `custom_providers[]` 中按 `name` 匹配的条目，凭据为 `base_url` / `api_key`。
+/// `providers:` 字典里的条目由 Hermes 自己管理，CC Switch 不写，故不参与接管。
+impl EntryTakeover for HermesAdapter {
+    fn entries(&self, live: &Value) -> Vec<(String, Value)> {
+        live.get("custom_providers")
+            .and_then(Value::as_array)
+            .map(|providers| {
+                providers
+                    .iter()
+                    .filter_map(|entry| {
+                        let name = entry.get("name").and_then(Value::as_str)?;
+                        Some((name.to_string(), entry.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// 顶层 `model.provider`（切换供应商时由 `apply_switch_defaults` 写入）
+    fn default_entry(&self, live: &Value) -> Option<String> {
+        live.get("model")
+            .and_then(|model| model.get("provider"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|provider| !provider.is_empty())
+            .map(str::to_string)
+    }
+
+    fn endpoint(&self, entry: &Value) -> EntryEndpoint {
+        let field = |key: &str| entry.get(key).and_then(Value::as_str).map(str::to_string);
+        EntryEndpoint {
+            base_url: field("base_url"),
+            api_key: field("api_key"),
+        }
+    }
+
+    fn proxyable(&self, entry: &Value) -> bool {
+        match entry.get("api_mode") {
+            None => true,
+            Some(mode) => mode
+                .as_str()
+                .is_some_and(|mode| PROXYABLE_API_MODES.contains(&mode.trim())),
+        }
+    }
+
+    fn write_endpoint(&self, id: &str, endpoint: &EntryEndpoint) -> Result<(), AppError> {
+        config::set_provider_endpoint(id, endpoint).map(|_| ())
     }
 }
 
@@ -188,9 +258,48 @@ mod tests {
     }
 
     #[test]
-    fn has_no_common_snippet_or_takeover() {
+    fn has_no_common_snippet_but_entry_level_takeover() {
         assert!(HermesAdapter.common_snippet().is_none());
-        assert!(HermesAdapter.takeover().is_none());
         assert!(HermesAdapter.mcp().is_some());
+        let takeover = HermesAdapter.takeover().expect("takeover");
+        assert!(takeover.entry_takeover().is_some());
+    }
+
+    #[test]
+    fn entry_takeover_reads_custom_providers_and_the_model_section() {
+        let entries = HermesAdapter.takeover().unwrap().entry_takeover().unwrap();
+        let live = json!({
+            "model": { "default": "m", "provider": "b" },
+            "custom_providers": [
+                { "name": "a", "base_url": "https://a.example.com/v1", "api_key": "sk-a" },
+                { "name": "b", "base_url": "https://b.example.com/v1", "api_key": "ccs-proxy-0123456789abcdef0123456789abcdef", "api_mode": "chat_completions" },
+                { "name": "c", "api_mode": "anthropic_messages" }
+            ]
+        });
+        let ids: Vec<_> = entries
+            .entries(&live)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert_eq!(entries.default_entry(&live).as_deref(), Some("b"));
+        let all = entries.entries(&live);
+        assert_eq!(
+            entries.endpoint(&all[0].1),
+            EntryEndpoint {
+                base_url: Some("https://a.example.com/v1".to_string()),
+                api_key: Some("sk-a".to_string()),
+            }
+        );
+        assert!(entries.proxyable(&all[0].1) && entries.proxyable(&all[1].1));
+        assert!(
+            !entries.proxyable(&all[2].1),
+            "anthropic_messages is not mounted"
+        );
+        // 整份 live 与单个条目都能识别占位符
+        let takeover = HermesAdapter.takeover().unwrap();
+        assert!(takeover.has_placeholder(&live));
+        assert!(takeover.has_placeholder(&all[1].1));
+        assert!(!takeover.has_placeholder(&all[0].1));
     }
 }

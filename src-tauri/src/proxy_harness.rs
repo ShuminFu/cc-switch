@@ -513,12 +513,17 @@ impl Default for HarnessCircuit {
     }
 }
 
+/// `(id, base_url, meta)` of one harness provider.
+type HarnessProvider = (String, String, Option<Value>);
+
 /// Builder for [`ProxyHarness`]; providers are tried in the order added.
 pub struct ProxyHarnessBuilder {
     /// `(id, base_url, meta)`; `meta` is the provider's JSON `meta` object.
     providers: Vec<(String, String, Option<Value>)>,
     /// Gemini providers, same shape as `providers`.
     gemini_providers: Vec<(String, String, Option<Value>)>,
+    /// Providers of other apps (e.g. `opencode`), keyed by app slug, in add order.
+    app_providers: Vec<(String, Vec<HarnessProvider>)>,
     auto_failover: bool,
     max_retries: u32,
     circuit: HarnessCircuit,
@@ -554,6 +559,24 @@ impl ProxyHarnessBuilder {
         self
     }
 
+    /// Add a provider of `app_type` (an additive app such as `opencode`,
+    /// `openclaw` or `hermes`) pointing at `upstream`, in that app's entry
+    /// shape. Its key is `sk-harness-<id>`; the first one added is current.
+    pub fn app_provider(mut self, app_type: &str, id: &str, upstream: &MockUpstream) -> Self {
+        let provider = (id.to_string(), upstream.base_url(), None);
+        match self
+            .app_providers
+            .iter_mut()
+            .find(|(slug, _)| slug == app_type)
+        {
+            Some((_, providers)) => providers.push(provider),
+            None => self
+                .app_providers
+                .push((app_type.to_string(), vec![provider])),
+        }
+        self
+    }
+
     /// Add a Claude provider whose base URL is `base_url` (e.g. a
     /// [`RawMockUpstream`]).
     pub fn provider_url(mut self, id: &str, base_url: String) -> Self {
@@ -579,7 +602,9 @@ impl ProxyHarnessBuilder {
 
     pub async fn spawn(self) -> ProxyHarness {
         assert!(
-            !self.providers.is_empty() || !self.gemini_providers.is_empty(),
+            !self.providers.is_empty()
+                || !self.gemini_providers.is_empty()
+                || !self.app_providers.is_empty(),
             "harness needs a provider"
         );
         // Same process-level TLS provider the app installs at startup (lib.rs).
@@ -594,6 +619,9 @@ impl ProxyHarnessBuilder {
             if !providers.is_empty() {
                 self.register_providers(&db, app_type, providers).await;
             }
+        }
+        for (app_type, providers) in &self.app_providers {
+            self.register_providers(&db, app_type, providers).await;
         }
 
         let config = ProxyConfig {
@@ -638,13 +666,23 @@ impl ProxyHarnessBuilder {
         providers: &[(String, String, Option<Value>)],
     ) {
         for (index, (id, base_url, meta)) in providers.iter().enumerate() {
+            let api_key = format!("sk-harness-{id}");
             let settings = if app_type == HARNESS_GEMINI_APP_TYPE {
                 json!({
                     "env": {
                         "GOOGLE_GEMINI_BASE_URL": base_url,
-                        "GEMINI_API_KEY": format!("sk-harness-{id}"),
+                        "GEMINI_API_KEY": api_key,
                     }
                 })
+            } else if app_type == "opencode" {
+                json!({
+                    "npm": "@ai-sdk/openai-compatible",
+                    "options": { "baseURL": base_url, "apiKey": api_key },
+                })
+            } else if app_type == "openclaw" {
+                json!({ "baseUrl": base_url, "apiKey": api_key, "api": "openai-completions" })
+            } else if app_type == "hermes" {
+                json!({ "name": id, "base_url": base_url, "api_key": api_key })
             } else {
                 json!({
                     "env": {
@@ -759,6 +797,7 @@ impl ProxyHarness {
         ProxyHarnessBuilder {
             providers: Vec::new(),
             gemini_providers: Vec::new(),
+            app_providers: Vec::new(),
             auto_failover: false,
             max_retries: 3,
             circuit: HarnessCircuit::default(),
@@ -808,6 +847,19 @@ impl ProxyHarness {
             .header("content-type", "application/json")
             .header("anthropic-version", "2023-06-01")
             .header("x-api-key", &self.token)
+            .json(body)
+            .send()
+            .await
+            .expect("send request to proxy")
+    }
+
+    /// POST a JSON body to `path` as an OpenAI SDK client does (the proxy
+    /// token is the bearer key written into the taken-over live entry).
+    pub async fn openai(&self, path: &str, body: &Value) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", self.token))
             .json(body)
             .send()
             .await

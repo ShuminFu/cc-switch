@@ -104,12 +104,12 @@
       "mcp": true,
       "skills": true,
       "prompts": true,
-      "proxyTakeover": false,
+      "proxyTakeover": true,
       "tray": false,
       "usage": true,
       "sessionResume": true
     },
-    "proxyRoute": null,
+    "proxyRoute": "/opencode",
     "inputTokenSemantics": "fresh",
     "defaultVisible": true
   },
@@ -123,12 +123,12 @@
       "mcp": true,
       "skills": false,
       "prompts": true,
-      "proxyTakeover": false,
+      "proxyTakeover": true,
       "tray": false,
-      "usage": false,
+      "usage": true,
       "sessionResume": false
     },
-    "proxyRoute": null,
+    "proxyRoute": "/openclaw",
     "inputTokenSemantics": "fresh",
     "defaultVisible": true
   },
@@ -142,12 +142,12 @@
       "mcp": true,
       "skills": true,
       "prompts": true,
-      "proxyTakeover": false,
+      "proxyTakeover": true,
       "tray": false,
-      "usage": false,
+      "usage": true,
       "sessionResume": false
     },
-    "proxyRoute": null,
+    "proxyRoute": "/hermes",
     "inputTokenSemantics": "fresh",
     "defaultVisible": false
   }

@@ -65,7 +65,9 @@ impl ProxyService {
         app: &AppType,
         mode: TakeoverMode,
     ) -> Result<(), TakeoverError> {
-        if !crate::settings::takeover_engine().uses_unified_takeover() {
+        // 累加模式应用的条目级接管晚于引擎合并，旧路径没有对应实现
+        let entry_level = super::additive::entry_takeover(app).is_some();
+        if !entry_level && !crate::settings::takeover_engine().uses_unified_takeover() {
             let legacy = match mode {
                 TakeoverMode::Strict => self.takeover_live_config_strict_legacy(app).await,
                 TakeoverMode::BestEffort => self.takeover_live_config_best_effort_legacy(app).await,
@@ -93,6 +95,11 @@ impl ProxyService {
             }
         };
 
+        // 累加模式应用只接管选中的供应商条目
+        if entry_level {
+            return self.takeover_entry(app, mode, &base_url, &live_config);
+        }
+
         let provider = self.takeover_provider(app, mode)?;
         self.project_takeover_live(app, &mut live_config, &base_url, provider.as_ref())?;
         self.write_takeover_live(app, &live_config, provider.as_ref())?;
@@ -106,10 +113,16 @@ impl ProxyService {
     /// 尽力接管所有支持代理接管的应用（`start_with_takeover` 使用）
     pub(in crate::services::proxy) async fn takeover_all(&self) -> Result<(), TakeoverError> {
         if !crate::settings::takeover_engine().uses_unified_takeover() {
-            return self
-                .takeover_live_configs_legacy()
+            self.takeover_live_configs_legacy()
                 .await
-                .map_err(|message| TakeoverError::Legacy { app: None, message });
+                .map_err(|message| TakeoverError::Legacy { app: None, message })?;
+            for descriptor in registry::with_caps(AppCaps::PROXY_TAKEOVER)
+                .filter(|d| super::additive::entry_takeover(&d.app).is_some())
+            {
+                self.takeover(&descriptor.app, TakeoverMode::BestEffort)
+                    .await?;
+            }
+            return Ok(());
         }
 
         for descriptor in registry::with_caps(AppCaps::PROXY_TAKEOVER) {
@@ -243,7 +256,7 @@ impl ProxyService {
                     Self::proxy_urls_match(url, expected)
                 })
             }),
-            _ => false,
+            _ => Self::entries_base_url_matches(app, config, expected),
         }
     }
 }

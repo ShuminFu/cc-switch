@@ -125,6 +125,12 @@ impl ProxyService {
             return;
         }
         let app_type_str = app_type.as_str();
+        if super::takeover::is_entry_takeover_app(app_type)
+            && !self.entries_live_matches_backup(app_type).await
+        {
+            log::info!("{app_type_str} 接管期间 live 有其它改动，只按条目恢复，不逐字节还原");
+            return;
+        }
         let raw = match self.db.get_live_backup_raw_snapshot(app_type_str).await {
             Ok(Some(raw)) => raw,
             Ok(None) => return,
@@ -277,6 +283,11 @@ impl ProxyService {
         &self,
         app_type: &AppType,
     ) -> Result<bool, String> {
+        // 累加模式应用的 SSOT 兜底按条目进行（见 cleanup_entry_placeholders_in_live）：
+        // 当前供应商不一定是被接管的条目（热切换会改写当前供应商）
+        if super::takeover::is_entry_takeover_app(app_type) {
+            return Ok(false);
+        }
         let current_id = crate::settings::get_effective_current_provider(&self.db, app_type)
             .map_err(|e| format!("获取 {app_type:?} 当前供应商失败: {e}"))?;
 
@@ -331,6 +342,11 @@ impl ProxyService {
     ) -> Result<(), String> {
         let app_type_enum =
             AppType::from_str(app_type).map_err(|_| format!("未知的应用类型: {app_type}"))?;
+        // 累加模式应用的备份是接管前的整份 live，热切换只改变代理目标，
+        // 被接管条目仍指向本地代理，备份保持不变
+        if super::takeover::is_entry_takeover_app(&app_type_enum) {
+            return Ok(());
+        }
         let mut effective_settings =
             build_effective_settings_with_common_config(self.db.as_ref(), &app_type_enum, provider)
                 .map_err(|e| format!("构建 {app_type} 有效配置失败: {e}"))?;

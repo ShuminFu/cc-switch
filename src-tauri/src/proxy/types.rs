@@ -479,10 +479,10 @@ mod tests {
     fn takeover_status_never_reports_apps_without_takeover_capability() {
         let status = ProxyTakeoverStatus::from_registry(|_| true);
         let json = serde_json::to_value(&status).unwrap();
-        for key in ["claude-desktop", "opencode", "openclaw", "hermes"] {
-            assert_eq!(json[key], false, "{key}");
+        assert_eq!(json["claude-desktop"], false);
+        for key in ["claude", "opencode", "openclaw", "hermes"] {
+            assert_eq!(json[key], true, "{key}");
         }
-        assert_eq!(json["claude"], true);
         assert!(!ProxyTakeoverStatus::default().any());
     }
 

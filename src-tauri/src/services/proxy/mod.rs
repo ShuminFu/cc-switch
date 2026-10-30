@@ -19,7 +19,7 @@ mod hot_switch;
 mod lifecycle;
 mod takeover;
 
-pub(crate) use takeover::TakeoverMode;
+pub(crate) use takeover::{write_entry_respecting_takeover, TakeoverMode};
 
 /// 用于接管 Live 配置时的占位符（避免客户端提示缺少 key，同时不泄露真实 Token）
 ///

@@ -1,6 +1,7 @@
 //! Proxy takeover crash/restore E2E (CCS-152).
 //!
-//! For every proxy-capable app (claude, codex, gemini, grokbuild) and both ways
+//! For every proxy-capable app (claude, codex, gemini, grokbuild, and the
+//! additive opencode, openclaw and hermes, CCS-163) and both ways
 //! of turning takeover on (`start_with_takeover` and `set_takeover_for_app`):
 //!
 //! 1. seed the app's live files with hand-written bytes (non-canonical
@@ -31,8 +32,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use cc_switch_lib::live_config_testkit::{self as kit, adapter};
-use cc_switch_lib::{update_settings, AppSettings, AppState, AppType, Database, Provider};
+use cc_switch_lib::live_config_testkit::{self as kit, adapter, EntryEndpoint, EntryTakeover};
+use cc_switch_lib::{
+    update_settings, AppSettings, AppState, AppType, Database, Provider, ProviderService,
+};
 use serde_json::{json, Value};
 use support::TestEnv;
 
@@ -107,6 +110,55 @@ fn cases() -> Vec<Case> {
             app: AppType::GrokBuild,
             files: vec![("config.toml", grok_config.clone())],
             settings: json!({ "config": grok_config }),
+        },
+        // 累加模式应用：live 里还有一个不归 CC Switch 管的条目，接管只改写选中条目
+        Case {
+            slug: "opencode",
+            app: AppType::OpenCode,
+            files: vec![(
+                "opencode.json",
+                format!(
+                    "{{\n  // hand-written OpenCode config\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"model\": \"{PROVIDER_ID}/crash-model\",\n  \"provider\": {{\n    \"{PROVIDER_ID}\": {{\n      \"npm\": \"@ai-sdk/openai-compatible\",\n      \"name\": \"Crash E2E\",\n      \"options\": {{ \"baseURL\": \"{UPSTREAM}/v1\", \"apiKey\": \"{API_KEY}\" }},\n      \"models\": {{ \"crash-model\": {{ \"name\": \"Crash Model\" }} }}\n    }},\n    \"hand-only\": {{\n      \"npm\": \"@ai-sdk/openai-compatible\",\n      \"options\": {{ \"baseURL\": \"https://other.example.com/v1\", \"apiKey\": \"sk-other\" }}\n    }}\n  }}\n}}\n"
+                ),
+            )],
+            settings: json!({
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Crash E2E",
+                "options": { "baseURL": format!("{UPSTREAM}/v1"), "apiKey": API_KEY },
+                "models": { "crash-model": { "name": "Crash Model" } }
+            }),
+        },
+        Case {
+            slug: "openclaw",
+            app: AppType::OpenClaw,
+            files: vec![(
+                "openclaw.json",
+                format!(
+                    "// hand-written OpenClaw config\n{{\n  models: {{\n    mode: 'merge',\n    providers: {{\n      '{PROVIDER_ID}': {{\n        baseUrl: '{UPSTREAM}/v1',\n        apiKey: '{API_KEY}',\n        api: 'openai-completions',\n        models: [{{ id: 'crash-model', name: 'Crash Model' }}],\n      }},\n      'hand-only': {{ baseUrl: 'https://other.example.com/v1', apiKey: 'sk-other', api: 'openai-completions' }},\n    }},\n  }},\n  agents: {{ defaults: {{ model: {{ primary: '{PROVIDER_ID}/crash-model' }} }} }},\n}}\n"
+                ),
+            )],
+            settings: json!({
+                "baseUrl": format!("{UPSTREAM}/v1"),
+                "apiKey": API_KEY,
+                "api": "openai-completions",
+                "models": [{ "id": "crash-model", "name": "Crash Model" }]
+            }),
+        },
+        Case {
+            slug: "hermes",
+            app: AppType::Hermes,
+            files: vec![(
+                "config.yaml",
+                format!(
+                    "# hand-written Hermes config\nmodel:\n  default: crash-model\n  provider: {PROVIDER_ID}\n\nagent:\n  max_turns: 50   # keep it short\n\ncustom_providers:\n  - name: {PROVIDER_ID}\n    base_url: {UPSTREAM}/v1\n    api_key: {API_KEY}\n    model: crash-model\n  - name: hand-only\n    base_url: https://other.example.com/v1\n    api_key: sk-other\n"
+                ),
+            )],
+            settings: json!({
+                "name": PROVIDER_ID,
+                "base_url": format!("{UPSTREAM}/v1"),
+                "api_key": API_KEY,
+                "model": "crash-model"
+            }),
         },
     ]
 }
@@ -441,4 +493,170 @@ fn takeover_snapshot_is_dropped_when_the_backup_is_rewritten() {
         live["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-rewritten",
         "recovery must follow the rewritten backup, not the stale snapshot"
     );
+}
+
+// ============================================================================
+// Additive apps (CCS-163)
+// ============================================================================
+
+/// 条目级接管的累加模式应用
+fn entry_cases() -> Vec<(Case, &'static dyn EntryTakeover)> {
+    cases()
+        .into_iter()
+        .filter_map(|case| {
+            let entries = adapter(&case.app).takeover()?.entry_takeover()?;
+            Some((case, entries))
+        })
+        .collect()
+}
+
+fn entry_endpoint(entries: &dyn EntryTakeover, live: &Value, id: &str) -> EntryEndpoint {
+    entries
+        .entries(live)
+        .into_iter()
+        .find(|(entry_id, _)| entry_id == id)
+        .map(|(_, entry)| entries.endpoint(&entry))
+        .unwrap_or_else(|| panic!("live has no entry {id}: {live}"))
+}
+
+#[test]
+fn additive_takeover_rewrites_only_the_selected_entry() {
+    let cases = entry_cases();
+    assert_eq!(
+        cases.iter().map(|(case, _)| case.slug).collect::<Vec<_>>(),
+        ["opencode", "openclaw", "hermes"]
+    );
+    for (case, entries) in cases {
+        for entry in ENTRIES {
+            let env = TestEnv::new();
+            let (_, _, live_before) = run_until_killed(&case, Seed::HandWritten, entry, env.home());
+            let live = adapter(&case.app).read_live().expect("read live");
+
+            let taken = entry_endpoint(entries, &live, PROVIDER_ID);
+            let base_url = taken.base_url.expect("proxy base url");
+            assert!(
+                base_url.starts_with("http://127.0.0.1:")
+                    && base_url.ends_with(&format!("/{}/v1", case.slug)),
+                "{} {entry:?}: selected entry points at the app route: {base_url}",
+                case.slug
+            );
+            assert!(
+                taken
+                    .api_key
+                    .as_deref()
+                    .is_some_and(|key| key.starts_with("ccs-proxy-")),
+                "{} {entry:?}: selected entry carries the install token",
+                case.slug
+            );
+            assert_eq!(
+                entry_endpoint(entries, &live, "hand-only"),
+                entry_endpoint(entries, &live_before, "hand-only"),
+                "{} {entry:?}: other entries are left alone",
+                case.slug
+            );
+            // 代理（故障转移关闭时）按当前供应商转发：必须是被接管的条目
+            let db = Database::init().expect("reopen database");
+            assert_eq!(
+                db.get_current_provider(case.slug)
+                    .expect("current provider"),
+                Some(PROVIDER_ID.to_string()),
+                "{} {entry:?}",
+                case.slug
+            );
+            drop(db);
+            assert!(restart_and_recover(), "{} {entry:?}: recovered", case.slug);
+        }
+    }
+}
+
+#[test]
+fn additive_crash_recovery_keeps_edits_to_other_entries() {
+    for (case, entries) in entry_cases() {
+        let env = TestEnv::new();
+        let (_, _, live_before) =
+            run_until_killed(&case, Seed::HandWritten, Entry::PerApp, env.home());
+
+        // 接管期间用户在应用里改了另一个条目的 Key
+        let edited = EntryEndpoint {
+            base_url: Some("https://other.example.com/v1".to_string()),
+            api_key: Some("sk-edited".to_string()),
+        };
+        entries
+            .write_endpoint("hand-only", &edited)
+            .expect("edit another entry");
+
+        assert!(restart_and_recover(), "{}: recovered", case.slug);
+        let live = adapter(&case.app).read_live().expect("read restored live");
+        assert_eq!(
+            entry_endpoint(entries, &live, PROVIDER_ID),
+            entry_endpoint(entries, &live_before, PROVIDER_ID),
+            "{}: the taken-over entry is restored",
+            case.slug
+        );
+        assert_eq!(
+            entry_endpoint(entries, &live, "hand-only"),
+            edited,
+            "{}: recovery must not roll back edits to other entries",
+            case.slug
+        );
+    }
+}
+
+#[test]
+fn additive_provider_save_during_takeover_keeps_the_proxy_endpoint() {
+    for (case, entries) in entry_cases() {
+        let env = TestEnv::new();
+        let db = Arc::new(Database::init().expect("open database"));
+        let state = AppState::new(db.clone());
+        let rt = process_runtime();
+        rt.block_on(async {
+            let mut proxy_config = db.get_proxy_config().await.expect("proxy config");
+            proxy_config.listen_port = 0;
+            db.update_proxy_config(proxy_config)
+                .await
+                .expect("use an ephemeral proxy port");
+        });
+        seed_live(&case, Seed::HandWritten, &db);
+        let _ = env.home();
+
+        rt.block_on(state.proxy_service.set_takeover_for_app(case.slug, true))
+            .unwrap_or_else(|e| panic!("{}: takeover: {e}", case.slug));
+        let proxied = entry_endpoint(
+            entries,
+            &adapter(&case.app).read_live().expect("read live"),
+            PROVIDER_ID,
+        );
+
+        // 接管期间在 CC Switch 里轮换该供应商的 Key
+        let mut provider = db
+            .get_provider_by_id(PROVIDER_ID, case.slug)
+            .expect("read provider")
+            .expect("provider");
+        let mut rotated = serde_json::to_string(&provider.settings_config).unwrap();
+        rotated = rotated.replace(API_KEY, "sk-rotated");
+        provider.settings_config = serde_json::from_str(&rotated).unwrap();
+        ProviderService::update(&state, case.app.clone(), None, provider)
+            .unwrap_or_else(|e| panic!("{}: update provider: {e}", case.slug));
+
+        let live = adapter(&case.app).read_live().expect("read live");
+        assert_eq!(
+            entry_endpoint(entries, &live, PROVIDER_ID),
+            proxied,
+            "{}: saving the provider keeps the entry on the proxy",
+            case.slug
+        );
+
+        rt.block_on(state.proxy_service.set_takeover_for_app(case.slug, false))
+            .unwrap_or_else(|e| panic!("{}: disable takeover: {e}", case.slug));
+        let live = adapter(&case.app).read_live().expect("read restored live");
+        assert_eq!(
+            entry_endpoint(entries, &live, PROVIDER_ID),
+            EntryEndpoint {
+                base_url: Some(format!("{UPSTREAM}/v1")),
+                api_key: Some("sk-rotated".to_string()),
+            },
+            "{}: disabling takeover restores the rotated key",
+            case.slug
+        );
+    }
 }

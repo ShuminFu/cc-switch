@@ -116,9 +116,7 @@ describe("app registry", () => {
     );
     expect(appsWithCap("additive")).toEqual(["opencode", "openclaw", "hermes"]);
     expect(appsWithCap("proxyTakeover")).toEqual(
-      ALL_APP_IDS.filter(
-        (id) => id !== "claude-desktop" && !appCaps(id).additive,
-      ),
+      ALL_APP_IDS.filter((id) => id !== "claude-desktop"),
     );
     expect(appsWithCap("healthCheck")).toEqual(["openclaw"]);
     expect(appsWithCap("setDefault")).toEqual(["openclaw", "hermes"]);

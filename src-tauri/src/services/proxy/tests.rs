@@ -4432,6 +4432,10 @@ async fn takeover_base_url_comes_from_the_registry_and_keeps_existing_live_urls(
         (AppType::Codex, format!("{origin}/v1")),
         (AppType::Gemini, origin.clone()),
         (AppType::GrokBuild, format!("{origin}/grokbuild/v1")),
+        // 累加模式应用只改写选中条目，使用各自的前缀路由（CCS-163）
+        (AppType::OpenCode, format!("{origin}/opencode/v1")),
+        (AppType::OpenClaw, format!("{origin}/openclaw/v1")),
+        (AppType::Hermes, format!("{origin}/hermes/v1")),
     ];
     for (app, url) in expected {
         assert_eq!(
@@ -4451,12 +4455,8 @@ async fn takeover_base_url_comes_from_the_registry_and_keeps_existing_live_urls(
         );
     }
 
-    for app in [
-        AppType::ClaudeDesktop,
-        AppType::OpenCode,
-        AppType::OpenClaw,
-        AppType::Hermes,
-    ] {
+    {
+        let app = AppType::ClaudeDesktop;
         assert_eq!(
             service.takeover_base_url(&app).await,
             Err(TakeoverError::Unsupported(app.clone()))
@@ -4533,6 +4533,121 @@ async fn strict_takeover_requires_live_config_and_best_effort_skips_it() {
             "{app:?}: skipped takeover must not create live files"
         );
     }
+}
+
+#[tokio::test]
+#[serial]
+async fn proxy_config_rows_are_created_for_apps_that_gained_takeover() {
+    // 种子行只有 claude/codex/gemini/grokbuild；之前 UPDATE 不命中任何行，
+    // OpenCode/OpenClaw/Hermes 的接管状态会静默丢失（CCS-163）
+    let db = Database::memory().expect("init db");
+    for slug in ["opencode", "openclaw", "hermes"] {
+        let mut config = db.get_proxy_config_for_app(slug).await.expect("config");
+        assert!(!config.enabled, "{slug}");
+        config.enabled = true;
+        db.update_proxy_config_for_app(config)
+            .await
+            .expect("update config");
+        assert!(
+            db.get_proxy_config_for_app(slug)
+                .await
+                .expect("config")
+                .enabled,
+            "{slug}: enabled must persist"
+        );
+    }
+    assert!(db.is_live_takeover_active().await.expect("any enabled"));
+}
+
+#[tokio::test]
+#[serial]
+async fn additive_takeover_reports_why_an_entry_cannot_be_taken_over() {
+    use crate::apps::openclaw::config as openclaw;
+
+    let _home = TempHome::new();
+    crate::settings::reload_settings().expect("reload settings");
+    let db = Arc::new(Database::memory().expect("init db"));
+    use_fixed_proxy_port(&db).await;
+    let service = ProxyService::new(db.clone());
+    let app = AppType::OpenClaw;
+    let entry = |api: &str, key: &str| json!({ "baseUrl": "https://up.example.com/v1", "apiKey": key, "api": api });
+    std::fs::create_dir_all(openclaw::get_openclaw_dir()).expect("openclaw dir");
+    openclaw::set_provider("a", entry("openai-completions", "sk-a")).expect("seed a");
+    openclaw::set_provider("b", entry("openai-completions", "sk-b")).expect("seed b");
+    let read_live = || crate::apps::adapter(&app).read_live().expect("read live");
+    let strict_error = |result: Result<(), TakeoverError>| match result {
+        Err(error) => error,
+        Ok(()) => panic!("strict takeover must fail"),
+    };
+
+    // 两个条目、没有默认模型也没有当前供应商：无法确定选中的条目
+    let before = read_live();
+    let error = strict_error(service.takeover(&app, TakeoverMode::Strict).await);
+    assert!(
+        matches!(&error, TakeoverError::Provider { message, .. } if message.contains("无法确定")),
+        "{error:?}"
+    );
+    service
+        .takeover(&app, TakeoverMode::BestEffort)
+        .await
+        .expect("best effort skips the app");
+    assert_eq!(read_live(), before, "a skipped takeover writes nothing");
+
+    // 默认模型指向 a，但 a 不由 CC Switch 管理
+    openclaw::set_default_model(&openclaw::OpenClawDefaultModel {
+        primary: "a/gpt-5".to_string(),
+        fallbacks: Vec::new(),
+        extra: Default::default(),
+    })
+    .expect("default model");
+    let error = strict_error(service.takeover(&app, TakeoverMode::Strict).await);
+    assert!(
+        matches!(&error, TakeoverError::Provider { message, .. } if message.contains("未由 CC Switch 管理")),
+        "{error:?}"
+    );
+
+    // a 说的是本地代理未挂载的协议
+    db.save_provider(
+        "openclaw",
+        &Provider::with_id(
+            "a".to_string(),
+            "A".to_string(),
+            entry("openai-completions", "sk-a"),
+            None,
+        ),
+    )
+    .expect("save a");
+    openclaw::set_provider("a", entry("anthropic-messages", "sk-a")).expect("anthropic a");
+    let error = strict_error(service.takeover(&app, TakeoverMode::Strict).await);
+    assert!(
+        matches!(error, TakeoverError::Projection { .. }),
+        "{error:?}"
+    );
+
+    // OpenAI 兼容协议：只改写 a，b 不动，a 成为代理目标
+    openclaw::set_provider("a", entry("openai-completions", "sk-a")).expect("openai a");
+    service
+        .takeover(&app, TakeoverMode::Strict)
+        .await
+        .expect("take over a");
+    let live = read_live();
+    let providers = &live["models"]["providers"];
+    assert_eq!(
+        providers["a"]["baseUrl"],
+        format!("http://127.0.0.1:{ENGINE_TEST_PORT}/openclaw/v1")
+    );
+    assert!(crate::proxy::inbound_auth::is_proxy_token(
+        providers["a"]["apiKey"].as_str().unwrap()
+    ));
+    assert_eq!(providers["b"], entry("openai-completions", "sk-b"));
+    assert_eq!(
+        db.get_current_provider("openclaw").expect("current"),
+        Some("a".to_string())
+    );
+    assert!(service
+        .live_takeover_matches_current_proxy(&app)
+        .await
+        .expect("match live"));
 }
 
 #[tokio::test]

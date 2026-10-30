@@ -26,7 +26,8 @@ pub use crate::proxy::providers::copilot_auth::CopilotAuthManager;
 /// The app adapter surface, used by `tests/app_adapter_conformance.rs` to run
 /// one contract over every entry in [`APPS`] (and a test-only extra app).
 pub use crate::apps::adapter::{
-    AppAdapter, CommonSnippet, Credentials, McpProjector, ProxyTakeover, SessionSource,
+    AppAdapter, CommonSnippet, Credentials, EntryEndpoint, EntryTakeover, McpProjector,
+    ProxyTakeover, SessionSource,
 };
 pub use crate::apps::{adapter, AppCaps, AppDescriptor, SyncMode, APPS};
 

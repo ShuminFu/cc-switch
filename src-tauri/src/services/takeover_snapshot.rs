@@ -108,6 +108,9 @@ pub(crate) fn takeover_live_files(app_type: &AppType) -> Vec<PathBuf> {
         ],
         AppType::Gemini => vec![crate::gemini_config::get_gemini_env_path()],
         AppType::GrokBuild => vec![crate::grok_config::get_grok_config_path()],
+        AppType::OpenCode => vec![crate::apps::opencode::config::get_opencode_config_path()],
+        AppType::OpenClaw => vec![crate::apps::openclaw::config::get_openclaw_config_path()],
+        AppType::Hermes => vec![crate::apps::hermes::config::get_hermes_config_path()],
         _ => Vec::new(),
     }
 }

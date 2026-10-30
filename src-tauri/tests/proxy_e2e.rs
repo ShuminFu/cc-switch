@@ -1979,3 +1979,108 @@ async fn perf_baseline_non_streaming_request() {
 
     harness.shutdown().await;
 }
+
+// ============================================================================
+// Additive apps behind takeover (CCS-163)
+// ============================================================================
+
+/// A non-streaming Chat Completions reply with usage.
+fn chat_reply(text: &str, prompt_tokens: u64, completion_tokens: u64) -> MockReply {
+    MockReply::json(
+        200,
+        json!({
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "model": "gpt-4.1",
+            "choices": [{
+                "index": 0,
+                "message": { "role": "assistant", "content": text },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens
+            }
+        }),
+    )
+}
+
+#[tokio::test]
+async fn additive_app_routes_fail_over_and_log_usage_per_app() {
+    for app in ["opencode", "openclaw", "hermes"] {
+        let _env = TestEnv::new();
+        let a = MockUpstream::always(MockReply::json(
+            503,
+            json!({ "error": { "message": "overloaded", "type": "server_error" } }),
+        ))
+        .await;
+        let b = MockUpstream::always(chat_reply("from b", 120, 30)).await;
+        let harness = ProxyHarness::builder()
+            .app_provider(app, "a", &a)
+            .app_provider(app, "b", &b)
+            .failover(true)
+            .spawn()
+            .await;
+
+        let request = json!({
+            "model": "gpt-4.1",
+            "messages": [{ "role": "user", "content": "hi" }]
+        });
+        let response = harness
+            .openai(&format!("/{app}/v1/chat/completions"), &request)
+            .await;
+        assert_eq!(response.status(), 200, "{app}");
+        let body = json_body(response).await;
+        assert_eq!(body["choices"][0]["message"]["content"], "from b", "{app}");
+
+        assert_eq!(a.hits(), 1, "{app}: primary is tried once");
+        assert_eq!(b.hits(), 1, "{app}: secondary serves the request");
+        let upstream = &b.requests()[0];
+        assert_eq!(upstream.path, "/v1/chat/completions", "{app}");
+        assert_eq!(
+            upstream.headers["authorization"], "Bearer sk-harness-b",
+            "{app}: the upstream gets the provider's key, not the proxy token"
+        );
+
+        let status = harness.status().await;
+        assert_eq!(status.failover_count, 1, "{app}");
+
+        let logs = harness.wait_for_request_logs(1).await;
+        let ok = logs
+            .iter()
+            .find(|row| row.status_code == 200)
+            .unwrap_or_else(|| panic!("{app}: success row in {logs:?}"));
+        assert_eq!(ok.app_type, app);
+        assert_eq!(ok.provider_id, "b", "{app}");
+        assert_eq!(ok.input_tokens, 120, "{app}");
+        assert_eq!(ok.output_tokens, 30, "{app}");
+
+        harness.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn additive_app_without_failover_uses_the_taken_over_provider() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(chat_reply("from a", 1, 1)).await;
+    let b = MockUpstream::always(chat_reply("from b", 1, 1)).await;
+    let harness = ProxyHarness::builder()
+        .app_provider("hermes", "a", &a)
+        .app_provider("hermes", "b", &b)
+        .spawn()
+        .await;
+
+    let response = harness
+        .openai(
+            "/hermes/v1/responses",
+            &json!({ "model": "gpt-4.1", "input": "hi" }),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(a.hits(), 1, "the current (taken-over) provider serves it");
+    assert_eq!(b.hits(), 0);
+    assert_eq!(a.requests()[0].path, "/v1/responses");
+
+    harness.shutdown().await;
+}

@@ -11,6 +11,7 @@
 //! - `transform`: 格式转换
 
 mod adapter;
+mod additive;
 mod auth;
 mod claude;
 mod codex;
@@ -45,6 +46,7 @@ pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex"
 
 // 公开导出
 pub use adapter::ProviderAdapter;
+pub use additive::AdditiveAppAdapter;
 pub use auth::{AuthInfo, AuthStrategy};
 pub use claude::{
     claude_api_format_needs_transform, get_claude_api_format,
@@ -216,7 +218,9 @@ pub fn get_adapter(app_type: &AppType) -> Box<dyn ProviderAdapter> {
         AppType::Codex => Box::new(CodexAdapter::new()),
         AppType::Gemini => Box::new(GeminiAdapter::new()),
         AppType::GrokBuild => Box::new(CodexAdapter::new()),
-        AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => Box::new(CodexAdapter::new()),
+        AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => {
+            Box::new(AdditiveAppAdapter::new(app_type.clone()))
+        }
     }
 }
 

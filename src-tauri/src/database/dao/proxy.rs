@@ -277,6 +277,9 @@ impl Database {
         &self,
         config: AppProxyConfig,
     ) -> Result<(), AppError> {
+        // 种子行只覆盖最初的代理应用；后来支持接管的应用（OpenCode 等）按需补行，
+        // 否则 UPDATE 不命中任何行，接管状态会静默丢失
+        self.ensure_proxy_config_row_exists(&config.app_type)?;
         let conn = lock_conn!(self.conn);
 
         conn.execute(
