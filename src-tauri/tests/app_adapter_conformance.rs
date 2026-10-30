@@ -862,12 +862,12 @@ const NEW_APP_FIXED_FILES: [&str; 3] = ["app_config.rs", "apps/registry.rs", "ap
 
 /// 新增一个应用需要改动的后端文件数上限（含新建的 `apps/<app>/mod.rs`），只允许下降。
 ///
-/// P4 目标是 6 个以内。当前的 10 个与一次实测一致：给 `AppType` 加一个变体并在
+/// P4 目标是 6 个以内。当前的 9 个与一次实测一致：给 `AppType` 加一个变体并在
 /// 注册表 / `apps::adapter()` 接入后，编译器只在 [`exhaustive_app_match_files`]
-/// 列出的文件里报不穷尽 match。剩余文件随 CCS-155（按应用状态：app_config.rs、
-/// settings.rs）以及 deeplink / paths / services/config.rs / proxy/providers 的
+/// 列出的文件里报不穷尽 match。CCS-155 之后 settings.rs 已不在其中；剩余文件随
+/// app_config.rs 以及 deeplink / paths / services/config.rs / proxy/providers 的
 /// 分派收敛下降。
-const NEW_APP_BACKEND_FILE_BUDGET: usize = 10;
+const NEW_APP_BACKEND_FILE_BUDGET: usize = 9;
 
 /// 去掉顶层的 `#[cfg(test)]` 条目：带花括号的块跳到列 0 的 `}`，单行声明
 ///（`mod foo;`）只跳过该行

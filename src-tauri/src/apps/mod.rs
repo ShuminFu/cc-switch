@@ -99,11 +99,36 @@ mod tests {
         }
     }
 
+    /// `#[cfg(test)] mod foo;` 声明的子模块文件（相对 src），
+    /// 与 tests/app_adapter_conformance.rs 的同名函数一致
+    fn test_only_module_files(rel: &str, src: &str) -> Vec<String> {
+        let dir = match rel.rsplit_once('/') {
+            Some((parent, "mod.rs")) => format!("{parent}/"),
+            Some((parent, file)) => format!("{parent}/{}/", file.trim_end_matches(".rs")),
+            None if rel == "lib.rs" || rel == "main.rs" => String::new(),
+            None => format!("{}/", rel.trim_end_matches(".rs")),
+        };
+        let lines: Vec<&str> = src.lines().map(str::trim).collect();
+        lines
+            .windows(2)
+            .filter(|pair| pair[0] == "#[cfg(test)]")
+            .filter_map(|pair| {
+                let name = pair[1]
+                    .trim_start_matches("pub ")
+                    .strip_prefix("mod ")?
+                    .strip_suffix(';')?;
+                Some(name.to_string())
+            })
+            .flat_map(|name| [format!("{dir}{name}.rs"), format!("{dir}{name}/")])
+            .collect()
+    }
+
     /// apps/** 之外的生产代码里以 `AppType::` 变体做分支的 `match`。
     ///
-    /// 返回 `(相对 src 的路径, match 所在行)`。测试模块、注释与 apps/** 不计入。
+    /// 返回 `(相对 src 的路径, match 所在行)`。测试模块（内联的 `#[cfg(test)]` 块
+    /// 与 `#[cfg(test)] mod foo;` 声明的文件）、注释与 apps/** 不计入。
     fn match_app_sites() -> Vec<(String, String)> {
-        fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
+        fn collect(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, String)>) {
             let mut entries: Vec<_> = std::fs::read_dir(dir)
                 .expect("read src dir")
                 .map(|entry| entry.expect("dir entry").path())
@@ -117,53 +142,67 @@ mod tests {
                     .replace('\\', "/");
                 if path.is_dir() {
                     if rel != "apps" {
-                        walk(&path, root, out);
+                        collect(&path, root, out);
                     }
                     continue;
                 }
                 if path.extension().is_none_or(|ext| ext != "rs") {
                     continue;
                 }
-                let src = std::fs::read_to_string(&path).expect("read source");
-                let production = production_source(&src);
-                let lines: Vec<&str> = production.lines().map(str::trim).collect();
-                for (i, line) in lines.iter().enumerate() {
-                    let is_match = !line.starts_with("//")
-                        && line.ends_with('{')
-                        && line
-                            .split(|c: char| !c.is_alphanumeric() && c != '_')
-                            .any(|word| word == "match");
-                    if !is_match {
-                        continue;
-                    }
-                    let first_arm = lines[i + 1..]
-                        .iter()
-                        .find(|next| {
-                            !next.is_empty() && !next.starts_with("//") && !next.starts_with('#')
-                        })
-                        .copied()
-                        .unwrap_or("");
-                    if first_arm.starts_with("AppType::")
-                        || first_arm.starts_with("crate::app_config::AppType::")
-                    {
-                        out.push((rel.clone(), line.to_string()));
-                    }
-                }
+                out.push((rel, std::fs::read_to_string(&path).expect("read source")));
             }
         }
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources = Vec::new();
+        collect(&root, &root, &mut sources);
+        let test_only: Vec<String> = sources
+            .iter()
+            .flat_map(|(rel, src)| test_only_module_files(rel, src))
+            .collect();
+
         let mut sites = Vec::new();
-        walk(&root, &root, &mut sites);
+        for (rel, src) in &sources {
+            let is_test_only = test_only.iter().any(|excluded| {
+                rel == excluded || (excluded.ends_with('/') && rel.starts_with(excluded.as_str()))
+            });
+            if is_test_only {
+                continue;
+            }
+            let production = production_source(src);
+            let lines: Vec<&str> = production.lines().map(str::trim).collect();
+            for (i, line) in lines.iter().enumerate() {
+                let is_match = !line.starts_with("//")
+                    && line.ends_with('{')
+                    && line
+                        .split(|c: char| !c.is_alphanumeric() && c != '_')
+                        .any(|word| word == "match");
+                if !is_match {
+                    continue;
+                }
+                let first_arm = lines[i + 1..]
+                    .iter()
+                    .find(|next| {
+                        !next.is_empty() && !next.starts_with("//") && !next.starts_with('#')
+                    })
+                    .copied()
+                    .unwrap_or("");
+                if first_arm.starts_with("AppType::")
+                    || first_arm.starts_with("crate::app_config::AppType::")
+                {
+                    sites.push((rel.clone(), line.to_string()));
+                }
+            }
+        }
         sites
     }
 
     /// match-app 站点计数（CI 通过 `cargo test` 执行）。
     ///
     /// CCS-149 前为 56 处（同一统计口径），之后的上限见 [`MATCH_APP_SITE_BUDGET`]，只允许下降。
-    /// P4 退出目标是 15 处以内，剩余站点集中在接管引擎（services/proxy/，
-    /// CCS-153/154）和按应用状态（settings.rs / app_config.rs，CCS-155）。
-    const MATCH_APP_SITE_BUDGET: usize = 40;
+    /// P4 退出目标是 15 处以内。CCS-153/154/155 收敛接管引擎与按应用状态后实测 28 处
+    ///（CCS-232 起不再把 `#[cfg(test)] mod foo;` 声明的测试文件计入）。
+    const MATCH_APP_SITE_BUDGET: usize = 28;
 
     #[test]
     fn match_app_sites_outside_apps_stay_within_budget() {
@@ -173,6 +212,16 @@ mod tests {
             .map(|(file, line)| format!("{file}: {line}"))
             .collect::<Vec<_>>()
             .join("\n");
+
+        for file in [
+            "proxy/forwarder/wire_golden.rs",
+            "proxy/usage/cost_golden.rs",
+        ] {
+            assert!(
+                sites.iter().all(|(site_file, _)| site_file != file),
+                "{file} is a #[cfg(test)] module and must not be counted:\n{listing}"
+            );
+        }
 
         for file in [
             "services/provider/live.rs",
