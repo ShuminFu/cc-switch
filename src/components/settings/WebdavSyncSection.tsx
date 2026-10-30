@@ -11,6 +11,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -34,7 +35,11 @@ import {
 } from "@/components/ui/dialog";
 import { settingsApi } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { SyncSnapshotKeyField } from "@/components/settings/SyncSnapshotKeyField";
+import {
+  SyncSnapshotKeyField,
+  SYNC_SNAPSHOT_KEY_STATUS_QUERY_KEY,
+} from "@/components/settings/SyncSnapshotKeyField";
+import { IpcError, toIpcError } from "@/lib/api/ipc";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import type {
   RemoteSnapshotInfo,
@@ -159,6 +164,78 @@ function formatDbCompatVersion(version?: number | null): string | null {
   return typeof version === "number" ? `db-v${version}` : null;
 }
 
+/** 后端 `AppError::localized` 的同步签名错误 key -> 文案 key（覆盖全部四种语言） */
+const SYNC_ERROR_KEYS: Record<string, TranslationKey> = {
+  "sync.key_missing": "settings.webdavSync.signature.errors.keyMissing",
+  "sync.manifest_key_mismatch":
+    "settings.webdavSync.signature.errors.manifestKeyMismatch",
+  "sync.manifest_signature_invalid":
+    "settings.webdavSync.signature.errors.manifestSignatureInvalid",
+  "sync.manifest_signature_unsupported":
+    "settings.webdavSync.signature.errors.manifestSignatureUnsupported",
+  "sync.manifest_unsigned":
+    "settings.webdavSync.signature.errors.manifestUnsigned",
+  "sync.manifest_unsigned_rejected":
+    "settings.webdavSync.signature.errors.manifestUnsignedRejected",
+};
+
+/** 同步错误文案：已知的 `sync.*` i18nKey 走本地化，其余保留后端原文 */
+function syncErrorText(error: unknown, t: TFunction): string {
+  const normalized = toIpcError(error);
+  const key =
+    normalized instanceof IpcError && normalized.i18nKey
+      ? SYNC_ERROR_KEYS[normalized.i18nKey]
+      : undefined;
+  if (key) return t(key);
+  return (error as Error)?.message ?? String(error);
+}
+
+/** 按远端签名状态决定下载流程：打开确认框，或直接拦截并提示 */
+type DownloadGate =
+  | { kind: "dialog"; dialog: "download" | "migrate_unsigned" }
+  | { kind: "error" | "warning"; message: TranslationKey };
+
+async function resolveDownloadGate(
+  signature: RemoteSnapshotInfo["signature"] | undefined,
+  keyConfigured: () => Promise<boolean>,
+  signedSync: boolean,
+): Promise<DownloadGate> {
+  switch (signature) {
+    case "invalid":
+      return {
+        kind: "error",
+        message: "settings.webdavSync.signature.invalid",
+      };
+    case "keyMissing":
+      return {
+        kind: "warning",
+        message: "settings.webdavSync.signature.keyMissing",
+      };
+    case "unsigned": {
+      const configured = await keyConfigured();
+      if (signedSync) {
+        // 已同步过签名快照：后端必然拒绝未签名远端（有密钥视为降级，无密钥要求先输入）
+        return configured
+          ? {
+              kind: "error",
+              message:
+                "settings.webdavSync.signature.errors.manifestUnsignedRejected",
+            }
+          : {
+              kind: "warning",
+              message: "settings.webdavSync.signature.keyMissing",
+            };
+      }
+      return {
+        kind: "dialog",
+        dialog: configured ? "migrate_unsigned" : "download",
+      };
+    }
+    default:
+      return { kind: "dialog", dialog: "download" };
+  }
+}
+
 function buildPasswordPreservationKey(values: {
   baseUrl?: string | null;
   username?: string | null;
@@ -185,7 +262,12 @@ type ActionState =
 
 type SyncType = "webdav" | "s3";
 
-type DialogType = "upload" | "download" | "mutual_exclusion" | null;
+type DialogType =
+  | "upload"
+  | "download"
+  | "migrate_unsigned"
+  | "mutual_exclusion"
+  | null;
 
 interface WebdavSyncSectionProps {
   config?: WebDavSyncSettings;
@@ -229,6 +311,34 @@ function ActionButton({
       </span>
     </Button>
   );
+}
+
+// ─── SignatureNotice ────────────────────────────────────────
+
+/** 下载确认框中的签名提示：一次性迁移说明，或未设置密钥时的未签名提示。 */
+function SignatureNotice({
+  dialogType,
+  signature,
+}: {
+  dialogType: DialogType;
+  signature?: RemoteSnapshotInfo["signature"];
+}) {
+  const { t } = useTranslation();
+  if (dialogType === "migrate_unsigned") {
+    return (
+      <p className="font-medium text-amber-600 dark:text-amber-400">
+        {t("settings.webdavSync.signature.migrate.message")}
+      </p>
+    );
+  }
+  if (signature === "unsigned") {
+    return (
+      <p className="text-muted-foreground">
+        {t("settings.webdavSync.signature.unsignedHint")}
+      </p>
+    );
+  }
+  return null;
 }
 
 // ─── Main component ─────────────────────────────────────────
@@ -326,6 +436,15 @@ export function WebdavSyncSection({
     setS3DialogType(null);
     setS3RemoteInfo(null);
   }, []);
+
+  /** 本机是否已设置同步密钥（与密钥字段共用查询缓存） */
+  const isSyncKeyConfigured = useCallback(async () => {
+    const status = await queryClient.ensureQueryData({
+      queryKey: SYNC_SNAPSHOT_KEY_STATUS_QUERY_KEY,
+      queryFn: () => settingsApi.getSyncSnapshotKeyStatus(),
+    });
+    return status.configured;
+  }, [queryClient]);
 
   // Cleanup justSaved timer on unmount
   useEffect(() => {
@@ -615,8 +734,17 @@ export function WebdavSyncSection({
         );
         return;
       }
+      const gate = await resolveDownloadGate(
+        info.signature,
+        isSyncKeyConfigured,
+        config?.status?.signedSync === true,
+      );
+      if (gate.kind !== "dialog") {
+        toast[gate.kind](t(gate.message));
+        return;
+      }
       setRemoteInfo(info);
-      setDialogType("download");
+      setDialogType(gate.dialog);
     } catch (error) {
       toast.error(
         t("settings.webdavSync.downloadFailed", {
@@ -626,7 +754,7 @@ export function WebdavSyncSection({
     } finally {
       setActionState("idle");
     }
-  }, [dirty, t]);
+  }, [config?.status?.signedSync, dirty, isSyncKeyConfigured, t]);
 
   /** Actually perform the download after user confirms. */
   const handleDownloadConfirm = useCallback(async () => {
@@ -634,22 +762,24 @@ export function WebdavSyncSection({
       toast.error(t("settings.webdavSync.unsavedChanges"));
       return;
     }
+    // 一次性迁移：用户确认信任未签名的远端快照
+    const allowUnsigned = dialogType === "migrate_unsigned";
     closeDialog();
     setActionState("downloading");
     try {
-      await settingsApi.webdavSyncDownload();
+      await settingsApi.webdavSyncDownload({ allowUnsigned });
       toast.success(t("settings.webdavSync.downloadSuccess"));
       await queryClient.invalidateQueries();
     } catch (error) {
       toast.error(
         t("settings.webdavSync.downloadFailed", {
-          error: (error as Error)?.message ?? String(error),
+          error: syncErrorText(error, t),
         }),
       );
     } finally {
       setActionState("idle");
     }
-  }, [closeDialog, dirty, queryClient, t]);
+  }, [closeDialog, dialogType, dirty, queryClient, t]);
 
   // ─── S3 helpers ────────────────────────────────────────────
 
@@ -827,8 +957,17 @@ export function WebdavSyncSection({
         );
         return;
       }
+      const gate = await resolveDownloadGate(
+        info.signature,
+        isSyncKeyConfigured,
+        s3Config?.status?.signedSync === true,
+      );
+      if (gate.kind !== "dialog") {
+        toast[gate.kind](t(gate.message));
+        return;
+      }
       setS3RemoteInfo(info);
-      setS3DialogType("download");
+      setS3DialogType(gate.dialog);
     } catch (error) {
       toast.error(
         t("settings.s3Sync.downloadFailed", {
@@ -838,29 +977,30 @@ export function WebdavSyncSection({
     } finally {
       setS3ActionState("idle");
     }
-  }, [s3Dirty, t]);
+  }, [isSyncKeyConfigured, s3Config?.status?.signedSync, s3Dirty, t]);
 
   const handleS3DownloadConfirm = useCallback(async () => {
     if (s3Dirty) {
       toast.error(t("settings.s3Sync.unsavedChanges"));
       return;
     }
+    const allowUnsigned = s3DialogType === "migrate_unsigned";
     closeS3Dialog();
     setS3ActionState("downloading");
     try {
-      await settingsApi.s3SyncDownload();
+      await settingsApi.s3SyncDownload({ allowUnsigned });
       toast.success(t("settings.s3Sync.downloadSuccess"));
       await queryClient.invalidateQueries();
     } catch (error) {
       toast.error(
         t("settings.s3Sync.downloadFailed", {
-          error: (error as Error)?.message ?? String(error),
+          error: syncErrorText(error, t),
         }),
       );
     } finally {
       setS3ActionState("idle");
     }
-  }, [closeS3Dialog, s3Dirty, queryClient, t]);
+  }, [closeS3Dialog, s3DialogType, s3Dirty, queryClient, t]);
 
   // ─── Sync type switching with mutual exclusion ─────────────
 
@@ -1634,7 +1774,7 @@ export function WebdavSyncSection({
 
       {/* ─── WebDAV Download confirmation dialog ─────────── */}
       <Dialog
-        open={dialogType === "download"}
+        open={dialogType === "download" || dialogType === "migrate_unsigned"}
         onOpenChange={(open) => {
           if (!open) closeDialog();
         }}
@@ -1643,7 +1783,9 @@ export function WebdavSyncSection({
           <DialogHeader className="space-y-3 border-b-0 bg-transparent pb-0">
             <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              {t("settings.webdavSync.confirmDownload.title")}
+              {dialogType === "migrate_unsigned"
+                ? t("settings.webdavSync.signature.migrate.title")
+                : t("settings.webdavSync.confirmDownload.title")}
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-3 text-sm leading-relaxed">
@@ -1688,6 +1830,10 @@ export function WebdavSyncSection({
                     {t("settings.webdavSync.confirmDownload.legacyNotice")}
                   </p>
                 )}
+                <SignatureNotice
+                  dialogType={dialogType}
+                  signature={remoteInfo?.signature}
+                />
                 <p className="text-destructive font-medium">
                   {t("settings.webdavSync.confirmDownload.warning")}
                 </p>
@@ -1699,7 +1845,9 @@ export function WebdavSyncSection({
               {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleDownloadConfirm}>
-              {t("settings.webdavSync.confirmDownload.confirm")}
+              {dialogType === "migrate_unsigned"
+                ? t("settings.webdavSync.signature.migrate.confirm")
+                : t("settings.webdavSync.confirmDownload.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1774,7 +1922,9 @@ export function WebdavSyncSection({
 
       {/* ─── S3 Download confirmation dialog ─────────────── */}
       <Dialog
-        open={s3DialogType === "download"}
+        open={
+          s3DialogType === "download" || s3DialogType === "migrate_unsigned"
+        }
         onOpenChange={(open) => {
           if (!open) closeS3Dialog();
         }}
@@ -1783,7 +1933,9 @@ export function WebdavSyncSection({
           <DialogHeader className="space-y-3 border-b-0 bg-transparent pb-0">
             <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              {t("settings.s3Sync.confirmDownload.title")}
+              {s3DialogType === "migrate_unsigned"
+                ? t("settings.webdavSync.signature.migrate.title")
+                : t("settings.s3Sync.confirmDownload.title")}
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-3 text-sm leading-relaxed">
@@ -1807,6 +1959,10 @@ export function WebdavSyncSection({
                     <dd>{s3RemoteInfo.artifacts.join(", ")}</dd>
                   </dl>
                 )}
+                <SignatureNotice
+                  dialogType={s3DialogType}
+                  signature={s3RemoteInfo?.signature}
+                />
                 <p className="text-destructive font-medium">
                   {t("settings.s3Sync.confirmDownload.warning")}
                 </p>
@@ -1818,7 +1974,9 @@ export function WebdavSyncSection({
               {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleS3DownloadConfirm}>
-              {t("settings.s3Sync.confirmDownload.confirm")}
+              {s3DialogType === "migrate_unsigned"
+                ? t("settings.webdavSync.signature.migrate.confirm")
+                : t("settings.s3Sync.confirmDownload.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

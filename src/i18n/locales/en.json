@@ -676,6 +676,24 @@
           "message": "After clearing, uploads are no longer signed and signed remote snapshots cannot be verified. This also resets the signed-sync state of WebDAV and S3, so unsigned remote snapshots will be accepted again.",
           "confirm": "Clear key"
         }
+      },
+      "signature": {
+        "invalid": "The remote snapshot's signature could not be verified: it may have been tampered with, or it was signed with a different sync key. The download was blocked.",
+        "keyMissing": "The remote snapshot is signed, but this device has no sync key. Enter the same sync key as the uploading device above, then try again.",
+        "unsignedHint": "This snapshot is unsigned. Set the same sync key on every device so snapshots are signed and verified.",
+        "migrate": {
+          "title": "Import unsigned snapshot",
+          "message": "This remote snapshot is unsigned (uploaded by an older version or by a device without a sync key). Import it once only if you trust its source; uploads from this device will be signed afterwards.",
+          "confirm": "Import once"
+        },
+        "errors": {
+          "keyMissing": "No sync key is configured, so snapshots cannot be verified or signed. Enter the same sync key on each device.",
+          "manifestKeyMismatch": "The remote snapshot was signed with a different sync key. Enter the same sync key on this device.",
+          "manifestSignatureInvalid": "The remote snapshot signature is invalid; it may have been tampered with and was not imported.",
+          "manifestSignatureUnsupported": "The remote snapshot uses an unsupported signature algorithm. Update CC Switch on this device.",
+          "manifestUnsigned": "The remote snapshot is unsigned (uploaded by an older version). Confirm it is trusted to import it once; later uploads will be signed.",
+          "manifestUnsignedRejected": "The remote snapshot is unsigned, but this device already synced signed snapshots. It may be a downgrade attack and was not imported."
+        }
       }
     },
     "syncType": {
