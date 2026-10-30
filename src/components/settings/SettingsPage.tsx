@@ -44,6 +44,7 @@ import { TerminalSettings } from "@/components/settings/TerminalSettings";
 import { NotificationSettings } from "@/components/notifications/NotificationSettings";
 import { DirectorySettings } from "@/components/settings/DirectorySettings";
 import { ImportExportSection } from "@/components/settings/ImportExportSection";
+import { SecretsVaultSettings } from "@/components/settings/SecretsVaultSettings";
 import { BackupListSection } from "@/components/settings/BackupListSection";
 import { WebdavSyncSection } from "@/components/settings/WebdavSyncSection";
 import { AboutSection } from "@/components/settings/AboutSection";
@@ -392,6 +393,9 @@ export function SettingsPage({
                             onExport={exportConfig}
                             onClear={clearSelection}
                           />
+                          <div className="mt-4">
+                            <SecretsVaultSettings />
+                          </div>
                         </AccordionContent>
                       </AccordionItem>
 
