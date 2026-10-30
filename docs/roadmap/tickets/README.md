@@ -142,77 +142,77 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-124](P3-proxy-request-path/CCS-124-p3-runtime-config-snapshot.md) | refactor | p2 | M | [proxy] Cache runtime config in an ArcSwap snapshot and remove DB reads from the request path | CCS-123 | Done |
 | [CCS-125](P3-proxy-request-path/CCS-125-p3-router-lock-db-read.md) | bug | p3 | S | [proxy] Read the breaker config before taking the breaker-map write lock | CCS-124 | Done |
 | [CCS-126](P3-proxy-request-path/CCS-126-p3-route-plan.md) | refactor | p1 | M | [proxy] Resolve a RoutePlan once per attempt and carry it in ForwardResult | CCS-123 | Done |
-| [CCS-127](P3-proxy-request-path/CCS-127-p3-attempt-recorder.md) | refactor | p2 | M | [proxy] Add AttemptRecorder to own status, breaker, health and try_switch for each attempt | CCS-126, CCS-051 | Open |
-| [CCS-128](P3-proxy-request-path/CCS-128-p3-failover-flapping.md) | bug | p3 | S | [proxy] Count failovers only when a request actually failed over, and report recovery separately | CCS-127 | Open |
-| [CCS-129](P3-proxy-request-path/CCS-129-p3-recovery-strategy.md) | refactor | p2 | M | [proxy] Replace nested forward() retries with a RecoveryStrategy list | CCS-127 | Open |
-| [CCS-130](P3-proxy-request-path/CCS-130-p3-request-pipeline-stages.md) | refactor | p2 | L | [proxy] Split forward() into request_builder, HeaderPolicy, transport and validate, leaving forwarder.rs a facade | CCS-129 | Open |
-| [CCS-131](P3-proxy-request-path/CCS-131-p3-header-hop-by-hop.md) | security | p3 | S | [proxy] Strip hop-by-hop, cookie and vendor-identity headers from forwarded requests |  | Open |
-| [CCS-132](P3-proxy-request-path/CCS-132-p3-header-case-per-request.md) | bug | p3 | M | [proxy] Capture original header casing per request instead of one peek per connection | CCS-014 | Open |
-| [CCS-133](P3-proxy-request-path/CCS-133-p3-breaker-sliding-window.md) | bug | p3 | S | [proxy] Compute the circuit-breaker error rate over a sliding window |  | Open |
-| [CCS-134](P3-proxy-request-path/CCS-134-p3-usage-ir.md) | refactor | p1 | M | [usage] Add a canonical UsageIR with from/to converters for each format | CCS-009, CCS-092 | Open |
-| [CCS-135](P3-proxy-request-path/CCS-135-p3-stop-reason-table.md) | refactor | p2 | S | [proxy] Add a canonical StopReason table and unify the Gemini mapping | CCS-134, CCS-065 | Open |
-| [CCS-136](P3-proxy-request-path/CCS-136-p3-sse-decoder.md) | refactor | p2 | M | [proxy] Replace the three SSE sniffers with one SseDecoder | CCS-126 | Open |
-| [CCS-137](P3-proxy-request-path/CCS-137-p3-stream-traits-taps.md) | refactor | p2 | L | [proxy] Wrap converters behind StreamDecoder/Encoder, and add UsageTap, TimingTap and aggregate | CCS-136, CCS-134 | Open |
-| [CCS-138](P3-proxy-request-path/CCS-138-p3-bug-report-capture.md) | feature | p2 | M | [proxy] Capture and export a redacted bug report in the golden-fixture layout | CCS-137 | Open |
-| [CCS-139](P3-proxy-request-path/CCS-139-p3-trace-inspector.md) | feature | p2 | M | [proxy] Add a per-request trace inspector | CCS-126, CCS-127 | Open |
-| [CCS-140](P3-proxy-request-path/CCS-140-p3-usage-parity-badge.md) | feature | p3 | S | [usage] Show a parity badge when normalized usage disagrees with the raw upstream usage | CCS-134, CCS-137 | Open |
-| [CCS-141](P3-proxy-request-path/CCS-141-p3-breaker-ui-probe.md) | feature | p3 | M | [proxy] Show live circuit-breaker state with a "probe now" action | CCS-111, CCS-051 | Open |
-| [CCS-142](P3-proxy-request-path/CCS-142-p3-retry-after-cooldown.md) | feature | p3 | S | [proxy] Honour Retry-After on 429 and 529 with a per-provider cooldown | CCS-127 | Open |
-| [CCS-143](P3-proxy-request-path/CCS-143-p3-session-sticky-routing.md) | feature | p3 | S | [proxy] Optionally keep each session_id on one provider so prompt caches survive | CCS-128 | Open |
-| [CCS-144](P3-proxy-request-path/CCS-144-p3-deps-dedupe-http.md) | chore | p3 | M | [deps] Dedupe tower, tower-http, webpki-roots and reqwest versions | CCS-041, CCS-014 | Open |
+| [CCS-127](P3-proxy-request-path/CCS-127-p3-attempt-recorder.md) | refactor | p2 | M | [proxy] Add AttemptRecorder to own status, breaker, health and try_switch for each attempt | CCS-126, CCS-051 | Done |
+| [CCS-128](P3-proxy-request-path/CCS-128-p3-failover-flapping.md) | bug | p3 | S | [proxy] Count failovers only when a request actually failed over, and report recovery separately | CCS-127 | Done |
+| [CCS-129](P3-proxy-request-path/CCS-129-p3-recovery-strategy.md) | refactor | p2 | M | [proxy] Replace nested forward() retries with a RecoveryStrategy list | CCS-127 | Done |
+| [CCS-130](P3-proxy-request-path/CCS-130-p3-request-pipeline-stages.md) | refactor | p2 | L | [proxy] Split forward() into request_builder, HeaderPolicy, transport and validate, leaving forwarder.rs a facade | CCS-129 | Done |
+| [CCS-131](P3-proxy-request-path/CCS-131-p3-header-hop-by-hop.md) | security | p3 | S | [proxy] Strip hop-by-hop, cookie and vendor-identity headers from forwarded requests |  | Done |
+| [CCS-132](P3-proxy-request-path/CCS-132-p3-header-case-per-request.md) | bug | p3 | M | [proxy] Capture original header casing per request instead of one peek per connection | CCS-014 | Done |
+| [CCS-133](P3-proxy-request-path/CCS-133-p3-breaker-sliding-window.md) | bug | p3 | S | [proxy] Compute the circuit-breaker error rate over a sliding window |  | Done |
+| [CCS-134](P3-proxy-request-path/CCS-134-p3-usage-ir.md) | refactor | p1 | M | [usage] Add a canonical UsageIR with from/to converters for each format | CCS-009, CCS-092 | Done |
+| [CCS-135](P3-proxy-request-path/CCS-135-p3-stop-reason-table.md) | refactor | p2 | S | [proxy] Add a canonical StopReason table and unify the Gemini mapping | CCS-134, CCS-065 | Done |
+| [CCS-136](P3-proxy-request-path/CCS-136-p3-sse-decoder.md) | refactor | p2 | M | [proxy] Replace the three SSE sniffers with one SseDecoder | CCS-126 | Done |
+| [CCS-137](P3-proxy-request-path/CCS-137-p3-stream-traits-taps.md) | refactor | p2 | L | [proxy] Wrap converters behind StreamDecoder/Encoder, and add UsageTap, TimingTap and aggregate | CCS-136, CCS-134 | Done |
+| [CCS-138](P3-proxy-request-path/CCS-138-p3-bug-report-capture.md) | feature | p2 | M | [proxy] Capture and export a redacted bug report in the golden-fixture layout | CCS-137 | Done |
+| [CCS-139](P3-proxy-request-path/CCS-139-p3-trace-inspector.md) | feature | p2 | M | [proxy] Add a per-request trace inspector | CCS-126, CCS-127 | Done |
+| [CCS-140](P3-proxy-request-path/CCS-140-p3-usage-parity-badge.md) | feature | p3 | S | [usage] Show a parity badge when normalized usage disagrees with the raw upstream usage | CCS-134, CCS-137 | Done |
+| [CCS-141](P3-proxy-request-path/CCS-141-p3-breaker-ui-probe.md) | feature | p3 | M | [proxy] Show live circuit-breaker state with a "probe now" action | CCS-111, CCS-051 | Done |
+| [CCS-142](P3-proxy-request-path/CCS-142-p3-retry-after-cooldown.md) | feature | p3 | S | [proxy] Honour Retry-After on 429 and 529 with a per-provider cooldown | CCS-127 | Done |
+| [CCS-143](P3-proxy-request-path/CCS-143-p3-session-sticky-routing.md) | feature | p3 | S | [proxy] Optionally keep each session_id on one provider so prompt caches survive | CCS-128 | Done |
+| [CCS-144](P3-proxy-request-path/CCS-144-p3-deps-dedupe-http.md) | chore | p3 | M | [deps] Dedupe tower, tower-http, webpki-roots and reqwest versions | CCS-041, CCS-014 | Done |
 
 ## P4: [P4 (v3.22): Per-app adapters, takeover engine, persistence and migration framework](P4-app-adapters-persistence/CCS-005-epic-p4.md)
 
 | ID | Kind | Pri | Effort | Title | Depends on | Status |
 |---|---|---|---|---|---|---|
-| [CCS-145](P4-app-adapters-persistence/CCS-145-p4-migration-framework.md) | refactor | p1 | M | [db] Add a versioned migration framework with a frozen baseline and audit table | CCS-011, CCS-091 | Open |
-| [CCS-146](P4-app-adapters-persistence/CCS-146-p4-adapter-trait-gemini-grok.md) | refactor | p1 | L | [apps] Add the AppAdapter trait and migrate Gemini and Grok | CCS-112, CCS-082 | Open |
-| [CCS-147](P4-app-adapters-persistence/CCS-147-p4-adapter-claude.md) | refactor | p2 | L | [apps] Migrate Claude and Claude Desktop to AppAdapter | CCS-146 | Open |
-| [CCS-148](P4-app-adapters-persistence/CCS-148-p4-adapter-codex.md) | refactor | p2 | L | [apps] Migrate Codex to AppAdapter, keeping the history-migration ids and markers stable | CCS-146 | Open |
-| [CCS-149](P4-app-adapters-persistence/CCS-149-p4-adapter-additive.md) | refactor | p2 | L | [apps] Migrate OpenCode, OpenClaw and Hermes to AppAdapter and remove the remaining fan-out | CCS-147, CCS-148 | Open |
-| [CCS-150](P4-app-adapters-persistence/CCS-150-p4-adapter-conformance.md) | chore | p1 | M | [apps] Add an adapter conformance suite that loops over APPS, plus the dummy 9th-app test | CCS-149 | Open |
-| [CCS-151](P4-app-adapters-persistence/CCS-151-p4-mcp-projector.md) | refactor | p2 | M | [mcp] Add McpProjector and generic MCP import loops | CCS-146, CCS-011 | Open |
+| [CCS-145](P4-app-adapters-persistence/CCS-145-p4-migration-framework.md) | refactor | p1 | M | [db] Add a versioned migration framework with a frozen baseline and audit table | CCS-011, CCS-091 | Done |
+| [CCS-146](P4-app-adapters-persistence/CCS-146-p4-adapter-trait-gemini-grok.md) | refactor | p1 | L | [apps] Add the AppAdapter trait and migrate Gemini and Grok | CCS-112, CCS-082 | Done |
+| [CCS-147](P4-app-adapters-persistence/CCS-147-p4-adapter-claude.md) | refactor | p2 | L | [apps] Migrate Claude and Claude Desktop to AppAdapter | CCS-146 | Done |
+| [CCS-148](P4-app-adapters-persistence/CCS-148-p4-adapter-codex.md) | refactor | p2 | L | [apps] Migrate Codex to AppAdapter, keeping the history-migration ids and markers stable | CCS-146 | Done |
+| [CCS-149](P4-app-adapters-persistence/CCS-149-p4-adapter-additive.md) | refactor | p2 | L | [apps] Migrate OpenCode, OpenClaw and Hermes to AppAdapter and remove the remaining fan-out | CCS-147, CCS-148 | Partial |
+| [CCS-150](P4-app-adapters-persistence/CCS-150-p4-adapter-conformance.md) | chore | p1 | M | [apps] Add an adapter conformance suite that loops over APPS, plus the dummy 9th-app test | CCS-149 | Partial |
+| [CCS-151](P4-app-adapters-persistence/CCS-151-p4-mcp-projector.md) | refactor | p2 | M | [mcp] Add McpProjector and generic MCP import loops | CCS-146, CCS-011 | Done |
 | [CCS-152](P4-app-adapters-persistence/CCS-152-p4-takeover-crash-e2e.md) | chore | p1 | M | [takeover] Add crash/restore E2E for each proxy-capable app and a legacy-path runtime flag | CCS-014, CCS-012 | Open |
 | [CCS-153](P4-app-adapters-persistence/CCS-153-p4-services-proxy-split.md) | refactor | p2 | M | [proxy] Split services/proxy.rs (7.2k lines) into lifecycle, takeover, backup, hot_switch and config modules | CCS-152, CCS-054 | Open |
 | [CCS-154](P4-app-adapters-persistence/CCS-154-p4-takeover-engine.md) | refactor | p2 | L | [proxy] Unify takeover behind takeover(app, Strict\|BestEffort) with TakeoverError and a registry-driven status | CCS-153, CCS-149 | Open |
-| [CCS-155](P4-app-adapters-persistence/CCS-155-p4-per-app-settings-state.md) | refactor | p2 | M | [settings] Use keyed per-app maps with old-key dual-write, and migrate profiles and localStorage | CCS-112, CCS-085 | Open |
-| [CCS-156](P4-app-adapters-persistence/CCS-156-p4-join-tables.md) | refactor | p2 | L | [db] Replace per-app MCP and skill columns with join tables, dual-writing the old columns for one release | CCS-145 | Open |
-| [CCS-157](P4-app-adapters-persistence/CCS-157-p4-pricing-engine.md) | refactor | p2 | L | [pricing] Add the pricing catalog, resolver and a single cost engine, and delete the hand-written backfill | CCS-145, CCS-092 | Open |
-| [CCS-158](P4-app-adapters-persistence/CCS-158-p4-pricing-provenance.md) | refactor | p2 | M | [pricing] Add pricing provenance and tombstones, classifying existing edited rows as user-owned | CCS-157, CCS-094 | Open |
-| [CCS-159](P4-app-adapters-persistence/CCS-159-p4-usage-repo.md) | refactor | p2 | L | [db] Add usage and session-cursor repositories with a UsageQuery builder and transactional ingest | CCS-145, CCS-097 | Open |
-| [CCS-160](P4-app-adapters-persistence/CCS-160-p4-superseded-by-backfill.md) | refactor | p2 | M | [db] Replace the correlated EXISTS with a superseded_by column and a chunked, resumable backfill | CCS-159 | Open |
-| [CCS-161](P4-app-adapters-persistence/CCS-161-p4-rollup-retention.md) | refactor | p3 | M | [db] Store rollup cost as integer micro-USD and add RetentionPolicy with Maintenance::run | CCS-159 | Open |
-| [CCS-162](P4-app-adapters-persistence/CCS-162-p4-json-key-order.md) | bug | p3 | S | [config] Keep user key order when rewriting user-owned JSON configs | CCS-149 | Open |
+| [CCS-155](P4-app-adapters-persistence/CCS-155-p4-per-app-settings-state.md) | refactor | p2 | M | [settings] Use keyed per-app maps with old-key dual-write, and migrate profiles and localStorage | CCS-112, CCS-085 | Done |
+| [CCS-156](P4-app-adapters-persistence/CCS-156-p4-join-tables.md) | refactor | p2 | L | [db] Replace per-app MCP and skill columns with join tables, dual-writing the old columns for one release | CCS-145 | Done |
+| [CCS-157](P4-app-adapters-persistence/CCS-157-p4-pricing-engine.md) | refactor | p2 | L | [pricing] Add the pricing catalog, resolver and a single cost engine, and delete the hand-written backfill | CCS-145, CCS-092 | Done |
+| [CCS-158](P4-app-adapters-persistence/CCS-158-p4-pricing-provenance.md) | refactor | p2 | M | [pricing] Add pricing provenance and tombstones, classifying existing edited rows as user-owned | CCS-157, CCS-094 | Done |
+| [CCS-159](P4-app-adapters-persistence/CCS-159-p4-usage-repo.md) | refactor | p2 | L | [db] Add usage and session-cursor repositories with a UsageQuery builder and transactional ingest | CCS-145, CCS-097 | Done |
+| [CCS-160](P4-app-adapters-persistence/CCS-160-p4-superseded-by-backfill.md) | refactor | p2 | M | [db] Replace the correlated EXISTS with a superseded_by column and a chunked, resumable backfill | CCS-159 | Done |
+| [CCS-161](P4-app-adapters-persistence/CCS-161-p4-rollup-retention.md) | refactor | p3 | M | [db] Store rollup cost as integer micro-USD and add RetentionPolicy with Maintenance::run | CCS-159 | Done |
+| [CCS-162](P4-app-adapters-persistence/CCS-162-p4-json-key-order.md) | bug | p3 | S | [config] Keep user key order when rewriting user-owned JSON configs | CCS-149 | Done |
 | [CCS-163](P4-app-adapters-persistence/CCS-163-p4-takeover-additive-apps.md) | feature | p2 | M | [proxy] Support proxy takeover, failover and usage for OpenCode, OpenClaw and Hermes | CCS-154 | Open |
-| [CCS-164](P4-app-adapters-persistence/CCS-164-p4-openclaw-mcp.md) | feature | p3 | S | [mcp] Add OpenClaw MCP support (Issue #4834) | CCS-151, CCS-149 | Open |
-| [CCS-165](P4-app-adapters-persistence/CCS-165-p4-capability-matrix.md) | feature | p3 | S | [settings] Add a capability matrix page | CCS-119, CCS-150 | Open |
-| [CCS-166](P4-app-adapters-persistence/CCS-166-p4-drift-detection.md) | feature | p2 | M | [apps] Detect live-config drift and external edits, and offer reconcile | CCS-154 | Open |
-| [CCS-167](P4-app-adapters-persistence/CCS-167-p4-budget-alerts.md) | feature | p3 | S | [usage] Add budget alerts on usage-log-recorded | CCS-159, CCS-095 | Open |
+| [CCS-164](P4-app-adapters-persistence/CCS-164-p4-openclaw-mcp.md) | feature | p3 | S | [mcp] Add OpenClaw MCP support (Issue #4834) | CCS-151, CCS-149 | Done |
+| [CCS-165](P4-app-adapters-persistence/CCS-165-p4-capability-matrix.md) | feature | p3 | S | [settings] Add a capability matrix page | CCS-119, CCS-150 | Done |
+| [CCS-166](P4-app-adapters-persistence/CCS-166-p4-drift-detection.md) | feature | p2 | M | [apps] Detect live-config drift and external edits, and offer reconcile | CCS-154 | Done |
+| [CCS-167](P4-app-adapters-persistence/CCS-167-p4-budget-alerts.md) | feature | p3 | S | [usage] Add budget alerts on usage-log-recorded | CCS-159, CCS-095 | Done |
 | [CCS-168](P4-app-adapters-persistence/CCS-168-p4-spend-cap-enforcement.md) | feature | p2 | M | [proxy] Enforce per-provider spend and token caps in provider selection | CCS-159, CCS-124 | Open |
-| [CCS-169](P4-app-adapters-persistence/CCS-169-p4-retention-panel.md) | feature | p3 | S | [settings] Add a retention and DB-size panel | CCS-161 | Open |
-| [CCS-170](P4-app-adapters-persistence/CCS-170-p4-live-config-journal.md) | feature | p3 | M | [apps] Keep a live-config journal with one-click undo of the last switch | CCS-149 | Open |
-| [CCS-171](P4-app-adapters-persistence/CCS-171-p4-usage-rescan.md) | feature | p3 | M | [usage] Add a usage re-scan action and a per-source data-quality report | CCS-159 | Open |
-| [CCS-172](P4-app-adapters-persistence/CCS-172-p4-keychain-secrets.md) | feature | p2 | L | [security] Store secrets in the OS keychain or credential manager | CCS-083, CCS-155 | Open |
-| [CCS-173](P4-app-adapters-persistence/CCS-173-p4-sync-snapshot-auth.md) | feature | p2 | M | [sync] Authenticate WebDAV/S3 snapshots with an HMAC and refuse unsigned remote imports | CCS-086, CCS-172 | Open |
+| [CCS-169](P4-app-adapters-persistence/CCS-169-p4-retention-panel.md) | feature | p3 | S | [settings] Add a retention and DB-size panel | CCS-161 | Done |
+| [CCS-170](P4-app-adapters-persistence/CCS-170-p4-live-config-journal.md) | feature | p3 | M | [apps] Keep a live-config journal with one-click undo of the last switch | CCS-149 | Done |
+| [CCS-171](P4-app-adapters-persistence/CCS-171-p4-usage-rescan.md) | feature | p3 | M | [usage] Add a usage re-scan action and a per-source data-quality report | CCS-159 | Done |
+| [CCS-172](P4-app-adapters-persistence/CCS-172-p4-keychain-secrets.md) | feature | p2 | L | [security] Store secrets in the OS keychain or credential manager | CCS-083, CCS-155 | Partial |
+| [CCS-173](P4-app-adapters-persistence/CCS-173-p4-sync-snapshot-auth.md) | feature | p2 | M | [sync] Authenticate WebDAV/S3 snapshots with an HMAC and refuse unsigned remote imports | CCS-086, CCS-172 | Partial |
 
 ## P5: [P5 (v4.0): Canonical protocol IR and codecs, plus command-layer cleanup](P5-protocol-ir-commands/CCS-006-epic-p5.md)
 
 | ID | Kind | Pri | Effort | Title | Depends on | Status |
 |---|---|---|---|---|---|---|
-| [CCS-174](P5-protocol-ir-commands/CCS-174-p5-ir-codec-core.md) | refactor | p2 | M | [proxy] Define the canonical protocol IR and codec traits | CCS-137, CCS-135 | Open |
-| [CCS-175](P5-protocol-ir-commands/CCS-175-p5-session-side-store.md) | refactor | p2 | M | [proxy] Move the Gemini shadow, Codex chat history and reasoning bridge behind SessionSideStore | CCS-174 | Open |
-| [CCS-176](P5-protocol-ir-commands/CCS-176-p5-codec-openai-chat.md) | refactor | p2 | L | [proxy] Migrate the Anthropic<-OpenAI Chat bridge to codecs | CCS-175 | Open |
-| [CCS-177](P5-protocol-ir-commands/CCS-177-p5-codec-gemini.md) | refactor | p2 | L | [proxy] Migrate the Gemini bridge to codecs | CCS-176 | Open |
-| [CCS-178](P5-protocol-ir-commands/CCS-178-p5-codec-responses.md) | refactor | p2 | XL | [proxy] Migrate the Responses bridges to codecs and remove the legacy engine | CCS-177 | Open |
+| [CCS-174](P5-protocol-ir-commands/CCS-174-p5-ir-codec-core.md) | refactor | p2 | M | [proxy] Define the canonical protocol IR and codec traits | CCS-137, CCS-135 | Done |
+| [CCS-175](P5-protocol-ir-commands/CCS-175-p5-session-side-store.md) | refactor | p2 | M | [proxy] Move the Gemini shadow, Codex chat history and reasoning bridge behind SessionSideStore | CCS-174 | Done |
+| [CCS-176](P5-protocol-ir-commands/CCS-176-p5-codec-openai-chat.md) | refactor | p2 | L | [proxy] Migrate the Anthropic<-OpenAI Chat bridge to codecs | CCS-175 | Done |
+| [CCS-177](P5-protocol-ir-commands/CCS-177-p5-codec-gemini.md) | refactor | p2 | L | [proxy] Migrate the Gemini bridge to codecs | CCS-176 | Done |
+| [CCS-178](P5-protocol-ir-commands/CCS-178-p5-codec-responses.md) | refactor | p2 | XL | [proxy] Migrate the Responses bridges to codecs and remove the legacy engine | CCS-177 | Partial |
 | [CCS-179](P5-protocol-ir-commands/CCS-179-p5-misc-split-terminal.md) | refactor | p2 | L | [commands] Split misc.rs into cli_tools services and a unified platform terminal stack | CCS-104, CCS-036 | Open |
 | [CCS-180](P5-protocol-ir-commands/CCS-180-p5-command-domains-permissions.md) | security | p2 | M | [ipc] Register commands per domain with collect_commands! and scope them with AppManifest permissions | CCS-179, CCS-117, CCS-075 | Open |
 | [CCS-181](P5-protocol-ir-commands/CCS-181-p5-thin-commands.md) | refactor | p2 | L | [commands] Make commands thin adapters over a Ctx/EventSink seam and reach 100% IpcError | CCS-180, CCS-114 | Open |
 | [CCS-182](P5-protocol-ir-commands/CCS-182-p5-app-shell-bootstrap.md) | refactor | p2 | M | [shell] Add a StartupStep pipeline with a startup diagnostics report and a single run-event router | CCS-181 | Open |
 | [CCS-183](P5-protocol-ir-commands/CCS-183-p5-tray-split.md) | refactor | p3 | M | [tray] Split the tray into model, menu and events driven by an event bus | CCS-182 | Open |
 | [CCS-184](P5-protocol-ir-commands/CCS-184-p5-session-resume-cross-platform.md) | feature | p3 | M | [sessions] Support session resume on Windows and Linux | CCS-179, CCS-074 | Open |
-| [CCS-185](P5-protocol-ir-commands/CCS-185-p5-midstream-failover.md) | feature | p2 | M | [proxy] Fail over on errors that arrive before any content is streamed | CCS-174, CCS-127 | Open |
-| [CCS-186](P5-protocol-ir-commands/CCS-186-p5-usage-parity-ci.md) | chore | p3 | S | [usage] Run a usage parity checker over the fixture corpus in CI | CCS-140, CCS-178 | Open |
-| [CCS-187](P5-protocol-ir-commands/CCS-187-p5-gemini-cli-anthropic.md) | feature | p3 | M | [proxy] Add the first new client/upstream combination: Gemini CLI to an Anthropic upstream | CCS-177 | Open |
+| [CCS-185](P5-protocol-ir-commands/CCS-185-p5-midstream-failover.md) | feature | p2 | M | [proxy] Fail over on errors that arrive before any content is streamed | CCS-174, CCS-127 | Done |
+| [CCS-186](P5-protocol-ir-commands/CCS-186-p5-usage-parity-ci.md) | chore | p3 | S | [usage] Run a usage parity checker over the fixture corpus in CI | CCS-140, CCS-178 | Done |
+| [CCS-187](P5-protocol-ir-commands/CCS-187-p5-gemini-cli-anthropic.md) | feature | p3 | M | [proxy] Add the first new client/upstream combination: Gemini CLI to an Anthropic upstream | CCS-177 | Done |
 | [CCS-188](P5-protocol-ir-commands/CCS-188-p5-tool-lifecycle-streaming.md) | feature | p3 | M | [cli-tools] Stream installer output and support cancel and timeout for tool lifecycle actions | CCS-179 | Open |
 
 ## F: [Track F: Frontend decomposition (runs in parallel from P2 bindings, lands by v4.0)](F-frontend/CCS-007-epic-f.md)
@@ -235,10 +235,10 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-202](F-frontend/CCS-202-f-resize-listener-leak.md) | bug | p3 | S | [shell] Unregister the onResized listener when App unmounts before it resolves |  | Done |
 | [CCS-203](F-frontend/CCS-203-f-safe-storage.md) | bug | p3 | S | [shell] Wrap all localStorage access in safe helpers |  | Done |
 | [CCS-204](F-frontend/CCS-204-f-a11y-icon-buttons.md) | bug | p3 | S | [a11y] Give icon-only buttons accessible names |  | Done |
-| [CCS-205](F-frontend/CCS-205-f-live-diff-preview.md) | feature | p3 | M | [provider-form] Preview the diff of the target live config before saving | CCS-190, CCS-149 | Open |
+| [CCS-205](F-frontend/CCS-205-f-live-diff-preview.md) | feature | p3 | M | [provider-form] Preview the diff of the target live config before saving | CCS-190, CCS-149 | Done |
 | [CCS-206](F-frontend/CCS-206-f-unsaved-changes-guard.md) | feature | p3 | S | [provider-form] Guard against closing the Add/Edit panel with unsaved changes | CCS-190, CCS-200 | Done |
 | [CCS-207](F-frontend/CCS-207-f-switching-state.md) | feature | p3 | S | [providers] Show a switching state and disable the other Switch buttons while a switch is pending | CCS-195 | Done |
 | [CCS-208](F-frontend/CCS-208-f-command-palette.md) | feature | p3 | S | [shell] Add a Cmd/Ctrl-K command palette to search and switch providers across apps | CCS-194, CCS-207 | Done |
-| [CCS-209](F-frontend/CCS-209-f-unpriced-requests-export.md) | feature | p3 | S | [usage] Filter and export unpriced requests, with a shortcut to add model pricing | CCS-159, CCS-021 | Open |
+| [CCS-209](F-frontend/CCS-209-f-unpriced-requests-export.md) | feature | p3 | S | [usage] Filter and export unpriced requests, with a shortcut to add model pricing | CCS-159, CCS-021 | Done |
 | [CCS-210](F-frontend/CCS-210-f-markdowneditor-stale-onchange.md) | bug | p3 | S | [editor] Stop MarkdownEditor capturing a stale onChange |  | Done |
-| [CCS-211](F-frontend/CCS-211-f-lint-green.md) | chore | p1 | S | [lint] Make pnpm lint green again after the P1/P2 merges |  | Open |
+| [CCS-211](F-frontend/CCS-211-f-lint-green.md) | chore | p1 | S | [lint] Make pnpm lint green again after the P1/P2 merges |  | Done |
