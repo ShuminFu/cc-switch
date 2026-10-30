@@ -502,7 +502,7 @@ impl ProxyService {
 
     /// 设置 AppHandle（在应用初始化时调用）
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
-        futures::executor::block_on(async {
+        crate::services::provider::block_on_async(async {
             *self.app_handle.write().await = Some(handle);
         });
     }
@@ -926,29 +926,34 @@ impl ProxyService {
         let app_type_str = app_type.as_str();
 
         // 1) 恢复原始 Live 配置（备份 → SSOT → 清理占位符 三层兜底）
-        futures::executor::block_on(self.restore_live_config_for_app_with_fallback_inner(app_type))
-            .map_err(|e| format!("恢复 {app_type_str} Live 配置失败: {e}"))?;
+        crate::services::provider::block_on_async(
+            self.restore_live_config_for_app_with_fallback_inner(app_type),
+        )
+        .map_err(|e| format!("恢复 {app_type_str} Live 配置失败: {e}"))?;
 
         // 2) 删除该 app 的备份
-        futures::executor::block_on(self.db.delete_live_backup(app_type_str))
+        crate::services::provider::block_on_async(self.db.delete_live_backup(app_type_str))
             .map_err(|e| format!("删除 {app_type_str} Live 备份失败: {e}"))?;
 
         // 3) 设置 proxy_config.enabled = false
-        let mut config =
-            futures::executor::block_on(self.db.get_proxy_config_for_app(app_type_str))
-                .map_err(|e| format!("获取 {app_type_str} 配置失败: {e}"))?;
+        let mut config = crate::services::provider::block_on_async(
+            self.db.get_proxy_config_for_app(app_type_str),
+        )
+        .map_err(|e| format!("获取 {app_type_str} 配置失败: {e}"))?;
         if config.enabled {
             config.enabled = false;
-            futures::executor::block_on(self.db.update_proxy_config_for_app(config))
+            crate::services::provider::block_on_async(self.db.update_proxy_config_for_app(config))
                 .map_err(|e| format!("清除 {app_type_str} enabled 状态失败: {e}"))?;
         }
 
         // 4) 清除该应用的健康状态
-        futures::executor::block_on(self.db.clear_provider_health_for_app(app_type_str))
-            .map_err(|e| format!("清除 {app_type_str} 健康状态失败: {e}"))?;
+        crate::services::provider::block_on_async(
+            self.db.clear_provider_health_for_app(app_type_str),
+        )
+        .map_err(|e| format!("清除 {app_type_str} 健康状态失败: {e}"))?;
 
         // 5) 清旧标志
-        let _ = futures::executor::block_on(self.db.set_live_takeover_active(false));
+        let _ = crate::services::provider::block_on_async(self.db.set_live_takeover_active(false));
 
         Ok(())
     }
