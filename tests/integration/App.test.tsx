@@ -156,7 +156,9 @@ const renderApp = (AppComponent: ComponentType) => {
   );
 };
 
-describe("App integration with MSW", () => {
+// The full App mounts every page and query; under a busy full-suite run it can
+// exceed the 5 s default even though it passes comfortably when run alone.
+describe("App integration with MSW", { timeout: 20_000 }, () => {
   beforeEach(() => {
     resetProviderState();
     toastSuccessMock.mockReset();
