@@ -167,7 +167,9 @@ impl EventEncoder for AnthropicEventEncoder {
         }
         let mut frames = Vec::new();
         match event {
-            StreamEvent::MessageStart { id, model, usage } => {
+            StreamEvent::MessageStart {
+                id, model, usage, ..
+            } => {
                 if self.started {
                     log::debug!("[Codec/Anthropic] Ignoring a second message_start");
                 } else {
@@ -196,6 +198,7 @@ impl EventEncoder for AnthropicEventEncoder {
                 ));
             }
             StreamEvent::Usage(usage) => self.usage = Some(*usage),
+            StreamEvent::UpstreamTruncated => {}
             StreamEvent::MessageStop { stop_reason } => {
                 self.ensure_started(&mut frames);
                 let usage = self.usage.map_or_else(zero_usage, UsageIR::to_anthropic);

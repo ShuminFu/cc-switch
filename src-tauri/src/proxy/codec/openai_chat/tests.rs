@@ -50,6 +50,7 @@ fn encode_request_builds_chat_messages() {
             name: "f".into(),
             description: None,
             input_schema: json!({}),
+            strict: None,
         }],
         max_tokens: Some(64),
         temperature: Some(0.5),
@@ -103,6 +104,7 @@ fn stream_decoder_emits_ir_events_in_order() {
                 id: "c1".into(),
                 model: "m".into(),
                 usage: Some(usage),
+                created: None,
             },
             StreamEvent::PartStart {
                 index: 0,

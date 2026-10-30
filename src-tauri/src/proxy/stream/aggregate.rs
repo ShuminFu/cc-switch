@@ -9,9 +9,8 @@ use axum::http::HeaderMap;
 use serde_json::{json, Value};
 
 use super::{SseDecoder, SseEvent};
-use crate::proxy::providers::{
-    codex_chat_common::extract_reasoning_field_text, transform_codex_anthropic,
-};
+use crate::proxy::codec::anthropic::sse_aggregate;
+use crate::proxy::providers::codex_chat_common::extract_reasoning_field_text;
 use crate::proxy::ProxyError;
 
 /// 非流式响应体的 SSE 聚合器，按上游线协议选择
@@ -30,7 +29,7 @@ impl SseAggregator {
         match self {
             Self::Chat => chat_sse_to_response_value(body),
             Self::Responses => responses_sse_to_response_value(body),
-            Self::Anthropic => transform_codex_anthropic::anthropic_sse_to_message_value(body),
+            Self::Anthropic => sse_aggregate::anthropic_sse_to_message_value(body),
         }
     }
 }

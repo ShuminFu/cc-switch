@@ -7,25 +7,30 @@
 use std::pin::Pin;
 
 use bytes::Bytes;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::Stream;
 use serde_json::Value;
 
-use super::anthropic::{AnthropicCodec, AnthropicEventEncoder};
+use super::anthropic::{
+    message_events, AnthropicCodec, AnthropicEventDecoder, AnthropicEventEncoder,
+};
 use super::gemini::{AnthropicToolSchemaHints, GeminiCodec, GeminiEventDecoder, GeminiShadowSink};
 use super::openai_chat::{OpenAiChatCodec, OpenAiChatEventDecoder};
-use super::responses::{ResponsesCodec, ResponsesEventDecoder, ResponsesUpstreamOptions};
+use super::responses::{
+    CodexToolContext, ResponsesCodec, ResponsesEventDecoder, ResponsesEventEncoder,
+    ResponsesFlavor, ResponsesUpstreamOptions,
+};
 use super::side_store::{SessionSideStore, SideStoreScope};
 use super::transcode::{
-    transcode_sse_stream, transcode_sse_stream_opts, transcode_sse_stream_with, TranscodeOptions,
-    TransportErrors,
+    transcode_sse_or_json_stream, transcode_sse_stream, transcode_sse_stream_with,
+    TranscodeOptions, TransportErrors,
 };
 use super::{CodecEngine, CodecError, EventEncoder, RequestCodec, ResponseCodec};
 use crate::proxy::error::ProxyError;
 use crate::proxy::protocol::ir::StreamEvent;
 use crate::proxy::providers::gemini_shadow::GeminiShadowStore;
 use crate::proxy::providers::{
-    streaming, streaming_gemini, streaming_responses, transform, transform_gemini,
-    transform_responses,
+    streaming, streaming_codex_anthropic, streaming_gemini, streaming_responses, transform,
+    transform_codex_anthropic, transform_gemini, transform_responses,
 };
 
 /// Anthropic ← OpenAI Chat 桥接已迁移（CCS-176）
@@ -36,6 +41,9 @@ pub const ANTHROPIC_GEMINI_MIGRATED: bool = true;
 
 /// Anthropic ← OpenAI Responses 桥接已迁移（CCS-178）
 pub const ANTHROPIC_RESPONSES_MIGRATED: bool = true;
+
+/// OpenAI Responses（Codex）← Anthropic Messages 桥接已迁移（CCS-178）
+pub const RESPONSES_ANTHROPIC_MIGRATED: bool = true;
 
 /// 装箱后的客户端 SSE 字节流
 pub type ClientSseStream = Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>;
@@ -234,19 +242,6 @@ pub fn responses_to_anthropic_response(
         .map_err(transform_error)
 }
 
-/// 上游流的开头是否为 JSON 文档（`{` / `[`）；全为空白（或 BOM）时还无法判断
-fn sniff_json_document(head: &[u8]) -> Option<bool> {
-    let text = match std::str::from_utf8(head) {
-        Ok(text) => text,
-        // 末尾不完整的多字节字符留到下一块再判断
-        Err(error) => std::str::from_utf8(&head[..error.valid_up_to()]).unwrap_or_default(),
-    };
-    text.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}')
-        .bytes()
-        .next()
-        .map(|first| matches!(first, b'{' | b'['))
-}
-
 /// 忽略 `stream: true`、直接返回整个 Responses JSON 的网关：转换为完整的 Anthropic 流
 fn responses_json_to_anthropic_frames(body: &[u8]) -> Vec<Bytes> {
     let text = String::from_utf8_lossy(body);
@@ -294,77 +289,137 @@ pub fn responses_to_anthropic_sse<E: std::error::Error + Send + 'static>(
     if !engine.uses_ir(ANTHROPIC_RESPONSES_MIGRATED) {
         return Box::pin(streaming_responses::create_anthropic_sse_stream_from_responses(upstream));
     }
-    Box::pin(async_stream::stream! {
-        let mut upstream = Box::pin(upstream);
-        let mut head: Vec<u8> = Vec::new();
-        let mut is_json = false;
-        // 嗅探：看到第一个非空白字符前保留原始字节
-        loop {
-            match upstream.next().await {
-                Some(Ok(bytes)) => {
-                    head.extend_from_slice(&bytes);
-                    match sniff_json_document(&head) {
-                        None => continue,
-                        Some(json) => {
-                            is_json = json;
-                            break;
-                        }
-                    }
-                }
-                Some(Err(error)) => {
-                    log::error!("Responses stream error: {error}");
-                    let mut encoder = AnthropicEventEncoder::new();
-                    for frame in encoder.encode(&StreamEvent::Error {
-                        message: format!("Stream error: {error}"),
-                        code: Some("stream_error".to_string()),
-                    }) {
-                        yield Ok(frame);
-                    }
-                    return;
-                }
-                None => break,
-            }
-        }
+    Box::pin(transcode_sse_or_json_stream(
+        upstream,
+        Box::new(|body: &[u8]| responses_json_to_anthropic_frames(body)),
+        Box::new(ResponsesEventDecoder::new()),
+        Box::new(AnthropicEventEncoder::with_start_output_tokens()),
+        TranscodeOptions {
+            transport_errors: TransportErrors::AsEvent,
+            flush_final_event: true,
+        },
+    ))
+}
 
-        if is_json {
-            // JSON 文档（含其中的空行）原样缓冲到 EOF
-            while let Some(chunk) = upstream.next().await {
-                match chunk {
-                    Ok(bytes) => head.extend_from_slice(&bytes),
-                    Err(error) => {
-                        log::error!("Responses stream error: {error}");
-                        let mut encoder = AnthropicEventEncoder::new();
-                        for frame in encoder.encode(&StreamEvent::Error {
-                            message: format!("Stream error: {error}"),
-                            code: Some("stream_error".to_string()),
-                        }) {
-                            yield Ok(frame);
-                        }
-                        return;
-                    }
+/// 请求侧的编解码错误：客户端请求本身无法转换，是不可重试的无效请求
+fn invalid_request_error(error: CodecError) -> ProxyError {
+    match error {
+        CodecError::Invalid { message, .. } => ProxyError::InvalidRequest(message),
+        other => ProxyError::TransformError(other.to_string()),
+    }
+}
+
+/// OpenAI Responses 请求（Codex）→ Anthropic Messages 请求
+///
+/// `default_max_tokens`：请求没有 `max_output_tokens` 时注入（Anthropic 要求必填）。
+pub fn responses_to_anthropic_request(
+    body: Value,
+    default_max_tokens: u64,
+    engine: CodecEngine,
+) -> Result<Value, ProxyError> {
+    if !engine.uses_ir(RESPONSES_ANTHROPIC_MIGRATED) {
+        return transform_codex_anthropic::responses_request_to_anthropic(body, default_max_tokens);
+    }
+    let request =
+        ResponsesCodec::for_client(ResponsesFlavor::AnthropicUpstream, Default::default())
+            .decode_request(&body)
+            .map_err(invalid_request_error)?;
+    AnthropicCodec
+        .encode_request_with_default_max_tokens(&request, default_max_tokens)
+        .map_err(invalid_request_error)
+}
+
+/// Anthropic Messages 非流式响应 → OpenAI Responses 响应
+pub fn anthropic_to_responses_response(
+    body: Value,
+    tool_context: &CodexToolContext,
+    engine: CodecEngine,
+) -> Result<Value, ProxyError> {
+    if !engine.uses_ir(RESPONSES_ANTHROPIC_MIGRATED) {
+        return transform_codex_anthropic::anthropic_response_to_responses_with_context(
+            body,
+            tool_context,
+        );
+    }
+    let response = AnthropicCodec
+        .decode_response(&body)
+        .map_err(transform_error)?;
+    ResponsesCodec::for_client(ResponsesFlavor::AnthropicUpstream, tool_context.clone())
+        .encode_response(&response)
+        .map_err(transform_error)
+}
+
+/// 完整的 Anthropic 消息（或错误信封）→ Responses SSE 帧（非流式上游 → 流式客户端）
+pub fn anthropic_message_to_responses_sse(
+    body: &Value,
+    tool_context: CodexToolContext,
+    engine: CodecEngine,
+) -> Vec<Bytes> {
+    if !engine.uses_ir(RESPONSES_ANTHROPIC_MIGRATED) {
+        return streaming_codex_anthropic::responses_sse_events_from_anthropic_message(
+            body,
+            tool_context,
+        );
+    }
+    let mut encoder = ResponsesEventEncoder::new(ResponsesFlavor::AnthropicUpstream, tool_context);
+    let mut frames: Vec<Bytes> = message_events(body)
+        .iter()
+        .flat_map(|event| encoder.encode(event))
+        .collect();
+    frames.extend(encoder.finish());
+    frames
+}
+
+/// Anthropic Messages SSE → OpenAI Responses SSE
+///
+/// 与旧转换器一致：上游返回整个 JSON 消息时缓冲到 EOF 后整体转换（解析失败按没有
+/// 终止事件处理）；未以空行结束的最后一个事件仍被处理；传输错误编码为 `response.failed`。
+pub fn anthropic_to_responses_sse<E: std::error::Error + Send + 'static>(
+    upstream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
+    tool_context: CodexToolContext,
+    engine: CodecEngine,
+) -> ClientSseStream {
+    if !engine.uses_ir(RESPONSES_ANTHROPIC_MIGRATED) {
+        return Box::pin(
+            streaming_codex_anthropic::create_responses_sse_stream_from_anthropic_with_context(
+                upstream,
+                tool_context,
+            ),
+        );
+    }
+    let json_context = tool_context.clone();
+    Box::pin(transcode_sse_or_json_stream(
+        upstream,
+        Box::new(move |body: &[u8]| {
+            let text = String::from_utf8_lossy(body);
+            let candidate =
+                text.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}');
+            match serde_json::from_str::<Value>(candidate) {
+                Ok(message) => {
+                    anthropic_message_to_responses_sse(&message, json_context, CodecEngine::Ir)
+                }
+                Err(_) => {
+                    let mut encoder = ResponsesEventEncoder::new(
+                        ResponsesFlavor::AnthropicUpstream,
+                        json_context,
+                    );
+                    encoder.encode(&StreamEvent::Error {
+                        message: "Upstream Anthropic stream ended before message_stop".to_string(),
+                        code: Some("stream_truncated".to_string()),
+                    })
                 }
             }
-            for frame in responses_json_to_anthropic_frames(&head) {
-                yield Ok(frame);
-            }
-            return;
-        }
-
-        let rest = futures::stream::iter(std::iter::once(Ok::<Bytes, E>(Bytes::from(head))))
-            .chain(upstream);
-        let mut converted = Box::pin(transcode_sse_stream_opts(
-            rest,
-            Box::new(ResponsesEventDecoder::new()),
-            Box::new(AnthropicEventEncoder::with_start_output_tokens()),
-            TranscodeOptions {
-                transport_errors: TransportErrors::AsEvent,
-                flush_final_event: true,
-            },
-        ));
-        while let Some(item) = converted.next().await {
-            yield item;
-        }
-    })
+        }),
+        Box::new(AnthropicEventDecoder::new()),
+        Box::new(ResponsesEventEncoder::new(
+            ResponsesFlavor::AnthropicUpstream,
+            tool_context,
+        )),
+        TranscodeOptions {
+            transport_errors: TransportErrors::AsEvent,
+            flush_final_event: true,
+        },
+    ))
 }
 
 #[cfg(test)]

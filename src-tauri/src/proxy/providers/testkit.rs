@@ -28,16 +28,13 @@
 //! same event sequence as the unsplit input and satisfies the structural
 //! invariants. Every failure names the split offsets that produced it.
 
+use super::streaming_codex_chat;
 use super::transform::inject_openai_stream_include_usage;
-use super::transform_codex_anthropic::{
-    anthropic_response_to_responses_with_context, responses_request_to_anthropic,
-};
 use super::transform_codex_chat::{
     build_codex_tool_context_from_request, chat_completion_to_response_with_context,
     responses_to_chat_completions_with_reasoning, CodexToolContext,
 };
 use super::transform_gemini::{extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints};
-use super::{streaming_codex_anthropic, streaming_codex_chat};
 use crate::proxy::codec::bridge;
 pub use crate::proxy::codec::CodecEngine;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
@@ -486,7 +483,7 @@ pub fn convert_request_with(
         // Same default max_tokens as the forwarder. The forwarder's later cache
         // breakpoint injection and Claude Code system prompt are provider config.
         Bridge::ResponsesAnthropic => {
-            responses_request_to_anthropic(body, CODEX_ANTHROPIC_DEFAULT_MAX_TOKENS)
+            bridge::responses_to_anthropic_request(body, CODEX_ANTHROPIC_DEFAULT_MAX_TOKENS, engine)
         }
     };
     Some(result.map_err(|e| e.to_string()))
@@ -519,7 +516,7 @@ pub fn convert_non_stream_with(
             chat_completion_to_response_with_context(body, &fixture.codex_tool_context())
         }
         Bridge::ResponsesAnthropic => {
-            anthropic_response_to_responses_with_context(body, &fixture.codex_tool_context())
+            bridge::anthropic_to_responses_response(body, &fixture.codex_tool_context(), engine)
         }
     };
     Some(result.map_err(|e| e.to_string()))
@@ -573,11 +570,8 @@ pub fn stream_output_with(
             .collect(),
         ),
         Bridge::ResponsesAnthropic => futures::executor::block_on(
-            streaming_codex_anthropic::create_responses_sse_stream_from_anthropic_with_context(
-                upstream,
-                fixture.codex_tool_context(),
-            )
-            .collect(),
+            bridge::anthropic_to_responses_sse(upstream, fixture.codex_tool_context(), engine)
+                .collect(),
         ),
     }
 }

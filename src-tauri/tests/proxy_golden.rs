@@ -249,6 +249,16 @@ fn golden_responses_anthropic() {
 }
 
 #[test]
+fn golden_responses_anthropic_ir() {
+    run_bridge_with(Bridge::ResponsesAnthropic, CodecEngine::Ir);
+}
+
+#[test]
+fn codec_parity_responses_anthropic() {
+    assert_codec_parity(Bridge::ResponsesAnthropic);
+}
+
+#[test]
 fn golden_fixture_inventory() {
     let mut total = 0;
     let mut commits = Vec::new();

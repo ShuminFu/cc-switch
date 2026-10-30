@@ -18,9 +18,7 @@ use super::{
     handler_config::{parser_config_for, CLAUDE_PARSER_CONFIG, CODEX_PARSER_CONFIG},
     handler_context::RequestContext,
     protocol::{ClaudeApiFormat, WireFormat},
-    providers::{
-        transform_codex_anthropic, transform_codex_chat, transform_gemini, transform_responses,
-    },
+    providers::{transform_codex_chat, transform_gemini, transform_responses},
     response_processor::{
         process_response, read_decoded_body, rebuilt_json_response, response_usage_log_task,
         spawn_response_usage_log, transformed_sse_response,
@@ -769,15 +767,15 @@ async fn handle_codex_anthropic_to_responses_transform(
 
     let _connection_guard = connection_guard;
     let upstream_usage = raw_usage_block(&anthropic_response).cloned();
-    let responses_response =
-        transform_codex_anthropic::anthropic_response_to_responses_with_context(
-            anthropic_response,
-            &codec.tool_context,
-        )
-        .map_err(|e| {
-            log::error!("[Codex] Failed to convert Anthropic response to Responses: {e}");
-            e
-        })?;
+    let responses_response = crate::proxy::codec::bridge::anthropic_to_responses_response(
+        anthropic_response,
+        &codec.tool_context,
+        crate::settings::codec_engine(),
+    )
+    .map_err(|e| {
+        log::error!("[Codex] Failed to convert Anthropic response to Responses: {e}");
+        e
+    })?;
 
     spawn_response_usage_log(
         state,

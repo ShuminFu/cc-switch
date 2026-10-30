@@ -175,6 +175,7 @@ fn encode_request_maps_ir_fields_in_legacy_order() {
             name: "search".into(),
             description: Some("Search".into()),
             input_schema: json!({"type": "object", "properties": {"q": {"type": "string"}}}),
+            strict: None,
         }],
         tool_choice: Some(ToolChoice::Tool {
             name: "search".into(),
@@ -622,6 +623,7 @@ fn stream_decoder_emits_text_live_and_tools_at_end() {
                 id: "r".into(),
                 model: "m".into(),
                 usage: Some(usage(6)),
+                created: None,
             },
             StreamEvent::PartStart {
                 index: 0,

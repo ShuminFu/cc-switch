@@ -158,3 +158,89 @@ fn decode_error(error: super::CodecError) -> StreamEvent {
         code: Some("invalid_upstream_event".to_string()),
     }
 }
+
+/// 上游流的开头是否为 JSON 文档（`{` / `[`）；全为空白（或 BOM）时还无法判断
+fn sniff_json_document(head: &[u8]) -> Option<bool> {
+    let text = match std::str::from_utf8(head) {
+        Ok(text) => text,
+        // 末尾不完整的多字节字符留到下一块再判断
+        Err(error) => std::str::from_utf8(&head[..error.valid_up_to()]).unwrap_or_default(),
+    };
+    text.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}')
+        .bytes()
+        .next()
+        .map(|first| matches!(first, b'{' | b'['))
+}
+
+/// 整段 JSON 响应体 → 客户端 SSE 帧
+pub type JsonBodyFrames = Box<dyn FnOnce(&[u8]) -> Vec<Bytes> + Send>;
+
+/// [`transcode_sse_stream_opts`]，并兼容忽略 `stream: true`、直接返回整个 JSON 的网关
+///
+/// 看到第一个非空白字符前保留原始字节：是 `{` / `[` 时（含其中的空行）缓冲到 EOF 后交给
+/// `json_frames`，否则按 SSE 转换。缓冲期间的传输错误由 `encoder` 编码为 `stream_error`。
+pub fn transcode_sse_or_json_stream<E: std::error::Error + Send + 'static>(
+    upstream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
+    json_frames: JsonBodyFrames,
+    decoder: Box<dyn EventDecoder>,
+    mut encoder: Box<dyn EventEncoder>,
+    options: TranscodeOptions,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+    async_stream::stream! {
+        let mut upstream = Box::pin(upstream);
+        let mut head: Vec<u8> = Vec::new();
+        let mut is_json = false;
+        let mut transport_error = None;
+        loop {
+            match upstream.next().await {
+                Some(Ok(bytes)) => {
+                    head.extend_from_slice(&bytes);
+                    if let Some(json) = sniff_json_document(&head) {
+                        is_json = json;
+                        break;
+                    }
+                }
+                Some(Err(error)) => {
+                    transport_error = Some(error.to_string());
+                    break;
+                }
+                None => break,
+            }
+        }
+        if is_json {
+            while let Some(chunk) = upstream.next().await {
+                match chunk {
+                    Ok(bytes) => head.extend_from_slice(&bytes),
+                    Err(error) => {
+                        transport_error = Some(error.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(error) = transport_error {
+            log::error!("Stream error: {error}");
+            let event = StreamEvent::Error {
+                message: format!("Stream error: {error}"),
+                code: Some("stream_error".to_string()),
+            };
+            for frame in encoder.encode(&event) {
+                yield Ok(frame);
+            }
+            return;
+        }
+        if is_json {
+            for frame in json_frames(&head) {
+                yield Ok(frame);
+            }
+            return;
+        }
+
+        let rest = futures::stream::iter(std::iter::once(Ok::<Bytes, E>(Bytes::from(head))))
+            .chain(upstream);
+        let mut converted = Box::pin(transcode_sse_stream_opts(rest, decoder, encoder, options));
+        while let Some(item) = converted.next().await {
+            yield item;
+        }
+    }
+}

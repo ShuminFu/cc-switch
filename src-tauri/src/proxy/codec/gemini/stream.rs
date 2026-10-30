@@ -92,6 +92,7 @@ impl GeminiEventDecoder {
                 id: str_field(chunk, "responseId").to_string(),
                 model: str_field(chunk, "modelVersion").to_string(),
                 usage: chunk.get("usageMetadata").map(UsageIR::from_gemini),
+                created: None,
             });
         }
         if self.latest_usage.is_none() {
@@ -195,6 +196,7 @@ impl EventDecoder for GeminiEventDecoder {
                 id: String::new(),
                 model: String::new(),
                 usage: self.latest_usage.as_ref().map(UsageIR::from_gemini),
+                created: None,
             });
         }
 

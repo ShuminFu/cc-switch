@@ -5,11 +5,17 @@
 //! - 作为**客户端**（Codex ← Anthropic / Chat）：请求解码、响应编码、流式编码。
 //!
 //! 上游一侧的 reasoning 条目经 [`crate::proxy::providers::reasoning_bridge`] 的信封
-//! 装进 IR 的 reasoning 签名，由 Anthropic 客户端原样带回后还原。
+//! 装进 IR 的 reasoning 签名，由 Anthropic 客户端原样带回后还原；客户端一侧的
+//! Anthropic 签名 thinking 经 [`reasoning`] 的信封装进 `encrypted_content`。
 
+mod client_request;
+mod client_response;
+mod client_stream;
+pub(crate) mod reasoning;
 mod request;
 mod response;
 mod stream;
+pub(crate) mod tools;
 
 use serde_json::Value;
 
@@ -17,7 +23,9 @@ use super::{CodecError, EventDecoder, EventEncoder, RequestCodec, ResponseCodec,
 use crate::proxy::protocol::ir::{ChatRequest, ChatResponse};
 use crate::proxy::protocol::WireFormat;
 
+pub use client_stream::ResponsesEventEncoder;
 pub use stream::ResponsesEventDecoder;
+pub(crate) use tools::CodexToolContext;
 
 /// 工具结果为错误时，Responses `output` 数组开头的标记（Responses 没有 `is_error`）
 pub(crate) const TOOL_RESULT_ERROR_MARKER: &str = "[cc-switch:tool-result-error]";
@@ -63,15 +71,37 @@ pub struct ResponsesUpstreamOptions {
     pub codex_fast_mode: bool,
 }
 
+/// Responses 作为客户端时上游的协议
+///
+/// 两个旧转换器（Codex ← Anthropic、Codex ← Chat）对同一 Responses 请求的归一化规则
+/// 与回复的条目布局不同；迁移期间按上游保留各自的形状，统一留待旧转换器删除之后。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResponsesFlavor {
+    #[default]
+    AnthropicUpstream,
+    ChatUpstream,
+}
+
 /// OpenAI Responses 编解码
 #[derive(Debug, Clone, Default)]
 pub struct ResponsesCodec {
     upstream: ResponsesUpstreamOptions,
+    flavor: ResponsesFlavor,
+    tool_context: CodexToolContext,
 }
 
 impl ResponsesCodec {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 作为客户端时的上游协议与工具上下文（由客户端请求构建）
+    pub(crate) fn for_client(flavor: ResponsesFlavor, tool_context: CodexToolContext) -> Self {
+        Self {
+            flavor,
+            tool_context,
+            ..Self::default()
+        }
     }
 
     /// 作为上游时的请求编码选项
@@ -100,8 +130,8 @@ impl RequestCodec for ResponsesCodec {
         WireFormat::OpenAiResponses
     }
 
-    fn decode_request(&self, _body: &Value) -> Result<ChatRequest, CodecError> {
-        Err(unsupported("request decoding (Responses as client)"))
+    fn decode_request(&self, body: &Value) -> Result<ChatRequest, CodecError> {
+        client_request::decode_request(body, self.flavor)
     }
 
     fn encode_request(&self, request: &ChatRequest) -> Result<Value, CodecError> {
@@ -114,8 +144,12 @@ impl ResponseCodec for ResponsesCodec {
         response::decode_response(body)
     }
 
-    fn encode_response(&self, _response: &ChatResponse) -> Result<Value, CodecError> {
-        Err(unsupported("response encoding (Responses as client)"))
+    fn encode_response(&self, response: &ChatResponse) -> Result<Value, CodecError> {
+        Ok(client_response::encode_response(
+            response,
+            self.flavor,
+            &self.tool_context,
+        ))
     }
 }
 
@@ -125,9 +159,14 @@ impl StreamCodec for ResponsesCodec {
     }
 
     fn stream_encoder(&self) -> Result<Box<dyn EventEncoder>, CodecError> {
-        Err(unsupported("stream encoding (Responses as client)"))
+        Ok(Box::new(ResponsesEventEncoder::new(
+            self.flavor,
+            self.tool_context.clone(),
+        )))
     }
 }
 
+#[cfg(test)]
+mod client_anthropic_tests;
 #[cfg(test)]
 mod tests;

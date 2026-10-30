@@ -14,7 +14,7 @@
 //! 各桥接按 anthropic←openai_chat、gemini、responses 的顺序逐个迁移，入口见 [`bridge`]。
 //! 已迁移：anthropic←openai_chat（[`anthropic`] + [`openai_chat`]，CCS-176）、
 //! anthropic←gemini（[`anthropic`] + [`gemini`]，CCS-177）、
-//! anthropic←responses（[`anthropic`] + [`responses`]，CCS-178）。
+//! anthropic←responses、responses←anthropic（[`anthropic`] + [`responses`]，CCS-178）。
 
 // 桥接逐个迁移到编解码；尚未迁移的桥接对应的部分 IR 与编解码项暂无调用方。
 #![allow(dead_code)]

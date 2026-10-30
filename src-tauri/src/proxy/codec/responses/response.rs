@@ -69,6 +69,7 @@ pub(super) fn decode_response(body: &Value) -> Result<ChatResponse, CodecError> 
         parts,
         stop_reason,
         usage: Some(usage(body.get("usage"))),
+        created: None,
     })
 }
 

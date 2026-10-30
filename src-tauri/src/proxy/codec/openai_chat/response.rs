@@ -106,6 +106,7 @@ pub(super) fn decode_response(body: &Value) -> Result<ChatResponse, CodecError> 
         stop_reason,
         // prompt_tokens 含缓存命中，UsageIR 拆为互斥的 fresh / cache_read / cache_write
         usage: body.get("usage").map(UsageIR::from_chat_completions),
+        created: body.get("created").and_then(Value::as_u64),
     })
 }
 

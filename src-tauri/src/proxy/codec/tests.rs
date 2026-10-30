@@ -118,6 +118,7 @@ impl ResponseCodec for TextCodec {
             parts: text_parts(&body["content"])?,
             stop_reason: parse_stop_reason(&body["stop_reason"]),
             usage: None,
+            created: None,
         })
     }
 
@@ -142,6 +143,7 @@ impl EventDecoder for TextDecoder {
                 id: data["id"].as_str().unwrap_or_default().to_string(),
                 model: data["model"].as_str().unwrap_or_default().to_string(),
                 usage: None,
+                created: None,
             }],
             "content_block_start" => vec![StreamEvent::PartStart {
                 index: index(),
@@ -222,6 +224,7 @@ fn text_response(texts: &[&str], stop_reason: Option<StopReason>) -> ChatRespons
         parts: texts.iter().map(|t| Part::text(*t)).collect(),
         stop_reason,
         usage: None,
+        created: None,
     }
 }
 

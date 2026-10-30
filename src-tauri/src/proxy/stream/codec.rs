@@ -14,17 +14,14 @@ use futures::Stream;
 use serde_json::Value;
 
 use crate::proxy::codec::bridge::{
-    gemini_to_anthropic_sse, openai_chat_to_anthropic_sse, responses_to_anthropic_sse,
+    anthropic_message_to_responses_sse, anthropic_to_responses_sse, gemini_to_anthropic_sse,
+    openai_chat_to_anthropic_sse, responses_to_anthropic_sse,
 };
 use crate::proxy::codec::gemini::GeminiShadowSink;
 use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
 use crate::proxy::providers::{
     codex_chat_history::{record_responses_sse_stream, CodexChatHistoryStore},
     gemini_shadow::GeminiShadowStore,
-    streaming_codex_anthropic::{
-        create_responses_sse_stream_from_anthropic_with_context,
-        responses_sse_events_from_anthropic_message,
-    },
     streaming_codex_chat::create_responses_sse_stream_from_chat_with_context,
     transform_codex_chat::CodexToolContext,
     transform_gemini::AnthropicToolSchemaHints,
@@ -149,16 +146,17 @@ impl StreamDecoder for AnthropicToResponses {
         WireFormat::OpenAiResponses
     }
     fn decode(self: Box<Self>, upstream: ByteStream) -> ByteStream {
-        Box::pin(create_responses_sse_stream_from_anthropic_with_context(
-            upstream,
-            self.tool_context,
-        ))
+        anthropic_to_responses_sse(upstream, self.tool_context, crate::settings::codec_engine())
     }
 }
 
 impl StreamEncoder for AnthropicToResponses {
     fn encode(self: Box<Self>, message: &Value) -> Vec<Bytes> {
-        responses_sse_events_from_anthropic_message(message, self.tool_context)
+        anthropic_message_to_responses_sse(
+            message,
+            self.tool_context,
+            crate::settings::codec_engine(),
+        )
     }
 }
 
@@ -194,6 +192,10 @@ pub(crate) fn anthropic_decoder(
 mod tests {
     use super::*;
     use crate::proxy::providers::streaming::create_anthropic_sse_stream;
+    use crate::proxy::providers::streaming_codex_anthropic::{
+        create_responses_sse_stream_from_anthropic_with_context,
+        responses_sse_events_from_anthropic_message,
+    };
     use futures::StreamExt;
 
     fn upstream(chunks: &[&str]) -> ByteStream {

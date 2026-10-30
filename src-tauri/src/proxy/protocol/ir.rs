@@ -178,6 +178,8 @@ pub struct ToolDef {
     pub description: Option<String>,
     /// 参数的 JSON Schema
     pub input_schema: Value,
+    /// 严格参数校验（OpenAI `strict`、Anthropic `strict`）
+    pub strict: Option<bool>,
 }
 
 /// 工具选择策略
@@ -234,6 +236,8 @@ pub struct ChatResponse {
     pub parts: Vec<Part>,
     pub stop_reason: Option<StopReason>,
     pub usage: Option<UsageIR>,
+    /// 上游给出的创建时间（Unix 秒），没有时为 `None`
+    pub created: Option<u64>,
 }
 
 impl ChatResponse {
@@ -251,6 +255,7 @@ impl ChatResponse {
             id: self.id.clone(),
             model: self.model.clone(),
             usage: None,
+            created: self.created,
         }];
         for (index, part) in self.parts.iter().enumerate() {
             events.push(StreamEvent::PartStart {
@@ -299,6 +304,8 @@ pub enum StreamEvent {
         id: String,
         model: String,
         usage: Option<UsageIR>,
+        /// 上游给出的创建时间（Unix 秒，Chat `created`），没有时为 `None`
+        created: Option<u64>,
     },
     /// 新内容块开始，`part` 为初始内容（可增量字段通常为空）
     PartStart { index: usize, part: Part },
@@ -310,6 +317,9 @@ pub enum StreamEvent {
     Usage(UsageIR),
     /// 回复结束
     MessageStop { stop_reason: Option<StopReason> },
+    /// 上游没有发出终止事件就结束了；解码端随后补发的 `MessageStop` 是截断收尾，
+    /// 未完成的块不能当作完整内容（例如工具参数可能不完整）
+    UpstreamTruncated,
     /// 上游在流中报告的错误；`code` 为上游给出的错误类型（如 `overloaded_error`）
     Error {
         message: String,
@@ -359,9 +369,15 @@ impl StreamAggregator {
             return Err(AggregateError::AfterStop);
         }
         match event {
-            StreamEvent::MessageStart { id, model, usage } => {
+            StreamEvent::MessageStart {
+                id,
+                model,
+                usage,
+                created,
+            } => {
                 self.response.id = id;
                 self.response.model = model;
+                self.response.created = created;
                 if usage.is_some() {
                     self.response.usage = usage;
                 }
@@ -386,6 +402,7 @@ impl StreamAggregator {
                 }
             }
             StreamEvent::Usage(usage) => self.response.usage = Some(usage),
+            StreamEvent::UpstreamTruncated => {}
             StreamEvent::MessageStop { stop_reason } => {
                 self.response.stop_reason = stop_reason;
                 self.stopped = true;
@@ -458,6 +475,7 @@ mod tests {
             ],
             stop_reason: Some(StopReason::ToolUse),
             usage: Some(usage()),
+            created: None,
         }
     }
 
@@ -470,6 +488,7 @@ mod tests {
                 id: "msg_1".into(),
                 model: "claude".into(),
                 usage: None,
+                created: None,
             })
         );
         assert_eq!(
@@ -564,6 +583,7 @@ mod tests {
             id: "msg_1".into(),
             model: "m".into(),
             usage,
+            created: None,
         };
         let response = aggregate([start(Some(usage()))]).unwrap();
         assert_eq!(response.usage, Some(usage()));
@@ -749,6 +769,7 @@ mod tests {
                 parts,
                 stop_reason,
                 usage,
+                created: None,
             })
     }
 

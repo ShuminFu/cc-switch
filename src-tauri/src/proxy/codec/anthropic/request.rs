@@ -242,6 +242,7 @@ fn decode_tools(tools: Option<&Value>) -> Vec<ToolDef> {
                 .get("input_schema")
                 .cloned()
                 .unwrap_or_else(|| json!({})),
+            strict: None,
         })
         .collect()
 }

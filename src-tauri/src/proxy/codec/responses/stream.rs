@@ -160,6 +160,7 @@ impl ResponsesEventDecoder {
             id: self.message_id.clone().unwrap_or_default(),
             model: self.model.clone().unwrap_or_default(),
             usage,
+            created: None,
         }
     }
 

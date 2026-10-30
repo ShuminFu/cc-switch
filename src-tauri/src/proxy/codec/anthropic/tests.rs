@@ -158,6 +158,7 @@ fn encode_response_writes_blocks_stop_reason_and_usage() {
         ],
         stop_reason: Some(StopReason::ToolUse),
         usage: Some(usage()),
+        created: None,
     };
     let body = AnthropicCodec.encode_response(&response).unwrap();
     assert_eq!(
@@ -210,6 +211,7 @@ fn non_stream_response_encodes_as_anthropic_sse() {
         ],
         stop_reason: Some(StopReason::EndTurn),
         usage: Some(usage()),
+        created: None,
     };
     let frames = frames_text(AnthropicCodec.encode_response_as_stream(&response).unwrap());
     let expected = [
@@ -245,6 +247,7 @@ fn stream_encoder_message_start_usage_and_terminal_events() {
         id: "m1".into(),
         model: "x".into(),
         usage: Some(usage()),
+        created: None,
     }));
     assert!(start[0]
         .contains(r#""usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":4}"#));
@@ -282,17 +285,12 @@ fn stream_encoder_message_start_usage_and_terminal_events() {
 }
 
 #[test]
-fn upstream_directions_are_unsupported() {
+fn upstream_directions_are_available() {
+    // 作为上游的方向由 Codex ← Anthropic 桥接使用（CCS-178）；空历史是无效请求
     assert!(matches!(
         AnthropicCodec.encode_request(&ChatRequest::default()),
-        Err(CodecError::Unsupported { .. })
+        Err(CodecError::Invalid { .. })
     ));
-    assert!(matches!(
-        AnthropicCodec.decode_response(&json!({})),
-        Err(CodecError::Unsupported { .. })
-    ));
-    assert!(matches!(
-        AnthropicCodec.stream_decoder(),
-        Err(CodecError::Unsupported { .. })
-    ));
+    assert!(AnthropicCodec.decode_response(&json!({})).is_ok());
+    assert!(AnthropicCodec.stream_decoder().is_ok());
 }
