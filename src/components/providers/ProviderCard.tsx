@@ -18,6 +18,7 @@ import { PROVIDER_TYPES, TEMPLATE_TYPES } from "@/config/constants";
 import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
+import { BudgetLimitBadge } from "@/components/usage/BudgetLimitBadge";
 import {
   extractCodexBaseUrl,
   extractCodexExperimentalBearerToken,
@@ -453,6 +454,8 @@ export function ProviderCard({
                 failoverPriority && (
                   <FailoverPriorityBadge priority={failoverPriority} />
                 )}
+
+              <BudgetLimitBadge provider={provider} appId={appId} />
 
               {provider.category === "third_party" &&
                 provider.meta?.isPartner && (
