@@ -2124,11 +2124,13 @@ impl ProviderService {
         // For other apps: Check if sync is needed (if this is current provider, or no current provider)
         let current = state.db.get_current_provider(app_type.as_str())?;
         if current.is_none() {
-            // No current provider, set as current and sync
+            // No current provider: write live first, then mark it current. If the
+            // live write fails the provider row is kept but stays non-current, so a
+            // later switch cannot backfill unrelated live content into it (SVC-01).
+            write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
             state
                 .db
                 .set_current_provider(app_type.as_str(), &provider.id)?;
-            write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
         }
 
         Ok(true)
@@ -2591,6 +2593,57 @@ impl ProviderService {
         Self::switch_normal(state, app_type, id, &providers)
     }
 
+    /// Persist the device-level and DB "current provider" pointers after live has
+    /// been written for `id`. On failure, restore the previous local pointer and
+    /// the previous provider's live config so pointers and live never disagree.
+    fn commit_current_pointers(
+        state: &AppState,
+        app_type: &AppType,
+        id: &str,
+        previous_live_provider: Option<&Provider>,
+    ) -> Result<(), AppError> {
+        let previous_local = crate::settings::get_current_provider(app_type);
+
+        // Local settings first (device-level, takes priority), then DB is_current
+        // (default for new devices). The DB update is one transaction, so on its
+        // failure only the local pointer needs to be put back.
+        let commit = crate::settings::set_current_provider(app_type, Some(id)).and_then(|()| {
+            state
+                .db
+                .set_current_provider(app_type.as_str(), id)
+                .inspect_err(|_| {
+                    if let Err(e) =
+                        crate::settings::set_current_provider(app_type, previous_local.as_deref())
+                    {
+                        log::warn!(
+                            "Failed to restore local current provider for {}: {e}",
+                            app_type.as_str()
+                        );
+                    }
+                })
+        });
+
+        let Err(err) = commit else {
+            return Ok(());
+        };
+
+        if let Some(previous) = previous_live_provider {
+            if let Err(restore_err) =
+                write_live_with_common_config(state.db.as_ref(), app_type, previous)
+            {
+                log::error!(
+                    "Failed to restore live config of '{}' after pointer commit failure: {restore_err}",
+                    previous.id
+                );
+                return Err(AppError::Message(format!(
+                    "Failed to persist current provider '{id}': {err}; additionally failed to restore live config of '{}': {restore_err}",
+                    previous.id
+                )));
+            }
+        }
+        Err(err)
+    }
+
     /// Normal switch flow (non-proxy mode)
     fn switch_normal(
         state: &AppState,
@@ -2626,6 +2679,12 @@ impl ProviderService {
         // Backfill: Backfill current live config to current provider
         // Use effective current provider (validated existence) to ensure backfill targets valid provider
         let current_id = crate::settings::get_effective_current_provider(&state.db, &app_type)?;
+        // The provider whose config is in live right now (after backfill). Used to
+        // restore live if committing the new "current" pointers fails afterwards.
+        let mut previous_live_provider: Option<Provider> = current_id
+            .as_ref()
+            .filter(|current_id| current_id.as_str() != id)
+            .and_then(|current_id| providers.get(current_id).cloned());
 
         if let Some(current_id) = current_id {
             if current_id != id {
@@ -2661,23 +2720,24 @@ impl ProviderService {
                                     .warnings
                                     .push(format!("backfill_failed:{current_id}"));
                             }
+                            previous_live_provider = Some(current_provider);
                         }
                     }
                 }
             }
         }
 
+        // Sync to live first (write_gemini_live handles security flag internally for
+        // Gemini). The "current" pointers are committed only once live holds the
+        // target provider: if they named the target while live still held the
+        // previous provider, the next switch would backfill the previous
+        // provider's credentials into the target's record (SVC-01).
+        write_live_with_common_config(state.db.as_ref(), &app_type, provider)?;
+
         // Additive mode apps skip setting is_current (no such concept)
         if !app_type.is_additive_mode() {
-            // Update local settings (device-level, takes priority)
-            crate::settings::set_current_provider(&app_type, Some(id))?;
-
-            // Update database is_current (as default for new devices)
-            state.db.set_current_provider(app_type.as_str(), id)?;
+            Self::commit_current_pointers(state, &app_type, id, previous_live_provider.as_ref())?;
         }
-
-        // Sync to live (write_gemini_live handles security flag internally for Gemini)
-        write_live_with_common_config(state.db.as_ref(), &app_type, provider)?;
 
         // Hermes is additive, so "switching" doesn't overwrite a live config file
         // — we instead update the top-level `model:` section to point at this
