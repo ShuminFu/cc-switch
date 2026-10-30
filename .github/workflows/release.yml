@@ -48,6 +48,12 @@ jobs:
         with:
           node-version-file: .node-version
 
+      - name: Check resolved Node version
+        shell: bash
+        run: |
+          node --version
+          test "$(node --version)" = "v$(tr -d '[:space:]' < .node-version)"
+
       - name: Check tag against manifest versions and CHANGELOG
         run: node scripts/check-versions.mjs "$GITHUB_REF_NAME"
 
@@ -79,6 +85,12 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .node-version
+
+      - name: Check resolved Node version
+        shell: bash
+        run: |
+          node --version
+          test "$(node --version)" = "v$(tr -d '[:space:]' < .node-version)"
 
       # rust-toolchain.toml pins the channel; the target adds below apply to
       # that toolchain, so only one toolchain is used for the build (CCS-025).
