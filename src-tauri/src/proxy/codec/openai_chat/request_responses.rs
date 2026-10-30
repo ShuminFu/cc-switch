@@ -14,10 +14,10 @@ use serde_json::{json, Map, Value};
 use super::request::{document_part, image_part};
 use crate::provider::CodexChatReasoningConfig;
 use crate::proxy::codec::json_number as number;
-use crate::proxy::protocol::ir::{ChatRequest, Message, Part, Role, ToolChoice};
-use crate::proxy::providers::transform::{
+use crate::proxy::codec::openai_chat::support::{
     inject_openai_stream_include_usage, is_openai_o_series, supports_reasoning_effort,
 };
+use crate::proxy::protocol::ir::{ChatRequest, Message, Part, Role, ToolChoice};
 
 /// Responses 请求中原样转发给 Chat 上游的字段
 const PASSTHROUGH_FIELDS: &[&str] = &[

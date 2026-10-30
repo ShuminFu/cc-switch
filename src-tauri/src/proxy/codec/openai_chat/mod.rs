@@ -17,6 +17,7 @@ mod request_responses;
 mod response;
 mod stream;
 mod stream_responses;
+pub mod support;
 
 use serde_json::Value;
 

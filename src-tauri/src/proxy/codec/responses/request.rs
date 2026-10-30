@@ -11,12 +11,12 @@ use serde_json::{json, Map, Value};
 use super::{ResponsesUpstreamOptions, TOOL_RESULT_ERROR_MARKER};
 use crate::proxy::codec::json_number as number;
 use crate::proxy::codec::openai_chat::request::reasoning_effort;
+use crate::proxy::codec::openai_chat::support::{
+    clean_schema, strip_leading_anthropic_billing_header, supports_reasoning_effort,
+};
 use crate::proxy::json_canonical::canonical_json_string;
 use crate::proxy::protocol::ir::{ChatRequest, MediaSource, Message, Part, Role, ToolChoice};
 use crate::proxy::providers::reasoning_bridge::decode_openai_reasoning_item;
-use crate::proxy::providers::transform::{
-    clean_schema, strip_leading_anthropic_billing_header, supports_reasoning_effort,
-};
 
 /// Codex OAuth 后端要求的 include 项（无服务端状态时保留多轮 reasoning）
 const REASONING_MARKER: &str = "reasoning.encrypted_content";

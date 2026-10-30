@@ -176,3 +176,8 @@ impl StreamCodec for GeminiCodec {
 
 #[cfg(test)]
 mod tests;
+
+/// 请求体中的模型名（Gemini 路由用）
+pub fn extract_gemini_model(body: &Value) -> Option<&str> {
+    body.get("model").and_then(|value| value.as_str())
+}

@@ -11,11 +11,13 @@
 mod client_request;
 mod client_response;
 mod client_stream;
+pub(crate) mod errors;
 pub(crate) mod reasoning;
 mod request;
 mod response;
 mod stream;
 pub(crate) mod tools;
+pub(crate) mod usage;
 
 use serde_json::Value;
 

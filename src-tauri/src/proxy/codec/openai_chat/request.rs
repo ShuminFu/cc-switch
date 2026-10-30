@@ -5,12 +5,12 @@
 use serde_json::{json, Map, Value};
 
 use crate::proxy::codec::json_number as number;
-use crate::proxy::protocol::ir::{
-    ChatRequest, MediaSource, Message, Part, ReasoningConfig, Role, ToolChoice,
-};
-use crate::proxy::providers::transform::{
+use crate::proxy::codec::openai_chat::support::{
     clean_schema, is_openai_o_series, strip_leading_anthropic_billing_header,
     supports_reasoning_effort,
+};
+use crate::proxy::protocol::ir::{
+    ChatRequest, MediaSource, Message, Part, ReasoningConfig, Role, ToolChoice,
 };
 
 pub(super) fn encode_request(request: &ChatRequest, preserve_reasoning_content: bool) -> Value {
