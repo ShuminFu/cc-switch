@@ -404,6 +404,9 @@ fn convert_messages_to_contents(
                         .or_insert_with(|| name.to_string());
                 }
             }
+            // PROV-11: restore thoughtSignatures carried in the stateless
+            // envelope; the shadow store (when it still has the turn) wins.
+            merge_thought_signatures_from_envelope(blocks, &mut thought_signature_by_id);
         }
     }
 
@@ -477,6 +480,47 @@ fn convert_messages_to_contents(
     }
 
     Ok(contents)
+}
+
+/// Decode `ccswitch-gemini-thought-v1` envelopes in an assistant message and map
+/// each signature onto the `tool_use` id at its recorded ordinal (names must
+/// match, so a reordered or edited message cannot misroute a signature).
+fn merge_thought_signatures_from_envelope(
+    blocks: &[Value],
+    thought_signature_by_id: &mut HashMap<String, String>,
+) {
+    let tool_uses: Vec<(&str, &str)> = blocks
+        .iter()
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .map(|b| {
+            (
+                b.get("id").and_then(Value::as_str).unwrap_or(""),
+                b.get("name").and_then(Value::as_str).unwrap_or(""),
+            )
+        })
+        .collect();
+    for block in blocks {
+        let data = match block.get("type").and_then(Value::as_str) {
+            Some("redacted_thinking") => block.get("data"),
+            Some("thinking") => block.get("signature"),
+            _ => None,
+        };
+        let Some(signatures) = data
+            .and_then(Value::as_str)
+            .and_then(super::ir::gemini::decode_thought_envelope)
+        else {
+            continue;
+        };
+        for signature in signatures {
+            if let Some((id, name)) = tool_uses.get(signature.ordinal) {
+                if !id.is_empty() && *name == signature.name {
+                    thought_signature_by_id
+                        .entry((*id).to_string())
+                        .or_insert(signature.signature);
+                }
+            }
+        }
+    }
 }
 
 fn find_matching_shadow_turn_for_assistant_message(
@@ -672,11 +716,13 @@ fn convert_message_content_to_parts(
                 // on every functionCall in a multi-turn tool-use exchange.
                 // Without replaying the stored signature the upstream may
                 // reject with "missing a `thought_signature`".
+                // `thoughtSignature` is a Part-level field, a sibling of
+                // `functionCall` (matching the shadow-replay shape).
+                let mut part = json!({ "functionCall": function_call });
                 if let Some(sig) = thought_signature_by_id.get(id) {
-                    function_call["thoughtSignature"] = json!(sig);
+                    part["thoughtSignature"] = json!(sig);
                 }
-
-                parts.push(json!({ "functionCall": function_call }));
+                parts.push(part);
             }
             "tool_result" => {
                 let tool_use_id = block
@@ -2378,5 +2424,97 @@ mod tests {
                 .is_none(),
             "functionResponse.id must also be omitted for synthesized ids"
         );
+    }
+
+    /// PROV-11: with no shadow store at all (proxy restart / eviction), a
+    /// Gemini tool turn replayed by the client keeps its `thoughtSignature`s and
+    /// real `functionCall.id`s through the stateless envelope.
+    #[test]
+    fn thought_signatures_round_trip_without_shadow_store() {
+        let gemini = json!({
+            "responseId": "r1",
+            "modelVersion": "gemini-3-pro",
+            "candidates": [{
+                "content": {"role": "model", "parts": [
+                    {"text": "Checking."},
+                    {"functionCall": {"id": "fc_paris", "name": "get_weather", "args": {"city": "Paris"}},
+                     "thoughtSignature": "sig-paris"},
+                    {"functionCall": {"name": "get_weather", "args": {"city": "Rome"}},
+                     "thoughtSignature": "sig-rome"},
+                    {"functionCall": {"name": "noop", "args": {}}}
+                ]},
+                "finishReason": "STOP"
+            }]
+        });
+        let anthropic = gemini_to_anthropic(gemini).unwrap();
+        let content = anthropic["content"].as_array().unwrap();
+        assert_eq!(content[1]["type"], "redacted_thinking");
+        assert!(content[1]["data"]
+            .as_str()
+            .unwrap()
+            .starts_with(super::super::ir::gemini::THOUGHT_ENVELOPE_PREFIX));
+        let tool_ids: Vec<String> = content
+            .iter()
+            .filter(|b| b["type"] == "tool_use")
+            .map(|b| b["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(tool_ids[0], "fc_paris");
+
+        let request = json!({
+            "model": "gemini-3-pro",
+            "messages": [
+                {"role": "user", "content": "weather?"},
+                {"role": "assistant", "content": anthropic["content"].clone()},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": tool_ids[0], "content": "sunny"},
+                    {"type": "tool_result", "tool_use_id": tool_ids[1], "content": "rainy"},
+                    {"type": "tool_result", "tool_use_id": tool_ids[2], "content": "ok"}
+                ]}
+            ]
+        });
+        let result = anthropic_to_gemini_with_shadow(request, None, None, None).unwrap();
+        let parts = result["contents"][1]["parts"].as_array().unwrap();
+        let calls: Vec<&Value> = parts
+            .iter()
+            .filter(|p| p.get("functionCall").is_some())
+            .collect();
+        assert_eq!(
+            calls.len(),
+            3,
+            "envelope must not become a Gemini part: {parts:?}"
+        );
+        assert_eq!(calls[0]["functionCall"]["id"], "fc_paris");
+        assert_eq!(calls[0]["thoughtSignature"], "sig-paris");
+        assert!(
+            calls[1]["functionCall"].get("id").is_none(),
+            "synthesized id leaked"
+        );
+        assert_eq!(calls[1]["thoughtSignature"], "sig-rome");
+        assert!(calls[2].get("thoughtSignature").is_none());
+    }
+
+    #[test]
+    fn thought_envelope_ignores_mismatched_tool_names() {
+        let envelope = super::super::ir::gemini::encode_thought_envelope(&[
+            super::super::ir::gemini::ThoughtSignature {
+                ordinal: 0,
+                name: "other".into(),
+                signature: "sig".into(),
+            },
+        ])
+        .unwrap();
+        let request = json!({
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "redacted_thinking", "data": envelope},
+                    {"type": "tool_use", "id": "call_1", "name": "lookup", "input": {}}
+                ]},
+                {"role": "user", "content": "ack"}
+            ]
+        });
+        let result = anthropic_to_gemini_with_shadow(request, None, None, None).unwrap();
+        assert!(result["contents"][0]["parts"][0]
+            .get("thoughtSignature")
+            .is_none());
     }
 }

@@ -3,6 +3,7 @@
 //! streaming and non-streaming Gemini→Anthropic bridges.
 
 use super::{Part, Response, StopReason, ToolInput, Usage};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::{json, Value};
 
 /// Gemini `usageMetadata` → IR.
@@ -63,11 +64,82 @@ pub(crate) fn decode_finish_reason(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Opaque replay state (PROV-11)
+// ---------------------------------------------------------------------------
+
+/// Prefix of the stateless envelope that carries Gemini `thoughtSignature`s
+/// through Anthropic clients inside a `redacted_thinking.data` field.
+pub(crate) const THOUGHT_ENVELOPE_PREFIX: &str = "ccswitch-gemini-thought-v1:";
+
+/// One function call's replay state: its ordinal among the message's
+/// `tool_use` blocks, its name (a consistency check) and its signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ThoughtSignature {
+    pub ordinal: usize,
+    pub name: String,
+    pub signature: String,
+}
+
+/// Encode the signatures of one assistant turn. Keys are tool-call ordinals,
+/// not ids, so the envelope stays deterministic even when the bridge had to
+/// synthesize ids.
+pub(crate) fn encode_thought_envelope(signatures: &[ThoughtSignature]) -> Option<String> {
+    if signatures.is_empty() {
+        return None;
+    }
+    let calls: Vec<Value> = signatures
+        .iter()
+        .map(|s| json!({"i": s.ordinal, "name": s.name, "sig": s.signature}))
+        .collect();
+    let bytes = serde_json::to_vec(&json!({ "calls": calls })).ok()?;
+    Some(format!(
+        "{THOUGHT_ENVELOPE_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(bytes)
+    ))
+}
+
+pub(crate) fn decode_thought_envelope(data: &str) -> Option<Vec<ThoughtSignature>> {
+    let payload = data.strip_prefix(THOUGHT_ENVELOPE_PREFIX)?;
+    let value: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()?;
+    Some(
+        value
+            .get("calls")?
+            .as_array()?
+            .iter()
+            .filter_map(|call| {
+                Some(ThoughtSignature {
+                    ordinal: call.get("i")?.as_u64()? as usize,
+                    name: call.get("name")?.as_str()?.to_string(),
+                    signature: call.get("sig")?.as_str()?.to_string(),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// `redacted_thinking` part carrying the envelope, when any call is signed.
+pub(crate) fn thought_envelope_part(signatures: &[ThoughtSignature]) -> Option<Part> {
+    encode_thought_envelope(signatures).map(|data| Part::RedactedThinking { data })
+}
+
+fn part_thought_signature(part: &Value) -> Option<&str> {
+    part.get("thoughtSignature")
+        .or_else(|| part.get("thought_signature"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+}
+
 /// Candidate `content.parts` → IR parts. `thought: true` parts become thinking
 /// (PROV-06); function calls must already carry an id (the bridge synthesizes
 /// missing ones before calling this so its shadow store sees the same ids).
+/// Function-call `thoughtSignature`s are carried statelessly in a
+/// `redacted_thinking` envelope placed before the first tool call (PROV-11).
 pub(crate) fn decode_parts(parts: &[Value]) -> Vec<Part> {
     let mut content = Vec::new();
+    let mut signatures = Vec::new();
+    let mut tool_ordinal = 0usize;
+    let mut first_tool_position = None;
     for part in parts {
         let text = part
             .get("text")
@@ -87,20 +159,35 @@ pub(crate) fn decode_parts(parts: &[Value]) -> Vec<Part> {
             continue;
         }
         if let Some(call) = part.get("functionCall") {
+            let name = call
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            if let Some(signature) = part_thought_signature(part) {
+                signatures.push(ThoughtSignature {
+                    ordinal: tool_ordinal,
+                    name: name.clone(),
+                    signature: signature.to_string(),
+                });
+            }
+            tool_ordinal += 1;
+            first_tool_position.get_or_insert(content.len());
             content.push(Part::ToolUse {
                 id: call
                     .get("id")
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
-                name: call
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
+                name,
                 input: ToolInput::Json(call.get("args").cloned().unwrap_or_else(|| json!({}))),
             });
         }
+    }
+    if let (Some(position), Some(envelope)) =
+        (first_tool_position, thought_envelope_part(&signatures))
+    {
+        content.insert(position, envelope);
     }
     content
 }

@@ -908,6 +908,31 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
         // tool-call boundaries, and flush in original order.
         // ------------------------------------------------------------------
         let tool_calls = tool_call_snapshots;
+        // PROV-11: carry the calls' thoughtSignatures statelessly so a tool
+        // loop survives a proxy restart or shadow-store eviction.
+        let signatures: Vec<super::ir::gemini::ThoughtSignature> = tool_calls
+            .iter()
+            .enumerate()
+            .filter_map(|(ordinal, call)| {
+                Some(super::ir::gemini::ThoughtSignature {
+                    ordinal,
+                    name: call.name.clone(),
+                    signature: call.thought_signature.clone().filter(|s| !s.is_empty())?,
+                })
+            })
+            .collect();
+        if let Some(data) = super::ir::gemini::encode_thought_envelope(&signatures) {
+            let index = next_content_index;
+            next_content_index += 1;
+            let start_event = json!({
+                "type": "content_block_start",
+                "index": index,
+                "content_block": { "type": "redacted_thinking", "data": data }
+            });
+            yield Ok(encode_sse("content_block_start", &start_event));
+            let stop_event = json!({ "type": "content_block_stop", "index": index });
+            yield Ok(encode_sse("content_block_stop", &stop_event));
+        }
         for tool_call in &tool_calls {
             let index = next_content_index;
             next_content_index += 1;
