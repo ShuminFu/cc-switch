@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { ModelOrderButtons, moveItem } from "./shared/ModelOrderButtons";
 import {
   useState,
   useRef,
@@ -157,7 +158,8 @@ export function HermesFormFields({
   onRateLimitDelayChange,
 }: HermesFormFieldsProps) {
   const { t } = useTranslation();
-  const [expandedModels, setExpandedModels] = useState<Record<number, boolean>>(
+  // Keyed by the stable row key, not the index (FE-PROV-11).
+  const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>(
     {},
   );
   const [fetchedModels, setFetchedModels] = useState<FetchedModel[]>([]);
@@ -211,7 +213,15 @@ export function HermesFormFields({
   );
 
   const toggleModelAdvanced = (index: number) => {
-    setExpandedModels((prev) => ({ ...prev, [index]: !prev[index] }));
+    const key = modelKeys[index];
+    setExpandedModels((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Reorder models; the first one becomes model.default on switch.
+  const handleMoveModel = (from: number, to: number) => {
+    if (to < 0 || to >= models.length) return;
+    modelKeysRef.current = moveItem(modelKeysRef.current, from, to);
+    onModelsChange(moveItem(models, from, to));
   };
 
   const handleAddModel = () => {
@@ -250,13 +260,13 @@ export function HermesFormFields({
   }, [baseUrl, apiKey, t]);
 
   const handleRemoveModel = (index: number) => {
-    modelKeysRef.current.splice(index, 1);
+    const [removedKey] = modelKeysRef.current.splice(index, 1);
     const next = [...models];
     next.splice(index, 1);
     onModelsChange(next);
     setExpandedModels((prev) => {
       const updated = { ...prev };
-      delete updated[index];
+      delete updated[removedKey];
       return updated;
     });
   };
@@ -477,11 +487,19 @@ export function HermesFormFields({
                       })}
                     />
                   </div>
+                  <ModelOrderButtons
+                    index={index}
+                    count={models.length}
+                    onMove={handleMoveModel}
+                  />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     onClick={() => handleRemoveModel(index)}
+                    aria-label={t("providerForm.removeModel", {
+                      defaultValue: "Remove model",
+                    })}
                     className="h-9 w-9 mt-5 text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -489,7 +507,7 @@ export function HermesFormFields({
                 </div>
 
                 <AdvancedSection
-                  open={expandedModels[index] ?? false}
+                  open={expandedModels[modelKeys[index]] ?? false}
                   onOpenChange={() => toggleModelAdvanced(index)}
                   labelKey="hermes.form.advancedOptions"
                 >
