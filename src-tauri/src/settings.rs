@@ -116,14 +116,24 @@ pub struct WebDavSyncSettings {
     pub base_url: String,
     #[serde(default)]
     pub username: String,
+    /// In memory this always holds the real password. On disk it is blank
+    /// when the password lives in the OS keychain (see `password_in_keychain`).
     #[serde(default)]
     pub password: String,
+    /// Set in `settings.json` when the password is stored in the OS keychain
+    /// (CMD-04). Managed by `crate::secrets::sync_credentials`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub password_in_keychain: bool,
     #[serde(default = "default_remote_root")]
     pub remote_root: String,
     #[serde(default = "default_profile")]
     pub profile: String,
     #[serde(default)]
     pub status: WebDavSyncStatus,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Default for WebDavSyncSettings {
@@ -134,6 +144,7 @@ impl Default for WebDavSyncSettings {
             base_url: String::new(),
             username: String::new(),
             password: String::new(),
+            password_in_keychain: false,
             remote_root: default_remote_root(),
             profile: default_profile(),
             status: WebDavSyncStatus::default(),
@@ -193,8 +204,14 @@ pub struct S3SyncSettings {
     pub bucket: String,
     #[serde(default)]
     pub access_key_id: String,
+    /// In memory this always holds the real secret. On disk it is blank when
+    /// the secret lives in the OS keychain (see `secret_in_keychain`).
     #[serde(default)]
     pub secret_access_key: String,
+    /// Set in `settings.json` when the secret access key is stored in the OS
+    /// keychain (CMD-04). Managed by `crate::secrets::sync_credentials`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub secret_in_keychain: bool,
     #[serde(default)]
     pub endpoint: String,
     #[serde(default = "default_remote_root")]
@@ -214,6 +231,7 @@ impl Default for S3SyncSettings {
             bucket: String::new(),
             access_key_id: String::new(),
             secret_access_key: String::new(),
+            secret_in_keychain: false,
             endpoint: String::new(),
             remote_root: default_remote_root(),
             profile: default_profile(),
@@ -277,6 +295,25 @@ impl S3SyncSettings {
             && self.access_key_id.is_empty()
             && self.secret_access_key.is_empty()
     }
+}
+
+/// End-to-end encryption of sync artifacts (SEC-06 / SVC-04).
+///
+/// Applies to both WebDAV and S3 sync. Managed only by the dedicated
+/// `sync_encryption_*` commands, never by `save_settings`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncEncryptionSettings {
+    /// When true, uploads are encrypted and refused if the passphrase is
+    /// unavailable (never silently uploaded in plaintext).
+    #[serde(default)]
+    pub enabled: bool,
+    /// In memory the real passphrase; blank on disk when it is stored in the
+    /// OS keychain (see `passphrase_in_keychain`).
+    #[serde(default)]
+    pub passphrase: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub passphrase_in_keychain: bool,
 }
 
 /// 本机自动迁移状态。
@@ -468,6 +505,10 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_sync: Option<S3SyncSettings>,
 
+    // ===== 同步加密设置 =====
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_encryption: Option<SyncEncryptionSettings>,
+
     // ===== WebDAV 备份设置（旧版，保留向后兼容）=====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webdav_backup: Option<serde_json::Value>,
@@ -549,6 +590,7 @@ impl Default for AppSettings {
             skill_storage_location: SkillStorageLocation::default(),
             webdav_sync: None,
             s3_sync: None,
+            sync_encryption: None,
             webdav_backup: None,
             backup_interval_hours: None,
             backup_retain_count: None,
@@ -644,7 +686,16 @@ impl AppSettings {
         let Some(path) = Self::settings_path() else {
             return Self::default();
         };
-        Self::load_from_path(&path)
+        let settings = Self::load_from_path(&path);
+        // CMD-04 migration: settings written by older versions (or while no
+        // keychain was available) hold credentials in plaintext. Re-save once
+        // so they move into the keychain; on failure they stay where they are.
+        if crate::secrets::sync_credentials::has_plaintext_credentials(&settings) {
+            if let Err(err) = save_settings_to_path(&settings, &path) {
+                log::warn!("[Secrets] Failed to migrate sync credentials to the keychain: {err}");
+            }
+        }
+        settings
     }
 
     /// 从指定路径加载设置。
@@ -668,6 +719,10 @@ impl AppSettings {
         match serde_json::from_str::<AppSettings>(&content) {
             Ok(mut settings) => {
                 settings.normalize_paths();
+                // CMD-04: resolve keychain-held sync credentials. Plaintext
+                // credentials found on disk are moved to the keychain on the
+                // next save (see `load_from_file`).
+                crate::secrets::sync_credentials::internalize_from_disk(&mut settings);
                 settings
             }
             Err(err) => {
@@ -722,6 +777,8 @@ fn save_settings_to_path(settings: &AppSettings, path: &Path) -> Result<(), AppE
 
     let mut normalized = settings.clone();
     normalized.normalize_paths();
+    // CMD-04: keep sync credentials out of settings.json when a keychain is available.
+    crate::secrets::sync_credentials::externalize_for_disk(&mut normalized);
 
     let parent = path
         .parent()
@@ -823,6 +880,9 @@ pub fn get_settings_for_frontend() -> AppSettings {
     }
     if let Some(s3) = &mut settings.s3_sync {
         s3.secret_access_key.clear();
+    }
+    if let Some(enc) = &mut settings.sync_encryption {
+        enc.passphrase.clear();
     }
     settings.webdav_backup = None;
     settings
@@ -1235,6 +1295,20 @@ pub fn set_s3_sync_settings(settings: Option<S3SyncSettings>) -> Result<(), AppE
     })
 }
 
+/// Current sync encryption settings (in memory, with the real passphrase).
+pub fn get_sync_encryption_settings() -> Option<SyncEncryptionSettings> {
+    settings_store().read().ok()?.sync_encryption.clone()
+}
+
+/// Replace the sync encryption settings (`None` disables encryption).
+pub fn set_sync_encryption_settings(
+    settings: Option<SyncEncryptionSettings>,
+) -> Result<(), AppError> {
+    mutate_settings(|current| {
+        current.sync_encryption = settings;
+    })
+}
+
 pub fn update_s3_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
     mutate_settings(|current| {
         if let Some(s3) = current.s3_sync.as_mut() {
@@ -1343,6 +1417,40 @@ mod tests {
 
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    /// CMD-04: with a keychain (the in-memory test backend), settings.json
+    /// holds no sync credential, and loading restores them in memory.
+    #[test]
+    #[serial_test::serial]
+    fn settings_file_keeps_sync_credentials_in_keychain() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        let settings = AppSettings {
+            webdav_sync: Some(WebDavSyncSettings {
+                base_url: "https://dav.example.com".to_string(),
+                username: "alice".to_string(),
+                password: "webdav-pass-123".to_string(),
+                ..WebDavSyncSettings::default()
+            }),
+            s3_sync: Some(S3SyncSettings {
+                bucket: "bucket".to_string(),
+                region: "us-east-1".to_string(),
+                access_key_id: "AKID".to_string(),
+                secret_access_key: "s3-secret-456".to_string(),
+                ..S3SyncSettings::default()
+            }),
+            ..AppSettings::default()
+        };
+        save_settings_to_path(&settings, &path).expect("save");
+
+        let on_disk = fs::read_to_string(&path).unwrap();
+        assert!(!on_disk.contains("webdav-pass-123"), "{on_disk}");
+        assert!(!on_disk.contains("s3-secret-456"), "{on_disk}");
+
+        let loaded = AppSettings::load_from_path(&path);
+        assert_eq!(loaded.webdav_sync.unwrap().password, "webdav-pass-123");
+        assert_eq!(loaded.s3_sync.unwrap().secret_access_key, "s3-secret-456");
     }
 
     #[test]

@@ -336,6 +336,10 @@ export interface RemoteSnapshotInfo {
   artifacts: string[];
   layout: RemoteSnapshotLayout;
   remotePath: string;
+  /** The remote snapshot is end-to-end encrypted. */
+  encrypted?: boolean;
+  /** Whether the local passphrase unlocks it (null: not encrypted / no passphrase). */
+  passphraseMatches?: boolean | null;
 }
 
 // 应用设置类型（用于设置对话框与 Tauri API）

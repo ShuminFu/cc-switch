@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { settingsApi } from "@/lib/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { SyncEncryptionSettings } from "./SyncEncryptionSettings";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import type {
   RemoteSnapshotInfo,
@@ -990,6 +991,8 @@ export function WebdavSyncSection({
           </SelectContent>
         </Select>
       </div>
+
+      <SyncEncryptionSettings />
 
       {/* ─── WebDAV form ──────────────────────────────────── */}
       {syncType === "webdav" && (

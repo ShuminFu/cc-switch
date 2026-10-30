@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
 use crate::error::AppError;
+use crate::secrets::envelope::{self, DerivedKey, EncryptionHeader, EnvelopeError};
 use crate::settings::WebDavSyncStatus;
 
 // Re-export archive functions for use by transport layers.
@@ -25,6 +26,13 @@ pub(crate) use super::webdav_sync::archive::{
 /// Retains historic "webdav" naming for backward compatibility with existing remotes.
 pub(crate) const PROTOCOL_FORMAT: &str = "cc-switch-webdav-sync";
 pub(crate) const PROTOCOL_VERSION: u32 = 2;
+/// Manifest `version` of an end-to-end encrypted snapshot (SEC-06 / SVC-04).
+///
+/// Encrypted snapshots live in the same `v2/` remote directory, but their
+/// manifest says `version: 3`, so older clients stop with "protocol version
+/// is incompatible" instead of trying to import ciphertext. Plaintext
+/// snapshots keep `version: 2` and stay readable by every client.
+pub(crate) const ENCRYPTED_PROTOCOL_VERSION: u32 = 3;
 pub(crate) const DB_COMPAT_VERSION: u32 = 6;
 pub(crate) const LEGACY_DB_COMPAT_VERSION: u32 = 5;
 pub(crate) const REMOTE_DB_SQL: &str = "db.sql";
@@ -71,6 +79,10 @@ pub(crate) struct SyncManifest {
     pub created_at: String,
     pub artifacts: BTreeMap<String, ArtifactMeta>,
     pub snapshot_id: String,
+    /// Present when the artifacts are encrypted; holds the public KDF salt and
+    /// parameters. Artifact hashes and sizes then describe the ciphertext.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption: Option<EncryptionHeader>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,10 +92,21 @@ pub(crate) struct ArtifactMeta {
 }
 
 pub(crate) struct LocalSnapshot {
+    /// `db.sql` as uploaded (ciphertext when encrypted).
     pub db_sql: Vec<u8>,
+    /// `skills.zip` as uploaded (ciphertext when encrypted).
     pub skills_zip: Vec<u8>,
     pub manifest_bytes: Vec<u8>,
     pub manifest_hash: String,
+    /// Fingerprint of the plaintext content (see [`local_content_fingerprint`]).
+    pub local_fingerprint: String,
+}
+
+/// Key and public header used to encrypt one upload.
+#[derive(Clone)]
+pub(crate) struct SnapshotKey {
+    pub header: EncryptionHeader,
+    pub key: DerivedKey,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +129,14 @@ impl RemoteLayout {
 pub(crate) fn build_local_snapshot(
     db: &crate::database::Database,
 ) -> Result<LocalSnapshot, AppError> {
+    build_snapshot(db, None)
+}
+
+/// Build the upload snapshot, encrypting the artifacts when `encryption` is set.
+pub(crate) fn build_snapshot(
+    db: &crate::database::Database,
+    encryption: Option<&SnapshotKey>,
+) -> Result<LocalSnapshot, AppError> {
     // Export database to SQL string
     let sql_string = db.export_sql_string_for_sync()?;
     let db_sql = sql_string.into_bytes();
@@ -122,6 +153,15 @@ pub(crate) fn build_local_snapshot(
     let skills_zip_path = tmp.path().join(REMOTE_SKILLS_ZIP);
     zip_skills_ssot(&skills_zip_path)?;
     let skills_zip = fs::read(&skills_zip_path).map_err(|e| AppError::io(&skills_zip_path, e))?;
+    let local_fingerprint = local_content_fingerprint(&db_sql, &skills_zip);
+
+    let (db_sql, skills_zip) = match encryption {
+        Some(enc) => (
+            seal_artifact(enc, REMOTE_DB_SQL, &db_sql)?,
+            seal_artifact(enc, REMOTE_SKILLS_ZIP, &skills_zip)?,
+        ),
+        None => (db_sql, skills_zip),
+    };
 
     // Build artifact map and compute hashes
     let mut artifacts = BTreeMap::new();
@@ -143,12 +183,17 @@ pub(crate) fn build_local_snapshot(
     let snapshot_id = compute_snapshot_id(&artifacts);
     let manifest = SyncManifest {
         format: PROTOCOL_FORMAT.to_string(),
-        version: PROTOCOL_VERSION,
+        version: if encryption.is_some() {
+            ENCRYPTED_PROTOCOL_VERSION
+        } else {
+            PROTOCOL_VERSION
+        },
         db_compat_version: Some(DB_COMPAT_VERSION),
         device_name: detect_system_device_name().unwrap_or_else(|| "Unknown Device".to_string()),
         created_at: Utc::now().to_rfc3339(),
         artifacts,
         snapshot_id,
+        encryption: encryption.map(|enc| enc.header.clone()),
     };
     let manifest_bytes =
         serde_json::to_vec_pretty(&manifest).map_err(|e| AppError::JsonSerialize { source: e })?;
@@ -159,6 +204,7 @@ pub(crate) fn build_local_snapshot(
         skills_zip,
         manifest_bytes,
         manifest_hash,
+        local_fingerprint,
     })
 }
 
@@ -198,7 +244,12 @@ pub(crate) fn validate_manifest_compat(
             ),
         ));
     }
-    if manifest.version != PROTOCOL_VERSION {
+    let expected_version = if manifest.encryption.is_some() {
+        ENCRYPTED_PROTOCOL_VERSION
+    } else {
+        PROTOCOL_VERSION
+    };
+    if manifest.version != expected_version {
         return Err(localized(
             "sync.manifest_version_incompatible",
             format!(
@@ -210,6 +261,9 @@ pub(crate) fn validate_manifest_compat(
                 manifest.version
             ),
         ));
+    }
+    if let Some(header) = &manifest.encryption {
+        header.check_supported().map_err(encryption_error)?;
     }
     let Some(db_compat_version) = effective_db_compat_version(manifest, layout) else {
         return Err(localized(
@@ -573,14 +627,205 @@ pub(crate) fn ensure_local_unchanged(
 /// Best-effort fingerprint of the current local state (e.g. after a download).
 pub(crate) fn capture_local_fingerprint(db: &crate::database::Database) -> Option<String> {
     match build_local_snapshot(db) {
-        Ok(snapshot) => Some(local_content_fingerprint(
-            &snapshot.db_sql,
-            &snapshot.skills_zip,
-        )),
+        Ok(snapshot) => Some(snapshot.local_fingerprint),
         Err(err) => {
             log::warn!("[Sync] Failed to fingerprint local snapshot: {err}");
             None
         }
+    }
+}
+
+// ─── End-to-end encryption (SEC-06 / SVC-04) ─────────────────
+//
+// Opt-in: with `syncEncryption.enabled`, uploads seal `db.sql` and
+// `skills.zip` with a key derived from the user's passphrase (see
+// `crate::secrets::envelope`) and put the public header in the manifest.
+// Downloads of encrypted snapshots need the passphrase; plaintext snapshots
+// (older versions, or encryption off) still download unchanged.
+
+pub(crate) const ENCRYPTION_PASSPHRASE_REQUIRED_KEY: &str = "sync.encryption.passphrase_required";
+pub(crate) const ENCRYPTION_WRONG_PASSPHRASE_KEY: &str = "sync.encryption.wrong_passphrase";
+pub(crate) const ENCRYPTION_PASSPHRASE_UNAVAILABLE_KEY: &str =
+    "sync.encryption.passphrase_unavailable";
+pub(crate) const ENCRYPTION_DOWNGRADE_KEY: &str = "sync.encryption.downgrade_refused";
+
+fn encryption_error(err: EnvelopeError) -> AppError {
+    match err {
+        EnvelopeError::Decrypt => localized(
+            ENCRYPTION_WRONG_PASSPHRASE_KEY,
+            "同步加密密码错误，或远端同步数据已被修改。",
+            "Wrong sync encryption passphrase, or the remote sync data was modified.",
+        ),
+        EnvelopeError::Unsupported(detail) => localized(
+            "sync.encryption.unsupported",
+            format!("远端同步数据使用了不支持的加密方式（{detail}），请升级 CC Switch。"),
+            format!(
+                "The remote sync data uses an unsupported encryption format ({detail}). Update CC Switch."
+            ),
+        ),
+        EnvelopeError::NotEncrypted | EnvelopeError::Malformed(_) => localized(
+            "sync.encryption.malformed",
+            format!("远端加密同步数据格式无效: {err}"),
+            format!("The encrypted remote sync data is invalid: {err}"),
+        ),
+    }
+}
+
+fn passphrase_required_error() -> AppError {
+    localized(
+        ENCRYPTION_PASSPHRASE_REQUIRED_KEY,
+        "远端同步数据已加密。请先在同步设置中填写加密密码。",
+        "The remote sync data is encrypted. Enter the sync encryption passphrase in the sync settings first.",
+    )
+}
+
+/// The passphrase to encrypt uploads with, `Ok(None)` when encryption is off.
+///
+/// When encryption is enabled but the passphrase cannot be read (keychain
+/// locked or unavailable), the upload fails instead of going out in plaintext.
+pub(crate) fn upload_passphrase() -> Result<Option<String>, AppError> {
+    match crate::settings::get_sync_encryption_settings() {
+        Some(enc) if enc.enabled => {
+            if enc.passphrase.is_empty() {
+                Err(localized(
+                    ENCRYPTION_PASSPHRASE_UNAVAILABLE_KEY,
+                    "已启用同步加密，但无法读取加密密码（系统钥匙串不可用或已锁定）。为避免明文上传，已取消上传。",
+                    "Sync encryption is enabled but the passphrase is unavailable (the system keychain is locked or missing). The upload was cancelled so nothing is sent unencrypted.",
+                ))
+            } else {
+                Ok(Some(enc.passphrase))
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The configured passphrase for decrypting downloads, if any.
+pub(crate) fn download_passphrase() -> Option<String> {
+    crate::settings::get_sync_encryption_settings()
+        .map(|enc| enc.passphrase)
+        .filter(|p| !p.is_empty())
+}
+
+struct CachedKey {
+    passphrase_digest: [u8; 32],
+    header: EncryptionHeader,
+    key: DerivedKey,
+}
+
+/// Argon2id is deliberately slow; keep the last derived key so auto-sync does
+/// not re-derive it on every upload. Keyed by the passphrase digest, so a
+/// changed passphrase always derives a new key.
+fn key_cache() -> &'static std::sync::Mutex<Option<CachedKey>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<Option<CachedKey>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn passphrase_digest(passphrase: &str) -> [u8; 32] {
+    Sha256::digest(passphrase.as_bytes()).into()
+}
+
+/// Key for encrypting an upload with `passphrase`.
+pub(crate) fn upload_key(passphrase: &str) -> Result<SnapshotKey, AppError> {
+    let digest = passphrase_digest(passphrase);
+    let mut cache = key_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = cache.as_ref().filter(|c| c.passphrase_digest == digest) {
+        return Ok(SnapshotKey {
+            header: cached.header.clone(),
+            key: cached.key.clone(),
+        });
+    }
+    let (header, key) = envelope::new_header(passphrase, envelope::KdfParams::recommended())
+        .map_err(encryption_error)?;
+    *cache = Some(CachedKey {
+        passphrase_digest: digest,
+        header: header.clone(),
+        key: key.clone(),
+    });
+    Ok(SnapshotKey { header, key })
+}
+
+/// Unlock an encrypted remote snapshot. `Ok(None)` for plaintext snapshots.
+pub(crate) fn unlock_remote(
+    manifest: &SyncManifest,
+    passphrase: Option<&str>,
+) -> Result<Option<DerivedKey>, AppError> {
+    let Some(header) = &manifest.encryption else {
+        return Ok(None);
+    };
+    let passphrase = passphrase.ok_or_else(passphrase_required_error)?;
+    let digest = passphrase_digest(passphrase);
+    let mut cache = key_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = cache
+        .as_ref()
+        .filter(|c| c.passphrase_digest == digest && &c.header == header)
+    {
+        return Ok(Some(cached.key.clone()));
+    }
+    let key = header.unlock(passphrase).map_err(encryption_error)?;
+    *cache = Some(CachedKey {
+        passphrase_digest: digest,
+        header: header.clone(),
+        key: key.clone(),
+    });
+    Ok(Some(key))
+}
+
+fn seal_artifact(enc: &SnapshotKey, name: &str, plain: &[u8]) -> Result<Vec<u8>, AppError> {
+    envelope::seal(&enc.key, name.as_bytes(), plain).map_err(encryption_error)
+}
+
+/// Decrypt a downloaded (and hash-verified) artifact. Plaintext artifacts of
+/// unencrypted snapshots are returned unchanged.
+pub(crate) fn open_artifact(
+    key: Option<&DerivedKey>,
+    name: &str,
+    bytes: Vec<u8>,
+) -> Result<Vec<u8>, AppError> {
+    match key {
+        Some(key) => envelope::open(key, name.as_bytes(), &bytes).map_err(encryption_error),
+        None if envelope::is_sealed(&bytes) => Err(encryption_error(EnvelopeError::Malformed(
+            "encrypted artifact without an encryption header".to_string(),
+        ))),
+        None => Ok(bytes),
+    }
+}
+
+/// Refuse to replace an encrypted remote snapshot with a plaintext one unless
+/// the user explicitly forces the overwrite (e.g. after turning encryption off).
+pub(crate) fn ensure_no_encryption_downgrade(
+    remote: Option<&SyncManifest>,
+    encrypting: bool,
+    force: bool,
+) -> Result<(), AppError> {
+    if force || encrypting || !remote.is_some_and(|m| m.encryption.is_some()) {
+        return Ok(());
+    }
+    Err(localized(
+        ENCRYPTION_DOWNGRADE_KEY,
+        "远端同步数据已加密，但本机未启用同步加密。为避免以明文覆盖，已取消上传。请启用同步加密，或手动上传并确认覆盖。",
+        "The remote sync data is encrypted but sync encryption is off on this device. The upload was cancelled so the encrypted snapshot is not replaced with plaintext. Enable sync encryption, or confirm an overwrite with a manual upload.",
+    ))
+}
+
+/// Encryption fields reported by `fetch_remote_info`.
+pub(crate) struct RemoteEncryptionInfo {
+    pub encrypted: bool,
+    /// `None` when not encrypted or no passphrase is configured.
+    pub passphrase_matches: Option<bool>,
+}
+
+pub(crate) fn remote_encryption_info(manifest: &SyncManifest) -> RemoteEncryptionInfo {
+    let encrypted = manifest.encryption.is_some();
+    let passphrase_matches = if encrypted {
+        download_passphrase().map(|p| unlock_remote(manifest, Some(&p)).is_ok())
+    } else {
+        None
+    };
+    RemoteEncryptionInfo {
+        encrypted,
+        passphrase_matches,
     }
 }
 
@@ -956,6 +1201,7 @@ mod tests {
             created_at: "2026-02-12T00:00:00Z".to_string(),
             artifacts,
             snapshot_id: "snap-1".to_string(),
+            encryption: None,
         }
     }
 
@@ -979,6 +1225,99 @@ mod tests {
             Some(DB_COMPAT_VERSION),
         );
         assert!(validate_manifest_compat(&manifest, RemoteLayout::Current).is_err());
+    }
+
+    // ── Encryption (SEC-06 / SVC-04) ──
+
+    fn encrypted_manifest(passphrase: &str) -> (SyncManifest, SnapshotKey) {
+        let key = upload_key(passphrase).expect("key");
+        let mut m = manifest_with(
+            PROTOCOL_FORMAT,
+            ENCRYPTED_PROTOCOL_VERSION,
+            Some(DB_COMPAT_VERSION),
+        );
+        m.encryption = Some(key.header.clone());
+        (m, key)
+    }
+
+    #[test]
+    fn encrypted_manifest_versioning_is_enforced() {
+        let (m, _key) = encrypted_manifest("versioning passphrase");
+        assert!(validate_manifest_compat(&m, RemoteLayout::Current).is_ok());
+
+        // version 3 needs an encryption header, and a header needs version 3.
+        let plain_v3 = manifest_with(
+            PROTOCOL_FORMAT,
+            ENCRYPTED_PROTOCOL_VERSION,
+            Some(DB_COMPAT_VERSION),
+        );
+        assert!(validate_manifest_compat(&plain_v3, RemoteLayout::Current).is_err());
+        let mut header_v2 = m.clone();
+        header_v2.version = PROTOCOL_VERSION;
+        assert!(validate_manifest_compat(&header_v2, RemoteLayout::Current).is_err());
+
+        // Unknown scheme: incompatible rather than a confusing decrypt error.
+        let mut unknown = m.clone();
+        unknown.encryption.as_mut().unwrap().scheme = "future-scheme".to_string();
+        let err = validate_manifest_compat(&unknown, RemoteLayout::Current).unwrap_err();
+        assert!(err.to_string().contains("unsupported"), "{err}");
+
+        // Old manifests without the field still parse.
+        let json = serde_json::to_value(manifest_with(
+            PROTOCOL_FORMAT,
+            PROTOCOL_VERSION,
+            Some(DB_COMPAT_VERSION),
+        ))
+        .unwrap();
+        assert!(json.get("encryption").is_none());
+        let parsed: SyncManifest = serde_json::from_value(json).unwrap();
+        assert!(parsed.encryption.is_none());
+    }
+
+    #[test]
+    fn unlock_and_open_artifacts() {
+        let (m, key) = encrypted_manifest("artifact passphrase");
+        let sealed = seal_artifact(&key, REMOTE_DB_SQL, b"-- sql").unwrap();
+
+        let unlocked = unlock_remote(&m, Some("artifact passphrase"))
+            .unwrap()
+            .expect("key for encrypted manifest");
+        assert_eq!(
+            open_artifact(Some(&unlocked), REMOTE_DB_SQL, sealed.clone()).unwrap(),
+            b"-- sql"
+        );
+        // Bound to the artifact name.
+        assert!(open_artifact(Some(&unlocked), REMOTE_SKILLS_ZIP, sealed.clone()).is_err());
+
+        let err = unlock_remote(&m, None).err().unwrap();
+        assert!(
+            matches!(err, AppError::Localized { key, .. } if key == ENCRYPTION_PASSPHRASE_REQUIRED_KEY)
+        );
+        let err = unlock_remote(&m, Some("nope nope nope")).err().unwrap();
+        assert!(
+            matches!(err, AppError::Localized { key, .. } if key == ENCRYPTION_WRONG_PASSPHRASE_KEY)
+        );
+
+        // Plaintext manifests need no key and pass artifacts through...
+        let plain = manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(DB_COMPAT_VERSION));
+        assert!(unlock_remote(&plain, None).unwrap().is_none());
+        assert_eq!(
+            open_artifact(None, REMOTE_DB_SQL, b"-- sql".to_vec()).unwrap(),
+            b"-- sql"
+        );
+        // ...but sealed bytes without a header are rejected, never imported.
+        assert!(open_artifact(None, REMOTE_DB_SQL, sealed).is_err());
+    }
+
+    #[test]
+    fn plaintext_upload_over_encrypted_remote_needs_force() {
+        let (encrypted, _key) = encrypted_manifest("downgrade passphrase");
+        let plain = manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(DB_COMPAT_VERSION));
+        assert!(ensure_no_encryption_downgrade(Some(&encrypted), false, false).is_err());
+        assert!(ensure_no_encryption_downgrade(Some(&encrypted), false, true).is_ok());
+        assert!(ensure_no_encryption_downgrade(Some(&encrypted), true, false).is_ok());
+        assert!(ensure_no_encryption_downgrade(Some(&plain), false, false).is_ok());
+        assert!(ensure_no_encryption_downgrade(None, false, false).is_ok());
     }
 
     #[test]

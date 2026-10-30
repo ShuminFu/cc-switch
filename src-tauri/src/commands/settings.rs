@@ -48,6 +48,8 @@ fn merge_settings_for_save(
     // 开关）后、前端 query 缓存刷新前的一次全量保存会把旧 marker 重放回来，
     // 重新开启时被"复活"的标记挡住而漏迁。
     incoming.local_migrations = existing.local_migrations.clone();
+    // 同步加密设置只由 sync_encryption_* 命令管理（前端拿不到密码）。
+    incoming.sync_encryption = existing.sync_encryption.clone();
     // 当前供应商指针同样是后端状态：只由 set_current_provider（切换、托盘、
     // 故障转移）写入。前端保存设置时会把缓存里的整份结构（含旧指针）发回来，
     // 若按 incoming 透传，设置页打开期间发生的切换会在点击保存时被回滚。
