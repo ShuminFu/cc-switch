@@ -6,8 +6,8 @@ use super::{
     content_encoding::{decompress_body, get_content_encoding},
     forwarder::ActiveConnectionGuard,
     handler_config::{
-        ResponseUsageParser, StreamEventRetention, StreamUsageEventFilter, StreamUsageParser,
-        UsageParserConfig,
+        ResponseUsageParser, StreamErrorFormat, StreamEventRetention, StreamUsageEventFilter,
+        StreamUsageParser, UsageParserConfig,
     },
     handler_context::{RequestContext, StreamingTimeoutConfig},
     hyper_client::ProxyResponse,
@@ -194,6 +194,7 @@ pub async fn handle_streaming(
         usage_collector,
         timeout_config,
         connection_guard,
+        parser_config.stream_error_format,
     );
 
     let body = axum::body::Body::from_stream(logged_stream);
@@ -785,9 +786,12 @@ pub fn create_logged_passthrough_stream(
     usage_collector: Option<SseUsageCollector>,
     timeout_config: StreamingTimeoutConfig,
     connection_guard: Option<ActiveConnectionGuard>,
+    error_format: StreamErrorFormat,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
-        let _conn_guard = connection_guard;
+        let mut conn_guard = connection_guard;
+        // 已发送字节是否停在 SSE 事件边界；不在边界时终止事件前先补空行收尾。
+        let mut at_event_boundary = true;
         let mut sse_buffer = SseBlockBuffer::new();
         let mut collector = usage_collector;
         let mut finish_guard = collector.clone().map(SseUsageFinishGuard::new);
@@ -823,10 +827,18 @@ pub fn create_logged_passthrough_stream(
                         Ok(Some(chunk)) => Some(chunk),
                         Ok(None) => None, // 流结束
                         Err(_) => {
-                            // 超时
-                            let timeout_type = if is_first_chunk { "首字节" } else { "静默期" };
-                            log::error!("[{tag}] 流式响应{}超时 ({}秒)", timeout_type, duration.as_secs());
-                            yield Err(std::io::Error::other(format!("流式响应{timeout_type}超时")));
+                            // 超时：计入 provider 健康度，并给客户端补一个协议内的终止错误事件，
+                            // 而不是直接截断 chunked body（PROXY-09）
+                            let message = if is_first_chunk {
+                                format!("流式响应首字节超时: {}秒无数据", duration.as_secs())
+                            } else {
+                                ProxyError::StreamIdleTimeout(duration.as_secs()).to_string()
+                            };
+                            log::error!("[{tag}] {message}");
+                            if let Some(guard) = conn_guard.as_mut() {
+                                guard.report_stream_failure(&message);
+                            }
+                            yield Ok(stream_error_event(error_format, &message, at_event_boundary));
                             break;
                         }
                     }
@@ -843,6 +855,9 @@ pub fn create_logged_passthrough_stream(
                         );
                     }
                     is_first_chunk = false;
+                    if !bytes.is_empty() {
+                        at_event_boundary = bytes.ends_with(b"\n\n");
+                    }
                     if inspect_sse_events {
                         sse_buffer.push(&bytes);
 
@@ -891,11 +906,18 @@ pub fn create_logged_passthrough_stream(
                 }
                 Some(Err(e)) => {
                     log::error!("[{tag}] 流错误: {e}");
-                    yield Err(std::io::Error::other(e.to_string()));
+                    let message = format!("上游流式响应中断: {e}");
+                    if let Some(guard) = conn_guard.as_mut() {
+                        guard.report_stream_failure(&message);
+                    }
+                    yield Ok(stream_error_event(error_format, &message, at_event_boundary));
                     break;
                 }
                 None => {
                     // 流正常结束
+                    if let Some(guard) = conn_guard.as_mut() {
+                        guard.report_stream_success();
+                    }
                     break;
                 }
             }
@@ -907,6 +929,51 @@ pub fn create_logged_passthrough_stream(
         if let Some(guard) = &mut finish_guard {
             guard.disarm();
         }
+    }
+}
+
+/// 流中途失败时补发给客户端的协议内终止错误事件（PROXY-09）。
+///
+/// `at_event_boundary == false` 时先补一个空行，结束可能被截断的半个事件，
+/// 保证错误事件被客户端解析为独立事件。
+pub(crate) fn stream_error_event(
+    format: StreamErrorFormat,
+    message: &str,
+    at_event_boundary: bool,
+) -> Bytes {
+    let payload = match format {
+        StreamErrorFormat::Anthropic => format!(
+            "event: error\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "error",
+                "error": {"type": "api_error", "message": message}
+            })
+        ),
+        StreamErrorFormat::OpenAiChat => format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "error": {
+                    "message": message,
+                    "type": "proxy_error",
+                    "code": "cc_switch_stream_interrupted"
+                }
+            })
+        ),
+        StreamErrorFormat::Responses => format!(
+            "event: response.failed\ndata: {}\n\n",
+            serde_json::json!({
+                "type": "response.failed",
+                "response": {
+                    "status": "failed",
+                    "error": {"code": "cc_switch_stream_interrupted", "message": message}
+                }
+            })
+        ),
+    };
+    if at_event_boundary {
+        Bytes::from(payload)
+    } else {
+        Bytes::from(format!("\n\n{payload}"))
     }
 }
 
@@ -1393,6 +1460,61 @@ pub(crate) mod tests {
         assert_eq!(retained.len(), 2);
         let usage = (CLAUDE_PARSER_CONFIG.stream_parser)(&retained).unwrap();
         assert_eq!((usage.input_tokens, usage.output_tokens), (3, 4));
+    }
+
+    #[test]
+    fn stream_error_events_are_protocol_shaped() {
+        use crate::proxy::handler_config::StreamErrorFormat;
+        let anthropic = stream_error_event(StreamErrorFormat::Anthropic, "boom", true);
+        let text = std::str::from_utf8(&anthropic).unwrap();
+        assert!(text.starts_with("event: error\ndata: "));
+        let data: Value = serde_json::from_str(
+            text.trim_end()
+                .strip_prefix("event: error\ndata: ")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(data["type"], "error");
+        assert_eq!(data["error"]["message"], "boom");
+
+        let chat = stream_error_event(StreamErrorFormat::OpenAiChat, "boom", false);
+        let text = std::str::from_utf8(&chat).unwrap();
+        assert!(
+            text.starts_with("\n\ndata: {"),
+            "closes a partial event first"
+        );
+        assert!(text.contains("\"code\":\"cc_switch_stream_interrupted\""));
+
+        let responses = stream_error_event(StreamErrorFormat::Responses, "boom", true);
+        let text = std::str::from_utf8(&responses).unwrap();
+        assert!(text.starts_with("event: response.failed\n"));
+        assert!(text.contains("\"status\":\"failed\""));
+    }
+
+    #[tokio::test]
+    async fn upstream_error_mid_stream_yields_terminal_event_not_io_error() {
+        use crate::proxy::handler_config::StreamErrorFormat;
+        let upstream = futures::stream::iter(vec![
+            Ok(Bytes::from_static(b"data: {\"partial\"")),
+            Err(std::io::Error::other("connection reset")),
+        ]);
+        let stream = create_logged_passthrough_stream(
+            upstream,
+            "test",
+            None,
+            StreamingTimeoutConfig {
+                first_byte_timeout: 0,
+                idle_timeout: 0,
+            },
+            None,
+            StreamErrorFormat::OpenAiChat,
+        );
+        let items: Vec<_> = stream.collect().await;
+        assert_eq!(items.len(), 2);
+        let last = items[1].as_ref().expect("terminal event, not an io error");
+        let text = std::str::from_utf8(last).unwrap();
+        assert!(text.starts_with("\n\ndata: "));
+        assert!(text.contains("connection reset"));
     }
 
     #[test]

@@ -13,7 +13,8 @@ use super::{
     forwarder::ActiveConnectionGuard,
     handler_config::{
         claude_stream_usage_event_filter, codex_stream_usage_event_filter, ResponseUsageParser,
-        CLAUDE_PARSER_CONFIG, CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG, OPENAI_PARSER_CONFIG,
+        StreamErrorFormat, CLAUDE_PARSER_CONFIG, CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG,
+        OPENAI_PARSER_CONFIG,
     },
     handler_context::RequestContext,
     providers::{
@@ -374,6 +375,7 @@ async fn handle_claude_transform(
             usage_collector,
             timeout_config,
             connection_guard,
+            StreamErrorFormat::Anthropic,
         );
 
         let mut headers = axum::http::HeaderMap::new();
@@ -919,6 +921,7 @@ async fn handle_codex_chat_to_responses_transform(
             usage_collector,
             ctx.streaming_timeout_config(),
             connection_guard,
+            StreamErrorFormat::Responses,
         );
 
         let mut headers = axum::http::HeaderMap::new();
@@ -1177,6 +1180,7 @@ fn build_codex_anthropic_sse_response(
         usage_collector,
         ctx.streaming_timeout_config(),
         connection_guard,
+        StreamErrorFormat::Responses,
     );
 
     let mut headers = axum::http::HeaderMap::new();

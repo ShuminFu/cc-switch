@@ -69,6 +69,9 @@ pub struct ForwardResult {
     /// 活跃连接 RAII guard：随响应一起流转到 response_processor / handle_claude_transform，
     /// 最终被 move 进流式 body future（或非流式响应作用域），覆盖整个响应生命周期。
     pub(crate) connection_guard: Option<ActiveConnectionGuard>,
+    /// 流式响应的最终结果上报器（PROXY-09）；由 `forward_with_retry` 挂到
+    /// `connection_guard` 上，随流一起走到流结束。
+    pub(crate) stream_health: Option<StreamHealthReporter>,
 }
 
 pub struct ForwardError {
@@ -88,6 +91,7 @@ pub struct ForwardError {
 /// 不需要每条出口路径都手动调用。
 pub(crate) struct ActiveConnectionGuard {
     status: Arc<RwLock<ProxyStatus>>,
+    stream_health: Option<StreamHealthReporter>,
 }
 
 impl ActiveConnectionGuard {
@@ -96,8 +100,99 @@ impl ActiveConnectionGuard {
             let mut s = status.write().await;
             s.active_connections = s.active_connections.saturating_add(1);
         }
-        Self { status }
+        Self {
+            status,
+            stream_health: None,
+        }
     }
+
+    /// 流在首包之后因上游错误 / 静默超时中断：计入熔断器与健康度（PROXY-09）。
+    pub(crate) fn report_stream_failure(&mut self, message: &str) {
+        if let Some(reporter) = self.stream_health.take() {
+            reporter.report(false, Some(message.to_string()));
+        }
+    }
+
+    /// 流正常结束：记录 provider 成功。
+    pub(crate) fn report_stream_success(&mut self) {
+        if let Some(reporter) = self.stream_health.take() {
+            reporter.report(true, None);
+        }
+    }
+}
+
+/// 流式响应的 provider 健康结果上报器（PROXY-09）。
+///
+/// 流式响应在首包到达时只是「看起来成功」：上游可能发完 `message_start` 就挂住或
+/// 断开。非 HalfOpen 探测的流式成功不在首包时记账，而是延迟到流结束：
+/// 正常结束记成功，上游错误/静默超时记失败。未显式上报就被丢弃（客户端中断、
+/// 非流式消费路径等）时按成功记账，保持旧语义。
+pub(crate) struct StreamHealthReporter {
+    router: Arc<ProviderRouter>,
+    status: Arc<RwLock<ProxyStatus>>,
+    provider_id: String,
+    provider_name: String,
+    app_type: String,
+    reported: bool,
+}
+
+impl StreamHealthReporter {
+    fn report(mut self, success: bool, error: Option<String>) {
+        self.send(success, error);
+    }
+
+    fn send(&mut self, success: bool, error: Option<String>) {
+        if self.reported {
+            return;
+        }
+        self.reported = true;
+        spawn_stream_health_record(
+            self.router.clone(),
+            self.status.clone(),
+            std::mem::take(&mut self.provider_id),
+            std::mem::take(&mut self.provider_name),
+            std::mem::take(&mut self.app_type),
+            success,
+            error,
+        );
+    }
+}
+
+impl Drop for StreamHealthReporter {
+    fn drop(&mut self) {
+        self.send(true, None);
+    }
+}
+
+fn spawn_stream_health_record(
+    router: Arc<ProviderRouter>,
+    status: Arc<RwLock<ProxyStatus>>,
+    provider_id: String,
+    provider_name: String,
+    app_type: String,
+    success: bool,
+    error: Option<String>,
+) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    handle.spawn(async move {
+        if !success {
+            let mut s = status.write().await;
+            s.last_error = Some(format!(
+                "Provider {provider_name} 流式响应中断: {}",
+                error.as_deref().unwrap_or("unknown")
+            ));
+        }
+        if let Err(e) = router
+            .record_result(&provider_id, &app_type, false, success, error)
+            .await
+        {
+            log::warn!(
+                "[{app_type}] 记录流式 Provider 结果失败: provider_id={provider_id}, error={e}"
+            );
+        }
+    });
 }
 
 impl Drop for ActiveConnectionGuard {
@@ -274,6 +369,32 @@ impl RequestForwarder {
         });
     }
 
+    /// 成功响应的熔断/健康记账。
+    ///
+    /// HalfOpen 探测与非流式响应立即记录（与旧行为一致）；普通流式响应返回
+    /// [`StreamHealthReporter`]，把结果延迟到流结束再记（PROXY-09）。
+    async fn record_success_or_defer(
+        &self,
+        provider: &Provider,
+        app_type: &str,
+        used_half_open_permit: bool,
+        response_is_sse: bool,
+    ) -> Option<StreamHealthReporter> {
+        if used_half_open_permit || !response_is_sse {
+            self.record_success_result(&provider.id, app_type, used_half_open_permit)
+                .await;
+            return None;
+        }
+        Some(StreamHealthReporter {
+            router: self.router.clone(),
+            status: self.status.clone(),
+            provider_id: provider.id.clone(),
+            provider_name: provider.name.clone(),
+            app_type: app_type.to_string(),
+            reported: false,
+        })
+    }
+
     /// 整流（thinking signature 或 budget）重试失败后的统一收尾。
     ///
     /// `None` 表示已记录熔断器、累积 `last_error`/`last_provider`，
@@ -369,7 +490,9 @@ impl RequestForwarder {
         // 把 guard 注入到 Ok 结果，让它随响应一起流转到 response_processor，
         // 在流式 body 的 future 内才真正 drop。
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
+        let mut guard = guard;
         result.map(|mut fr| {
+            guard.stream_health = fr.stream_health.take();
             fr.connection_guard = Some(guard);
             fr
         })
@@ -505,7 +628,13 @@ impl RequestForwarder {
                 Ok((response, claude_api_format, outbound_model)) => {
                     // 成功：普通闭合熔断状态异步记录，避免阻塞流式首包返回；
                     // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
-                    self.record_success_result(&provider.id, app_type_str, half_open_permit.take())
+                    let stream_health = self
+                        .record_success_or_defer(
+                            provider,
+                            app_type_str,
+                            half_open_permit.take(),
+                            response.is_sse(),
+                        )
                         .await;
 
                     // 更新当前应用类型使用的 provider
@@ -552,6 +681,7 @@ impl RequestForwarder {
                         claude_api_format,
                         outbound_model,
                         connection_guard: None,
+                        stream_health,
                     });
                 }
                 Err(e) => {
@@ -605,12 +735,14 @@ impl RequestForwarder {
                                     log::info!(
                                         "[{app_type_str}] [Media] Unsupported-image retry succeeded"
                                     );
-                                    self.record_success_result(
-                                        &provider.id,
-                                        app_type_str,
-                                        half_open_permit.take(),
-                                    )
-                                    .await;
+                                    let stream_health = self
+                                        .record_success_or_defer(
+                                            provider,
+                                            app_type_str,
+                                            half_open_permit.take(),
+                                            response.is_sse(),
+                                        )
+                                        .await;
 
                                     {
                                         let mut current_providers =
@@ -655,6 +787,7 @@ impl RequestForwarder {
                                         claude_api_format,
                                         outbound_model,
                                         connection_guard: None,
+                                        stream_health,
                                     });
                                 }
                                 Err(retry_err) => {
@@ -749,12 +882,14 @@ impl RequestForwarder {
                                 {
                                     Ok((response, claude_api_format, outbound_model)) => {
                                         log::info!("[{app_type_str}] [RECT-002] 整流重试成功");
-                                        self.record_success_result(
-                                            &provider.id,
-                                            app_type_str,
-                                            half_open_permit.take(),
-                                        )
-                                        .await;
+                                        let stream_health = self
+                                            .record_success_or_defer(
+                                                provider,
+                                                app_type_str,
+                                                half_open_permit.take(),
+                                                response.is_sse(),
+                                            )
+                                            .await;
 
                                         // 更新当前应用类型使用的 provider
                                         {
@@ -804,6 +939,7 @@ impl RequestForwarder {
                                             claude_api_format,
                                             outbound_model,
                                             connection_guard: None,
+                                            stream_health,
                                         });
                                     }
                                     Err(retry_err) => {
@@ -924,12 +1060,14 @@ impl RequestForwarder {
                             {
                                 Ok((response, claude_api_format, outbound_model)) => {
                                     log::info!("[{app_type_str}] [RECT-011] budget 整流重试成功");
-                                    self.record_success_result(
-                                        &provider.id,
-                                        app_type_str,
-                                        half_open_permit.take(),
-                                    )
-                                    .await;
+                                    let stream_health = self
+                                        .record_success_or_defer(
+                                            provider,
+                                            app_type_str,
+                                            half_open_permit.take(),
+                                            response.is_sse(),
+                                        )
+                                        .await;
 
                                     {
                                         let mut current_providers =
@@ -973,6 +1111,7 @@ impl RequestForwarder {
                                         claude_api_format,
                                         outbound_model,
                                         connection_guard: None,
+                                        stream_health,
                                     });
                                 }
                                 Err(retry_err) => {
@@ -4011,6 +4150,140 @@ mod tests {
         );
         // The client's own body is never mutated.
         assert!(contains_thinking_block(&body));
+    }
+
+    fn sse_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream"),
+        );
+        headers
+    }
+
+    /// Runs one stream that sends `message_start` and then hangs, through the
+    /// passthrough stream with a 1s idle timeout. Returns the client-visible bytes.
+    async fn run_hanging_stream(forwarder: &RequestForwarder, provider: &Provider) -> String {
+        let upstream = futures::stream::once(async {
+            Ok::<Bytes, std::io::Error>(Bytes::from_static(
+                b"event: message_start\ndata: {\"type\":\"message_start\"}\n\n",
+            ))
+        })
+        .chain(futures::stream::pending());
+        let response = ProxyResponse::streamed(StatusCode::OK, sse_headers(), upstream);
+        let reporter = forwarder
+            .record_success_or_defer(provider, "claude", false, response.is_sse())
+            .await;
+        assert!(reporter.is_some(), "streamed success must be deferred");
+        let mut guard = ActiveConnectionGuard::acquire(forwarder.status.clone()).await;
+        guard.stream_health = reporter;
+
+        let stream = crate::proxy::response_processor::create_logged_passthrough_stream(
+            response.bytes_stream(),
+            "test",
+            None,
+            crate::proxy::handler_context::StreamingTimeoutConfig {
+                first_byte_timeout: 0,
+                idle_timeout: 1,
+            },
+            Some(guard),
+            crate::proxy::handler_config::StreamErrorFormat::Anthropic,
+        );
+        let chunks: Vec<_> = stream.collect().await;
+        let mut out = String::new();
+        for chunk in chunks {
+            out.push_str(&String::from_utf8_lossy(&chunk.expect("no io error")));
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn mid_stream_idle_timeouts_open_the_breaker_and_end_with_error_event() {
+        let forwarder = test_forwarder(Duration::from_secs(5), Duration::from_secs(5));
+        let provider = test_provider_with_type(None);
+
+        // The per-app failure threshold comes from the DB config, so keep feeding
+        // "200 + message_start, then hang" streams until the breaker opens.
+        let mut streams = 0u32;
+        let mut stats = None;
+        'outer: for _ in 0..5 {
+            let outputs = futures::future::join_all(
+                (0..4).map(|_| run_hanging_stream(&forwarder, &provider)),
+            )
+            .await;
+            streams += 4;
+            for out in &outputs {
+                assert!(out.starts_with("event: message_start"));
+                assert!(
+                    out.ends_with("\n\n") && out.contains("event: error\ndata: "),
+                    "client must receive a terminal error event: {out}"
+                );
+            }
+            // Health is recorded on a spawned task.
+            for _ in 0..25 {
+                stats = forwarder
+                    .router
+                    .get_circuit_breaker_stats(&provider.id, "claude")
+                    .await;
+                if stats
+                    .as_ref()
+                    .is_some_and(|s| s.state == crate::proxy::circuit_breaker::CircuitState::Open)
+                {
+                    break 'outer;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+        let stats = stats.expect("breaker exists");
+        assert_eq!(
+            stats.state,
+            crate::proxy::circuit_breaker::CircuitState::Open,
+            "breaker must open after {streams} mid-stream failures"
+        );
+        assert_eq!(stats.failed_requests, stats.total_requests);
+        let last_error = forwarder.status.read().await.last_error.clone();
+        assert!(last_error.is_some_and(|e| e.contains("流式响应中断")));
+    }
+
+    #[tokio::test]
+    async fn completed_or_dropped_streams_record_success() {
+        let forwarder = test_forwarder(Duration::from_secs(5), Duration::from_secs(5));
+        let provider = test_provider_with_type(None);
+        let response = ProxyResponse::streamed(
+            StatusCode::OK,
+            sse_headers(),
+            futures::stream::iter(vec![Ok::<Bytes, std::io::Error>(Bytes::from_static(
+                b"data: {}\n\n",
+            ))]),
+        );
+        // Dropping the reporter without an explicit outcome (client abort) keeps
+        // the old "success" semantics.
+        let reporter = forwarder
+            .record_success_or_defer(&provider, "claude", false, response.is_sse())
+            .await;
+        drop(reporter);
+
+        // Non-SSE responses are recorded immediately, no reporter.
+        let json = ProxyResponse::buffered(StatusCode::OK, HeaderMap::new(), Bytes::new());
+        assert!(forwarder
+            .record_success_or_defer(&provider, "claude", false, json.is_sse())
+            .await
+            .is_none());
+
+        let mut successes = 0;
+        for _ in 0..50 {
+            successes = forwarder
+                .router
+                .get_circuit_breaker_stats(&provider.id, "claude")
+                .await
+                .map(|s| s.total_requests - s.failed_requests)
+                .unwrap_or(0);
+            if successes >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(successes, 2);
     }
 
     #[tokio::test]

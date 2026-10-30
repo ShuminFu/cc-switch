@@ -39,6 +39,17 @@ pub enum StreamEventRetention {
     },
 }
 
+/// 流式响应在中途失败时，向客户端补发的协议终止错误事件格式（PROXY-09）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamErrorFormat {
+    /// Anthropic Messages：`event: error`
+    Anthropic,
+    /// OpenAI Chat Completions / Gemini：`data: {"error": {...}}`
+    OpenAiChat,
+    /// OpenAI Responses：`event: response.failed`
+    Responses,
+}
+
 /// 各 API 的使用量解析配置
 #[derive(Clone, Copy)]
 pub struct UsageParserConfig {
@@ -52,6 +63,8 @@ pub struct UsageParserConfig {
     pub stream_event_filter: Option<StreamUsageEventFilter>,
     /// 流式 usage 事件保留策略
     pub stream_event_retention: StreamEventRetention,
+    /// 流中途失败时补发的终止错误事件格式
+    pub stream_error_format: StreamErrorFormat,
     /// 应用类型字符串（用于日志记录）
     pub app_type_str: &'static str,
 }
@@ -163,6 +176,7 @@ pub const CLAUDE_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
     model_extractor: claude_model_extractor,
     stream_event_filter: Some(claude_stream_usage_event_filter),
     stream_event_retention: StreamEventRetention::All,
+    stream_error_format: StreamErrorFormat::Anthropic,
     app_type_str: "claude",
 };
 
@@ -177,6 +191,7 @@ pub const OPENAI_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
         ignore_null_usage: true,
         model_key: "model",
     },
+    stream_error_format: StreamErrorFormat::OpenAiChat,
     app_type_str: "codex",
 };
 
@@ -187,6 +202,7 @@ pub const CODEX_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
     model_extractor: codex_auto_model_extractor,
     stream_event_filter: Some(codex_stream_usage_event_filter),
     stream_event_retention: StreamEventRetention::All,
+    stream_error_format: StreamErrorFormat::Responses,
     app_type_str: "codex",
 };
 
@@ -201,6 +217,7 @@ pub const GEMINI_PARSER_CONFIG: UsageParserConfig = UsageParserConfig {
         ignore_null_usage: false,
         model_key: "modelVersion",
     },
+    stream_error_format: StreamErrorFormat::OpenAiChat,
     app_type_str: "gemini",
 };
 
