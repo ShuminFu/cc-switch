@@ -13,6 +13,7 @@
 
 mod adapter;
 mod auth;
+pub(crate) mod chat_tool_call_slots;
 mod claude;
 mod codex;
 pub(crate) mod codex_chat_common;
