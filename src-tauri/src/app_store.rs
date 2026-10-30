@@ -6,7 +6,7 @@ use tauri_plugin_store::StoreExt;
 use crate::error::AppError;
 
 /// Store 中的键名
-const STORE_KEY_APP_CONFIG_DIR: &str = "app_config_dir_override";
+pub(crate) const STORE_KEY_APP_CONFIG_DIR: &str = "app_config_dir_override";
 
 /// 缓存当前的 app_config_dir 覆盖路径，避免存储 AppHandle
 static APP_CONFIG_DIR_OVERRIDE: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
@@ -24,6 +24,15 @@ fn update_cached_override(value: Option<PathBuf>) {
 /// 获取缓存中的 app_config_dir 覆盖路径
 pub fn get_app_config_dir_override() -> Option<PathBuf> {
     override_cache().read().ok()?.clone()
+}
+
+/// Set the cached override for this process without a Tauri `AppHandle`.
+///
+/// Used by the `ccs` CLI and the headless proxy (PRODUCT-10/11), which resolve
+/// the override from the same `app_paths.json` store file (or a flag/env var)
+/// before any path lookup happens.
+pub(crate) fn set_app_config_dir_override_for_process(value: Option<PathBuf>) {
+    update_cached_override(value);
 }
 
 fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -106,7 +115,7 @@ pub fn set_app_config_dir_to_store(
 }
 
 /// 解析路径，支持 ~ 开头的相对路径
-fn resolve_path(raw: &str) -> PathBuf {
+pub(crate) fn resolve_path(raw: &str) -> PathBuf {
     if raw == "~" {
         if let Some(home) = dirs::home_dir() {
             return home;
