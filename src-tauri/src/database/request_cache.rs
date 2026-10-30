@@ -282,12 +282,15 @@ mod tests {
         let first = db.proxy_request_snapshot("claude").unwrap();
         {
             let conn = db.conn.lock().unwrap();
+            // provider_health 有指向 providers 的外键；本测试只关心 hook 过滤，临时关闭外键约束。
+            conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
             conn.execute(
                 "INSERT INTO provider_health (provider_id, app_type, is_healthy, consecutive_failures, updated_at)
                  VALUES ('p', 'claude', 1, 0, 'now')",
                 [],
             )
             .unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         }
         let again = db.proxy_request_snapshot("claude").unwrap();
         assert!(Arc::ptr_eq(&first, &again));
