@@ -2,6 +2,7 @@
 //!
 //! Handles provider CRUD operations, switching, and configuration management.
 
+mod async_bridge;
 mod endpoints;
 mod gemini_auth;
 mod live;
@@ -43,6 +44,8 @@ use live::{
 };
 use usage::validate_usage_script;
 
+pub(crate) use async_bridge::block_on_async;
+
 /// The built-in Codex official provider is safe to select during takeover:
 /// Codex keeps ownership of its ChatGPT login and the proxy only forwards the
 /// authenticated request. Other official providers retain the existing block.
@@ -71,16 +74,15 @@ pub fn reapply_current_codex_official_live(state: &AppState) -> Result<bool, App
     // 代理接管期间 live 归代理所有（开启代理时官方供应商只警告不拦截，
     // 二者可以共存）。与切换/保存路径一致：以 backup/占位符为所有权信号，
     // 只更新备份，注入后的配置由接管释放时的恢复路径落盘。
-    let has_live_backup =
-        futures::executor::block_on(state.db.get_live_backup(AppType::Codex.as_str()))
-            .ok()
-            .flatten()
-            .is_some();
+    let has_live_backup = block_on_async(state.db.get_live_backup(AppType::Codex.as_str()))
+        .ok()
+        .flatten()
+        .is_some();
     let live_taken_over = state
         .proxy_service
         .detect_takeover_in_live_config_for_app(&AppType::Codex);
     if has_live_backup || live_taken_over {
-        futures::executor::block_on(
+        block_on_async(
             state
                 .proxy_service
                 .update_live_backup_from_provider(AppType::Codex.as_str(), provider),
@@ -2297,11 +2299,10 @@ impl ProviderService {
             // 如果 Claude 代理接管处于激活状态，并且代理服务正在运行：
             // - 不直接走普通 Live 写入逻辑
             // - 改为更新 Live 备份，并在 Claude 下同步代理安全的 Live 配置
-            let has_live_backup =
-                futures::executor::block_on(state.db.get_live_backup(app_type.as_str()))
-                    .ok()
-                    .flatten()
-                    .is_some();
+            let has_live_backup = block_on_async(state.db.get_live_backup(app_type.as_str()))
+                .ok()
+                .flatten()
+                .is_some();
             let live_taken_over = state
                 .proxy_service
                 .detect_takeover_in_live_config_for_app(&app_type);
@@ -2314,7 +2315,7 @@ impl ProviderService {
                 if matches!(app_type, AppType::ClaudeDesktop) {
                     write_live_with_common_config(state.db.as_ref(), &app_type, &provider)?;
                 } else {
-                    futures::executor::block_on(
+                    block_on_async(
                         state
                             .proxy_service
                             .update_live_backup_from_provider(app_type.as_str(), &provider),
@@ -2322,9 +2323,9 @@ impl ProviderService {
                     .map_err(|e| AppError::Message(format!("更新 Live 备份失败: {e}")))?;
                 }
 
-                if futures::executor::block_on(state.proxy_service.is_running()) {
+                if block_on_async(state.proxy_service.is_running()) {
                     if matches!(app_type, AppType::Claude) {
-                        futures::executor::block_on(
+                        block_on_async(
                             state
                                 .proxy_service
                                 .sync_claude_live_from_provider_while_proxy_active(&provider),
@@ -2337,7 +2338,7 @@ impl ProviderService {
                         // model_catalog_json file. Refresh takeover-owned Live
                         // immediately so adding/removing mappings cannot leave
                         // the previous catalog pointer and capabilities active.
-                        futures::executor::block_on(
+                        block_on_async(
                             state
                                 .proxy_service
                                 .sync_codex_live_from_provider_while_proxy_active(&provider),
@@ -2533,7 +2534,7 @@ impl ProviderService {
             app_type,
             AppType::Claude | AppType::Codex | AppType::Gemini | AppType::GrokBuild
         ) {
-            Some(futures::executor::block_on(
+            Some(block_on_async(
                 state.proxy_service.lock_switch_for_app(app_type.as_str()),
             ))
         } else {
@@ -2543,11 +2544,10 @@ impl ProviderService {
         // Backup or live placeholders mean the live file is owned by proxy
         // takeover, even if the proxy server is temporarily stopped or is in the
         // activation window before enabled=true is committed.
-        let is_app_taken_over =
-            futures::executor::block_on(state.db.get_live_backup(app_type.as_str()))
-                .ok()
-                .flatten()
-                .is_some();
+        let is_app_taken_over = block_on_async(state.db.get_live_backup(app_type.as_str()))
+            .ok()
+            .flatten()
+            .is_some();
         let live_taken_over = state
             .proxy_service
             .detect_takeover_in_live_config_for_app(&app_type);
@@ -2577,7 +2577,7 @@ impl ProviderService {
                 id
             );
 
-            futures::executor::block_on(
+            block_on_async(
                 state
                     .proxy_service
                     .hot_switch_provider_inner(app_type.as_str(), id),
@@ -2846,11 +2846,10 @@ impl ProviderService {
             return Ok(());
         };
 
-        let has_live_backup =
-            futures::executor::block_on(state.db.get_live_backup(app_type.as_str()))
-                .ok()
-                .flatten()
-                .is_some();
+        let has_live_backup = block_on_async(state.db.get_live_backup(app_type.as_str()))
+            .ok()
+            .flatten()
+            .is_some();
 
         let live_taken_over = state
             .proxy_service
@@ -2864,7 +2863,7 @@ impl ProviderService {
                 return Ok(());
             }
 
-            futures::executor::block_on(
+            block_on_async(
                 state
                     .proxy_service
                     .update_live_backup_from_provider(app_type.as_str(), provider),

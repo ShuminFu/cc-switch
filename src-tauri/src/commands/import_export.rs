@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use super::run_blocking;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::State;
@@ -145,8 +146,8 @@ pub async fn create_db_backup(state: State<'_, AppState>) -> Result<String, Stri
 
 /// List all database backup files
 #[tauri::command]
-pub fn list_db_backups() -> Result<Vec<BackupEntry>, String> {
-    Database::list_backups().map_err(|e| e.to_string())
+pub async fn list_db_backups() -> Result<Vec<BackupEntry>, String> {
+    run_blocking(move || Database::list_backups().map_err(|e| e.to_string())).await
 }
 
 /// Restore database from a backup file
@@ -174,15 +175,16 @@ pub async fn restore_db_backup(
 
 /// Rename a database backup file
 #[tauri::command]
-pub fn rename_db_backup(
+pub async fn rename_db_backup(
     #[allow(non_snake_case)] oldFilename: String,
     #[allow(non_snake_case)] newName: String,
 ) -> Result<String, String> {
-    Database::rename_backup(&oldFilename, &newName).map_err(|e| e.to_string())
+    run_blocking(move || Database::rename_backup(&oldFilename, &newName).map_err(|e| e.to_string()))
+        .await
 }
 
 /// Delete a database backup file
 #[tauri::command]
-pub fn delete_db_backup(filename: String) -> Result<(), String> {
-    Database::delete_backup(&filename).map_err(|e| e.to_string())
+pub async fn delete_db_backup(filename: String) -> Result<(), String> {
+    run_blocking(move || Database::delete_backup(&filename).map_err(|e| e.to_string())).await
 }

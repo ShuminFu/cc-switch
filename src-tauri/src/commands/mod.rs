@@ -2,6 +2,7 @@
 
 mod auth;
 mod balance;
+mod blocking;
 mod budget;
 mod codex_oauth;
 mod coding_plan;
@@ -38,6 +39,7 @@ mod workspace;
 
 pub use auth::*;
 pub use balance::*;
+pub(crate) use blocking::{run_blocking, run_blocking_with_state};
 pub use budget::*;
 pub use codex_oauth::*;
 pub use coding_plan::*;

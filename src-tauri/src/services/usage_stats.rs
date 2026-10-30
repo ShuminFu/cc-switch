@@ -2410,9 +2410,140 @@ fn should_try_pricing_prefix_match(model_id: &str) -> bool {
         && dash_count >= 2
 }
 
+/// 模型定价信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPricingInfo {
+    pub model_id: String,
+    pub display_name: String,
+    pub input_cost_per_million: String,
+    pub output_cost_per_million: String,
+    pub cache_read_cost_per_million: String,
+    pub cache_creation_cost_per_million: String,
+}
+
+// 模型定价表的读写（原先以裸 SQL 写在 commands/usage.rs 中）。
+impl Database {
+    /// 列出全部模型定价（按显示名称排序）。表缺失时返回空列表。
+    pub fn list_model_pricing(&self) -> Result<Vec<ModelPricingInfo>, AppError> {
+        let conn = lock_conn!(self.conn);
+
+        // 检查表是否存在
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='model_pricing'",
+                [],
+                |row| row.get::<_, i64>(0).map(|count| count > 0),
+            )
+            .unwrap_or(false);
+
+        if !table_exists {
+            log::error!("model_pricing 表不存在,可能需要重启应用以触发数据库迁移");
+            return Ok(Vec::new());
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT model_id, display_name, input_cost_per_million, output_cost_per_million,
+                    cache_read_cost_per_million, cache_creation_cost_per_million
+             FROM model_pricing
+             ORDER BY display_name",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(ModelPricingInfo {
+                model_id: row.get(0)?,
+                display_name: row.get(1)?,
+                input_cost_per_million: row.get(2)?,
+                output_cost_per_million: row.get(3)?,
+                cache_read_cost_per_million: row.get(4)?,
+                cache_creation_cost_per_million: row.get(5)?,
+            })
+        })?;
+
+        let mut pricing = Vec::new();
+        for row in rows {
+            pricing.push(row?);
+        }
+        Ok(pricing)
+    }
+
+    /// 插入或替换一条模型定价（调用方负责校验输入）。
+    pub fn upsert_model_pricing(&self, pricing: &ModelPricingInfo) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "INSERT OR REPLACE INTO model_pricing (
+                model_id, display_name, input_cost_per_million, output_cost_per_million,
+                cache_read_cost_per_million, cache_creation_cost_per_million
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                pricing.model_id,
+                pricing.display_name,
+                pricing.input_cost_per_million,
+                pricing.output_cost_per_million,
+                pricing.cache_read_cost_per_million,
+                pricing.cache_creation_cost_per_million
+            ],
+        )
+        .map_err(|e| AppError::Database(format!("更新模型定价失败: {e}")))?;
+        Ok(())
+    }
+
+    /// 删除一条模型定价。
+    pub fn delete_model_pricing(&self, model_id: &str) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "DELETE FROM model_pricing WHERE model_id = ?1",
+            params![model_id],
+        )
+        .map_err(|e| AppError::Database(format!("删除模型定价失败: {e}")))?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_pricing_crud_roundtrip() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let pricing = ModelPricingInfo {
+            model_id: "zz-test-model".to_string(),
+            display_name: "ZZ Test".to_string(),
+            input_cost_per_million: "1.5".to_string(),
+            output_cost_per_million: "2".to_string(),
+            cache_read_cost_per_million: "0.1".to_string(),
+            cache_creation_cost_per_million: "0.2".to_string(),
+        };
+        db.upsert_model_pricing(&pricing)?;
+        let listed = db.list_model_pricing()?;
+        let found = listed
+            .iter()
+            .find(|p| p.model_id == "zz-test-model")
+            .expect("upserted pricing listed");
+        assert_eq!(found.input_cost_per_million, "1.5");
+        assert_eq!(found.display_name, "ZZ Test");
+
+        db.upsert_model_pricing(&ModelPricingInfo {
+            output_cost_per_million: "3".to_string(),
+            ..pricing
+        })?;
+        let replaced = db.list_model_pricing()?;
+        assert_eq!(
+            replaced
+                .iter()
+                .filter(|p| p.model_id == "zz-test-model")
+                .count(),
+            1
+        );
+
+        db.delete_model_pricing("zz-test-model")?;
+        assert!(db
+            .list_model_pricing()?
+            .iter()
+            .all(|p| p.model_id != "zz-test-model"));
+        Ok(())
+    }
 
     fn local_ts(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> i64 {
         match Local.with_ymd_and_hms(year, month, day, hour, minute, second) {
