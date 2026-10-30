@@ -180,8 +180,5 @@ jobs:
         with:
           node-version-file: .node-version
 
-      # Report-only: production deps currently have open advisories
-      # (smol-toml, zod). Make this blocking once they are upgraded.
       - name: pnpm audit (production dependencies)
-        continue-on-error: true
         run: pnpm audit --prod --audit-level=high
