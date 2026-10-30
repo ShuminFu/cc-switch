@@ -1,25 +1,88 @@
+use bytes::{Bytes, BytesMut};
+
+/// Strip an SSE field prefix (`field: value` or `field:value`) without allocating.
 #[inline]
 pub(crate) fn strip_sse_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
-    line.strip_prefix(&format!("{field}: "))
-        .or_else(|| line.strip_prefix(&format!("{field}:")))
+    let rest = line.strip_prefix(field)?.strip_prefix(':')?;
+    Some(rest.strip_prefix(' ').unwrap_or(rest))
+}
+
+/// Locate the first SSE event delimiter (`\n\n` or `\r\n\r\n`, whichever
+/// starts first) in one pass. Returns `(block_end, delimiter_len)`.
+#[inline]
+fn find_sse_delimiter(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
+    let mut i = from;
+    while i < bytes.len() {
+        let rel = bytes[i..].iter().position(|&b| b == b'\n')?;
+        let nl = i + rel;
+        match bytes.get(nl + 1) {
+            Some(b'\n') => return Some((nl, 2)),
+            Some(b'\r')
+                if nl >= 1 && bytes[nl - 1] == b'\r' && bytes.get(nl + 2) == Some(&b'\n') =>
+            {
+                return Some((nl - 1, 4));
+            }
+            _ => i = nl + 1,
+        }
+    }
+    None
 }
 
 #[inline]
 pub(crate) fn take_sse_block(buffer: &mut String) -> Option<String> {
-    let mut best: Option<(usize, usize)> = None;
+    let (pos, len) = find_sse_delimiter(buffer.as_bytes(), 0)?;
+    // Both delimiters are ASCII, so `pos` and `pos + len` are char boundaries.
+    let rest = buffer.split_off(pos + len);
+    let mut block = std::mem::replace(buffer, rest);
+    block.truncate(pos);
+    Some(block)
+}
 
-    for (delimiter, len) in [("\r\n\r\n", 4usize), ("\n\n", 2usize)] {
-        if let Some(pos) = buffer.find(delimiter) {
-            if best.is_none_or(|(best_pos, _)| pos < best_pos) {
-                best = Some((pos, len));
+/// Allocation-light SSE block splitter over raw bytes.
+///
+/// Chunks are appended to a `BytesMut`; complete blocks are split off the front
+/// with `split_to` (O(1), no memmove of the remaining bytes), and a scan cursor
+/// avoids rescanning a partial block on every chunk. Blocks always end at an
+/// ASCII delimiter, so a multi-byte UTF-8 character can never straddle two
+/// blocks and no UTF-8 remainder bookkeeping is needed.
+#[derive(Debug, Default)]
+pub(crate) struct SseBlockBuffer {
+    buf: BytesMut,
+    scan_from: usize,
+}
+
+impl SseBlockBuffer {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn push(&mut self, chunk: &[u8]) {
+        self.buf.extend_from_slice(chunk);
+    }
+
+    /// Next complete block (without its delimiter), if any.
+    pub(crate) fn next_block(&mut self) -> Option<Bytes> {
+        match find_sse_delimiter(&self.buf, self.scan_from) {
+            Some((pos, len)) => {
+                let mut block = self.buf.split_to(pos + len);
+                block.truncate(pos);
+                self.scan_from = 0;
+                Some(block.freeze())
+            }
+            None => {
+                // A delimiter is at most 4 bytes; keep enough overlap to find one
+                // that is completed by the next chunk.
+                self.scan_from = self.buf.len().saturating_sub(3);
+                None
             }
         }
     }
 
-    let (pos, len) = best?;
-    let block = buffer[..pos].to_string();
-    buffer.drain(..pos + len);
-    Some(block)
+    /// Bytes buffered after the last complete block.
+    #[allow(dead_code)]
+    pub(crate) fn remaining(&self) -> &[u8] {
+        &self.buf
+    }
 }
 
 /// Append raw bytes to a UTF-8 `String` buffer, correctly handling multi-byte
@@ -87,7 +150,7 @@ pub(crate) fn append_utf8_safe(buffer: &mut String, remainder: &mut Vec<u8>, new
 
 #[cfg(test)]
 mod tests {
-    use super::{append_utf8_safe, strip_sse_field, take_sse_block};
+    use super::{append_utf8_safe, strip_sse_field, take_sse_block, SseBlockBuffer};
 
     #[test]
     fn strip_sse_field_accepts_optional_space() {
@@ -130,6 +193,53 @@ mod tests {
             Some("data: {\"ok\":true}".to_string())
         );
         assert_eq!(buffer, "rest");
+    }
+
+    #[test]
+    fn take_sse_block_picks_the_earliest_delimiter() {
+        let mut buffer = "a\r\n\r\nb\n\nc".to_string();
+        assert_eq!(take_sse_block(&mut buffer), Some("a".to_string()));
+        assert_eq!(take_sse_block(&mut buffer), Some("b".to_string()));
+        assert_eq!(take_sse_block(&mut buffer), None);
+        assert_eq!(buffer, "c");
+
+        // `\r\n\n` ends at the `\n\n`, leaving the `\r` in the block (as before).
+        let mut buffer = "x\r\n\nrest".to_string();
+        assert_eq!(take_sse_block(&mut buffer), Some("x\r".to_string()));
+        assert_eq!(buffer, "rest");
+    }
+
+    #[test]
+    fn strip_sse_field_requires_exact_field_name() {
+        assert_eq!(strip_sse_field("data", "data"), None);
+        assert_eq!(strip_sse_field("database: x", "data"), None);
+        assert_eq!(strip_sse_field("data:", "data"), Some(""));
+        assert_eq!(strip_sse_field("data:  two", "data"), Some(" two"));
+    }
+
+    #[test]
+    fn block_buffer_splits_across_arbitrary_chunk_boundaries() {
+        let stream = "event: a\ndata: {\"t\":\"你好\"}\n\nevent: b\r\ndata: 2\r\n\r\ndata: tail";
+        let bytes = stream.as_bytes();
+        for chunk_size in 1..=bytes.len() {
+            let mut buffer = SseBlockBuffer::new();
+            let mut blocks = Vec::new();
+            for chunk in bytes.chunks(chunk_size) {
+                buffer.push(chunk);
+                while let Some(block) = buffer.next_block() {
+                    blocks.push(String::from_utf8(block.to_vec()).unwrap());
+                }
+            }
+            assert_eq!(
+                blocks,
+                vec![
+                    "event: a\ndata: {\"t\":\"你好\"}".to_string(),
+                    "event: b\r\ndata: 2".to_string()
+                ],
+                "chunk_size={chunk_size}"
+            );
+            assert_eq!(buffer.remaining(), b"data: tail");
+        }
     }
 
     // ------------------------------------------------------------------

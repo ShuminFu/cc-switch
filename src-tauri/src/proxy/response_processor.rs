@@ -5,11 +5,11 @@
 use super::{
     content_encoding::{decompress_body, get_content_encoding},
     forwarder::ActiveConnectionGuard,
-    handler_config::{StreamUsageEventFilter, UsageParserConfig},
+    handler_config::{StreamEventRetention, StreamUsageEventFilter, UsageParserConfig},
     handler_context::{RequestContext, StreamingTimeoutConfig},
     hyper_client::ProxyResponse,
     server::ProxyState,
-    sse::{strip_sse_field, take_sse_block},
+    sse::{strip_sse_field, SseBlockBuffer},
     usage::parser::TokenUsage,
     ProxyError,
 };
@@ -22,11 +22,10 @@ use serde_json::Value;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex as StdMutex, OnceLock,
     },
     time::Duration,
 };
-use tokio::sync::Mutex;
 
 // ============================================================================
 // 响应头处理
@@ -345,13 +344,68 @@ pub struct SseUsageCollector {
 }
 
 struct SseUsageCollectorInner {
-    events: Mutex<Vec<Value>>,
-    first_event_time: Mutex<Option<std::time::Instant>>,
-    first_event_set: AtomicBool,
+    retained: StdMutex<RetainedEvents>,
+    first_event_time: OnceLock<std::time::Instant>,
     start_time: std::time::Instant,
     on_complete: UsageCallbackWithTiming,
     should_collect: Option<StreamUsageEventFilter>,
+    retention: StreamEventRetention,
     finished: AtomicBool,
+}
+
+/// 收集器保留的事件：`All` 模式下是完整列表；`LastUsage` 模式下至多两个
+/// （首个带模型名的事件 + 最后一个 usage 事件），内存与流长度无关（PERF-07）。
+#[derive(Default)]
+struct RetainedEvents {
+    all: Vec<Value>,
+    model_event: Option<Value>,
+    usage_event: Option<Value>,
+}
+
+impl RetainedEvents {
+    fn push(&mut self, event: Value, retention: StreamEventRetention) {
+        let StreamEventRetention::LastUsage {
+            usage_key,
+            ignore_null_usage,
+            model_key,
+        } = retention
+        else {
+            self.all.push(event);
+            return;
+        };
+
+        let has_model = |value: &Value| {
+            value
+                .get(model_key)
+                .and_then(Value::as_str)
+                .is_some_and(|model| !model.is_empty())
+        };
+        let is_usage_event = event
+            .get(usage_key)
+            .is_some_and(|usage| !(ignore_null_usage && usage.is_null()));
+
+        if is_usage_event {
+            // 被替换的旧 usage 事件若是首个带模型名的事件，转存为 model_event，
+            // 保持「首个模型名」的既有语义。
+            if let Some(previous) = self.usage_event.replace(event) {
+                if self.model_event.is_none() && has_model(&previous) {
+                    self.model_event = Some(previous);
+                }
+            }
+        } else if self.model_event.is_none()
+            && !self.usage_event.as_ref().is_some_and(&has_model)
+            && has_model(&event)
+        {
+            self.model_event = Some(event);
+        }
+    }
+
+    fn into_events(self) -> Vec<Value> {
+        let mut events = self.all;
+        events.extend(self.model_event);
+        events.extend(self.usage_event);
+        events
+    }
 }
 
 impl SseUsageCollector {
@@ -361,15 +415,30 @@ impl SseUsageCollector {
         should_collect: Option<StreamUsageEventFilter>,
         callback: impl Fn(Vec<Value>, Option<u64>) + Send + Sync + 'static,
     ) -> Self {
+        Self::with_retention(
+            start_time,
+            should_collect,
+            StreamEventRetention::All,
+            callback,
+        )
+    }
+
+    /// 同 `new`，但按 `retention` 只保留解析器需要的事件。
+    pub fn with_retention(
+        start_time: std::time::Instant,
+        should_collect: Option<StreamUsageEventFilter>,
+        retention: StreamEventRetention,
+        callback: impl Fn(Vec<Value>, Option<u64>) + Send + Sync + 'static,
+    ) -> Self {
         let on_complete: UsageCallbackWithTiming = Arc::new(callback);
         Self {
             inner: Arc::new(SseUsageCollectorInner {
-                events: Mutex::new(Vec::new()),
-                first_event_time: Mutex::new(None),
-                first_event_set: AtomicBool::new(false),
+                retained: StdMutex::new(RetainedEvents::default()),
+                first_event_time: OnceLock::new(),
                 start_time,
                 on_complete,
                 should_collect,
+                retention,
                 finished: AtomicBool::new(false),
             }),
         }
@@ -382,23 +451,19 @@ impl SseUsageCollector {
             .unwrap_or(true)
     }
 
-    /// 标记首个被收集的 SSE 事件时间，沿用 `first_token_ms` 的既有近似语义。
-    async fn mark_first_collected_event_time(&self) {
-        if self.inner.first_event_set.load(Ordering::Acquire) {
-            return;
-        }
-        let mut first_time = self.inner.first_event_time.lock().await;
-        if first_time.is_none() {
-            *first_time = Some(std::time::Instant::now());
-            self.inner.first_event_set.store(true, Ordering::Release);
-        }
-    }
-
-    /// 推送 SSE 事件
+    /// 推送 SSE 事件。首个被收集事件的时间沿用 `first_token_ms` 的既有近似语义。
+    ///
+    /// 临界区极短且不跨 await，用 std Mutex + OnceLock 代替两把 tokio Mutex。
     pub async fn push(&self, event: Value) {
-        self.mark_first_collected_event_time().await;
-        let mut events = self.inner.events.lock().await;
-        events.push(event);
+        self.inner
+            .first_event_time
+            .get_or_init(std::time::Instant::now);
+        let mut retained = self
+            .inner
+            .retained
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        retained.push(event, self.inner.retention);
     }
 
     /// 完成收集并触发回调
@@ -408,14 +473,19 @@ impl SseUsageCollector {
         }
 
         let events = {
-            let mut guard = self.inner.events.lock().await;
-            std::mem::take(&mut *guard)
+            let mut retained = self
+                .inner
+                .retained
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            std::mem::take(&mut *retained).into_events()
         };
 
-        let first_token_ms = {
-            let first_time = self.inner.first_event_time.lock().await;
-            first_time.map(|t| (t - self.inner.start_time).as_millis() as u64)
-        };
+        let first_token_ms = self
+            .inner
+            .first_event_time
+            .get()
+            .map(|t| (*t - self.inner.start_time).as_millis() as u64);
 
         (self.inner.on_complete)(events, first_token_ms);
     }
@@ -490,9 +560,10 @@ fn create_usage_collector(
     let model_extractor = parser_config.model_extractor;
     let session_id = ctx.session_id.clone();
 
-    Some(SseUsageCollector::new(
+    Some(SseUsageCollector::with_retention(
         start_time,
         parser_config.stream_event_filter,
+        parser_config.stream_event_retention,
         move |events, first_token_ms| {
             if let Some(usage) = stream_parser(&events) {
                 let model = model_extractor(&events, &fallback_model);
@@ -683,8 +754,7 @@ pub fn create_logged_passthrough_stream(
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
         let _conn_guard = connection_guard;
-        let mut buffer = String::new();
-        let mut utf8_remainder: Vec<u8> = Vec::new();
+        let mut sse_buffer = SseBlockBuffer::new();
         let mut collector = usage_collector;
         let mut finish_guard = collector.clone().map(SseUsageFinishGuard::new);
         let inspect_sse_events =
@@ -740,11 +810,13 @@ pub fn create_logged_passthrough_stream(
                     }
                     is_first_chunk = false;
                     if inspect_sse_events {
-                        crate::proxy::sse::append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
+                        sse_buffer.push(&bytes);
 
-                        // 尝试解析并记录完整的 SSE 事件
-                        while let Some(event_text) = take_sse_block(&mut buffer) {
-                            if !event_text.trim().is_empty() {
+                        // 尝试解析并记录完整的 SSE 事件（块以 ASCII 分隔符结尾，
+                        // 不会切断多字节字符；合法 UTF-8 时 from_utf8_lossy 零拷贝）
+                        while let Some(block) = sse_buffer.next_block() {
+                            let event_text = String::from_utf8_lossy(&block);
+                            {
                                 // 提取 data 部分；只有 usage collector 存在时才解析 JSON。
                                 for line in event_text.lines() {
                                     if let Some(data) = strip_sse_field(line, "data") {
@@ -1192,5 +1264,100 @@ pub(crate) mod tests {
             Decimal::from_str("1.5").unwrap()
         );
         Ok(())
+    }
+
+    async fn collect_with(config: &UsageParserConfig, events: &[Value]) -> Vec<Value> {
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let collector = SseUsageCollector::with_retention(
+            std::time::Instant::now(),
+            config.stream_event_filter,
+            config.stream_event_retention,
+            move |events, _| {
+                *sink.lock().unwrap() = events;
+            },
+        );
+        for event in events {
+            let data = event.to_string();
+            if collector.should_collect(&data) {
+                collector.push(event.clone()).await;
+            }
+        }
+        collector.finish().await;
+        let events = captured.lock().unwrap().clone();
+        events
+    }
+
+    #[tokio::test]
+    async fn openai_collector_retains_bounded_events_with_same_usage() {
+        use crate::proxy::handler_config::OPENAI_PARSER_CONFIG;
+        let mut events: Vec<Value> = (0..1000)
+            .map(|i| {
+                serde_json::json!({
+                    "id": "chatcmpl-1",
+                    "model": "gpt-first",
+                    "choices": [{"index": 0, "delta": {"content": format!("tok{i}")}}],
+                    "usage": null
+                })
+            })
+            .collect();
+        events.push(serde_json::json!({
+            "id": "chatcmpl-1",
+            "model": "gpt-last",
+            "choices": [],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7}
+        }));
+
+        let retained = collect_with(&OPENAI_PARSER_CONFIG, &events).await;
+        assert!(retained.len() <= 2, "retained {} events", retained.len());
+
+        let full = (OPENAI_PARSER_CONFIG.stream_parser)(&events).unwrap();
+        let bounded = (OPENAI_PARSER_CONFIG.stream_parser)(&retained).unwrap();
+        assert_eq!(bounded.input_tokens, full.input_tokens);
+        assert_eq!(bounded.output_tokens, full.output_tokens);
+        assert_eq!(bounded.model, full.model);
+        assert_eq!(
+            (OPENAI_PARSER_CONFIG.model_extractor)(&retained, "fallback"),
+            (OPENAI_PARSER_CONFIG.model_extractor)(&events, "fallback"),
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_collector_keeps_first_model_and_last_usage() {
+        use crate::proxy::handler_config::GEMINI_PARSER_CONFIG;
+        let mut events = vec![serde_json::json!({
+            "modelVersion": "gemini-first",
+            "usageMetadata": {"promptTokenCount": 5, "totalTokenCount": 6}
+        })];
+        for total in 7..500 {
+            events.push(serde_json::json!({
+                "modelVersion": "gemini-later",
+                "usageMetadata": {"promptTokenCount": 5, "totalTokenCount": total}
+            }));
+        }
+
+        let retained = collect_with(&GEMINI_PARSER_CONFIG, &events).await;
+        assert!(retained.len() <= 2, "retained {} events", retained.len());
+
+        let full = (GEMINI_PARSER_CONFIG.stream_parser)(&events).unwrap();
+        let bounded = (GEMINI_PARSER_CONFIG.stream_parser)(&retained).unwrap();
+        assert_eq!(bounded.input_tokens, full.input_tokens);
+        assert_eq!(bounded.output_tokens, full.output_tokens);
+        assert_eq!(bounded.model.as_deref(), Some("gemini-first"));
+        assert_eq!(bounded.model, full.model);
+    }
+
+    #[tokio::test]
+    async fn claude_collector_keeps_all_selected_events() {
+        use crate::proxy::handler_config::CLAUDE_PARSER_CONFIG;
+        let events = vec![
+            serde_json::json!({"type": "message_start", "message": {"id": "m", "model": "c", "usage": {"input_tokens": 3}}}),
+            serde_json::json!({"type": "content_block_delta", "delta": {"text": "x"}}),
+            serde_json::json!({"type": "message_delta", "usage": {"output_tokens": 4}}),
+        ];
+        let retained = collect_with(&CLAUDE_PARSER_CONFIG, &events).await;
+        assert_eq!(retained.len(), 2);
+        let usage = (CLAUDE_PARSER_CONFIG.stream_parser)(&retained).unwrap();
+        assert_eq!((usage.input_tokens, usage.output_tokens), (3, 4));
     }
 }
