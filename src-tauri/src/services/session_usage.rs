@@ -1548,11 +1548,23 @@ mod tests {
         let db = Database::memory()?;
         insert_undercounted_claude_row(&db, "session:q1", 0, 0, 1_000)?;
         insert_undercounted_claude_row(&db, "session:q2", 20, 0, 2_000)?;
+        // q3 与一条代理日志指纹相同：只计入 duplicate_count，不参与其它质量统计与时间范围
+        insert_undercounted_claude_row(&db, "session:q3", 30, 0, 500)?;
         {
             let conn = lock_conn!(db.conn);
             conn.execute(
                 "UPDATE proxy_request_logs SET total_cost_usd = '0.5', session_id = NULL
                  WHERE request_id = 'session:q2'",
+                [],
+            )?;
+            conn.execute(
+                "INSERT INTO proxy_request_logs (
+                    request_id, provider_id, app_type, model, request_model,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                    input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd,
+                    total_cost_usd, latency_ms, status_code, created_at, data_source
+                ) VALUES ('proxy-q3', 'p', 'claude', 'claude-sonnet-4-5', 'claude-sonnet-4-5',
+                          10, 30, 100, 0, '0', '0', '0', '0', '0.2', 100, 200, 500, 'proxy')",
                 [],
             )?;
         }
@@ -1564,12 +1576,17 @@ mod tests {
             .expect("session_log source");
         assert_eq!(claude.request_count, 2);
         assert_eq!(claude.total_cost_usd, "0.500000");
-        assert_eq!(claude.duplicate_count, 0);
+        assert_eq!(claude.duplicate_count, 1);
         assert_eq!(claude.unpriced_count, 1);
         assert_eq!(claude.missing_session_count, 1);
         assert_eq!(claude.zero_output_count, 1);
         assert_eq!(claude.first_created_at, Some(1_000));
         assert_eq!(claude.last_created_at, Some(2_000));
+        let proxy = breakdown
+            .iter()
+            .find(|s| s.data_source == "proxy")
+            .expect("proxy source");
+        assert_eq!((proxy.request_count, proxy.duplicate_count), (1, 0));
         Ok(())
     }
 }
