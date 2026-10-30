@@ -17,6 +17,9 @@ impl McpService {
 
     /// 添加或更新 MCP 服务器
     pub fn upsert_server(state: &AppState, server: McpServer) -> Result<(), AppError> {
+        // 先做 schema 校验：无效定义不得写入数据库或任何 live 配置
+        mcp::validate_server_spec(&server.server)?;
+
         // 读取旧状态：用于处理“编辑时取消勾选某个应用”的场景（需要从对应 live 配置中移除）
         let prev_apps = state
             .db

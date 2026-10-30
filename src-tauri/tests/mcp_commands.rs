@@ -460,6 +460,55 @@ fn enabling_codex_mcp_skips_when_codex_dir_missing() {
     );
 }
 
+/// CFG-05: invalid specs are rejected by `upsert_server` before the DB or any
+/// live config file changes.
+#[test]
+fn upsert_mcp_server_rejects_invalid_spec_before_any_write() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+    fs::create_dir_all(home.join(".claude")).expect("create ~/.claude dir");
+
+    let state = support::create_test_state().expect("create test state");
+    for spec in [
+        json!({"command": "echo", "args": ["ok", 1]}),
+        json!({"command": "echo", "env": {"A": 1}}),
+        json!({"type": "http", "url": "file:///etc/passwd"}),
+        json!({"type": "websocket", "url": "https://example.com"}),
+    ] {
+        let result = McpService::upsert_server(
+            &state,
+            McpServer {
+                id: "bad".to_string(),
+                name: "bad".to_string(),
+                server: spec.clone(),
+                apps: McpApps {
+                    claude: true,
+                    ..McpApps::default()
+                },
+                description: None,
+                homepage: None,
+                docs: None,
+                tags: Vec::new(),
+            },
+        );
+        assert!(result.is_err(), "{spec} should be rejected");
+    }
+
+    assert!(
+        !state
+            .db
+            .get_all_mcp_servers()
+            .expect("list servers")
+            .contains_key("bad"),
+        "invalid server must not be stored"
+    );
+    assert!(
+        !get_claude_mcp_path().exists(),
+        "~/.claude.json must not be written for an invalid server"
+    );
+}
+
 #[test]
 fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
     let _guard = test_mutex().lock().expect("acquire test mutex");
