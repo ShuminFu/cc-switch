@@ -207,7 +207,8 @@ pub(crate) fn install(conn: &Connection) -> Result<(), AppError> {
 
 /// 创建维护 `superseded_by` 的触发器（幂等；没有该列的库跳过）。
 ///
-/// 每次迁移结束和 SQL 导入后都会调用：SQL 导出不含触发器。
+/// 每次迁移结束和 SQL 导入后都会调用：SQL 导出不含触发器。先删后建，
+/// 已有库里较旧的触发器定义也会被替换为当前版本。
 pub(crate) fn ensure_triggers(conn: &Connection) -> Result<(), AppError> {
     if !has_fingerprint_columns(conn)?
         || !Database::has_column(conn, "proxy_request_logs", "superseded_by")?
@@ -223,11 +224,17 @@ pub(crate) fn ensure_triggers(conn: &Connection) -> Result<(), AppError> {
             superseding = superseding_proxy_id("proxy_request_logs"),
         )
     };
+    // 匹配条件里的时间窗口写作 `NEW.created_at BETWEEN 列 ± 窗口`，用不上索引的
+    // created_at 区间；这里补一个等价的「列 BETWEEN NEW ± 窗口」，避免每条代理
+    // 写入都扫描同指纹的全部历史会话行
     let mark_sessions_covered_by_new = format!(
         "UPDATE proxy_request_logs
          SET superseded_by = NEW.request_id
          WHERE superseded_by IS NULL
            AND {session_row}
+           AND proxy_request_logs.created_at BETWEEN
+               NEW.created_at - {SESSION_PROXY_DEDUP_WINDOW_SECONDS}
+               AND NEW.created_at + {SESSION_PROXY_DEDUP_WINDOW_SECONDS}
            AND {conditions};",
         session_row = is_session_row("proxy_request_logs"),
         conditions = proxy_match_conditions("proxy_request_logs", "NEW"),
@@ -240,7 +247,7 @@ pub(crate) fn ensure_triggers(conn: &Connection) -> Result<(), AppError> {
     // recursive_triggers 默认关闭，REPLACE 删除旧行不触发 DELETE 触发器，
     // 因此 INSERT 时也重新判定指向同一 request_id 的会话行。
     let sql = format!(
-        "CREATE TRIGGER IF NOT EXISTS {TRIGGER_AFTER_INSERT}
+        "CREATE TRIGGER {TRIGGER_AFTER_INSERT}
          AFTER INSERT ON proxy_request_logs
          BEGIN
              {recompute_new}
@@ -250,7 +257,7 @@ pub(crate) fn ensure_triggers(conn: &Connection) -> Result<(), AppError> {
              {mark_sessions_covered_by_new}
          END;
 
-         CREATE TRIGGER IF NOT EXISTS {TRIGGER_AFTER_UPDATE}
+         CREATE TRIGGER {TRIGGER_AFTER_UPDATE}
          AFTER UPDATE OF {FINGERPRINT_COLUMNS} ON proxy_request_logs
          BEGIN
              {recompute_old}
@@ -260,7 +267,7 @@ pub(crate) fn ensure_triggers(conn: &Connection) -> Result<(), AppError> {
              {mark_sessions_covered_by_new}
          END;
 
-         CREATE TRIGGER IF NOT EXISTS {TRIGGER_AFTER_DELETE}
+         CREATE TRIGGER {TRIGGER_AFTER_DELETE}
          AFTER DELETE ON proxy_request_logs
          WHEN {old_ds} = 'proxy'
          BEGIN
@@ -269,6 +276,7 @@ pub(crate) fn ensure_triggers(conn: &Connection) -> Result<(), AppError> {
         recompute_new = recompute_pointing_to("NEW.request_id"),
         recompute_old = recompute_pointing_to("OLD.request_id"),
     );
+    drop_triggers(conn)?;
     conn.execute_batch(&sql)
         .map_err(|e| AppError::Database(format!("创建 superseded_by 触发器失败: {e}")))
 }
@@ -798,6 +806,38 @@ mod tests {
         assert_eq!(trigger_count(&conn)?, 3);
         assert_eq!(ids_where(&conn, "l.superseded_by IS NULL")?, local_before);
         assert_parity(&conn)?;
+        Ok(())
+    }
+
+    #[test]
+    fn superseded_triggers_are_recreated_with_current_definition() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let conn = lock_conn!(db.conn);
+        // 较旧定义的触发器（例如早期构建创建的）：迁移结束后必须被替换
+        conn.execute_batch(&format!(
+            "DROP TRIGGER {TRIGGER_AFTER_INSERT};
+             CREATE TRIGGER {TRIGGER_AFTER_INSERT} AFTER INSERT ON proxy_request_logs
+             BEGIN SELECT 1; END;"
+        ))?;
+        Database::apply_schema_migrations_on_conn(&conn)?;
+
+        let sql: String = conn.query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+            params![TRIGGER_AFTER_INSERT],
+            |row| row.get(0),
+        )?;
+        let sql = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+        // 代理写入时按 created_at 区间查找会话行（可走索引区间）
+        assert!(
+            sql.contains(&format!(
+                "proxy_request_logs.created_at BETWEEN NEW.created_at - {SESSION_PROXY_DEDUP_WINDOW_SECONDS}"
+            )),
+            "stale trigger must be replaced: {sql}"
+        );
+
+        let mut rng = Lcg(67);
+        insert_synthetic_rows(&conn, &mut rng, "r", 1_000, 1_000_000, 3600)?;
+        assert!(assert_parity(&conn)? > 0);
         Ok(())
     }
 
