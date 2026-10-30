@@ -88,3 +88,15 @@ from CCS-074, and the webview still sends only `{providerId, sessionId}`.
   To do it: open Sessions, select a Claude/Codex session, click Resume, and confirm a terminal
   opens in the project directory, runs `<cli> --resume <id>`, and stays open afterwards.
 
+
+**Review.** Checked every acceptance criterion against `c9a0414`: the per-OS script tests and
+`cargo test terminal` are in place and green, the IPC still accepts only `{providerId, sessionId}`,
+and macOS keeps its existing launchers. One defect was fixed: `build_windows_cwd_command_str`
+caret-escaped `^ & | < > ( )` even though the path is written inside double quotes, where cmd
+keeps `^` as a literal character. A project directory such as `C:\work\proj (1)` therefore
+became `cd /d "C:\work\proj ^(1^)"` and the resume `.bat` exited on the failed `cd`. The
+provider launcher's `cd` had the same problem. The helper now only doubles `%`, which is still
+expanded inside quotes. The resume and shell test expectations were updated to match. Re-ran fmt, clippy
+(`-D warnings`, lib and tests), `cargo test --lib` (2799 passed), `cargo test terminal`,
+`pnpm typecheck`, `pnpm test:unit` (1570 passed) and `pnpm format:check`, all clean. Status
+stays Partial until the manual resume runs on real Windows and Linux desktops.

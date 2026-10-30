@@ -540,7 +540,7 @@ mod tests {
 
         assert_eq!(
             batch,
-            "@echo off\r\ncd /d \"C:\\Users\\me\\proj ^(1^)^&x\" || exit /b 1\r\ncall claude --resume abc-123\r\ndel \"%~f0\" >nul 2>&1\r\n"
+            "@echo off\r\ncd /d \"C:\\Users\\me\\proj (1)&x\" || exit /b 1\r\ncall claude --resume abc-123\r\ndel \"%~f0\" >nul 2>&1\r\n"
         );
     }
 

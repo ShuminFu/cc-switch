@@ -47,7 +47,9 @@ pub(crate) fn is_windows_unc_path(path: &str) -> bool {
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) fn build_windows_cwd_command_str(path: &str) -> String {
-    let escaped = escape_windows_batch_value(path);
+    // 路径位于双引号内：cmd 在引号内不再解析 `^ & | < > ( )`（`^` 会被当作字面量保留），
+    // 只有批处理阶段的 `%` 展开仍然生效，因此仅需把 `%` 写成 `%%`。
+    let escaped = path.replace('%', "%%");
 
     if is_windows_unc_path(path) {
         // `cmd.exe` cannot make a UNC path current via `cd`; `pushd` maps it first.
@@ -164,7 +166,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "pushd \"\\\\server\\share\\100%%^&^(test^)\" || exit /b 1\r\n"
+            "pushd \"\\\\server\\share\\100%%&(test)\" || exit /b 1\r\n"
         );
     }
 
