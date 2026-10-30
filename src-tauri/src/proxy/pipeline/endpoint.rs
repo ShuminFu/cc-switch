@@ -34,6 +34,9 @@ impl UpstreamTarget {
             rewrite_codex_responses_endpoint_to_chat(endpoint)
         } else if flags.codex_responses_to_anthropic {
             rewrite_codex_responses_endpoint_to_anthropic(endpoint)
+        } else if flags.gemini_to_anthropic {
+            // Gemini 的 query（`alt=sse`、`key=`）对 Anthropic 上游没有意义，不转发
+            ("/v1/messages".to_string(), None)
         } else if needs_transform && adapter.name() == "Claude" {
             let api_format = api_format
                 .unwrap_or_else(|| crate::proxy::providers::get_claude_api_format(provider));
@@ -55,7 +58,7 @@ impl UpstreamTarget {
         // "full URL" switch off, treat it as a full endpoint so we don't double-append
         // `/v1/messages` (→ `.../v1/messages/v1/messages`, a non-retryable 400). Matches the
         // exact endpoint suffix, so prefixed gateways like `.../api/v1/messages` are covered.
-        let codex_anthropic_base_is_full_endpoint = flags.codex_responses_to_anthropic
+        let codex_anthropic_base_is_full_endpoint = flags.foreign_client_to_anthropic()
             && base_url_is_full_endpoint(base_url, "/v1/messages");
 
         let url = if api_format == Some(ClaudeApiFormat::GeminiNative) {

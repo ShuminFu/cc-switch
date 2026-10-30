@@ -1,11 +1,16 @@
 //! Gemini Native 编解码
 //!
-//! 目前只实现 Gemini 作为**上游**一侧所需的方向（Anthropic 客户端 ← Gemini 上游）：
+//! Gemini 作为**上游**（Anthropic 客户端 ← Gemini 上游），[`GeminiCodec`]：
 //! - 请求编码（[`ChatRequest`] → `generateContent` 请求体）
 //! - 响应解码（`GenerateContentResponse` → [`ChatResponse`]）
 //! - 流式解码（`streamGenerateContent?alt=sse` → [`StreamEvent`]）
 //!
-//! Gemini 客户端直连 Gemini 上游时是透传，不经过 IR，反方向返回
+//! Gemini 作为**客户端**（Gemini CLI → Anthropic 上游，CCS-187），[`GeminiClientCodec`]：
+//! - 请求解码（`generateContent` 请求体 → [`ChatRequest`]，模型名与流式标志来自 URL）
+//! - 响应编码（[`ChatResponse`] → `GenerateContentResponse`）
+//! - 流式编码（[`StreamEvent`] → `streamGenerateContent?alt=sse`，[`GeminiEventEncoder`]）
+//!
+//! Gemini 客户端直连 Gemini 上游时是透传，不经过 IR；两个编解码未实现的方向返回
 //! [`CodecError::Unsupported`]。
 //!
 //! Gemini 有两类 IR 之外的状态：
@@ -16,6 +21,9 @@
 //! - 客户端工具 schema（[`AnthropicToolSchemaHints`]），解码端据此纠正 Gemini
 //!   偶尔放错位置的工具参数。
 
+mod client_request;
+pub(crate) mod client_response;
+mod client_stream;
 mod request;
 mod response;
 mod stream;
@@ -32,6 +40,7 @@ use crate::proxy::protocol::ir::{ChatRequest, ChatResponse};
 use crate::proxy::protocol::WireFormat;
 use crate::proxy::providers::gemini_shadow::{GeminiAssistantTurn, GeminiShadowStore};
 
+pub use client_stream::GeminiEventEncoder;
 pub use stream::GeminiEventDecoder;
 pub use tool_calls::AnthropicToolSchemaHints;
 
@@ -174,6 +183,69 @@ impl StreamCodec for GeminiCodec {
     }
 }
 
+/// Gemini 作为客户端时的编解码（Gemini CLI 等 → 其他格式的上游）
+///
+/// Gemini 请求体不含模型名与流式标志（二者在 URL 中），由调用方从端点解析后传入。
+#[derive(Debug, Clone, Default)]
+pub struct GeminiClientCodec {
+    model: String,
+    stream: bool,
+}
+
+impl GeminiClientCodec {
+    pub fn new(model: impl Into<String>, stream: bool) -> Self {
+        Self {
+            model: model.into(),
+            stream,
+        }
+    }
+}
+
+impl RequestCodec for GeminiClientCodec {
+    fn format(&self) -> WireFormat {
+        WireFormat::GeminiNative
+    }
+
+    fn decode_request(&self, body: &Value) -> Result<ChatRequest, CodecError> {
+        if !body.is_object() {
+            return Err(invalid(
+                "generateContent request body must be a JSON object",
+            ));
+        }
+        Ok(client_request::decode_request(
+            body,
+            &self.model,
+            self.stream,
+        ))
+    }
+
+    fn encode_request(&self, _request: &ChatRequest) -> Result<Value, CodecError> {
+        Err(unsupported("request encoding (Gemini as client)"))
+    }
+}
+
+impl ResponseCodec for GeminiClientCodec {
+    fn decode_response(&self, _body: &Value) -> Result<ChatResponse, CodecError> {
+        Err(unsupported("response decoding (Gemini as client)"))
+    }
+
+    fn encode_response(&self, response: &ChatResponse) -> Result<Value, CodecError> {
+        Ok(client_response::encode_response(response))
+    }
+}
+
+impl StreamCodec for GeminiClientCodec {
+    fn stream_decoder(&self) -> Result<Box<dyn EventDecoder>, CodecError> {
+        Err(unsupported("stream decoding (Gemini as client)"))
+    }
+
+    fn stream_encoder(&self) -> Result<Box<dyn EventEncoder>, CodecError> {
+        Ok(Box::new(GeminiEventEncoder::new()))
+    }
+}
+
+#[cfg(test)]
+mod client_tests;
 #[cfg(test)]
 mod tests;
 

@@ -1,4 +1,4 @@
-//! [`ChatRequest`] → Anthropic Messages 请求体（Anthropic 作为上游，Codex 客户端）
+//! [`ChatRequest`] → Anthropic Messages 请求体（Anthropic 作为上游，Codex / Gemini 客户端）
 //!
 //! 字段写入顺序与旧转换器（`providers::transform_codex_anthropic`）一致，序列化结果逐字节相同。
 //! 除结构转换外还负责 Anthropic 协议对历史的要求：
@@ -93,7 +93,13 @@ pub(super) fn encode_request(
         .filter(|value| *value > 0)
         .unwrap_or(default_max_tokens);
     let mut thinking_enabled = false;
-    let mut thinking_budget = effort.and_then(effort_to_thinking_budget).unwrap_or(0);
+    // 显式预算（Gemini `thinkingBudget`）优先于按强度推导的预算
+    let mut thinking_budget = request
+        .reasoning
+        .as_ref()
+        .and_then(|reasoning| reasoning.budget_tokens)
+        .or_else(|| effort.and_then(effort_to_thinking_budget))
+        .unwrap_or(0);
     let explicitly_disabled = reasoning_explicitly_disabled(effort);
     let adaptive_should_think = adaptive_model
         && (adaptive_by_default || effort.and_then(codex_effort_to_anthropic).is_some());
@@ -138,6 +144,9 @@ pub(super) fn encode_request(
 
     if !thinking_enabled {
         insert_sampling(&mut result, request);
+    }
+    if !request.stop.is_empty() {
+        result.insert("stop_sequences".into(), json!(request.stop));
     }
     if request.stream {
         result.insert("stream".into(), json!(true));
@@ -216,6 +225,9 @@ fn insert_sampling(result: &mut Map<String, Value>, request: &ChatRequest) {
     }
     if let Some(top_p) = request.top_p {
         result.insert("top_p".into(), json_number(top_p));
+    }
+    if let Some(top_k) = request.top_k {
+        result.insert("top_k".into(), json!(top_k));
     }
 }
 

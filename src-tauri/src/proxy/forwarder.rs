@@ -437,6 +437,7 @@ impl RequestForwarder {
 
         let stages = BodyStages {
             app_type: request.app_type,
+            endpoint: request.endpoint,
             provider,
             adapter,
             flags,
@@ -460,7 +461,7 @@ impl RequestForwarder {
         );
         let force_identity_encoding = normalized.needs_transform
             || flags.codex_responses_to_chat
-            || flags.codex_responses_to_anthropic;
+            || flags.foreign_client_to_anthropic();
         let (built, copilot_optimization) = stages.finish(normalized).await?;
         request_builder::log_prompt_cache_trace(
             request.app_type,
@@ -495,7 +496,8 @@ impl RequestForwarder {
             upstream_host: header_policy::upstream_authority(&target.url),
             auth_headers: resolved_auth.headers,
             codex_official_auth_passthrough: flags.codex_official_auth_passthrough,
-            codex_responses_to_anthropic: flags.codex_responses_to_anthropic,
+            // Gemini 客户端 → Anthropic 上游与 Codex 同样需要补 anthropic-version、规整 Accept
+            codex_responses_to_anthropic: flags.foreign_client_to_anthropic(),
             codex_impersonate_claude_code: flags.codex_impersonate_claude_code,
             is_copilot: flags.is_copilot,
             force_identity_encoding: force_identity_encoding || is_streaming,
@@ -570,7 +572,7 @@ impl RequestForwarder {
         );
 
         let check =
-            SuccessCheck::for_route(flags.codex_responses_to_anthropic, plan.claude_api_format);
+            SuccessCheck::for_route(flags.foreign_client_to_anthropic(), plan.claude_api_format);
         let response = self
             .validator()
             .validate(response, is_streaming, check, plan.upstream)

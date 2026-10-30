@@ -15,10 +15,14 @@ use super::{
     error_mapper::{get_error_message, map_proxy_error_to_status},
     errors::render::{handle_codex_chat_error_response, render_forward_error},
     forwarder::ActiveConnectionGuard,
-    handler_config::{parser_config_for, CLAUDE_PARSER_CONFIG, CODEX_PARSER_CONFIG},
+    handler_config::{
+        parser_config_for, CLAUDE_PARSER_CONFIG, CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG,
+    },
     handler_context::RequestContext,
     protocol::{ClaudeApiFormat, WireFormat},
-    providers::{transform_codex_chat, transform_gemini, transform_responses},
+    providers::{
+        transform_codex_chat, transform_gemini, transform_responses, GeminiGenerateEndpoint,
+    },
     response_processor::{
         process_response, read_decoded_body, rebuilt_json_response, response_usage_log_task,
         spawn_response_usage_log, transformed_sse_response,
@@ -28,8 +32,8 @@ use super::{
     stream::{
         aggregate::{parse_upstream_json, responses_sse_to_response_value, SseAggregator},
         codec::{
-            anthropic_decoder, decode_upstream, AnthropicToResponses, ChatToResponses,
-            GeminiToAnthropic, StreamDecoder, StreamEncoder,
+            anthropic_decoder, decode_upstream, AnthropicToGemini, AnthropicToResponses,
+            ChatToResponses, GeminiToAnthropic, StreamDecoder, StreamEncoder,
         },
     },
     types::*,
@@ -302,6 +306,18 @@ pub(crate) async fn handle_proxied(
                 is_stream,
                 connection_guard,
                 codex_tool_context.unwrap_or_default(),
+            )
+            .await;
+        }
+        ResponseDecode::GeminiFromAnthropic => {
+            // Gemini 请求体没有 `stream` 字段，流式由 URL 的 `:streamGenerateContent` 决定
+            let is_stream = GeminiGenerateEndpoint::parse(&endpoint).is_some_and(|e| e.stream);
+            return handle_gemini_anthropic_transform(
+                response,
+                &ctx,
+                &state,
+                is_stream,
+                connection_guard,
             )
             .await;
         }
@@ -791,6 +807,75 @@ async fn handle_codex_anthropic_to_responses_transform(
         capture.record_json(CaptureSide::Client, &responses_response);
     }
     rebuilt_json_response(status, response_headers, &responses_response, ctx.tag)
+}
+
+/// Gemini 客户端（Gemini CLI）← Anthropic Messages 上游的响应转换（CCS-187）
+///
+/// 流式客户端：上游 SSE（或忽略 `stream: true` 返回的整段 JSON）逐帧转换为 Gemini SSE；
+/// 非流式客户端：上游 JSON（或未标注 Content-Type 的 SSE 体，聚合后）转换为
+/// `GenerateContentResponse`。usage 按 Gemini 客户端格式记录（`app_type = gemini`）。
+async fn handle_gemini_anthropic_transform(
+    response: super::hyper_client::ProxyResponse,
+    ctx: &RequestContext,
+    state: &ProxyState,
+    is_stream: bool,
+    connection_guard: Option<ActiveConnectionGuard>,
+) -> Result<axum::response::Response, ProxyError> {
+    let status = response.status();
+
+    if is_stream {
+        let upstream = tap_stream(
+            ctx.capture.clone(),
+            CaptureSide::Upstream,
+            response.bytes_stream(),
+        );
+        let (client_format, sse_stream) =
+            decode_upstream(Box::new(AnthropicToGemini), ctx.tag, Box::pin(upstream));
+        return Ok(transformed_sse_response(
+            sse_stream,
+            client_format,
+            ctx,
+            state,
+            status.as_u16(),
+            connection_guard,
+        ));
+    }
+
+    let _connection_guard = connection_guard;
+    let body_timeout = ctx.non_streaming_body_timeout();
+    let (response_headers, status, body_bytes) =
+        read_decoded_body(response, ctx.tag, body_timeout).await?;
+    if let Some(capture) = &ctx.capture {
+        capture.record_body(CaptureSide::Upstream, &body_bytes);
+    }
+    let anthropic_response = parse_upstream_json(
+        ctx.tag,
+        &body_bytes,
+        &response_headers,
+        Some(SseAggregator::Anthropic),
+        "Failed to parse upstream anthropic response",
+    )?;
+    let upstream_usage = raw_usage_block(&anthropic_response).cloned();
+    let gemini_response =
+        crate::proxy::codec::bridge::anthropic_to_gemini_client_response(anthropic_response)
+            .map_err(|e| {
+                log::error!("[Gemini] Failed to convert Anthropic response to Gemini: {e}");
+                e
+            })?;
+
+    spawn_response_usage_log(
+        state,
+        ctx,
+        GEMINI_PARSER_CONFIG.response_parser,
+        &gemini_response,
+        upstream_usage,
+        status.as_u16(),
+    );
+
+    if let Some(capture) = &ctx.capture {
+        capture.record_json(CaptureSide::Client, &gemini_response);
+    }
+    rebuilt_json_response(status, response_headers, &gemini_response, ctx.tag)
 }
 
 fn should_use_claude_transform_streaming(

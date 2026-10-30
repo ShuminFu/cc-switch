@@ -14,8 +14,9 @@ use futures::Stream;
 use serde_json::Value;
 
 use crate::proxy::codec::bridge::{
-    anthropic_message_to_responses_sse, anthropic_to_responses_sse, chat_to_responses_sse,
-    gemini_to_anthropic_sse, openai_chat_to_anthropic_sse, responses_to_anthropic_sse,
+    anthropic_message_to_responses_sse, anthropic_to_gemini_client_sse, anthropic_to_responses_sse,
+    chat_to_responses_sse, gemini_to_anthropic_sse, openai_chat_to_anthropic_sse,
+    responses_to_anthropic_sse,
 };
 use crate::proxy::codec::gemini::GeminiShadowSink;
 use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
@@ -156,6 +157,21 @@ impl StreamEncoder for AnthropicToResponses {
             self.tool_context,
             crate::settings::codec_engine(),
         )
+    }
+}
+
+/// Anthropic Messages 流 → Gemini `streamGenerateContent?alt=sse`（Gemini CLI 客户端）
+pub(crate) struct AnthropicToGemini;
+
+impl StreamDecoder for AnthropicToGemini {
+    fn upstream_format(&self) -> WireFormat {
+        WireFormat::AnthropicMessages
+    }
+    fn client_format(&self) -> WireFormat {
+        WireFormat::GeminiNative
+    }
+    fn decode(self: Box<Self>, upstream: ByteStream) -> ByteStream {
+        anthropic_to_gemini_client_sse(upstream)
     }
 }
 

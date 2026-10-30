@@ -45,6 +45,8 @@ pub enum ResponseDecode {
     ResponsesFromAnthropic,
     /// Codex Responses 客户端，上游为 Chat Completions
     ResponsesFromChat,
+    /// Gemini Native 客户端（Gemini CLI），上游为 Anthropic Messages
+    GeminiFromAnthropic,
 }
 
 /// 单次转发尝试的路由计划
@@ -88,6 +90,9 @@ impl RoutePlan {
             }
             (WireFormat::OpenAiResponses, WireFormat::OpenAiChat) => {
                 ResponseDecode::ResponsesFromChat
+            }
+            (WireFormat::GeminiNative, WireFormat::AnthropicMessages) => {
+                ResponseDecode::GeminiFromAnthropic
             }
             // 其余组合没有请求侧转换，按透传处理
             _ => ResponseDecode::Passthrough,
@@ -210,6 +215,26 @@ mod tests {
         assert_eq!(
             plan(WireFormat::OpenAiResponses, WireFormat::OpenAiChat, None).response_decode(),
             ResponseDecode::ResponsesFromChat
+        );
+    }
+
+    #[test]
+    fn gemini_client_decodes_anthropic_upstream() {
+        let gemini = plan(
+            WireFormat::GeminiNative,
+            WireFormat::AnthropicMessages,
+            None,
+        );
+        assert!(gemini.needs_transform());
+        assert_eq!(
+            gemini.response_decode(),
+            ResponseDecode::GeminiFromAnthropic
+        );
+        assert!(gemini.to_string().contains("decode=GeminiFromAnthropic"));
+        // Gemini 直连 Gemini 仍是透传
+        assert_eq!(
+            plan(WireFormat::GeminiNative, WireFormat::GeminiNative, None).response_decode(),
+            ResponseDecode::Passthrough
         );
     }
 

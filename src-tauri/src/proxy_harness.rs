@@ -38,8 +38,12 @@ use crate::proxy::types::{AppProxyConfig, ProxyConfig};
 pub use crate::proxy::{CircuitBreakerStats, CircuitProbeResult, CircuitState};
 use crate::services::stream_check::{StreamCheckConfig, StreamCheckService};
 
-/// App type every harness provider is registered under.
+/// App type every harness provider is registered under (except the Gemini
+/// providers added with [`ProxyHarnessBuilder::gemini_provider_with_meta`]).
 pub const HARNESS_APP_TYPE: &str = "claude";
+
+/// App type of the Gemini harness providers.
+pub const HARNESS_GEMINI_APP_TYPE: &str = "gemini";
 
 // ============================================================================
 // Mock upstream
@@ -513,6 +517,8 @@ impl Default for HarnessCircuit {
 pub struct ProxyHarnessBuilder {
     /// `(id, base_url, meta)`; `meta` is the provider's JSON `meta` object.
     providers: Vec<(String, String, Option<Value>)>,
+    /// Gemini providers, same shape as `providers`.
+    gemini_providers: Vec<(String, String, Option<Value>)>,
     auto_failover: bool,
     max_retries: u32,
     circuit: HarnessCircuit,
@@ -530,6 +536,20 @@ impl ProxyHarnessBuilder {
     /// (e.g. `{"apiFormat": "openai_responses", "providerType": "github_copilot"}`).
     pub fn provider_with_meta(mut self, id: &str, upstream: &MockUpstream, meta: Value) -> Self {
         self.providers
+            .push((id.to_string(), upstream.base_url(), Some(meta)));
+        self
+    }
+
+    /// Add a Gemini provider pointing at `upstream` with the given JSON `meta`
+    /// (e.g. `{"apiFormat": "anthropic"}` for an Anthropic upstream). Its key is
+    /// `sk-harness-<id>`, sent as configured for the upstream format.
+    pub fn gemini_provider_with_meta(
+        mut self,
+        id: &str,
+        upstream: &MockUpstream,
+        meta: Value,
+    ) -> Self {
+        self.gemini_providers
             .push((id.to_string(), upstream.base_url(), Some(meta)));
         self
     }
@@ -558,63 +578,23 @@ impl ProxyHarnessBuilder {
     }
 
     pub async fn spawn(self) -> ProxyHarness {
-        assert!(!self.providers.is_empty(), "harness needs a provider");
+        assert!(
+            !self.providers.is_empty() || !self.gemini_providers.is_empty(),
+            "harness needs a provider"
+        );
         // Same process-level TLS provider the app installs at startup (lib.rs).
         let _ = rustls::crypto::ring::default_provider().install_default();
         let db = Arc::new(Database::memory().expect("in-memory database"));
         install_statement_counter(&db);
 
-        for (index, (id, base_url, meta)) in self.providers.iter().enumerate() {
-            let mut provider = Provider::with_id(
-                id.clone(),
-                format!("Harness {id}"),
-                json!({
-                    "env": {
-                        "ANTHROPIC_BASE_URL": base_url,
-                        "ANTHROPIC_AUTH_TOKEN": format!("sk-harness-{id}"),
-                    }
-                }),
-                None,
-            );
-            provider.sort_index = Some(index);
-            if let Some(meta) = meta {
-                provider.meta = Some(
-                    serde_json::from_value(meta.clone()).expect("valid harness provider meta"),
-                );
-            }
-            db.save_provider(HARNESS_APP_TYPE, &provider)
-                .expect("save harness provider");
-            if self.auto_failover {
-                db.add_to_failover_queue(HARNESS_APP_TYPE, id)
-                    .expect("queue harness provider");
+        for (app_type, providers) in [
+            (HARNESS_APP_TYPE, &self.providers),
+            (HARNESS_GEMINI_APP_TYPE, &self.gemini_providers),
+        ] {
+            if !providers.is_empty() {
+                self.register_providers(&db, app_type, providers).await;
             }
         }
-        db.set_current_provider(HARNESS_APP_TYPE, &self.providers[0].0)
-            .expect("set current harness provider");
-
-        // Reading the row first creates the per-app defaults.
-        let defaults = db
-            .get_proxy_config_for_app(HARNESS_APP_TYPE)
-            .await
-            .expect("read app proxy config");
-        db.update_proxy_config_for_app(AppProxyConfig {
-            enabled: true,
-            auto_failover_enabled: self.auto_failover,
-            max_retries: self.max_retries,
-            // Keep scenario failures fast and deterministic.
-            non_streaming_timeout: 30,
-            streaming_first_byte_timeout: 30,
-            streaming_idle_timeout: 30,
-            circuit_failure_threshold: self.circuit.failure_threshold,
-            circuit_success_threshold: self.circuit.success_threshold,
-            circuit_timeout_seconds: self.circuit.timeout_seconds,
-            // Only consecutive failures open the breaker in harness scenarios.
-            circuit_error_rate_threshold: 1.0,
-            circuit_min_requests: u32::MAX / 2,
-            ..defaults
-        })
-        .await
-        .expect("write app proxy config");
 
         let config = ProxyConfig {
             listen_address: "127.0.0.1".to_string(),
@@ -647,6 +627,73 @@ impl ProxyHarnessBuilder {
             token,
             client,
         }
+    }
+
+    /// Save `providers` under `app_type` (queue order = add order), make the
+    /// first one current and enable the proxy for the app.
+    async fn register_providers(
+        &self,
+        db: &Database,
+        app_type: &str,
+        providers: &[(String, String, Option<Value>)],
+    ) {
+        for (index, (id, base_url, meta)) in providers.iter().enumerate() {
+            let settings = if app_type == HARNESS_GEMINI_APP_TYPE {
+                json!({
+                    "env": {
+                        "GOOGLE_GEMINI_BASE_URL": base_url,
+                        "GEMINI_API_KEY": format!("sk-harness-{id}"),
+                    }
+                })
+            } else {
+                json!({
+                    "env": {
+                        "ANTHROPIC_BASE_URL": base_url,
+                        "ANTHROPIC_AUTH_TOKEN": format!("sk-harness-{id}"),
+                    }
+                })
+            };
+            let mut provider =
+                Provider::with_id(id.clone(), format!("Harness {id}"), settings, None);
+            provider.sort_index = Some(index);
+            if let Some(meta) = meta {
+                provider.meta = Some(
+                    serde_json::from_value(meta.clone()).expect("valid harness provider meta"),
+                );
+            }
+            db.save_provider(app_type, &provider)
+                .expect("save harness provider");
+            if self.auto_failover {
+                db.add_to_failover_queue(app_type, id)
+                    .expect("queue harness provider");
+            }
+        }
+        db.set_current_provider(app_type, &providers[0].0)
+            .expect("set current harness provider");
+
+        // Reading the row first creates the per-app defaults.
+        let defaults = db
+            .get_proxy_config_for_app(app_type)
+            .await
+            .expect("read app proxy config");
+        db.update_proxy_config_for_app(AppProxyConfig {
+            enabled: true,
+            auto_failover_enabled: self.auto_failover,
+            max_retries: self.max_retries,
+            // Keep scenario failures fast and deterministic.
+            non_streaming_timeout: 30,
+            streaming_first_byte_timeout: 30,
+            streaming_idle_timeout: 30,
+            circuit_failure_threshold: self.circuit.failure_threshold,
+            circuit_success_threshold: self.circuit.success_threshold,
+            circuit_timeout_seconds: self.circuit.timeout_seconds,
+            // Only consecutive failures open the breaker in harness scenarios.
+            circuit_error_rate_threshold: 1.0,
+            circuit_min_requests: u32::MAX / 2,
+            ..defaults
+        })
+        .await
+        .expect("write app proxy config");
     }
 }
 
@@ -711,6 +758,7 @@ impl ProxyHarness {
     pub fn builder() -> ProxyHarnessBuilder {
         ProxyHarnessBuilder {
             providers: Vec::new(),
+            gemini_providers: Vec::new(),
             auto_failover: false,
             max_retries: 3,
             circuit: HarnessCircuit::default(),
@@ -760,6 +808,20 @@ impl ProxyHarness {
             .header("content-type", "application/json")
             .header("anthropic-version", "2023-06-01")
             .header("x-api-key", &self.token)
+            .json(body)
+            .send()
+            .await
+            .expect("send request to proxy")
+    }
+
+    /// POST a JSON body to `path` as a Gemini client does (`x-goog-api-key`
+    /// carries the proxy token).
+    pub async fn gemini(&self, path: &str, body: &Value) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("content-type", "application/json")
+            .header("x-goog-api-key", &self.token)
+            .header("x-goog-api-client", "google-genai-sdk/1.0.0 gl-node/v22")
             .json(body)
             .send()
             .await

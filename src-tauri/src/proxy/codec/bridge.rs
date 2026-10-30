@@ -13,7 +13,10 @@ use serde_json::Value;
 use super::anthropic::{
     message_events, AnthropicCodec, AnthropicEventDecoder, AnthropicEventEncoder,
 };
-use super::gemini::{AnthropicToolSchemaHints, GeminiCodec, GeminiEventDecoder, GeminiShadowSink};
+use super::gemini::{
+    AnthropicToolSchemaHints, GeminiClientCodec, GeminiCodec, GeminiEventDecoder,
+    GeminiEventEncoder, GeminiShadowSink,
+};
 use super::openai_chat::{
     decode_responses_client_response, encode_responses_client_request, OpenAiChatCodec,
     OpenAiChatEventDecoder, OpenAiChatResponsesDecoder,
@@ -487,6 +490,79 @@ pub fn chat_to_responses_sse<E: std::error::Error + Send + 'static>(
             ResponsesFlavor::ChatUpstream,
             tool_context,
         )),
+    ))
+}
+
+/// Gemini `generateContent` 请求（Gemini CLI）→ Anthropic Messages 请求（CCS-187）
+///
+/// Gemini 客户端 ← Anthropic 上游是新组合，没有旧转换器，三个入口都只走 IR 编解码。
+///
+/// `model` 与 `stream` 来自客户端 URL（`models/{model}:streamGenerateContent`）；
+/// `default_max_tokens`：请求没有 `maxOutputTokens` 时注入（Anthropic 要求必填）。
+pub fn gemini_client_to_anthropic_request(
+    body: Value,
+    model: &str,
+    stream: bool,
+    default_max_tokens: u64,
+) -> Result<Value, ProxyError> {
+    let request = GeminiClientCodec::new(model, stream)
+        .decode_request(&body)
+        .map_err(invalid_request_error)?;
+    AnthropicCodec
+        .encode_request_with_default_max_tokens(&request, default_max_tokens)
+        .map_err(invalid_request_error)
+}
+
+/// Anthropic Messages 非流式响应 → Gemini `GenerateContentResponse`
+pub fn anthropic_to_gemini_client_response(body: Value) -> Result<Value, ProxyError> {
+    let response = AnthropicCodec
+        .decode_response(&body)
+        .map_err(transform_error)?;
+    GeminiClientCodec::default()
+        .encode_response(&response)
+        .map_err(transform_error)
+}
+
+/// Anthropic Messages SSE → Gemini `streamGenerateContent?alt=sse`
+///
+/// 上游返回整个 JSON 消息时缓冲到 EOF 后整体转换；未以空行结束的最后一个事件仍被处理；
+/// 传输错误编码为 Gemini 错误帧。
+pub fn anthropic_to_gemini_client_sse<E: std::error::Error + Send + 'static>(
+    upstream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
+) -> ClientSseStream {
+    Box::pin(transcode_sse_or_json_stream(
+        upstream,
+        Box::new(|body: &[u8]| {
+            let text = String::from_utf8_lossy(body);
+            let candidate =
+                text.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}');
+            let events = match serde_json::from_str::<Value>(candidate) {
+                Ok(message) => match AnthropicCodec.decode_response(&message) {
+                    Ok(response) => response.to_events(),
+                    Err(error) => vec![StreamEvent::Error {
+                        message: transform_error(error).to_string(),
+                        code: Some("response_transform_error".to_string()),
+                    }],
+                },
+                Err(_) => vec![StreamEvent::Error {
+                    message: "Upstream Anthropic stream ended before message_stop".to_string(),
+                    code: Some("stream_truncated".to_string()),
+                }],
+            };
+            let mut encoder = GeminiEventEncoder::new();
+            let mut frames: Vec<Bytes> = events
+                .iter()
+                .flat_map(|event| encoder.encode(event))
+                .collect();
+            frames.extend(encoder.finish());
+            frames
+        }),
+        Box::new(AnthropicEventDecoder::new()),
+        Box::new(GeminiEventEncoder::new()),
+        TranscodeOptions {
+            transport_errors: TransportErrors::AsEvent,
+            flush_final_event: true,
+        },
     ))
 }
 

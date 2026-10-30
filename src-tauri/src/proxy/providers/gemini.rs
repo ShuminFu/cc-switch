@@ -5,10 +5,89 @@
 //! ## 认证模式
 //! - **Gemini**: API Key 认证 (x-goog-api-key)
 //! - **GeminiCli**: OAuth Bearer 认证 (用于 Gemini CLI)
+//! - **Anthropic 上游**（CCS-187）：供应商声明 `apiFormat = anthropic` 时，Gemini 客户端的
+//!   `generateContent` 请求转换为 Anthropic Messages，Key 以 `x-api-key` 发送
+//!   （`meta.apiKeyField = ANTHROPIC_AUTH_TOKEN` 时改为 `Authorization: Bearer`）
 
 use super::{AuthInfo, AuthStrategy, ProviderAdapter, ProviderType};
 use crate::provider::Provider;
 use crate::proxy::error::ProxyError;
+use crate::proxy::protocol::WireFormat;
+
+/// Gemini 供应商的上游是否为 Anthropic Messages
+///
+/// 只看显式配置（`meta.apiFormat`，其次 `settingsConfig.apiFormat` / `api_format`），
+/// 不根据 base_url 猜测；取值与 Codex 的 `apiFormat` 相同（`anthropic` / `claude` / `messages` 等）。
+pub fn gemini_provider_uses_anthropic(provider: &Provider) -> bool {
+    provider
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.api_format.as_deref())
+        .or_else(|| {
+            provider
+                .settings_config
+                .get("apiFormat")
+                .or_else(|| provider.settings_config.get("api_format"))
+                .and_then(|value| value.as_str())
+        })
+        .and_then(WireFormat::from_codex_wire_api)
+        == Some(WireFormat::AnthropicMessages)
+}
+
+/// Gemini 生成端点（`models/{model}:generateContent` / `:streamGenerateContent`）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeminiGenerateEndpoint {
+    /// URL 中的模型名（去掉 `models/` 前缀）
+    pub model: String,
+    /// `:streamGenerateContent`
+    pub stream: bool,
+}
+
+impl GeminiGenerateEndpoint {
+    /// 解析入站端点；`countTokens`、`GET models` 等其他端点返回 `None`
+    pub fn parse(endpoint: &str) -> Option<Self> {
+        let path = endpoint
+            .split_once('?')
+            .map_or(endpoint, |(path, _query)| path);
+        let (_, resource) = path.rsplit_once("/models/")?;
+        let (model, method) = resource.rsplit_once(':')?;
+        let stream = match method {
+            "generateContent" => false,
+            "streamGenerateContent" => true,
+            _ => return None,
+        };
+        let model = percent_decode(model);
+        if model.is_empty() || model.contains('/') {
+            return None;
+        }
+        Some(Self { model, stream })
+    }
+}
+
+/// URL 路径段的百分号解码（模型名中的 `.` 等字符通常不编码，这里只做兜底）
+fn percent_decode(segment: &str) -> String {
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = |byte: u8| (byte as char).to_digit(16);
+            if let (Some(high), Some(low)) = (hex(bytes[index + 1]), hex(bytes[index + 2])) {
+                decoded.push((high * 16 + low) as u8);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8(decoded).unwrap_or_else(|_| segment.to_string())
+}
+
+/// 该请求是否走 Gemini 客户端 → Anthropic 上游的转换
+pub fn should_convert_gemini_to_anthropic(provider: &Provider, endpoint: &str) -> bool {
+    GeminiGenerateEndpoint::parse(endpoint).is_some() && gemini_provider_uses_anthropic(provider)
+}
 
 /// Gemini 适配器
 pub struct GeminiAdapter;
@@ -159,6 +238,19 @@ impl ProviderAdapter for GeminiAdapter {
 
     fn extract_auth(&self, provider: &Provider) -> Option<AuthInfo> {
         let key = self.extract_key_raw(provider)?;
+        if gemini_provider_uses_anthropic(provider) {
+            let uses_bearer = provider
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.api_key_field.as_deref())
+                .is_some_and(|field| field.eq_ignore_ascii_case("ANTHROPIC_AUTH_TOKEN"));
+            let strategy = if uses_bearer {
+                AuthStrategy::ClaudeAuth
+            } else {
+                AuthStrategy::Anthropic
+            };
+            return Some(AuthInfo::new(key, strategy));
+        }
         let strategy = self.detect_auth_type(provider);
 
         match strategy {
@@ -200,6 +292,14 @@ impl ProviderAdapter for GeminiAdapter {
         use super::adapter::auth_header_value as hv;
         use http::{HeaderName, HeaderValue};
         Ok(match auth.strategy {
+            // Anthropic 上游：只发一种认证头（anthropic-version 由出站头策略补齐）
+            AuthStrategy::Anthropic => {
+                vec![(HeaderName::from_static("x-api-key"), hv(&auth.api_key)?)]
+            }
+            AuthStrategy::ClaudeAuth => vec![(
+                HeaderName::from_static("authorization"),
+                hv(&format!("Bearer {}", auth.api_key))?,
+            )],
             AuthStrategy::GoogleOAuth => {
                 let token = auth.access_token.as_ref().unwrap_or(&auth.api_key);
                 vec![
@@ -414,5 +514,95 @@ mod tests {
         let adapter = GeminiAdapter::new();
         assert!(adapter.parse_oauth_credentials("AIza-api-key").is_none());
         assert!(adapter.parse_oauth_credentials("invalid-json{").is_none());
+    }
+
+    fn anthropic_provider(meta: serde_json::Value) -> Provider {
+        let mut provider = create_provider(json!({
+            "env": {
+                "GOOGLE_GEMINI_BASE_URL": "https://api.anthropic.com",
+                "GEMINI_API_KEY": "sk-ant-test"
+            }
+        }));
+        provider.meta = Some(serde_json::from_value(meta).unwrap());
+        provider
+    }
+
+    #[test]
+    fn anthropic_upstream_is_declared_only_by_api_format() {
+        assert!(gemini_provider_uses_anthropic(&anthropic_provider(
+            json!({ "apiFormat": "anthropic" })
+        )));
+        assert!(gemini_provider_uses_anthropic(&anthropic_provider(
+            json!({ "apiFormat": " Claude " })
+        )));
+        assert!(!gemini_provider_uses_anthropic(&anthropic_provider(json!(
+            {}
+        ))));
+        assert!(gemini_provider_uses_anthropic(&create_provider(json!({
+            "apiFormat": "anthropic",
+            "env": { "GEMINI_API_KEY": "k" }
+        }))));
+        // base_url 不参与判断
+        assert!(!gemini_provider_uses_anthropic(&create_provider(json!({
+            "env": { "GOOGLE_GEMINI_BASE_URL": "https://api.anthropic.com" }
+        }))));
+    }
+
+    #[test]
+    fn generate_endpoints_are_parsed_from_the_inbound_path() {
+        assert_eq!(
+            GeminiGenerateEndpoint::parse(
+                "/v1beta/models/claude-sonnet-4-5:streamGenerateContent?alt=sse"
+            ),
+            Some(GeminiGenerateEndpoint {
+                model: "claude-sonnet-4-5".to_string(),
+                stream: true,
+            })
+        );
+        assert_eq!(
+            GeminiGenerateEndpoint::parse("/gemini/v1/models/claude%2Dhaiku:generateContent"),
+            Some(GeminiGenerateEndpoint {
+                model: "claude-haiku".to_string(),
+                stream: false,
+            })
+        );
+        for other in [
+            "/v1beta/models/m:countTokens",
+            "/v1beta/models",
+            "/v1beta/models/m",
+            "/v1beta/models/:generateContent",
+        ] {
+            assert_eq!(GeminiGenerateEndpoint::parse(other), None, "{other}");
+        }
+        let provider = anthropic_provider(json!({ "apiFormat": "anthropic" }));
+        assert!(should_convert_gemini_to_anthropic(
+            &provider,
+            "/v1beta/models/m:generateContent"
+        ));
+        assert!(!should_convert_gemini_to_anthropic(
+            &provider,
+            "/v1beta/models/m:countTokens"
+        ));
+    }
+
+    #[test]
+    fn anthropic_upstream_uses_x_api_key_or_bearer() {
+        let adapter = GeminiAdapter::new();
+        let provider = anthropic_provider(json!({ "apiFormat": "anthropic" }));
+        let auth = adapter.extract_auth(&provider).unwrap();
+        assert_eq!(auth.strategy, AuthStrategy::Anthropic);
+        let headers = adapter.get_auth_headers(&auth).unwrap();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].0.as_str(), "x-api-key");
+        assert_eq!(headers[0].1, "sk-ant-test");
+
+        let provider = anthropic_provider(
+            json!({ "apiFormat": "anthropic", "apiKeyField": "ANTHROPIC_AUTH_TOKEN" }),
+        );
+        let auth = adapter.extract_auth(&provider).unwrap();
+        assert_eq!(auth.strategy, AuthStrategy::ClaudeAuth);
+        let headers = adapter.get_auth_headers(&auth).unwrap();
+        assert_eq!(headers[0].0.as_str(), "authorization");
+        assert_eq!(headers[0].1, "Bearer sk-ant-test");
     }
 }

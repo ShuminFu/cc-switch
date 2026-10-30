@@ -85,6 +85,8 @@ impl CaptureBridge {
             }
             ResponseDecode::ResponsesFromChat => Some(CaptureBridge::ResponsesChat),
             ResponseDecode::ResponsesFromAnthropic => Some(CaptureBridge::ResponsesAnthropic),
+            // Gemini 客户端 ← Anthropic（CCS-187）的 fixture 导出随 golden 桥接一起提供
+            ResponseDecode::GeminiFromAnthropic => None,
             ResponseDecode::AnthropicFrom(ClaudeApiFormat::Anthropic)
             | ResponseDecode::Passthrough => None,
         }

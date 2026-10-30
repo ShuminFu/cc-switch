@@ -6,7 +6,8 @@
 //!    上游模型、Copilot 模型归一化与 live 解析、`[1m]` 后缀剥离；
 //! 2. **VendorNormalize** — Copilot 优化器、解析 Claude API 格式、按供应商归一化
 //!    Anthropic messages 与预防式 media 降级；
-//! 3. **Encode** — 转换为上游线协议（Codex→Chat / Codex→Anthropic / Claude→其他格式）；
+//! 3. **Encode** — 转换为上游线协议（Codex→Chat / Codex→Anthropic / Gemini→Anthropic /
+//!    Claude→其他格式）；
 //! 4. **Canonicalize** — 过滤 `_` 前缀私有字段并规范化键序；
 //! 5. **LocalOverrides** — provider 级请求体覆盖（改动后再规范化一次）。
 
@@ -52,6 +53,8 @@ pub(crate) struct RouteFlags {
     /// avoids leaking the Claude Code fingerprint and identity prompt to
     /// general-purpose gateways.
     pub codex_impersonate_claude_code: bool,
+    /// Gemini 客户端（`generateContent` / `streamGenerateContent`）→ Anthropic Messages 上游
+    pub gemini_to_anthropic: bool,
 }
 
 impl RouteFlags {
@@ -76,7 +79,14 @@ impl RouteFlags {
                 && providers::is_codex_official_provider(provider),
             codex_impersonate_claude_code: codex_responses_to_anthropic
                 && meta.and_then(|meta| meta.impersonate_claude_code) == Some(true),
+            gemini_to_anthropic: matches!(app_type, AppType::Gemini)
+                && providers::should_convert_gemini_to_anthropic(provider, endpoint),
         }
+    }
+
+    /// 上游为 Anthropic Messages、客户端说的是别的协议（Codex Responses / Gemini）
+    pub(crate) fn foreign_client_to_anthropic(&self) -> bool {
+        self.codex_responses_to_anthropic || self.gemini_to_anthropic
     }
 }
 
@@ -101,6 +111,8 @@ pub(crate) struct BuiltBody {
 /// 请求体改写阶段
 pub(crate) struct BodyStages<'a> {
     pub app_type: &'a AppType,
+    /// 客户端端点（含 query）；Gemini 的模型名与流式标志在其中
+    pub endpoint: &'a str,
     pub provider: &'a Provider,
     pub adapter: &'a dyn ProviderAdapter,
     pub flags: RouteFlags,
@@ -134,6 +146,19 @@ impl BodyStages<'_> {
         // 应用模型映射（独立于格式转换）
         // Claude Desktop proxy 模式必须先把 Desktop 可见的 claude-* route
         // 映射成真实上游模型名，并且未知 route 要直接报错，不能使用默认模型兜底。
+        // Gemini → Anthropic：模型名在 URL 中，先写进请求体，供模型映射与出站模型记录使用
+        let gemini_body;
+        let client_body = match self.gemini_endpoint() {
+            Some(endpoint) => {
+                let mut body = client_body.clone();
+                if let Some(object) = body.as_object_mut() {
+                    object.insert("model".to_string(), Value::String(endpoint.model));
+                }
+                gemini_body = body;
+                &gemini_body
+            }
+            None => client_body,
+        };
         let mapped_body = if matches!(self.app_type, AppType::ClaudeDesktop) {
             crate::claude_desktop_config::map_proxy_request_model(
                 client_body.clone(),
@@ -255,6 +280,8 @@ impl BodyStages<'_> {
             (self.encode_codex_chat(body).await?, false)
         } else if self.flags.codex_responses_to_anthropic {
             self.encode_codex_anthropic(body)?
+        } else if self.flags.gemini_to_anthropic {
+            (self.encode_gemini_anthropic(body)?, false)
         } else if needs_transform {
             if self.adapter.name() == "Claude" {
                 let api_format =
@@ -367,6 +394,42 @@ impl BodyStages<'_> {
         Ok((anthropic_body, one_m))
     }
 
+    /// Gemini → Anthropic 时解析出的生成端点
+    fn gemini_endpoint(&self) -> Option<providers::GeminiGenerateEndpoint> {
+        self.flags
+            .gemini_to_anthropic
+            .then(|| providers::GeminiGenerateEndpoint::parse(self.endpoint))
+            .flatten()
+    }
+
+    /// Gemini `generateContent` 请求 → Anthropic Messages 请求
+    ///
+    /// 模型名取模型映射之后的请求体 `model`（ModelMapping 阶段从 URL 写入），流式标志
+    /// 取 URL 的 `:streamGenerateContent`。请求没有 `maxOutputTokens` 时使用供应商的
+    /// `maxOutputTokens` 配置，否则使用与 Codex→Anthropic 相同的保守默认值。
+    fn encode_gemini_anthropic(&self, body: Value) -> Result<Value, ProxyError> {
+        let endpoint = self.gemini_endpoint().ok_or_else(|| {
+            ProxyError::InvalidRequest(format!(
+                "Unsupported Gemini endpoint for an Anthropic upstream: {}",
+                self.endpoint
+            ))
+        })?;
+        let model = model_of(&body).unwrap_or(endpoint.model);
+        let default_max_tokens = self
+            .provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.max_output_tokens)
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_CODEX_ANTHROPIC_MAX_TOKENS);
+        crate::proxy::codec::bridge::gemini_client_to_anthropic_request(
+            body,
+            &model,
+            endpoint.stream,
+            default_max_tokens,
+        )
+    }
+
     /// 过滤私有参数后应用 provider 级请求体覆盖（Copilot 不允许覆盖）
     fn local_overrides(&self, mut body: Value) -> Value {
         if self.flags.is_copilot {
@@ -399,7 +462,7 @@ impl BodyStages<'_> {
             client: self.scope.client_format,
             upstream: if flags.codex_responses_to_chat {
                 WireFormat::OpenAiChat
-            } else if flags.codex_responses_to_anthropic {
+            } else if flags.foreign_client_to_anthropic() {
                 WireFormat::AnthropicMessages
             } else if let Some(api_format) = api_format {
                 api_format.wire_format()

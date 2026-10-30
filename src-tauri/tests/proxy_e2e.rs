@@ -1018,6 +1018,191 @@ async fn sse_stream_passes_through_unchanged_and_logs_usage() {
     harness.shutdown().await;
 }
 
+// ============================================================================
+// Gemini CLI -> Anthropic upstream (CCS-187)
+// ============================================================================
+
+/// A Gemini CLI style `generateContent` body (no model, no stream flag).
+fn gemini_cli_request() -> Value {
+    json!({
+        "systemInstruction": { "parts": [{ "text": "You are a CLI agent." }] },
+        "contents": [{ "role": "user", "parts": [{ "text": "hello" }] }],
+        "tools": [{ "functionDeclarations": [{
+            "name": "read_file",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": { "absolute_path": { "type": "STRING" } },
+                "required": ["absolute_path"]
+            }
+        }] }],
+        "generationConfig": { "temperature": 0, "topP": 1 }
+    })
+}
+
+async fn gemini_anthropic_harness(upstream: &MockUpstream) -> ProxyHarness {
+    ProxyHarness::builder()
+        .gemini_provider_with_meta("g1", upstream, json!({ "apiFormat": "anthropic" }))
+        .spawn()
+        .await
+}
+
+/// The Gemini-only request shape must not leak to the Anthropic upstream.
+fn assert_anthropic_upstream_request(request: &cc_switch_lib::proxy_harness::RecordedRequest) {
+    assert_eq!(
+        request.path, "/v1/messages",
+        "Gemini query is not forwarded"
+    );
+    assert_eq!(request.headers["x-api-key"], "sk-harness-g1");
+    assert_eq!(request.headers["anthropic-version"], "2023-06-01");
+    assert!(request.headers.get("x-goog-api-key").is_none());
+    assert!(request.headers.get("authorization").is_none());
+    let body = request.json();
+    assert_eq!(body["model"], MODEL, "model comes from the Gemini URL");
+    assert_eq!(body["system"], "You are a CLI agent.");
+    assert_eq!(
+        body["messages"],
+        json!([{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }])
+    );
+    assert_eq!(body["max_tokens"], 8192);
+    assert_eq!(body["temperature"], 0);
+    assert!(
+        body.get("top_p").is_none(),
+        "topP is dropped next to temperature"
+    );
+    assert_eq!(
+        body["tools"][0]["input_schema"]["properties"]["absolute_path"]["type"],
+        "string"
+    );
+    assert!(body.get("contents").is_none() && body.get("generationConfig").is_none());
+}
+
+#[tokio::test]
+async fn gemini_cli_generate_content_is_served_by_an_anthropic_upstream() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::message("hi from claude", 17, 6)).await;
+    let harness = gemini_anthropic_harness(&upstream).await;
+
+    let response = harness
+        .gemini(
+            &format!("/v1beta/models/{MODEL}:generateContent?key=client-key"),
+            &gemini_cli_request(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let body = json_body(response).await;
+    assert_eq!(
+        body["candidates"][0]["content"],
+        json!({ "role": "model", "parts": [{ "text": "hi from claude" }] })
+    );
+    assert_eq!(body["candidates"][0]["finishReason"], "STOP");
+    assert_eq!(
+        body["usageMetadata"],
+        json!({ "promptTokenCount": 17, "candidatesTokenCount": 6, "totalTokenCount": 23 })
+    );
+    assert_eq!(body["modelVersion"], MODEL);
+
+    assert_eq!(upstream.hits(), 1);
+    let sent = &upstream.requests()[0];
+    assert_anthropic_upstream_request(sent);
+    assert!(sent.json().get("stream").is_none());
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs.len(), 1);
+    let row = &logs[0];
+    assert_eq!(row.app_type, "gemini");
+    assert_eq!(row.provider_id, "g1");
+    assert_eq!(row.model, MODEL);
+    assert_eq!(row.status_code, 200);
+    assert_eq!((row.input_tokens, row.output_tokens), (17, 6));
+    assert!(!row.is_streaming);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn gemini_cli_stream_generate_content_streams_gemini_frames() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::sse(anthropic_sse_chunks())).await;
+    let harness = gemini_anthropic_harness(&upstream).await;
+
+    let response = harness
+        .gemini(
+            &format!("/v1beta/models/{MODEL}:streamGenerateContent?alt=sse"),
+            &gemini_cli_request(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let content_type = response.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "{content_type}"
+    );
+    let text = response.text().await.expect("read stream");
+    let frames: Vec<Value> = text
+        .split("\n\n")
+        .filter(|block| !block.trim().is_empty())
+        .map(|block| {
+            let data = block
+                .strip_prefix("data: ")
+                .unwrap_or_else(|| panic!("Gemini frames carry no event name: {block:?}"));
+            serde_json::from_str(data).expect("frame is JSON")
+        })
+        .collect();
+    let streamed: String = frames
+        .iter()
+        .filter_map(|frame| frame["candidates"][0]["content"]["parts"][0]["text"].as_str())
+        .collect();
+    assert_eq!(streamed, "Hello world");
+    let last = frames.last().expect("at least one frame");
+    assert_eq!(last["candidates"][0]["finishReason"], "STOP");
+    assert_eq!(last["usageMetadata"]["promptTokenCount"], 21);
+    assert_eq!(last["usageMetadata"]["candidatesTokenCount"], 9);
+    assert!(frames[..frames.len() - 1]
+        .iter()
+        .all(|frame| frame["candidates"][0].get("finishReason").is_none()));
+
+    let sent = &upstream.requests()[0];
+    assert_anthropic_upstream_request(sent);
+    assert_eq!(sent.json()["stream"], true);
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs.len(), 1);
+    let row = &logs[0];
+    assert_eq!(row.app_type, "gemini");
+    assert!(row.is_streaming);
+    assert_eq!((row.input_tokens, row.output_tokens), (21, 9));
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn gemini_cli_sees_anthropic_errors_in_gemini_shape() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::json(
+        429,
+        json!({ "type": "error", "error": { "type": "rate_limit_error", "message": "slow down" } }),
+    ))
+    .await;
+    let harness = gemini_anthropic_harness(&upstream).await;
+
+    let response = harness
+        .gemini(
+            &format!("/v1beta/models/{MODEL}:generateContent"),
+            &gemini_cli_request(),
+        )
+        .await;
+    assert_eq!(response.status(), 429);
+    assert_eq!(
+        json_body(response).await,
+        json!({ "error": { "code": 429, "message": "slow down", "status": "RESOURCE_EXHAUSTED" } })
+    );
+
+    harness.shutdown().await;
+}
+
 fn sse_frame(event: &str, data: Value) -> String {
     format!("event: {event}\ndata: {data}\n\n")
 }
