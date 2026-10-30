@@ -68,6 +68,9 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   const [searching, setSearching] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic search token: only the latest request may update state, and
+  // closing search invalidates any request still in flight (FE-UI-57).
+  const searchTokenRef = useRef(0);
 
   // Dark mode
   const isDarkMode = useDarkMode();
@@ -81,6 +84,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   // Debounced search execution
   const executeSearch = useCallback(
     async (query: string) => {
+      const token = ++searchTokenRef.current;
       if (!query.trim()) {
         setSearchResults([]);
         setSearching(false);
@@ -89,12 +93,14 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
       setSearching(true);
       try {
         const results = await workspaceApi.searchDailyMemoryFiles(query.trim());
+        if (token !== searchTokenRef.current) return;
         setSearchResults(results);
       } catch (err) {
+        if (token !== searchTokenRef.current) return;
         console.error("Failed to search daily memory files:", err);
         toast.error(t("workspace.dailyMemory.searchFailed"));
       } finally {
-        setSearching(false);
+        if (token === searchTokenRef.current) setSearching(false);
       }
     },
     [t],
@@ -125,6 +131,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
 
   // Close search bar and clear state
   const closeSearch = useCallback(() => {
+    searchTokenRef.current += 1;
     setIsSearchOpen(false);
     setSearchTerm("");
     setSearchResults([]);
@@ -335,14 +342,15 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
         <div className="space-y-4">
           {/* Header with path, search, and create button */}
           <div className="flex items-center justify-between gap-2">
-            <p
+            <button
+              type="button"
               className="text-sm text-muted-foreground shrink-0 cursor-pointer hover:text-foreground transition-colors inline-flex items-center gap-1"
               onClick={() => workspaceApi.openDirectory("memory")}
               title={t("workspace.openDirectory")}
             >
               ~/.openclaw/workspace/memory/
               <FolderOpen className="w-3.5 h-3.5" />
-            </p>
+            </button>
             <div className="flex items-center gap-1.5">
               <Button
                 variant="ghost"
@@ -387,6 +395,10 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
                     />
                     {searchTerm && (
                       <button
+                        type="button"
+                        aria-label={t("common.clear", {
+                          defaultValue: "Clear",
+                        })}
                         onClick={() => handleSearchChange("")}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -424,46 +436,50 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
             ) : (
               <div className="space-y-2">
                 {searchResults.map((result) => (
-                  <button
-                    key={result.filename}
-                    onClick={() => openFile(result.filename)}
-                    className="w-full flex items-start gap-3 p-4 rounded-xl border border-border bg-card hover:bg-accent/50 transition-colors text-left group"
-                  >
-                    <div className="mt-0.5 text-muted-foreground group-hover:text-foreground transition-colors">
-                      <Calendar className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm text-foreground">
-                          {result.date}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {formatFileSize(result.sizeBytes)}
-                        </span>
-                        {result.matchCount > 0 && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-                            {t("workspace.dailyMemory.matchCount", {
-                              count: result.matchCount,
-                            })}
+                  <div key={result.filename} className="relative group">
+                    <button
+                      type="button"
+                      onClick={() => openFile(result.filename)}
+                      className="w-full flex items-start gap-3 p-4 pr-12 rounded-xl border border-border bg-card hover:bg-accent/50 transition-colors text-left"
+                    >
+                      <div className="mt-0.5 text-muted-foreground group-hover:text-foreground transition-colors">
+                        <Calendar className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm text-foreground">
+                            {result.date}
                           </span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatFileSize(result.sizeBytes)}
+                          </span>
+                          {result.matchCount > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                              {t("workspace.dailyMemory.matchCount", {
+                                count: result.matchCount,
+                              })}
+                            </span>
+                          )}
+                        </div>
+                        {result.snippet && (
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2 whitespace-pre-line">
+                            {result.snippet}
+                          </p>
                         )}
                       </div>
-                      {result.snippet && (
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2 whitespace-pre-line">
-                          {result.snippet}
-                        </p>
-                      )}
-                    </div>
-                    <div
-                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeletingFile(result.filename);
-                      }}
+                    </button>
+                    {/* Sibling, not nested: a button inside a button is invalid and
+                        unreachable by keyboard (FE-UI-11). */}
+                    <button
+                      type="button"
+                      onClick={() => setDeletingFile(result.filename)}
+                      className="absolute right-3 top-4 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                      aria-label={t("common.delete")}
+                      title={t("common.delete")}
                     >
-                      <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive transition-colors" />
-                    </div>
-                  </button>
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 ))}
               </div>
             )
@@ -480,39 +496,43 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
           ) : (
             <div className="space-y-2">
               {files.map((file) => (
-                <button
-                  key={file.filename}
-                  onClick={() => openFile(file.filename)}
-                  className="w-full flex items-start gap-3 p-4 rounded-xl border border-border bg-card hover:bg-accent/50 transition-colors text-left group"
-                >
-                  <div className="mt-0.5 text-muted-foreground group-hover:text-foreground transition-colors">
-                    <Calendar className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm text-foreground">
-                        {file.date}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatFileSize(file.sizeBytes)}
-                      </span>
-                    </div>
-                    {file.preview && (
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {file.preview}
-                      </p>
-                    )}
-                  </div>
-                  <div
-                    className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeletingFile(file.filename);
-                    }}
+                <div key={file.filename} className="relative group">
+                  <button
+                    type="button"
+                    onClick={() => openFile(file.filename)}
+                    className="w-full flex items-start gap-3 p-4 pr-12 rounded-xl border border-border bg-card hover:bg-accent/50 transition-colors text-left"
                   >
-                    <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive transition-colors" />
-                  </div>
-                </button>
+                    <div className="mt-0.5 text-muted-foreground group-hover:text-foreground transition-colors">
+                      <Calendar className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm text-foreground">
+                          {file.date}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatFileSize(file.sizeBytes)}
+                        </span>
+                      </div>
+                      {file.preview && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                          {file.preview}
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                  {/* Sibling, not nested: a button inside a button is invalid and
+                      unreachable by keyboard (FE-UI-11). */}
+                  <button
+                    type="button"
+                    onClick={() => setDeletingFile(file.filename)}
+                    className="absolute right-3 top-4 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                    aria-label={t("common.delete")}
+                    title={t("common.delete")}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               ))}
             </div>
           )}

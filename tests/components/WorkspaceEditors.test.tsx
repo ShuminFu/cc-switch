@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import WorkspaceFileEditor from "@/components/workspace/WorkspaceFileEditor";
 import DailyMemoryPanel from "@/components/workspace/DailyMemoryPanel";
@@ -149,5 +155,79 @@ describe("DailyMemoryPanel create today", () => {
 
     const editor = (await screen.findByTestId("editor")) as HTMLTextAreaElement;
     expect(editor.value).toBe("");
+  });
+});
+
+describe("DailyMemoryPanel search", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+    api.listDailyMemoryFiles.mockResolvedValue([
+      {
+        filename: "2026-01-01.md",
+        date: "2026-01-01",
+        sizeBytes: 10,
+        preview: "x",
+      },
+    ]);
+  });
+
+  const result = (filename: string) => ({
+    filename,
+    date: filename.replace(".md", ""),
+    sizeBytes: 1,
+    snippet: filename,
+    matchCount: 1,
+  });
+
+  it("ignores results that arrive for an older query (FE-UI-57)", async () => {
+    const pending: Array<(value: unknown) => void> = [];
+    api.searchDailyMemoryFiles.mockImplementation(
+      () => new Promise((resolve) => pending.push(resolve)),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
+      await waitFor(() => expect(api.listDailyMemoryFiles).toHaveBeenCalled());
+      fireEvent.click(
+        screen.getByTitle("workspace.dailyMemory.searchScopeHint"),
+      );
+      const input = await screen.findByPlaceholderText(
+        "workspace.dailyMemory.searchPlaceholder",
+      );
+
+      fireEvent.change(input, { target: { value: "ab" } });
+      await act(async () => {
+        vi.advanceTimersByTime(350);
+      });
+      fireEvent.change(input, { target: { value: "abc" } });
+      await act(async () => {
+        vi.advanceTimersByTime(350);
+      });
+      expect(pending).toHaveLength(2);
+
+      // Newer query resolves first, the stale one last.
+      await act(async () => {
+        pending[1]([result("new.md")]);
+      });
+      await act(async () => {
+        pending[0]([result("old.md")]);
+      });
+
+      expect(await screen.findByText("new")).toBeInTheDocument();
+      expect(screen.queryByText("old")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("delete is a separate, labelled button (FE-UI-11)", async () => {
+    render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
+    await screen.findByText("2026-01-01");
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    expect(
+      await screen.findByText("workspace.dailyMemory.confirmDeleteTitle"),
+    ).toBeInTheDocument();
+    // Opening the delete confirm did not open the file.
+    expect(api.readDailyMemoryFile).not.toHaveBeenCalled();
   });
 });
