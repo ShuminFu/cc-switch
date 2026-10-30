@@ -8,6 +8,10 @@ const apiMocks = vi.hoisted(() => ({
   getOpenClawLiveProvider: vi.fn(),
 }));
 
+const formMocks = vi.hoisted(() => ({
+  providerKey: undefined as string | undefined,
+}));
+
 vi.mock("@/lib/api", () => ({
   providersApi: {
     getCurrent: apiMocks.getCurrent,
@@ -61,6 +65,7 @@ vi.mock("@/components/providers/forms/ProviderForm", () => ({
       meta?: Record<string, unknown>;
       icon?: string;
       iconColor?: string;
+      providerKey?: string;
     }) => void;
     isProxyTakeover?: boolean;
   }) => (
@@ -76,6 +81,7 @@ vi.mock("@/components/providers/forms/ProviderForm", () => ({
           meta: initialData.meta,
           icon: initialData.icon,
           iconColor: initialData.iconColor,
+          providerKey: formMocks.providerKey,
         });
       }}
     >
@@ -96,6 +102,106 @@ describe("EditProviderDialog", () => {
     apiMocks.getCurrent.mockReset();
     apiMocks.getLiveProviderSettings.mockReset();
     apiMocks.getOpenClawLiveProvider.mockReset();
+    formMocks.providerKey = undefined;
+  });
+
+  it("does not mount the form until the live backfill resolves (FE-PROV-02)", async () => {
+    const provider: Provider = {
+      id: "current",
+      name: "Current",
+      category: "custom",
+      settingsConfig: { env: { ANTHROPIC_AUTH_TOKEN: "db-key" } },
+    };
+    const liveSettings = { env: { ANTHROPIC_AUTH_TOKEN: "live-key" } };
+    let resolveLive: (value: unknown) => void = () => {};
+
+    apiMocks.getCurrent.mockResolvedValue(provider.id);
+    apiMocks.getLiveProviderSettings.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLive = resolve;
+        }),
+    );
+
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+        appId="claude"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(apiMocks.getLiveProviderSettings).toHaveBeenCalled(),
+    );
+    expect(screen.queryByTestId("settings-config")).toBeNull();
+    expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
+
+    resolveLive(liveSettings);
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(screen.getByTestId("settings-config").textContent ?? "{}"),
+      ).toEqual(liveSettings),
+    );
+    expect(
+      screen.getByRole("button", { name: "common.save" }),
+    ).not.toBeDisabled();
+  });
+
+  it("still mounts the form when reading the current provider fails", async () => {
+    const provider: Provider = {
+      id: "p1",
+      name: "P1",
+      settingsConfig: { env: {} },
+    };
+    apiMocks.getCurrent.mockRejectedValue(new Error("ipc failed"));
+
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+        appId="claude"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-config")).toBeInTheDocument(),
+    );
+  });
+
+  it("submits a Hermes provider-key rename with the original id (FE-PROV-05)", async () => {
+    const provider: Provider = {
+      id: "old-key",
+      name: "Hermes Custom",
+      settingsConfig: { name: "old-key", base_url: "https://api.example.com" },
+    };
+    const handleSubmit = vi.fn().mockResolvedValue(undefined);
+    apiMocks.getCurrent.mockResolvedValue("someone-else");
+    formMocks.providerKey = "new-key";
+
+    render(
+      <EditProviderDialog
+        open
+        provider={provider}
+        onOpenChange={vi.fn()}
+        onSubmit={handleSubmit}
+        appId="hermes"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-config")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
+    expect(handleSubmit.mock.calls[0][0].provider.id).toBe("new-key");
+    expect(handleSubmit.mock.calls[0][0].originalId).toBe("old-key");
   });
 
   it("保留 Codex 数据库中的 modelCatalog，避免 live 配置缺字段时清空模型映射", async () => {

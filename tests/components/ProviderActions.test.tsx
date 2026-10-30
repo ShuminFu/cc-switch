@@ -1,0 +1,63 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { ProviderActions } from "@/components/providers/ProviderActions";
+
+function renderActions(
+  overrides: Partial<Parameters<typeof ProviderActions>[0]> = {},
+) {
+  const props = {
+    appId: "claude" as const,
+    isCurrent: false,
+    onSwitch: vi.fn(),
+    onEdit: vi.fn(),
+    onDuplicate: vi.fn(),
+    onDelete: vi.fn(),
+    ...overrides,
+  };
+  render(<ProviderActions {...props} />);
+  return props;
+}
+
+describe("ProviderActions", () => {
+  it("disables Duplicate for read-only (Hermes-managed) providers (FE-PROV-42)", () => {
+    const props = renderActions({ appId: "hermes", isReadOnly: true });
+
+    const hint = "由 Hermes 管理，请在 Hermes Web UI 中编辑";
+    // Edit, Duplicate and Delete all carry the managed hint when read-only.
+    const buttons = screen.getAllByTitle(hint);
+    expect(buttons).toHaveLength(3);
+    // Edit and Duplicate are real disabled buttons.
+    expect(buttons[0]).toBeDisabled();
+    expect(buttons[1]).toBeDisabled();
+
+    for (const button of buttons) {
+      fireEvent.click(button);
+    }
+    expect(props.onDuplicate).not.toHaveBeenCalled();
+    expect(props.onEdit).not.toHaveBeenCalled();
+    expect(props.onDelete).not.toHaveBeenCalled();
+    expect(screen.queryByTitle("provider.duplicate")).toBeNull();
+  });
+
+  it("keeps Duplicate enabled for normal providers", () => {
+    const props = renderActions();
+    const duplicate = screen.getByTitle("provider.duplicate");
+    expect(duplicate).not.toBeDisabled();
+    fireEvent.click(duplicate);
+    expect(props.onDuplicate).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the main button while a provider mutation is pending (FE-PROV-49)", () => {
+    const props = renderActions({ isActionPending: true });
+    const main = screen.getByRole("button", { name: /provider.enable/ });
+    expect(main).toBeDisabled();
+    fireEvent.click(main);
+    expect(props.onSwitch).not.toHaveBeenCalled();
+  });
+
+  it("allows switching when nothing is pending", () => {
+    const props = renderActions();
+    fireEvent.click(screen.getByRole("button", { name: /provider.enable/ }));
+    expect(props.onSwitch).toHaveBeenCalledTimes(1);
+  });
+});

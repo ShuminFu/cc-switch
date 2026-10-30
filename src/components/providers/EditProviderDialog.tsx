@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Save } from "lucide-react";
+import { Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import type { Provider } from "@/types";
@@ -39,15 +39,23 @@ export function EditProviderDialog({
     unknown
   > | null>(null);
 
-  // 使用 ref 标记是否已经加载过，防止重复读取覆盖用户编辑
-  const [hasLoadedLive, setHasLoadedLive] = useState(false);
+  // 记录已完成 live 回填的 provider id；防止重复读取覆盖用户编辑，
+  // 同时作为渲染门槛：回填完成前不挂载表单，避免用户输入被 form.reset 覆盖 (FE-PROV-02)
+  const [liveLoadedFor, setLiveLoadedFor] = useState<string | null>(null);
+  const providerId = provider?.id ?? null;
+  const hasLoadedLive = providerId !== null && liveLoadedFor === providerId;
 
   useEffect(() => {
     let cancelled = false;
+    const finish = (live: Record<string, unknown> | null) => {
+      if (cancelled || !providerId) return;
+      setLiveSettings(live);
+      setLiveLoadedFor(providerId);
+    };
     const load = async () => {
-      if (!open || !provider) {
+      if (!open || !providerId) {
         setLiveSettings(null);
-        setHasLoadedLive(false);
+        setLiveLoadedFor(null);
         return;
       }
 
@@ -58,78 +66,44 @@ export function EditProviderDialog({
 
       // 代理接管模式：Live 配置已被代理改写，读取 live 会导致编辑界面展示代理地址/占位符等内容
       // 因此直接回退到 SSOT（数据库）配置，避免用户困惑与误保存
-      if (isProxyTakeover) {
-        if (!cancelled) {
-          setLiveSettings(null);
-          setHasLoadedLive(true);
-        }
-        return;
-      }
-
       // OpenCode uses additive mode - each provider's config is stored independently in DB
       // Reading live config would return the full opencode.json (with $schema, provider, mcp etc.)
       // instead of just the provider fragment, causing incorrect nested structure on save
-      if (appId === "opencode") {
-        if (!cancelled) {
-          setLiveSettings(null);
-          setHasLoadedLive(true);
-        }
-        return;
-      }
-
-      if (appId === "openclaw") {
-        try {
-          const live = await openclawApi.getLiveProvider(provider.id);
-          if (!cancelled && live && typeof live === "object") {
-            setLiveSettings(live);
-          } else if (!cancelled) {
-            setLiveSettings(null);
-          }
-        } catch {
-          if (!cancelled) {
-            setLiveSettings(null);
-          }
-        } finally {
-          if (!cancelled) {
-            setHasLoadedLive(true);
-          }
-        }
+      if (isProxyTakeover || appId === "opencode") {
+        finish(null);
         return;
       }
 
       try {
-        const currentId = await providersApi.getCurrent(appId);
-        if (currentId && provider.id === currentId) {
-          try {
-            const live = (await vscodeApi.getLiveProviderSettings(
-              appId,
-            )) as Record<string, unknown>;
-            if (!cancelled && live && typeof live === "object") {
-              setLiveSettings(live);
-              setHasLoadedLive(true);
-            }
-          } catch {
-            // 读取实时配置失败则回退到 SSOT（不打断编辑流程）
-            if (!cancelled) {
-              setLiveSettings(null);
-              setHasLoadedLive(true);
-            }
-          }
-        } else {
-          if (!cancelled) {
-            setLiveSettings(null);
-            setHasLoadedLive(true);
-          }
+        if (appId === "openclaw") {
+          const live = await openclawApi.getLiveProvider(providerId);
+          finish(live && typeof live === "object" ? live : null);
+          return;
         }
-      } finally {
-        // no-op
+
+        const currentId = await providersApi.getCurrent(appId);
+        if (currentId && providerId === currentId) {
+          const live = (await vscodeApi.getLiveProviderSettings(
+            appId,
+          )) as Record<string, unknown>;
+          finish(live && typeof live === "object" ? live : null);
+        } else {
+          finish(null);
+        }
+      } catch {
+        // 读取实时配置失败则回退到 SSOT（不打断编辑流程）
+        finish(null);
       }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [open, provider?.id, appId, hasLoadedLive, isProxyTakeover]); // 只依赖 provider.id，不依赖整个 provider 对象
+  }, [open, providerId, appId, hasLoadedLive, isProxyTakeover]); // 只依赖 provider.id，不依赖整个 provider 对象
+
+  // 无需读取 live 的场景直接渲染，其余场景等待回填完成后再挂载表单
+  const needsLiveLoad = !isProxyTakeover && appId !== "opencode";
+  const isFormReady = !needsLiveLoad || hasLoadedLive;
 
   const initialSettingsConfig = useMemo(() => {
     const base = (liveSettings ?? provider?.settingsConfig ?? {}) as Record<
@@ -189,7 +163,7 @@ export function EditProviderDialog({
         unknown
       >;
       const nextProviderId =
-        (appId === "opencode" || appId === "openclaw") &&
+        (appId === "opencode" || appId === "openclaw" || appId === "hermes") &&
         values.providerKey?.trim()
           ? values.providerKey.trim()
           : provider.id;
@@ -230,7 +204,7 @@ export function EditProviderDialog({
         <Button
           type="submit"
           form="provider-form"
-          disabled={isFormSubmitting}
+          disabled={isFormSubmitting || !isFormReady}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           <Save className="h-4 w-4 mr-2" />
@@ -238,17 +212,31 @@ export function EditProviderDialog({
         </Button>
       }
     >
-      <ProviderForm
-        appId={appId}
-        providerId={provider.id}
-        submitLabel={t("common.save")}
-        onSubmit={handleSubmit}
-        onCancel={() => onOpenChange(false)}
-        onSubmittingChange={setIsFormSubmitting}
-        initialData={initialData}
-        showButtons={false}
-        isProxyTakeover={isProxyTakeover}
-      />
+      {!isFormReady ? (
+        <div
+          className="flex items-center justify-center py-16 text-muted-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+          <span className="text-sm">
+            {t("common.loading", { defaultValue: "Loading..." })}
+          </span>
+        </div>
+      ) : (
+        <ProviderForm
+          key={provider.id}
+          appId={appId}
+          providerId={provider.id}
+          submitLabel={t("common.save")}
+          onSubmit={handleSubmit}
+          onCancel={() => onOpenChange(false)}
+          onSubmittingChange={setIsFormSubmitting}
+          initialData={initialData}
+          showButtons={false}
+          isProxyTakeover={isProxyTakeover}
+        />
+      )}
     </FullScreenPanel>
   );
 }

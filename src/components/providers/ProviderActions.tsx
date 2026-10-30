@@ -22,6 +22,8 @@ interface ProviderActionsProps {
   isCurrent: boolean;
   isInConfig?: boolean;
   isTesting?: boolean;
+  // Some provider mutation is in flight; disable the main/failover button
+  isActionPending?: boolean;
   isProxyTakeover?: boolean;
   isOmo?: boolean;
   onSwitch: () => void;
@@ -61,6 +63,7 @@ export function ProviderActions({
   isCurrent,
   isInConfig = false,
   isTesting,
+  isActionPending = false,
   isProxyTakeover = false,
   isOmo = false,
   onSwitch,
@@ -95,6 +98,7 @@ export function ProviderActions({
     !isAdditiveMode && !isOmo && isAutoFailoverEnabled && onToggleFailover;
 
   const handleMainButtonClick = () => {
+    if (isActionPending) return;
     if (isOmo) {
       if (isCurrent) {
         onDisableOmo?.();
@@ -272,7 +276,8 @@ export function ProviderActions({
           size="sm"
           variant={buttonState.variant}
           onClick={handleMainButtonClick}
-          disabled={buttonState.disabled}
+          disabled={buttonState.disabled || isActionPending}
+          aria-busy={isActionPending || undefined}
           className={cn("w-[4.5rem] px-2.5", buttonState.className)}
         >
           {buttonState.icon}
@@ -298,9 +303,13 @@ export function ProviderActions({
         <Button
           size="icon"
           variant="ghost"
-          onClick={onDuplicate}
-          title={t("provider.duplicate")}
-          className={iconButtonClass}
+          onClick={isReadOnly ? undefined : onDuplicate}
+          disabled={isReadOnly}
+          title={isReadOnly ? readOnlyHint : t("provider.duplicate")}
+          className={cn(
+            iconButtonClass,
+            isReadOnly && "opacity-40 cursor-not-allowed text-muted-foreground",
+          )}
         >
           <Copy className="h-4 w-4" />
         </Button>

@@ -251,6 +251,49 @@ function collectCustomModels(
   return customs;
 }
 
+/**
+ * Reconcile the locally displayed custom rows with the (store-derived) rows.
+ *
+ * Rows whose key exists in the store are refreshed from it; draft rows that
+ * are not persisted yet (no key or no model, which `mergeCustomModelsIntoStore`
+ * intentionally does not write) are kept so that an unrelated store change
+ * (e.g. picking a builtin agent's model) does not wipe a half-filled row.
+ * Complete rows missing from the store were removed externally and are
+ * dropped. Store rows not shown yet are appended (FE-PROV-06).
+ */
+export function reconcileCustomModels(
+  prev: CustomModelItem[],
+  store: Record<string, Record<string, unknown>>,
+  builtinKeys: Set<string>,
+): CustomModelItem[] {
+  const fromStore = collectCustomModels(store, builtinKeys);
+  const storeByKey = new Map(fromStore.map((item) => [item.key, item]));
+  const used = new Set<string>();
+  const next: CustomModelItem[] = [];
+
+  for (const row of prev) {
+    const key = row.key.trim();
+    const storeRow = key ? storeByKey.get(key) : undefined;
+    if (storeRow && !used.has(key)) {
+      used.add(key);
+      next.push(storeRow);
+      continue;
+    }
+    const isDraft = !key || !row.model.trim();
+    if (isDraft && !(key && used.has(key))) {
+      next.push(row);
+    }
+  }
+
+  for (const item of fromStore) {
+    if (!used.has(item.key)) {
+      next.push(item);
+    }
+  }
+
+  return next;
+}
+
 export function mergeCustomModelsIntoStore(
   store: Record<string, Record<string, unknown>>,
   builtinKeys: Set<string>,
@@ -349,11 +392,15 @@ export function OmoFormFields({
   );
 
   useEffect(() => {
-    setCustomAgents(collectCustomModels(agents, builtinAgentKeys));
+    setCustomAgents((prev) =>
+      reconcileCustomModels(prev, agents, builtinAgentKeys),
+    );
   }, [agents]);
 
   useEffect(() => {
-    setCustomCategories(collectCustomModels(categories, BUILTIN_CATEGORY_KEYS));
+    setCustomCategories((prev) =>
+      reconcileCustomModels(prev, categories, BUILTIN_CATEGORY_KEYS),
+    );
   }, [categories]);
 
   const syncCustomAgents = useCallback(

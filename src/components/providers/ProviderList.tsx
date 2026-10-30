@@ -63,6 +63,9 @@ interface ProviderListProps {
   onOpenTerminal?: (provider: Provider) => void;
   onCreate?: () => void;
   isLoading?: boolean;
+  // A provider mutation (switch/add/update/delete) is in flight: card main
+  // buttons are disabled so double clicks cannot start concurrent switches.
+  isActionPending?: boolean;
   isProxyRunning?: boolean; // 代理服务运行状态
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管）
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
@@ -85,6 +88,7 @@ export function ProviderList({
   onOpenTerminal,
   onCreate,
   isLoading = false,
+  isActionPending = false,
   isProxyRunning = false,
   isProxyTakeover = false,
   activeProviderId,
@@ -177,8 +181,14 @@ export function ProviderList({
     [isFailoverModeActive, failoverQueue],
   );
 
+  const isFailoverMutationPending =
+    addToQueue.isPending || removeFromQueue.isPending;
+  const isAnyActionPending = isActionPending || isFailoverMutationPending;
+
   const handleToggleFailover = useCallback(
     (providerId: string, enabled: boolean) => {
+      // Ignore repeated clicks while a queue mutation is still running.
+      if (addToQueue.isPending || removeFromQueue.isPending) return;
       if (enabled) {
         addToQueue.mutate({ appType: appId, providerId });
       } else {
@@ -416,6 +426,7 @@ export function ProviderList({
                 onOpenTerminal={onOpenTerminal}
                 onTest={handleTest}
                 isTesting={isChecking(provider.id)}
+                isActionPending={isAnyActionPending}
                 isProxyRunning={isProxyRunning}
                 isProxyTakeover={isProxyTakeover}
                 isAutoFailoverEnabled={isFailoverModeActive}
@@ -555,6 +566,7 @@ interface SortableProviderCardProps {
   onOpenTerminal?: (provider: Provider) => void;
   onTest?: (provider: Provider) => void;
   isTesting: boolean;
+  isActionPending?: boolean;
   isProxyRunning: boolean;
   isProxyTakeover: boolean;
   isAutoFailoverEnabled: boolean;
@@ -586,6 +598,7 @@ function SortableProviderCard({
   onOpenTerminal,
   onTest,
   isTesting,
+  isActionPending,
   isProxyRunning,
   isProxyTakeover,
   isAutoFailoverEnabled,
@@ -633,6 +646,7 @@ function SortableProviderCard({
         onOpenTerminal={onOpenTerminal}
         onTest={onTest}
         isTesting={isTesting}
+        isActionPending={isActionPending}
         isProxyRunning={isProxyRunning}
         isProxyTakeover={isProxyTakeover}
         dragHandleProps={{

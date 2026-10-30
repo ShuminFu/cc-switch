@@ -25,6 +25,11 @@ interface FullScreenPanelProps {
   contentClassName?: string;
 }
 
+// Open panels in open order. Only the top-most panel reacts to Escape, so a
+// nested panel (speed test, common config, ...) does not also close its
+// parent and discard the parent's unsaved edits (FE-PROV-41).
+const openPanelStack: symbol[] = [];
+
 const DRAG_BAR_HEIGHT = isWindows() || isLinux() ? 0 : 28; // px - match App.tsx
 const HEADER_HEIGHT = 64; // px - match App.tsx
 
@@ -60,8 +65,14 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
   React.useEffect(() => {
     if (!isOpen) return;
 
+    const panelToken = Symbol("full-screen-panel");
+    openPanelStack.push(panelToken);
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (openPanelStack[openPanelStack.length - 1] !== panelToken) {
+          return;
+        }
         // 子组件（例如 Radix 的 Select/Dialog/Dropdown）如果已经消费了 ESC，就不要再关闭整个面板
         if (event.defaultPrevented) {
           return;
@@ -80,6 +91,8 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
     window.addEventListener("keydown", handleKeyDown, false);
     return () => {
       window.removeEventListener("keydown", handleKeyDown, false);
+      const index = openPanelStack.lastIndexOf(panelToken);
+      if (index >= 0) openPanelStack.splice(index, 1);
     };
   }, [isOpen]);
 

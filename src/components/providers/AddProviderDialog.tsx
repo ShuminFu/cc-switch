@@ -374,7 +374,14 @@ export function AddProviderDialog({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="app-specific" className="mt-0">
+          {/* Keep the form mounted while the Universal tab is shown so that
+              switching tabs does not discard unsaved input (FE-PROV-04). */}
+          <TabsContent
+            value="app-specific"
+            className="mt-0"
+            forceMount
+            hidden={activeTab !== "app-specific"}
+          >
             <ProviderForm
               appId={appId}
               submitLabel={t("common.add")}

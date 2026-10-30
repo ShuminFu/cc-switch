@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -406,6 +406,12 @@ function ProviderFormFull({
     mode: "onSubmit",
   });
   const { isSubmitting } = form.formState;
+  // Subscribe to settingsConfig so that edits made through the JSON editors
+  // (which only call form.setValue) re-render the form and the derived
+  // API-key / base-URL / model hooks always see the live config instead of a
+  // stale render-time snapshot (FE-PROV-01).
+  const watchedSettingsConfig =
+    useWatch({ control: form.control, name: "settingsConfig" }) ?? "";
 
   const handleSettingsConfigChange = useCallback(
     (config: string) => {
@@ -446,7 +452,7 @@ function ProviderFormFull({
     handleApiKeyChange,
     showApiKey: shouldShowApiKey,
   } = useApiKeyState({
-    initialConfig: form.getValues("settingsConfig"),
+    initialConfig: watchedSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
     selectedPresetId,
     category,
@@ -457,7 +463,7 @@ function ProviderFormFull({
   const { baseUrl, handleClaudeBaseUrlChange } = useBaseUrlState({
     appType: appId,
     category,
-    settingsConfig: form.getValues("settingsConfig"),
+    settingsConfig: watchedSettingsConfig,
     codexConfig: "",
     onSettingsConfigChange: handleSettingsConfigChange,
     onCodexConfigChange: () => {},
@@ -476,7 +482,7 @@ function ProviderFormFull({
     subagentModel,
     handleModelChange,
   } = useModelState({
-    settingsConfig: form.getValues("settingsConfig"),
+    settingsConfig: watchedSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
   });
 
@@ -613,8 +619,11 @@ function ProviderFormFull({
         : "",
     );
 
-  const { configError: codexConfigError, debouncedValidate } =
-    useCodexTomlValidation();
+  const {
+    configError: codexConfigError,
+    debouncedValidate,
+    validateToml: validateCodexToml,
+  } = useCodexTomlValidation();
 
   const handleCodexConfigChange = useCallback(
     (value: string) => {
@@ -713,7 +722,7 @@ function ProviderFormFull({
   } = useTemplateValues({
     selectedPresetId: appId === "claude" ? selectedPresetId : null,
     presetEntries: appId === "claude" ? presetEntries : [],
-    settingsConfig: form.getValues("settingsConfig"),
+    settingsConfig: watchedSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
   });
 
@@ -726,7 +735,7 @@ function ProviderFormFull({
     isExtracting: isClaudeExtracting,
     handleExtract: handleClaudeExtract,
   } = useCommonConfigSnippet({
-    settingsConfig: form.getValues("settingsConfig"),
+    settingsConfig: watchedSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
     initialData: appId === "claude" ? initialData : undefined,
     initialEnabled:
@@ -995,7 +1004,65 @@ function ProviderFormFull({
   const shouldApplyLocalProxyRequestOverrides =
     (appId === "claude" || appId === "codex") && category !== "official";
 
+  // Hard errors in the Codex / Gemini editors block saving. Previously an
+  // unparsable auth.json / config.json silently fell back to the RHF
+  // settingsConfig (empty defaults in add mode, pre-edit config in edit
+  // mode), discarding every edit with a success toast (FE-PROV-08).
+  const getEditorBlockingError = (): string | null => {
+    const isPlainObject = (value: unknown) =>
+      !!value && typeof value === "object" && !Array.isArray(value);
+    if (appId === "codex") {
+      if (codexAuth.trim()) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(codexAuth);
+        } catch {
+          return t("providerForm.codexAuthInvalid", {
+            defaultValue: "auth.json is not valid JSON. Fix it before saving.",
+          });
+        }
+        if (!isPlainObject(parsed)) {
+          return t("providerForm.codexAuthNotObject", {
+            defaultValue: "auth.json must be a JSON object.",
+          });
+        }
+      }
+      if (!validateCodexToml(codexConfig ?? "")) {
+        return t("providerForm.codexConfigInvalid", {
+          defaultValue: "config.toml has a syntax error. Fix it before saving.",
+        });
+      }
+    } else if (appId === "gemini") {
+      if (envError) {
+        return envError;
+      }
+      if (geminiConfig.trim()) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(geminiConfig);
+        } catch {
+          return t("providerForm.geminiConfigInvalid", {
+            defaultValue:
+              "Gemini config.json is not valid JSON. Fix it before saving.",
+          });
+        }
+        if (!isPlainObject(parsed)) {
+          return t("providerForm.geminiConfigNotObject", {
+            defaultValue: "Gemini config.json must be a JSON object.",
+          });
+        }
+      }
+    }
+    return null;
+  };
+
   const handleSubmit = async (values: ProviderFormData) => {
+    const editorError = getEditorBlockingError();
+    if (editorError) {
+      toast.error(editorError);
+      return;
+    }
+
     const overridesResult = shouldApplyLocalProxyRequestOverrides
       ? buildLocalProxyRequestOverrides(
           localProxyHeadersOverride,
@@ -1283,7 +1350,7 @@ function ProviderFormFull({
 
     if (appId === "codex") {
       try {
-        const authJson = JSON.parse(codexAuth);
+        const authJson = codexAuth.trim() ? JSON.parse(codexAuth) : {};
         let normalizedCodexConfig =
           category !== "official" && (codexConfig ?? "").trim()
             ? setCodexWireApi(codexConfig ?? "", "responses")
@@ -1320,7 +1387,13 @@ function ProviderFormFull({
         }
         settingsConfig = JSON.stringify(configObj);
       } catch (err) {
-        settingsConfig = values.settingsConfig.trim();
+        // Never fall back to the stale RHF value: that silently drops edits.
+        toast.error(
+          t("providerForm.codexAuthInvalid", {
+            defaultValue: "auth.json is not valid JSON. Fix it before saving.",
+          }),
+        );
+        return;
       }
     } else if (appId === "gemini") {
       try {
@@ -1332,7 +1405,13 @@ function ProviderFormFull({
         };
         settingsConfig = JSON.stringify(combined);
       } catch (err) {
-        settingsConfig = values.settingsConfig.trim();
+        toast.error(
+          t("providerForm.geminiConfigInvalid", {
+            defaultValue:
+              "Gemini config.json is not valid JSON. Fix it before saving.",
+          }),
+        );
+        return;
       }
     } else if (
       appId === "opencode" &&
@@ -1427,23 +1506,9 @@ function ProviderFormFull({
       const needsClearEndpoints =
         hadEndpoints && draftCustomEndpoints.length === 0;
 
-      let mergedMeta = needsClearEndpoints
+      const mergedMeta = needsClearEndpoints
         ? mergeProviderMeta(initialData?.meta, {})
         : mergeProviderMeta(initialData?.meta, customEndpointsToSave);
-
-      if (activePreset?.isPartner) {
-        mergedMeta = {
-          ...(mergedMeta ?? {}),
-          isPartner: true,
-        };
-      }
-
-      if (activePreset?.partnerPromotionKey) {
-        mergedMeta = {
-          ...(mergedMeta ?? {}),
-          partnerPromotionKey: activePreset.partnerPromotionKey,
-        };
-      }
 
       if (mergedMeta !== undefined) {
         payload.meta = mergedMeta;
@@ -1559,6 +1624,16 @@ function ProviderFormFull({
 
     if (!isCodexOauthProvider && "codexFastMode" in nextMeta) {
       delete nextMeta.codexFastMode;
+    }
+
+    // Partner badge / promotion key come from the chosen preset and must be
+    // persisted on every add, not only when draft custom endpoints exist
+    // (FE-PROV-43).
+    if (!isEditMode && activePreset?.isPartner) {
+      nextMeta.isPartner = true;
+    }
+    if (!isEditMode && activePreset?.partnerPromotionKey) {
+      nextMeta.partnerPromotionKey = activePreset.partnerPromotionKey;
     }
 
     payload.meta = nextMeta;
@@ -2090,8 +2165,8 @@ function ProviderFormFull({
               providerId={providerId}
               shouldShowApiKey={
                 (category !== "cloud_provider" ||
-                  hasApiKeyField(form.getValues("settingsConfig"), "claude")) &&
-                shouldShowApiKey(form.getValues("settingsConfig"), isEditMode)
+                  hasApiKeyField(watchedSettingsConfig, "claude")) &&
+                shouldShowApiKey(watchedSettingsConfig, isEditMode)
               }
               apiKey={apiKey}
               onApiKeyChange={handleApiKeyChange}
@@ -2220,7 +2295,7 @@ function ProviderFormFull({
             <GeminiFormFields
               providerId={providerId}
               shouldShowApiKey={shouldShowApiKey(
-                form.getValues("settingsConfig"),
+                watchedSettingsConfig,
                 isEditMode,
               )}
               apiKey={geminiApiKey}
@@ -2403,7 +2478,7 @@ function ProviderFormFull({
                   {t("provider.configJson")}
                 </Label>
                 <JsonEditor
-                  value={form.getValues("settingsConfig")}
+                  value={watchedSettingsConfig}
                   onChange={(config) => form.setValue("settingsConfig", config)}
                   placeholder={`{
   "npm": "@ai-sdk/openai-compatible",
@@ -2428,7 +2503,7 @@ function ProviderFormFull({
                   {t("provider.configJson")}
                 </Label>
                 <JsonEditor
-                  value={form.getValues("settingsConfig")}
+                  value={watchedSettingsConfig}
                   onChange={(config) => form.setValue("settingsConfig", config)}
                   placeholder={
                     appId === "hermes"
@@ -2463,7 +2538,7 @@ function ProviderFormFull({
           ) : (
             <>
               <CommonConfigEditor
-                value={form.getValues("settingsConfig")}
+                value={watchedSettingsConfig}
                 onChange={(value) => form.setValue("settingsConfig", value)}
                 useCommonConfig={useCommonConfig}
                 onCommonConfigToggle={handleCommonConfigToggle}
