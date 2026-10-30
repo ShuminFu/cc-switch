@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { UsageHero } from "./UsageHero";
 import { UsageTrendChart } from "./UsageTrendChart";
 import { RequestLogTable } from "./RequestLogTable";
+import { DataSourceBar } from "./DataSourceBar";
 import { ProviderStatsTable } from "./ProviderStatsTable";
 import { ModelStatsTable } from "./ModelStatsTable";
 import {
@@ -373,6 +374,7 @@ export function UsageDashboard({
             transition={{ delay: 0.2 }}
           >
             <TabsContent value="logs" className="mt-0">
+              <DataSourceBar refreshIntervalMs={refreshIntervalMs} />
               <RequestLogTable
                 range={range}
                 rangeLabel={rangeLabel}
