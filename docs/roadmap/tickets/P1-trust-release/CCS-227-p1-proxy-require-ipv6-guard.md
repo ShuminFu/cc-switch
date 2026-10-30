@@ -1,6 +1,6 @@
 # CCS-227: [proxy-tests] Fail the [::1] proxy tests instead of skipping when CCS_REQUIRE_IPV6 is set
 
-**Status:** Open · **Kind:** chore · **Labels:** `chore`, `phase:P1`, `p3-low`, `area:proxy-tests`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P1`, `p3-low`, `area:proxy-tests`
 
 > **Ticket key:** `p1-proxy-require-ipv6-guard` · **Phase:** P1 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -15,9 +15,23 @@
 - Touches `src-tauri/src/proxy/`: add a fixture change or the `no-fixture-needed` label (CCS-034).
 
 ## Acceptance criteria / verification
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --lib proxy::hyper_client` still passes here (tests skip).
-- [ ] `CCS_REQUIRE_IPV6=1 cargo test --manifest-path src-tauri/Cargo.toml --lib proxy::hyper_client::tests::connect_via_proxy_reaches_ipv6_literal_proxy` panics here with EAFNOSUPPORT.
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `~/go/bin/actionlint .github/workflows/ci.yml` pass.
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --lib proxy::hyper_client` still passes here (tests skip).
+- [x] `CCS_REQUIRE_IPV6=1 cargo test --manifest-path src-tauri/Cargo.toml --lib proxy::hyper_client::tests::connect_via_proxy_reaches_ipv6_literal_proxy` panics here with EAFNOSUPPORT.
+- [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `~/go/bin/actionlint .github/workflows/ci.yml` pass.
 
 ## Dependencies
 None.
+
+## Implementation notes
+- `src-tauri/src/proxy/hyper_client.rs` (tests module): `bind_ipv6_loopback()` panics with the bind error when `CCS_REQUIRE_IPV6` is set to a non-empty value other than `0`; otherwise it still prints the skip line and returns `None`. The env check is a small pure helper `ipv6_required()` with its own unit test (`ipv6_required_ignores_unset_empty_and_zero`).
+- `.github/workflows/ci.yml` (backend job, "Run tests" step): `CCS_REQUIRE_IPV6: ${{ runner.os != 'Windows' && '1' || '' }}` — set on the Linux and macOS legs; Windows gets an empty value, which the helper treats as unset (left out because Windows runner IPv6 loopback availability was not verified).
+- Proxy fixture rule (CCS-034): this is a test-only change with no proxy behaviour change, so the PR needs the `no-fixture-needed` label applied by a maintainer.
+- Commit: 956052f.
+
+Verification (Linux container without IPv6):
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib proxy::hyper_client` — 16 passed, 0 failed (IPv6 tests skip).
+- `CCS_REQUIRE_IPV6=1 cargo test --manifest-path src-tauri/Cargo.toml --lib proxy::hyper_client::tests::connect_via_proxy_reaches_ipv6_literal_proxy` — FAILED as intended: `CCS_REQUIRE_IPV6 is set but IPv6 loopback bind failed: Address family not supported by protocol (os error 97)`.
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — clean.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 2852 passed, 0 failed, 3 ignored.
+- YAML parses with `yaml.safe_load`; `~/go/bin/actionlint .github/workflows/ci.yml` — clean.
+- Remaining (CI only): the real `[::1]` assertions run on the GitHub Linux/macOS backend legs.
