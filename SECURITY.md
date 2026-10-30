@@ -56,3 +56,9 @@ Reporters will be credited in the release notes unless they prefer to remain ano
 Security fixes are released as patch versions and announced via [GitHub Releases](https://github.com/farion1231/cc-switch/releases). We recommend always updating to the latest version.
 
 安全修复通过补丁版本发布，并通过 [GitHub Releases](https://github.com/farion1231/cc-switch/releases) 通知。建议始终更新到最新版本。
+
+## Privacy and Data Flows / 隐私与数据流向
+
+CC Switch has no telemetry or analytics. API keys, OAuth tokens and cloud-sync credentials are stored unencrypted in `~/.cc-switch/` and in each tool's own config files. [PRIVACY.md](PRIVACY.md) lists what is stored locally and every network request the app makes (update check, provider requests through the local proxy, usage and subscription-quota queries that read CLI OAuth tokens, skills, cloud sync, and more). A request that is not listed there should be reported as a security issue.
+
+CC Switch 不包含任何遥测或统计。API 密钥、OAuth 令牌和云同步凭据以未加密形式保存在 `~/.cc-switch/` 及各工具自己的配置文件中。[PRIVACY.md](PRIVACY.md)（英文）列出了本地存储的内容以及应用发出的所有网络请求（更新检查、经本地代理转发的供应商请求、读取 CLI OAuth 令牌的用量与订阅额度查询、技能、云同步等）。如发现未列出的请求，请按安全问题报告。
