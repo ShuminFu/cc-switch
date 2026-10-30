@@ -5,6 +5,7 @@
 use super::{lock_conn, Database, SCHEMA_VERSION};
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
+use crate::secrets::provider_vault;
 use chrono::{Local, Utc};
 use rusqlite::backup::Backup;
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
@@ -278,7 +279,9 @@ impl Database {
     /// 导出为 SQLite 兼容的 SQL 文本（内存字符串，完整导出）
     pub fn export_sql_string(&self) -> Result<String, AppError> {
         let snapshot = self.snapshot_to_memory()?;
-        Self::dump_sql(&snapshot, &[])
+        let (placeholders, blanked) = Self::prepare_export_secrets(&snapshot)?;
+        let dump = Self::dump_sql(&snapshot, &[])?;
+        Ok(Self::with_vault_warning(dump, placeholders, blanked))
     }
 
     /// Export SQL for sync (WebDAV), skipping local-only tables' data
@@ -294,7 +297,189 @@ impl Database {
                 )
                 .map_err(|e| AppError::Database(format!("清理设备本地设置失败: {e}")))?;
         }
-        Self::dump_sql(&snapshot, SYNC_SKIP_TABLES)
+        let (placeholders, blanked) = Self::prepare_export_secrets(&snapshot)?;
+        let dump = Self::dump_sql(&snapshot, SYNC_SKIP_TABLES)?;
+        Ok(Self::with_vault_warning(dump, placeholders, blanked))
+    }
+
+    // ─── Provider API-key vault (DB-02): export / import ──────
+
+    /// Stored provider configs of `conn`: `(app, id, config)`, including the
+    /// universal providers (app `universal`).
+    fn secret_rows_of(
+        conn: &Connection,
+    ) -> Result<Vec<(String, String, serde_json::Value)>, AppError> {
+        let mut out = Vec::new();
+        if Self::table_exists(conn, "providers")? {
+            let mut stmt = conn
+                .prepare("SELECT app_type, id, settings_config FROM providers")
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for row in rows {
+                let (app, id, json) = row.map_err(|e| AppError::Database(e.to_string()))?;
+                if let Ok(value) = serde_json::from_str(&json) {
+                    out.push((app, id, value));
+                }
+            }
+        }
+        for (id, value) in Self::universal_rows_of(conn)? {
+            out.push((provider_vault::UNIVERSAL_APP.to_string(), id, value));
+        }
+        Ok(out)
+    }
+
+    fn universal_rows_of(
+        conn: &Connection,
+    ) -> Result<serde_json::Map<String, serde_json::Value>, AppError> {
+        if !Self::table_exists(conn, "settings")? {
+            return Ok(serde_json::Map::new());
+        }
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'universal_providers'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        Ok(
+            match json.and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok()) {
+                Some(serde_json::Value::Object(map)) => map,
+                _ => serde_json::Map::new(),
+            },
+        )
+    }
+
+    /// Write changed configs back into `conn` (a snapshot or staging copy).
+    fn write_secret_rows(
+        conn: &Connection,
+        changed: &[(String, String, serde_json::Value)],
+    ) -> Result<(), AppError> {
+        let mut universal = Self::universal_rows_of(conn)?;
+        let mut universal_changed = false;
+        for (app, id, value) in changed {
+            if app == provider_vault::UNIVERSAL_APP {
+                universal.insert(id.clone(), value.clone());
+                universal_changed = true;
+                continue;
+            }
+            let json =
+                serde_json::to_string(value).map_err(|e| AppError::Database(e.to_string()))?;
+            conn.execute(
+                "UPDATE providers SET settings_config = ?1 WHERE id = ?2 AND app_type = ?3",
+                rusqlite::params![json, id, app],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        if universal_changed {
+            let json =
+                serde_json::to_string(&universal).map_err(|e| AppError::Database(e.to_string()))?;
+            conn.execute(
+                "UPDATE settings SET value = ?1 WHERE key = 'universal_providers'",
+                [json],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Export with the vault on: the snapshot keeps placeholders and loses any
+    /// secret still stored inline, so an export or a sync bundle never holds a
+    /// resolved secret. Returns `(placeholders, blanked)` for the warning.
+    fn prepare_export_secrets(snapshot: &Connection) -> Result<(usize, usize), AppError> {
+        let enabled = provider_vault::enabled();
+        let mut placeholders = 0;
+        let mut blanked = 0;
+        let mut changed = Vec::new();
+        for (app, id, value) in Self::secret_rows_of(snapshot)? {
+            let value = if enabled {
+                let (redacted, n) = provider_vault::redact_for_export(&value);
+                if n > 0 {
+                    blanked += n;
+                    changed.push((app, id, redacted.clone()));
+                }
+                redacted
+            } else {
+                value
+            };
+            placeholders += provider_vault::placeholder_refs(&value).len();
+        }
+        Self::write_secret_rows(snapshot, &changed)?;
+        Ok((placeholders, blanked))
+    }
+
+    /// Add the vault warning below the export header (the header must stay
+    /// first: imports check it).
+    fn with_vault_warning(dump: String, placeholders: usize, blanked: usize) -> String {
+        if placeholders == 0 && blanked == 0 {
+            return dump;
+        }
+        let comment = provider_vault::export_warning_comment(placeholders, blanked);
+        match dump.find("PRAGMA foreign_keys=OFF;") {
+            Some(pos) => format!("{}{comment}{}", &dump[..pos], &dump[pos..]),
+            None => dump,
+        }
+    }
+
+    /// Whether an imported database needs [`Self::adapt_imported_secrets`].
+    pub(crate) fn imported_secrets_need_adapting(target: &Connection) -> Result<bool, AppError> {
+        if provider_vault::enabled() {
+            return Ok(true);
+        }
+        Ok(Self::secret_rows_of(target)?
+            .iter()
+            .any(|(_, _, v)| provider_vault::contains_placeholder(v)))
+    }
+
+    /// Adapt the provider secrets of an imported database (`target`, not yet
+    /// live) to this device before it replaces the live one: placeholders this
+    /// keychain cannot resolve take the key this device already has for the
+    /// same provider (`local`); with the vault on, inline keys move to the
+    /// keychain; with it off, resolvable placeholders are inlined. Returns the
+    /// number of secrets that stay unresolved (keys to re-enter).
+    pub(crate) fn adapt_imported_secrets(
+        local: Option<&Connection>,
+        target: &Connection,
+    ) -> Result<usize, AppError> {
+        if !Self::imported_secrets_need_adapting(target)? {
+            return Ok(0);
+        }
+        let enabled = provider_vault::enabled();
+        let incoming = Self::secret_rows_of(target)?;
+        let local_rows: std::collections::HashMap<(String, String), serde_json::Value> = match local
+        {
+            Some(conn) => Self::secret_rows_of(conn)?
+                .into_iter()
+                .map(|(app, id, v)| ((app, id), v))
+                .collect(),
+            None => Default::default(),
+        };
+        let backend = provider_vault::vault_backend();
+        let mut unresolved = 0;
+        let mut changed = Vec::new();
+        for (app, id, value) in incoming {
+            let local_value = local_rows.get(&(app.clone(), id.clone()));
+            let (adapted, missing) =
+                provider_vault::adapt_imported(enabled, backend, &app, &id, &value, local_value);
+            unresolved += missing.len();
+            if adapted != value {
+                changed.push((app, id, adapted));
+            }
+        }
+        Self::write_secret_rows(target, &changed)?;
+        if unresolved > 0 {
+            log::warn!(
+                "[Vault] Imported data holds {unresolved} provider secret(s) that are not in this device's keychain; re-enter those API keys"
+            );
+        }
+        Ok(unresolved)
     }
 
     /// 导出为 SQLite 兼容的 SQL 文本
@@ -370,6 +555,11 @@ impl Database {
             let local_snapshot = self.snapshot_to_memory()?;
             Self::restore_tables(&local_snapshot, &temp_conn, preserve_tables)?;
             Self::restore_device_local_state(&local_snapshot, &temp_conn)?;
+            Self::adapt_imported_secrets(Some(&local_snapshot), &temp_conn)?;
+        } else if Self::imported_secrets_need_adapting(&temp_conn)? {
+            // DB-02: the local snapshot is only needed when secrets must be adapted.
+            let local_snapshot = self.snapshot_to_memory()?;
+            Self::adapt_imported_secrets(Some(&local_snapshot), &temp_conn)?;
         }
 
         // 使用 Backup 将临时库原子写回主库
@@ -1045,6 +1235,8 @@ impl Database {
             let local_snapshot = self.snapshot_to_memory()?;
             Self::restore_tables(&local_snapshot, &staging_conn, RESTORE_PRESERVE_TABLES)?;
             Self::restore_device_local_state(&local_snapshot, &staging_conn)?;
+            // DB-02: check placeholders against this keychain and warn.
+            Self::adapt_imported_secrets(Some(&local_snapshot), &staging_conn)?;
         }
 
         // Step 3: Safety backup of the current database. Rotation never prunes
@@ -1715,6 +1907,99 @@ mod tests {
             None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
         }
 
+        Ok(())
+    }
+
+    // ─── Provider API-key vault (DB-02) ──────────────────────
+
+    fn vault_provider(id: &str, key: &str) -> crate::provider::Provider {
+        crate::provider::Provider::with_id(
+            id.to_string(),
+            id.to_string(),
+            serde_json::json!({ "env": { "ANTHROPIC_AUTH_TOKEN": key } }),
+            None,
+        )
+    }
+
+    #[test]
+    fn exports_with_the_vault_on_carry_placeholders_and_a_warning() -> Result<(), AppError> {
+        use crate::secrets::provider_vault;
+        let db = Database::memory()?;
+        provider_vault::set_enabled_for_test(Some(true));
+        db.save_provider("claude", &vault_provider("vault-export", "sk-vault-export"))?;
+        // A secret that ended up inline (keychain failure) must not leak either.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta)
+                 VALUES ('vault-inline', 'claude', 'x', '{\"env\":{\"ANTHROPIC_API_KEY\":\"sk-vault-inline\"}}', '{}')",
+                [],
+            )?;
+        }
+        for sql in [db.export_sql_string()?, db.export_sql_string_for_sync()?] {
+            assert!(!sql.contains("sk-vault-export"));
+            assert!(!sql.contains("sk-vault-inline"));
+            assert!(sql.contains(provider_vault::PLACEHOLDER_PREFIX));
+            assert!(sql.starts_with(super::CC_SWITCH_SQL_EXPORT_HEADER));
+            assert!(
+                sql.contains("-- cc-switch-vault: 1 provider secret(s)"),
+                "{sql}"
+            );
+            assert!(sql.contains("1 secret(s) could not be moved"));
+        }
+        // The live database is unchanged by the export.
+        assert_eq!(
+            query_opt_string(
+                &db,
+                "SELECT settings_config FROM providers WHERE id = 'vault-inline'"
+            )
+            .unwrap(),
+            "{\"env\":{\"ANTHROPIC_API_KEY\":\"sk-vault-inline\"}}"
+        );
+        provider_vault::set_enabled_for_test(None);
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn sync_download_of_placeholders_keeps_this_devices_keys() -> Result<(), AppError> {
+        use crate::secrets::provider_vault;
+        // Device A (vault on) uploads placeholders.
+        let remote = Database::memory()?;
+        provider_vault::set_enabled_for_test(Some(true));
+        remote.save_provider("claude", &vault_provider("vault-sync", "sk-device-a"))?;
+        remote.save_provider("claude", &vault_provider("vault-sync-new", "sk-only-a"))?;
+        let sql = remote.export_sql_string_for_sync()?;
+        assert!(!sql.contains("sk-device-a"));
+        // Simulate device B: its keychain does not have A's entries.
+        provider_vault::delete_refs(
+            provider_vault::vault_backend(),
+            &[
+                "claude/vault-sync/env/ANTHROPIC_AUTH_TOKEN".to_string(),
+                "claude/vault-sync-new/env/ANTHROPIC_AUTH_TOKEN".to_string(),
+            ],
+        );
+
+        // Device B (vault off) has its own plaintext key for the same provider.
+        provider_vault::set_enabled_for_test(Some(false));
+        let local = Database::memory()?;
+        local.save_provider("claude", &vault_provider("vault-sync", "sk-device-b"))?;
+        local.import_sql_string_for_sync(&sql)?;
+
+        let kept = local.get_provider_by_id("vault-sync", "claude")?.unwrap();
+        assert_eq!(
+            kept.settings_config["env"]["ANTHROPIC_AUTH_TOKEN"],
+            serde_json::json!("sk-device-b")
+        );
+        // A provider B never had stays a placeholder: the key must be re-entered.
+        let fresh = local
+            .get_provider_by_id("vault-sync-new", "claude")?
+            .unwrap();
+        assert!(fresh.settings_config["env"]["ANTHROPIC_AUTH_TOKEN"]
+            .as_str()
+            .unwrap()
+            .starts_with(provider_vault::PLACEHOLDER_PREFIX));
+        provider_vault::set_enabled_for_test(None);
         Ok(())
     }
 }

@@ -954,6 +954,7 @@ pub fn run() {
             commands::s3_sync_save_settings,
             commands::s3_sync_fetch_remote_info,
             commands::sync_encryption_get_status,
+            secrets::commands::get_provider_secret_vault_status, secrets::commands::set_provider_secret_vault,
             commands::sync_encryption_set_passphrase,
             commands::sync_encryption_disable,
             commands::save_file_dialog,

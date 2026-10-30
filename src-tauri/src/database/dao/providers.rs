@@ -1,6 +1,7 @@
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::provider::{Provider, ProviderMeta};
+use crate::secrets::provider_vault::{self, ProviderRow};
 use indexmap::IndexMap;
 use rusqlite::params;
 use std::collections::{HashMap, HashSet};
@@ -71,6 +72,12 @@ impl Database {
         for provider_res in provider_iter {
             let (id, mut provider) = provider_res.map_err(|e| AppError::Database(e.to_string()))?;
             provider.id = id.clone();
+            // DB-02: callers always receive real values, never placeholders.
+            provider.settings_config = provider_vault::for_read(
+                app_type,
+                &id,
+                std::mem::take(&mut provider.settings_config),
+            );
 
             let mut stmt_endpoints = conn.prepare(
                 "SELECT url, added_at FROM provider_endpoints WHERE provider_id = ?1 AND app_type = ?2 ORDER BY added_at ASC, url ASC"
@@ -171,17 +178,32 @@ impl Database {
         );
 
         match result {
-            Ok(provider) => Ok(Some(provider)),
+            Ok(mut provider) => {
+                provider.settings_config = provider_vault::for_read(
+                    app_type,
+                    id,
+                    std::mem::take(&mut provider.settings_config),
+                );
+                Ok(Some(provider))
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(AppError::Database(e.to_string())),
         }
     }
 
     pub fn save_provider(&self, app_type: &str, provider: &Provider) -> Result<(), AppError> {
+        // DB-02: with the vault on, secrets go to the keychain and the row keeps
+        // placeholders. Keychain writes happen before the row is written.
+        let stored_config =
+            provider_vault::for_storage(app_type, &provider.id, &provider.settings_config);
+        let stored_config_json = serde_json::to_string(&stored_config)
+            .map_err(|e| AppError::Database(format!("Failed to serialize settings_config: {e}")))?;
+
         let mut conn = lock_conn!(self.conn);
         let tx = conn
             .transaction()
             .map_err(|e| AppError::Database(e.to_string()))?;
+        let previous_config = Self::raw_settings_config(&tx, app_type, &provider.id);
 
         let mut meta_clone = provider.meta.clone().unwrap_or_default();
         let endpoints = std::mem::take(&mut meta_clone.custom_endpoints);
@@ -216,9 +238,7 @@ impl Database {
                 WHERE id = ?13 AND app_type = ?14",
                 params![
                     provider.name,
-                    serde_json::to_string(&provider.settings_config).map_err(|e| {
-                        AppError::Database(format!("Failed to serialize settings_config: {e}"))
-                    })?,
+                    stored_config_json,
                     provider.website_url,
                     provider.category,
                     provider.created_at,
@@ -246,8 +266,7 @@ impl Database {
                     provider.id,
                     app_type,
                     provider.name,
-                    serde_json::to_string(&provider.settings_config)
-                        .map_err(|e| AppError::Database(format!("Failed to serialize settings_config: {e}")))?,
+                    stored_config_json,
                     provider.website_url,
                     provider.category,
                     provider.created_at,
@@ -274,16 +293,93 @@ impl Database {
         }
 
         tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
+        drop(conn);
+        if let Some(previous) = previous_config {
+            provider_vault::forget_stale(app_type, &provider.id, &previous, Some(&stored_config));
+        }
         Ok(())
+    }
+
+    /// The stored (unresolved) `settings_config` of one row.
+    fn raw_settings_config(
+        conn: &rusqlite::Connection,
+        app_type: &str,
+        id: &str,
+    ) -> Option<serde_json::Value> {
+        conn.query_row(
+            "SELECT settings_config FROM providers WHERE id = ?1 AND app_type = ?2",
+            params![id, app_type],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
     }
 
     pub fn delete_provider(&self, app_type: &str, id: &str) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
+        let previous_config = Self::raw_settings_config(&conn, app_type, id);
         conn.execute(
             "DELETE FROM providers WHERE id = ?1 AND app_type = ?2",
             params![id, app_type],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        drop(conn);
+        // DB-02: a deleted provider leaves no keychain entries behind.
+        if let Some(previous) = previous_config {
+            provider_vault::forget_stale(app_type, id, &previous, None);
+        }
+        Ok(())
+    }
+
+    /// Every provider row with its stored (unresolved) `settings_config`, for
+    /// the vault migrations and status (DB-02).
+    pub fn load_provider_secret_rows(&self) -> Result<Vec<ProviderRow>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let mut stmt = conn
+            .prepare("SELECT app_type, id, settings_config FROM providers ORDER BY app_type, id")
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (app, id, json) = row.map_err(|e| AppError::Database(e.to_string()))?;
+            // Rows that do not parse are left alone (never rewritten).
+            if let Ok(settings_config) = serde_json::from_str(&json) {
+                out.push(ProviderRow {
+                    app,
+                    id,
+                    settings_config,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Write back `settings_config` of the given rows as-is (no vault
+    /// processing), in one transaction.
+    pub fn store_provider_secret_rows(&self, rows: &[ProviderRow]) -> Result<(), AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        for row in rows {
+            let json = serde_json::to_string(&row.settings_config).map_err(|e| {
+                AppError::Database(format!("Failed to serialize settings_config: {e}"))
+            })?;
+            tx.execute(
+                "UPDATE providers SET settings_config = ?1 WHERE id = ?2 AND app_type = ?3",
+                params![json, row.id, row.app],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
@@ -315,11 +411,13 @@ impl Database {
         provider_id: &str,
         settings_config: &serde_json::Value,
     ) -> Result<(), AppError> {
+        let stored_config = provider_vault::for_storage(app_type, provider_id, settings_config);
         let conn = lock_conn!(self.conn);
+        let previous_config = Self::raw_settings_config(&conn, app_type, provider_id);
         conn.execute(
             "UPDATE providers SET settings_config = ?1 WHERE id = ?2 AND app_type = ?3",
             params![
-                serde_json::to_string(settings_config).map_err(|e| AppError::Database(format!(
+                serde_json::to_string(&stored_config).map_err(|e| AppError::Database(format!(
                     "Failed to serialize settings_config: {e}"
                 )))?,
                 provider_id,
@@ -327,6 +425,10 @@ impl Database {
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        drop(conn);
+        if let Some(previous) = previous_config {
+            provider_vault::forget_stale(app_type, provider_id, &previous, Some(&stored_config));
+        }
         Ok(())
     }
 
@@ -486,6 +588,7 @@ impl Database {
             })?
         };
 
+        let settings_config = provider_vault::for_read(app_type, &id, settings_config);
         Ok(Some(Provider {
             id,
             name,

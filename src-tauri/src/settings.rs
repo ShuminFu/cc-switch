@@ -538,6 +538,14 @@ pub struct AppSettings {
     pub notifications: Option<crate::services::notifications::NotificationSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_probe: Option<crate::proxy::health::HealthProbeSettings>,
+
+    // ===== Provider API-key vault (DB-02 / PRODUCT-01) =====
+    /// Keep provider API keys/tokens in the OS keychain and only placeholders
+    /// in `cc-switch.db`. Opt-in, device-local (never synced). Changed only
+    /// through [`set_provider_secret_vault`], which runs the data migration;
+    /// whole-settings saves keep the current value.
+    #[serde(default)]
+    pub provider_secret_vault: bool,
 }
 
 fn default_show_in_tray() -> bool {
@@ -604,6 +612,7 @@ impl Default for AppSettings {
             local_migrations: None,
             notifications: None,
             health_probe: None,
+            provider_secret_vault: false,
         }
     }
 }
@@ -908,6 +917,8 @@ fn settings_write_guard() -> std::sync::RwLockWriteGuard<'static, AppSettings> {
 pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
     new_settings.normalize_paths();
     let mut guard = settings_write_guard();
+    // The vault flag only changes together with its data migration.
+    new_settings.provider_secret_vault = guard.provider_secret_vault;
     save_settings_file(&new_settings)?;
     *guard = new_settings;
     Ok(())
@@ -924,6 +935,8 @@ where
     let previous = guard.clone();
     let mut next = build(&previous);
     next.normalize_paths();
+    // The vault flag only changes together with its data migration.
+    next.provider_secret_vault = previous.provider_secret_vault;
     save_settings_file(&next)?;
     *guard = next;
     Ok(previous)
@@ -939,6 +952,23 @@ where
         next
     })
     .map(|_| ())
+}
+
+/// Whether the provider API-key vault is switched on for this device.
+pub fn provider_secret_vault_enabled() -> bool {
+    get_settings().provider_secret_vault
+}
+
+/// Persist the provider API-key vault flag. Callers must run the matching
+/// data migration (`crate::secrets::provider_vault_admin`).
+#[cfg_attr(test, allow(dead_code))]
+pub fn set_provider_secret_vault(enabled: bool) -> Result<(), AppError> {
+    let mut guard = settings_write_guard();
+    let mut next = guard.clone();
+    next.provider_secret_vault = enabled;
+    save_settings_file(&next)?;
+    *guard = next;
+    Ok(())
 }
 
 pub fn is_codex_third_party_history_provider_bucket_migrated() -> bool {
