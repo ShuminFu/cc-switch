@@ -49,7 +49,7 @@ None.
 - docs/roadmap/tickets/P1-trust-release/CCS-079-p1-atomic-write-durable.md (Wine evidence section)
 
 ### Commits
-- See `git log --grep CCS-228` (docs-only commit recording this evidence).
+- 9708994 docs(roadmap): record Wine run of the Windows atomic_write path (CCS-228)
 
 ### Remaining
 - None for this ticket. CCS-079's "On Windows CI, overwrite works without remove_file" box still needs a real windows-latest runner. Wine is interim evidence, not a substitute.
