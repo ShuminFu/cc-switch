@@ -619,8 +619,11 @@ function ProviderFormFull({
         : "",
     );
 
-  const { configError: codexConfigError, debouncedValidate } =
-    useCodexTomlValidation();
+  const {
+    configError: codexConfigError,
+    debouncedValidate,
+    validateToml: validateCodexToml,
+  } = useCodexTomlValidation();
 
   const handleCodexConfigChange = useCallback(
     (value: string) => {
@@ -1001,7 +1004,65 @@ function ProviderFormFull({
   const shouldApplyLocalProxyRequestOverrides =
     (appId === "claude" || appId === "codex") && category !== "official";
 
+  // Hard errors in the Codex / Gemini editors block saving. Previously an
+  // unparsable auth.json / config.json silently fell back to the RHF
+  // settingsConfig (empty defaults in add mode, pre-edit config in edit
+  // mode), discarding every edit with a success toast (FE-PROV-08).
+  const getEditorBlockingError = (): string | null => {
+    const isPlainObject = (value: unknown) =>
+      !!value && typeof value === "object" && !Array.isArray(value);
+    if (appId === "codex") {
+      if (codexAuth.trim()) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(codexAuth);
+        } catch {
+          return t("providerForm.codexAuthInvalid", {
+            defaultValue: "auth.json is not valid JSON. Fix it before saving.",
+          });
+        }
+        if (!isPlainObject(parsed)) {
+          return t("providerForm.codexAuthNotObject", {
+            defaultValue: "auth.json must be a JSON object.",
+          });
+        }
+      }
+      if (!validateCodexToml(codexConfig ?? "")) {
+        return t("providerForm.codexConfigInvalid", {
+          defaultValue: "config.toml has a syntax error. Fix it before saving.",
+        });
+      }
+    } else if (appId === "gemini") {
+      if (envError) {
+        return envError;
+      }
+      if (geminiConfig.trim()) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(geminiConfig);
+        } catch {
+          return t("providerForm.geminiConfigInvalid", {
+            defaultValue:
+              "Gemini config.json is not valid JSON. Fix it before saving.",
+          });
+        }
+        if (!isPlainObject(parsed)) {
+          return t("providerForm.geminiConfigNotObject", {
+            defaultValue: "Gemini config.json must be a JSON object.",
+          });
+        }
+      }
+    }
+    return null;
+  };
+
   const handleSubmit = async (values: ProviderFormData) => {
+    const editorError = getEditorBlockingError();
+    if (editorError) {
+      toast.error(editorError);
+      return;
+    }
+
     const overridesResult = shouldApplyLocalProxyRequestOverrides
       ? buildLocalProxyRequestOverrides(
           localProxyHeadersOverride,
@@ -1289,7 +1350,7 @@ function ProviderFormFull({
 
     if (appId === "codex") {
       try {
-        const authJson = JSON.parse(codexAuth);
+        const authJson = codexAuth.trim() ? JSON.parse(codexAuth) : {};
         let normalizedCodexConfig =
           category !== "official" && (codexConfig ?? "").trim()
             ? setCodexWireApi(codexConfig ?? "", "responses")
@@ -1326,7 +1387,13 @@ function ProviderFormFull({
         }
         settingsConfig = JSON.stringify(configObj);
       } catch (err) {
-        settingsConfig = values.settingsConfig.trim();
+        // Never fall back to the stale RHF value: that silently drops edits.
+        toast.error(
+          t("providerForm.codexAuthInvalid", {
+            defaultValue: "auth.json is not valid JSON. Fix it before saving.",
+          }),
+        );
+        return;
       }
     } else if (appId === "gemini") {
       try {
@@ -1338,7 +1405,13 @@ function ProviderFormFull({
         };
         settingsConfig = JSON.stringify(combined);
       } catch (err) {
-        settingsConfig = values.settingsConfig.trim();
+        toast.error(
+          t("providerForm.geminiConfigInvalid", {
+            defaultValue:
+              "Gemini config.json is not valid JSON. Fix it before saving.",
+          }),
+        );
+        return;
       }
     } else if (
       appId === "opencode" &&
