@@ -1,5 +1,5 @@
 /**
- * Marker field and source values that `hermes_config.rs::get_providers`
+ * Marker field and source values that `apps/hermes/config.rs::get_providers`
  * injects onto each settings payload. Kept in sync with the Rust constants
  * `PROVIDER_SOURCE_FIELD` / `PROVIDER_SOURCE_CUSTOM_LIST` / `PROVIDER_SOURCE_DICT`.
  */

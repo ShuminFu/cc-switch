@@ -14,7 +14,7 @@ Takeover consolidation can corrupt users' settings.json, config.toml or auth.jso
 
 ## Acceptance criteria / verification
 - [ ] Green on 3 OSes
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --test takeover_crash`
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --test takeover_crash`
 
 ## Dependencies
 p0-proxy-harness-e2e, p0-config-writer-snapshots
@@ -68,9 +68,23 @@ p0-proxy-harness-e2e, p0-config-writer-snapshots
 
 **Remaining.** The "Green on 3 OSes" item is not verified: it needs the CI matrix (`ci.yml` runs the full `cargo test` on ubuntu-22.04, windows-latest and macos-latest, and that run includes `takeover_crash`). The suite uses only the `TestEnv` path injection, `config_dir()` from the adapters and ephemeral ports, so nothing in it is specific to one OS. It was only run on Linux here.
 
-**Review.** I checked the commits against the spec, the restore and backup call sites, sync import of `proxy_live_backup` (the temp DB is migrated before local rows are copied back, so the new column is safe) and the file permissions on restore (`atomic_write` keeps the existing mode). Everything holds up. I also ran an extra probe: Codex with only `config.toml` and no `auth.json` also came back byte-for-byte. One defect fixed: if the snapshot failed to serialize (for example, a path that is not UTF-8), `save_takeover_backup` returned an error and blocked takeover. The code meant to only skip the snapshot, so it now logs a warning and continues. Known limitation, left as is: the hot-switch rollback (`rollback_hot_switch_preparation`) writes the previous backup back with `save_live_backup`, which drops the snapshot. After a failed hot switch, restore therefore falls back to the JSON backup: the settings are correct but the formatting may not be. Re-verified on Linux: `takeover_crash` 5 passed; full `cargo test --no-fail-fast` 3011 passed, 0 failed; fmt and clippy (`--all-targets -D warnings`) clean; `pnpm typecheck` clean. Status stays Partial until a 3-OS CI run is green.
+**Review.** I checked the commits against the spec, the restore and backup call sites, sync import of `proxy_live_backup` (the temp DB is migrated before local rows are copied back, so the new column is safe) and the file permissions on restore (`atomic_write` keeps the existing mode). Everything holds up. I also ran an extra probe: Codex with only `config.toml` and no `auth.json` also came back byte-for-byte. One defect fixed: if the snapshot failed to serialize (for example, a path that is not UTF-8), `save_takeover_backup` returned an error and blocked takeover. The code meant to only skip the snapshot, so it now logs a warning and continues. Known limitation (fixed since by [CCS-212](../P4-app-adapters-persistence/CCS-212-p4-hot-switch-rollback-snapshot.md), see the evidence refresh below): the hot-switch rollback (`rollback_hot_switch_preparation`) writes the previous backup back with `save_live_backup`, which drops the snapshot. After a failed hot switch, restore therefore falls back to the JSON backup: the settings are correct but the formatting may not be. Re-verified on Linux: `takeover_crash` 5 passed; full `cargo test --no-fail-fast` 3011 passed, 0 failed; fmt and clippy (`--all-targets -D warnings`) clean; `pnpm typecheck` clean. Status stays Partial until a 3-OS CI run is green.
 
 ### Remaining after triage
 
 - Blocked: Green on 3 OSes (ubuntu-22.04, windows-latest, macos-latest). Needs a windows-latest/macos-latest run of the ci.yml backend matrix, or real machines (cross-compiling to windows-gnu/apple fails on aws-lc-sys). Linux is 10/10 locally.
 - Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
+
+### Evidence refresh (CCS-221)
+
+Re-run on the lane2/followups tree at f13a403 (Linux):
+- `cargo test --manifest-path src-tauri/Cargo.toml --test takeover_crash` → 10
+  passed, 0 failed (5 at the time of the original notes; later tickets added
+  cases). The box is ticked.
+- The known limitation about the hot-switch rollback dropping the raw snapshot
+  is closed by CCS-212 (`ee3196b`): `failed_hot_switch_keeps_the_takeover_snapshot`
+  in `src-tauri/tests/takeover_crash.rs` passes in the run above.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+  → clean.
+- Status stays Partial: "Green on 3 OSes" still needs the windows-latest and
+  macos-latest CI runs.

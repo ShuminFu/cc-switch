@@ -16,8 +16,8 @@ Verified finding backend-session-sync-blocking. The 60 s periodic sync runs bloc
 - Make sync_session_usage `async` with spawn_blocking on a cloned Arc<Database>.
 
 ## Acceptance criteria / verification
-- [ ] `cargo check` and `cargo test --manifest-path src-tauri/Cargo.toml session_usage`
-- [ ] A debug log shows the command no longer runs on the `main` thread
+- [x] `cargo check` and `cargo test --manifest-path src-tauri/Cargo.toml session_usage`
+- [x] A debug log shows the command no longer runs on the `main` thread
 - [ ] Manual: with many large .jsonl files, the window stays responsive during a manual sync
 
 ## Dependencies
@@ -76,3 +76,22 @@ and has not been run here.
 - Blocked: nothing; every remaining item is codable.
 - Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
 - Follow-up [CCS-224](../P0-safety-net/CCS-224-p0-usage-session-sync-responsiveness.md): Prove the UI stays responsive during a large session-log sync with a headless e2e spec.
+
+### Evidence refresh (CCS-221)
+
+The 60 s loop moved out of `lib.rs`: it is now `session_usage_sync_loop` in
+`src-tauri/src/app_shell/bootstrap.rs` (lines 1069-1152 at f13a403; the
+periodic `loop` starts at line 1125). Each step still goes through
+`services::session_usage::run_sync_blocking`, whose
+`[SESSION-SYNC] {label} running on thread {:?}` debug log is at
+`services/session_usage.rs:841`. The `sync_session_usage` command is now in
+`commands/usage.rs:204` (still `async`).
+
+Re-run on the lane2/followups tree at f13a403 (Linux):
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib session_usage` → 56
+  passed, 0 failed, including `test_run_sync_blocking_runs_off_caller_thread`
+  (this also proves the build, so it covers `cargo check`).
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+  → clean.
+- The test box and the debug-log box are ticked. The manual responsiveness check
+  stays open (CCS-224 covers it headlessly).

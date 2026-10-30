@@ -11,7 +11,7 @@ Covers verified findings backend-terminal-tmp-key and backend-terminal-script-na
 - Launcher script names depend only on the PID, so quick consecutive launches run the wrong provider's script or lose it to another session's cleanup.
 
 ## Evidence
-- src-tauri/src/commands/misc.rs:2724-2729 (path), 2757-2773 (std::fs::write), 3098-3160 (Linux launcher + exec at build_exec_line :1125), 2789 (macOS), 3122 (Linux), 3223 (Windows .bat), 3345 (launch_terminal_running)
+- (Historical, before the CCS-179/181 split; see "Evidence refresh (CCS-221)" below for the current locations.) src-tauri/src/commands/misc.rs:2724-2729 (path), 2757-2773 (std::fs::write), 3098-3160 (Linux launcher + exec at build_exec_line :1125), 2789 (macOS), 3122 (Linux), 3223 (Windows .bat), 3345 (launch_terminal_running)
 
 ## Proposed change
 - Create the files with tempfile::Builder (0600, random suffix, create_new) under app_config_dir/tmp, or $XDG_RUNTIME_DIR where available, and keep() them.
@@ -19,9 +19,9 @@ Covers verified findings backend-terminal-tmp-key and backend-terminal-script-na
 - Remove the config file after claude exits, before the exec line.
 
 ## Acceptance criteria / verification
-- [ ] Unit test: the helper returns distinct paths across calls, and on unix mode & 0o077 == 0
+- [x] Unit test: the helper returns distinct paths across calls, and on unix mode & 0o077 == 0
 - [ ] Manual (Linux): `ls -l` shows -rw-------; the file is gone after exiting claude; A then B quickly each print their own config path
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml commands::misc` and clippy
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal` and clippy (was `commands::misc` before the code moved in CCS-179/181)
 
 ## Dependencies
 None.
@@ -80,3 +80,29 @@ mode 0600, or 0700 for scripts, then `keep()`).
 - Blocked: Confirmation on a real desktop terminal (gnome-terminal/konsole with the real claude CLI). Needs interactive desktop use; CCS-223 covers the Linux behaviour.
 - Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
 - Follow-up [CCS-223](../P0-safety-net/CCS-223-p0-terminal-tempfile-headless-e2e.md): Headless Linux end-to-end check of private terminal temp files, plus temp-dir selection tests.
+
+### Evidence refresh (CCS-221)
+
+The terminal launch code moved out of `commands/misc.rs` (CCS-179/181). Current
+locations:
+- `src-tauri/src/platform/terminal/tempfiles.rs`: `write_claude_config`,
+  `private_launch_temp_dir`, `sanitize_temp_file_component`,
+  `write_private_temp_file`, and the tests in `tests::private_temp_files`
+  (distinct private paths, 0o700 scripts, private unique config files,
+  sanitizer, `rm` before `exec`, and the `sh` regression test that the config
+  and script are gone after an `exec`-terminated script).
+- `src-tauri/src/platform/terminal/posix.rs`: `build_exec_line`,
+  `build_provider_launcher_script`, `write_provider_launcher`,
+  `build_running_script`.
+- `src-tauri/src/platform/terminal/linux.rs`: `launch_provider_terminal`,
+  `launch_running_terminal`; `src-tauri/src/platform/terminal/mod.rs`:
+  `launch_terminal_running`. macOS and Windows branches are in `macos.rs` and
+  `windows.rs`.
+
+Re-run on the lane2/followups tree at f13a403 (Linux):
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal`
+  → 24 passed, 0 failed (includes the 6 `private_temp_files` tests).
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+  → clean.
+- The unit-test and test+clippy boxes are ticked. The manual desktop check and
+  the macOS/Windows compile stay open (see "Remaining after triage").

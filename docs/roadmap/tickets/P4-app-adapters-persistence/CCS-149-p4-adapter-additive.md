@@ -80,7 +80,7 @@ The budget constant should be lowered as each of those tickets lands.
 - Not compiled locally (Linux runner): the Windows-only `wsl_distro_for_tool` edit. It is a mechanical swap to `settings::override_dir(&AppType::…)`.
 
 **Follow-ups for other lanes.**
-- `src/config/hermesProviderSource.ts` has a doc comment that still says `hermes_config.rs::get_providers`; it should now be `apps/hermes/config.rs`. That file is in the frontend lane, so I did not edit it.
+- `src/config/hermesProviderSource.ts` has a doc comment that still says `hermes_config.rs::get_providers`; it should now be `apps/hermes/config.rs`. That file is in the frontend lane, so I did not edit it. Fixed in [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md).
 
 ### Remaining after triage
 
