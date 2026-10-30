@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use chrono::{DateTime, FixedOffset};
+use chrono::DateTime;
 use serde_json::Value;
 
 /// Maximum number of characters for session titles (shared across providers).
@@ -114,20 +114,69 @@ pub fn open_tool_db(path: &Path, writable: bool) -> rusqlite::Result<rusqlite::C
     Ok(conn)
 }
 
+/// Scale an integer epoch timestamp to milliseconds. Values are classified by
+/// magnitude: seconds (< 1e11), milliseconds (< 1e14), microseconds (< 1e17)
+/// and nanoseconds above that.
+fn epoch_to_ms(n: i64) -> i64 {
+    let abs = n.unsigned_abs();
+    if abs < 100_000_000_000 {
+        n.saturating_mul(1000)
+    } else if abs < 100_000_000_000_000 {
+        n
+    } else if abs < 100_000_000_000_000_000 {
+        n / 1000
+    } else {
+        n / 1_000_000
+    }
+}
+
+/// Parse a timestamp into epoch milliseconds. Accepts integers / floats in
+/// seconds, milliseconds, microseconds or nanoseconds, RFC 3339 strings, naive
+/// ISO-8601 strings without an offset (assumed UTC), SQLite `datetime()` output
+/// (`YYYY-MM-DD HH:MM:SS[.fff]`) and numeric strings.
 pub fn parse_timestamp_to_ms(value: &Value) -> Option<i64> {
-    // Integer: milliseconds (>1e12) or seconds
     if let Some(n) = value.as_i64() {
-        return Some(if n > 1_000_000_000_000 { n } else { n * 1000 });
+        return Some(epoch_to_ms(n));
     }
     if let Some(n) = value.as_f64() {
-        let n = n as i64;
-        return Some(if n > 1_000_000_000_000 { n } else { n * 1000 });
+        if !n.is_finite() {
+            return None;
+        }
+        // Fractional seconds keep their millisecond precision.
+        if n.abs() < 100_000_000_000.0 {
+            return Some((n * 1000.0) as i64);
+        }
+        return Some(epoch_to_ms(n as i64));
     }
-    // RFC3339 string
-    let raw = value.as_str()?;
-    DateTime::parse_from_rfc3339(raw)
-        .ok()
-        .map(|dt: DateTime<FixedOffset>| dt.timestamp_millis())
+    let raw = value.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
+        return Some(dt.timestamp_millis());
+    }
+    if let Ok(n) = raw.parse::<i64>() {
+        return Some(epoch_to_ms(n));
+    }
+    if let Ok(n) = raw.parse::<f64>() {
+        return parse_timestamp_to_ms(&Value::from(n));
+    }
+    const NAIVE_FORMATS: [&str; 4] = [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M",
+    ];
+    for format in NAIVE_FORMATS {
+        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(raw, format) {
+            return Some(naive.and_utc().timestamp_millis());
+        }
+    }
+    // "2026-03-06 10:17:58+08:00" style (space separator with offset).
+    if let Ok(dt) = DateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S%.f%:z") {
+        return Some(dt.timestamp_millis());
+    }
+    None
 }
 
 pub fn extract_text(content: &Value) -> String {
@@ -353,5 +402,40 @@ mod tests {
             parse_timestamp_to_ms(&json!("1970-01-01T00:00:01Z")),
             Some(1_000)
         );
+    }
+
+    #[test]
+    fn parse_timestamp_accepts_naive_sqlite_and_scaled_integers() {
+        let expected = 1_772_792_278_000_i64; // 2026-03-06T10:17:58Z
+        assert_eq!(
+            parse_timestamp_to_ms(&json!("2026-03-06T10:17:58")),
+            Some(expected),
+            "naive ISO is treated as UTC"
+        );
+        assert_eq!(
+            parse_timestamp_to_ms(&json!("2026-03-06 10:17:58")),
+            Some(expected),
+            "SQLite datetime('now') format"
+        );
+        assert_eq!(
+            parse_timestamp_to_ms(&json!("2026-03-06 10:17:58.250")),
+            Some(expected + 250)
+        );
+        assert_eq!(
+            parse_timestamp_to_ms(&json!(expected * 1000)),
+            Some(expected),
+            "microseconds"
+        );
+        assert_eq!(
+            parse_timestamp_to_ms(&json!(expected * 1_000_000)),
+            Some(expected),
+            "nanoseconds"
+        );
+        assert_eq!(parse_timestamp_to_ms(&json!("1772792278")), Some(expected));
+        assert_eq!(
+            parse_timestamp_to_ms(&json!(1_772_792_278.5_f64)),
+            Some(expected + 500)
+        );
+        assert_eq!(parse_timestamp_to_ms(&json!("not a date")), None);
     }
 }
