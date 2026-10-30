@@ -46,11 +46,11 @@ pub fn validate_server_spec(spec: &Value) -> Result<(), AppError> {
         if let Some(args) = obj.get("args") {
             let ok = args
                 .as_array()
-                .map(|arr| arr.iter().all(Value::is_string))
+                .map(|arr| arr.iter().all(is_scalar))
                 .unwrap_or(false);
             if !ok {
                 return Err(AppError::McpValidation(
-                    "MCP 服务器 args 字段必须为字符串数组".into(),
+                    "MCP 服务器 args 字段必须为字符串（或数字/布尔）数组".into(),
                 ));
             }
         }
@@ -87,19 +87,27 @@ pub fn validate_server_spec(spec: &Value) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Live configs (TOML in particular) legitimately carry numbers and booleans in
+/// `args`/`env`/`headers` (e.g. `PORT = 3000`); every tool stringifies them.
+/// Only nested arrays/objects and null are rejected, so existing servers are
+/// not silently dropped on import.
+fn is_scalar(v: &Value) -> bool {
+    v.is_string() || v.is_number() || v.is_boolean()
+}
+
 fn validate_string_map(value: Option<&Value>, field: &str) -> Result<(), AppError> {
     let Some(value) = value else {
         return Ok(());
     };
     let ok = value
         .as_object()
-        .map(|m| m.values().all(Value::is_string))
+        .map(|m| m.values().all(is_scalar))
         .unwrap_or(false);
     if ok {
         Ok(())
     } else {
         Err(AppError::McpValidation(format!(
-            "MCP 服务器 {field} 字段必须为值均为字符串的对象"
+            "MCP 服务器 {field} 字段必须为值均为字符串（或数字/布尔）的对象"
         )))
     }
 }
@@ -193,15 +201,14 @@ mod tests {
             json!({"command": ""}),
             json!({"command": 42}),
             json!({"command": "echo", "args": "-c evil"}),
-            json!({"command": "echo", "args": ["ok", 1]}),
             json!({"command": "echo", "env": ["A=b"]}),
-            json!({"command": "echo", "env": {"A": 1}}),
+            json!({"command": "echo", "args": ["ok", {"x": 1}]}),
+            json!({"type": "http", "url": "https://x", "headers": {"A": [1]}}),
             json!({"command": "echo", "cwd": 1}),
             json!({"type": "http"}),
             json!({"type": "http", "url": "not a url"}),
             json!({"type": "http", "url": "file:///etc/passwd"}),
             json!({"type": "sse", "url": "javascript:alert(1)"}),
-            json!({"type": "http", "url": "https://x", "headers": {"A": true}}),
         ] {
             assert!(
                 validate_server_spec(&spec).is_err(),
@@ -228,5 +235,31 @@ mod tests {
 
         let spec = json!({"type": "http", "url": "https://x", "args": ["&"]});
         assert!(find_cmd_wrap_unsafe_arg(&spec).is_none());
+    }
+}
+
+#[cfg(test)]
+mod scalar_value_tests {
+    use super::validate_server_spec;
+    use serde_json::json;
+
+    #[test]
+    fn numeric_and_boolean_env_and_args_are_accepted() {
+        let spec = json!({
+            "command": "npx",
+            "args": ["server", "--port", 3000, true],
+            "env": {"PORT": 3000, "DEBUG": false, "NAME": "x"}
+        });
+        assert!(validate_server_spec(&spec).is_ok());
+    }
+
+    #[test]
+    fn nested_values_are_rejected() {
+        let bad_args = json!({"command": "npx", "args": [["nested"]]});
+        assert!(validate_server_spec(&bad_args).is_err());
+        let bad_env = json!({"command": "npx", "env": {"K": {"x": 1}}});
+        assert!(validate_server_spec(&bad_env).is_err());
+        let null_env = json!({"command": "npx", "env": {"K": null}});
+        assert!(validate_server_spec(&null_env).is_err());
     }
 }
