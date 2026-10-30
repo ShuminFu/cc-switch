@@ -1,52 +1,60 @@
+import { useSyncExternalStore } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { proxyApi } from "@/lib/api/proxy";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import type { GlobalProxyConfig, AppProxyConfig } from "@/types/proxy";
+import { useTauriEvent } from "@/hooks/useTauriEvent";
+import type {
+  GlobalProxyConfig,
+  AppProxyConfig,
+  ProxyStatus,
+} from "@/types/proxy";
 
 // ========== 代理服务器状态 Hooks ==========
+//
+// The single proxy-status poller lives in `@/hooks/useProxyStatus` (key
+// ["proxyStatus"], polled only while the server runs). The former duplicate
+// 5 s `useProxyStatus` and the unused 2 s `useIsProxyRunning` /
+// `useIsLiveTakeoverActive` pollers were removed (PERF-13).
+
+/** Fallback refresh for takeover state changed outside this window. */
+const TAKEOVER_FALLBACK_REFETCH_MS = 30_000;
 
 /**
- * 获取代理服务器状态
+ * Whether the cached ["proxyStatus"] says the proxy server is running.
+ *
+ * Reads the cache only (never fetches), so components can gate their own
+ * polling on proxy state without adding another `get_proxy_status` poller.
  */
-export function useProxyStatus() {
-  return useQuery({
-    queryKey: ["proxyStatus"],
-    queryFn: () => proxyApi.getProxyStatus(),
-    refetchInterval: 5000, // 每 5 秒刷新一次
-  });
-}
-
-/**
- * 检查代理服务器是否运行
- */
-export function useIsProxyRunning() {
-  return useQuery({
-    queryKey: ["proxyRunning"],
-    queryFn: () => proxyApi.isProxyRunning(),
-    refetchInterval: 2000,
-  });
-}
-
-/**
- * 检查是否处于接管模式
- */
-export function useIsLiveTakeoverActive() {
-  return useQuery({
-    queryKey: ["liveTakeoverActive"],
-    queryFn: () => proxyApi.isLiveTakeoverActive(),
-    refetchInterval: 2000,
-  });
+export function useCachedProxyRunning(): boolean {
+  const queryClient = useQueryClient();
+  const queryCache = queryClient.getQueryCache();
+  return useSyncExternalStore(
+    (onChange) => queryCache.subscribe(onChange),
+    () =>
+      queryClient.getQueryData<ProxyStatus>(["proxyStatus"])?.running === true,
+  );
 }
 
 /**
  * 获取各应用接管状态
+ *
+ * Takeover changes made from this window go through mutations that invalidate
+ * this key; changes made from the tray emit `proxy-flags-changed`. A slow
+ * fallback poll covers anything else, and pauses while the window is hidden.
  */
 export function useProxyTakeoverStatus() {
+  const queryClient = useQueryClient();
+
+  useTauriEvent("proxy-flags-changed", () => {
+    void queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+  });
+
   return useQuery({
     queryKey: ["proxyTakeoverStatus"],
     queryFn: () => proxyApi.getProxyTakeoverStatus(),
-    refetchInterval: 2000,
+    refetchInterval: TAKEOVER_FALLBACK_REFETCH_MS,
+    refetchIntervalInBackground: false,
   });
 }
 

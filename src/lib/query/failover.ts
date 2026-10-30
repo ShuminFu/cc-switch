@@ -3,6 +3,14 @@ import { failoverApi } from "@/lib/api/failover";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { useCachedProxyRunning } from "./proxy";
+
+/**
+ * Health / circuit-breaker state only changes while the proxy handles requests,
+ * so poll only while the cached proxy status says it is running. Intervals
+ * pause while the window is hidden (refetchIntervalInBackground: false).
+ */
+const HEALTH_REFETCH_MS = 5000;
 
 // ========== 熔断器 Hooks ==========
 
@@ -10,11 +18,13 @@ import { extractErrorMessage } from "@/utils/errorUtils";
  * 获取供应商健康状态
  */
 export function useProviderHealth(providerId: string, appType: string) {
+  const proxyRunning = useCachedProxyRunning();
   return useQuery({
     queryKey: ["providerHealth", providerId, appType],
     queryFn: () => failoverApi.getProviderHealth(providerId, appType),
     enabled: !!providerId && !!appType,
-    refetchInterval: 5000, // 每 5 秒刷新一次
+    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
     retry: false,
   });
 }
@@ -81,11 +91,13 @@ export function useUpdateCircuitBreakerConfig() {
  * 获取熔断器统计信息
  */
 export function useCircuitBreakerStats(providerId: string, appType: string) {
+  const proxyRunning = useCachedProxyRunning();
   return useQuery({
     queryKey: ["circuitBreakerStats", providerId, appType],
     queryFn: () => failoverApi.getCircuitBreakerStats(providerId, appType),
     enabled: !!providerId && !!appType,
-    refetchInterval: 5000, // 每 5 秒刷新一次
+    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
   });
 }
 
