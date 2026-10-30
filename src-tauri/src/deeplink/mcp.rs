@@ -37,6 +37,12 @@ pub struct McpImportError {
 ///
 /// This function handles batch import of MCP servers from standard MCP JSON format.
 /// If a server already exists, only the apps flags are merged (existing config preserved).
+///
+/// Trust model: an MCP stdio server is arbitrary command execution inside the
+/// user's coding tools, so live tool configs are only touched when the request
+/// carries `enabled == Some(true)` (set by the confirmation dialog after an
+/// explicit opt-in). Otherwise new servers are stored in the CC Switch database
+/// with every app flag off, and existing servers keep their current app flags.
 pub fn import_mcp_from_deeplink(
     state: &AppState,
     request: DeepLinkImportRequest,
@@ -88,6 +94,9 @@ pub fn import_mcp_from_deeplink(
         ));
     }
 
+    // Only write into live tool configs after an explicit opt-in.
+    let enable_now = request.enabled == Some(true);
+
     // Get existing servers to check for duplicates
     let existing_servers = state.db.get_all_mcp_servers()?;
 
@@ -96,12 +105,25 @@ pub fn import_mcp_from_deeplink(
     let mut failed = Vec::new();
 
     for (id, server_spec) in mcp_servers.iter() {
+        if let Err(e) = validate_deeplink_server(id, server_spec) {
+            log::warn!("Rejected MCP server '{id}' from deep link: {e}");
+            failed.push(McpImportError {
+                id: id.clone(),
+                error: format!("{e}"),
+            });
+            continue;
+        }
+
         // Check if server already exists
         let server = if let Some(existing) = existing_servers.get(id) {
             // Server exists - merge apps only, keep other fields unchanged
             log::info!("MCP server '{id}' already exists, merging apps only");
 
-            let merged_apps = merge_mcp_apps(&existing.apps, &target_apps);
+            let merged_apps = if enable_now {
+                merge_mcp_apps(&existing.apps, &target_apps)
+            } else {
+                existing.apps.clone()
+            };
 
             McpServer {
                 id: existing.id.clone(),
@@ -120,7 +142,11 @@ pub fn import_mcp_from_deeplink(
                 id: id.clone(),
                 name: id.clone(),
                 server: server_spec.clone(),
-                apps: target_apps.clone(),
+                apps: if enable_now {
+                    target_apps.clone()
+                } else {
+                    McpApps::default()
+                },
                 description: None,
                 homepage: None,
                 docs: None,
@@ -148,6 +174,36 @@ pub fn import_mcp_from_deeplink(
         imported_ids,
         failed,
     })
+}
+
+/// Maximum accepted length of an MCP server id coming from a deep link.
+const MAX_SERVER_ID_LEN: usize = 128;
+
+/// Validate one server entry from a deep link payload before anything is stored.
+pub(crate) fn validate_deeplink_server(id: &str, spec: &Value) -> Result<(), AppError> {
+    if id.trim().is_empty()
+        || id.len() > MAX_SERVER_ID_LEN
+        || id.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err(AppError::InvalidInput(format!(
+            "Invalid MCP server id '{id}': must be 1-{MAX_SERVER_ID_LEN} characters without whitespace"
+        )));
+    }
+
+    crate::mcp::validate_server_spec(spec)?;
+
+    // On Windows cc-switch rewrites npx/node/... to `cmd /c ...`, where unquoted
+    // `& | < > ^` in an argument would be interpreted by cmd.exe. Refuse such
+    // specs from untrusted deep links instead of silently changing their meaning.
+    if cfg!(windows) {
+        if let Some(arg) = crate::mcp::find_cmd_wrap_unsafe_arg(spec) {
+            return Err(AppError::InvalidInput(format!(
+                "MCP server '{id}' argument '{arg}' contains cmd.exe metacharacters (& | < > ^) and cannot be wrapped safely with 'cmd /c' on Windows"
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 /// Parse apps string into McpApps struct

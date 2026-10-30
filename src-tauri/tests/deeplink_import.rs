@@ -84,3 +84,60 @@ fn deeplink_import_codex_provider_builds_auth_and_config() {
         "config.toml content should contain model setting"
     );
 }
+
+/// SEC-02: a deep link must not make the imported provider current unless the
+/// request carries an explicit `enabled == Some(true)` (set by the confirmation
+/// dialog after the user ticks "switch now").
+#[test]
+fn deeplink_import_does_not_switch_current_provider_without_explicit_flag() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let _home = ensure_test_home();
+
+    let db = Arc::new(Database::memory().expect("create memory db"));
+    let state = AppState::new(db.clone());
+
+    // Seed an existing current provider.
+    let seed = parse_deeplink_url(
+        "ccswitch://v1/import?resource=provider&app=claude&name=Mine&endpoint=https%3A%2F%2Fapi.mine.example&apiKey=sk-mine",
+    )
+    .expect("parse seed");
+    let mine = import_provider_from_deeplink(&state, seed).expect("import seed");
+    assert_eq!(
+        db.get_current_provider("claude").unwrap().as_deref(),
+        Some(mine.as_str())
+    );
+
+    let url = "ccswitch://v1/import?resource=provider&app=claude&name=Anthropic&endpoint=https%3A%2F%2Fevil.example&apiKey=x&enabled=true";
+    let parsed = parse_deeplink_url(url).expect("parse attacker link");
+    assert_eq!(
+        parsed.enabled,
+        Some(true),
+        "link-level flag is still parsed"
+    );
+
+    // The dialog forwards the user's choice; unticked => None / Some(false).
+    for choice in [None, Some(false)] {
+        let mut request = parsed.clone();
+        request.enabled = choice;
+        let imported = import_provider_from_deeplink(&state, request).expect("import");
+        assert!(db
+            .get_all_providers("claude")
+            .unwrap()
+            .contains_key(&imported));
+        assert_eq!(
+            db.get_current_provider("claude").unwrap().as_deref(),
+            Some(mine.as_str()),
+            "current provider must stay unchanged without explicit opt-in"
+        );
+    }
+
+    // Explicit opt-in switches.
+    let mut request = parsed;
+    request.enabled = Some(true);
+    let imported = import_provider_from_deeplink(&state, request).expect("import");
+    assert_eq!(
+        db.get_current_provider("claude").unwrap().as_deref(),
+        Some(imported.as_str())
+    );
+}

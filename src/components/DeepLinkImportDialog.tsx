@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useId } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { DeepLinkImportRequest, deeplinkApi } from "@/lib/api/deeplink";
 import {
@@ -10,6 +10,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { providersApi } from "@/lib/api/providers";
+import type { AppId } from "@/lib/api/types";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -17,6 +20,7 @@ import { PromptConfirmation } from "./deeplink/PromptConfirmation";
 import { McpConfirmation } from "./deeplink/McpConfirmation";
 import { SkillConfirmation } from "./deeplink/SkillConfirmation";
 import { ProviderIcon } from "./ProviderIcon";
+import { decodeBase64Lenient, getEndpointHost } from "./deeplink/safety";
 
 interface DeeplinkError {
   url: string;
@@ -29,6 +33,40 @@ export function DeepLinkImportDialog() {
   const [request, setRequest] = useState<DeepLinkImportRequest | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  // Explicit, per-import user choices. They always start unticked, whatever
+  // the link asks for: a deep link alone must never switch the current
+  // provider, write MCP servers into live configs or enable a usage script.
+  const [switchNow, setSwitchNow] = useState(false);
+  const [mcpEnableNow, setMcpEnableNow] = useState(false);
+  const [usageScriptEnabled, setUsageScriptEnabled] = useState(false);
+  // null = unknown; "" = no current provider for the target app
+  const [currentProviderId, setCurrentProviderId] = useState<string | null>(
+    null,
+  );
+  const switchCheckboxId = useId();
+  const usageCheckboxId = useId();
+
+  useEffect(() => {
+    setSwitchNow(false);
+    setMcpEnableNow(false);
+    setUsageScriptEnabled(false);
+    setCurrentProviderId(null);
+
+    if (!request?.app || (request.resource && request.resource !== "provider"))
+      return;
+    let cancelled = false;
+    providersApi
+      .getCurrent(request.app as AppId)
+      .then((id) => {
+        if (!cancelled) setCurrentProviderId(id ?? "");
+      })
+      .catch(() => {
+        /* informational only */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [request]);
 
   // 容错判断：MCP 导入结果可能缺少 type 字段
   const isMcpImportResult = (
@@ -97,7 +135,19 @@ export function DeepLinkImportDialog() {
     setIsImporting(true);
 
     try {
-      const result = await deeplinkApi.importFromDeeplink(request);
+      // Replace the link-supplied flags with the user's explicit choices.
+      const finalRequest: DeepLinkImportRequest = { ...request };
+      if (request.resource === "mcp") {
+        finalRequest.enabled = mcpEnableNow;
+      } else if (request.resource === "provider" || !request.resource) {
+        finalRequest.enabled = switchNow;
+        if (request.usageScript) {
+          finalRequest.usageEnabled = usageScriptEnabled;
+        } else if (request.usageEnabled !== undefined) {
+          finalRequest.usageEnabled = false;
+        }
+      }
+      const result = await deeplinkApi.importFromDeeplink(finalRequest);
       const refreshMcp = async (summary: {
         importedCount: number;
         importedIds: string[];
@@ -211,6 +261,23 @@ export function DeepLinkImportDialog() {
     request?.apiKey && request.apiKey.length > 4
       ? `${request.apiKey.substring(0, 4)}${"*".repeat(20)}`
       : "****";
+
+  const endpointHosts = useMemo(
+    () =>
+      (request?.endpoint ?? "")
+        .split(",")
+        .map((ep) => ep.trim())
+        .filter(Boolean)
+        .map(getEndpointHost),
+    [request?.endpoint],
+  );
+  const primaryHost = endpointHosts[0] ?? "";
+
+  const decodedUsageScript = useMemo(
+    () =>
+      request?.usageScript ? decodeBase64Lenient(request.usageScript) : null,
+    [request?.usageScript],
+  );
 
   // Check if config file is present
   const hasConfigFile = !!(request?.config || request?.configUrl);
@@ -334,7 +401,11 @@ export function DeepLinkImportDialog() {
                 <PromptConfirmation request={request} />
               )}
               {request.resource === "mcp" && (
-                <McpConfirmation request={request} />
+                <McpConfirmation
+                  request={request}
+                  enableNow={mcpEnableNow}
+                  onEnableNowChange={setMcpEnableNow}
+                />
               )}
               {request.resource === "skill" && (
                 <SkillConfirmation request={request} />
@@ -354,6 +425,26 @@ export function DeepLinkImportDialog() {
                       />
                     </div>
                   )}
+
+                  {/* Destination host: where every request will be sent */}
+                  <div
+                    className="rounded-lg border border-blue-300 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20"
+                    data-testid="deeplink-endpoint-host"
+                  >
+                    <div className="text-xs font-medium text-muted-foreground">
+                      {t("deeplink.endpointHostLabel", {
+                        defaultValue: "Requests will be sent to",
+                      })}
+                    </div>
+                    <div className="mt-1 text-lg font-semibold font-mono break-all">
+                      {primaryHost || "-"}
+                    </div>
+                    {endpointHosts.length > 1 && (
+                      <div className="mt-1 text-xs font-mono text-muted-foreground break-all">
+                        {endpointHosts.slice(1).join(", ")}
+                      </div>
+                    )}
+                  </div>
 
                   {/* App Type */}
                   <div className="grid grid-cols-3 items-center gap-4">
@@ -634,12 +725,12 @@ export function DeepLinkImportDialog() {
                         <div className="col-span-2 text-sm">
                           <span
                             className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
-                              request.usageEnabled !== false
+                              usageScriptEnabled
                                 ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
                                 : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
                             }`}
                           >
-                            {request.usageEnabled !== false
+                            {usageScriptEnabled
                               ? t("deeplink.usageScriptEnabled", {
                                   defaultValue: "已启用",
                                 })
@@ -648,6 +739,44 @@ export function DeepLinkImportDialog() {
                                 })}
                           </span>
                         </div>
+                      </div>
+
+                      {/* Script source: users must be able to read the code */}
+                      <div className="space-y-1">
+                        <div className="text-xs text-muted-foreground">
+                          {t("deeplink.usageScriptSource", {
+                            defaultValue: "Script source",
+                          })}
+                        </div>
+                        <pre
+                          className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded border bg-muted/50 p-2 text-xs font-mono"
+                          data-testid="deeplink-usage-script-source"
+                        >
+                          {decodedUsageScript ??
+                            t("deeplink.usageScriptDecodeFailed", {
+                              defaultValue: "(script could not be decoded)",
+                            })}
+                        </pre>
+                      </div>
+
+                      <div className="flex items-start gap-2">
+                        <Checkbox
+                          id={usageCheckboxId}
+                          checked={usageScriptEnabled}
+                          disabled={decodedUsageScript === null}
+                          onCheckedChange={(v) =>
+                            setUsageScriptEnabled(v === true)
+                          }
+                        />
+                        <label
+                          htmlFor={usageCheckboxId}
+                          className="text-sm leading-tight"
+                        >
+                          {t("deeplink.usageScriptEnableLabel", {
+                            defaultValue:
+                              "Enable this usage script (it runs inside CC Switch on every usage query)",
+                          })}
+                        </label>
                       </div>
 
                       {/* Usage API Key (if different from provider) */}
@@ -701,6 +830,60 @@ export function DeepLinkImportDialog() {
                         )}
                     </div>
                   )}
+
+                  {/* Switch to this provider: explicit, separate opt-in */}
+                  <div className="space-y-2 rounded-lg border p-3">
+                    {request.enabled && (
+                      <div
+                        className="rounded-md bg-red-50 p-2 text-sm font-medium text-red-800 dark:bg-red-900/20 dark:text-red-200"
+                        data-testid="deeplink-switch-requested-warning"
+                      >
+                        {t("deeplink.switchRequestedWarning", {
+                          defaultValue:
+                            "This link asks to make this provider current immediately, which would route all {{app}} traffic to {{host}}. It is only switched if you tick the box below.",
+                          app: request.app,
+                          host: primaryHost,
+                        })}
+                      </div>
+                    )}
+                    <div className="flex items-start gap-2">
+                      <Checkbox
+                        id={switchCheckboxId}
+                        checked={switchNow}
+                        onCheckedChange={(v) => setSwitchNow(v === true)}
+                      />
+                      <label
+                        htmlFor={switchCheckboxId}
+                        className="text-sm leading-tight"
+                      >
+                        {t("deeplink.switchNowLabel", {
+                          defaultValue:
+                            "Switch to this provider now (route all {{app}} traffic to {{host}})",
+                          app: request.app,
+                          host: primaryHost,
+                        })}
+                      </label>
+                    </div>
+                    {switchNow && (
+                      <div className="text-sm font-medium text-red-600 dark:text-red-400">
+                        {t("deeplink.switchNowWarning", {
+                          defaultValue:
+                            "All {{app}} traffic, including your prompts and file contents, will be sent to {{host}} right after import.",
+                          app: request.app,
+                          host: primaryHost,
+                        })}
+                      </div>
+                    )}
+                    {!switchNow && currentProviderId === "" && (
+                      <div className="text-xs text-yellow-700 dark:text-yellow-300">
+                        {t("deeplink.firstProviderNotice", {
+                          defaultValue:
+                            "No provider is active for {{app}} yet, so this provider will become the current one.",
+                          app: request.app,
+                        })}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Warning */}
                   <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 p-3 text-sm text-yellow-800 dark:text-yellow-200">
