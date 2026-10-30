@@ -13,6 +13,18 @@ use super::super::{lock_conn, Database};
 pub(crate) const PRICING_SOURCE_RESPONSE: &str = "response";
 pub(crate) const PRICING_SOURCE_REQUEST: &str = "request";
 
+/// Settings key holding the per-install access token for the local proxy listener.
+pub(crate) const PROXY_ACCESS_TOKEN_SETTING_KEY: &str = "proxy_access_token";
+
+/// Generate a fresh random proxy access token (~244 bits of entropy).
+fn generate_proxy_access_token() -> String {
+    format!(
+        "ccsp-{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
 pub(crate) fn validate_cost_multiplier(value: &str) -> Result<Decimal, AppError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -53,6 +65,42 @@ pub(crate) fn validate_pricing_source(value: &str) -> Result<&str, AppError> {
 }
 
 impl Database {
+    // ==================== Proxy Access Token ====================
+
+    /// Return the persisted proxy access token, creating and storing a random one on first use.
+    ///
+    /// The token is required by the proxy listener for requests that do not come from the
+    /// local machine (non-loopback binds) or that carry a non-local `Host` header.
+    /// `INSERT OR IGNORE` + re-read keeps concurrent first calls converging on one token.
+    pub fn get_or_create_proxy_access_token(&self) -> Result<String, AppError> {
+        if let Some(token) = self.get_setting(PROXY_ACCESS_TOKEN_SETTING_KEY)? {
+            let trimmed = token.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+
+        let candidate = generate_proxy_access_token();
+        {
+            let conn = lock_conn!(self.conn);
+            // Replace an empty/whitespace value, keep any non-empty token written concurrently.
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                 WHERE trim(settings.value) = ''",
+                rusqlite::params![PROXY_ACCESS_TOKEN_SETTING_KEY, candidate],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+
+        match self.get_setting(PROXY_ACCESS_TOKEN_SETTING_KEY)? {
+            Some(token) if !token.trim().is_empty() => Ok(token.trim().to_string()),
+            _ => Err(AppError::Database(
+                "failed to persist proxy access token".to_string(),
+            )),
+        }
+    }
+
     // ==================== Global Proxy Config ====================
 
     /// 获取全局代理配置（统一字段）
@@ -72,26 +120,36 @@ impl Database {
                         listen_address: row.get(1)?,
                         listen_port: row.get::<_, i32>(2)? as u16,
                         enable_logging: row.get::<_, i32>(3)? != 0,
+                        access_token: None,
                     })
                 },
             )
         };
         // conn 已在 block 结束时释放
 
-        match result {
-            Ok(config) => Ok(config),
+        let mut config = match result {
+            Ok(config) => config,
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 // 如果不存在，创建默认配置
                 self.init_proxy_config_rows().await?;
-                Ok(GlobalProxyConfig {
+                GlobalProxyConfig {
                     proxy_enabled: false,
                     listen_address: "127.0.0.1".to_string(),
                     listen_port: 15721,
                     enable_logging: true,
-                })
+                    access_token: None,
+                }
             }
-            Err(e) => Err(AppError::Database(e.to_string())),
+            Err(e) => return Err(AppError::Database(e.to_string())),
+        };
+
+        // Expose the access token to the app UI so it can be shown next to the
+        // non-loopback warning. A failure here must not break the proxy settings page.
+        match self.get_or_create_proxy_access_token() {
+            Ok(token) => config.access_token = Some(token),
+            Err(e) => log::warn!("failed to load proxy access token: {e}"),
         }
+        Ok(config)
     }
 
     /// 更新全局代理配置（镜像写三行）
@@ -906,6 +964,40 @@ impl Database {
 mod tests {
     use crate::database::Database;
     use crate::error::AppError;
+
+    #[test]
+    fn proxy_access_token_is_created_once_and_persisted() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let first = db.get_or_create_proxy_access_token()?;
+        assert!(first.starts_with("ccsp-"));
+        assert!(first.len() >= 64, "token should be long: {first}");
+        let second = db.get_or_create_proxy_access_token()?;
+        assert_eq!(first, second);
+        assert_eq!(
+            db.get_setting(super::PROXY_ACCESS_TOKEN_SETTING_KEY)?
+                .as_deref(),
+            Some(first.as_str())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn proxy_access_token_replaces_blank_value() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        db.set_setting(super::PROXY_ACCESS_TOKEN_SETTING_KEY, "   ")?;
+        let token = db.get_or_create_proxy_access_token()?;
+        assert!(token.starts_with("ccsp-"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn global_proxy_config_exposes_access_token() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let config = db.get_global_proxy_config().await?;
+        let token = db.get_or_create_proxy_access_token()?;
+        assert_eq!(config.access_token.as_deref(), Some(token.as_str()));
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_default_cost_multiplier_round_trip() -> Result<(), AppError> {
