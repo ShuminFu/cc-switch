@@ -281,7 +281,7 @@ mod tests {
             [],
         )?;
 
-        let filter = effective_usage_log_filter("l");
+        let filter = effective_usage_log_filter(&conn, "l")?;
         let sql = format!("SELECT COUNT(*) FROM proxy_request_logs l WHERE {filter}");
         let count: i64 = conn.query_row(&sql, [], |row| row.get(0))?;
         assert_eq!(count, 1);

@@ -19,6 +19,9 @@ use tauri::{AppHandle, Emitter};
 /// 前端监听的事件名
 pub const EVENT_USAGE_LOG_RECORDED: &str = "usage-log-recorded";
 
+/// `superseded_by` 后台回填进度事件名（载荷见 `SupersededBackfillProgress`）
+pub const EVENT_USAGE_BACKFILL_PROGRESS: &str = "usage-backfill-progress";
+
 /// 防抖窗口：合并 200ms 内的多次通知。
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(200);
 
@@ -65,4 +68,16 @@ pub fn notify_log_recorded() {
             log::warn!("emit {EVENT_USAGE_LOG_RECORDED} 失败: {e}");
         }
     });
+}
+
+/// 推送 `superseded_by` 回填进度（每块一次，不防抖；AppHandle 未注入时忽略）。
+pub fn notify_backfill_progress(
+    progress: crate::database::repo::superseded::SupersededBackfillProgress,
+) {
+    let Some(handle) = APP_HANDLE.get() else {
+        return;
+    };
+    if let Err(e) = handle.emit(EVENT_USAGE_BACKFILL_PROGRESS, progress) {
+        log::warn!("emit {EVENT_USAGE_BACKFILL_PROGRESS} 失败: {e}");
+    }
 }

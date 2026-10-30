@@ -107,7 +107,7 @@ fn provider_name_coalesce(log_alias: &str, provider_alias: &str) -> String {
 }
 
 /// SQL 字面量列表：全部会话来源的 data_source 值，如 `'session_log', 'codex_session'`。
-fn session_sources_sql_list() -> String {
+pub(super) fn session_sources_sql_list() -> String {
     UsageSource::SESSIONS
         .iter()
         .map(|source| format!("'{}'", source.as_str()))
@@ -122,7 +122,7 @@ pub(crate) const SESSION_PROXY_DEDUP_WINDOW_SECONDS: i64 = 10 * 60;
 /// 防御 schema v9 之前可能写入的 NULL data_source 行（见
 /// `tests::create_legacy_nullable_logs_table`）。所有用到 data_source 的查询
 /// 都应通过此 helper 生成片段，避免遗漏。
-fn data_source_expr(log_alias: &str) -> String {
+pub(super) fn data_source_expr(log_alias: &str) -> String {
     format!(
         "COALESCE({log_alias}.data_source, '{}')",
         UsageSource::Proxy.as_str()
@@ -233,42 +233,7 @@ fn unpriced_model_id(log: &RequestLogDetail) -> String {
     }
 }
 
-pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
-    let data_source = data_source_expr(log_alias);
-    let proxy_data_source = data_source_expr("proxy_dedup");
-    let session_sources = session_sources_sql_list();
-    format!(
-        "NOT (
-            {data_source} IN ({session_sources})
-            AND EXISTS (
-                SELECT 1
-                FROM proxy_request_logs proxy_dedup
-                WHERE {proxy_data_source} = 'proxy'
-                  AND proxy_dedup.app_type = {log_alias}.app_type
-                  AND proxy_dedup.status_code >= 200
-                  AND proxy_dedup.status_code < 300
-                  AND proxy_dedup.input_tokens = {log_alias}.input_tokens
-                  AND proxy_dedup.output_tokens = {log_alias}.output_tokens
-                  AND proxy_dedup.cache_read_tokens = {log_alias}.cache_read_tokens
-                  AND (
-                      proxy_dedup.cache_creation_tokens = {log_alias}.cache_creation_tokens
-                      OR (
-                          {log_alias}.cache_creation_tokens = 0
-                          AND {data_source} IN ('codex_session', 'gemini_session', 'opencode_session')
-                      )
-                  )
-                  AND proxy_dedup.created_at BETWEEN
-                      {log_alias}.created_at - {SESSION_PROXY_DEDUP_WINDOW_SECONDS}
-                      AND {log_alias}.created_at + {SESSION_PROXY_DEDUP_WINDOW_SECONDS}
-                  AND (
-                      LOWER(proxy_dedup.model) = LOWER({log_alias}.model)
-                      OR LOWER(proxy_dedup.model) = 'unknown'
-                      OR LOWER({log_alias}.model) = 'unknown'
-                  )
-            )
-        )"
-    )
-}
+pub(crate) use super::superseded::effective_usage_log_filter;
 
 /// 跨源去重指纹键。
 ///
@@ -475,7 +440,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
 
         // Build detail WHERE clause
-        let mut conditions = vec![effective_usage_log_filter("l")];
+        let mut conditions = vec![effective_usage_log_filter(&conn, "l")?];
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         if let Some(start) = start_date {
@@ -634,7 +599,7 @@ impl Database {
     ) -> Result<Vec<UsageSummaryByApp>, AppError> {
         let conn = lock_conn!(self.conn);
 
-        let mut detail_conditions = vec![effective_usage_log_filter("l")];
+        let mut detail_conditions = vec![effective_usage_log_filter(&conn, "l")?];
         let mut detail_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(start) = start_date {
             detail_conditions.push("l.created_at >= ?".to_string());
@@ -843,7 +808,7 @@ impl Database {
                 String::new()
             };
 
-            let effective_filter = effective_usage_log_filter("l");
+            let effective_filter = effective_usage_log_filter(&conn, "l")?;
             let fresh_input = fresh_input_sql("l");
             let sql = format!(
                 "SELECT
@@ -956,7 +921,7 @@ impl Database {
             String::new()
         };
 
-        let effective_filter = effective_usage_log_filter("l");
+        let effective_filter = effective_usage_log_filter(&conn, "l")?;
         let fresh_input = fresh_input_sql("l");
         let detail_sql = format!(
             "SELECT
@@ -1138,7 +1103,7 @@ impl Database {
     ) -> Result<Vec<ProviderStats>, AppError> {
         let conn = lock_conn!(self.conn);
 
-        let mut detail_conditions = vec![effective_usage_log_filter("l")];
+        let mut detail_conditions = vec![effective_usage_log_filter(&conn, "l")?];
         let mut detail_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(start) = start_date {
             detail_conditions.push("l.created_at >= ?".to_string());
@@ -1282,7 +1247,7 @@ impl Database {
     ) -> Result<Vec<ModelStats>, AppError> {
         let conn = lock_conn!(self.conn);
 
-        let mut detail_conditions = vec![effective_usage_log_filter("l")];
+        let mut detail_conditions = vec![effective_usage_log_filter(&conn, "l")?];
         let mut detail_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(start) = start_date {
             detail_conditions.push("l.created_at >= ?".to_string());
@@ -2128,8 +2093,12 @@ impl UsageQuery {
     }
 
     /// WHERE 子句与参数。`include_cursor = false` 用于总数统计（不受翻页位置影响）。
-    fn where_clause(&self, include_cursor: bool) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
-        let mut conditions = vec![effective_usage_log_filter("l")];
+    fn where_clause(
+        &self,
+        conn: &Connection,
+        include_cursor: bool,
+    ) -> Result<(String, Vec<Box<dyn rusqlite::ToSql>>), AppError> {
+        let mut conditions = vec![effective_usage_log_filter(conn, "l")?];
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         if let Some(ref app_type) = self.app_type {
@@ -2178,12 +2147,12 @@ impl UsageQuery {
             }
         }
 
-        (format!("WHERE {}", conditions.join(" AND ")), params)
+        Ok((format!("WHERE {}", conditions.join(" AND ")), params))
     }
 
     /// 满足筛选条件的总行数（忽略分页位置）
     pub fn count(&self, conn: &Connection) -> Result<u32, AppError> {
-        let (where_clause, params) = self.where_clause(false);
+        let (where_clause, params) = self.where_clause(conn, false)?;
         let sql = format!(
             "SELECT COUNT(*) FROM proxy_request_logs l
              {providers_join}
@@ -2198,7 +2167,7 @@ impl UsageQuery {
 
     /// 取一页。多取一行判断是否还有下一页。
     pub fn fetch(&self, conn: &Connection) -> Result<UsagePage, AppError> {
-        let (where_clause, mut params) = self.where_clause(true);
+        let (where_clause, mut params) = self.where_clause(conn, true)?;
         params.push(Box::new(i64::from(self.limit) + 1));
         params.push(Box::new(i64::from(self.offset.unwrap_or(0))));
 
@@ -2511,7 +2480,7 @@ pub(crate) fn upgrade_session_row(
 pub(crate) fn data_source_breakdown(
     conn: &Connection,
 ) -> Result<Vec<(String, i64, f64)>, AppError> {
-    let effective_filter = effective_usage_log_filter("l");
+    let effective_filter = effective_usage_log_filter(conn, "l")?;
     let sql = format!(
         "SELECT COALESCE(l.data_source, 'proxy') as ds, COUNT(*) as cnt,
                 COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as cost

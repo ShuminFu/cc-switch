@@ -2,6 +2,7 @@
 //!
 //! 提供 SQL 导出/导入和二进制快照备份功能。
 
+use super::repo::superseded;
 use super::{lock_conn, Database, SCHEMA_VERSION};
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
@@ -27,6 +28,8 @@ const SYNC_SKIP_TABLES: &[&str] = &[
     "session_log_sync",
     // 迁移审计记录属于本设备
     "schema_migrations",
+    // superseded_by 回填进度描述的是本设备的 proxy_request_logs
+    superseded::BACKFILL_STATE_TABLE,
 ];
 
 /// Tables whose local data is preserved (restored from local snapshot) during WebDAV import.
@@ -39,6 +42,8 @@ const SYNC_PRESERVE_TABLES: &[&str] = &[
     "session_log_sync",
     // 迁移审计记录属于本设备
     "schema_migrations",
+    // superseded_by 回填进度描述的是本设备的 proxy_request_logs
+    superseded::BACKFILL_STATE_TABLE,
 ];
 
 /// Settings rows that belong to this install only: never exported, and kept
@@ -161,7 +166,10 @@ impl Database {
         Self::apply_schema_migrations_on_conn(&temp_conn)?;
         Self::validate_basic_state(&temp_conn)?;
         if let Some(local_snapshot) = local_snapshot.as_ref() {
+            // 本地日志连同 superseded_by 原样恢复（值已自洽），恢复期间不逐行重算
+            superseded::drop_triggers(&temp_conn)?;
             Self::restore_tables(local_snapshot, &temp_conn, preserve_tables)?;
+            superseded::ensure_triggers(&temp_conn)?;
         }
         Self::write_local_only_settings(&temp_conn, &local_settings)?;
 
@@ -577,12 +585,13 @@ impl Database {
         output.push_str(&format!("PRAGMA user_version={user_version};\n"));
         output.push_str("BEGIN TRANSACTION;\n");
 
-        // 导出 schema
+        // 导出 schema。触发器不导出（导入授权不允许 CREATE TRIGGER），
+        // 导入后由迁移框架重建（见 `superseded::ensure_triggers`）
         let mut stmt = conn
             .prepare(
                 "SELECT type, name, tbl_name, sql
                  FROM sqlite_master
-                 WHERE sql NOT NULL AND type IN ('table','index','trigger','view')
+                 WHERE sql NOT NULL AND type IN ('table','index','view')
                  ORDER BY type='table' DESC, name",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;

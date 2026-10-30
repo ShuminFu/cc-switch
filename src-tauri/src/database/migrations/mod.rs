@@ -15,6 +15,7 @@ mod legacy;
 mod v016;
 mod v017;
 mod v018;
+mod v019;
 
 use super::{Database, SCHEMA_VERSION};
 use crate::error::AppError;
@@ -172,12 +173,20 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         db_compat: DbCompatImpact::Additive,
         up: |conn, _| v018::apply(conn),
     },
+    Migration {
+        version: 19,
+        name: "proxy_request_logs.superseded_by with maintenance triggers and backfill state",
+        db_compat: DbCompatImpact::Additive,
+        up: |conn, _| v019::apply(conn),
+    },
 ];
 
 impl Database {
     /// 在指定连接上应用 Schema 迁移（全新数据库也走这里，从 v0 开始）
     pub(crate) fn apply_schema_migrations_on_conn(conn: &Connection) -> Result<(), AppError> {
-        Self::migrate_on_conn(conn, SCHEMA_VERSION)
+        Self::migrate_on_conn(conn, SCHEMA_VERSION)?;
+        // SQL 导出不含触发器：导入当前版本的导出后迁移不会执行，这里补建
+        crate::database::repo::superseded::ensure_triggers(conn)
     }
 
     /// 迁移到 `target` 版本为止（测试用于构造某个历史版本的真实数据库）

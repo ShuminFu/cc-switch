@@ -123,7 +123,7 @@ impl Database {
 
     fn do_rollup_and_prune(conn: &rusqlite::Connection, cutoff: i64) -> Result<u64, AppError> {
         // Aggregate old logs, merging with any pre-existing rollup rows via LEFT JOIN.
-        let effective_filter = effective_usage_log_filter("l");
+        let effective_filter = effective_usage_log_filter(conn, "l")?;
         let fresh_detail_input = fresh_input_sql("l");
         let fresh_old_input = fresh_input_sql("old");
         // request_model 维度保留路由接管的「客户端别名 → 真实模型」映射，

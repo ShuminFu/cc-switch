@@ -604,6 +604,19 @@ pub fn run() {
                 Err(e) => log::warn!("✗ Failed to seed official providers: {e}"),
             }
 
+            // 跨源去重标记 superseded_by 的分块回填：后台进行，不阻塞启动；
+            // 完成前 Dashboard 查询回落到 EXISTS，结果不变
+            {
+                let db_for_superseded_backfill = app_state.db.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(e) = db_for_superseded_backfill
+                        .run_superseded_backfill(crate::usage_events::notify_backfill_progress)
+                    {
+                        log::warn!("✗ superseded_by backfill failed: {e}");
+                    }
+                });
+            }
+
             {
                 let db_for_codex_history_migration = app_state.db.clone();
                 tauri::async_runtime::spawn_blocking(move || {
