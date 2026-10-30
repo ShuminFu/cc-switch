@@ -69,7 +69,24 @@ export type ImportResult =
     }
   | { type: "skill"; key: string };
 
+/**
+ * A deep link that reached the backend before the webview was listening
+ * (cold start, lightweight mode). `url` is redacted (no query values).
+ */
+export type PendingDeepLink =
+  | { kind: "import"; request: DeepLinkImportRequest }
+  | { kind: "error"; url: string; error: string };
+
 export const deeplinkApi = {
+  /**
+   * Signal that the `deeplink-import` / `deeplink-error` listeners are
+   * registered. Returns the deep link buffered before the frontend was ready,
+   * at most once; later links arrive as events.
+   */
+  frontendReady: async (): Promise<PendingDeepLink | null> => {
+    return invoke("deeplink_frontend_ready");
+  },
+
   /**
    * Parse a deep link URL
    * @param url The ccswitch:// URL to parse
