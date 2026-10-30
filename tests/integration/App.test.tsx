@@ -10,6 +10,8 @@ import {
   setProviders,
 } from "../msw/state";
 import { emitTauriEvent } from "../msw/tauriMocks";
+import { server } from "../msw/server";
+import { http, HttpResponse } from "msw";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -145,8 +147,10 @@ vi.mock("@/components/mcp/McpPanel", () => ({
     ),
 }));
 
-const renderApp = (AppComponent: ComponentType) => {
-  const client = new QueryClient();
+const renderApp = (
+  AppComponent: ComponentType,
+  client: QueryClient = new QueryClient(),
+) => {
   return render(
     <QueryClientProvider client={client}>
       <Suspense fallback={<div data-testid="loading">loading</div>}>
@@ -351,5 +355,36 @@ describe("App integration with MSW", () => {
     );
 
     liveIdsSpy.mockRestore();
+  });
+
+  it("shows an error state with retry, not the empty list, when get_providers fails", async () => {
+    let fail = true;
+    server.use(
+      http.post("http://tauri.local/get_providers", () =>
+        fail
+          ? HttpResponse.text("database is locked", { status: 500 })
+          : undefined,
+      ),
+    );
+
+    const { default: App } = await import("@/App");
+    renderApp(
+      App,
+      new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+    );
+
+    expect(await screen.findByTestId("providers-error")).toHaveTextContent(
+      "database is locked",
+    );
+    expect(screen.queryByTestId("provider-list")).not.toBeInTheDocument();
+
+    fail = false;
+    fireEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
   });
 });

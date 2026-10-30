@@ -9,14 +9,15 @@ import type {
   AppProxyConfig,
   ProxyStatus,
 } from "@/types/proxy";
+import { extractErrorMessage } from "@/utils/errorUtils";
+import { getAppLabel, isAnyTakeoverActive } from "@/config/proxyApps";
 import { queryKeys } from "./keys";
 
 // ========== 代理服务器状态 Hooks ==========
 //
-// The single proxy-status poller lives in `@/hooks/useProxyStatus` (key
-// queryKeys.proxy.status, polled only while the server runs). The former duplicate
-// 5 s `useProxyStatus` and the unused 2 s `useIsProxyRunning` /
-// `useIsLiveTakeoverActive` pollers were removed (PERF-13).
+// This module is the single proxy query layer (FE-ARCH-05). `useProxyStatus`
+// below is the only `get_proxy_status` poller (key `queryKeys.proxy.status`,
+// polled only while the server runs); `@/hooks/useProxyStatus` re-exports it.
 
 /** Fallback refresh for takeover state changed outside this window. */
 const TAKEOVER_FALLBACK_REFETCH_MS = 30_000;
@@ -49,9 +50,12 @@ export function useProxyTakeoverStatus() {
   const queryClient = useQueryClient();
 
   useTauriEvent("proxy-flags-changed", () => {
-    void queryClient.invalidateQueries({
-      queryKey: queryKeys.proxy.takeoverStatus,
-    });
+    void Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.proxy.takeoverStatus,
+      }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status }),
+    ]);
   });
 
   return useQuery({
@@ -59,7 +63,232 @@ export function useProxyTakeoverStatus() {
     queryFn: () => proxyApi.getProxyTakeoverStatus(),
     refetchInterval: TAKEOVER_FALLBACK_REFETCH_MS,
     refetchIntervalInBackground: false,
+    placeholderData: (previousData) => previousData,
   });
+}
+
+/**
+ * 代理服务状态管理
+ */
+export function useProxyStatus() {
+  const queryClient = useQueryClient();
+  const { t } = useTranslation();
+
+  // 查询状态（自动轮询）
+  const { data: status, isLoading } = useQuery({
+    queryKey: queryKeys.proxy.status,
+    queryFn: () => proxyApi.getProxyStatus(),
+    // 仅在服务运行时轮询
+    refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
+    // 保持之前的数据，避免闪烁
+    placeholderData: (previousData) => previousData,
+  });
+
+  // 查询各应用接管状态（与 useProxyTakeoverStatus 共用同一查询与事件订阅）
+  const { data: takeoverStatus } = useProxyTakeoverStatus();
+
+  // 启动服务器（总开关：仅启动服务，不接管）
+  const startProxyServerMutation = useMutation({
+    mutationFn: () => proxyApi.startProxyServer(),
+    onSuccess: (info) => {
+      toast.success(
+        t("proxy.server.started", {
+          address: info.address,
+          port: info.port,
+          defaultValue: `代理服务已启动 - ${info.address}:${info.port}`,
+        }),
+        { closeButton: true },
+      );
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
+    },
+    onError: (error: Error) => {
+      const detail =
+        extractErrorMessage(error) ||
+        t("common.unknown", { defaultValue: "未知错误" });
+      toast.error(
+        t("proxy.server.startFailed", {
+          detail,
+          defaultValue: `启动代理服务失败: ${detail}`,
+        }),
+      );
+    },
+  });
+
+  // 停止服务器（仅停止服务，不改写/恢复其它应用接管状态）
+  const stopProxyServerMutation = useMutation({
+    mutationFn: () => proxyApi.stopProxyServer(),
+    onSuccess: () => {
+      toast.success(
+        t("proxy.server.stopped", {
+          defaultValue: "Routing service stopped",
+        }),
+        { closeButton: true },
+      );
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
+    },
+    onError: (error: Error) => {
+      const detail =
+        extractErrorMessage(error) ||
+        t("common.unknown", { defaultValue: "未知错误" });
+      toast.error(
+        t("proxy.server.stopFailed", {
+          detail,
+          defaultValue: "Failed to stop routing service: {{detail}}",
+        }),
+      );
+    },
+  });
+
+  // 停止服务器（总开关关闭：强制恢复所有已接管的 Live 配置）
+  const stopWithRestoreMutation = useMutation({
+    mutationFn: () => proxyApi.stopProxyWithRestore(),
+    onSuccess: () => {
+      toast.success(
+        t("proxy.stoppedWithRestore", {
+          defaultValue: "代理服务已关闭，已恢复所有接管配置",
+        }),
+        { closeButton: true },
+      );
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.proxy.takeoverStatus,
+      });
+      // 彻底删除所有供应商健康状态缓存（后端已清空数据库记录）
+      queryClient.removeQueries({
+        queryKey: queryKeys.failover.providerHealthAll,
+      });
+      // 彻底删除所有熔断器统计缓存（代理停止后熔断器状态已重置）
+      queryClient.removeQueries({
+        queryKey: queryKeys.failover.circuitBreakerStatsAll,
+      });
+      // 注意：故障转移队列和开关状态会保留，不需要刷新
+    },
+    onError: (error: Error) => {
+      const detail =
+        extractErrorMessage(error) ||
+        t("common.unknown", { defaultValue: "未知错误" });
+      toast.error(
+        t("proxy.stopWithRestoreFailed", {
+          detail,
+          defaultValue: `停止失败: ${detail}`,
+        }),
+      );
+    },
+  });
+
+  // 按应用开启/关闭接管
+  const setTakeoverForAppMutation = useMutation({
+    mutationFn: ({ appType, enabled }: { appType: string; enabled: boolean }) =>
+      proxyApi.setProxyTakeoverForApp(appType, enabled),
+    onSuccess: (_data, variables) => {
+      const appLabel = getAppLabel(variables.appType);
+
+      toast.success(
+        variables.enabled
+          ? t("proxy.takeover.enabled", {
+              app: appLabel,
+              defaultValue: `已接管 ${appLabel} 配置（请求将走本地代理）`,
+            })
+          : t("proxy.takeover.disabled", {
+              app: appLabel,
+              defaultValue: `已恢复 ${appLabel} 配置`,
+            }),
+        { closeButton: true },
+      );
+
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.proxy.takeoverStatus,
+      });
+    },
+    onError: (error: Error) => {
+      const detail =
+        extractErrorMessage(error) ||
+        t("common.unknown", { defaultValue: "未知错误" });
+      toast.error(
+        t("proxy.takeover.failed", {
+          detail,
+          defaultValue: `操作失败: ${detail}`,
+        }),
+      );
+    },
+  });
+
+  // 代理模式切换供应商（热切换）
+  const switchProxyProviderMutation = useMutation({
+    mutationFn: ({
+      appType,
+      providerId,
+    }: {
+      appType: string;
+      providerId: string;
+    }) => proxyApi.switchProxyProvider(appType, providerId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
+    },
+    onError: (error: Error) => {
+      const detail =
+        extractErrorMessage(error) ||
+        t("common.unknown", { defaultValue: "未知错误" });
+      toast.error(
+        t("proxy.switchFailed", {
+          error: detail,
+          defaultValue: `切换失败: ${detail}`,
+        }),
+      );
+    },
+  });
+
+  // 检查是否运行中
+  const checkRunning = async () => {
+    try {
+      return await proxyApi.isProxyRunning();
+    } catch {
+      return false;
+    }
+  };
+
+  // 检查接管状态
+  const checkTakeoverActive = async () => {
+    try {
+      return await proxyApi.isLiveTakeoverActive();
+    } catch {
+      return false;
+    }
+  };
+
+  return {
+    status,
+    isLoading,
+    isRunning: status?.running || false,
+    takeoverStatus,
+    isTakeoverActive: isAnyTakeoverActive(takeoverStatus),
+
+    // 启动/停止（总开关）
+    startProxyServer: startProxyServerMutation.mutateAsync,
+    stopProxyServer: stopProxyServerMutation.mutateAsync,
+    stopWithRestore: stopWithRestoreMutation.mutateAsync,
+
+    // 按应用接管开关
+    setTakeoverForApp: setTakeoverForAppMutation.mutateAsync,
+
+    // 代理模式下切换供应商
+    switchProxyProvider: switchProxyProviderMutation.mutateAsync,
+
+    // 状态检查
+    checkRunning,
+    checkTakeoverActive,
+
+    // 加载状态
+    isStarting: startProxyServerMutation.isPending,
+    isStoppingServer: stopProxyServerMutation.isPending,
+    isStopping: stopWithRestoreMutation.isPending,
+    isPending:
+      startProxyServerMutation.isPending ||
+      stopProxyServerMutation.isPending ||
+      stopWithRestoreMutation.isPending ||
+      setTakeoverForAppMutation.isPending,
+  };
 }
 
 // ========== 代理服务器控制 Hooks ==========
@@ -148,15 +377,17 @@ export function useSwitchProxyProvider() {
       });
     },
     onError: (error: Error) => {
-      toast.error(t("proxy.switchFailed", { error: error.message }));
+      toast.error(
+        t("proxy.switchFailed", { error: extractErrorMessage(error) }),
+      );
     },
   });
 }
 
-// ========== Legacy 代理配置 Hooks (兼容) ==========
+// ========== 代理配置 Hooks ==========
 
 /**
- * 获取代理配置（旧版）
+ * 获取代理配置（`@/hooks/useProxyConfig` re-exports this）
  */
 export function useProxyConfig() {
   const queryClient = useQueryClient();
@@ -174,9 +405,11 @@ export function useProxyConfig() {
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.config });
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
-        t("proxy.settings.toast.saveFailed", { error: error.message }),
+        t("proxy.settings.toast.saveFailed", {
+          error: extractErrorMessage(error),
+        }),
       );
     },
   });
@@ -217,9 +450,11 @@ export function useUpdateGlobalProxyConfig() {
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.config });
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
-        t("proxy.settings.toast.saveFailed", { error: error.message }),
+        t("proxy.settings.toast.saveFailed", {
+          error: extractErrorMessage(error),
+        }),
       );
     },
   });
@@ -260,9 +495,11 @@ export function useUpdateAppProxyConfig() {
       });
       queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
-    onError: (error: Error) => {
+    onError: (error: unknown) => {
       toast.error(
-        t("proxy.settings.toast.saveFailed", { error: error.message }),
+        t("proxy.settings.toast.saveFailed", {
+          error: extractErrorMessage(error),
+        }),
       );
     },
   });

@@ -69,15 +69,13 @@ export const useProvidersQuery = (
     refetchInterval: isProxyRunning ? 30_000 : false,
     refetchIntervalInBackground: false,
     queryFn: async () => {
-      let providers: Record<string, Provider> = {};
+      // A failed provider read must surface as a query error (FE-ARCH-06):
+      // swallowing it rendered "you have no providers" for a broken
+      // config/DB. The previous list stays visible via keepPreviousData.
+      const providers = await providersApi.getAll(appId);
       let currentProviderId = "";
 
-      try {
-        providers = await providersApi.getAll(appId);
-      } catch (error) {
-        console.error("获取供应商列表失败:", error);
-      }
-
+      // The current id is secondary: keep the list usable if only it fails.
       try {
         currentProviderId = await providersApi.getCurrent(appId);
       } catch (error) {
