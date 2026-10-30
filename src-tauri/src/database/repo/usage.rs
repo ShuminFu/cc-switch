@@ -1635,6 +1635,27 @@ impl Database {
             monthly_exceeded,
         })
     }
+
+    /// 列出 meta 中可能配置了日/月限额的 provider：`(id, app_type, name)`。
+    ///
+    /// 仅做 `LIKE` 粗筛，具体限额是否有效仍由 `check_provider_limits_at` 解析判定。
+    pub(crate) fn list_providers_with_spend_limits(
+        &self,
+    ) -> Result<Vec<(String, String, String)>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, app_type, name FROM providers
+                 WHERE meta LIKE '%limitDailyUsd%' OR meta LIKE '%limitMonthlyUsd%'
+                 ORDER BY app_type, id",
+            )
+            .map_err(|e| AppError::Database(format!("读取限额 provider 列表失败: {e}")))?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .map_err(|e| AppError::Database(format!("读取限额 provider 列表失败: {e}")))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(format!("读取限额 provider 列表失败: {e}")))
+    }
 }
 
 impl Database {

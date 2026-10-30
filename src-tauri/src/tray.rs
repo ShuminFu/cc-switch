@@ -86,7 +86,7 @@ fn map_locale_to_tray_language(locale: &str) -> &'static str {
 }
 
 /// 读取系统区域并映射为托盘语言码；取不到区域时回退到 `zh`。
-fn detect_system_tray_language() -> &'static str {
+pub(crate) fn detect_system_tray_language() -> &'static str {
     sys_locale::get_locale()
         .as_deref()
         .map(map_locale_to_tray_language)

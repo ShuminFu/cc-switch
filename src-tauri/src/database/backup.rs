@@ -48,7 +48,11 @@ const SYNC_PRESERVE_TABLES: &[&str] = &[
 
 /// Settings rows that belong to this install only: never exported, and kept
 /// from the local database on SQL import, sync import and backup restore.
-const LOCAL_ONLY_SETTING_KEYS: &[&str] = &[crate::proxy::inbound_auth::INBOUND_TOKEN_SETTING_KEY];
+const LOCAL_ONLY_SETTING_KEYS: &[&str] = &[
+    crate::proxy::inbound_auth::INBOUND_TOKEN_SETTING_KEY,
+    // 预算告警去重状态跟随本机用量日志
+    crate::services::budget_alerts::BUDGET_ALERT_STATE_KEY,
+];
 
 /// PRAGMAs that an imported SQL file may run; `dump_sql` only emits these.
 const SQL_IMPORT_ALLOWED_PRAGMAS: &[&str] = &["foreign_keys", "user_version"];

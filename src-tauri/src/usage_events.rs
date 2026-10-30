@@ -67,6 +67,9 @@ pub fn notify_log_recorded() {
         if let Err(e) = handle.emit(EVENT_USAGE_LOG_RECORDED, ()) {
             log::warn!("emit {EVENT_USAGE_LOG_RECORDED} 失败: {e}");
         }
+
+        // 同一防抖批次内评估 provider 日/月限额，跨过 80% / 100% 时发系统通知
+        crate::services::budget_alerts::on_usage_recorded(&handle);
     });
 }
 
