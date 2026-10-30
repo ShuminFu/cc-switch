@@ -1,4 +1,4 @@
-//! Golden tests for the protocol bridges (Anthropic and Responses clients).
+//! Golden tests for the protocol bridges (Anthropic, Responses and Gemini clients).
 //!
 //! Each directory under `tests/fixtures/proxy/<bridge>/<case>/` is one case
 //! (see `proxy::providers::testkit` for the layout). For every case this test
@@ -266,6 +266,26 @@ fn golden_responses_anthropic_ir() {
 #[test]
 fn codec_parity_responses_anthropic() {
     assert_codec_parity(Bridge::ResponsesAnthropic);
+}
+
+/// Minimum number of fixtures pinning the Gemini CLI -> Anthropic combination
+/// (CCS-187), across stream and non-stream cases.
+const MIN_GEMINI_ANTHROPIC_FIXTURES: usize = 10;
+
+/// Gemini CLI -> Anthropic (CCS-187) is a new combination with no legacy
+/// converter: both engines run the same IR codecs, so it runs once and checks
+/// its own fixture floor.
+#[test]
+fn golden_gemini_anthropic() {
+    let fixtures = load(Bridge::GeminiAnthropic);
+    assert!(
+        fixtures.len() >= MIN_GEMINI_ANTHROPIC_FIXTURES,
+        "expected at least {MIN_GEMINI_ANTHROPIC_FIXTURES} gemini__anthropic fixtures, found {}",
+        fixtures.len()
+    );
+    assert!(fixtures.iter().filter(|f| f.has_stream()).count() >= 5);
+    assert!(fixtures.iter().filter(|f| f.has_non_stream()).count() >= 5);
+    run_bridge(Bridge::GeminiAnthropic);
 }
 
 /// Minimum number of upstream bodies with a raw usage block that the usage

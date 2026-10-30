@@ -1,0 +1,6 @@
+intent = "An upstream stream cut off after partial text (no message_stop) is finished with MAX_TOKENS so the client does not treat it as a complete answer."
+source_commit = "0ddfcb2"
+
+[invariants]
+skip = ["usage_conservation"]
+skip_reason = "The upstream stream ends before message_delta: the Anthropic usage parser counts no output tokens, while the client reports the message_start output count that the IR carries for an aborted stream."

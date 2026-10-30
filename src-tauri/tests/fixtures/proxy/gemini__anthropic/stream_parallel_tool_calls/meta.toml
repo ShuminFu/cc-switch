@@ -1,0 +1,2 @@
+intent = "Parallel tool_use blocks whose input arrives as input_json_delta fragments are emitted as complete functionCall frames when each block stops, in block order."
+source_commit = "0ddfcb2"

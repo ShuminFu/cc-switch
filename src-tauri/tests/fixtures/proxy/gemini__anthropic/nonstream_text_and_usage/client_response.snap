@@ -1,0 +1,28 @@
+---
+source: tests/proxy_golden.rs
+description: "A non-stream Gemini CLI request maps systemInstruction, generationConfig sampling and stop sequences onto an Anthropic request; the Anthropic text reply becomes one candidate with STOP and usageMetadata."
+---
+# non-stream
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Hello there!"
+          }
+        ]
+      },
+      "index": 0,
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 21,
+    "candidatesTokenCount": 5,
+    "totalTokenCount": 26
+  },
+  "modelVersion": "claude-sonnet-4-5",
+  "responseId": "msg_g1"
+}

@@ -1,0 +1,2 @@
+intent = "A non-stream Gemini CLI request maps systemInstruction, generationConfig sampling (topP dropped next to temperature, which newer Claude models reject), topK and stop sequences onto an Anthropic request; the Anthropic text reply becomes one candidate with STOP and usageMetadata."
+source_commit = "0ddfcb2"

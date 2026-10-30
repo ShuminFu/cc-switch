@@ -1,0 +1,2 @@
+intent = "Text deltas stream live as one frame each; finishReason and the final usageMetadata (cache reads included in promptTokenCount) ride on the last content frame."
+source_commit = "0ddfcb2"

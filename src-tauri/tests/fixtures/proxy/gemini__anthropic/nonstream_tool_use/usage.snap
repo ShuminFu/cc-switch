@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: "Gemini Schema tool declarations (upper-case types, nullable) become JSON Schema tools, built-in tools are dropped and toolConfig ANY with one allowed name forces that tool; the tool_use reply becomes a functionCall that carries the Anthropic id."
+---
+# non-stream
+{
+  "input_tokens": 310,
+  "output_tokens": 40,
+  "cache_read_tokens": 0,
+  "cache_creation_tokens": 0,
+  "model": "claude-sonnet-4-5",
+  "message_id": null,
+  "billable": true
+}

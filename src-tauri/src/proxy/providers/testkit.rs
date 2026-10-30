@@ -5,15 +5,16 @@
 //!
 //! - Anthropic Messages clients: `anthropic__openai_chat`, `anthropic__gemini`,
 //!   `anthropic__responses`;
-//! - OpenAI Responses (Codex) clients: `responses__chat`, `responses__anthropic`.
+//! - OpenAI Responses (Codex) clients: `responses__chat`, `responses__anthropic`;
+//! - Gemini native clients (Gemini CLI): `gemini__anthropic`.
 //!
 //! Fixture layout (one directory per case):
 //!
 //! ```text
 //! tests/fixtures/proxy/<bridge>/<case>/
 //!   meta.toml                 intent, source, source commit, options, invariants
-//!   client_request.json       optional: request sent by the client (Anthropic
-//!                             or Responses, per the bridge's client protocol)
+//!   client_request.json       optional: request sent by the client (Anthropic,
+//!                             Responses or Gemini, per the bridge's client protocol)
 //!   upstream_response.sse     optional: raw upstream SSE body (stream case)
 //!   upstream_response.json    optional: upstream JSON body (non-stream case)
 //!   upstream_request.snap     snapshot: converted upstream request
@@ -79,6 +80,8 @@ pub enum Bridge {
     ResponsesChat,
     /// OpenAI Responses (Codex) client -> Anthropic Messages upstream.
     ResponsesAnthropic,
+    /// Gemini native client (Gemini CLI) -> Anthropic Messages upstream.
+    GeminiAnthropic,
 }
 
 /// Wire protocol spoken on one side of a bridge.
@@ -99,12 +102,13 @@ impl Protocol {
 }
 
 impl Bridge {
-    pub const ALL: [Bridge; 5] = [
+    pub const ALL: [Bridge; 6] = [
         Bridge::AnthropicOpenAiChat,
         Bridge::AnthropicGemini,
         Bridge::AnthropicResponses,
         Bridge::ResponsesChat,
         Bridge::ResponsesAnthropic,
+        Bridge::GeminiAnthropic,
     ];
 
     pub fn dir_name(self) -> &'static str {
@@ -114,6 +118,7 @@ impl Bridge {
             Bridge::AnthropicResponses => "anthropic__responses",
             Bridge::ResponsesChat => "responses__chat",
             Bridge::ResponsesAnthropic => "responses__anthropic",
+            Bridge::GeminiAnthropic => "gemini__anthropic",
         }
     }
 
@@ -124,6 +129,7 @@ impl Bridge {
                 Protocol::Anthropic
             }
             Bridge::ResponsesChat | Bridge::ResponsesAnthropic => Protocol::Responses,
+            Bridge::GeminiAnthropic => Protocol::Gemini,
         }
     }
 
@@ -133,7 +139,7 @@ impl Bridge {
             Bridge::AnthropicOpenAiChat | Bridge::ResponsesChat => Protocol::OpenAiChat,
             Bridge::AnthropicGemini => Protocol::Gemini,
             Bridge::AnthropicResponses => Protocol::Responses,
-            Bridge::ResponsesAnthropic => Protocol::Anthropic,
+            Bridge::ResponsesAnthropic | Bridge::GeminiAnthropic => Protocol::Anthropic,
         }
     }
 
@@ -183,7 +189,18 @@ pub struct CaseOptions {
     /// `store: false` and requests encrypted reasoning).
     #[serde(default)]
     pub codex_oauth: bool,
+    /// Gemini client: model name from the request URL (the body has none).
+    /// Defaults to [`GEMINI_CLIENT_DEFAULT_MODEL`].
+    #[serde(default)]
+    pub client_model: Option<String>,
+    /// Gemini client: whether the URL is `:streamGenerateContent`. Defaults to
+    /// whether the fixture ships an `upstream_response.sse`.
+    #[serde(default)]
+    pub client_stream: Option<bool>,
 }
+
+/// Model a Gemini client fixture requests when `client_model` is not set.
+pub const GEMINI_CLIENT_DEFAULT_MODEL: &str = "claude-sonnet-4-5";
 
 /// How the client stream is expected to end.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -452,15 +469,22 @@ impl ClientEvent {
     fn is_terminal(&self) -> bool {
         self.is_completion()
             || matches!(self.kind(), "error" | "response.failed")
+            || self.is_gemini_error()
             || self.event.as_deref() == Some(STREAM_ERROR_EVENT)
     }
 
-    /// Successful end of the message (possibly truncated by a token limit).
+    /// Successful end of the message (possibly truncated by a token limit);
+    /// for Gemini clients a frame carrying a `finishReason`.
     fn is_completion(&self) -> bool {
         matches!(
             self.kind(),
             "message_stop" | "response.completed" | "response.incomplete"
-        )
+        ) || gemini_finish_reason(&self.data).is_some()
+    }
+
+    /// Gemini error frame: `{"error": {...}}` without a `type`.
+    fn is_gemini_error(&self) -> bool {
+        self.kind().is_empty() && self.data.get("error").is_some()
     }
 }
 
@@ -509,11 +533,25 @@ pub fn convert_request_with(
         Bridge::ResponsesAnthropic => {
             bridge::responses_to_anthropic_request(body, CODEX_ANTHROPIC_DEFAULT_MAX_TOKENS, engine)
         }
+        // A new combination without a legacy converter: always the IR codecs.
+        Bridge::GeminiAnthropic => {
+            let options = &fixture.meta.options;
+            bridge::gemini_client_to_anthropic_request(
+                body,
+                options
+                    .client_model
+                    .as_deref()
+                    .unwrap_or(GEMINI_CLIENT_DEFAULT_MODEL),
+                options.client_stream.unwrap_or(fixture.has_stream()),
+                CODEX_ANTHROPIC_DEFAULT_MAX_TOKENS,
+            )
+        }
     };
     Some(result.map_err(|e| e.to_string()))
 }
 
-/// `DEFAULT_CODEX_ANTHROPIC_MAX_TOKENS` in the forwarder.
+/// `DEFAULT_CODEX_ANTHROPIC_MAX_TOKENS` in the forwarder (also the Gemini ->
+/// Anthropic default).
 const CODEX_ANTHROPIC_DEFAULT_MAX_TOKENS: u64 = 8192;
 
 /// Convert the non-stream upstream body into the client response.
@@ -542,6 +580,7 @@ pub fn convert_non_stream_with(
         Bridge::ResponsesAnthropic => {
             bridge::anthropic_to_responses_response(body, &fixture.codex_tool_context(), engine)
         }
+        Bridge::GeminiAnthropic => bridge::anthropic_to_gemini_client_response(body),
     };
     Some(result.map_err(|e| e.to_string()))
 }
@@ -593,6 +632,9 @@ pub fn stream_output_with(
             bridge::anthropic_to_responses_sse(upstream, fixture.codex_tool_context(), engine)
                 .collect(),
         ),
+        Bridge::GeminiAnthropic => {
+            futures::executor::block_on(bridge::anthropic_to_gemini_client_sse(upstream).collect())
+        }
     }
 }
 
@@ -698,6 +740,7 @@ fn recorded_stream_usage(client: Protocol, events: &[ClientEvent]) -> Option<Tok
     let data: Vec<Value> = events.iter().map(|event| event.data.clone()).collect();
     match client {
         Protocol::Responses => TokenUsage::from_codex_stream_events_auto(&data),
+        Protocol::Gemini => TokenUsage::from_gemini_stream_chunks(&data),
         _ => TokenUsage::from_claude_stream_events(&data),
     }
 }
@@ -705,6 +748,7 @@ fn recorded_stream_usage(client: Protocol, events: &[ClientEvent]) -> Option<Tok
 fn recorded_response_usage(client: Protocol, response: &Value) -> Option<TokenUsage> {
     match client {
         Protocol::Responses => TokenUsage::from_codex_response_auto(response),
+        Protocol::Gemini => TokenUsage::from_gemini_response(response),
         _ => TokenUsage::from_claude_response(response),
     }
 }
@@ -1230,6 +1274,9 @@ pub fn check_stream_invariants(
     if bridge.client() == Protocol::Responses {
         return check_responses_stream_invariants(bridge, events, terminal, skip, upstream_usage);
     }
+    if bridge.client() == Protocol::Gemini {
+        return check_gemini_stream_invariants(bridge, events, terminal, skip, upstream_usage);
+    }
     let mut violations: Vec<(Invariant, String)> = Vec::new();
     let mut fail = |inv: Invariant, message: String| violations.push((inv, message));
     let describe = |i: usize, event: &ClientEvent| format!("event #{i} ({})", event.data);
@@ -1503,6 +1550,9 @@ pub fn check_response_invariants(
 ) -> Vec<String> {
     if bridge.client() == Protocol::Responses {
         return check_responses_response_invariants(bridge, response, skip, upstream_usage);
+    }
+    if bridge.client() == Protocol::Gemini {
+        return check_gemini_response_invariants(bridge, response, skip, upstream_usage);
     }
     let mut violations: Vec<(Invariant, String)> = Vec::new();
     let empty = Vec::new();
@@ -1873,6 +1923,160 @@ fn check_responses_response_invariants(
     report_violations(violations, skip)
 }
 
+/// `finishReason` of the first candidate of a Gemini response or stream frame.
+fn gemini_finish_reason(frame: &Value) -> Option<&str> {
+    frame.pointer("/candidates/0/finishReason")?.as_str()
+}
+
+/// Content parts of the first candidate of a Gemini response or stream frame.
+fn gemini_parts(frame: &Value) -> &[Value] {
+    frame
+        .pointer("/candidates/0/content/parts")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+}
+
+/// `tool_ids` / `tool_input_json` / `reasoning_first` checks on Gemini parts in
+/// output order (stream frames concatenated).
+fn check_gemini_parts(parts: &[&Value], violations: &mut Vec<(Invariant, String)>) {
+    let mut tool_ids = HashSet::new();
+    let mut seen_non_thought = false;
+    for (i, part) in parts.iter().enumerate() {
+        if let Some(call) = part.get("functionCall") {
+            seen_non_thought = true;
+            let id = call.get("id").and_then(Value::as_str).unwrap_or_default();
+            let name = call.get("name").and_then(Value::as_str).unwrap_or_default();
+            if id.is_empty() || name.is_empty() {
+                violations.push((
+                    Invariant::ToolIds,
+                    format!("part #{i} has an empty functionCall id or name"),
+                ));
+            } else if !tool_ids.insert(id.to_string()) {
+                violations.push((Invariant::ToolIds, format!("part #{i} reuses id {id}")));
+            }
+            if !call.get("args").is_some_and(Value::is_object) {
+                violations.push((
+                    Invariant::ToolInputJson,
+                    format!("part #{i} functionCall args is not an object"),
+                ));
+            }
+        } else if part.get("thought").and_then(Value::as_bool) == Some(true) {
+            if seen_non_thought {
+                violations.push((
+                    Invariant::ReasoningFirst,
+                    format!("part #{i} is a thought after content"),
+                ));
+            }
+        } else if part
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.is_empty())
+        {
+            seen_non_thought = true;
+        }
+    }
+}
+
+/// Stream invariants for a Gemini client: data-only frames, one `finishReason`
+/// on the last frame (or one error frame), valid tool calls and conserved usage.
+fn check_gemini_stream_invariants(
+    bridge: Bridge,
+    events: &[ClientEvent],
+    terminal: Terminal,
+    skip: &HashSet<Invariant>,
+    upstream_usage: Option<&TokenUsage>,
+) -> Vec<String> {
+    let mut violations: Vec<(Invariant, String)> = Vec::new();
+    for (i, event) in events.iter().enumerate() {
+        if event.event.is_some() && event.event.as_deref() != Some(STREAM_ERROR_EVENT) {
+            violations.push((
+                Invariant::EventNames,
+                format!("frame #{i} has SSE event name {:?}", event.event),
+            ));
+        }
+    }
+    let parts: Vec<&Value> = events
+        .iter()
+        .flat_map(|event| gemini_parts(&event.data))
+        .collect();
+    check_gemini_parts(&parts, &mut violations);
+
+    let terminals: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.is_terminal())
+        .map(|(i, _)| i)
+        .collect();
+    match terminal {
+        Terminal::None => {
+            if !terminals.is_empty() {
+                violations.push((
+                    Invariant::Terminal,
+                    format!("expected no terminal frame, found them at {terminals:?}"),
+                ));
+            }
+        }
+        Terminal::MessageStop | Terminal::Error => {
+            let last = events.len().checked_sub(1);
+            if terminals.len() != 1 || terminals.first().copied() != last {
+                violations.push((
+                    Invariant::Terminal,
+                    format!(
+                        "expected exactly one terminal frame as the last of {} frames, found {terminals:?}",
+                        events.len()
+                    ),
+                ));
+            } else if events[terminals[0]].is_completion() != (terminal == Terminal::MessageStop) {
+                violations.push((
+                    Invariant::Terminal,
+                    format!(
+                        "expected {terminal:?} terminal, got {}",
+                        events[terminals[0]].data
+                    ),
+                ));
+            }
+        }
+    }
+
+    if terminal == Terminal::MessageStop {
+        if let Err(problem) = check_usage_conservation(
+            bridge,
+            upstream_usage,
+            &client_stream_usage(bridge.client(), events),
+        ) {
+            violations.push((Invariant::UsageConservation, problem));
+        }
+    }
+    report_violations(violations, skip)
+}
+
+/// Non-stream invariants for a Gemini client response.
+fn check_gemini_response_invariants(
+    bridge: Bridge,
+    response: &Value,
+    skip: &HashSet<Invariant>,
+    upstream_usage: Option<&TokenUsage>,
+) -> Vec<String> {
+    let mut violations: Vec<(Invariant, String)> = Vec::new();
+    let parts: Vec<&Value> = gemini_parts(response).iter().collect();
+    check_gemini_parts(&parts, &mut violations);
+    if gemini_finish_reason(response).is_none() {
+        violations.push((
+            Invariant::Terminal,
+            "response has no finishReason".to_string(),
+        ));
+    }
+    if let Err(problem) = check_usage_conservation(
+        bridge,
+        upstream_usage,
+        &client_response_usage(bridge.client(), response),
+    ) {
+        violations.push((Invariant::UsageConservation, problem));
+    }
+    report_violations(violations, skip)
+}
+
 // ---------------------------------------------------------------------------
 // Chunk-split fuzzing
 // ---------------------------------------------------------------------------
@@ -2065,6 +2269,20 @@ pub fn aggregate_stream_message(client: Protocol, events: &[ClientEvent]) -> Val
     if client == Protocol::Responses {
         return aggregate_responses_stream(events);
     }
+    if client == Protocol::Gemini {
+        let parts: Vec<&Value> = events
+            .iter()
+            .flat_map(|event| gemini_parts(&event.data))
+            .collect();
+        return json!({
+            "parts": merge_gemini_parts(&parts),
+            "finishReason": events
+                .iter()
+                .rev()
+                .find_map(|event| gemini_finish_reason(&event.data)),
+            "usage": client_stream_usage(client, events),
+        });
+    }
     let mut blocks: Vec<(u64, Map<String, Value>, String)> = Vec::new();
     let mut stop_reason = Value::Null;
     for event in events {
@@ -2122,6 +2340,45 @@ pub fn aggregate_stream_message(client: Protocol, events: &[ClientEvent]) -> Val
         "stop_reason": stop_reason,
         "usage": client_stream_usage(client, events),
     })
+}
+
+/// Gemini parts with adjacent text pieces of the same kind (thought or not)
+/// joined, functionCall ids and thought signatures dropped: the shape both the
+/// stream and non-stream paths must agree on.
+fn merge_gemini_parts(parts: &[&Value]) -> Vec<Value> {
+    let mut merged: Vec<Value> = Vec::new();
+    for part in parts {
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            if text.is_empty() {
+                continue;
+            }
+            let thought = part.get("thought").and_then(Value::as_bool) == Some(true);
+            if let Some(last) = merged.last_mut() {
+                let last_thought = last.get("thought").and_then(Value::as_bool) == Some(true);
+                if let (Some(previous), true) = (
+                    last.get("text").and_then(Value::as_str),
+                    last_thought == thought,
+                ) {
+                    last["text"] = json!(format!("{previous}{text}"));
+                    continue;
+                }
+            }
+            merged.push(if thought {
+                json!({ "text": text, "thought": true })
+            } else {
+                json!({ "text": text })
+            });
+        } else if let Some(call) = part.get("functionCall") {
+            let mut call = call.clone();
+            if let Some(map) = call.as_object_mut() {
+                map.remove("id");
+            }
+            merged.push(json!({ "functionCall": call }));
+        } else {
+            merged.push((*part).clone());
+        }
+    }
+    merged
 }
 
 fn aggregate_responses_stream(events: &[ClientEvent]) -> Value {
@@ -2213,7 +2470,26 @@ pub fn parity_diff(
     }
 
     let non_stream_usage = client_response_usage(client, non_stream_response);
+    let gemini_non_stream;
+    let non_stream_response = if client == Protocol::Gemini {
+        let parts: Vec<&Value> = gemini_parts(non_stream_response).iter().collect();
+        gemini_non_stream = json!({
+            "parts": merge_gemini_parts(&parts),
+            "finishReason": gemini_finish_reason(non_stream_response),
+        });
+        &gemini_non_stream
+    } else {
+        non_stream_response
+    };
     let (stop_field, content_field, content) = match client {
+        Protocol::Gemini => (
+            "finishReason",
+            "parts",
+            (
+                stream_message["parts"].clone(),
+                non_stream_response["parts"].clone(),
+            ),
+        ),
         Protocol::Responses => (
             "status",
             "output",

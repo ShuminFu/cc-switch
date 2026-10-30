@@ -1,0 +1,70 @@
+---
+source: tests/proxy_golden.rs
+description: Thinking deltas stream as thought parts; the signed thinking is packed into the thoughtSignature of the first functionCall frame only.
+---
+{
+  "model": "claude-sonnet-4-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "fix the bug"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 30000,
+  "thinking": {
+    "type": "enabled",
+    "budget_tokens": 15000
+  },
+  "stream": true,
+  "tools": [
+    {
+      "name": "read_file",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "absolute_path": {
+            "type": "string",
+            "description": "Absolute path"
+          },
+          "offset": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "absolute_path"
+        ]
+      },
+      "description": "Reads a file from the local filesystem."
+    },
+    {
+      "name": "run_shell_command",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "directory": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "description": "Runs a shell command."
+    }
+  ]
+}

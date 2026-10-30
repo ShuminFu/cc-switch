@@ -1,0 +1,9 @@
+---
+source: tests/proxy_golden.rs
+description: Thinking deltas stream as thought parts; the signed thinking is packed into the thoughtSignature of the first functionCall frame only.
+---
+# stream
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"Look at ","thought":true}]},"index":0}],"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":1,"totalTokenCount":121},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"the file.","thought":true}]},"index":0}],"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":1,"totalTokenCount":121},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"toolu_T1","name":"read_file","args":{"absolute_path":"/src/main.rs"}},"thoughtSignature":"ccswitch-anthropic-thinking-list-v1:W3sidHlwZSI6InRoaW5raW5nIiwidGhpbmtpbmciOiJMb29rIGF0IHRoZSBmaWxlLiIsInNpZ25hdHVyZSI6IkVxTUJDa1lJQnhnQ0trQnNpZyJ9XQ"}]},"index":0}],"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":1,"totalTokenCount":121},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"toolu_T2","name":"run_shell_command","args":{"command":"cargo test"}}}]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":120,"candidatesTokenCount":60,"totalTokenCount":180},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}

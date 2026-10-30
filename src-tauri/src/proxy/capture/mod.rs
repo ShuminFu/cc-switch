@@ -1,7 +1,7 @@
 //! 缺陷报告抓包（CaptureTap）：按需、限时地记录协议桥请求的完整往返。
 //!
 //! 用户在请求日志里开启抓包后（默认 10 分钟，到期自动关闭），每个走协议桥
-//! （Anthropic ↔ Chat/Gemini/Responses、Responses ↔ Chat/Anthropic）的请求记录：
+//! （Anthropic ↔ Chat/Gemini/Responses、Responses ↔ Chat/Anthropic、Gemini ↔ Anthropic）的请求记录：
 //!
 //! - 客户端请求（方法、路径、请求头、JSON 体）；
 //! - 实际发往上游的请求（最后一次尝试的 URL、请求头、JSON 体）；
@@ -49,16 +49,18 @@ pub enum CaptureBridge {
     AnthropicResponses,
     ResponsesChat,
     ResponsesAnthropic,
+    GeminiAnthropic,
 }
 
 impl CaptureBridge {
     #[cfg(test)]
-    pub const ALL: [CaptureBridge; 5] = [
+    pub const ALL: [CaptureBridge; 6] = [
         CaptureBridge::AnthropicOpenAiChat,
         CaptureBridge::AnthropicGemini,
         CaptureBridge::AnthropicResponses,
         CaptureBridge::ResponsesChat,
         CaptureBridge::ResponsesAnthropic,
+        CaptureBridge::GeminiAnthropic,
     ];
 
     pub fn dir_name(self) -> &'static str {
@@ -68,6 +70,7 @@ impl CaptureBridge {
             CaptureBridge::AnthropicResponses => "anthropic__responses",
             CaptureBridge::ResponsesChat => "responses__chat",
             CaptureBridge::ResponsesAnthropic => "responses__anthropic",
+            CaptureBridge::GeminiAnthropic => "gemini__anthropic",
         }
     }
 
@@ -85,8 +88,7 @@ impl CaptureBridge {
             }
             ResponseDecode::ResponsesFromChat => Some(CaptureBridge::ResponsesChat),
             ResponseDecode::ResponsesFromAnthropic => Some(CaptureBridge::ResponsesAnthropic),
-            // Gemini 客户端 ← Anthropic（CCS-187）的 fixture 导出随 golden 桥接一起提供
-            ResponseDecode::GeminiFromAnthropic => None,
+            ResponseDecode::GeminiFromAnthropic => Some(CaptureBridge::GeminiAnthropic),
             ResponseDecode::AnthropicFrom(ClaudeApiFormat::Anthropic)
             | ResponseDecode::Passthrough => None,
         }

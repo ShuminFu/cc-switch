@@ -1,0 +1,2 @@
+intent = "Gemini Schema tool declarations (upper-case types, nullable) become JSON Schema tools, built-in tools are dropped and toolConfig ANY with one allowed name forces that tool; the tool_use reply becomes a functionCall that carries the Anthropic id."
+source_commit = "0ddfcb2"

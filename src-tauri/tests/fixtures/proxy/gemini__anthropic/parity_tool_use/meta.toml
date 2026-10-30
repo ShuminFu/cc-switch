@@ -1,0 +1,6 @@
+intent = "The same Anthropic tool_use reply converts to the same functionCall parts and STOP finishReason in stream and non-stream mode."
+source_commit = "0ddfcb2"
+
+[parity]
+expected_diff = [
+]

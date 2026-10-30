@@ -1,0 +1,2 @@
+intent = "Signed thinking and redacted thinking are packed into the thoughtSignature of the first functionCall (the thinking text is also shown as a thought part) so the next tool-result request can replay them; a positive thinkingBudget enables Anthropic thinking without sampling parameters."
+source_commit = "0ddfcb2"

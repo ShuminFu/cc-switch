@@ -413,6 +413,64 @@ async fn capture_of_a_golden_case_replays_green() {
     assert!(outcome.client_response.is_some());
 }
 
+/// A Gemini client capture keeps the model and stream flag from the request
+/// URL (the body has neither) and replays through the gemini__anthropic bridge.
+#[tokio::test]
+async fn capture_export_of_a_gemini_client_round_trips_through_the_testkit() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/proxy");
+    let original = testkit::load_fixture(
+        Bridge::GeminiAnthropic,
+        &root.join("gemini__anthropic/parity_text_stop"),
+    )
+    .expect("golden fixture");
+    let sse = original.upstream_sse.clone().expect("stream body");
+
+    let store = CaptureStore::default();
+    store.arm(Duration::from_secs(60));
+    let capture = store.begin("gemini", "g1").expect("armed");
+    capture.record_client_request(
+        &Method::POST,
+        &Uri::from_static("/v1beta/models/claude-haiku-4-5:streamGenerateContent?alt=sse"),
+        &HeaderMap::new(),
+        original.client_request.as_ref().expect("client request"),
+    );
+    capture.set_route("g1", CaptureBridge::GeminiAnthropic, false);
+    feed(
+        &capture,
+        CaptureSide::Upstream,
+        &[std::str::from_utf8(&sse).unwrap()],
+    )
+    .await;
+    capture.set_request_id("req-gemini");
+
+    let entries = unzip(&store.export_zip("req-gemini").expect("export"));
+    let dir = tempfile::tempdir().expect("tempdir");
+    for (name, contents) in &entries {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    let case = capture.with_record(export::case_name);
+    let fixture = testkit::load_fixture(
+        Bridge::GeminiAnthropic,
+        &dir.path().join("gemini__anthropic").join(case),
+    )
+    .expect("load export");
+    assert_eq!(
+        fixture.meta.options.client_model.as_deref(),
+        Some("claude-haiku-4-5")
+    );
+    assert_eq!(fixture.meta.options.client_stream, Some(true));
+    let outcome = testkit::run_fixture(&fixture);
+    assert!(outcome.failures.is_empty(), "{:#?}", outcome.failures);
+    let request = outcome.upstream_request.expect("upstream request");
+    assert!(
+        request.contains("\"model\": \"claude-haiku-4-5\""),
+        "{request}"
+    );
+    assert!(request.contains("\"stream\": true"), "{request}");
+}
+
 #[tokio::test]
 async fn capture_export_records_terminal_and_upstream_error() {
     let store = CaptureStore::default();
@@ -551,5 +609,9 @@ fn capture_bridges_match_the_golden_testkit() {
     assert_eq!(
         CaptureBridge::from_decode(ResponseDecode::ResponsesFromChat),
         Some(CaptureBridge::ResponsesChat)
+    );
+    assert_eq!(
+        CaptureBridge::from_decode(ResponseDecode::GeminiFromAnthropic),
+        Some(CaptureBridge::GeminiAnthropic)
     );
 }

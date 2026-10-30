@@ -22,6 +22,7 @@ use zip::write::SimpleFileOptions;
 use super::redact::{redact_bytes, redact_json};
 use super::{CaptureBridge, CaptureRecord, CapturedBody, CapturedRequest};
 use crate::error::AppError;
+use crate::proxy::providers::GeminiGenerateEndpoint;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 
 /// capture.json 的格式版本
@@ -48,11 +49,21 @@ struct ExportOptions {
     upstream_error: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     codex_oauth: bool,
+    /// Gemini 客户端：URL 中的模型名（请求体不含模型）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_model: Option<String>,
+    /// Gemini 客户端：URL 是否为 `:streamGenerateContent`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_stream: Option<bool>,
 }
 
 impl ExportOptions {
     fn is_empty(&self) -> bool {
-        !self.preserve_reasoning_content && self.upstream_error.is_none() && !self.codex_oauth
+        !self.preserve_reasoning_content
+            && self.upstream_error.is_none()
+            && !self.codex_oauth
+            && self.client_model.is_none()
+            && self.client_stream.is_none()
     }
 }
 
@@ -133,6 +144,11 @@ pub(crate) fn build_files(
     }
 
     let client_response = BodyFile::from_body(&record.client);
+    let gemini_endpoint = record
+        .client_request
+        .as_ref()
+        .filter(|_| bridge == CaptureBridge::GeminiAnthropic)
+        .and_then(|request| GeminiGenerateEndpoint::parse(&request.url));
     let meta = ExportMeta {
         intent: intent(record, bridge),
         source_commit: SOURCE_COMMIT.to_string(),
@@ -149,6 +165,10 @@ pub(crate) fn build_files(
                 .clone()
                 .filter(|_| record.upstream.is_stream),
             codex_oauth: record.codex_oauth && bridge == CaptureBridge::AnthropicResponses,
+            client_model: gemini_endpoint
+                .as_ref()
+                .map(|endpoint| endpoint.model.clone()),
+            client_stream: gemini_endpoint.as_ref().map(|endpoint| endpoint.stream),
         },
         invariants: ExportInvariants {
             terminal: client_response.as_ref().and_then(BodyFile::terminal),

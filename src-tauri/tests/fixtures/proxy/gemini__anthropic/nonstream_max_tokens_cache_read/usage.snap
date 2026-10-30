@@ -1,0 +1,14 @@
+---
+source: tests/proxy_golden.rs
+description: max_tokens maps to MAX_TOKENS; Anthropic cache reads are folded into promptTokenCount and reported as cachedContentTokenCount.
+---
+# non-stream
+{
+  "input_tokens": 1510,
+  "output_tokens": 16,
+  "cache_read_tokens": 1500,
+  "cache_creation_tokens": 0,
+  "model": "claude-sonnet-4-5",
+  "message_id": null,
+  "billable": true
+}

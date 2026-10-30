@@ -1,0 +1,20 @@
+---
+source: tests/proxy_golden.rs
+description: "A stream request answered with one whole Anthropic JSON message (gateway ignored stream:true) still becomes a complete Gemini stream."
+---
+{
+  "model": "claude-sonnet-4-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192,
+  "stream": true
+}

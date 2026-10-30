@@ -1,0 +1,41 @@
+---
+source: tests/proxy_golden.rs
+description: The same Anthropic tool_use reply converts to the same functionCall parts and STOP finishReason in stream and non-stream mode.
+---
+# stream
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"text":"Checking."}]},"index":0}],"usageMetadata":{"promptTokenCount":50,"candidatesTokenCount":1,"totalTokenCount":51},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+<no-event-name> {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"toolu_P1","name":"run_shell_command","args":{"command":"git status"}}}]},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":50,"candidatesTokenCount":20,"totalTokenCount":70},"modelVersion":"claude-sonnet-4-5","responseId":"msg_g1"}
+
+# non-stream
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Checking."
+          },
+          {
+            "functionCall": {
+              "id": "toolu_P1",
+              "name": "run_shell_command",
+              "args": {
+                "command": "git status"
+              }
+            }
+          }
+        ]
+      },
+      "index": 0,
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 50,
+    "candidatesTokenCount": 20,
+    "totalTokenCount": 70
+  },
+  "modelVersion": "claude-sonnet-4-5",
+  "responseId": "msg_g1"
+}

@@ -1,0 +1,25 @@
+---
+source: tests/proxy_golden.rs
+description: "A non-stream Gemini CLI request maps systemInstruction, generationConfig sampling (topP dropped next to temperature, which newer Claude models reject), topK and stop sequences onto an Anthropic request; the Anthropic text reply becomes one candidate with STOP and usageMetadata."
+---
+{
+  "model": "claude-sonnet-4-5",
+  "system": "You are a CLI agent.\n\nBe concise.",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Say hello"
+        }
+      ]
+    }
+  ],
+  "max_tokens": 2048,
+  "temperature": 0.3,
+  "top_k": 64,
+  "stop_sequences": [
+    "<END>"
+  ]
+}

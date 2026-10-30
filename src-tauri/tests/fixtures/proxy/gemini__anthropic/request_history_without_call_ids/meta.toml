@@ -1,0 +1,2 @@
+intent = "A multi-turn Gemini history whose functionCall parts have no ids gets deterministic positional ids; functionResponse parts pair by name, output/error results map to tool_result content and is_error, unsigned thought parts are dropped, consecutive user contents merge and inline media become image/document blocks."
+source_commit = "0ddfcb2"

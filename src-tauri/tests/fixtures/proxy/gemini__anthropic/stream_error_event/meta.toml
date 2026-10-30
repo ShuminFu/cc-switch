@@ -1,0 +1,5 @@
+intent = "An Anthropic overloaded_error event mid-stream flushes the pending text frame and ends the stream with a Gemini error frame (503 UNAVAILABLE), without a finishReason."
+source_commit = "0ddfcb2"
+
+[invariants]
+terminal = "error"

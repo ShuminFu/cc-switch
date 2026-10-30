@@ -1,0 +1,2 @@
+intent = "A stream request answered with one whole Anthropic JSON message (gateway ignored stream:true) still becomes a complete Gemini stream."
+source_commit = "0ddfcb2"

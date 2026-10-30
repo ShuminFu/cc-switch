@@ -1,0 +1,150 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Look at the screenshot and the log"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "inlineData": {
+            "mimeType": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUg=="
+          }
+        },
+        {
+          "inlineData": {
+            "mimeType": "text/plain",
+            "data": "bG9nIGxpbmUgMQ=="
+          }
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "text": "Plan: read then run",
+          "thought": true
+        },
+        {
+          "text": "I'll check two things."
+        },
+        {
+          "functionCall": {
+            "name": "run_shell_command",
+            "args": {
+              "command": "ls"
+            }
+          }
+        },
+        {
+          "functionCall": {
+            "name": "read_file",
+            "args": {
+              "absolute_path": "/x"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "read_file",
+            "response": {
+              "output": "file body"
+            }
+          }
+        },
+        {
+          "functionResponse": {
+            "name": "run_shell_command",
+            "response": {
+              "error": "permission denied"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "model",
+      "parts": [
+        {
+          "text": "The command failed."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "Try again with sudo"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "read_file",
+          "description": "Reads a file from the local filesystem.",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "absolute_path": {
+                "type": "STRING",
+                "description": "Absolute path"
+              },
+              "offset": {
+                "type": "NUMBER",
+                "nullable": true
+              },
+              "limit": {
+                "type": "NUMBER"
+              }
+            },
+            "required": [
+              "absolute_path"
+            ]
+          }
+        },
+        {
+          "name": "run_shell_command",
+          "description": "Runs a shell command.",
+          "parametersJsonSchema": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "directory": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      ]
+    },
+    {
+      "googleSearch": {}
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "AUTO"
+    }
+  }
+}

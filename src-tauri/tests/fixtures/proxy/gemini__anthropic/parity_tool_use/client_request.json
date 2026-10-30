@@ -1,0 +1,63 @@
+{
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "status?"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "read_file",
+          "description": "Reads a file from the local filesystem.",
+          "parameters": {
+            "type": "OBJECT",
+            "properties": {
+              "absolute_path": {
+                "type": "STRING",
+                "description": "Absolute path"
+              },
+              "offset": {
+                "type": "NUMBER",
+                "nullable": true
+              },
+              "limit": {
+                "type": "NUMBER"
+              }
+            },
+            "required": [
+              "absolute_path"
+            ]
+          }
+        },
+        {
+          "name": "run_shell_command",
+          "description": "Runs a shell command.",
+          "parametersJsonSchema": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "directory": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        }
+      ]
+    },
+    {
+      "googleSearch": {}
+    }
+  ]
+}
