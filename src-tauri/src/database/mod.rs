@@ -16,6 +16,7 @@
 //! ├── migrations/   - 版本化迁移（MIGRATIONS、v1 冻结基线、schema_migrations 审计表）
 //! ├── backup.rs     - SQL 导入导出 + 快照备份
 //! ├── journal.rs    - journal_mode / synchronous / busy_timeout
+//! ├── maintenance.rs - 按 RetentionPolicy 汇总 / 清理使用量数据与备份（Maintenance::run）
 //! ├── migration.rs  - JSON → SQLite 数据迁移
 //! ├── repo/         - 使用量 / 定价 / 会话导入游标仓库（UsageQuery、UsageSource）
 //! └── dao/          - 数据访问对象
@@ -29,6 +30,7 @@
 pub(crate) mod backup;
 mod dao;
 pub(crate) mod journal;
+mod maintenance;
 mod migration;
 mod migrations;
 pub(crate) mod repo;
@@ -48,6 +50,7 @@ pub(crate) use dao::proxy::{
 pub(crate) use dao::usage_rollup::local_midnight_timestamp;
 pub use dao::FailoverQueueItem;
 pub use dao::Profile;
+pub use maintenance::Maintenance;
 
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
@@ -60,7 +63,7 @@ use std::sync::{Arc, Mutex};
 
 /// 当前 Schema 版本号
 /// 每次修改表结构时递增，并在 `migrations::MIGRATIONS` 末尾追加对应的迁移步骤
-pub const SCHEMA_VERSION: i32 = 19;
+pub const SCHEMA_VERSION: i32 = 20;
 
 /// 安全地序列化 JSON，避免 unwrap panic
 pub(crate) fn to_json_string<T: Serialize>(value: &T) -> Result<String, AppError> {
@@ -178,14 +181,9 @@ impl Database {
         }
         db.ensure_model_pricing_seeded()?;
 
-        // Startup cleanup: prune old logs and reclaim space
-        if let Err(e) = db.cleanup_old_stream_check_logs(7) {
-            log::warn!("Startup stream_check_logs cleanup failed: {e}");
-        }
-        if let Err(e) = db.rollup_and_prune(30) {
-            log::warn!("Startup rollup_and_prune failed: {e}");
-        }
-        // Reclaim disk space after cleanup
+        // Startup cleanup: prune old logs per the retention policy and reclaim space
+        Maintenance::run(&db, &crate::settings::effective_retention_policy());
+        // Reclaim disk space after cleanup (also free pages left by migrations)
         {
             let conn = lock_conn!(db.conn);
             if let Err(e) = conn.execute_batch("PRAGMA incremental_vacuum;") {

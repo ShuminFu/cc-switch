@@ -67,6 +67,35 @@ pub fn fresh_input_sql(alias: &str) -> String {
     )
 }
 
+/// Integer micro-USD per US dollar: `usage_daily_rollups.total_cost_micros`
+/// stores costs in this unit so rollup sums are exact integer additions.
+pub(crate) const MICRO_USD_PER_USD: i64 = 1_000_000;
+
+/// Build an SQL expression converting a decimal-text cost column (such as
+/// `l.total_cost_usd`) into integer micro-USD, rounded half away from zero.
+///
+/// Rollups sum this per-row value, so a rollup's `total_cost_micros` equals
+/// the sum of its detail rows' micro-USD costs exactly.
+pub(crate) fn cost_micros_sql(column: &str) -> String {
+    format!("CAST(ROUND(COALESCE(CAST({column} AS REAL), 0) * {MICRO_USD_PER_USD}) AS INTEGER)")
+}
+
+/// Build an SQL expression rendering an integer micro-USD expression as the
+/// exact decimal text written to `usage_daily_rollups.total_cost_usd`
+/// (e.g. `1000000` → `'1.000000'`).
+pub(crate) fn micros_to_usd_text_sql(micros: &str) -> String {
+    format!(
+        "printf('%s%d.%06d', CASE WHEN ({micros}) < 0 THEN '-' ELSE '' END, \
+         abs({micros}) / {MICRO_USD_PER_USD}, abs({micros}) % {MICRO_USD_PER_USD})"
+    )
+}
+
+/// Build an SQL aggregate summing a rollup alias' integer micro-USD cost and
+/// returning it in USD (REAL). The sum itself is an exact integer addition.
+pub(crate) fn rollup_cost_usd_sum_sql(alias: &str) -> String {
+    format!("(COALESCE(SUM({alias}.total_cost_micros), 0) / {MICRO_USD_PER_USD}.0)")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +246,29 @@ mod tests {
         let sql = format!("SELECT {expr} FROM proxy_request_logs l");
         let value: i64 = conn.query_row(&sql, [], |row| row.get(0)).unwrap();
         assert_eq!(value, 500);
+    }
+
+    #[test]
+    fn cost_micros_round_trip_through_text() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (text, micros, rendered) in [
+            ("0.1", 100_000_i64, "0.100000"),
+            ("0.0000005", 1, "0.000001"),
+            ("0.00000049", 0, "0.000000"),
+            ("12.345678", 12_345_678, "12.345678"),
+            ("", 0, "0.000000"),
+            ("-0.25", -250_000, "-0.250000"),
+        ] {
+            let sql = format!(
+                "SELECT {m}, {t} FROM (SELECT ?1 AS c)",
+                m = cost_micros_sql("c"),
+                t = micros_to_usd_text_sql(&cost_micros_sql("c")),
+            );
+            let (got, text_out): (i64, String) = conn
+                .query_row(&sql, [text], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap();
+            assert_eq!(got, micros, "micros for {text:?}");
+            assert_eq!(text_out, rendered, "text for {text:?}");
+        }
     }
 }

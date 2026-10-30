@@ -16,6 +16,7 @@ mod v016;
 mod v017;
 mod v018;
 mod v019;
+mod v020;
 
 use super::{Database, SCHEMA_VERSION};
 use crate::error::AppError;
@@ -178,6 +179,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "proxy_request_logs.superseded_by with maintenance triggers and backfill state",
         db_compat: DbCompatImpact::Additive,
         up: |conn, _| v019::apply(conn),
+    },
+    Migration {
+        version: 20,
+        name: "usage_daily_rollups.total_cost_micros integer micro-USD cost",
+        db_compat: DbCompatImpact::Additive,
+        up: |conn, _| v020::apply(conn),
     },
 ];
 

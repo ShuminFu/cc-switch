@@ -4,7 +4,9 @@
 
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
-use crate::services::sql_helpers::{fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH};
+use crate::services::sql_helpers::{
+    cost_micros_sql, fresh_input_sql, micros_to_usd_text_sql, INPUT_TOKEN_SEMANTICS_FRESH,
+};
 use crate::services::usage_stats::effective_usage_log_filter;
 use chrono::{Duration, Local, NaiveDate, TimeZone};
 
@@ -63,7 +65,42 @@ pub(crate) fn local_midnight_timestamp(day: NaiveDate) -> Result<i64, AppError> 
     Ok(local_dt.timestamp())
 }
 
+/// Oldest `usage_daily_rollups.date` kept when rollups are retained for
+/// `retain_days`: the local day `retain_days - 1` days before `now`'s day, so the
+/// last `retain_days` local days (today included) survive. Rows dated strictly
+/// before it are deleted — the same "older than N days" rule the detail cutoff
+/// applies, at day granularity.
+fn compute_rollup_cutoff_date(
+    now: chrono::DateTime<Local>,
+    retain_days: u32,
+) -> Result<String, AppError> {
+    let keep_days = i64::from(retain_days.max(1)) - 1;
+    let oldest_kept = now
+        .date_naive()
+        .checked_sub_signed(Duration::days(keep_days))
+        .ok_or_else(|| AppError::Database("rollup retention cutoff overflow".to_string()))?;
+    Ok(oldest_kept.format("%Y-%m-%d").to_string())
+}
+
 impl Database {
+    /// Delete usage_daily_rollups rows older than `retain_days` local days.
+    /// Returns the number of deleted rollup rows.
+    pub fn prune_old_rollups(&self, retain_days: u32) -> Result<u64, AppError> {
+        let cutoff_date = compute_rollup_cutoff_date(Local::now(), retain_days)?;
+        let conn = lock_conn!(self.conn);
+        let deleted = conn
+            .execute(
+                "DELETE FROM usage_daily_rollups WHERE date < ?1",
+                [&cutoff_date],
+            )
+            .map_err(|e| AppError::Database(format!("Pruning old rollups failed: {e}")))?;
+        if deleted > 0 {
+            log::info!("Pruned {deleted} usage_daily_rollups rows (retain={retain_days}d)");
+            crate::usage_events::notify_log_recorded();
+        }
+        Ok(deleted as u64)
+    }
+
     /// Aggregate proxy_request_logs older than `retain_days` into usage_daily_rollups,
     /// then delete the aggregated detail rows.
     /// Returns the number of deleted detail rows.
@@ -126,6 +163,12 @@ impl Database {
         let effective_filter = effective_usage_log_filter(conn, "l")?;
         let fresh_detail_input = fresh_input_sql("l");
         let fresh_old_input = fresh_input_sql("old");
+        // 成本按整数微美元累计：每行明细先换算为微美元再整数求和，汇总总额与明细之和
+        // 精确相等（浮点 SUM 会累积误差，例如 10 × 0.1 得到 0.9999999999999999）。
+        // total_cost_usd 写入同一微美元值的精确十进制文本。
+        let detail_micros = cost_micros_sql("l.total_cost_usd");
+        let merged_micros = "COALESCE(old.total_cost_micros, 0) + new_cost_micros";
+        let merged_cost_text = micros_to_usd_text_sql(merged_micros);
         // request_model 维度保留路由接管的「客户端别名 → 真实模型」映射，
         // pricing_model 维度保留写入时的计价基准（request 计价模式下与 model 分叉）；
         // 明细行的这两列可能为 NULL（历史/手工数据），归一为 ''。
@@ -135,7 +178,7 @@ impl Database {
                  request_count, success_count,
                  input_tokens, output_tokens,
                  cache_read_tokens, cache_creation_tokens,
-                 input_token_semantics, total_cost_usd, avg_latency_ms)
+                 input_token_semantics, total_cost_usd, total_cost_micros, avg_latency_ms)
             SELECT
                 d, a, p, m, rm, pm,
                 COALESCE(old.request_count, 0) + new_req,
@@ -145,7 +188,8 @@ impl Database {
                 COALESCE(old.cache_read_tokens, 0) + new_cr,
                 COALESCE(old.cache_creation_tokens, 0) + new_cc,
                 {INPUT_TOKEN_SEMANTICS_FRESH},
-                CAST(COALESCE(CAST(old.total_cost_usd AS REAL), 0) + new_cost AS TEXT),
+                {merged_cost_text},
+                {merged_micros},
                 CASE WHEN COALESCE(old.request_count, 0) + new_req > 0
                     THEN (COALESCE(old.avg_latency_ms, 0) * COALESCE(old.request_count, 0)
                           + new_lat * new_req)
@@ -163,7 +207,7 @@ impl Database {
                     COALESCE(SUM(l.output_tokens), 0) as new_out,
                     COALESCE(SUM(l.cache_read_tokens), 0) as new_cr,
                     COALESCE(SUM(l.cache_creation_tokens), 0) as new_cc,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as new_cost,
+                    COALESCE(SUM({detail_micros}), 0) as new_cost_micros,
                     COALESCE(AVG(l.latency_ms), 0) as new_lat
                 FROM proxy_request_logs l
                 WHERE l.created_at < ?1 AND {effective_filter}
@@ -193,7 +237,7 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use super::compute_local_midnight_cutoff;
+    use super::{compute_local_midnight_cutoff, compute_rollup_cutoff_date};
     use crate::database::Database;
     use crate::error::AppError;
     use chrono::{Local, TimeZone};
@@ -234,6 +278,16 @@ mod tests {
         // (2026-04-16 - 7d) = 2026-04-09; cutoff = 2026-04-10 00:00 local.
         let expected = local_dt(2026, 4, 10, 0, 0, 0);
         assert_eq!(cutoff_dt, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn rollup_cutoff_keeps_the_last_retain_days_local_days() -> Result<(), AppError> {
+        let now = local_dt(2026, 4, 16, 14, 32, 17);
+        assert_eq!(compute_rollup_cutoff_date(now, 1)?, "2026-04-16");
+        assert_eq!(compute_rollup_cutoff_date(now, 30)?, "2026-03-18");
+        // 0 is clamped to 1 (today only) rather than deleting today's rows
+        assert_eq!(compute_rollup_cutoff_date(now, 0)?, "2026-04-16");
         Ok(())
     }
 
@@ -521,6 +575,81 @@ mod tests {
             (total_cost - 5.0).abs() < 1e-6,
             "expected backfilled cost 5.0, got {total_cost}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn rollup_cost_equals_sum_of_detail_rows_exactly() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let old_ts = chrono::Utc::now().timestamp() - 40 * 86400;
+        // 10 × 0.1 sums to 0.9999999999999999 in floating point; plus sub-cent rows
+        // whose micro-USD values must add up without drift.
+        let mut costs: Vec<&str> = vec!["0.1"; 10];
+        costs.extend(["0.000001", "0.000002", "1.234567", "0.3333333333"]);
+        let expected_micros: i64 = 1_000_000 + 1 + 2 + 1_234_567 + 333_333;
+
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            for (i, cost) in costs.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO proxy_request_logs (
+                        request_id, provider_id, app_type, model,
+                        input_tokens, output_tokens, total_cost_usd,
+                        latency_ms, status_code, created_at
+                    ) VALUES (?1, 'p1', 'claude', 'claude-3', 1, 1, ?2, 100, 200, ?3)",
+                    rusqlite::params![format!("exact-{i}"), cost, old_ts + i as i64],
+                )?;
+            }
+            let detail_micros: i64 = conn.query_row(
+                &format!(
+                    "SELECT SUM({}) FROM proxy_request_logs",
+                    crate::services::sql_helpers::cost_micros_sql("total_cost_usd")
+                ),
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(detail_micros, expected_micros);
+        }
+
+        assert_eq!(db.rollup_and_prune(30)?, costs.len() as u64);
+
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            let (micros, text): (i64, String) = conn.query_row(
+                "SELECT total_cost_micros, total_cost_usd FROM usage_daily_rollups
+                 WHERE model = 'claude-3'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!(
+                micros, expected_micros,
+                "rollup equals the detail sum exactly"
+            );
+            assert_eq!(text, "2.567903");
+        }
+
+        // A second batch for the same day merges by integer addition.
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO proxy_request_logs (
+                    request_id, provider_id, app_type, model,
+                    input_tokens, output_tokens, total_cost_usd,
+                    latency_ms, status_code, created_at
+                ) VALUES ('exact-merge', 'p1', 'claude', 'claude-3', 1, 1, '0.1', 100, 200, ?1)",
+                [old_ts],
+            )?;
+        }
+        assert_eq!(db.rollup_and_prune(30)?, 1);
+        let conn = crate::database::lock_conn!(db.conn);
+        let (micros, text): (i64, String) = conn.query_row(
+            "SELECT total_cost_micros, total_cost_usd FROM usage_daily_rollups
+             WHERE model = 'claude-3'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(micros, expected_micros + 100_000);
+        assert_eq!(text, "2.667903");
         Ok(())
     }
 

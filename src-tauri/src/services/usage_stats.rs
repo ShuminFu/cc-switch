@@ -836,8 +836,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-01-01",
                     "claude",
@@ -857,8 +859,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-01-02",
                     "claude",
@@ -878,8 +882,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-01-03",
                     "claude",
@@ -901,6 +907,10 @@ mod tests {
         assert_eq!(summary.total_requests, 20);
         assert_eq!(summary.total_input_tokens, 2000);
         assert_eq!(summary.total_output_tokens, 1000);
+        assert_eq!(
+            summary.total_cost, "2.000000",
+            "rollup cost read from micro-USD"
+        );
 
         Ok(())
     }
@@ -991,10 +1001,11 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
                 ) VALUES
-                ('2026-06-08', 'claude', 'prov-a', 'claude-sonnet-4-6', 5, 5, 500, 50, 0, 0, '5.0', 100),
-                ('2026-06-08', 'claude', 'prov-b', 'deepseek-v3', 7, 7, 700, 70, 0, 0, '7.0', 100)",
+                ('2026-06-08', 'claude', 'prov-a', 'claude-sonnet-4-6', 5, 5, 500, 50, 0, 0, '5.0', 5000000, 100),
+                ('2026-06-08', 'claude', 'prov-b', 'deepseek-v3', 7, 7, 700, 70, 0, 0, '7.0', 7000000, 100)",
                 [],
             )?;
         }
@@ -1086,8 +1097,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-01-01",
                     "claude",
@@ -1107,8 +1120,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-01-02",
                     "claude",
@@ -1607,8 +1622,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-02-01",
                     "claude",
@@ -1628,8 +1645,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-02-02",
                     "claude",
@@ -1649,8 +1668,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-02-03",
                     "claude",
@@ -1762,8 +1783,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-03-02",
                     "claude",
@@ -1805,8 +1828,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-04-01",
                     "claude",
@@ -1826,8 +1851,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-04-02",
                     "claude",
@@ -1847,8 +1874,10 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model,
                     request_count, success_count, input_tokens, output_tokens,
-                    cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                    avg_latency_ms
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    CAST(ROUND(CAST(?11 AS REAL) * 1000000) AS INTEGER), ?12)",
                 params![
                     "2024-04-03",
                     "claude",
@@ -1900,8 +1929,10 @@ mod tests {
             "INSERT INTO usage_daily_rollups (
                 date, app_type, provider_id, model,
                 request_count, success_count, input_tokens, output_tokens,
-                cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms
-            ) VALUES (?, 'claude', ?, ?, 1, 1, 0, 0, 0, 0, ?, 100)",
+                cache_read_tokens, cache_creation_tokens, total_cost_usd, total_cost_micros,
+                avg_latency_ms
+            ) VALUES (?1, 'claude', ?2, ?3, 1, 1, 0, 0, 0, 0, ?4,
+                CAST(ROUND(CAST(?4 AS REAL) * 1000000) AS INTEGER), 100)",
             params![date, provider_id, model, total_cost_usd],
         )?;
         Ok(())

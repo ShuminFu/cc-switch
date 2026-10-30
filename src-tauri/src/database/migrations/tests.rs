@@ -525,3 +525,48 @@ fn migrate_v17_to_v18_classifies_pricing_provenance() -> Result<(), AppError> {
     assert_eq!(missing, 0, "the migration itself writes no rows");
     Ok(())
 }
+
+#[test]
+fn migrate_v19_to_v20_backfills_rollup_cost_micros() -> Result<(), AppError> {
+    let conn = Connection::open_in_memory()?;
+    Database::apply_schema_migrations_up_to(&conn, 19)?;
+    conn.execute_batch(
+        "INSERT INTO usage_daily_rollups
+            (date, app_type, provider_id, model, request_count, success_count,
+             input_tokens, output_tokens, total_cost_usd, avg_latency_ms)
+         VALUES
+            ('2026-05-01', 'claude', 'p1', 'm-float', 10, 10, 0, 0, '0.9999999999999999', 100),
+            ('2026-05-01', 'claude', 'p1', 'm-small', 1, 1, 0, 0, '0.0000004', 100),
+            ('2026-05-01', 'claude', 'p1', 'm-plain', 1, 1, 0, 0, '12.345678', 100);",
+    )?;
+
+    Database::apply_schema_migrations_up_to(&conn, 20)?;
+
+    let mut stmt = conn.prepare(
+        "SELECT model, total_cost_usd, total_cost_micros FROM usage_daily_rollups ORDER BY model",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "m-float".to_string(),
+                "0.9999999999999999".to_string(),
+                1_000_000
+            ),
+            ("m-plain".to_string(), "12.345678".to_string(), 12_345_678),
+            ("m-small".to_string(), "0.0000004".to_string(), 0),
+        ],
+        "micros backfilled from the text cost; the text column is left unchanged"
+    );
+    assert!(audit_versions(&conn)?.ends_with(&[20]));
+    Ok(())
+}

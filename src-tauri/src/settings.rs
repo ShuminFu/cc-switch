@@ -598,6 +598,14 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup_retain_count: Option<u32>,
 
+    // ===== 数据保留策略（见 [`RetentionPolicy`]）=====
+    /// Days of per-request usage detail to keep before it is rolled up (default 30, minimum 1)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_detail_retention_days: Option<u32>,
+    /// Days of daily usage rollups to keep (default / 0 = keep forever)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_rollup_retention_days: Option<u32>,
+
     // ===== 终端设置 =====
     /// 首选终端应用（可选，默认使用系统默认终端）
     /// - macOS: "terminal" | "iterm2" | "warp" | "alacritty" | "kitty" | "ghostty" | "wezterm" | "kaku"
@@ -655,6 +663,8 @@ impl Default for AppSettings {
             webdav_backup: None,
             backup_interval_hours: None,
             backup_retain_count: None,
+            usage_detail_retention_days: None,
+            usage_rollup_retention_days: None,
             preferred_terminal: None,
             local_migrations: None,
         }
@@ -1339,15 +1349,63 @@ pub fn effective_backup_interval_hours() -> u32 {
 
 /// Get the effective backup retain count (default 10, minimum 1)
 pub fn effective_backup_retain_count() -> usize {
-    settings_store()
-        .read()
-        .unwrap_or_else(|e| {
-            log::warn!("设置锁已毒化，使用恢复值: {e}");
-            e.into_inner()
-        })
-        .backup_retain_count
-        .map(|n| (n as usize).max(1))
-        .unwrap_or(10)
+    effective_retention_policy().backups_keep
+}
+
+// ===== 数据保留策略 =====
+
+/// 数据保留策略：由设置项解析出的生效值，供 [`crate::database::Maintenance::run`] 使用
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionPolicy {
+    /// `proxy_request_logs` 明细保留天数，更早的明细汇总进 `usage_daily_rollups` 后删除（≥ 1）
+    pub detail_days: u32,
+    /// `usage_daily_rollups` 保留天数；`None` 表示永久保留。不会小于 `detail_days`，
+    /// 否则刚汇总的日期会被立即删除
+    pub rollup_days: Option<u32>,
+    /// 保留的数据库备份文件数（≥ 1）
+    pub backups_keep: usize,
+}
+
+impl RetentionPolicy {
+    pub const DEFAULT_DETAIL_DAYS: u32 = 30;
+    pub const DEFAULT_BACKUPS_KEEP: usize = 10;
+
+    /// 从设置解析生效的保留策略（缺省值、下限与 `rollup_days ≥ detail_days` 约束）
+    pub fn from_settings(settings: &AppSettings) -> Self {
+        let detail_days = settings
+            .usage_detail_retention_days
+            .unwrap_or(Self::DEFAULT_DETAIL_DAYS)
+            .max(1);
+        let rollup_days = settings
+            .usage_rollup_retention_days
+            .filter(|days| *days > 0)
+            .map(|days| days.max(detail_days));
+        let backups_keep = settings
+            .backup_retain_count
+            .map(|n| (n as usize).max(1))
+            .unwrap_or(Self::DEFAULT_BACKUPS_KEEP);
+        Self {
+            detail_days,
+            rollup_days,
+            backups_keep,
+        }
+    }
+}
+
+impl Default for RetentionPolicy {
+    fn default() -> Self {
+        Self::from_settings(&AppSettings::default())
+    }
+}
+
+/// 当前设置下生效的数据保留策略
+pub fn effective_retention_policy() -> RetentionPolicy {
+    let store = settings_store();
+    let settings = store.read().unwrap_or_else(|e| {
+        log::warn!("设置锁已毒化，使用恢复值: {e}");
+        e.into_inner()
+    });
+    RetentionPolicy::from_settings(&settings)
 }
 
 // ===== 终端设置管理函数 =====
@@ -1411,6 +1469,50 @@ pub fn update_s3_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
 mod tests {
     use super::*;
     use crate::app_config::AppType;
+
+    #[test]
+    fn retention_policy_defaults_and_bounds() {
+        assert_eq!(
+            RetentionPolicy::default(),
+            RetentionPolicy {
+                detail_days: 30,
+                rollup_days: None,
+                backups_keep: 10,
+            }
+        );
+
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "usageDetailRetentionDays": 0,
+            "usageRollupRetentionDays": 0,
+            "backupRetainCount": 0
+        }))
+        .expect("settings");
+        assert_eq!(
+            RetentionPolicy::from_settings(&settings),
+            RetentionPolicy {
+                detail_days: 1,
+                rollup_days: None,
+                backups_keep: 1,
+            },
+            "zero detail/backups clamp to 1, zero rollup days keeps rollups forever"
+        );
+
+        let settings = AppSettings {
+            usage_detail_retention_days: Some(60),
+            usage_rollup_retention_days: Some(14),
+            backup_retain_count: Some(3),
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            RetentionPolicy::from_settings(&settings),
+            RetentionPolicy {
+                detail_days: 60,
+                rollup_days: Some(60),
+                backups_keep: 3,
+            },
+            "rollups are never pruned before their detail rows"
+        );
+    }
 
     #[test]
     fn visible_apps_old_settings_default_claude_desktop_visible() {

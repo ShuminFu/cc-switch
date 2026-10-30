@@ -14,7 +14,9 @@ use crate::pricing::resolver::{
     clean_model_id_for_pricing, find_model_pricing_row, is_placeholder_pricing_model,
     model_pricing_candidates, should_try_pricing_prefix_match,
 };
-use crate::services::sql_helpers::{fresh_input_sql, input_token_semantics_for_app_type};
+use crate::services::sql_helpers::{
+    fresh_input_sql, input_token_semantics_for_app_type, rollup_cost_usd_sum_sql,
+};
 use crate::services::usage_stats::{
     DailyStats, LogFilters, ModelStats, PaginatedLogs, ProviderLimitStatus, ProviderStats,
     RequestLogDetail, UnpricedModelStats, UsageSummary, UsageSummaryByApp,
@@ -421,7 +423,7 @@ pub(crate) const PROVIDER_LIMIT_WINDOW_SQL: &str = "SELECT COALESCE(SUM(cost), 0
     WHERE provider_id = ?1 AND app_type = ?2
       AND created_at >= ?3 AND created_at < ?4
     UNION ALL
-    SELECT CAST(total_cost_usd AS REAL)
+    SELECT total_cost_micros / 1000000.0
     FROM usage_daily_rollups
     WHERE provider_id = ?1 AND app_type = ?2
       AND date >= ?5 AND date < ?6
@@ -512,6 +514,7 @@ impl Database {
 
         let fresh_input_detail = fresh_input_sql("l");
         let fresh_input_rollup = fresh_input_sql("r");
+        let rollup_cost = rollup_cost_usd_sum_sql("r");
         let sql = format!(
             "SELECT
                 COALESCE(d.total_requests, 0) + COALESCE(r.total_requests, 0),
@@ -533,7 +536,7 @@ impl Database {
                  FROM proxy_request_logs l {detail_join} {where_clause}) d,
                 (SELECT
                     COALESCE(SUM(r.request_count), 0) as total_requests,
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0) as total_cost,
+                    {rollup_cost} as total_cost,
                     COALESCE(SUM({fresh_input_rollup}), 0) as total_input_tokens,
                     COALESCE(SUM(r.output_tokens), 0) as total_output_tokens,
                     COALESCE(SUM(r.cache_creation_tokens), 0) as total_cache_creation_tokens,
@@ -658,6 +661,7 @@ impl Database {
         let detail_app_type = folded_app_type_sql("l.app_type");
         let rollup_app_type = folded_app_type_sql("r.app_type");
 
+        let rollup_cost = rollup_cost_usd_sum_sql("r");
         let sql = format!(
             "SELECT app_type,
                 SUM(req_count) as req_count,
@@ -681,7 +685,7 @@ impl Database {
                 UNION ALL
                 SELECT {rollup_app_type} as app_type,
                     COALESCE(SUM(r.request_count), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                    {rollup_cost},
                     COALESCE(SUM({fresh_input_rollup}), 0),
                     COALESCE(SUM(r.output_tokens), 0),
                     COALESCE(SUM(r.cache_creation_tokens), 0),
@@ -1006,11 +1010,12 @@ impl Database {
         };
 
         let fresh_input_rollup = fresh_input_sql("r");
+        let rollup_cost = rollup_cost_usd_sum_sql("r");
         let rollup_sql = format!(
             "SELECT
                 r.date,
                 COALESCE(SUM(r.request_count), 0),
-                COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                {rollup_cost},
                 COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
                 COALESCE(SUM({fresh_input_rollup}), 0),
                 COALESCE(SUM(r.output_tokens), 0),
@@ -1163,6 +1168,7 @@ impl Database {
         let rollup_pname = provider_name_coalesce("r", "p2");
         let fresh_input_detail = fresh_input_sql("l");
         let fresh_input_rollup = fresh_input_sql("r");
+        let rollup_cost = rollup_cost_usd_sum_sql("r");
         let sql = format!(
             "SELECT
                 provider_id, app_type, provider_name,
@@ -1190,7 +1196,7 @@ impl Database {
                     {rollup_pname} as provider_name,
                     COALESCE(SUM(r.request_count), 0),
                     COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                    {rollup_cost},
                     COALESCE(SUM(r.success_count), 0),
                     COALESCE(SUM(r.avg_latency_ms * r.request_count), 0)
                 FROM usage_daily_rollups r
@@ -1322,6 +1328,7 @@ impl Database {
         let fresh_input_rollup = fresh_input_sql("r");
         let detail_model = effective_model_sql("l");
         let rollup_model = effective_model_sql("r");
+        let rollup_cost = rollup_cost_usd_sum_sql("r");
         let sql = format!(
             "SELECT
                 model,
@@ -1341,7 +1348,7 @@ impl Database {
                 SELECT {rollup_model},
                     COALESCE(SUM(r.request_count), 0),
                     COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0)
+                    {rollup_cost}
                 FROM usage_daily_rollups r
                 {rollup_join}
                 {rollup_where}

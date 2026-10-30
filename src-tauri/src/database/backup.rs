@@ -384,29 +384,7 @@ impl Database {
         }
 
         // Periodic maintenance is always enabled, regardless of auto-backup settings.
-        let mut reclaimed_rows = 0u64;
-        match self.cleanup_old_stream_check_logs(7) {
-            Ok(deleted) => {
-                reclaimed_rows += deleted;
-            }
-            Err(e) => {
-                log::warn!("Periodic stream_check_logs cleanup failed: {e}");
-            }
-        }
-        match self.rollup_and_prune(30) {
-            Ok(deleted) => {
-                reclaimed_rows += deleted;
-            }
-            Err(e) => {
-                log::warn!("Periodic rollup_and_prune failed: {e}");
-            }
-        }
-        if reclaimed_rows > 0 {
-            let conn = lock_conn!(self.conn);
-            if let Err(e) = conn.execute_batch("PRAGMA incremental_vacuum;") {
-                log::warn!("Periodic incremental vacuum failed: {e}");
-            }
-        }
+        super::Maintenance::run(self, &crate::settings::effective_retention_policy());
 
         Ok(())
     }
@@ -516,13 +494,15 @@ impl Database {
             super::journal::set_journal_mode(&dest_conn, "delete")?;
         }
 
-        Self::cleanup_db_backups(&backup_dir)?;
+        Self::cleanup_db_backups(
+            &backup_dir,
+            crate::settings::effective_backup_retain_count(),
+        )?;
         Ok((backup_id, backup_path))
     }
 
-    /// 清理旧的数据库备份，保留最新的 N 个
-    fn cleanup_db_backups(dir: &Path) -> Result<(), AppError> {
-        let retain = crate::settings::effective_backup_retain_count();
+    /// 清理旧的数据库备份，保留最新的 `retain` 个，返回删除的文件数
+    pub(crate) fn cleanup_db_backups(dir: &Path, retain: usize) -> Result<u64, AppError> {
         let entries = match fs::read_dir(dir) {
             Ok(iter) => iter
                 .filter_map(|entry| entry.ok())
@@ -534,23 +514,27 @@ impl Database {
                         .unwrap_or(false)
                 })
                 .collect::<Vec<_>>(),
-            Err(_) => return Ok(()),
+            Err(_) => return Ok(0),
         };
 
         if entries.len() <= retain {
-            return Ok(());
+            return Ok(0);
         }
 
         let remove_count = entries.len().saturating_sub(retain);
         let mut sorted = entries;
         sorted.sort_by_key(|entry| entry.metadata().and_then(|m| m.modified()).ok());
 
+        let mut removed = 0u64;
         for entry in sorted.into_iter().take(remove_count) {
-            if let Err(err) = fs::remove_file(entry.path()) {
-                log::warn!("删除旧数据库备份失败 {}: {}", entry.path().display(), err);
+            match fs::remove_file(entry.path()) {
+                Ok(()) => removed += 1,
+                Err(err) => {
+                    log::warn!("删除旧数据库备份失败 {}: {}", entry.path().display(), err);
+                }
             }
         }
-        Ok(())
+        Ok(removed)
     }
 
     /// 基础状态校验
@@ -1185,8 +1169,8 @@ mod tests {
                 "INSERT INTO usage_daily_rollups (
                     date, app_type, provider_id, model, request_count, success_count,
                     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                    total_cost_usd, avg_latency_ms
-                ) VALUES ('2026-03-01', 'claude', 'local-provider', 'claude-3', 7, 7, 700, 350, 0, 0, '0.07', 120)",
+                    total_cost_usd, total_cost_micros, avg_latency_ms
+                ) VALUES ('2026-03-01', 'claude', 'local-provider', 'claude-3', 7, 7, 700, 350, 0, 0, '0.07', 70000, 120)",
                 [],
             )?;
             conn.execute(

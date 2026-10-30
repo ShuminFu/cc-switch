@@ -186,7 +186,8 @@ SAMPLES = {
         dict(date="2024-12-31", app_type="claude", provider_id="claude-relay",
              model="fixture-model", request_count=3, success_count=3,
              input_tokens=3000, output_tokens=900, cache_read_tokens=0,
-             cache_creation_tokens=0, total_cost_usd="0.0225", avg_latency_ms=700),
+             cache_creation_tokens=0, total_cost_usd="0.0225", total_cost_micros=22500,
+             avg_latency_ms=700),
     ],
     "stream_check_logs": [
         dict(provider_id="claude-relay", provider_name="Claude Relay", app_type="claude",
