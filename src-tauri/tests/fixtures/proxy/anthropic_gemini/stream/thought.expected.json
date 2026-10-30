@@ -33,18 +33,7 @@
       "index": 0,
       "delta": {
         "type": "thinking_delta",
-        "thinking": "Six times eight "
-      }
-    }
-  },
-  {
-    "event": "content_block_delta",
-    "data": {
-      "type": "content_block_delta",
-      "index": 0,
-      "delta": {
-        "type": "thinking_delta",
-        "thinking": "is forty-eight."
+        "thinking": "Six times eight is forty-eight."
       }
     }
   },

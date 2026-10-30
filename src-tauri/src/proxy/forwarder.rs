@@ -579,6 +579,23 @@ impl RequestForwarder {
                 continue;
             }
 
+            // Budget hard limit (PRODUCT-05): when enforcement is on and this provider
+            // has reached its daily/monthly limit, skip it and try the next provider in
+            // the failover queue. Dropping `half_open_permit` releases any HalfOpen slot.
+            if let Some((budget_err, limit_status)) =
+                self.check_budget_breach(app_type_str, provider).await
+            {
+                if let Some(app) = self.app_handle.as_ref() {
+                    notify_budget_breach(app, app_type_str, provider, &limit_status);
+                }
+                last_error = Some(ProxyError::UpstreamError {
+                    status: 429,
+                    body: Some(budget_err.to_string()),
+                });
+                last_provider = Some(provider.clone());
+                continue;
+            }
+
             // PRE-SEND 优化器：每个 provider 独立决定是否优化
             // 仅 Bedrock 优化时 clone（避免优化字段泄漏到非 Bedrock provider）；
             // 其余情况借用，只有整流真正改写时才写时复制（PERF-04）。
@@ -3694,6 +3711,70 @@ fn value_for_log(value: &Value) -> String {
         Value::Array(values) => format!("array(len={})", values.len()),
         Value::Object(values) => format!("object(len={})", values.len()),
     }
+}
+
+impl RequestForwarder {
+    /// Run the (blocking) budget check off the async workers. Any internal error
+    /// fails open: a broken usage query must never block the user's request.
+    async fn check_budget_breach(
+        &self,
+        app_type: &str,
+        provider: &Provider,
+    ) -> Option<(
+        crate::error::AppError,
+        crate::services::usage_stats::ProviderLimitStatus,
+    )> {
+        let db = self.router.db().clone();
+        let app_type = app_type.to_string();
+        let provider_id = provider.id.clone();
+        match tokio::task::spawn_blocking(move || {
+            crate::services::budget::hard_limit_breach(&db, &app_type, &provider_id)
+        })
+        .await
+        {
+            Ok(Ok(breach)) => breach,
+            Ok(Err(e)) => {
+                log::debug!("budget check failed (allowing request): {e}");
+                None
+            }
+            Err(e) => {
+                log::debug!("budget check task failed (allowing request): {e}");
+                None
+            }
+        }
+    }
+}
+
+fn notify_budget_breach(
+    app: &tauri::AppHandle,
+    app_type: &str,
+    provider: &Provider,
+    status: &crate::services::usage_stats::ProviderLimitStatus,
+) {
+    use crate::services::notifications::{notify_budget_exceeded, BudgetPeriod};
+    let parse = |v: &str| v.parse::<f64>().unwrap_or(0.0);
+    let (period, spent, limit) = if status.daily_exceeded {
+        (
+            BudgetPeriod::Daily,
+            parse(&status.daily_usage),
+            status.daily_limit.as_deref().map(parse).unwrap_or(0.0),
+        )
+    } else {
+        (
+            BudgetPeriod::Monthly,
+            parse(&status.monthly_usage),
+            status.monthly_limit.as_deref().map(parse).unwrap_or(0.0),
+        )
+    };
+    notify_budget_exceeded(
+        app,
+        app_type,
+        &provider.id,
+        &provider.name,
+        period,
+        spent,
+        limit,
+    );
 }
 
 #[cfg(test)]

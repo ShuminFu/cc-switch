@@ -28,7 +28,9 @@ use super::{
             responses_sse_events_from_anthropic_message,
         },
         streaming_codex_chat::create_responses_sse_stream_from_chat_with_context,
-        streaming_gemini::create_anthropic_sse_stream_from_gemini,
+        streaming_gemini::{
+            create_anthropic_sse_stream_from_gemini_with_text_mode, GeminiTextStreamMode,
+        },
         streaming_responses::create_anthropic_sse_stream_from_responses,
         transform, transform_codex_anthropic, transform_codex_chat, transform_gemini,
         transform_responses,
@@ -345,13 +347,16 @@ async fn handle_claude_transform(
         > = if api_format == "openai_responses" {
             Box::new(Box::pin(create_anthropic_sse_stream_from_responses(stream)))
         } else if api_format == "gemini_native" {
-            Box::new(Box::pin(create_anthropic_sse_stream_from_gemini(
-                stream,
-                Some(state.gemini_shadow.clone()),
-                Some(ctx.provider.id.clone()),
-                Some(ctx.session_id.clone()),
-                tool_schema_hints.clone(),
-            )))
+            Box::new(Box::pin(
+                create_anthropic_sse_stream_from_gemini_with_text_mode(
+                    stream,
+                    Some(state.gemini_shadow.clone()),
+                    Some(ctx.provider.id.clone()),
+                    Some(ctx.session_id.clone()),
+                    tool_schema_hints.clone(),
+                    GeminiTextStreamMode::for_provider(&ctx.provider),
+                ),
+            ))
         } else {
             Box::new(Box::pin(create_anthropic_sse_stream(stream)))
         };

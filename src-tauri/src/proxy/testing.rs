@@ -407,12 +407,9 @@ pub(crate) mod golden {
         anthropic_chat_request_image_base64 => "anthropic_chat", Request, "image_base64";
         anthropic_chat_request_text_with_system => "anthropic_chat", Request, "text_with_system";
         anthropic_chat_request_thinking_history => "anthropic_chat", Request, "thinking_history";
-        anthropic_chat_request_tool_use_roundtrip => "anthropic_chat", Request, "tool_use_roundtrip",
-            known_bug = "PROV-15: Anthropic->Chat JSON-stringifies tool_result content blocks instead of flattening their text";
-        anthropic_chat_request_image_url_source => "anthropic_chat", Request, "image_url_source",
-            known_bug = "PROV-15: Anthropic->Chat turns a URL image source into an empty data: URI";
-        anthropic_chat_response_tool_call_missing_id => "anthropic_chat", Response, "tool_call_missing_id",
-            known_bug = "PROV-14: Chat->Anthropic emits tool_use.id \"\" when the upstream omits tool_calls[].id";
+        anthropic_chat_request_tool_use_roundtrip => "anthropic_chat", Request, "tool_use_roundtrip";
+        anthropic_chat_request_image_url_source => "anthropic_chat", Request, "image_url_source";
+        anthropic_chat_response_tool_call_missing_id => "anthropic_chat", Response, "tool_call_missing_id";
         anthropic_chat_response_error_envelope => "anthropic_chat", Response, "error_envelope";
         anthropic_chat_response_length_truncated => "anthropic_chat", Response, "length_truncated";
         anthropic_chat_response_reasoning_content => "anthropic_chat", Response, "reasoning_content";
@@ -428,21 +425,18 @@ pub(crate) mod golden {
         anthropic_chat_stream_truncated_no_done => "anthropic_chat", Stream, "truncated_no_done";
         anthropic_gemini_request_image_base64 => "anthropic_gemini", Request, "image_base64";
         anthropic_gemini_request_text_with_system => "anthropic_gemini", Request, "text_with_system";
-        anthropic_gemini_request_thinking_history => "anthropic_gemini", Request, "thinking_history",
-            known_bug = "PROV-06: Anthropic->Gemini drops thinking.budget_tokens instead of sending generationConfig.thinkingConfig";
+        anthropic_gemini_request_thinking_history => "anthropic_gemini", Request, "thinking_history";
         anthropic_gemini_request_tool_use_roundtrip => "anthropic_gemini", Request, "tool_use_roundtrip";
         anthropic_gemini_response_function_call => "anthropic_gemini", Response, "function_call";
         anthropic_gemini_response_function_call_with_id => "anthropic_gemini", Response, "function_call_with_id";
         anthropic_gemini_response_max_tokens => "anthropic_gemini", Response, "max_tokens";
         anthropic_gemini_response_prompt_blocked => "anthropic_gemini", Response, "prompt_blocked";
         anthropic_gemini_response_text => "anthropic_gemini", Response, "text";
-        anthropic_gemini_response_thought => "anthropic_gemini", Response, "thought",
-            known_bug = "PROV-06: Gemini->Anthropic discards thought:true parts instead of emitting a thinking block";
+        anthropic_gemini_response_thought => "anthropic_gemini", Response, "thought";
         anthropic_gemini_stream_function_call => "anthropic_gemini", Stream, "function_call";
         anthropic_gemini_stream_parallel_no_id_calls => "anthropic_gemini", Stream, "parallel_no_id_calls";
         anthropic_gemini_stream_text_utf8 => "anthropic_gemini", Stream, "text_utf8";
-        anthropic_gemini_stream_thought => "anthropic_gemini", Stream, "thought",
-            known_bug = "PROV-06: Gemini stream discards thought:true parts instead of streaming a thinking block";
+        anthropic_gemini_stream_thought => "anthropic_gemini", Stream, "thought";
         anthropic_gemini_stream_transport_error_mid_stream => "anthropic_gemini", Stream, "transport_error_mid_stream";
         anthropic_gemini_stream_truncated_no_finish => "anthropic_gemini", Stream, "truncated_no_finish";
         anthropic_responses_request_image_base64 => "anthropic_responses", Request, "image_base64";
@@ -454,8 +448,7 @@ pub(crate) mod golden {
         anthropic_responses_response_incomplete_max_tokens => "anthropic_responses", Response, "incomplete_max_tokens";
         anthropic_responses_response_reasoning => "anthropic_responses", Response, "reasoning";
         anthropic_responses_response_text => "anthropic_responses", Response, "text";
-        anthropic_responses_stream_done_only_text => "anthropic_responses", Stream, "done_only_text",
-            known_bug = "PROV-39: Responses->Anthropic stream drops text delivered only in output_text.done";
+        anthropic_responses_stream_done_only_text => "anthropic_responses", Stream, "done_only_text";
         anthropic_responses_stream_function_call => "anthropic_responses", Stream, "function_call";
         anthropic_responses_stream_reasoning => "anthropic_responses", Stream, "reasoning";
         anthropic_responses_stream_response_failed => "anthropic_responses", Stream, "response_failed";
@@ -970,7 +963,6 @@ pub(crate) mod roundtrip {
     /// PROV-35: converters must never hand the client (or the usage logger) an empty
     /// message id when the upstream omits one.
     #[test]
-    #[ignore = "PROV-35: converters copy an absent upstream id through as \"\""]
     fn converted_responses_never_have_empty_ids() {
         let chat = transform::openai_to_anthropic(json!({
             "object": "chat.completion", "model": "m",

@@ -23,6 +23,11 @@ pub struct ProviderRouter {
 }
 
 impl ProviderRouter {
+    /// Shared database handle (used by per-attempt checks such as budget limits).
+    pub fn db(&self) -> &Arc<Database> {
+        &self.db
+    }
+
     /// 创建新的供应商路由器
     pub fn new(db: Arc<Database>) -> Self {
         Self {
