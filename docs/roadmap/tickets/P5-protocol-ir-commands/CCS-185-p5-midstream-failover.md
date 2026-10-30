@@ -54,3 +54,10 @@ Reasoning deltas count as content, which differs slightly from "first TextDelta 
 - `cargo fmt --check`: clean.
 - `cargo clippy --all-targets -- -D warnings`: clean.
 - No frontend changes.
+
+**Review.** All three acceptance criteria hold: the two E2E tests assert P2's exact bytes, `failover_count`, P1's health and that P2 is not hit after content. Two gaps were fixed in the follow-up commit:
+- Only text, reasoning and tool-call parts counted as content. A stream that opened with a `redacted_thinking` block (or an image or tool-result part) stayed buffered, and an error after it still failed over. Every non-text, non-reasoning `PartStart` now commits the stream.
+- Streaming requests force `accept-encoding: identity`, but an upstream that compresses the SSE anyway could not be decoded. A short compressed stream reached EOF with no events and was failed over on every provider. The gate now passes streams with a `content-encoding` straight through, as before.
+New unit tests: `redacted_reasoning_block_commits_the_stream` and `compressed_stream_is_passed_through_unchecked`. `cargo test --no-fail-fast`: 2868 passed, 0 failed. `cargo clippy --all-targets -- -D warnings` and `cargo fmt` are clean.
+
+Known limitation, left as is: like the existing first-byte priming, the gate keys off the first-byte timeout. With failover on and that timeout set to 0 (disabled), the gate is skipped. Anthropic server-tool blocks (`server_tool_use`, `web_search_tool_result`) are not decoded into IR, so they keep the gate buffering until the following text, the 256 KiB cap or a clean stop.

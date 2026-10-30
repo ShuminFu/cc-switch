@@ -21,6 +21,7 @@ use crate::proxy::codec::gemini::GeminiEventDecoder;
 use crate::proxy::codec::openai_chat::OpenAiChatEventDecoder;
 use crate::proxy::codec::responses::ResponsesEventDecoder;
 use crate::proxy::codec::EventDecoder;
+use crate::proxy::content_encoding::get_content_encoding;
 use crate::proxy::error::ProxyError;
 use crate::proxy::hyper_client::ProxyResponse;
 use crate::proxy::protocol::ir::{Part, PartDelta, StreamEvent};
@@ -58,8 +59,8 @@ fn is_content(event: &StreamEvent) -> bool {
     match event {
         StreamEvent::PartStart { part, .. } => match part {
             Part::Text { text } | Part::Reasoning { text, .. } => !text.is_empty(),
-            Part::ToolCall { .. } => true,
-            _ => false,
+            // 工具调用、加密 reasoning、图片等块在开始事件里就是完整内容
+            _ => true,
         },
         StreamEvent::PartDelta { delta, .. } => match delta {
             PartDelta::Text(text) | PartDelta::Reasoning(text) => !text.is_empty(),
@@ -122,6 +123,10 @@ impl ResponseValidator {
         upstream: WireFormat,
     ) -> Result<ProxyResponse, ProxyError> {
         if self.streaming_first_byte_timeout.is_zero() {
+            return Ok(response);
+        }
+        // 上游无视 `accept-encoding: identity` 压缩了 SSE：无法解码检查，原样直通
+        if get_content_encoding(response.headers()).is_some() {
             return Ok(response);
         }
 
@@ -400,6 +405,43 @@ mod tests {
             .await
             .expect("JSON bodies are left to the response converter");
         assert_eq!(prepared.bytes().await.unwrap(), Bytes::from(body));
+    }
+
+    #[tokio::test]
+    async fn redacted_reasoning_block_commits_the_stream() {
+        let chunks = vec![
+            anthropic_start(),
+            sse(
+                "content_block_start",
+                r#"{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque"}}"#,
+            ),
+            anthropic_error(),
+        ];
+        let prepared = validator()
+            .gate_stream_start(chunked(chunks.clone()), WireFormat::AnthropicMessages)
+            .await
+            .expect("a redacted thinking block is content");
+        assert_eq!(
+            prepared.bytes().await.unwrap(),
+            Bytes::from(chunks.concat())
+        );
+    }
+
+    #[tokio::test]
+    async fn compressed_stream_is_passed_through_unchecked() {
+        let mut headers = HeaderMap::new();
+        headers.insert("content-encoding", "gzip".parse().unwrap());
+        let body = Bytes::from_static(b"\x1f\x8b\x08\x00not-sse");
+        let response = ProxyResponse::streamed(
+            StatusCode::OK,
+            headers,
+            futures::stream::iter(vec![Ok::<Bytes, std::io::Error>(body.clone())]),
+        );
+        let prepared = validator()
+            .gate_stream_start(response, WireFormat::AnthropicMessages)
+            .await
+            .expect("compressed SSE cannot be inspected and is passed through");
+        assert_eq!(prepared.bytes().await.unwrap(), body);
     }
 
     #[tokio::test]
