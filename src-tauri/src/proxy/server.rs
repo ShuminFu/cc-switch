@@ -45,7 +45,10 @@ const MAX_CONCURRENT_CONNECTIONS: usize = 1024;
 pub struct ProxyState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<ProxyConfig>>,
+    /// Server-level status (running, address, port).
     pub status: Arc<RwLock<ProxyStatus>>,
+    /// Request counters (PROXY-34), merged into the status on read.
+    pub metrics: Arc<super::pipeline::metrics::ProxyMetrics>,
     pub start_time: Arc<RwLock<Option<std::time::Instant>>>,
     /// 每个应用类型当前使用的 provider (app_type -> (provider_id, provider_name))
     pub current_providers: Arc<RwLock<std::collections::HashMap<String, (String, String)>>>,
@@ -59,6 +62,15 @@ pub struct ProxyState {
     pub app_handle: Option<tauri::AppHandle>,
     /// 故障转移切换管理器
     pub failover_manager: Arc<FailoverSwitchManager>,
+}
+
+impl ProxyState {
+    /// Server status with the request counters filled in.
+    pub async fn status_snapshot(&self) -> ProxyStatus {
+        let mut status = self.status.read().await.clone();
+        self.metrics.apply_to(&mut status);
+        status
+    }
 }
 
 /// 代理HTTP服务器
@@ -85,6 +97,7 @@ impl ProxyServer {
             db,
             config: Arc::new(RwLock::new(config.clone())),
             status: Arc::new(RwLock::new(ProxyStatus::default())),
+            metrics: super::pipeline::metrics::ProxyMetrics::new(),
             start_time: Arc::new(RwLock::new(None)),
             current_providers: Arc::new(RwLock::new(std::collections::HashMap::new())),
             provider_router,
@@ -305,7 +318,7 @@ impl ProxyServer {
     }
 
     pub async fn get_status(&self) -> ProxyStatus {
-        let mut status = self.state.status.read().await.clone();
+        let mut status = self.state.status_snapshot().await;
 
         // 计算运行时间
         if let Some(start) = *self.state.start_time.read().await {

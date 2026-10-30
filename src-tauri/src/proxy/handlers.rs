@@ -8,7 +8,6 @@
 //! - Claude 的格式转换逻辑保留在此文件（用于 OpenRouter 旧接口回退）
 
 use super::{
-    content_encoding::{decompress_body, get_content_encoding, is_supported_content_encoding},
     error_mapper::{get_error_message, map_proxy_error_to_status},
     forwarder::ActiveConnectionGuard,
     handler_config::{
@@ -17,6 +16,7 @@ use super::{
         OPENAI_PARSER_CONFIG,
     },
     handler_context::RequestContext,
+    pipeline::inbound::{endpoint_with_query, read_inbound, BodyPolicy, InboundRequest},
     providers::{
         chat_tool_call_slots::ChatToolCallSlots,
         codex_chat_common::extract_reasoning_field_text,
@@ -49,7 +49,6 @@ use super::{
 use crate::app_config::AppType;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use bytes::Bytes;
-use http_body_util::BodyExt;
 use serde_json::{json, Value};
 
 // ============================================================================
@@ -69,8 +68,7 @@ pub async fn health_check() -> (StatusCode, Json<Value>) {
 
 /// 获取服务状态
 pub async fn get_status(State(state): State<ProxyState>) -> Result<Json<ProxyStatus>, ProxyError> {
-    let status = state.status.read().await.clone();
-    Ok(Json(status))
+    Ok(Json(state.status_snapshot().await))
 }
 
 /// GET /v1/models — Codex model list (reachability check)
@@ -121,7 +119,7 @@ pub async fn handle_messages(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_messages_for_app(state, request, AppType::Claude, "Claude", "claude", None).await
+    handle_messages_for_app(state, request, &CLAUDE_ROUTE).await
 }
 
 pub async fn handle_claude_desktop_messages(
@@ -129,15 +127,7 @@ pub async fn handle_claude_desktop_messages(
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
     validate_claude_desktop_gateway_auth(&state, request.headers())?;
-    handle_messages_for_app(
-        state,
-        request,
-        AppType::ClaudeDesktop,
-        "Claude Desktop",
-        "claude-desktop",
-        Some("/claude-desktop"),
-    )
-    .await
+    handle_messages_for_app(state, request, &CLAUDE_DESKTOP_ROUTE).await
 }
 
 pub async fn handle_claude_desktop_models(
@@ -159,80 +149,28 @@ pub async fn handle_claude_desktop_models(
 async fn handle_messages_for_app(
     state: ProxyState,
     request: axum::extract::Request,
-    app_type: AppType,
-    tag: &'static str,
-    app_type_str: &'static str,
-    strip_prefix: Option<&'static str>,
+    route: &'static RouteSpec,
 ) -> Result<axum::response::Response, ProxyError> {
-    let (parts, body) = request.into_parts();
-    let method = parts.method.clone();
-    let uri = parts.uri;
-    let headers = parts.headers;
-    let extensions = parts.extensions;
-    let body_bytes = body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
-    let body: Value =
-        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
-
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
-
-    let raw_endpoint = uri
-        .path_and_query()
-        .map(|path_and_query| path_and_query.as_str())
-        .unwrap_or(uri.path());
-    let endpoint = strip_prefix
-        .and_then(|prefix| raw_endpoint.strip_prefix(prefix))
-        .unwrap_or(raw_endpoint);
-
-    let is_stream = body
-        .get("stream")
-        .and_then(|s| s.as_bool())
-        .unwrap_or(false);
-
-    // 转发请求
-    let forwarder = ctx.create_forwarder(&state);
-    let mut result = match forwarder
-        .forward_with_retry(
-            &app_type,
-            method,
-            endpoint,
-            &body,
-            headers,
-            extensions,
-            ctx.get_providers(),
-        )
-        .await
-    {
-        Ok(result) => result,
-        Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
-            log_forward_error(&state, &ctx, is_stream, &err.error);
-            return Err(err.error);
-        }
+    let forwarded = match forward_request(&state, request, route).await? {
+        Ok(forwarded) => forwarded,
+        Err(failed) => return Err(failed.error),
     };
-
-    let connection_guard = result.connection_guard.take();
-    ctx.outbound_model = result.outbound_model.take();
-    ctx.provider = result.provider;
-    let api_format = result
-        .claude_api_format
+    let Forwarded {
+        ctx,
+        body,
+        is_stream,
+        response,
+        claude_api_format,
+        connection_guard,
+        ..
+    } = forwarded;
+    let api_format = claude_api_format
         .as_deref()
         .unwrap_or_else(|| get_claude_api_format(&ctx.provider))
         .to_string();
-    let response = result.response;
 
-    // 检查是否需要格式转换（OpenRouter 等中转服务）
-    let adapter = get_adapter(&app_type);
-    let needs_transform = adapter.needs_transform(&ctx.provider);
-
-    // Claude 特有：格式转换处理
-    if needs_transform {
+    // Claude 特有：格式转换处理（OpenRouter 等中转服务）
+    if get_adapter(&route.app_type).needs_transform(&ctx.provider) {
         return handle_claude_transform(
             response,
             &ctx,
@@ -254,6 +192,200 @@ async fn handle_messages_for_app(
         connection_guard,
     )
     .await
+}
+
+// ============================================================================
+// Shared request pipeline driver (PROXY-07)
+// ============================================================================
+
+/// How a route derives the endpoint it forwards.
+enum EndpointRule {
+    /// The received path and query, minus an optional route prefix (PROXY-38).
+    Received { strip_prefix: Option<&'static str> },
+    /// A fixed endpoint plus the received query string.
+    Fixed(&'static str),
+}
+
+/// Everything that differs between the proxy's API routes.
+struct RouteSpec {
+    app_type: AppType,
+    tag: &'static str,
+    app_type_str: &'static str,
+    body: BodyPolicy,
+    endpoint: EndpointRule,
+    /// Gemini: the model name lives in the URI.
+    model_from_uri: bool,
+}
+
+const CLAUDE_ROUTE: RouteSpec = RouteSpec {
+    app_type: AppType::Claude,
+    tag: "Claude",
+    app_type_str: "claude",
+    body: BodyPolicy::JSON,
+    endpoint: EndpointRule::Received {
+        strip_prefix: Some("/claude"),
+    },
+    model_from_uri: false,
+};
+
+const CLAUDE_DESKTOP_ROUTE: RouteSpec = RouteSpec {
+    app_type: AppType::ClaudeDesktop,
+    tag: "Claude Desktop",
+    app_type_str: "claude-desktop",
+    body: BodyPolicy::JSON,
+    endpoint: EndpointRule::Received {
+        strip_prefix: Some("/claude-desktop"),
+    },
+    model_from_uri: false,
+};
+
+const CODEX_CHAT_ROUTE: RouteSpec = RouteSpec {
+    app_type: AppType::Codex,
+    tag: "Codex",
+    app_type_str: "codex",
+    body: BodyPolicy::CODEX,
+    endpoint: EndpointRule::Fixed("/chat/completions"),
+    model_from_uri: false,
+};
+
+const CODEX_RESPONSES_ROUTE: RouteSpec = RouteSpec {
+    app_type: AppType::Codex,
+    tag: "Codex",
+    app_type_str: "codex",
+    body: BodyPolicy::CODEX,
+    endpoint: EndpointRule::Fixed("/responses"),
+    model_from_uri: false,
+};
+
+const GROKBUILD_RESPONSES_ROUTE: RouteSpec = RouteSpec {
+    app_type: AppType::GrokBuild,
+    tag: "Grok Build",
+    app_type_str: "grokbuild",
+    body: BodyPolicy::CODEX,
+    endpoint: EndpointRule::Fixed("/responses"),
+    model_from_uri: false,
+};
+
+const CODEX_COMPACT_ROUTE: RouteSpec = RouteSpec {
+    app_type: AppType::Codex,
+    tag: "Codex",
+    app_type_str: "codex",
+    body: BodyPolicy::CODEX,
+    endpoint: EndpointRule::Fixed("/responses/compact"),
+    model_from_uri: false,
+};
+
+const GROKBUILD_COMPACT_ROUTE: RouteSpec = RouteSpec {
+    app_type: AppType::GrokBuild,
+    tag: "Grok Build",
+    app_type_str: "grokbuild",
+    body: BodyPolicy::CODEX,
+    endpoint: EndpointRule::Fixed("/responses/compact"),
+    model_from_uri: false,
+};
+
+const GEMINI_ROUTE: RouteSpec = RouteSpec {
+    app_type: AppType::Gemini,
+    tag: "Gemini",
+    app_type_str: "gemini",
+    body: BodyPolicy::GEMINI,
+    endpoint: EndpointRule::Received {
+        strip_prefix: Some("/gemini"),
+    },
+    model_from_uri: true,
+};
+
+/// A request that a provider served.
+struct Forwarded {
+    ctx: RequestContext,
+    body: Value,
+    endpoint: String,
+    is_stream: bool,
+    response: super::hyper_client::ProxyResponse,
+    claude_api_format: Option<String>,
+    connection_guard: Option<ActiveConnectionGuard>,
+}
+
+/// A request no provider served (already logged as a failed request).
+struct FailedForward {
+    ctx: RequestContext,
+    endpoint: String,
+    error: ProxyError,
+}
+
+/// Parse → select → forward (with failover). Errors before forwarding (bad
+/// JSON, no provider) are returned as `Err`; a forward failure as `Ok(Err(..))`
+/// so each route can shape its own error body.
+async fn forward_request(
+    state: &ProxyState,
+    request: axum::extract::Request,
+    route: &RouteSpec,
+) -> Result<Result<Forwarded, FailedForward>, ProxyError> {
+    let inbound = read_inbound(request, route.body).await?;
+    let mut ctx = RequestContext::new(
+        state,
+        &inbound.body,
+        &inbound.headers,
+        route.app_type.clone(),
+        route.tag,
+        route.app_type_str,
+    )
+    .await?;
+    if route.model_from_uri {
+        ctx = ctx.with_model_from_uri(&inbound.uri);
+    }
+    let endpoint = match route.endpoint {
+        EndpointRule::Received { strip_prefix } => inbound.endpoint_without_prefix(strip_prefix),
+        EndpointRule::Fixed(path) => endpoint_with_query(&inbound.uri, path),
+    };
+    let is_stream = inbound.is_stream();
+    let InboundRequest {
+        method,
+        headers,
+        extensions,
+        body,
+        ..
+    } = inbound;
+
+    let forwarder = ctx.create_forwarder(state);
+    let result = forwarder
+        .forward_with_retry(
+            &route.app_type,
+            method,
+            &endpoint,
+            &body,
+            headers,
+            extensions,
+            ctx.get_providers(),
+        )
+        .await;
+    let mut result = match result {
+        Ok(result) => result,
+        Err(mut err) => {
+            if let Some(provider) = err.provider.take() {
+                ctx.provider = provider;
+            }
+            log_forward_error(state, &ctx, is_stream, &err.error);
+            return Ok(Err(FailedForward {
+                ctx,
+                endpoint,
+                error: err.error,
+            }));
+        }
+    };
+
+    let connection_guard = result.connection_guard.take();
+    ctx.outbound_model = result.outbound_model.take();
+    ctx.provider = result.provider;
+    Ok(Ok(Forwarded {
+        ctx,
+        body,
+        endpoint,
+        is_stream,
+        response: result.response,
+        claude_api_format: result.claude_api_format,
+        connection_guard,
+    }))
 }
 
 /// 转换后的非流式响应记账（Converted 来源，零用量不落账）。
@@ -398,12 +530,7 @@ async fn handle_claude_transform(
     }
 
     // 非流式响应转换 (OpenAI/Responses → Anthropic)
-    let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
-            std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
-        } else {
-            std::time::Duration::ZERO
-        };
+    let body_timeout = ctx.body_read_timeout();
     let (mut response_headers, _status, body_bytes) =
         read_decoded_body(response, ctx.tag, body_timeout).await?;
 
@@ -538,56 +665,6 @@ async fn handle_claude_transform(
     })
 }
 
-fn endpoint_with_query(uri: &axum::http::Uri, endpoint: &str) -> String {
-    match uri.query() {
-        Some(query) => format!("{endpoint}?{query}"),
-        None => endpoint.to_string(),
-    }
-}
-
-/// Codex 客户端（尤其 Desktop 登录态）可能对请求体启用 zstd 压缩，使得后续
-/// `serde_json::from_slice` 直接解析失败。这里在解析前解压，并剥掉已失真的实体头
-/// （content-encoding / content-length / transfer-encoding）——转发层会基于解压后的
-/// 明文 JSON 重新生成正确的头。
-fn decode_codex_request_body(
-    headers: &mut axum::http::HeaderMap,
-    body_bytes: Bytes,
-) -> Result<Bytes, ProxyError> {
-    let Some(encoding) = get_content_encoding(headers) else {
-        return Ok(body_bytes);
-    };
-
-    if !is_supported_content_encoding(&encoding) {
-        return Err(ProxyError::InvalidRequest(format!(
-            "Unsupported request content-encoding: {encoding}"
-        )));
-    }
-
-    log::debug!("[Codex] 解压请求体: content-encoding={encoding}");
-    let decompressed = match decompress_body(&encoding, &body_bytes) {
-        Ok(Some(decompressed)) => decompressed,
-        // is_supported_content_encoding 已确保编码受支持，正常不会返回 None；
-        // 防御性兜底：宁可报错，也不能把压缩字节当 JSON 透传下去。
-        Ok(None) => {
-            return Err(ProxyError::InvalidRequest(format!(
-                "Unsupported request content-encoding: {encoding}"
-            )));
-        }
-        Err(e) => {
-            log::warn!("[Codex] 请求体解压失败 ({encoding}): {e}");
-            return Err(ProxyError::InvalidRequest(format!(
-                "Failed to decompress request body ({encoding}): {e}"
-            )));
-        }
-    };
-
-    headers.remove(axum::http::header::CONTENT_ENCODING);
-    headers.remove(axum::http::header::CONTENT_LENGTH);
-    headers.remove(axum::http::header::TRANSFER_ENCODING);
-
-    Ok(Bytes::from(decompressed))
-}
-
 // ============================================================================
 // Codex API 处理器
 // ============================================================================
@@ -597,63 +674,18 @@ pub async fn handle_chat_completions(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    let (parts, req_body) = request.into_parts();
-    let method = parts.method.clone();
-    let uri = parts.uri;
-    let mut headers = parts.headers;
-    let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
-    let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value =
-        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
-
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, AppType::Codex, "Codex", "codex").await?;
-    let endpoint = endpoint_with_query(&uri, "/chat/completions");
-
-    let is_stream = body
-        .get("stream")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let forwarder = ctx.create_forwarder(&state);
-    let mut result = match forwarder
-        .forward_with_retry(
-            &AppType::Codex,
-            method,
-            &endpoint,
-            &body,
-            headers,
-            extensions,
-            ctx.get_providers(),
-        )
-        .await
-    {
-        Ok(result) => result,
-        Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
-            log_forward_error(&state, &ctx, is_stream, &err.error);
-            return build_codex_proxy_error_response(&ctx, &endpoint, &err.error);
+    let forwarded = match forward_request(&state, request, &CODEX_CHAT_ROUTE).await? {
+        Ok(forwarded) => forwarded,
+        Err(failed) => {
+            return build_codex_proxy_error_response(&failed.ctx, &failed.endpoint, &failed.error)
         }
     };
-
-    let connection_guard = result.connection_guard.take();
-    ctx.outbound_model = result.outbound_model.take();
-    ctx.provider = result.provider;
-    let response = result.response;
-
     process_response(
-        response,
-        &ctx,
+        forwarded.response,
+        &forwarded.ctx,
         &state,
         &OPENAI_PARSER_CONFIG,
-        connection_guard,
+        forwarded.connection_guard,
     )
     .await
 }
@@ -663,102 +695,61 @@ pub async fn handle_responses(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_for_app(state, request, AppType::Codex, "Codex", "codex").await
+    handle_responses_for_app(state, request, &CODEX_RESPONSES_ROUTE).await
 }
 
 pub async fn handle_grokbuild_responses(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_for_app(
-        state,
-        request,
-        AppType::GrokBuild,
-        "Grok Build",
-        "grokbuild",
-    )
-    .await
+    handle_responses_for_app(state, request, &GROKBUILD_RESPONSES_ROUTE).await
 }
 
+/// `/responses` and `/responses/compact` (Codex and Grok Build): passthrough, or
+/// the Responses bridge to a Chat / Anthropic upstream.
 async fn handle_responses_for_app(
     state: ProxyState,
     request: axum::extract::Request,
-    app_type: AppType,
-    tag: &'static str,
-    app_type_str: &'static str,
+    route: &'static RouteSpec,
 ) -> Result<axum::response::Response, ProxyError> {
-    let (parts, req_body) = request.into_parts();
-    let method = parts.method.clone();
-    let uri = parts.uri;
-    let mut headers = parts.headers;
-    let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
-    let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value =
-        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
-
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
-    let endpoint = endpoint_with_query(&uri, "/responses");
-
-    let is_stream = body
-        .get("stream")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let codex_tool_context = transform_codex_chat::build_codex_tool_context_from_request(&body);
-
-    let forwarder = ctx.create_forwarder(&state);
-    let mut result = match forwarder
-        .forward_with_retry(
-            &app_type,
-            method,
-            &endpoint,
-            &body,
-            headers,
-            extensions,
-            ctx.get_providers(),
-        )
-        .await
-    {
-        Ok(result) => result,
-        Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
-            log_forward_error(&state, &ctx, is_stream, &err.error);
-            return build_codex_proxy_error_response(&ctx, &endpoint, &err.error);
+    let forwarded = match forward_request(&state, request, route).await? {
+        Ok(forwarded) => forwarded,
+        Err(failed) => {
+            return build_codex_proxy_error_response(&failed.ctx, &failed.endpoint, &failed.error)
         }
     };
-
-    let connection_guard = result.connection_guard.take();
-    ctx.outbound_model = result.outbound_model.take();
-    ctx.provider = result.provider;
-    let response = result.response;
+    let Forwarded {
+        ctx,
+        body,
+        endpoint,
+        is_stream,
+        response,
+        connection_guard,
+        ..
+    } = forwarded;
 
     if super::providers::should_convert_codex_responses_to_anthropic(&ctx.provider, &endpoint) {
+        let tool_context = transform_codex_chat::build_codex_tool_context_from_request(&body);
         return handle_codex_anthropic_to_responses_transform(
             response,
             &ctx,
             &state,
             is_stream,
             connection_guard,
-            codex_tool_context,
+            tool_context,
         )
         .await;
     }
 
     if super::providers::should_convert_codex_responses_to_chat(&ctx.provider, &endpoint) {
+        let tool_context = transform_codex_chat::build_codex_tool_context_from_request(&body);
         return handle_codex_chat_to_responses_transform(
             response,
             &ctx,
             &state,
             is_stream,
             connection_guard,
-            codex_tool_context,
+            tool_context,
         )
         .await;
     }
@@ -778,114 +769,14 @@ pub async fn handle_responses_compact(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_compact_for_app(state, request, AppType::Codex, "Codex", "codex").await
+    handle_responses_for_app(state, request, &CODEX_COMPACT_ROUTE).await
 }
 
 pub async fn handle_grokbuild_responses_compact(
     State(state): State<ProxyState>,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    handle_responses_compact_for_app(
-        state,
-        request,
-        AppType::GrokBuild,
-        "Grok Build",
-        "grokbuild",
-    )
-    .await
-}
-
-async fn handle_responses_compact_for_app(
-    state: ProxyState,
-    request: axum::extract::Request,
-    app_type: AppType,
-    tag: &'static str,
-    app_type_str: &'static str,
-) -> Result<axum::response::Response, ProxyError> {
-    let (parts, req_body) = request.into_parts();
-    let method = parts.method.clone();
-    let uri = parts.uri;
-    let mut headers = parts.headers;
-    let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
-    let body_bytes = decode_codex_request_body(&mut headers, body_bytes)?;
-    let body: Value =
-        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?;
-
-    let mut ctx =
-        RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
-    let endpoint = endpoint_with_query(&uri, "/responses/compact");
-
-    let is_stream = body
-        .get("stream")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let codex_tool_context = transform_codex_chat::build_codex_tool_context_from_request(&body);
-
-    let forwarder = ctx.create_forwarder(&state);
-    let mut result = match forwarder
-        .forward_with_retry(
-            &app_type,
-            method,
-            &endpoint,
-            &body,
-            headers,
-            extensions,
-            ctx.get_providers(),
-        )
-        .await
-    {
-        Ok(result) => result,
-        Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
-            log_forward_error(&state, &ctx, is_stream, &err.error);
-            return build_codex_proxy_error_response(&ctx, &endpoint, &err.error);
-        }
-    };
-
-    let connection_guard = result.connection_guard.take();
-    ctx.outbound_model = result.outbound_model.take();
-    ctx.provider = result.provider;
-    let response = result.response;
-
-    if super::providers::should_convert_codex_responses_to_anthropic(&ctx.provider, &endpoint) {
-        return handle_codex_anthropic_to_responses_transform(
-            response,
-            &ctx,
-            &state,
-            is_stream,
-            connection_guard,
-            codex_tool_context,
-        )
-        .await;
-    }
-
-    if super::providers::should_convert_codex_responses_to_chat(&ctx.provider, &endpoint) {
-        return handle_codex_chat_to_responses_transform(
-            response,
-            &ctx,
-            &state,
-            is_stream,
-            connection_guard,
-            codex_tool_context,
-        )
-        .await;
-    }
-
-    process_response(
-        response,
-        &ctx,
-        &state,
-        &CODEX_PARSER_CONFIG,
-        connection_guard,
-    )
-    .await
+    handle_responses_for_app(state, request, &GROKBUILD_COMPACT_ROUTE).await
 }
 
 async fn handle_codex_chat_to_responses_transform(
@@ -944,12 +835,7 @@ async fn handle_codex_chat_to_responses_transform(
     }
 
     let _connection_guard = connection_guard;
-    let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
-            std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
-        } else {
-            std::time::Duration::ZERO
-        };
+    let body_timeout = ctx.body_read_timeout();
     let (mut response_headers, status, body_bytes) =
         read_decoded_body(response, ctx.tag, body_timeout).await?;
     let body_str = String::from_utf8_lossy(&body_bytes);
@@ -1071,12 +957,7 @@ async fn handle_codex_anthropic_to_responses_transform(
         );
     }
 
-    let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
-            std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
-        } else {
-            std::time::Duration::ZERO
-        };
+    let body_timeout = ctx.body_read_timeout();
     let (mut response_headers, status, body_bytes) =
         read_decoded_body(response, ctx.tag, body_timeout).await?;
     let body_str = String::from_utf8_lossy(&body_bytes);
@@ -1213,12 +1094,7 @@ async fn handle_codex_chat_error_response(
     ctx: &RequestContext,
     status: axum::http::StatusCode,
 ) -> Result<axum::response::Response, ProxyError> {
-    let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
-            std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
-        } else {
-            std::time::Duration::ZERO
-        };
+    let body_timeout = ctx.body_read_timeout();
     let (mut response_headers, _status, body_bytes) =
         read_decoded_body(response, ctx.tag, body_timeout).await?;
 
@@ -1439,76 +1315,18 @@ fn compact_error_message(message: &str, max_chars: usize) -> String {
 /// 处理 Gemini API 请求（透传，包括查询参数）
 pub async fn handle_gemini(
     State(state): State<ProxyState>,
-    uri: axum::http::Uri,
     request: axum::extract::Request,
 ) -> Result<axum::response::Response, ProxyError> {
-    let (parts, req_body) = request.into_parts();
-    let method = parts.method.clone();
-    let headers = parts.headers;
-    let extensions = parts.extensions;
-    let body_bytes = req_body
-        .collect()
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read request body: {e}")))?
-        .to_bytes();
-    // GET 类只读端点（/v1beta/models、/v1beta/models/<model> 等）没有请求体，
-    // 不能强制 parse 为 JSON —— 否则空 body 会被拒绝。
-    let body: Value = if body_bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&body_bytes).map_err(|e| ProxyError::invalid_request_json(&e))?
+    let forwarded = match forward_request(&state, request, &GEMINI_ROUTE).await? {
+        Ok(forwarded) => forwarded,
+        Err(failed) => return Err(failed.error),
     };
-
-    // Gemini 的模型名称在 URI 中
-    let mut ctx = RequestContext::new(&state, &body, &headers, AppType::Gemini, "Gemini", "gemini")
-        .await?
-        .with_model_from_uri(&uri);
-
-    // 提取完整的路径和查询参数
-    let endpoint = uri
-        .path_and_query()
-        .map(|pq| pq.as_str())
-        .unwrap_or(uri.path());
-
-    let is_stream = body
-        .get("stream")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let forwarder = ctx.create_forwarder(&state);
-    let mut result = match forwarder
-        .forward_with_retry(
-            &AppType::Gemini,
-            method,
-            endpoint,
-            &body,
-            headers,
-            extensions,
-            ctx.get_providers(),
-        )
-        .await
-    {
-        Ok(result) => result,
-        Err(mut err) => {
-            if let Some(provider) = err.provider.take() {
-                ctx.provider = provider;
-            }
-            log_forward_error(&state, &ctx, is_stream, &err.error);
-            return Err(err.error);
-        }
-    };
-
-    let connection_guard = result.connection_guard.take();
-    ctx.outbound_model = result.outbound_model.take();
-    ctx.provider = result.provider;
-    let response = result.response;
-
     process_response(
-        response,
-        &ctx,
+        forwarded.response,
+        &forwarded.ctx,
         &state,
         &GEMINI_PARSER_CONFIG,
-        connection_guard,
+        forwarded.connection_guard,
     )
     .await
 }
@@ -2110,6 +1928,7 @@ mod tests {
         upstream_body_parse_error,
     };
     use crate::proxy::ProxyError;
+    use http_body_util::BodyExt;
 
     #[test]
     fn body_looks_like_sse_detects_unlabeled_sse_prefixes() {
@@ -2809,7 +2628,6 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
     }
 
     async fn response_json(response: axum::response::Response) -> serde_json::Value {
-        use http_body_util::BodyExt;
         let bytes = response
             .into_body()
             .collect()
