@@ -1,6 +1,6 @@
 # CI/CD, build, release & dependencies — findings (CI-xx)
 
-Part of the [next-phase proposals](../README.md). 38 findings. Priorities: P2 = 34, P3 = 4.
+Part of the [next-phase proposals](../README.md). 48 findings. Priorities: P2 = 40, P3 = 8.
 
 ## Area summary
 
@@ -44,10 +44,20 @@ The pipeline already does several hard things well: a five-target release matrix
 | [CI-36](#ci-36) | Updater/signing key custody and rotation are undocumented | security | P2 | S | medium |  |
 | [CI-37](#ci-37) | Ambitious — end-to-end release-engineering overhaul (release-please/git-cliff driven, dry-run, signed/attested, multi-channel) | feature | P2 (first pass P1) | XL | medium | partially-confirmed |
 | [CI-38](#ci-38) | Ambitious — split the 147k-LOC `cc-switch` crate into a Cargo workspace (core / proxy / cli / tauri shell) | refactor | P2 | XL | medium |  |
+| [CI-39](#ci-39) | Capability set grants `process:allow-restart` but not `process:allow-exit`, so every frontend `exit()` call is denied | bug | P2 (first pass P1) | S | high | partially-confirmed |
+| [CI-40](#ci-40) | Vite `envPrefix` includes `TAURI_`, exposing `TAURI_SIGNING_PRIVATE_KEY` and its password to the renderer bundle | security | P2 (first pass P1) | S | high | partially-confirmed |
+| [CI-41](#ci-41) | Release workflow is not gated on CI: any `v*` tag on any commit ships without tests, fmt, clippy or typecheck | ci | P2 (first pass P1) | S | medium | partially-confirmed |
+| [CI-42](#ci-42) | Release build matrix runs third-party build code with a `contents: write` token | security | P2 | S | high |  |
+| [CI-43](#ci-43) | CSP allows the webview to connect to any `http:`/`https:` origin, and the asset protocol is compiled in but unused | security | P2 | S | medium |  |
+| [CI-44](#ci-44) | Flatpak build cannot run host CLIs or terminals: no `flatpak-spawn --host` path and no `org.freedesktop.Flatpak` talk-name | bug | P2 | M | medium |  |
 | [CI-32](#ci-32) | Repo hygiene: 105 KB `deplink.html` served from the repo root via GitHub Pages without a Pages workflow, PRD at root, 14 MB of tracked sponsor images, oversized tray icon | tech-debt | P3 | M | high |  |
 | [CI-33](#ci-33) | Four README copies duplicate a 60-cell sponsor table and the download/feature sections by hand | refactor | P3 | M | high |  |
 | [CI-34](#ci-34) | Issue/PR templates miss the fields releases now need, and the commit convention is documented but unenforced | docs | P3 | S | high |  |
 | [CI-35](#ci-35) | Linux WebKit environment workarounds are applied to every packaging format, not just the AppImage that motivated them | performance | P3 | S | medium |  |
+| [CI-45](#ci-45) | `cargo clippy` in CI skips tests, integration tests and examples (no `--all-targets`) | ci | P3 | S | high |  |
+| [CI-46](#ci-46) | macOS release retry loop reruns the entire universal build for any failure and the 60-minute step cap cannot fit three attempts | ci | P3 | S | medium |  |
+| [CI-47](#ci-47) | Release-time tools are downloaded unpinned (create-dmg via Homebrew, Tauri's linuxdeploy/AppImage tooling) | security | P3 | S | medium |  |
+| [CI-48](#ci-48) | Notarization uses an Apple ID app-specific password on the command line instead of an App Store Connect API key | security | P3 | S | medium |  |
 
 ## Findings
 
@@ -369,6 +379,67 @@ The pipeline already does several hard things well: a five-target release matrix
 - **Proposal:** Introduce `src-tauri/Cargo.toml` as a `[workspace]` (or a root-level `crates/`): `cc-switch-core` (config models + parsers for every tool, `database/`, `services/`, `mcp/`, `session_manager/`, `deeplink/` parsing, `error.rs`; deps: serde/toml/json5/rusqlite only — no `tauri`), `cc-switch-proxy` (`proxy/`, axum/hyper/rustls/rquickjs; depends on core), `cc-switch-cli` (new, `clap`-based: `cc-switch switch <app> <provider>`, `export`, `import`, `proxy serve`; depends on core+proxy, no GTK), and `cc-switch-app` (today's `src-tauri`: `commands/`, `tray.rs`, `lib.rs` builder, plugins; depends on all). Do it incrementally: step 1 move `error.rs`+`database/`+config parsers behind a `core` crate with `pub use` shims; step 2 proxy; step 3 CLI. Add `cargo test -p cc-switch-core -p cc-switch-proxy` as a fast PR job on a bare runner and keep the full app build in the matrix. Ship the CLI as an extra release asset and as a Homebrew formula.
 - **Acceptance:** `cargo test -p cc-switch-core` runs on `ubuntu-latest` with no apt step in <5 minutes; a change to `codex_config.rs` does not recompile `proxy/`; `cc-switch --help` works headless on Linux servers; `cargo deny` runs per crate with stricter rules on `proxy`.
 
+### CI-39: Capability set grants `process:allow-restart` but not `process:allow-exit`, so every frontend `exit()` call is denied
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/capabilities/default.json:19` lists only `"process:allow-restart"` (no `process:default` / `process:allow-exit`); `src-tauri/src/lib.rs:309` registers `tauri_plugin_process::init()`; `src/main.tsx:16,63` `await exit(1)` at the end of `handleConfigLoadError`; `src/components/DatabaseUpgrade.tsx:5,292` Quit button `onClick={() => void exit(0)}`; `src/main.tsx:94-102` calls `handleConfigLoadError` inside a `try` whose `catch` logs "忽略拉取错误，继续渲染" and then falls through to render the full `<App />` (`:104-115`).
+- **Problem:** Tauri 2 rejects plugin commands that are not in the window's capability, so `exit()` throws `process.exit not allowed`. On a corrupt config the user sees the error dialog, the exit is refused, the exception is swallowed by the bootstrap `catch`, and the normal App is rendered against a backend that reported an init failure, which is the exact state the comment at `main.tsx:96` says can never happen and invites writes over a broken config. On the DB-too-new recovery screen the Quit button does nothing.
+- **Proposal:** Add `"process:allow-exit"` (or replace the single permission with `"process:default"`) to `capabilities/default.json`. Additionally make `handleConfigLoadError` fall back to a Rust command that calls `app.exit(1)` if the plugin call fails, and do not fall through to rendering `<App />` after a reported init error.
+- **Acceptance:** With a deliberately corrupted `~/.cc-switch` config, the app shows the dialog and the process exits with code 1; on the DB-too-new screen the Quit button terminates the process; a unit/integration test or capability check asserts `process:allow-exit` is present.
+- **Verification:** **partially-confirmed** — Confirmed src-tauri/capabilities/default.json:19 grants only "process:allow-restart" (no process:default/allow-exit), so plugin exit() is denied and the DatabaseUpgrade.tsx:292 Quit button (`onClick={() => void exit(0)}`) does nothing. However, the corrupt-config scenario is wrong: the configLoadError event is never emitted anywhere in src-tauri/src, and set_init_error is only called at lib.rs:429 for kind db_version_too_new, which main.tsx renders as <DatabaseUpgrade> and returns before main.tsx:94. Corrupt legacy config is handled natively in Rust (lib.rs:399-407 dialog plus std::process::exit(1)), so the main.tsx:94-115 fall-through to <App /> cannot happen today. The real impact is a broken Quit button on a rare recovery screen, where the window can still be closed, so P2. The capability fix is correct. (Origin: completeness-critic pass.)
+
+### CI-40: Vite `envPrefix` includes `TAURI_`, exposing `TAURI_SIGNING_PRIVATE_KEY` and its password to the renderer bundle
+
+**Type:** security · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `vite.config.ts` sets `envPrefix: ["VITE_", "TAURI_"]`; `src-tauri/tauri.conf.json:10` `beforeBuildCommand: pnpm run build:renderer` (vite build) runs inside `pnpm tauri build`; `.github/workflows/release.yml:183` and `:185` write `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` into `GITHUB_ENV`, so both are in the environment of the Vite build at `:245`, `:268-270`, `:275`. Today the only use is `import.meta.env.DEV` (`src/components/settings/SettingsPage.tsx:162`).
+- **Problem:** Vite exposes every env var matching `envPrefix` to client code. Any future `import.meta.env.TAURI_SIGNING_PRIVATE_KEY*` reference, a whole-object `import.meta.env` use (debug dump, spread, a dependency that reads it), or a dependency compromise statically inlines the updater private key and password into the shipped JS, which is public in every release. With them, anyone can sign malicious updates that every installed client accepts. Tauri 2 renamed its build vars to `TAURI_ENV_*` and its templates use `TAURI_ENV_*` precisely for this reason. This is distinct from CI-05 (secret handling in shell): here the leak target is the published bundle.
+- **Proposal:** Change to `envPrefix: ["VITE_", "TAURI_ENV_"]`. Add a release-step guard that greps `dist/` for the first 20 characters of the base64 key (and `untrusted comment`) and fails the job if found.
+- **Acceptance:** `vite.config.ts` no longer exposes `TAURI_SIGNING_*`; the release workflow contains a step that fails if `dist/` contains signing-key material; a test build with `TAURI_SIGNING_PRIVATE_KEY=sentinel` and `console.log(import.meta.env)` added produces no `sentinel` in `dist/`.
+- **Verification:** **partially-confirmed** — vite.config.ts sets `envPrefix: ["VITE_", "TAURI_"]`, and release.yml:183/185 put TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) into GITHUB_ENV ahead of `pnpm tauri build` (:245, :268-270, :275), whose beforeBuildCommand (tauri.conf.json:10) runs vite build. So the vars fall inside the client-exposed prefix. Nothing leaks today: the only import.meta usage in src/ is `import.meta.env.DEV` (SettingsPage.tsx:162). The 'dependency compromise' argument is moot, because a malicious build-time dependency can read process.env directly whatever envPrefix says. This is a latent footgun worth fixing (TAURI_ENV_ is the Tauri 2 convention), but it is not a current P1 exposure. (Origin: completeness-critic pass.)
+
+### CI-41: Release workflow is not gated on CI: any `v*` tag on any commit ships without tests, fmt, clippy or typecheck
+
+**Type:** ci · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `.github/workflows/release.yml:3-6` triggers on `push: tags: 'v*'` from any branch; the `release` job (`:16-31`) goes straight from checkout to install and `tauri build` with no `pnpm typecheck`, `pnpm test:unit`, `cargo test`, `cargo clippy` and no `needs:` on a test job or check of the commit's CI status; `.github/workflows/ci.yml:3-7` runs only on PRs and `push` to `main`, so a tag on a feature branch or a commit pushed straight after a red `main` build is never verified. `release.yml:18` uses `environment: release` but nothing in the repo documents tag or branch protection rules for it.
+- **Problem:** A release can be produced from a commit that fails tests or was never on `main` (e.g. a tag pushed from a local branch). Given the 2,000+ Rust tests and DB migration logic, shipping an untested commit to an auto-updating user base can corrupt user data. CI-07 covers dry runs and CI-06 the tag/version mismatch; neither ensures the tagged commit passed CI.
+- **Proposal:** Turn `ci.yml` into a reusable workflow (`on: workflow_call`) and add a `verify` job in `release.yml` that calls it; make `release` `needs: verify`. Also verify that the tagged commit is reachable from `origin/main` (`git merge-base --is-ancestor $GITHUB_SHA origin/main`), and configure tag protection plus `release` environment deployment rules restricted to `v*` tags.
+- **Acceptance:** Pushing a `v*` tag on a commit with a failing unit test or one not on `main` stops the run before any build leg starts; the release run graph shows `verify` before `release`.
+- **Verification:** **partially-confirmed** — release.yml:3-6 triggers on any `v*` tag push. The release job has no `needs:` (the only `needs:` entries are at :590 and :639, downstream of release) and no typecheck, test, fmt or clippy step. ci.yml:3-7 runs only on PRs and pushes to main, so the tagged commit is never verified by the release pipeline itself. `environment: release` (:18) may carry deployment or tag protection rules configured in GitHub settings, which cannot be checked from the repo. The data-corruption impact is speculative, since a maintainer process normally tags a green main. The gap is real; it is process hardening rather than P1. (Origin: completeness-critic pass.)
+
+### CI-42: Release build matrix runs third-party build code with a `contents: write` token
+
+**Type:** security · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `.github/workflows/release.yml:8-9` top-level `permissions: contents: write` applies to the five-leg `release` job (`:16`), which runs `pnpm install --frozen-lockfile` (`:131`), arbitrary Cargo `build.rs` scripts and Vite plugins via `pnpm tauri build` (`:245`, `:270`, `:275`), and `brew install create-dmg` (`:328`). Only `publish-release` (`:591-592`) and `assemble-latest-json` (`:640-641`) actually write to the repo, and they already declare their own `contents: write`.
+- **Problem:** A compromised npm/crate dependency or Homebrew formula executing on a build leg gets a `GITHUB_TOKEN` that can push commits, move tags or edit releases in the repository, so it can tamper with the release it is building (or with `main`). The build legs only need `contents: read`. CI-18 covers `ci.yml` having no `permissions` block; this is the release workflow's over-broad default.
+- **Proposal:** Set top-level `permissions: contents: read` in `release.yml` and keep `contents: write` only on `publish-release` and `assemble-latest-json`. Set `persist-credentials: false` on the build-leg `actions/checkout`.
+- **Acceptance:** `release.yml` top-level permissions are read-only; only the two publishing jobs request `contents: write`; a release run still publishes all assets and `latest.json`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CI-43: CSP allows the webview to connect to any `http:`/`https:` origin, and the asset protocol is compiled in but unused
+
+**Type:** security · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/tauri.conf.json:29` `connect-src 'self' ipc: http://ipc.localhost https: http:` and `img-src 'self' data: https: http:`; `:30-33` `assetProtocol.enable: true` with `scope: []`; `src-tauri/Cargo.toml:30` enables the `protocol-asset` feature. The only direct renderer network call is `fetch(MODELS_DEV_API_URL)` in `src/components/usage/ModelsDevPickerDialog.tsx:164`; `grep convertFileSrc src` finds nothing. `src/components/ProviderIcon.tsx:79` renders `dangerouslySetInnerHTML={{ __html: iconSvg }}`.
+- **Problem:** The renderer holds API keys for many providers. If any HTML/SVG injection lands (e.g. via provider icons rendered as raw HTML, or deep-link imported data), the wildcard `connect-src` lets an attacker exfiltrate data to any host over plain HTTP, and `img-src http:` gives a second exfil channel. Enabling the asset protocol with an empty scope adds attack surface for no feature.
+- **Proposal:** Restrict `connect-src` to `'self' ipc: http://ipc.localhost https://models.dev` (route any other HTTP through Rust commands); restrict `img-src` to `'self' data:` plus explicit icon hosts if needed. Remove `assetProtocol` and the `protocol-asset` feature unless a feature needs it.
+- **Acceptance:** `tauri.conf.json` CSP has no bare `http:`/`https:` in `connect-src`; a renderer `fetch('https://example.com')` is blocked by CSP in a dev build while the models.dev picker still works; `protocol-asset` is gone from `Cargo.toml`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+- **Possible overlap with:** SEC-16, CMD-03 (check before scheduling)
+
+### CI-44: Flatpak build cannot run host CLIs or terminals: no `flatpak-spawn --host` path and no `org.freedesktop.Flatpak` talk-name
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `flatpak/com.ccswitch.desktop.yml:9-22` finish-args grant `--filesystem=home` and network but not `--talk-name=org.freedesktop.Flatpak`; the app spawns host programs directly: `src-tauri/src/commands/misc.rs:1669` `Command::new(tool_path).arg("--version")` (CLI version detection), `:3176-3186` probes `/usr/bin/<terminal>` and runs `Command::new(terminal)` to open a terminal session, `:3206` `Command::new("which")`; `grep -rn FLATPAK src-tauri/src` returns nothing, so there is no sandbox-aware branch.
+- **Problem:** Inside the Flatpak sandbox `/usr/bin` is the GNOME runtime, not the host, so `claude`/`codex`/`gemini` version detection reports "not installed" and "open in terminal" fails with "未找到可用的终端" for Flatpak users, even though the README and flatpak/README advertise this package. CI-23 covers the manifest's runtime age, pinning and deep links, not this functional breakage.
+- **Proposal:** Detect the sandbox (`/.flatpak-info` exists or `FLATPAK_ID` set) and wrap host commands as `flatpak-spawn --host <cmd> ...`; add `--talk-name=org.freedesktop.Flatpak` to finish-args; document the limitation if Flathub rejects that permission.
+- **Acceptance:** In a locally built Flatpak, the About/tools panel detects a host-installed `claude` CLI and "open terminal" launches the host terminal; a unit test covers the command-wrapping helper.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### CI-32: Repo hygiene: 105 KB `deplink.html` served from the repo root via GitHub Pages without a Pages workflow, PRD at root, 14 MB of tracked sponsor images, oversized tray icon
 
 **Type:** tech-debt · **Priority:** P3 · **Effort:** M · **Confidence:** high
@@ -404,3 +475,43 @@ The pipeline already does several hard things well: a five-target release matrix
 - **Problem:** Packaging-specific mitigations leak into native packages where the distro's WebKitGTK is usually newer and the DMA-BUF path works, costing rendering performance and battery on every Linux install.
 - **Proposal:** Gate the two workarounds on `std::env::var_os("APPIMAGE").is_some()` (set by the AppImage runtime) and on a documented override env var; keep the GDK backend escape hatch; document the matrix in the Linux section of README.
 - **Acceptance:** `WEBKIT_DISABLE_COMPOSITING_MODE` is unset in `/proc/<pid>/environ` of a `.deb`-installed instance and set for the AppImage; no new Linux rendering issues reported after one release.
+
+### CI-45: `cargo clippy` in CI skips tests, integration tests and examples (no `--all-targets`)
+
+**Type:** ci · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `.github/workflows/ci.yml:101-102` `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` lints only the lib/bin targets; the `#[cfg(test)]` modules in `src-tauri/src` and the 10 files in `src-tauri/tests/` are compiled only by `cargo test` (`:105`), which does not run clippy lints, and the `test-hooks` feature (`Cargo.toml:20`) is never linted.
+- **Problem:** Clippy findings such as `await_holding_lock`, unused results or always-true assertions in test code are never reported, so lint debt builds up silently in the test suite. With `-D warnings`, turning `--all-targets` on later becomes a large cleanup PR.
+- **Proposal:** Change the step to `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` (fix or `#[allow]` existing hits in the same PR).
+- **Acceptance:** The CI clippy step uses `--all-targets --all-features` and passes; adding a deliberate clippy violation inside a `#[cfg(test)]` module fails CI.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CI-46: macOS release retry loop reruns the entire universal build for any failure and the 60-minute step cap cannot fit three attempts
+
+**Type:** ci · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `.github/workflows/release.yml:231-258`: `timeout-minutes: 60` wraps a loop of up to 3 `pnpm tauri build --target universal-apple-darwin` runs with 60 s and 120 s sleeps in between; the loop retries on any non-zero exit (compile error, frontend build error, signing failure), not only notarization; each retry rebuilds both architectures and resubmits the app to Apple.
+- **Problem:** A universal release build with `lto`/`codegen-units = 1` (`Cargo.toml:104-107`) takes a large part of the 60 minutes, so retries usually hit the step timeout and the job fails with a generic cancellation instead of the real error. Deterministic failures burn up to an hour of macOS minutes, and a notarization hiccup forces a full recompile.
+- **Proposal:** Split the step: build once with `tauri build --no-sign`-style separation or set `APPLE_*` notarization env only for a separate step; run notarization with `xcrun notarytool submit --wait` in its own retry loop (as already done for the DMG at `:370-392`) against the built `.app` zip; fail fast on compile errors.
+- **Acceptance:** A compile error fails the macOS leg on the first attempt; a forced notarization failure retries only the notarization step and does not rebuild Rust.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CI-47: Release-time tools are downloaded unpinned (create-dmg via Homebrew, Tauri's linuxdeploy/AppImage tooling)
+
+**Type:** security · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `.github/workflows/release.yml:328` `HOMEBREW_NO_AUTO_UPDATE=1 brew install create-dmg` installs whatever formula version the runner image has, and the result is run with the Developer ID identity (`:344` `--codesign "$APPLE_SIGNING_IDENTITY"`) while the unlocked signing keychain is the default keychain (`:206-207`); `:275` `pnpm tauri build --bundles appimage,...` makes the Tauri bundler fetch linuxdeploy and its GTK plugin at build time with no checksum pinned in the repo; `:645` `apt-get install -y gh || true`.
+- **Problem:** The signed DMG and the AppImage depend on tool versions that change under the project with no record of which version produced a release, so builds are not reproducible, and a compromised upstream tool runs next to an unlocked code-signing keychain. CI-18 covers Action tag pinning only.
+- **Proposal:** Pin create-dmg to a vendored script at a fixed commit (it is a single shell script) with a SHA-256 check, or use `hdiutil` directly; pre-download linuxdeploy/AppImage plugins at fixed versions with checksums into the Tauri tools cache before `tauri build`; record tool versions in the job summary.
+- **Acceptance:** The release workflow contains no unversioned `brew install`; AppImage tooling is fetched by URL plus SHA-256 under repo control; two runs on the same tag use identical tool versions, as shown in the job summary.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### CI-48: Notarization uses an Apple ID app-specific password on the command line instead of an App Store Connect API key
+
+**Type:** security · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `.github/workflows/release.yml:237-239` passes `APPLE_ID`/`APPLE_PASSWORD`/`APPLE_TEAM_ID` to `tauri build`; `:373-377` `xcrun notarytool submit "$DMG_PATH" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"` puts the password in the process argument list.
+- **Problem:** An app-specific password belongs to one person's Apple ID, so if that person loses access the release pipeline breaks, and it cannot be scoped or rotated per pipeline. Passing it as an argv value exposes it to any process on the runner that can list processes. Tauri and notarytool both support API keys (`APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH` / `--key --key-id --issuer`) that are team-owned and revocable.
+- **Proposal:** Create a team App Store Connect API key with the Developer role, store the `.p8` as a secret written to `$RUNNER_TEMP`, switch Tauri to `APPLE_API_KEY`/`APPLE_API_ISSUER`/`APPLE_API_KEY_PATH` and notarytool to `--key/--key-id/--issuer`, then delete the Apple ID secrets.
+- **Acceptance:** `release.yml` no longer references `APPLE_PASSWORD`/`APPLE_ID`; both app and DMG notarization succeed with the API key; the `.p8` file is removed in the cleanup step.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

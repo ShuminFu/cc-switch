@@ -1,6 +1,6 @@
 # Performance & resources — findings (PERF-xx)
 
-Part of the [next-phase proposals](../README.md). 40 findings. Priorities: P1 = 2, P2 = 27, P3 = 11.
+Part of the [next-phase proposals](../README.md). 50 findings. Priorities: P1 = 2, P2 = 33, P3 = 15.
 
 ## Area summary
 
@@ -39,6 +39,12 @@ The codebase (147.7k lines of Rust, 81.3k lines of TS/TSX, 750 crates, v3.17.0) 
 | [PERF-30](#perf-30) | No performance measurement infrastructure (benchmarks, load harness, startup spans, bundle/DB plan checks) | test | P2 | M | high |  |
 | [PERF-31](#perf-31) | No SQLite statement cache: 310 `conn.execute`/`prepare` call sites, zero `prepare_cached` | performance | P2 | S | high |  |
 | [PERF-33](#perf-33) | Frontend boot waterfall: render blocked on `get_init_error`, then ~10 independent invokes including a duplicated env-conflict scan | performance | P2 | S | high |  |
+| [PERF-41](#perf-41) | The previous session's log file is deleted on every launch, so diagnostics from a crash, hang or OS kill are gone once the user restarts | bug | P2 | S | high |  |
+| [PERF-42](#perf-42) | All crates log at Trace during startup, and stay at Trace for the whole session if `log_config` fails to load; logging 'disabled' is not honored before setup finishes | bug | P2 | S | high |  |
+| [PERF-43](#perf-43) | Background timers use tokio `interval` with the default `Burst` policy: slow or suspended passes cause back-to-back session-sync storms, and 'daily' maintenance follows awake time, not wall time | bug | P2 | S | medium |  |
+| [PERF-44](#perf-44) | OAuth token refresh (Copilot and Codex) runs inline on the proxy request path behind a per-account mutex, uses the 600 s global client timeout, and fails the request even when the cached token is still valid | performance | P2 | M | high |  |
+| [PERF-45](#perf-45) | `reqwest` is built with default features, so native-tls/OpenSSL is compiled and linked alongside rustls, and `Client::builder()` likely defaults to the native backend | tech-debt | P2 | S | medium |  |
+| [PERF-46](#perf-46) | Session list renders every session row with no virtualization, and re-filters, re-sorts and re-groups the whole list on every keystroke | performance | P2 | M | high |  |
 | [PERF-06](#perf-06) | SSE passthrough parser allocates per line and memmoves the buffer per event | performance | P3 (first pass P1) | S | high | partially-confirmed |
 | [PERF-09](#perf-09) | Provider limit checks wrap the indexed `created_at` column in `date()`/`strftime()` (non-sargable full scans) | performance | P3 (first pass P1) | S | high | partially-confirmed |
 | [PERF-16](#perf-16) | Tray menu is rebuilt from scratch on every provider/profile/failover change, re-reading every provider table, blocking on async DB calls and parsing live config files from disk | performance | P3 (first pass P1) | M | high | partially-confirmed |
@@ -50,6 +56,10 @@ The codebase (147.7k lines of Rust, 81.3k lines of TS/TSX, 750 crates, v3.17.0) 
 | [PERF-38](#perf-38) | `CodexChatHistoryStore` caps entries (512 responses) but not bytes, and `GeminiShadowStore` defaults are not surfaced for tuning | performance | P3 | S | low |  |
 | [PERF-39](#perf-39) | `scan_unmanaged_skills` walks 8+ directories and reads every `SKILL.md` synchronously on the main thread when the Skills page opens | performance | P3 | S | medium |  |
 | [PERF-40](#perf-40) | `ProviderRouter::select_providers` allocates a circuit-breaker key string and takes an async RwLock per provider per request even when failover is disabled for all but one provider | performance | P3 | S | medium |  |
+| [PERF-47](#perf-47) | `ProviderCard` and its `UsageFooter` register two observers of the same usage query with different auto-query rules (OpenClaw/Hermes) and different `enabled` conditions, and scripts keep running in the background while the app sits in the tray | bug | P3 | S | high |  |
+| [PERF-48](#perf-48) | The app filter on usage queries wraps `app_type` in a CASE expression, so the request-log list with an app filter and no date range scans the whole table | performance | P3 | S | medium |  |
+| [PERF-49](#perf-49) | 'Disable request logging' is checked with `RwLock::try_read().unwrap_or(true)` in three places, so requests are logged whenever the config lock is busy | bug | P3 | S | high |  |
+| [PERF-50](#perf-50) | Minimize-to-tray keeps the full webview and React app alive indefinitely, with no option to release it | feature | P3 | M | medium |  |
 
 ## Findings
 
@@ -328,6 +338,66 @@ The codebase (147.7k lines of Rust, 81.3k lines of TS/TSX, 750 crates, v3.17.0) 
 - **Proposal:** Render the shell immediately and show the DB-upgrade screen if/when `get_init_error` resolves with an error; add one `get_bootstrap_state` command returning settings + providers(current app) + proxy overview + migration results in a single call; skip the per-app env check when the all-apps result is fresh.
 - **Acceptance:** Webview `performance.mark('first-provider-card')` < 400 ms after `DOMContentLoaded` on the Linux CI runner; invoke count during the first second <= 5.
 
+### PERF-41: The previous session's log file is deleted on every launch, so diagnostics from a crash, hang or OS kill are gone once the user restarts
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/lib.rs:349-351`: `let log_file_path = log_dir.join("cc-switch.log"); let _ = std::fs::remove_file(&log_file_path);` runs unconditionally before the log plugin is built. `lib.rs:365-369` then uses `RotationStrategy::KeepSome(2)` with a 1 GB `max_file_size`, so there is never more than one live file. `src-tauri/src/panic_hook.rs:3,37-38,80-180` only records Rust panics in `crash.log`. Webview crashes, deadlocks (for example on the global DB mutex), OOM or force-quit, and proxy errors leave nothing behind once the app is relaunched.
+- **Problem:** The usual support flow ('it froze or broke, I restarted, here is my log') cannot work: relaunching the app wipes the only log that recorded the failure. The 1 GB cap with no retained rotation also means one bad session can fill a lot of disk, while the useful history is thrown away on the next launch.
+- **Proposal:** At startup, rename the old file to `cc-switch.prev.log` (or `cc-switch.<timestamp>.log`) instead of deleting it, and keep the last N files (for example 3). Lower `max_file_size` to something like 20-50 MB and use `KeepSome(n)` with n of 3 or more so rotation keeps history. Show 'open previous log' next to the current log in Settings.
+- **Acceptance:** After a forced kill and relaunch, the previous session's log still exists on disk and can be opened from Settings. Total log-directory size stays under a documented bound, for example 150 MB.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PERF-42: All crates log at Trace during startup, and stay at Trace for the whole session if `log_config` fails to load; logging 'disabled' is not honored before setup finishes
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/lib.rs:353-357` builds `tauri_plugin_log` with `.level(log::LevelFilter::Trace)` and no `level_for(...)` filters, so hyper, rustls, reqwest, tao/wry and rusqlite trace output is let through. The real level is applied only at `lib.rs:968-978` (`if let Ok(log_config) = db.get_log_config() { log::set_max_level(...) }`), after DB init, migrations, live-config imports and tray build. When `get_log_config` returns `Err` (`database/dao/settings.rs:313-318`: a JSON parse failure of the stored `log_config`, or any DB error), there is no `else` branch, so the process logs at Trace until exit. The early `return Ok(())` recovery path at `lib.rs:425-447` also never lowers the level. `proxy/types.rs:365-367` maps `enabled=false` to `Off`, but only once line 972 is reached.
+- **Problem:** Every launch writes a burst of third-party trace output (TLS handshakes, HTTP frames, SQL) to disk, which adds startup I/O. Users who turned logging off still get a startup log. A corrupt or future-format `log_config` value quietly turns on maximum-verbosity logging of every dependency for the whole session, which hurts both performance and privacy (PERF-28 and SEC-13 describe what the app itself logs at debug).
+- **Proposal:** Start at `Info` (or `Warn`), not Trace, and add `level_for("hyper", Warn)`, `level_for("rustls", Warn)`, `level_for("reqwest", Warn)`, `level_for("tao", Warn)` and similar. Read `log_config` as early as possible, or cache it in `settings.json`, and apply it before the DB work. On `Err`, fall back to `LogConfig::default().to_level_filter()` and log a warning. Apply the level on the db-recovery path as well.
+- **Acceptance:** With logging disabled, a fresh launch creates no log lines from setup. With a corrupt `log_config` row, `log::max_level()` after setup equals the default level, not Trace. A unit test covers the `Err` fallback.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PERF-43: Background timers use tokio `interval` with the default `Burst` policy: slow or suspended passes cause back-to-back session-sync storms, and 'daily' maintenance follows awake time, not wall time
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/lib.rs:1077-1088` (24 h maintenance: `tokio::time::interval(24*60*60)` then `periodic_backup_if_needed`) and `lib.rs:1093-1140` (60 s session sync running the Claude, Codex, Gemini and OpenCode JSONL/SQLite importers) both create `tokio::time::interval` without `set_missed_tick_behavior`. `rg MissedTickBehavior src-tauri/src` returns nothing. The default `MissedTickBehavior::Burst` fires every missed tick immediately. A sync pass that takes longer than 60 s (first import of a large `~/.claude/projects`, see PERF-10), or a clock source that advances across sleep, produces passes with no gap that hold the single DB mutex (PERF-17) over and over. Where the monotonic clock pauses during suspend (Linux/macOS), the 24 h timer counts only awake time, so a laptop that sleeps nightly may go days without its scheduled backup and rollup until the next restart.
+- **Problem:** After resume, or after a slow pass, the app can run several full importer passes in a row. Each walks the session trees and takes the global DB lock, which stalls proxy logging and UI commands just when the user returns to the machine. Meanwhile, the daily maintenance schedule drifts silently.
+- **Proposal:** Call `interval.set_missed_tick_behavior(MissedTickBehavior::Delay)` (or `Skip`) on both timers, and run each pass with `spawn_blocking`. For the daily job, poll hourly and compare a wall-clock `last_maintenance_at` value stored in settings against `SystemTime::now()`, so suspend and restarts do not reset or stretch the schedule.
+- **Acceptance:** A test with tokio's paused clock that advances time by 10 minutes triggers at most one extra sync pass. The maintenance job runs within one hour of 24 wall-clock hours passing, including across a simulated suspend.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PERF-44: OAuth token refresh (Copilot and Codex) runs inline on the proxy request path behind a per-account mutex, uses the 600 s global client timeout, and fails the request even when the cached token is still valid
+
+**Type:** performance · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/providers/copilot_auth.rs:731-776` `get_valid_token_for_account`: when `is_expiring_soon()` (`:306-309`, `TOKEN_REFRESH_BUFFER_SECONDS = 60` at `:92`), it takes `refresh_lock.lock().await` (`:744-745`) and awaits `fetch_copilot_token_with_github_token`, with `?` propagating any failure (`:766-767`). `codex_oauth_auth.rs:497-563` follows the same pattern (`refresh_with_token(&refresh_token).await?` at `:533`). Both call `crate::proxy::http_client::get()` (`copilot_auth.rs:601,645,828,915,1029,1306,1338`; `codex_oauth_auth.rs:267,349,430,463`), whose builder sets `.timeout(Duration::from_secs(600))` and `.connect_timeout(30s)` (`proxy/http_client.rs:216-220`). No background task refreshes tokens ahead of expiry.
+- **Problem:** Once per token lifetime, every in-flight and new request for that account queues behind one refresh call. If GitHub or OpenAI auth is slow or blackholed, all of them wait up to 10 minutes and then fail. A transient refresh failure in the last 60 s before expiry rejects requests the still-valid cached token could have served. This adds latency spikes to the hot path. PROV-09 covers failure backoff and token loss on persist failure, but not the inline blocking or the stale-but-valid fallback.
+- **Proposal:** Refresh tokens ahead of time in a background task (for example at 80% of the token's lifetime). Give refresh calls their own short timeout (5-10 s). On refresh failure, return the cached token while `expires_at > now`, and only fail once it has actually expired. Waiters should share the outcome of the in-flight refresh (a `Shared` future) instead of each retrying in turn after the mutex is released.
+- **Acceptance:** With a mock auth server that hangs, proxy requests made while the cached token is still valid succeed with no added latency, and refresh attempts time out within 10 s. A test checks that a refresh failure inside the buffer window still returns the cached token.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PERF-45: `reqwest` is built with default features, so native-tls/OpenSSL is compiled and linked alongside rustls, and `Client::builder()` likely defaults to the native backend
+
+**Type:** tech-debt · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/Cargo.toml:42`: `reqwest = { version = "0.12", features = ["rustls-tls", "json", "stream", "socks"] }` without `default-features = false`. In `src-tauri/Cargo.lock`, the `reqwest 0.12.28` dependency list includes `native-tls`, `hyper-tls` and `tokio-native-tls` alongside `hyper-rustls`/`rustls`, and the lock carries `native-tls` (line 3128), `openssl` (3491), `openssl-sys` (3523), `schannel` (4813) and `security-framework` (4891). `proxy/http_client.rs:216-263` never calls `use_rustls_tls()`, and with both backends enabled reqwest 0.12 picks the `default-tls` (native) backend. PERF-25 and PERF-26 cover the duplicate reqwest 0.12/0.13 versions and the two webpki/native root stores, but not that a full second TLS implementation (dynamically linked libssl on Linux) is pulled in.
+- **Problem:** The binary carries two TLS stacks. Linux packages need a runtime libssl (AppImage/deb/Flatpak compatibility). Which TLS library and trust store is used depends on whether a request goes through reqwest (native, by default) or hyper (rustls), which makes TLS failure reports hard to reproduce. Other roadmap items assume reqwest uses rustls, and that assumption may be wrong.
+- **Proposal:** Set `default-features = false` on reqwest and list the needed features explicitly (`rustls-tls` or `rustls-tls-native-roots`, `http2`, `charset`, `json`, `stream`, `socks`). Optionally call `.use_rustls_tls()` in `build_client` for clarity. Check with `cargo tree -i native-tls -i openssl-sys` that nothing else pulls them in, or feature-gate the crate that does.
+- **Acceptance:** `cargo tree -e features -i openssl-sys` and `-i native-tls` report no dependency from the app's reqwest 0.12. The Linux release binary no longer has a `NEEDED libssl` entry (if no other crate needs it), and the release binary size shrinks measurably.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PERF-46: Session list renders every session row with no virtualization, and re-filters, re-sorts and re-groups the whole list on every keystroke
+
+**Type:** performance · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src/components/sessions/SessionManagerPage.tsx:4,331` uses `useVirtualizer` only for the transcript pane. The list pane renders `groupedSessions.map(...)` (`:1236-1378`) or `filteredSessions.map((session) => renderSessionItem(session))` (`:1392-1393`) in full. The search input calls `setSearch(event.target.value)` directly (`:809`), with no debounce or `useDeferredValue` (`rg debounce|useDeferredValue` in the file finds nothing). `filteredSessions = searchSessions(search)` (`:235-237`), then `groupSessionsByProviderAndDirectory` (`:239-247`) and three more derived `filter` memos (`:547-565`) recompute on each keystroke. `src/hooks/useSessionSearch.ts:55-61` copies and sorts the full array every time the query is empty, and `:63-67` searches with `limit: filteredByProvider.length`.
+- **Problem:** Users with thousands of Claude/Codex sessions (common after months of use) get a list that mounts thousands of `SessionItem` DOM nodes, and typing in search blocks the main thread on each character. PERF-22 and SESS-21 cover the backend rescan and the index rebuild, but not the list rendering or the per-keystroke recomputation.
+- **Proposal:** Virtualize the session list with the same `@tanstack/react-virtual` already in use, flattening groups into header and item rows. Wrap `search` in `useDeferredValue` or a 150 ms debounce. Cache the recency-sorted array in a memo so it is not re-sorted per call, and cap search results (for example 500) with a 'show more' option.
+- **Acceptance:** With 5,000 mocked sessions, the list pane mounts fewer than 100 `SessionItem` nodes, and a React Profiler commit for a keystroke in search takes under 16 ms on a mid-range machine.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### PERF-06: SSE passthrough parser allocates per line and memmoves the buffer per event
 
 **Type:** performance · **Priority:** P3 · **Effort:** S · **Confidence:** high
@@ -429,3 +499,43 @@ The codebase (147.7k lines of Rust, 81.3k lines of TS/TSX, 750 crates, v3.17.0) 
 - **Problem:** Small but on the request path; cumulatively with PERF-05 it is several lock acquisitions per request.
 - **Proposal:** Key breakers by `(app_type, provider_id)` `Arc<str>` without formatting, keep `Arc<CircuitBreaker>` references in the cached provider snapshot (PERF-05), and use atomics for `total_requests`/`last_request_at`.
 - **Acceptance:** No `format!` or `.await` on locks in `select_providers` for the single-provider path; micro-bench shows < 1 us per call.
+
+### PERF-47: `ProviderCard` and its `UsageFooter` register two observers of the same usage query with different auto-query rules (OpenClaw/Hermes) and different `enabled` conditions, and scripts keep running in the background while the app sits in the tray
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/providers/ProviderCard.tsx:250-262`: `shouldAutoQuery = appId === "opencode" || appId === "openclaw" || appId === "hermes" ? isInConfig : isCurrent` and `enabled: usageEnabled && !isOfficial && !isOfficialSubscriptionUsage`. `src/components/UsageFooter.tsx:58-74`: `shouldAutoQuery = appId === "opencode" ? isInConfig : isCurrent` and `enabled: usageEnabled`. Both call `useUsageQuery(provider.id, appId, ...)` on the same `usageKeys.script` key, and the footer is rendered inside the card (`ProviderCard.tsx:536-544, 622-630`). `src/lib/query/queries.ts:259-268` sets `refetchIntervalInBackground: true`, so each observer that has an interval keeps executing the user's usage script (QuickJS plus an external HTTP call) after the window is hidden.
+- **Problem:** Whether an OpenClaw/Hermes provider auto-refreshes now depends on which observer happens to own the interval. The footer's observer is enabled for official providers that the card deliberately excludes, which can trigger usage-script calls the card was written to prevent. Background refresh continues even though the tray has its own throttled refresh (`tray.rs:1033-1047`), which uses the same scripts and quotas and adds rate-limit and credential-error risk.
+- **Proposal:** Move the usage query into a single hook (for example `useProviderUsage(provider, appId, {isCurrent, isInConfig})`) that the card calls once, and pass `usage` down to `UsageFooter` as a prop. Put the accumulative-app list in one shared constant. Set `refetchIntervalInBackground: false` and let the backend tray refresh cover the hidden-window case.
+- **Acceptance:** Only one `useUsageQuery` observer exists per provider card (checked with a React Query devtools or unit-test spy). OpenClaw/Hermes providers follow the same auto-refresh rule in card and footer. No usage-script invocations happen while the window is hidden, except tray-triggered ones.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PERF-48: The app filter on usage queries wraps `app_type` in a CASE expression, so the request-log list with an app filter and no date range scans the whole table
+
+**Type:** performance · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/services/usage_stats.rs:244-249` documents that `folded_app_type_sql` (`CASE WHEN col = 'claude-desktop' THEN 'claude' ELSE col END`) disables the index, on the grounds that 'these are aggregates that already carry a time filter'. `get_request_logs` (`:1466-1481`) applies it via `conditions.push(format!("{} = ?", folded_app_type_sql("l.app_type")))`, but its date bounds are optional (`:1494-1501`, `if let Some(start) = filters.start_date`). The COUNT(*) and page queries (`:1511-1548`) therefore cannot use `idx_request_logs_app_created_at` (`database/schema.rs:2783`), and `folded_app_type_sql` is used 13 times in the file.
+- **Problem:** The assumption in the comment does not hold for the log list: choosing an app with 'all time' turns each page load (plus its COUNT) into a full scan of up to 30 days of logs, on top of the per-row correlated dedup filter (PERF-08), all while holding the global DB lock.
+- **Proposal:** Generate a sargable predicate instead of comparing the CASE expression: for `app_type = 'claude'` emit `l.app_type IN ('claude','claude-desktop')`, and plain `l.app_type = ?` for everything else. Keep the CASE only in `SELECT`/`GROUP BY` projections. Add an `EXPLAIN QUERY PLAN` test for the log list.
+- **Acceptance:** `EXPLAIN QUERY PLAN` for `get_request_logs` with `app_type='claude'` and no dates shows `USING INDEX idx_request_logs_app_created_at` (or the provider index) instead of `SCAN l`. Results are unchanged in the existing usage_stats tests.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PERF-49: 'Disable request logging' is checked with `RwLock::try_read().unwrap_or(true)` in three places, so requests are logged whenever the config lock is busy
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src-tauri/src/proxy/response_processor.rs:464-472` (`create_usage_collector`: `state.config.try_read().map(|c| c.enable_logging).unwrap_or(true)`), `:566-571` (`spawn_log_usage`: `if let Ok(config) = state.config.try_read() { if !config.enable_logging { return; } }`, which falls through to logging on contention) and `:605-611` (`usage_logging_enabled`, used by `handlers.rs:358`). `state.config` is a tokio `Arc<RwLock<ProxyConfig>>` (`proxy/server.rs:36`), and `try_read` fails whenever a writer holds the lock or is queued, for example during a config update from the UI.
+- **Problem:** A user who disabled logging (privacy, or a shared machine) still gets request rows, with model, provider, session and token counts, written for any request that races a config write. There are three copies of the check, each written differently, so a fix applied to one can miss the others.
+- **Proposal:** Mirror `enable_logging` into an `AtomicBool` on `ProxyState`, updated wherever `config` is written, and read it with `Ordering::Relaxed` from one helper. Alternatively, use `config.read().await` in the async paths. Default to not logging, never to logging, when the value cannot be determined.
+- **Acceptance:** A test that holds a write guard on `state.config` with `enable_logging=false` while a request completes shows no row inserted into `proxy_request_logs`. Exactly one helper is used for the check.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### PERF-50: Minimize-to-tray keeps the full webview and React app alive indefinitely, with no option to release it
+
+**Type:** feature · **Priority:** P3 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src-tauri/src/lib.rs:290-302`: with `minimize_to_tray_on_close`, `CloseRequested` calls `api.prevent_close(); window.hide()` (plus `set_skip_taskbar` / `apply_tray_policy`), so the webview process, the JS heap (all locale bundles, presets and inline SVGs, see PERF-15/PERF-19) and every mounted React Query observer stay alive. Several observers set `refetchIntervalInBackground: true` (`src/lib/query/queries.ts:267`, `src/lib/query/subscription.ts:95,133`). The tray is the main surface while the app is hidden, and it is driven entirely from Rust (`tray.rs:1033-1110`).
+- **Problem:** cc-switch is designed to sit in the tray for days. Keeping a WebView2/WKWebView instance (often 100-300 MB resident) and its timers alive while nobody is looking at it costs memory and wakeups, which matters on battery-powered laptops.
+- **Proposal:** Add an opt-in (or default) setting 'Release window memory when hidden': on close-to-tray, destroy the `main` webview window, and recreate it from the tray 'Show' action or the single-instance handler. Persist UI state that must survive (current tab, filters) in settings or localStorage. Make sure backend events tolerate the window being absent.
+- **Acceptance:** With the setting on, closing to tray drops the app's total RSS by most of the webview footprint (measured on Windows and macOS), and reopening from the tray restores the previous page within 1 s.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

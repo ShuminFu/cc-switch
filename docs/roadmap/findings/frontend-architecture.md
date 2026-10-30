@@ -1,6 +1,6 @@
 # Frontend architecture — findings (FE-ARCH-xx)
 
-Part of the [next-phase proposals](../README.md). 36 findings. Priorities: P2 = 22, P3 = 14.
+Part of the [next-phase proposals](../README.md). 47 findings. Priorities: P2 = 25, P3 = 22.
 
 ## Area summary
 
@@ -32,6 +32,9 @@ The frontend has a reasonable three-layer skeleton (hand-written `src/lib/api/*`
 | [FE-ARCH-27](#fe-arch-27) | No frontend architecture/conventions documentation; agent instruction files are gitignored | docs | P2 | S | high |  |
 | [FE-ARCH-28](#fe-arch-28) | `Provider.settingsConfig: Record<string, any>` and ~100 `any` tokens undermine the core data model | tech-debt | P2 | M | high |  |
 | [FE-ARCH-34](#fe-arch-34) | Presets as data: move the 11k-line preset tables out of the bundle into versioned, validated, user-extensible JSON | feature | P2 | L | medium |  |
+| [FE-ARCH-37](#fe-arch-37) | Typing-time quote normalisation rewrites TOML string contents and can turn valid TOML invalid | bug | P2 | S | high |  |
+| [FE-ARCH-38](#fe-arch-38) | `envPrefix: ["VITE_", "TAURI_"]` exposes every TAURI_* variable, including the updater signing key in release CI, to the renderer bundle | security | P2 | S | medium |  |
+| [FE-ARCH-39](#fe-arch-39) | Mutation error toasts read `error.message` on Tauri string rejections and show 'undefined' or an empty toast | bug | P2 | S | high |  |
 | [FE-ARCH-18](#fe-arch-18) | Optimistic updates for switch, sort and delete | feature | P3 | M | high |  |
 | [FE-ARCH-21](#fe-arch-21) | Inline-SVG icon rendering and permissive CSP deserve a hardening pass; sponsored presets carry tracking parameters | security | P3 | S | medium |  |
 | [FE-ARCH-22](#fe-arch-22) | `localStorage` keys are scattered and written from multiple places without validation | tech-debt | P3 | S | high |  |
@@ -46,6 +49,14 @@ The frontend has a reasonable three-layer skeleton (hand-written `src/lib/api/*`
 | [FE-ARCH-33](#fe-arch-33) | Stricter TypeScript compiler options are off (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`) | tech-debt | P3 | M | high |  |
 | [FE-ARCH-35](#fe-arch-35) | Two different provider sort implementations with different locale rules | bug | P3 | S | medium |  |
 | [FE-ARCH-36](#fe-arch-36) | Success/error toast policy: 2-second global duration hides errors; warnings and successes compete | ux | P3 | S | high |  |
+| [FE-ARCH-40](#fe-arch-40) | Common-config `deepMerge` is open to prototype pollution via a `__proto__` key in the snippet | security | P3 | S | high |  |
+| [FE-ARCH-41](#fe-arch-41) | Request-log pagination uses OFFSET against a moving `endDate`, so pages duplicate or skip rows while traffic flows | bug | P3 | M | high |  |
+| [FE-ARCH-42](#fe-arch-42) | Usage 7d/14d/30d presets compute the window start by subtracting fixed 24h blocks, giving an extra day across DST transitions | bug | P3 | S | high |  |
+| [FE-ARCH-43](#fe-arch-43) | Provider duplication shifts sibling sortIndex before the add, leaving a gap or wrong order if the add fails | bug | P3 | S | high |  |
+| [FE-ARCH-44](#fe-arch-44) | Skills install/uninstall cache patches build a key format that never matches backend keys; installed list can get duplicates | bug | P3 | S | high |  |
+| [FE-ARCH-45](#fe-arch-45) | Directory settings load is all-or-nothing and fails silently, so every path field shows blank and Reset writes empty defaults | bug | P3 | S | medium |  |
+| [FE-ARCH-46](#fe-arch-46) | Line-based Codex TOML editing misreads section boundaries (array tables, headers with comments, quoted keys) and can insert keys into the wrong table | bug | P3 | M | medium |  |
+| [FE-ARCH-47](#fe-arch-47) | API-key extraction prefers an empty ANTHROPIC_AUTH_TOKEN over a populated ANTHROPIC_API_KEY and ignores `meta.apiKeyField` | bug | P3 | S | medium |  |
 
 ## Findings
 
@@ -253,6 +264,37 @@ The frontend has a reasonable three-layer skeleton (hand-written `src/lib/api/*`
 - **Proposal:** Define a JSON schema (zod on the frontend, serde on the backend) for presets, ship the built-in set as JSON assets loaded lazily per app, add `~/.cc-switch/presets/*.json` user overrides merged by a Rust `get_presets(app)` command, and optionally a signed remote preset feed with a settings toggle. Keep sponsor flags (`isPartner`, `primePartner`, `partnerPromotionKey`) explicit in the schema.
 - **Acceptance:** Presets load via a command and are absent from the main chunk; a user-dropped JSON preset appears in the selector; schema validation errors are surfaced, not fatal.
 
+### FE-ARCH-37: Typing-time quote normalisation rewrites TOML string contents and can turn valid TOML invalid
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/utils/textNormalization.ts:7-21` replaces every curly/full-width quote (“ ” „ ‟ ＂ ‘ ’ ＇) with ASCII quotes across the whole text, ignoring TOML context. It runs on every keystroke on the editor buffer: `src/components/providers/forms/hooks/useCodexConfigState.ts:259-263` (`setCodexConfig(normalizeTomlText(value))`) and `src/components/mcp/McpFormModal.tsx:225-226`; also before every parse/edit in `src/utils/providerConfigUtils.ts:359-360,483,746,795,871,903,968,1012,1069,1119,1187,1262` and `src/utils/tomlUtils.ts:13,58`.
+- **Problem:** Quotes inside string values and comments are user content. `developer_instructions = 'Don’t do X'` becomes `'Don't do X'`, which ends the literal string early and makes the whole config fail to parse. `note = "他说“你好”"` becomes `"他说"你好""`, which is also invalid. When the TOML stays valid, the user's text is still changed without notice (CJK quotes inside prompts, instructions and comments get flattened). The 'fix' only helps in one case: someone who typed curly quotes as delimiters. Every other user gets their content corrupted, and the editor rewrites it while they type.
+- **Proposal:** Stop normalising the buffer in onChange handlers. Normalise only as a parse-time fallback: first try `parseToml(text)`; only if that fails, try `parseToml(normalizeQuotes(text))`. If the fallback succeeds, show a one-click 'Replace smart quotes used as delimiters' suggestion rather than mutating silently. Better still, normalise only quote characters outside strings/comments with a small tokenizer. The setter helpers in providerConfigUtils should work on the raw text and leave quotes alone.
+- **Acceptance:** Unit tests: (1) `x = 'Don’t'` stays byte-identical through `handleCodexConfigChange`, `setCodexBaseUrl` and `setCodexModelName`; (2) `x = "“hi”"` stays identical and parses; (3) `x = “hi”` (curly delimiters) still gets the fix offered. No onChange handler changes characters inside TOML strings.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-ARCH-38: `envPrefix: ["VITE_", "TAURI_"]` exposes every TAURI_* variable, including the updater signing key in release CI, to the renderer bundle
+
+**Type:** security · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `vite.config.ts:30` sets `envPrefix: ["VITE_", "TAURI_"]`. `.github/workflows/release.yml:183-185` writes `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` into `$GITHUB_ENV`, so they are in the environment when `tauri build` runs `beforeBuildCommand: pnpm run build:renderer` (`src-tauri/tauri.conf.json:10`). Today the only reference is `import.meta.env.DEV` (`src/components/settings/SettingsPage.tsx:162`).
+- **Problem:** Vite inlines every variable matching `envPrefix` into the client wherever `import.meta.env` is used. That means a whole-object use (`console.log(import.meta.env)`, `{...import.meta.env}`, a library that reads it) or a mistaken `import.meta.env.TAURI_SIGNING_PRIVATE_KEY` would embed the minisign private key and its password in the public JS of every release. Anyone holding them can sign malicious auto-updates that `tauri.conf.json:62-67` would accept. Nothing guards against this: no lint rule and no post-build scan.
+- **Proposal:** Narrow the prefix to what Tauri recommends (`envPrefix: ["VITE_", "TAURI_ENV_"]`), or to `VITE_` only. Then add a CI step after `build:renderer` that fails if `dist/` contains the signing key's first characters or the string `TAURI_SIGNING`. Optionally move the key-preparation step after the renderer build, or scope it to the `tauri build` step's `env:` and not `$GITHUB_ENV`.
+- **Acceptance:** `vite.config.ts` no longer exposes `TAURI_SIGNING_*`; a CI check grepping `dist/**/*.js` for `TAURI_SIGNING` and the key's first 16 base64 characters passes on release builds and fails if a test file adds `console.log(import.meta.env)` with a dummy key.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+- **Possible overlap with:** CI-40 (check before scheduling)
+
+### FE-ARCH-39: Mutation error toasts read `error.message` on Tauri string rejections and show 'undefined' or an empty toast
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** Tauri commands returning `Result<_, String>` reject `invoke` with a plain string (e.g. `src-tauri/src/commands/proxy.rs:82,108,136,283`, `src-tauri/src/commands/global_proxy.rs:89`). The handlers are typed `(error: Error)` and read `.message`: `src/lib/query/proxy.ts:127,155,198,239`, `src/hooks/useProxyConfig.ts:36`, `src/hooks/useGlobalProxy.ts:78` (`toast.error(error.message)` shows an empty toast) and `:103`. Other handlers in the same files already use `extractErrorMessage(error)` correctly (`src/hooks/useProxyStatus.ts:54-57`, `src/App.tsx:323-329`).
+- **Problem:** When switching proxy providers, saving proxy/failover config, testing a global proxy or scanning proxies fails, the user sees 'Save failed: undefined' or a blank red toast. The real backend reason (for example 'Proxy URL is empty', or a port conflict) is lost exactly when it is needed. The `(error: Error)` annotation hides the issue from TypeScript.
+- **Proposal:** Replace each `error.message` in mutation `onError` handlers with `extractErrorMessage(error)` from `@/utils/errorUtils`, and type the parameter as `unknown`. Set `Register` in TanStack Query (`declare module '@tanstack/react-query' { interface Register { defaultError: unknown } }`) so code that assumes `.message` no longer compiles.
+- **Acceptance:** `rg 'error\.message' src/lib/query src/hooks` only matches guarded `instanceof Error` branches; a vitest that rejects `proxyApi.updateProxyConfig` with the string 'port in use' asserts the toast text contains 'port in use'.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### FE-ARCH-18: Optimistic updates for switch, sort and delete
 
 **Type:** feature · **Priority:** P3 · **Effort:** M · **Confidence:** high
@@ -378,3 +420,83 @@ The frontend has a reasonable three-layer skeleton (hand-written `src/lib/api/*`
 - **Problem:** Users miss error details (copy action exists only for switch failures at `mutations.ts:327-333`).
 - **Proposal:** In the global error handler (FE-ARCH-11) set `duration: 6000`, `closeButton: true`, and a "Copy details" action for all errors; cap simultaneous toasts (`visibleToasts`), and collapse "switched + restart required" into one toast with description.
 - **Acceptance:** Every `toast.error` renders >= 6 s with a copy action; no mutation produces two toasts for one user action.
+
+### FE-ARCH-40: Common-config `deepMerge` is open to prototype pollution via a `__proto__` key in the snippet
+
+**Type:** security · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/utils/providerConfigUtils.ts:13-29` iterates `Object.entries(source)` from `JSON.parse(snippetString)` (`:122`). For key `__proto__`, `target[key]` returns `Object.prototype`, which passes `isPlainObject` (`:9-11`, `toString` gives `[object Object]`), so `deepMerge(Object.prototype, value)` writes onto the global prototype. `deepRemove`/`isSubset` (`:31-64`) walk the same keys. Callers: `src/components/providers/forms/hooks/useCommonConfigSnippet.ts:138,176,205,249`. Snippets are stored in the DB and come back via WebDAV/S3 sync and SQL import.
+- **Problem:** A snippet such as `{"__proto__":{"enabled":true}}`, typed by hand, pasted from a shared guide or synced from another machine, adds `enabled`/`env`/etc. to every object in the renderer. That silently changes truthiness checks across the app (for example `settings.enableX`, `meta.isPartner`), and the effect lasts until restart. The renderer holds API keys and can invoke privileged commands, so prototype gadgets are a real concern.
+- **Proposal:** Skip `__proto__`, `constructor` and `prototype` keys in `deepMerge`, `deepRemove` and `isSubset`, and test with `Object.hasOwn(target, key)` rather than `in`/indexing. Or build merge targets with `Object.create(null)`, or use a vetted merge (`structuredClone` + an own-key walk). Also reject such keys in `validateJsonConfig`.
+- **Acceptance:** A unit test calling `updateCommonConfigSnippet('{}', '{"__proto__":{"polluted":1}}', true)` leaves `({} as any).polluted === undefined` and returns an error or ignores the key.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-ARCH-41: Request-log pagination uses OFFSET against a moving `endDate`, so pages duplicate or skip rows while traffic flows
+
+**Type:** bug · **Priority:** P3 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** `src/lib/query/usage.ts` `useRequestLogs` calls `resolveUsageRange(range)` inside `queryFn`, so for presets other than custom, and for custom with `liveEndTime`, `endDate = now` is recomputed on every fetch and every 30 s refetch (`DEFAULT_REFETCH_INTERVAL_MS`). The query key holds only the preset, not the resolved bounds. The backend orders `created_at DESC LIMIT ? OFFSET ?` (`src-tauri/src/services/usage_stats.rs:1540-1541`). `src/components/usage/RequestLogTable.tsx:74-82` pages with a plain `page` index; its reset effect (`:88-96`) also leaves out `statusCode`.
+- **Problem:** While the proxy is serving requests, N new rows at the top shift every later page by N. Moving from page 1 to page 2 then shows rows already seen, and the 30 s refetch of page 3 silently changes what it shows. Rows can also be skipped entirely when filters change mid-session. Changing the status-code filter while on page 5 can land on an empty page.
+- **Proposal:** When the user leaves page 0, freeze the window: capture `endDate` (or the `created_at`/`request_id` of the first row) as a snapshot and pass it as a fixed upper bound until they go back to page 0 or press refresh. Better, switch the backend to keyset pagination (`WHERE (created_at, request_id) < (?, ?)`). Add `statusCode` to the page-reset dependencies, and use `placeholderData: keepPreviousData` so the table does not flash empty between pages.
+- **Acceptance:** Integration test: with 25 logs, load page 0 (20 rows), insert 5 new logs, load page 1; it shows exactly the original oldest 5 rows with no duplicates. Changing the status filter resets to page 0.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-ARCH-42: Usage 7d/14d/30d presets compute the window start by subtracting fixed 24h blocks, giving an extra day across DST transitions
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/lib/usageRange.ts:16-24` `getPresetLookbackStart` uses `getStartOfLocalDayDate(nowMs - (dayCount - 1) * DAY_MS)` with `DAY_MS = 86_400_000` (`:4`). In a DST zone, if a 23-hour spring-forward day lies inside the window and the local time is between 00:00 and 01:00, subtracting 6×24h lands at 23:xx two days back, so the '7d' window covers 8 calendar days.
+- **Problem:** Usage dashboards and cost totals for a '7 day' range include an extra day for an hour after midnight around DST changes. Users comparing their bills see inconsistent totals, and the trend chart gets an extra bucket. `src/lib` has no test for `usageRange` (FE-ARCH-15 lists it as untested).
+- **Proposal:** Use calendar arithmetic: `const d = new Date(nowMs); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (dayCount - 1)).getTime()/1000`. Add tests with `TZ=Europe/Berlin` and `TZ=America/New_York` around the March/November transitions.
+- **Acceptance:** `resolveUsageRange({preset:'7d'}, Date.parse('2026-03-31T00:30:00+02:00'))` under TZ=Europe/Berlin returns a start of 2026-03-25 00:00 local; the test suite runs these with a fixed TZ.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-ARCH-43: Provider duplication shifts sibling sortIndex before the add, leaving a gap or wrong order if the add fails
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/App.tsx:777-799` calls `providersApi.updateSortOrder(updates, activeApp)` to bump every provider with `sortIndex >= original+1`, and only afterwards calls `await addProvider(duplicatedProvider)` (`:800`). `addProvider` (`src/hooks/useProviderActions.ts:75-86`) can throw (validation, live-config write, OpenCode/OpenClaw key conflicts) and nothing compensates. The `providers` map used for the shift comes from the render-time query cache, so it may be stale. The copy also deep-clones the full `meta` (`App.tsx:719-721`), including `authBinding`, `usage_script`, `partnerPromotionKey` and `promptCacheKey` (`src/types.ts:182-233`).
+- **Problem:** A failed duplicate leaves the list reordered with a hole. The failover queue order, which depends on `sort_index` (`src/hooks/useDragSort.ts:83-86`), changes without the user asking. Two quick duplicates race on the same stale map. Copying `promptCacheKey` and the managed-account binding means two providers share a cache-routing key and an OAuth account binding, which the user is unlikely to expect.
+- **Proposal:** Add a backend `duplicate_provider(app, id)` command that inserts the copy and reorders in one SQLite transaction and returns the new provider. Choose explicitly which meta fields to carry over: drop `promptCacheKey`, `partnerPromotionKey` and `isPartner`, and ask before keeping `authBinding`. Until that exists, at least run the add first and shift sort indices only on success.
+- **Acceptance:** A test where `addProvider` rejects asserts `updateSortOrder` was not called (or was rolled back); a duplicated provider has no `promptCacheKey`/`partnerPromotionKey`; two concurrent duplicates produce distinct, contiguous sortIndex values.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-ARCH-44: Skills install/uninstall cache patches build a key format that never matches backend keys; installed list can get duplicates
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/hooks/useSkills.ts:69-111` (`useInstallSkill.onSuccess`) builds `skillKey = `${installName}:${owner}:${repo}`` and maps `s.key === skillKey ? {...s, installed: true}` over the `["skills","discoverable"]` cache. The backend builds discoverable keys as `format!("{}/{}:{}", repo.owner, repo.name, directory)` (`src-tauri/src/services/skill.rs:2001`), and `DiscoverableSkill` has no `installed` field (`src/lib/api/skills.ts:55-64`, `skill.rs:50-72`), so that patch never fires. The same mismatched key is passed from `src/components/skills/UnifiedSkillsPanel.tsx:151-159` into `useUninstallSkill`. The installed-cache patch appends `[...oldData, installedSkill]` without de-duplicating by `id`.
+- **Problem:** The discoverable-cache update is dead code that looks load-bearing. The UI only stays right because `SkillsPage.tsx:187-200` re-derives `installed` from the installed list. Installing over an already-present skill (reinstall/repair, or two quick clicks before `isPending` disables the button) adds a second entry with the same `id`. That causes duplicate React keys and a wrong count in `UnifiedSkillsPanel` (`totalLabel` at `:353`) until a full refetch, which never happens because of `staleTime: Infinity` (`useSkills.ts:28`).
+- **Proposal:** Remove the discoverable-cache patches and the client-built `skillKey`; derive install state in one selector shared by SkillsPage and UnifiedSkillsPanel. In `useInstallSkill.onSuccess`, upsert by `id` (`oldData.filter(s => s.id !== installedSkill.id).concat(installedSkill)`), or just invalidate `["skills","installed"]`.
+- **Acceptance:** `rg 'skillKey' src` returns no client-built keys; a hook test that installs the same skill twice leaves exactly one entry with that id in the `["skills","installed"]` cache.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-ARCH-45: Directory settings load is all-or-nothing and fails silently, so every path field shows blank and Reset writes empty defaults
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/hooks/useDirectorySettings.ts:163-197` wraps 16 independent calls (`getAppConfigDirOverride`, seven `getConfigDir(app)`, eight `homeDir()/join`) in one `Promise.all`. Any single rejection, such as one app's dir resolution failing because a configured path is invalid or on an unmounted drive, skips all state updates and only `console.error`s (`:227-231`). `defaultsRef` keeps empty strings (`:144-153`), so `resetAllDirectories` (`:355-369`) and `updateDirectoryState(key, undefined)` (`:256-262`) set `resolvedDirs[key] = ""`.
+- **Problem:** One bad directory makes the Settings directory section show empty placeholders for all apps, with no error. Users cannot tell which app's directory is wrong, and pressing reset leaves the field empty instead of showing the default (`~/.claude`, etc.). Defaults are also computed client-side (`APP_DIRECTORY_META` `:31-42`), duplicating the backend's own resolution, so they can drift (for example per-platform defaults).
+- **Proposal:** Use `Promise.allSettled` and fill each field independently; show an inline error on the field whose resolution failed. Get defaults from a single backend command (`get_default_config_dirs`) so the Rust resolver is the only source of truth.
+- **Acceptance:** A test where `settingsApi.getConfigDir('gemini')` rejects still populates claude/codex/etc., and the gemini field shows an error state; reset of a field restores the backend-reported default rather than an empty string.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-ARCH-46: Line-based Codex TOML editing misreads section boundaries (array tables, headers with comments, quoted keys) and can insert keys into the wrong table
+
+**Type:** bug · **Priority:** P3 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** `src/utils/providerConfigUtils.ts:371` `TOML_SECTION_HEADER_PATTERN = /^\s*\[([^\]\r\n]+)\]\s*$/` does not match `[[array.tables]]` or `[section] # comment`, and compares names verbatim (`getTomlSectionRange` `:452-454` uses `match[1] === sectionName`). So `[ model_providers.x ]` and `[model_providers."my.id"]` never match `model_providers.${providerName}` (`:511-520`). Insertion point = `bodyEndIndex` of the misdetected range (`getTomlSectionInsertIndex` `:472-483`). The comment at `:349-351` says whole-document edits must go through the backend `toml_edit` command, yet base_url/wire_api/model/bearer/name/goals setters (`:795ff`, `:903ff`, `:1012ff`, `:1187ff`, `:1262ff`) still edit by regex.
+- **Problem:** If `[[...]]` or a commented header follows the active `[model_providers.X]`, its lines are treated as part of the provider section. A missing `base_url`/`wire_api` then gets appended under the array table, so Codex reads it from the wrong place, and an existing assignment there may be 'found' and overwritten. Provider ids with dots or spaces (legal as quoted keys) never resolve, so setters fall into the 'recoverable assignment' heuristics and may duplicate keys, which makes the TOML invalid.
+- **Proposal:** Send these field edits through the existing backend `toml_edit` path (one command such as `set_codex_provider_fields({base_url, wire_api, model, ...})`), which handles quoting, array tables and comments correctly. If they must stay client-side, use a real section detector that recognises `[[...]]`, trailing comments and quoted/whitespace-padded keys, and normalise names before comparing.
+- **Acceptance:** Unit tests: `setCodexBaseUrl` on a config with `[model_providers.x]` followed by `[[profiles.y]]` inserts base_url before the `[[...]]` line; `[model_providers.x] # main` is recognised; `model_provider = "a.b"` with `[model_providers."a.b"]` updates that table. The result parses with smol-toml in every case.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-ARCH-47: API-key extraction prefers an empty ANTHROPIC_AUTH_TOKEN over a populated ANTHROPIC_API_KEY and ignores `meta.apiKeyField`
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/utils/providerConfigUtils.ts:183-193` returns `env.ANTHROPIC_AUTH_TOKEN` whenever it is a string, including "", before looking at `ANTHROPIC_API_KEY`. `setApiKeyInConfig` (`:323-330`) likewise writes to AUTH_TOKEN if the key exists and leaves a populated API_KEY untouched. `meta.apiKeyField` (`src/types.ts:206`) is used only when creating a missing field. Used by `src/components/providers/forms/hooks/useApiKeyState.ts:32,49` to seed the API-key input.
+- **Problem:** Configs imported from live `settings.json` or presets often carry `"ANTHROPIC_AUTH_TOKEN": ""` next to a real `ANTHROPIC_API_KEY`. The edit form then shows an empty key field. If the user types a key, it goes into AUTH_TOKEN while the old API_KEY stays, so Claude Code sends both headers and the stale key may still be used or conflict. Users see 'key not saved' behaviour that is hard to diagnose.
+- **Proposal:** Resolve the field by priority: `meta.apiKeyField` if set, then whichever of AUTH_TOKEN/API_KEY is non-empty, then AUTH_TOKEN. Use the same resolver in get and set. When writing, optionally clear or remove the other field if it holds a different non-empty value, after warning the user.
+- **Acceptance:** Tests: `{env:{ANTHROPIC_AUTH_TOKEN:'',ANTHROPIC_API_KEY:'sk-1'}}` gives `getApiKeyFromConfig` → 'sk-1', and `setApiKeyInConfig(..., 'sk-2')` updates ANTHROPIC_API_KEY; with `apiKeyField:'ANTHROPIC_API_KEY'` reads/writes always target that field.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

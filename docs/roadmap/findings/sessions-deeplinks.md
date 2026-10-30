@@ -1,6 +1,6 @@
 # Session manager, deep links & usage ingestion — findings (SESS-xx)
 
-Part of the [next-phase proposals](../README.md). 34 findings. Priorities: P1 = 2, P2 = 17, P3 = 15.
+Part of the [next-phase proposals](../README.md). 46 findings. Priorities: P1 = 2, P2 = 24, P3 = 20.
 
 ## Area summary
 
@@ -29,6 +29,13 @@ The Session Manager is a solid v1: seven providers are scanned in parallel (`ses
 | [SESS-17](#sess-17) | Cost and token usage per session are available in the DB but never surfaced in the Session Manager | feature | P2 | M | high |  |
 | [SESS-23](#sess-23) | Test gaps across session manager, terminal, deep links and usage events | test | P2 | M | high |  |
 | [SESS-28](#sess-28) | Usage ingestion re-reads whole files on every change (line offsets, multiple passes) | performance | P2 | M | high |  |
+| [SESS-35](#sess-35) | Session-log usage rows are frozen at the first-seen streaming snapshot (Claude INSERT OR IGNORE across syncs; Gemini upsert is unreachable) | bug | P2 (first pass P1) | M | high | confirmed |
+| [SESS-36](#sess-36) | Usage sync cursor advances past a partially written last line and past rows that failed to insert | bug | P2 | S | medium |  |
+| [SESS-37](#sess-37) | Deep-link usage scripts run auto-enabled in an unbounded QuickJS sandbox, and the confirmation never shows the code | security | P2 (first pass P1) | M | high | partially-confirmed |
+| [SESS-38](#sess-38) | Provider deep link with enabled=true immediately switches the live provider, and the confirmation dialog never says so | security | P2 | S | high |  |
+| [SESS-39](#sess-39) | Deep-link dialog can swap the pending request under the user (stale merge result / new link while open or importing) | security | P2 | S | medium |  |
+| [SESS-40](#sess-40) | Deleted Hermes/OpenCode sessions come back from their legacy JSONL/JSON copies; the Hermes scan silently caps at 500 | bug | P2 | M | high |  |
+| [SESS-41](#sess-41) | Session deletion is permanent with no trash or undo | feature | P2 | M | high |  |
 | [SESS-18](#sess-18) | Missing session lifecycle features: export, pin/favorites, tags, archive, fork, redaction | feature | P3 | L | high |  |
 | [SESS-19](#sess-19) | Gemini/Claude title metadata edge cases (untrimmed `.project_root`, 160-char Gemini titles, string-only Gemini titles) | bug | P3 | S | medium |  |
 | [SESS-20](#sess-20) | Stringly-typed `source_path` with two incompatible `sqlite:` conventions | tech-debt | P3 | M | high |  |
@@ -44,6 +51,11 @@ The Session Manager is a solid v1: seven providers are scanned in parallel (`ses
 | [SESS-32](#sess-32) | `enabled` semantics and app aliases differ across deep-link resource types | tech-debt | P3 | S | high |  |
 | [SESS-33](#sess-33) | Unbounded deep-link payloads and lenient base64 decoding | security | P3 | S | medium |  |
 | [SESS-34](#sess-34) | `useSessionSearch` highlight and auto-expand use the list query inside message bodies | bug | P3 | S | high |  |
+| [SESS-42](#sess-42) | Fallback 'unknown' IDs collide in usage request_id keys and drop rows across files | bug | P3 | S | medium |  |
+| [SESS-43](#sess-43) | Endpoints taken from the inline deep-link config skip validate_url | security | P3 | S | high |  |
+| [SESS-44](#sess-44) | configUrl links are previewed as if they are supported, but import always fails | ux | P3 | S | high |  |
+| [SESS-45](#sess-45) | Refresh never reloads the open transcript; active sessions show stale messages | ux | P3 | S | high |  |
+| [SESS-46](#sess-46) | session_log_sync rows are never pruned for deleted or moved files | tech-debt | P3 | S | medium |  |
 
 ## Findings
 
@@ -224,6 +236,76 @@ The Session Manager is a solid v1: seven providers are scanned in parallel (`ses
 - **Proposal:** Persist byte offset + a short prefix hash (or inode/size) in `session_log_sync`, `seek` to the offset and parse only the delta, falling back to a full re-read when the prefix check fails; cache the Codex identity/boundary per file; for Gemini keep a per-session `(message_count, lastUpdated)` watermark and only process new messages; replace polling with the watcher from SESS-09.
 - **Acceptance:** Benchmark: appending 1 KB to a 100 MB JSONL costs <5 ms of parsing; sync-state table gains `byte_offset`/`prefix_hash` columns with a migration.
 
+### SESS-35: Session-log usage rows are frozen at the first-seen streaming snapshot (Claude INSERT OR IGNORE across syncs; Gemini upsert is unreachable)
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** src-tauri/src/services/session_usage.rs:300-317 dedups snapshots of one message.id (stop_reason / larger output_tokens wins), but only among lines read in the current pass (lines <= last_offset are skipped at :211-213). :333-335 now imports rows with no stop_reason. :441 `should_skip_session_insert` returns early when the request_id exists, and :480 uses `INSERT OR IGNORE`. The periodic sync runs every 60 s (src-tauri/src/lib.rs:1094,1126-1135). session_usage_opencode.rs:237 already says in a comment that in-progress messages have only part of their tokens and that INSERT OR IGNORE cannot backfill them, so OpenCode skips them; Claude has no such guard. Gemini: session_usage_gemini.rs:263 also returns early on an existing request_id, so the `ON CONFLICT(request_id) DO UPDATE` at :309-322, meant for full re-reads carrying updated values, never runs.
+- **Problem:** When a 60 s sync tick lands while Claude Code is streaming a reply, the snapshot written so far (e.g. output_tokens=1-26, no stop_reason) is inserted as `session:<msg_id>`. The final snapshot (e.g. 1349 output tokens) comes in the next pass and is ignored, so output cost is under-counted for good. Long agentic turns that span a tick are the most affected. The upsert written for Gemini has the same problem: it is dead code.
+- **Proposal:** Make session inserts upserts that keep the best snapshot: `ON CONFLICT(request_id) DO UPDATE SET ... WHERE excluded.output_tokens > output_tokens OR (stop_reason now present)`. Change should_skip_session_insert so an existing request_id with data_source=session_* is updated, not skipped. Store a stop_reason/is_final column, or keep rows without stop_reason as provisional. Emit notify_log_recorded on updates too. Remove or fix the Gemini early return so its upsert can run.
+- **Acceptance:** Unit test: sync a file containing a partial snapshot of msg_1, then append the final snapshot and sync again. proxy_request_logs then holds a single msg_1 row with the final output_tokens and recomputed cost. A matching Gemini test shows changed token counts being updated.
+- **Verification:** **confirmed** — services/session_usage.rs:211 skips lines <= last_offset, so per-message.id dedup (:291-310) only sees the current pass; :441 `should_skip_session_insert` returns early because usage_stats.rs:357 returns true when the request_id exists, and :480 is `INSERT OR IGNORE`, so a partial snapshot imported mid-stream is never replaced by the final one. session_usage_opencode.rs:236-240 explicitly skips incomplete messages for this reason, but Claude has no such guard (the :333-335 comment even relaxes the gate to import rows that have no stop_reason). Gemini: session_usage_gemini.rs:263 returns early on an existing request_id, so the ON CONFLICT DO UPDATE at :300-322 cannot fire. The behaviour is real, but the impact is under-counted output-token statistics with no security or user-data loss, so P2 fits better than P1. (Origin: completeness-critic pass.)
+
+### SESS-36: Usage sync cursor advances past a partially written last line and past rows that failed to insert
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** src-tauri/src/services/session_usage.rs:206-227: `line_offset += 1` happens before the line is read. `BufRead::lines()` returns a final line with no newline as Ok, so a half-flushed JSON line fails `serde_json::from_str` and is skipped with `continue`. :345-350 turns insert errors into `skipped += 1`, and :354 still stores `line_offset` as the new cursor. The Codex parser does the same (session_usage_codex.rs:422-428 increment and skip, :577-583 errors counted as skipped, :589 cursor saved). The Gemini count is saved unconditionally (session_usage_gemini.rs:212). OpenCode does this correctly: it deliberately leaves the cursor unchanged on errors (session_usage_opencode.rs:135-160).
+- **Problem:** If a sync tick reads a transcript while the agent is halfway through appending a large line, or if an insert fails once (SQLITE_BUSY, lock contention with the proxy logger), the cursor still moves past that line. The next sync starts after it, so that usage is never imported and the user gets no error.
+- **Proposal:** Track byte offsets and advance the cursor only to the end of the last complete line, i.e. one ending in '\n', that parsed and inserted successfully. Do not advance it on insert errors. Follow the OpenCode pattern: a has_errors flag that blocks update_sync_state. Optionally re-read the last N lines on each pass and rely on request_id idempotency.
+- **Acceptance:** Test: write a file whose last line is truncated JSON with no newline and sync. Then complete the line and sync again; the row is imported. Test: inject an insert failure; the cursor does not advance and the next sync imports the row.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SESS-37: Deep-link usage scripts run auto-enabled in an unbounded QuickJS sandbox, and the confirmation never shows the code
+
+**Type:** security · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** src-tauri/src/deeplink/provider.rs:246-255 decodes `usageScript` and sets `enabled = request.usage_enabled.unwrap_or(!code.is_empty())`, so any script in a link is enabled by default; `usageAutoInterval` is taken as-is (parser.rs:141-143). src-tauri/src/usage_script.rs:34-57 and :115-132 create `Runtime::new()`/`Context::full` and call `ctx.eval(script)` with no interrupt handler, no memory limit and no stack limit (grep finds no `set_interrupt_handler`/`set_memory_limit`). `timeout_secs` only bounds the HTTP request (:227). The eval runs inside an async fn on the Tauri runtime (services/provider/usage.rs:22). src/components/DeepLinkImportDialog.tsx:626-650 shows only an 'enabled' badge for the script, never its source.
+- **Problem:** A shared provider link can carry a script such as `while(1){}` or one that allocates without limit, plus an auto-query interval. Each automatic or manual usage query then pins a runtime worker thread forever or exhausts memory, which hangs or crashes the app. The user cannot see this before importing, because the code is hidden and enabled by default.
+- **Proposal:** Add a QuickJS interrupt handler with a deadline from `timeout`, `set_memory_limit` and `set_max_stack_size`, and run eval in spawn_blocking. Import usage scripts from deep links as disabled unless the user explicitly opts in. Show the decoded script (collapsible, monospace) and the auto-query interval in the confirmation dialog. Enforce a minimum auto interval.
+- **Acceptance:** A usage script `while(true){}` returns a timeout error within `timeout` seconds and the app stays responsive. A deep link with usageScript imports with usage_script.enabled=false unless the user ticks a checkbox in the dialog. The dialog renders the script text.
+- **Verification:** **partially-confirmed** — deeplink/provider.rs:255 sets `enabled = request.usage_enabled.unwrap_or(!code.is_empty())`. usage_script.rs:34-57/115-132 call Runtime::new/Context::full and ctx.eval synchronously inside an async fn, and grep finds no interrupt handler, memory limit or spawn_blocking, so `while(1){}` would pin an async worker. DeepLinkImportDialog.tsx:626-650 shows only an enabled/disabled badge, never the script. One part of the proposal is already in place: the frontend clamps the auto-query interval to at least 1 minute (src/lib/query/queries.ts:265). Exfiltration is also limited, because the request URL is checked same-origin against base_url (usage_script.rs validate_request_url). The impact is a user-confirmed local DoS/hang, which makes P2 more proportionate than P1. (Origin: completeness-critic pass.)
+
+### SESS-38: Provider deep link with enabled=true immediately switches the live provider, and the confirmation dialog never says so
+
+**Type:** security · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/deeplink/provider.rs:130-134: `if merged_request.enabled.unwrap_or(false) { ProviderService::switch(...) }` rewrites the live Claude/Codex/Gemini config to the link's endpoint. parser.rs:130 reads `enabled` from the URL. src/components/DeepLinkImportDialog.tsx has no reference to `request.enabled` (grep for 'enabled' matches only usageEnabled at :637-646). The provider view shows name, endpoint and masked key (:391-405) with a single Import button.
+- **Problem:** A link that looks like 'add a provider' actually makes it the active provider at once. From then on all CLI traffic, including source code in prompts, goes to the link author's endpoint, and the user had no indication or choice. This is separate from the prompt-file overwrite (SESS-07) and the cross-resource semantics (SESS-32): this is the provider path and how it is disclosed.
+- **Proposal:** Show an explicit 'Switch to this provider after import' checkbox that reflects `enabled` but defaults to unchecked. Pass the user's choice, not the URL value, to the backend. Warn when the endpoint host differs from known provider presets.
+- **Acceptance:** Opening `ccswitch://v1/import?resource=provider&...&enabled=true` shows the switch checkbox unchecked. Importing without ticking it leaves the current provider unchanged. Ticking it switches.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SESS-39: Deep-link dialog can swap the pending request under the user (stale merge result / new link while open or importing)
+
+**Type:** security · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** src/components/DeepLinkImportDialog.tsx:51-76: every `deeplink-import` event calls `setRequest(...)` with no guard for an open dialog or a running import. For links carrying `config`, `setRequest(mergedRequest)` runs after `await deeplinkApi.mergeDeeplinkConfig`, so an older event can resolve last and overwrite a newer one. handleImport (:93-205) imports whatever `request` holds at click time, and after it finishes it calls `setIsOpen(false)`, which can also dismiss a newer request that arrived meanwhile without the user reviewing it.
+- **Problem:** A web page can fire several ccswitch:// links in a row: a benign one first, then a different one shortly before the user clicks Import. The dialog content changes under the cursor, and an out-of-order merge result can show one payload while the state holds another. The user may approve something they did not review.
+- **Proposal:** Give each incoming event a sequence id and drop stale merge results. While a dialog is open or importing, queue new requests and show them one at a time (or show 'another import request arrived'). Freeze the reviewed request when the dialog opens and import exactly that snapshot. Disable Import for about 1 s after the content changes.
+- **Acceptance:** Test: emit event A with config (slow merge), then event B without config. The dialog ends on B and A's merge result is discarded. Emitting a new event while the dialog is open queues it and leaves the visible request unchanged.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SESS-40: Deleted Hermes/OpenCode sessions come back from their legacy JSONL/JSON copies; the Hermes scan silently caps at 500
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** src-tauri/src/session_manager/providers/hermes.rs:26-48 merges SQLite and JSONL sessions and keeps a JSONL entry whenever its id is not in SQLite. delete_session_sqlite (:233-270) deletes only the `messages`/`sessions` rows and ignores errors from the messages delete (`let _ = tx.execute(...)` at :260); it never removes `sessions/<id>.jsonl`. hermes.rs:84 `SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500`. opencode.rs:37-61 uses the same merge, and delete_session_sqlite (opencode.rs:382-421) never touches the legacy `storage/session|message|part` files.
+- **Problem:** Deleting a Hermes session that also has a JSONL transcript, or an OpenCode session migrated from JSON storage, removes the SQLite rows. On the next refresh the merge no longer finds the id in SQLite, so the JSONL/JSON copy appears again and the user sees the delete as having failed. For Hermes users with more than 500 sessions, older ones silently fall back to their JSONL entries (or vanish). Deleting those removes only the file and leaves invisible DB rows.
+- **Proposal:** On SQLite delete, also delete the matching legacy JSONL/JSON artifacts (reusing the existing file-delete helpers with id verification), or have the scan hide JSONL ids that have a tombstone. Propagate the messages-delete error. Replace LIMIT 500 with pagination, or at least log and surface truncation.
+- **Acceptance:** Test: a Hermes session present in both state.db and sessions/<id>.jsonl is deleted via its sqlite: source, and scan_sessions() no longer returns it. Same for OpenCode JSON+SQLite. With 600 Hermes sessions in SQLite, all 600 are listed or the UI shows a truncation notice.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SESS-41: Session deletion is permanent with no trash or undo
+
+**Type:** feature · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** Every provider deletes with `std::fs::remove_file`/`remove_dir_all` or SQL `DELETE`: claude.rs:103-118 (including the whole sidecar dir with subagents/tool-results), grokbuild.rs:127, gemini.rs:130, opencode.rs:342-376 and :408-415, hermes.rs:260-263 and :489. Batch delete (mod.rs:120-128, SessionManagerPage.tsx:475-487) can remove dozens of transcripts in one confirm. The success toast (mutations.ts:365-369) has no undo action.
+- **Problem:** One mis-click in selection mode, or a stale selection, destroys conversation history that the source CLIs need for `--resume`, and it cannot be recovered. The backlog's 'archive' feature (SESS-18) is a different workflow and does not protect against accidental deletes.
+- **Proposal:** Move file-based sessions to the OS trash (the `trash` crate) or to a cc-switch quarantine dir with a 30-day TTL. For SQLite providers, export the rows to a JSON file in the quarantine before deleting. Add an 'Undo' action to the delete toasts and a 'Recently deleted' view.
+- **Acceptance:** After deleting a Claude session, the .jsonl and its sidecar dir are in the trash or quarantine. Clicking Undo within the toast restores them and the session reappears in the list with resume working.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### SESS-18: Missing session lifecycle features: export, pin/favorites, tags, archive, fork, redaction
 
 **Type:** feature · **Priority:** P3 · **Effort:** L · **Confidence:** high
@@ -358,3 +440,53 @@ The Session Manager is a solid v1: seven providers are scanned in parallel (`ses
 - **Problem:** Typing a provider or directory name in the list search expands and re-highlights thousands of characters in the detail pane and the highlights do not correspond to the list results; large sessions re-render on every keystroke.
 - **Proposal:** Decouple list search from the detail pane (dedicated find bar, SESS-16); memoize highlight regexes; only pass a query to message items when the find bar is active.
 - **Acceptance:** Typing in the list search no longer changes the detail pane; React Profiler shows no `SessionMessageItem` re-renders on list-search keystrokes.
+
+### SESS-42: Fallback 'unknown' IDs collide in usage request_id keys and drop rows across files
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** src-tauri/src/services/session_usage_codex.rs:556-560 builds `codex:<thread_id>:<event_index>` with `thread_id` defaulting to "unknown" when neither read_codex_session_identity nor a session_meta line provides it, so every such file produces `codex:unknown:1`, `codex:unknown:2`, and so on. session_usage_gemini.rs:183 and :191-192 build `gemini_session:<sid>:<message_id>` with both parts defaulting to "unknown". Inserts are idempotent on request_id (session_usage_codex.rs:627 and :666 `INSERT OR IGNORE`, gemini :263).
+- **Problem:** Once one file has claimed `codex:unknown:N`, the Nth event of every other file without an identity (truncated or older-format rollouts) is skipped, and so is every Gemini message without an id in the same session. Usage and cost are silently under-counted, and the rows are reported as 'skipped' rather than as errors.
+- **Proposal:** When an ID is missing, derive a stable fallback from the file: hash the canonical path or the filename UUID for Codex, and the array index plus timestamp for Gemini messages. Log a warning once per file.
+- **Acceptance:** Test: two Codex rollout files with no session_meta, each with 3 token_count events, import 6 rows. A Gemini file with two id-less gemini messages imports 2 rows.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SESS-43: Endpoints taken from the inline deep-link config skip validate_url
+
+**Type:** security · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/deeplink/parser.rs:101-114 runs `validate_url` (http/https only) only on the URL `endpoint`/`homepage` params. When those are absent, provider.rs merge_claude_config (:673-678) copies `env.ANTHROPIC_BASE_URL`, merge_codex_config (:739-743) copies the TOML base_url, and merge_additive_config (:879-887) copies `baseUrl`/`options.baseURL`. None of these are validated, and they go straight into the stored provider (provider.rs:55-68, build_* functions). validate_url is called only from parser.rs (grep).
+- **Problem:** A link can set `config=` with an endpoint such as `file:///…`, `ftp://…` or a malformed string. That gets past the scheme check the parser enforces and ends up in live CLI configs, giving broken or surprising providers and a way around future endpoint policy checks.
+- **Proposal:** Run validate_url on every endpoint (and inferred homepage) after parse_and_merge_config, inside import_provider_from_deeplink, and in merge_deeplink_config so the preview shows the error too.
+- **Acceptance:** Test: a Claude provider link with no endpoint param and config env ANTHROPIC_BASE_URL='file:///etc/passwd' fails import with an 'Invalid URL scheme' error.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SESS-44: configUrl links are previewed as if they are supported, but import always fails
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/deeplink/parser.rs:129 accepts `configUrl`. provider.rs:594-598 always returns 'Remote config URL is not yet supported'. src/components/DeepLinkImportDialog.tsx:57-70 calls merge, shows an error toast, then falls back to opening the dialog anyway, and :216-221 and :612-620 render the configUrl as a normal 'config source' row with an enabled Import button that then fails again.
+- **Problem:** Users who receive configUrl links get a confirmation dialog that looks importable, followed by an error. This is confusing, and nothing tells them how to fix it.
+- **Proposal:** Reject configUrl in the parser with a clear message (and drop it from the generator), or implement fetching behind HTTPS + size limit + host disclosure. Until then, disable Import and show an inline explanation when only configUrl is present.
+- **Acceptance:** Opening a link with only configUrl shows one clear 'not supported' message and no enabled Import button. No import attempt reaches the backend.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SESS-45: Refresh never reloads the open transcript; active sessions show stale messages
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/sessions/SessionManagerPage.tsx:1140 refresh button calls only `refetch()` of `useSessionsQuery` (:192). The message query is keyed `['sessionMessages', providerId, sourcePath]` with staleTime 30 s (src/lib/query/queries.ts:315-324). Its key does not include `lastActiveAt`, so even after the list refetches and shows a newer last-active time, the cached transcript stays.
+- **Problem:** While watching a session that is still running in a CLI, clicking refresh updates the list timestamp but the detail pane keeps the old messages until the cache expires or the user switches sessions. That makes the viewer unreliable for monitoring live work.
+- **Proposal:** Have refresh also invalidate `['sessionMessages', selected.providerId, selected.sourcePath]`, and/or include `lastActiveAt` in the message query key so a newer list entry refetches automatically. Optionally poll the selected session while it was active in the last few minutes.
+- **Acceptance:** With a session open, append a message to its file and click refresh; the new message appears in the detail pane without switching sessions.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### SESS-46: session_log_sync rows are never pruned for deleted or moved files
+
+**Type:** tech-debt · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** Rows are only ever added or replaced: session_usage.rs:385-408 `INSERT OR REPLACE` keyed by absolute file path. OpenCode adds one row per session (`<db>:<session_id>`, session_usage_opencode.rs:107-109, :149). Codex archived files inherit state through a suffix-match scan of the whole table (session_usage_codex.rs:189-200, `substr(file_path, -length(?2))`, which cannot use an index). Nothing deletes rows: grep shows no DELETE on session_log_sync, and the Session Manager delete paths (session_manager/mod.rs:104-118) do not touch it.
+- **Problem:** The table grows without bound with every transcript ever seen, including ones deleted via the Session Manager. Each Codex archived-file lookup does a full table scan on suffix matching, which gets slower as history grows. Stale rows can also wrongly suppress re-import if a path is reused.
+- **Proposal:** After each sync pass, delete rows whose path no longer exists, or that were not seen in N passes. Remove the row when the Session Manager deletes a session. Store the file name in its own indexed column for the archived-session inheritance lookup.
+- **Acceptance:** After deleting a session file and running a sync, its session_log_sync row is gone. The archived inheritance query uses an index (EXPLAIN QUERY PLAN shows SEARCH, not SCAN).
+- **Verification:** added by completeness-critic pass (not independently re-verified)

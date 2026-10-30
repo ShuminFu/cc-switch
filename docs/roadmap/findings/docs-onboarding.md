@@ -1,6 +1,6 @@
 # Documentation & onboarding — findings (DOCS-xx)
 
-Part of the [next-phase proposals](../README.md). 23 findings. Priorities: P2 = 15, P3 = 8.
+Part of the [next-phase proposals](../README.md). 32 findings. Priorities: P2 = 23, P3 = 9.
 
 ## Area summary
 
@@ -25,6 +25,14 @@ The four UI locales (`src/i18n/locales/{en,zh,zh-TW,ja}.json`) are structurally 
 | [DOCS-16](#docs-16) | No contextual help links from the app to the manual | feature | P2 | M | high |  |
 | [DOCS-17](#docs-17) | In-app "What's new" after updates | feature | P2 | M | high |  |
 | [DOCS-19](#docs-19) | Error presentation: raw backend strings in toasts, mixed languages, no "copy details" or next step | ux | P2 | M | high |  |
+| [DOCS-24](#docs-24) | Documented toolchain prerequisites (Node 18, pnpm 8, Rust 1.85) cannot build the repo; no engines/packageManager pin | docs | P2 (first pass P1) | S | high | confirmed |
+| [DOCS-25](#docs-25) | CONTRIBUTING/README check commands diverge from CI: phantom `pnpm lint`, broken `--coverage`, missing `dist/` and `-D warnings` | docs | P2 | S | high |  |
+| [DOCS-26](#docs-26) | Contributor docs point to non-existent locale files, say there are 3 languages instead of 4, and state a wrong command-naming rule | docs | P2 (first pass P1) | S | high | confirmed |
+| [DOCS-27](#docs-27) | zh-TW locale is missing 30 keys (the entire tool install/diagnose UI) and keeps 2 stale keys; no locale-parity check | bug | P2 (first pass P1) | S | high | confirmed |
+| [DOCS-28](#docs-28) | 9 UI strings exist only as hard-coded Chinese defaultValue: English/Japanese users see Chinese toasts and tooltips | bug | P2 (first pass P1) | S | high | confirmed |
+| [DOCS-29](#docs-29) | Config-files reference (5.1) documents a fictional settings.json schema, an outdated table list and invalid tool-config examples | docs | P2 (first pass P1) | M | high | partially-confirmed |
+| [DOCS-30](#docs-30) | README download section lists wrong asset names, omits Windows/Linux ARM64, and claims distro support the builds cannot meet | docs | P2 | S | medium |  |
+| [DOCS-31](#docs-31) | Provider empty-state import fails silently with a non-actionable toast; copy and button disagree for Claude Desktop | ux | P2 | S | high |  |
 | [DOCS-03](#docs-03) | README screenshots show a three-app UI that predates most shipped features | docs | P3 (first pass P1) | M | high | partially-confirmed |
 | [DOCS-12](#docs-12) | Cross-README consistency nits (relative `../../releases` links, naming, DE manual link) | docs | P3 | S | high |  |
 | [DOCS-13](#docs-13) | First-run experience is a single text modal — add a guided setup wizard | ux | P3 (first pass P1) | L | medium | partially-confirmed |
@@ -33,6 +41,7 @@ The four UI locales (`src/i18n/locales/{en,zh,zh-TW,ja}.json`) are structurally 
 | [DOCS-21](#docs-21) | Issue/PR templates do not reflect four UI locales or the German README | docs | P3 | S | high |  |
 | [DOCS-22](#docs-22) | GitHub release body is Chinese-only and hand-written in the workflow | docs | P3 | S | high |  |
 | [DOCS-23](#docs-23) | Package/store descriptions and in-app product copy still describe a three-tool product | docs | P3 | S | high |  |
+| [DOCS-32](#docs-32) | Bug-report template omits 3 of 8 supported apps and asks for logs without a redaction warning | docs | P3 | S | high |  |
 
 ## Findings
 
@@ -174,6 +183,86 @@ The four UI locales (`src/i18n/locales/{en,zh,zh-TW,ja}.json`) are structurally 
 - **Proposal:** Introduce `showError({ code | message, detail, action? })` presenter: localized title from the code, detail collapsed, "Copy details" button, optional action (open settings, open docs via DOCS-16); route all `toast.error` through it (lint ban on `toast.error(String(`/`error.message)`); feed from structured codes as I18N-03 lands.
 - **Acceptance:** `rg "toast\.error\((String\(|error\.message|e\b)" src` → 0; error toasts show a localized title + copy button.
 
+### DOCS-24: Documented toolchain prerequisites (Node 18, pnpm 8, Rust 1.85) cannot build the repo; no engines/packageManager pin
+
+**Type:** docs · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** CONTRIBUTING.md:23-24 (and zh :151-152) and README.md:442-444 say "Node.js 18+", "pnpm 8+", "Rust 1.85+". But node_modules/vite/package.json:57 needs "node": "^20.19.0 || >=22.12.0" (package.json pins vite ^7.3.0); pnpm-lock.yaml:1 is lockfileVersion '9.0', which pnpm 8 cannot read, and CI uses pnpm 10.12.3 (.github/workflows/ci.yml:29) with Node 20 (:24); rust-toolchain.toml sets channel = "1.95" while src-tauri/Cargo.toml:9 says rust-version = "1.85.0". package.json has no "engines" or "packageManager" field.
+- **Problem:** A new contributor who follows the docs on Node 18 or pnpm 8 gets an install or vite startup failure before the first build. The Rust minimum is never tested, because rustup always picks the 1.95 toolchain, so 1.85 is a claim nobody checks.
+- **Proposal:** Change the prerequisites in CONTRIBUTING (both languages) and all four READMEs to Node >=20.19 and pnpm 10.x (pinned through corepack), and say that rust-toolchain.toml selects Rust automatically. Add "packageManager": "pnpm@10.12.3" and "engines": {"node": ">=20.19"} to package.json. Either raise Cargo rust-version to the tested floor or add a CI job that runs on 1.85.
+- **Acceptance:** Every prerequisite line matches package.json engines/packageManager and rust-toolchain.toml. Running `pnpm install` on Node 18 fails with a clear engines error rather than a vite crash.
+- **Verification:** **confirmed** — CONTRIBUTING.md:23-24 says 'Node.js 18+ and pnpm 8+', 'Rust 1.85+', and README*.md:442-444 (README_ZH:445-447) repeat this. But node_modules/vite/package.json:57 requires "node": "^20.19.0 || >=22.12.0", pnpm-lock.yaml:1 is lockfileVersion '9.0', ci.yml uses node-version "20" and pnpm 10.12.3, and rust-toolchain.toml has channel = "1.95" while src-tauri/Cargo.toml:9 has rust-version = "1.85.0". package.json has no engines or packageManager field. The gap is real, but it costs contributors a one-time setup failure (vite and pnpm both print clear version errors) and does not affect end users, so P2 rather than P1. (Origin: completeness-critic pass.)
+
+### DOCS-25: CONTRIBUTING/README check commands diverge from CI: phantom `pnpm lint`, broken `--coverage`, missing `dist/` and `-D warnings`
+
+**Type:** docs · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** CONTRIBUTING.md:45 and :173 list `pnpm lint` ("ESLint check"), but package.json:6-15 has no lint script and the repo has no eslint dependency or config (no .eslintrc*/eslint.config*). README.md:517 says `pnpm test:unit --coverage`, but vitest.config.ts:16-18 sets coverage with no provider and no @vitest/coverage-* package is installed (node_modules/@vitest is absent). CONTRIBUTING.md:68 runs `cd src-tauri && cargo fmt --check && cargo clippy && cargo test`, while CI first runs `mkdir -p dist` (.github/workflows/ci.yml:95-96, required by tauri generate_context frontendDist) and `cargo clippy -- -D warnings` (:102). CONTRIBUTING.md:60 also cites ESLint as the frontend linter.
+- **Problem:** Contributors run commands that do not exist or that fail. On a fresh clone, local clippy can fail because dist/ is missing, and a PR that passes the documented clippy (warnings allowed) can still fail CI's -D warnings gate.
+- **Proposal:** Delete the `pnpm lint`/ESLint mentions, or add a real lint script. Add @vitest/coverage-v8 or drop the coverage command. Make the documented pre-PR checks match CI exactly (mkdir -p dist; cargo clippy -- -D warnings), ideally behind one `pnpm check` script that CI also calls.
+- **Acceptance:** Each command in CONTRIBUTING.md and in the README dev section runs successfully on a fresh clone, and the pre-PR check list is identical to the steps in ci.yml.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DOCS-26: Contributor docs point to non-existent locale files, say there are 3 languages instead of 4, and state a wrong command-naming rule
+
+**Type:** docs · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** CONTRIBUTING.md:113-118 (zh :241-246): "CC Switch supports three languages... Update all three locale files: src/locales/en/translation.json, src/locales/zh/translation.json, src/locales/ja/translation.json". The real files are src/i18n/locales/{en,zh,ja,zh-TW}.json, and src/locales does not exist. CONTRIBUTING.md:15 says "English, Chinese, and Japanese". README.md:548 project tree shows `src/locales/` (README itself lists zh/zh-TW/en/ja at :249). CONTRIBUTING.md:62 says "Tauri 2.0: Command names must use camelCase", but the commands are snake_case (e.g. `fn stream_check_provider`, `get_stream_check_config` in src-tauri/src/commands) and only arguments are camelCased (`#[tauri::command(rename_all = "camelCase")]` at src-tauri/src/commands/model_fetch.rs:11).
+- **Problem:** Contributors who follow the i18n instructions edit paths that do not exist, or create them, and skip zh-TW. This is one direct cause of the zh-TW key drift. The command-naming rule tells people to break the existing naming convention.
+- **Proposal:** Correct the paths to src/i18n/locales/*.json, list all four locales (including zh-TW), fix the README project tree, and reword the Tauri rule to: "command fns are snake_case; JS-side argument keys are camelCase".
+- **Acceptance:** Every path in CONTRIBUTING.md and the README tree exists on disk (a link or path check passes), and the i18n section names four locale files.
+- **Verification:** **confirmed** — CONTRIBUTING.md:113-118 and :241-246 say 'three languages' and list src/locales/{en,zh,ja}/translation.json, but src/locales does not exist; the files are src/i18n/locales/{en,ja,zh,zh-TW}.json. CONTRIBUTING.md:15 lists only three languages. The README tree is at README.md:553 (and the DE/JA/ZH equivalents), not :548, and shows locales/ directly under src/. CONTRIBUTING.md:62 says 'Command names must use camelCase', yet the commands are snake_case (stream_check.rs:18 `stream_check_provider`, :116 `get_stream_check_config`) and only 17 of 284 #[tauri::command] attributes use rename_all = "camelCase" (e.g. model_fetch.rs:11). All claims hold, but this is a contributor-docs issue, so P2. (Origin: completeness-critic pass.)
+
+### DOCS-27: zh-TW locale is missing 30 keys (the entire tool install/diagnose UI) and keeps 2 stale keys; no locale-parity check
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** A flatten-and-diff of src/i18n/locales/*.json gives en/zh/ja 2583 keys and zh-TW 2555. Missing from zh-TW: settings.toolDiagnose, toolDiagnoseFailed, toolDiagnoseNoConflict, toolDiagnosing, toolInstall, toolUpdate, updateAllTools, updateAvailableShort, toolConflictTitle/Hint/Default/NotRunnable, toolUpgradeConfirmTitle/Hint/Btn, toolUpgradeWillRun, toolUpgradeUnanchoredHint, toolActionDone/Failed/Partial/VersionUnchanged(+Title)/InstalledNotRunnable, manualInstallCommands, currentVersion, latestVersion, installedNotRunnable, toolCheckEnv, toolNotRunnable, toolReady. Extra in zh-TW only: settings.oneClickInstall, providerForm.partnerPromotion.aicoding. These keys are used in src/components/settings/AboutSection.tsx:721,1238. src/i18n/index.ts:82 has fallbackLng: "en". No test under tests/ compares locale key sets.
+- **Problem:** Traditional-Chinese users see the About page's tool-install, update and conflict-diagnosis section in English. That section is the main self-help surface for 'CLI not found' problems. The drift went unnoticed because nothing checks parity.
+- **Proposal:** Add the 30 zh-TW translations and remove the 2 orphaned keys. Add a vitest test, e.g. tests/i18n/parity.test.ts, that flattens every locale and asserts the key sets match en.json, so it runs in the existing `pnpm test:unit` CI step.
+- **Acceptance:** All four locale files have identical flattened key sets, and the parity test fails when a key is added to en.json alone.
+- **Verification:** **confirmed** — I re-ran a flatten-and-diff on src/i18n/locales: en/zh/ja have 2583 keys and zh-TW has 2555. Exactly the 30 settings.* tool keys listed are missing from zh-TW, and settings.oneClickInstall and providerForm.partnerPromotion.aicoding exist only in zh-TW. AboutSection.tsx uses these keys (e.g. :553 toolDiagnoseNoConflict, :669/:1206 toolInstall, :972 toolDiagnose). src/i18n/index.ts sets fallbackLng: "en", so zh-TW users see English, which is readable rather than broken. I found no locale-parity test under tests/. The impact is a partial English fallback for one locale, so P2 rather than P1. (Origin: completeness-critic pass.)
+
+### DOCS-28: 9 UI strings exist only as hard-coded Chinese defaultValue: English/Japanese users see Chinese toasts and tooltips
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** These keys are called with a Chinese defaultValue and are absent from all four locale files: failover.tooltip.takeoverRequired (src/components/proxy/FailoverToggle.tsx:46 "请先接管 ${appLabel}，再启用故障转移"), providerForm.requiredFields (src/components/providers/forms/GrokBuildProviderForm.tsx:304 "请填写供应商名称、API 地址、API Key 和模型"), provider.duplicateLiveIdsLoadFailed (src/App.tsx:757), providerForm.providerKeyStatusLoading (src/components/providers/forms/ProviderForm.tsx:1071), codexConfig.noCommonConfigToApply (src/components/providers/forms/hooks/useCodexCommonConfig.ts:324), claudeDesktop.route.stopBlockedByTakeover (src/components/proxy/ClaudeDesktopRouteToggle.tsx:45), proxy.server.stopped / proxy.server.stopFailed (src/hooks/useProxyStatus.ts:72,84), notifications.proxyReasonClaudeDesktop (src/hooks/useProviderActions.ts:218), plus usage.unpriced (src/components/usage/RequestLogTable.tsx:280 t("usage.unpriced", "未定价")). About 400 `defaultValue: "<Chinese>"` occurrences exist in src/**/*.tsx, so this is easy to repeat.
+- **Problem:** Because i18next falls back to defaultValue when a key is missing, these validation errors, tooltips and toasts appear in Chinese regardless of the UI language. Examples are the Grok Build form's required-field error, the failover tooltip, and the proxy stop toast. They are often the exact messages a user needs to understand what blocked them.
+- **Proposal:** Add the 10 keys to en/zh/ja/zh-TW. Add a test or script that scans `t("key"` call sites for keys missing from en.json and fails CI, and stop using non-English defaultValue literals, or make them English.
+- **Acceptance:** With the language set to English, none of the listed messages contains CJK characters, and the scan reports 0 keys used in src/ that are missing from en.json.
+- **Verification:** **confirmed** — None of the 10 keys exists in any of the 4 locale files (checked by script), and each call site passes a Chinese defaultValue. Examples: FailoverToggle.tsx:46 `请先接管 ${appLabel}，再启用故障转移`, GrokBuildProviderForm.tsx:304, App.tsx:757, ProviderForm.tsx:1071, useCodexCommonConfig.ts:324, ClaudeDesktopRouteToggle.tsx:45, useProxyStatus.ts:72/84, useProviderActions.ts:218, and RequestLogTable.tsx:280 t("usage.unpriced", "未定价"). i18next returns the defaultValue when a key is missing in both the active language and the fallback, so non-Chinese users see Chinese. I count 399 Chinese defaultValue literals in src/**/*.tsx. These are real but scattered toasts and tooltips, so P2. (Origin: completeness-critic pass.)
+
+### DOCS-29: Config-files reference (5.1) documents a fictional settings.json schema, an outdated table list and invalid tool-config examples
+
+**Type:** docs · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** docs/user-manual/en/5-faq/5.1-config-files.md:44-58 shows settings.json with "theme", "windowBehavior", "autoStart". src-tauri/src/settings.rs:341-424 AppSettings (serde camelCase) has no such fields; the real ones include launchOnStartup, minimizeToTrayOnClose, showInTray, silentStartup, visibleApps, grokConfigDir. Theme is kept in browser localStorage key "cc-switch-theme" (src/components/theme-provider.tsx:30,52), not in settings.json. The table list at :27-39 omits stream_check_logs, proxy_live_backup, usage_daily_rollups, session_log_sync and profiles, all created in src-tauri/src/database/schema.rs. The Claude example at :88-97 uses an invented `"permissions": {"allow_file_access": true}` (the real shape is `permissions.allow: [..]`, as in services/provider/mod.rs:1005). The Codex example at :148-156 puts `base_url`/`model = "gpt-4"` at top level, whereas cc-switch writes `model_provider = "custom"` + `[model_providers.custom]` (src/config/codexProviderPresets.ts:63-68).
+- **Problem:** This page is the reference for anyone hand-editing or debugging live configs, and the page itself tells users that settings.json is 'safe to edit manually' (:318-321). A user who copies these examples writes keys cc-switch ignores, or a Codex config that does not route, and wrong field names make support triage harder.
+- **Proposal:** Regenerate the settings.json sample from AppSettings, or add a test that serializes AppSettings::default() and compares it with a fenced block in the doc. Update the table list to the current schema. Replace the Claude/Codex/Gemini examples with real output of the current presets, and mirror the changes in zh/ja.
+- **Acceptance:** Every key in the documented settings.json exists in AppSettings, every table name in the doc exists in schema.rs, and the Codex example parses into a provider cc-switch can switch to.
+- **Verification:** **partially-confirmed** — docs/user-manual/en/5-faq/5.1-config-files.md:44-58 lists theme/windowBehavior/autoStart. AppSettings (src-tauri/src/settings.rs:341-424) has none of these; it has showInTray, minimizeToTrayOnClose, launchOnStartup, silentStartup, visibleApps and grokConfigDir, and theme lives in localStorage 'cc-switch-theme' (theme-provider.tsx:30). The table list at :27-37 omits profiles, proxy_live_backup, session_log_sync, stream_check_logs and usage_daily_rollups, all created in schema.rs. The `permissions.allow_file_access` example at :95 and the top-level base_url/model Codex example at :148-150 do not match what cc-switch writes (`model_provider = "custom"` + `[model_providers.custom]`, codexProviderPresets.ts:63-68). However, the doc never calls settings.json 'safe to edit manually': :317-321 is about manually editing CLI tool configs and backfill. P2 fits a reference page. (Origin: completeness-critic pass.)
+
+### DOCS-30: README download section lists wrong asset names, omits Windows/Linux ARM64, and claims distro support the builds cannot meet
+
+**Type:** docs · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** README.md:354 says `CC-Switch-v{version}-Windows.msi`/`-Portable.zip` with no ARM64 mention, and :386-390 say `CC-Switch-v{version}-Linux.deb`/`.rpm`/`.AppImage`. The release workflow publishes `CC-Switch-${VERSION}-Linux-${ARCH}.AppImage|.deb|.rpm` (.github/workflows/release.yml:526,536,544) and `Windows-arm64.msi`/`-arm64-Portable.zip` (:624) built on windows-11-arm and ubuntu-22.04-arm (:24,27). The user manual already has the correct arch names (docs/user-manual/en/1-getting-started/1.2-installation.md:161,173) but lists Windows as x64 only (:9). README.md:345 claims "Ubuntu 22.04+ / Debian 11+ / Fedora 34+" while Linux bundles are built on ubuntu-22.04 (glibc 2.35) against libwebkit2gtk-4.1 (release.yml:79). Debian 11 ships glibc 2.31 and no webkit2gtk-4.1, and Fedora 34 ships glibc 2.33.
+- **Problem:** Users look for file names that do not exist, ARM64 Windows/Linux users do not learn that native builds exist, and Debian 11 / Fedora 34 users install packages that fail to start on missing glibc or webkit symbols.
+- **Proposal:** Use the real `-Linux-x86_64`/`-Linux-arm64` and `-Windows-arm64` names in all four READMEs and the manual's platform table. Set the Linux minimum to what the ubuntu-22.04 build supports (glibc >= 2.35 and webkit2gtk-4.1, e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+), or add an older build runner.
+- **Acceptance:** Each asset name pattern in the READMEs matches an asset produced by release.yml, and the stated minimum distro versions provide glibc >= the build host's and webkit2gtk-4.1.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### DOCS-31: Provider empty-state import fails silently with a non-actionable toast; copy and button disagree for Claude Desktop
+
+**Type:** ux · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src/components/providers/ProviderList.tsx:211-245: when importDefault/importOpenCodeFromLive/... returns false, the code shows `toast.info(t("provider.noProviders"))`, i.e. "No providers added yet" (en.json), which is the same text as the empty-state title. It does not say which file was checked or why nothing was found. src/components/providers/ProviderEmptyState.tsx:27-29 always shows provider.noProvidersDescription ("If you already have a config, click 'Import Current Config'"), while for claude-desktop the button reads "Import existing providers from Claude Code" (:39-43). :41 also carries a hard-coded Chinese defaultValue. showSnippetHint (:18-19) covers only claude/codex/gemini.
+- **Problem:** The empty state is a first-run screen. A user whose config lives in a custom directory, or whose live file is missing, clicks Import and gets only a repeat of the empty-state title, with no hint about where cc-switch looked or what to do next. For Claude Desktop the description names a button that is not on screen.
+- **Proposal:** Have the import commands return a reason, for example the path checked plus not-found or parse-error. Show it in the toast with the live config path, and offer an 'Open config folder' or 'Set config directory' action. Add per-app description keys (for example provider.noProvidersDescriptionClaudeDesktop) so the copy matches the button.
+- **Acceptance:** When an import finds nothing, the toast names the file path that was checked and links to the config-directory setting, and the Claude Desktop empty state's description refers to the button actually shown.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### DOCS-03: README screenshots show a three-app UI that predates most shipped features
 
 **Type:** docs · **Priority:** P3 · **Effort:** M · **Confidence:** high
@@ -247,3 +336,13 @@ The four UI locales (`src/i18n/locales/{en,zh,zh-TW,ja}.json`) are structurally 
 - **Problem:** Four different tool lists across surfaces; store metadata and first-run copy are the ones new users read first.
 - **Proposal:** Define the canonical tool list once (`src/config/apps.ts` or a docs glossary) and update package.json, metainfo (with `xml:lang` translations), first-run copy and manual index from it; add a CI grep guard for the old slogan.
 - **Acceptance:** All surfaces list the same eight tools; `rg -n "Codex & Gemini CLI" package.json flatpak docs` → 0.
+
+### DOCS-32: Bug-report template omits 3 of 8 supported apps and asks for logs without a redaction warning
+
+**Type:** docs · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** .github/ISSUE_TEMPLATE/bug_report.yml:43-55 'Related App' options are Claude Code, Codex, Gemini CLI, OpenCode, OpenClaw, Other. Claude Desktop, Grok Build and Hermes are missing, although README.md:222 advertises 8 tools. :62-63 and :94-95 ask users to attach "logs" and screenshots, with no warning that provider configs and settings.json/auth.json/.env contain API keys and that proxy logs and screenshots show base URLs and keys. There is no field for the feature area (proxy/failover, MCP, skills, sync, sessions). The placeholder version is "e.g. 3.11.1" (:26).
+- **Problem:** Reports for Claude Desktop, Grok Build and Hermes land under 'Other', so labeling and triage are harder. Users who paste config files or logs into public issues following the template can leak API keys, and SECURITY.md does not cover this.
+- **Proposal:** Add the three missing apps and a 'Feature area' dropdown. Add a required checkbox: "I have removed API keys/tokens from logs, configs and screenshots". Point to the crash.log/log directory (src-tauri/src/panic_hook.rs:3,42) so people know which file to attach.
+- **Acceptance:** The Related App dropdown lists all 8 tools from the README, and the template has a redaction acknowledgement before the logs field.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

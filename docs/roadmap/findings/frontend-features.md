@@ -1,6 +1,6 @@
 # Feature UI (settings, usage, proxy, skills, MCP) — findings (FE-UI-xx)
 
-Part of the [next-phase proposals](../README.md). 47 findings. Priorities: P2 = 23, P3 = 24.
+Part of the [next-phase proposals](../README.md). 60 findings. Priorities: P2 = 31, P3 = 29.
 
 ## Area summary
 
@@ -33,6 +33,14 @@ The non-provider feature UI is broad and mostly functional, with some genuinely 
 | [FE-UI-33](#fe-ui-33) | Skills UX — discovery "Uninstall" only toasts, no install progress, sequential update-all without progress, conflict/symlink explanation missing | feature | P2 | M | high |  |
 | [FE-UI-34](#fe-ui-34) | OpenClaw/workspace editors reset local edits on refetch and have no unsaved-changes guard | bug | P2 | S | medium |  |
 | [FE-UI-42](#fe-ui-42) | Test gaps — no component tests for proxy, usage charts/pricing, about, backups, log/rectifier, OpenClaw, workspace, prompts, Hermes; S3 branch untested | test | P2 (first pass P1) | L | high | partially-confirmed |
+| [FE-UI-48](#fe-ui-48) | MCP wizard in edit mode silently renames the server ID, creating a duplicate or overwriting another server | bug | P2 (first pass P1) | S | high | confirmed |
+| [FE-UI-49](#fe-ui-49) | Workspace file editor can overwrite a file with empty content after a failed read; "Create today" can clobber an existing daily note | bug | P2 (first pass P1) | S | high | partially-confirmed |
+| [FE-UI-50](#fe-ui-50) | Hermes memory editor discards unsaved edits when switching between the Agent and User tabs, and allows saving over the limit | bug | P2 | S | high |  |
+| [FE-UI-51](#fe-ui-51) | Prompt edit form is re-hydrated from `initialData` on every list reload, wiping in-progress edits; content is force-trimmed | bug | P2 | S | medium |  |
+| [FE-UI-52](#fe-ui-52) | Prompt enable/disable toggle leaks unhandled rejections, has no pending state, and races on rapid clicks | bug | P2 | S | high |  |
+| [FE-UI-53](#fe-ui-53) | Environment-conflict banner shows API keys and tokens in plain text | security | P2 | S | high |  |
+| [FE-UI-54](#fe-ui-54) | Deleted environment variables cannot be restored from the UI although a restore API and backup exist | feature | P2 | S | high |  |
+| [FE-UI-55](#fe-ui-55) | SQL config import replaces the whole database without confirmation and offers no one-click rollback | ux | P2 | S | high |  |
 | [FE-UI-02](#fe-ui-02) | `hermesConfigDir` is skipped by sanitisation, form normalisation and directory-change detection | bug | P3 (first pass P1) | S | high | partially-confirmed |
 | [FE-UI-04](#fe-ui-04) | Failover/takeover UI covers different app sets in different places; label maps diverge | bug | P3 (first pass P1) | M | high | partially-confirmed |
 | [FE-UI-08](#fe-ui-08) | Cancelling the export file dialog shows an error toast (and the test enshrines it) | ux | P3 | S | high |  |
@@ -57,6 +65,11 @@ The non-provider feature UI is broad and mostly functional, with some genuinely 
 | [FE-UI-45](#fe-ui-45) | Install-command snippets execute remote scripts (incl. `-ExecutionPolicy Bypass`) without surfacing the source URL or a warning | docs | P3 | S | medium |  |
 | [FE-UI-46](#fe-ui-46) | Prompt management lacks versioning/history and diff against the live file | feature | P3 | M | medium |  |
 | [FE-UI-47](#fe-ui-47) | `DialogContent`/`DialogOverlay` duplicate the z-index map and most feature dialogs pick ad-hoc `zIndex` values | tech-debt | P3 | S | high |  |
+| [FE-UI-56](#fe-ui-56) | Header failover switch cannot be turned off once takeover is off | bug | P3 | S | medium |  |
+| [FE-UI-57](#fe-ui-57) | Daily-memory search can show results for an older query (no out-of-order guard) | bug | P3 | S | medium |  |
+| [FE-UI-58](#fe-ui-58) | Skill storage migration hides which skills failed and still reports the new location as active | ux | P3 | S | medium |  |
+| [FE-UI-59](#fe-ui-59) | Request-log status filter only offers five exact codes; other errors such as 403/404/502/503/529 cannot be filtered | ux | P3 | S | high |  |
+| [FE-UI-60](#fe-ui-60) | Skill repo URL parser rejects common GitHub URL forms and passes an untrimmed branch | ux | P3 | S | high |  |
 
 ## Findings
 
@@ -272,6 +285,86 @@ The non-provider feature UI is broad and mostly functional, with some genuinely 
 - **Proposal:** Add RTL tests per panel for load/error/empty/save paths; parametrise the Webdav suite over both adapters (after FE-UI-16); add `vitest-axe` smoke tests for every panel; add the locale-parity test (FE-UI-06) and a `knip` check (FE-UI-05).
 - **Acceptance:** Coverage report shows ≥ 70 % statements for `src/components/{proxy,usage,openclaw,workspace,prompts,hermes}` and `src/components/settings/{BackupListSection,AboutSection,Log*,Rectifier*}`.
 - **Verification:** **partially-confirmed** — Confirmed: the evidence rg -l matches only tests/msw/handlers.ts, tests/components/SettingsDialog.test.tsx, tests/integration/SettingsDialog.test.tsx and tests/components/UsageDashboard.test.tsx, and the latter three mock the named children (SettingsDialog.test.tsx:236-240, UsageDashboard.test.tsx:48-72); WebdavSyncSection.test.tsx has 0 's3' hits, UnifiedSkillsPanel.test.tsx has a single it() at :99, useProxyStatus.test.tsx one case, UsageDashboard.test.tsx three cases all about the refresh interval (:116-138), and useImportExport.test.tsx:214-224 asserts toast.error fires once when the save dialog is cancelled. vitest.config.ts:16-18 configures coverage reporters only with no thresholds, and package.json has neither vitest-axe nor knip. Detail off: usage is not wholly untested because tests/components/PricingEditModal.test.tsx, RequestLogTable.test.tsx, ModelsDevPickerDialog.test.ts and usageFormat.test.ts exist; the real gap is UsageTrendChart/UsageHero/PricingConfigPanel/UsageDateRangePicker plus all of src/components/{proxy,openclaw,workspace,prompts,hermes,agents}. A coverage gap is not a defect, so P2; the 70% target is reasonable but arbitrary.
+
+### FE-UI-48: MCP wizard in edit mode silently renames the server ID, creating a duplicate or overwriting another server
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/mcp/McpFormModal.tsx:700-708` shows the "Use wizard" button when `isEditing`; `McpWizardModal.tsx:177-178,307-308` seeds an editable title from `initialTitle={formId}` (`McpFormModal.tsx:743`); `McpFormModal.tsx:270-271` `handleWizardApply` does `setFormId(title)` unconditionally with no `existingIds` check; the ID input is `disabled={isEditing}` (`:503`) so the user cannot revert it; `handleSubmit` only checks duplicates when `!isEditing` (`:297`) and upserts `{...initialData, id: trimmedId}` (`:365-371,404`); backend `src-tauri/src/services/mcp.rs:19-28` `upsert_server` saves by `server.id`.
+- **Problem:** Editing a server, opening the wizard and changing (or mistyping) the title changes the entry's ID. On save the original server stays as-is and a second copy is created. If the new title matches another server's ID, that server is overwritten with no warning, so its config and app bindings are lost.
+- **Proposal:** In edit mode, make the wizard title read-only (or ignore `title` in `handleWizardApply` when `isEditing`). In add mode, run `ensureUniqueId`/`setIdError` on the wizard title. As a second check, make `handleSubmit` reject `trimmedId !== editingId` while editing.
+- **Acceptance:** A component test: edit server `a`, apply the wizard with title `b` (where `b` exists), then save. `upsertMutation` is called with id `a` (or blocked with an id error), and server `b` is never overwritten.
+- **Verification:** **confirmed** — McpFormModal.tsx:700 shows the wizard button when `isEditing || selectedPreset === -1`, McpWizardModal.tsx:308 lets the user edit `wizardTitle` (seeded from `initialTitle={formId}`, :743), and handleApply (:136-151) checks only that the title is non-empty. McpFormModal.tsx:270-271 `handleWizardApply` calls `setFormId(title)` with no isEditing or existingIds check, the ID input is `disabled={isEditing}` (:503), and the duplicate check at :297 is `!isEditing && ...`, so the entry `{...initialData, id: trimmedId}` (:365-371) goes to upsert. Backend dao/mcp.rs:75 uses `INSERT OR REPLACE` keyed on id, so a rename creates a copy and a collision silently overwrites another server. The behaviour is real, but it only happens when the user actively edits the wizard title, and the duplicate case is visible in the list. P2 fits better than P1; the proposal is sound. (Origin: completeness-critic pass.)
+
+### FE-UI-49: Workspace file editor can overwrite a file with empty content after a failed read; "Create today" can clobber an existing daily note
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/workspace/WorkspaceFileEditor.tsx:38-52` — when `readFile` rejects, it only toasts and runs `finally(() => setLoading(false))`. `content` stays `""`, the editor renders, and Save is enabled (`:73` `disabled={saving || loading}`), so `handleSave` calls `writeFile(filename, "")` (`:57`). By contrast, `DailyMemoryPanel.tsx:208-211` clears `editingFile` on read failure. Also `DailyMemoryPanel.tsx:220-232` `handleCreateToday` decides existence from the in-memory `files` list. That list is `[]` while loading or after a failed `loadFiles` (`:181-192`), and the button is never disabled (`:373-381`). It then opens an empty editor for today's filename, and Save writes `""` over the real note (`:239`).
+- **Problem:** A transient read error (permissions, file locked, IPC timeout) or a slow or failed list load leaves the user in an editor that looks empty but works. Pressing Save, which a user who sees a blank file may well do, silently destroys the file's existing content. There is no backup.
+- **Proposal:** Track a `loadError` state in WorkspaceFileEditor: render an error or retry view and disable Save when the read failed. In DailyMemoryPanel, disable "Create today" while `loadingList` or after a list error, or try `readDailyMemoryFile(today)` first and only fall back to empty on a confirmed not-found. Optionally, have the backend write to a temp file and keep a `.bak` copy.
+- **Acceptance:** Tests: (1) mock `readFile` to reject, and Save is disabled and `writeFile` is never called; (2) mock `listDailyMemoryFiles` to reject or pend while today's file exists, click Create today, then Save, and the existing content is not replaced with an empty string.
+- **Verification:** **partially-confirmed** — WorkspaceFileEditor.tsx:47-51 only toasts on a read error, and Save stays enabled (`disabled={saving || loading}`, :73), so handleSave writes whatever `content` holds (:57). One detail is wrong: the editor stays mounted in WorkspaceFilesPanel.tsx:151-155 and `content` is never reset, so after a failed read the buffer may hold the previously opened file's text rather than "". That is worse, because it overwrites the target with another file's content. Reads fail only on real I/O errors such as permissions or non-UTF-8 content (commands/workspace.rs:315-321 returns Ok(None) when the file is missing), so the trigger is uncommon. In DailyMemoryPanel.tsx:220-232, handleCreateToday trusts the in-memory `files` list, which stays [] after a failed load (:186-188), and the button (:373-381) is never disabled, so the clobber path holds. The cost is data loss behind an uncommon error plus a user Save, so P2 rather than P1; the proposal is sound. (Origin: completeness-critic pass.)
+
+### FE-UI-50: Hermes memory editor discards unsaved edits when switching between the Agent and User tabs, and allows saving over the limit
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/hermes/HermesMemoryPanel.tsx:164-173` renders each `MemoryTabPane` inside a Radix `TabsContent`. `src/components/ui/tabs.tsx:38-50` passes no `forceMount`, so the inactive pane unmounts. The dirty buffer is local state (`:36-47`, `content`/`loaded`). On remount, `loaded=false` re-hydrates from the cached query, which drops the edits. Save is enabled even when `isOver` (`:59,117-120`); only the counter turns red.
+- **Problem:** A user who edits MEMORY, switches to USER to check something and comes back loses the edits with no prompt. The code comment at `:39-41` shows the intent was to protect in-flight edits. The panel also writes content that exceeds Hermes' character limit, and Hermes may truncate or reject that content at runtime.
+- **Proposal:** Lift the per-kind draft buffers into `HermesMemoryPanel` (or use `forceMount` with `hidden`), show a dirty marker on the tab triggers, and guard tab switches and closing with a confirm when a draft is dirty. Disable Save, or require confirmation, when `charCount > limit`.
+- **Acceptance:** Test: type in the Agent tab, switch to User and back, and the typed text is still present. With content longer than `limit`, Save is disabled or opens a confirmation first.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-51: Prompt edit form is re-hydrated from `initialData` on every list reload, wiping in-progress edits; content is force-trimmed
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/components/prompts/PromptFormPanel.tsx:59-65` — `useEffect(() => { setName(...); setDescription(...); setContent(initialData.content) }, [initialData])`. `PromptPanel.tsx:150` passes `initialData={prompts[editingId]}`. `usePromptActions.ts:14-18` `reload` replaces the whole `prompts` object, so every entry gets a new identity. `reload` fires on the `profile-applied` Tauri event (`PromptPanel.tsx:64`) and on `prompt-imported` deep-link events (`:48-61`) while the form is open. `handleSave` stores `content.trim()` (`PromptFormPanel.tsx:80`).
+- **Problem:** If a profile is applied (for example from the tray) or a prompt deep link arrives while the user is editing a prompt, the form silently resets to the stored version and typed changes are lost. Trimming also removes intentional leading or trailing whitespace and the final newline from Markdown that is written verbatim to CLAUDE.md/AGENTS.md.
+- **Proposal:** Hydrate once per `editingId`, not per object identity: key the effect on `editingId`, or mount the form with `key={editingId}` and use initial state only. If the stored prompt changes underneath, show a "changed on disk, reload?" notice. Store content untrimmed, and check emptiness with `trim()` only.
+- **Acceptance:** Test: open the edit form, type, dispatch `prompt-imported` or `profile-applied` (triggering `reload`), and the typed text remains. Saving `"# A\n"` persists the trailing newline.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-52: Prompt enable/disable toggle leaks unhandled rejections, has no pending state, and races on rapid clicks
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/hooks/usePromptActions.ts:76-127` `toggleEnabled` rethrows (`:123`) after rollback. `PromptListItem.tsx:34` calls `onToggle(id, newEnabled)` without awaiting or catching, so a failure produces an unhandled promise rejection. `PromptToggle.tsx:13-24` supports `disabled` but no caller passes it. The rollback uses the closure `previousPrompts = prompts` (`:79`), and the disable path upserts `{...prompts[id]}` from that same stale closure (`:110-113`). Each toggle then calls `reload()`, which sets `loading=true` and makes `PromptPanel.tsx:114-117` replace the whole list with "Loading…".
+- **Problem:** Clicking two prompts quickly sends overlapping enable/upsert calls whose order is not guaranteed. A failure in one rolls the UI back to a snapshot that predates the other click, so the UI no longer matches the backend's live file. Errors also surface as uncaught rejections in the console, and the list flickers to a loading placeholder on every toggle.
+- **Proposal:** Move prompts to React Query (`useQuery` plus `useMutation` with `onMutate`/`onError` rollback from `queryClient.getQueryData`). Disable all toggles while a toggle mutation is pending, and catch errors at the call site. Show the loading placeholder only on the first load (`isLoading`), not on background refetches.
+- **Acceptance:** With a mocked `enablePrompt` that rejects, no unhandledrejection is raised. While a toggle is pending, other toggles are disabled, and the list never shows the "Loading" placeholder after the first load.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-53: Environment-conflict banner shows API keys and tokens in plain text
+
+**Type:** security · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/env/EnvWarningBanner.tsx:198-200` renders `{t("env.field.value")}: {conflict.varValue}` in full with `break-all`. The conflicts are every variable whose name contains `ANTHROPIC`, `OPENAI` or `GEMINI` (`src-tauri/src/services/env_checker.rs:35-42`), so typically `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `OPENAI_API_KEY`. The banner is a `fixed top-0 z-[100]` overlay (`:114`) that is shown automatically at startup (`src/App.tsx:493-505`).
+- **Problem:** Opening the app while screen-sharing, streaming or taking a screenshot for a bug report exposes full credentials. Nothing else in the app shows raw keys unmasked by default. Provider forms mask API keys.
+- **Proposal:** Mask values for names matching `KEY|TOKEN|SECRET` (for example `sk-ant-…a1B2`), with an explicit eye toggle per row and copy-to-clipboard. Keep the full value only in memory.
+- **Acceptance:** With a conflict `ANTHROPIC_API_KEY=sk-ant-abcdef123456`, the rendered banner text does not contain `abcdef123456` until the reveal toggle is clicked.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-54: Deleted environment variables cannot be restored from the UI although a restore API and backup exist
+
+**Type:** feature · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/lib/api/env.ts:34-35` exports `restoreEnvBackup(backupPath)` → `restore_env_backup`, and `rg restoreEnvBackup src` finds no caller. After deletion, `EnvWarningBanner.tsx:75-83` only shows the backup path in a 5-second toast. `EnvConflict.sourceType === "system"` deletions edit the Windows registry or shell rc files (`:98-110`), which is hard for users to undo by hand.
+- **Problem:** Bulk-deleting environment variables changes the user's shell profile or registry. If the user removed the wrong variable (one needed by another tool), the only recovery path is a file path that disappeared with the toast, and they have to edit it manually.
+- **Proposal:** Add an "Undo" action to the success toast that calls `restoreEnvBackup(backupInfo.backupPath)`, and add a small "Environment backups" list (for example in Settings › Advanced) with restore buttons.
+- **Acceptance:** After deleting a conflict, clicking Undo in the toast calls `restore_env_backup` with the returned path, and re-running `checkAllEnvConflicts` shows the variable again.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-55: SQL config import replaces the whole database without confirmation and offers no one-click rollback
+
+**Type:** ux · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/settings/ImportExportSection.tsx:60-64`: the same button is "Select file" and then becomes "Import" (`onClick={!selectedFile ? onSelectFile : onImport}`), with no confirmation step. `src/hooks/useImportExport.ts:85-104` calls `importConfigFromFile` directly, then immediately syncs live configs (`syncCurrentProvidersLiveSafe`). The pre-import `backupId` is only printed as text (`ImportExportSection.tsx:170-172`) and is not linked to a restore action, although `BackupListSection` has restore.
+- **Problem:** One extra click on the same spot overwrites all providers, MCP servers, prompts and settings, and rewrites the live CLI config files. If the user picked the wrong or an older export, recovering means finding the matching backup by ID in a different section.
+- **Proposal:** Before importing, show a confirmation dialog with the file name, its modified date and a warning that current data will be replaced (ideally with counts from a dry-run parse). After success, show a "Revert import" button that restores `backupId` through the existing backup-restore command.
+- **Acceptance:** Clicking Import opens a confirm dialog, and cancelling does not call `importConfigFromFile`. After a successful import, a Revert action is visible and calls the backup-restore API with `result.backupId`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
 
 ### FE-UI-02: `hermesConfigDir` is skipped by sanitisation, form normalisation and directory-change detection
 
@@ -490,3 +583,53 @@ The non-provider feature UI is broad and mostly functional, with some genuinely 
 - **Problem:** Dialogs opened from a FullScreenPanel must remember to pass `zIndex="alert"` or render underneath it; the overlay/content maps can drift.
 - **Proposal:** Single `Z_LAYERS` constant; a `useDialogLayer()` context so nested dialogs auto-increment; lint rule or wrapper (`<Modal>`) that derives the layer from the stack.
 - **Acceptance:** No `zIndex=` props in feature code; nested dialog inside a FullScreenPanel renders above it by default.
+
+### FE-UI-56: Header failover switch cannot be turned off once takeover is off
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/components/proxy/FailoverToggle.tsx:31-34`: `handleToggle` deliberately allows `checked=false` when takeover is off (`if (checked && !takeoverEnabled) return;`), but the `Switch` is `disabled={setEnabled.isPending || isLoading || !takeoverEnabled}` (`:80-84`). `checked={isEnabled}` keeps showing on, with an animated pulsing icon (`:71-78`), because `autoFailoverEnabled` is a separate per-app flag (`src/lib/query/failover.ts:201-221`) that is not cleared by `setTakeoverForApp`.
+- **Problem:** After a user stops takeover for an app, the header can show failover as enabled and pulsing, and the control to turn it off is greyed out. The user has to find the setting in Settings › Proxy, and the stale flag takes effect again the next time takeover is enabled.
+- **Proposal:** Only disable the switch when `!isEnabled && !takeoverEnabled`, so turning off is always possible. Alternatively, render a muted or inactive state when takeover is off. Optionally clear failover when takeover is disabled.
+- **Acceptance:** With `autoFailoverEnabled=true` and `takeoverStatus[app]=false`, the switch is clickable and toggling it calls `setAutoFailoverEnabled(app, false)`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-57: Daily-memory search can show results for an older query (no out-of-order guard)
+
+**Type:** bug · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/components/workspace/DailyMemoryPanel.tsx:93-112`: `executeSearch` awaits `searchDailyMemoryFiles` and unconditionally calls `setSearchResults(results)` and `setSearching(false)`. The debounce (`:115-126`) cancels only the timer, not an in-flight request. `closeSearch` (`:138-146`) clears results, but a pending response repopulates them. `handleDelete`/`handleBackToList` also fire extra searches (`:262-264,286-288`).
+- **Problem:** When a slow full-text search for "ab" resolves after the search for "abc", the list shows matches for the stale term. Closing search while a request is in flight makes results reappear in the hidden state, and `searching` toggles inconsistently.
+- **Proposal:** Keep a request counter (or an AbortController-style token) in a ref, and ignore responses whose token is not the latest or that arrive after `closeSearch`. Alternatively, move the search to `useQuery` keyed by the debounced term.
+- **Acceptance:** Test with two mocked searches resolving in reverse order: the final `searchResults` correspond to the last term typed. A result arriving after `closeSearch` does not change state.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-58: Skill storage migration hides which skills failed and still reports the new location as active
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** `src/components/settings/SkillStorageLocationSettings.tsx:47-62`: when `result.errors.length > 0`, it shows only `migrationPartial` with counts, discards the `errors` strings (built per skill as `"{dir}: {e}"` in `src-tauri/src/services/skill.rs:1199`), and still calls `onMigrated(target)`. The backend also persists the new location even on partial failure (`skill.rs:1206`). The installed-skills queries are not invalidated after migration.
+- **Problem:** After a partial migration, some skills stay in the old directory while the setting says they are in the new one. The user cannot tell which skills are affected or retry them, and the Skills list may show stale paths until a refetch.
+- **Proposal:** Show the error list (expandable toast or dialog) with a "Retry failed" action. Invalidate `["skills"]` queries after migration. Consider not flipping the setting (or offering a rollback) when errors are non-empty.
+- **Acceptance:** With a mocked `migrateStorage` returning `errors: ["foo: permission denied"]`, the UI displays `foo` and the reason, and the installed-skills query is refetched.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-59: Request-log status filter only offers five exact codes; other errors such as 403/404/502/503/529 cannot be filtered
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/usage/RequestLogTable.tsx:116-137` hard-codes `SelectItem` values `200, 400, 401, 429, 500` and maps the choice to an exact `statusCode`. The backend filter is exact as well (`LogFilters.statusCode`). There is no "errors only" or status-class option. The query also has no `placeholderData`, so each page change or filter change drops to the `isLoading` placeholder (`:149`).
+- **Problem:** Proxy failures commonly come back as 403, 404, 408, 502, 503, 504 or 529 (Anthropic overloaded). Users investigating failover cannot isolate them, and "all non-2xx" — the most useful view — is impossible.
+- **Proposal:** Add status-class options (`2xx`, `4xx`, `5xx`, `errors (≥400)`) backed by a `statusMin`/`statusMax` filter, plus a free-entry code. Use `placeholderData: keepPreviousData` in `useRequestLogs` to avoid flashing.
+- **Acceptance:** Selecting "Errors" returns only rows with `statusCode >= 400`, including 502 and 529. Paginating keeps the previous rows visible until the new page arrives.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### FE-UI-60: Skill repo URL parser rejects common GitHub URL forms and passes an untrimmed branch
+
+**Type:** ux · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** `src/components/skills/RepoManagerPanel.tsx:39-52`: `parseRepoUrl` only strips `^https?://github.com/` and `.git$`, then requires exactly two `/` parts. So `https://github.com/o/r/` (trailing slash), `github.com/o/r`, `https://www.github.com/o/r`, `git@github.com:o/r.git` and `https://github.com/o/r/tree/dev/skills` are all rejected as invalid. `:64-68` sends `branch: branch || "main"` without `trim()`, and always defaults to `main` even for `master` repos.
+- **Problem:** Users who paste a URL from the browser address bar or the GitHub "Code" button often get "invalid URL". A branch typed with a stray space becomes a repo entry that never downloads.
+- **Proposal:** Normalise the input: trim, strip a trailing `/`, accept an optional `www.` or a missing scheme, accept the SSH form, and parse `/tree/<branch>` to pre-fill the branch. Trim the branch and leave it empty so the backend resolves the repo's default branch. Validate owner and repo against `^[A-Za-z0-9_.-]+$`.
+- **Acceptance:** Unit tests for `parseRepoUrl` cover the five forms above, each returning the correct owner, name and (when present) branch. A branch input of `" dev "` is sent as `"dev"`.
+- **Verification:** added by completeness-critic pass (not independently re-verified)

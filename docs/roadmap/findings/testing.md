@@ -1,6 +1,6 @@
 # Testing & QA — findings (TEST-xx)
 
-Part of the [next-phase proposals](../README.md). 33 findings. Priorities: P1 = 1, P2 = 23, P3 = 9.
+Part of the [next-phase proposals](../README.md). 43 findings. Priorities: P1 = 2, P2 = 31, P3 = 10.
 
 ## Area summary
 
@@ -11,6 +11,7 @@ Frontend: 72 vitest files (68 under `tests/`: components 30, config 10, hooks 18
 | ID | Title | Type | Priority | Effort | Confidence | Verdict |
 |---|---|---|---|---|---|---|
 | [TEST-01](#test-01) | No in-process end-to-end test of the proxy request path | test | P1 (first pass P0) | L | high | confirmed |
+| [TEST-34](#test-34) | Restoring the oldest DB backup can delete it mid-restore and wipe the live database | bug | P1 (first pass P0) | S | high | confirmed |
 | [TEST-02](#test-02) | Proxy format conversion has no golden-file corpus or whole-object assertions | test | P2 (first pass P1) | L | high | confirmed |
 | [TEST-03](#test-03) | Tauri command layer (285 commands) is effectively untested | test | P2 (first pass P1) | L | high | confirmed |
 | [TEST-04](#test-04) | MSW handler set drifts from the real command registry (22% coverage, 5 phantom handlers) | test | P2 (first pass P1) | M | high | confirmed |
@@ -34,6 +35,14 @@ Frontend: 72 vitest files (68 under `tests/`: components 30, config 10, hooks 18
 | [TEST-23](#test-23) | Three recent fixes landed without a regression test | test | P2 | S | high |  |
 | [TEST-27](#test-27) | Usage accounting pipeline lacks a cross-version golden corpus despite 4 recent fixes | test | P2 | M | medium |  |
 | [TEST-33](#test-33) | Prioritized roadmap to a trustworthy pyramid | docs | P2 (first pass P1) | XL | medium | partially-confirmed |
+| [TEST-35](#test-35) | DB restore overwrites the live database before checking the backup's schema version or integrity | bug | P2 (first pass P1) | S | medium | partially-confirmed |
+| [TEST-36](#test-36) | Env-conflict delete/restore rewrites shell rc files lossily and has no tests | bug | P2 (first pass P1) | M | high | confirmed |
+| [TEST-37](#test-37) | Production binary honours CC_SWITCH_TEST_HOME, and the 'test-hooks' feature gates nothing | security | P2 | S | high |  |
+| [TEST-38](#test-38) | Several modules bypass the get_home_dir() seam, so tests can touch the real user profile | test | P2 | S | high |  |
+| [TEST-39](#test-39) | Clippy in CI skips all test code (no --all-targets) | ci | P2 | S | high |  |
+| [TEST-40](#test-40) | MSW is configured with onUnhandledRequest: 'warn', so unmocked invokes don't fail tests | test | P2 | S | high |  |
+| [TEST-41](#test-41) | Release workflow builds and publishes without running any tests, on targets CI never tests | ci | P2 | S | high |  |
+| [TEST-42](#test-42) | No test for schema-migration rollback, and a failed pre-migration backup is ignored | test | P2 | M | medium |  |
 | [TEST-07](#test-07) | Zero tests for MCP sync services despite three recent MCP fixes | test | P3 (first pass P1) | M | high | refuted |
 | [TEST-24](#test-24) | Frontend suite is slow per file and dominated by environment setup | performance | P3 | S | high |  |
 | [TEST-25](#test-25) | No shared test-data factories; fixtures are copy-pasted | test | P3 | S | high |  |
@@ -43,6 +52,7 @@ Frontend: 72 vitest files (68 under `tests/`: components 30, config 10, hooks 18
 | [TEST-30](#test-30) | Layering guard tests scan their own source text | tech-debt | P3 | S | high |  |
 | [TEST-31](#test-31) | Test organisation is inconsistent (tests/ vs colocated, utils under components/) | docs | P3 | S | high |  |
 | [TEST-32](#test-32) | Deep-link import is covered on the backend but the 730-line frontend dialog is untested | test | P3 | M | medium |  |
+| [TEST-43](#test-43) | CI uses Node 20 while the repo pins Node 22.12.0 | ci | P3 | S | high |  |
 
 ## Findings
 
@@ -55,6 +65,16 @@ Frontend: 72 vitest files (68 under `tests/`: components 30, config 10, hooks 18
 - **Proposal:** Add `src-tauri/tests/proxy_e2e.rs` that (1) seeds `Database::memory()` with a provider whose `base_url` points at a `wiremock::MockServer`, (2) starts `ProxyServer::new(ProxyConfig{listen_port:0,..}, db, None)`, (3) sends Anthropic/OpenAI/Responses/Gemini requests with `reqwest` and asserts upstream request body + downstream response/SSE event sequence + `proxy_request_logs` row + circuit-breaker state. Add `wiremock`, `reqwest` (dev) to `[dev-dependencies]`. Cover: non-stream, stream, upstream 5xx -> failover to second provider, 413 mapping (`codex_proxy_413_points_to_upstream_not_local_proxy`), cache breakpoint injection on managed Claude takeover.
 - **Acceptance:** `cargo test --test proxy_e2e` runs >= 12 scenarios on all 3 CI OSes in < 60 s; each scenario asserts the full upstream body via golden file (TEST-02); the three commits above could be reverted and at least one e2e scenario fails.
 - **Verification:** **confirmed** — Confirmed by reading: src-tauri/src/proxy/server.rs is 405 lines with no #[cfg(test)], the handlers.rs test module (line 2437, 49 tests) only calls pure helpers (33x chat_sse_to_response_value, 9x body_looks_like_sse, 7x responses_sse_to_response_value, 1x openai_to_anthropic), and the only ad-hoc listeners are src-tauri/src/services/coding_plan.rs:1977/2003/2107; Cargo.toml:112-114 dev-deps are only serial_test and tempfile. The nearest mitigation is services/proxy.rs tests (around lines 3671, 6297, 6437, 6541) that call ProxyService::start()/start_with_takeover() with listen_port: 0, but none sends an HTTP request through the bound server, and forwarder.rs async tests (3774-3810) feed hand-built ProxyResponse::streamed values, so no test exercises listener -> handler -> forwarder -> upstream. Minor evidence slips: Request::builder appears 0 times in handlers.rs (2 in hyper_client.rs:294/690), Database::memory is at database/mod.rs:182, and reqwest is already a normal dependency so only wiremock needs adding. Priority lowered to P1: a missing harness is neither exploitable nor data-loss, though the 11 proxy/cache/usage fixes in git log -50 justify 'high'.
+
+### TEST-34: Restoring the oldest DB backup can delete it mid-restore and wipe the live database
+
+**Type:** bug · **Priority:** P1 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/database/backup.rs:552-597 restore_from_backup checks backup_path.exists() (~567), then at :574 calls self.backup_database_file() for a safety backup; backup_database_file (:298-334) ends with Self::cleanup_db_backups(&backup_dir) (:333), which (:337-367) sorts *.db by mtime and removes the oldest entries.len()-retain files (retain = effective_backup_retain_count, settings.rs:1077-1087, default 10). Back in restore, :581 Connection::open(&backup_path) uses rusqlite's default CREATE flag, so a deleted file opens as a fresh empty DB, and :583-589 Backup::new(&source_conn, &mut main_conn).step(-1) copies it over the main DB; :593-595 then recreate empty tables. `rg restore_from_backup src-tauri` finds no test of Database::restore_from_backup.
+- **Problem:** When the backup dir already holds `retain` backups and the user restores the oldest one (the usual 'go back as far as possible' case), the safety backup pushes the count over the limit and retention deletes exactly the file being restored. The restore then copies an empty database over the live one and reports success. All providers, MCP servers and usage history are gone; only the safety backup is left, and the user has to find it by hand.
+- **Proposal:** In restore_from_backup, open the source with OpenFlags::SQLITE_OPEN_READ_ONLY (no CREATE) before taking the safety backup, or copy it to a temp file first. Make backup_database_file take an `exclude: Option<&Path>` (or skip cleanup) so retention never prunes the restore target. Add a regression test: set backup_retain_count=2, create 2 backups with distinct mtimes, restore the oldest, and assert the provider rows from that backup are present.
+- **Acceptance:** A test in database/tests.rs fills the backup dir to the retention limit, restores the oldest backup and asserts the restored DB contains that backup's providers. The test fails on the current code and passes after the fix. Opening a missing backup path returns an error and does not create a file.
+- **Verification:** **confirmed** — backup.rs:567 checks exists(), then :574 calls backup_database_file(), which ends at :333 with cleanup_db_backups(); :337-367 sort *.db by mtime and remove the oldest len-retain files (default retain 10, settings.rs:1077-1087), so with the dir at the limit, restoring the oldest backup deletes that file. :581 `Connection::open(&backup_path)` then creates an empty DB, which :583-589 copy over the live DB, and :593-595 recreate empty tables, so the restore reports success. rg finds no test of Database::restore_from_backup. I lowered this to P1 because the live data is not lost for good: the safety backup is the newest file, so it survives cleanup, and its id is shown in the success toast (BackupListSection.tsx:90-98). The chosen backup itself is permanently deleted, and the app silently runs on an empty DB. (Origin: completeness-critic pass.)
 
 ### TEST-02: Proxy format conversion has no golden-file corpus or whole-object assertions
 
@@ -270,6 +290,87 @@ Frontend: 72 vitest files (68 under `tests/`: components 30, config 10, hooks 18
 - **Acceptance:** Phase gates: P0 after Phase 1 = CI reports coverage, zero MSW warnings, proxy e2e green; after Phase 2 = every `commands/`, `dao/`, `mcp/` file has tests and `#[serial]` < 60; after Phase 3 = e2e journeys in CI, nightly fuzz/live tier, and FE/BE coverage >= 60%/70% with ratchet enforced.
 - **Verification:** **partially-confirmed** — Measurements reproduce: rg counts 462 `it(` cases across 72 vitest files, 2,060 `#[test]`/`#[tokio::test]` in src-tauri/src and 114 in src-tauri/tests/*.rs, 213-133=80 .rs files without a `#[cfg(test)]` module, 123 `#[serial]`, no playwright/cypress/tauri-driver in package.json, no `@vitest/coverage-*` in pnpm-lock.yaml, and .github/workflows/ci.yml:54/105 run only `pnpm test:unit` and `cargo test` (vitest.config.ts:16 declares a coverage reporter but nothing invokes it). Phase-0/1 items are genuinely open: tests/setupTests.ts:12 has `onUnhandledRequest: "warn"` with no console.error guard, tests/msw/tauriMocks.ts:7-62 mocks only core/event/path while src imports plugin-dialog/process/updater and api/window, package.json `format:check` covers `src/**` only with no ESLint, src-tauri/Cargo.toml:113-114 dev-deps are just serial_test+tempfile (no wiremock/proptest/insta/specta/nextest), and the only `TcpListener::bind` in the proxy is production code at src-tauri/src/proxy/server.rs:112. However the 'memory DB' part of TEST-08 is already largely in place (src-tauri/src/database/mod.rs:182 `Database::memory()` is used 141 times; only tests/support.rs:72-84 still calls file-backed `Database::init()`), the '8 frontend directories' figure is loose (10 src/components subdirs plus src/contexts, src/i18n, src/assets have no test references), and the Phase-2 gate `#[serial] < 60` is scheduled before TEST-09, the Phase-3 item that removes the global statics forcing those 123 `#[serial]`s. The committed docs/roadmap/README.md:39 already sequences TEST-01/02/04/06/08 as the Phase-1 'Test and CI backbone', so this item partly duplicates it. As a docs/planning item with no direct exploit or data-loss path, P1 is disproportionate under the given scale; P2 fits.
 
+### TEST-35: DB restore overwrites the live database before checking the backup's schema version or integrity
+
+**Type:** bug · **Priority:** P2 · **Effort:** S · **Confidence:** medium
+
+- **Evidence:** src-tauri/src/database/backup.rs:581-589 copy the backup into main_conn first; only afterwards :593-595 run create_tables(), apply_schema_migrations() and ensure_model_pricing_seeded(). apply_schema_migrations rejects user_version > SCHEMA_VERSION (schema.rs:421-426; SCHEMA_VERSION = 15 at database/mod.rs:55). Database::stored_user_version_exceeds_supported (mod.rs:170-178) exists but is not called here. There is no PRAGMA integrity_check or validate_basic_state (backup.rs:369-383) on the source.
+- **Problem:** A backup made by a newer app version, for example one synced from another machine, or a truncated or corrupt .db file still replaces the live DB. Then restore_from_backup returns an error. The running app is left on a DB it cannot migrate, and on the next launch the 'version too new' guard may block startup. Recovery depends on the user finding the safety backup id that was never returned, because the function returned an error.
+- **Proposal:** Before the Backup step, open the source read-only and check that PRAGMA user_version <= SCHEMA_VERSION, PRAGMA integrity_check == 'ok', and that the required tables exist. Better still, restore into a temp file, run the migrations there, and swap it in only after everything succeeds. On any failure after overwrite, roll back from the safety backup automatically. Add tests for a future-version backup and a corrupt backup.
+- **Acceptance:** Tests show that restoring a backup with user_version=SCHEMA_VERSION+1 or a garbage .db file returns an error and leaves the live DB byte-for-byte or row-for-row unchanged.
+- **Verification:** **partially-confirmed** — Confirmed: backup.rs:581-589 copy the source over main_conn before any version or integrity check. The user_version > SCHEMA_VERSION rejection only runs afterwards, in apply_schema_migrations (schema.rs:421-426, called at backup.rs:594). stored_user_version_exceeds_supported (mod.rs:170) is used only at lib.rs:426. The future-version case is real: the overwrite happens, an error comes back, and the safety id is lost on the error path. The 'garbage .db' case is overstated: a non-SQLite file should fail in Backup::new/step with NOTADB before any destination page is committed, so the live DB stays intact. A future-version backup in the local backups dir needs a downgrade or a hand-copied file, which is uncommon, so I lowered this to P2. (Origin: completeness-critic pass.)
+
+### TEST-36: Env-conflict delete/restore rewrites shell rc files lossily and has no tests
+
+**Type:** bug · **Priority:** P2 · **Effort:** M · **Confidence:** high
+
+- **Evidence:** src-tauri/src/services/env_checker.rs:131-139 records var_value with surrounding quotes stripped (trim_matches('"').trim_matches('\'')). src-tauri/src/services/env_manager.rs:216 restore appends format!("\nexport {}={}", var_name, var_value) unquoted at the end of the file. :118-139 delete drops every line whose name matches (it ignores the recorded line number in source_path 'path:line') and rewrites the file with lines().join("\n"), which loses the trailing newline and any CRLF. The only test is test_backup_dir_creation (:231-239).
+- **Problem:** Take `export FOO="a b"` or a value containing $ or ;. The restore writes `export FOO=a b`, which breaks or changes the user's ~/.zshrc or ~/.bashrc. A delete removes every definition of the variable, including ones inside conditionals or other blocks, not just the one the user saw. These are irreversible edits to the user's dotfiles with zero test coverage.
+- **Proposal:** Delete only the recorded line number, after checking that it still matches. Preserve the original line text in BackupInfo and restore it verbatim at its original position, falling back to appending a shell-quoted value (shlex-style single quotes). Preserve line endings and the final newline. Add tempdir-based tests covering quoted values, multiple definitions, CRLF files and round-trip delete-then-restore.
+- **Acceptance:** A test writes an rc file with `export FOO="a b"`, a second FOO definition inside an if-block, and a trailing newline. After delete_env_vars for the first conflict followed by restore_from_backup, the file is byte-identical to the original.
+- **Verification:** **confirmed** — env_checker.rs:137-140 strip quotes from var_value. env_manager.rs:216 restores with format!("\nexport {}={}") unquoted, appended at end of file. delete (:109-140) ignores the line number in source_path, filters every line whose name matches (including indented ones in if-blocks), and rewrites with lines().join("\n"), which drops the trailing newline and the CRLFs. The only test is test_backup_dir_creation (:235-239). I lowered this to P2: the matched variables are API-key or URL vars (keyword match), whose values rarely contain spaces or shell metacharacters, and a JSON backup of the conflicts is written first (:43-66). The edits are still lossy, though, and the round-trip is not exact. (Origin: completeness-critic pass.)
+
+### TEST-37: Production binary honours CC_SWITCH_TEST_HOME, and the 'test-hooks' feature gates nothing
+
+**Type:** security · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** src-tauri/src/config.rs:22-28 get_home_dir() returns the CC_SWITCH_TEST_HOME env var in every build, with no cfg(test) or feature gate. src-tauri/Cargo.toml:20 declares `test-hooks = []`, but the only uses are #[cfg_attr(not(feature = "test-hooks"), doc(hidden))] on public fns such as switch_provider_test_hook (commands/provider.rs:93-100), import_default_config_test_hook (:140-146) and four proxy hooks (commands/proxy.rs:159-251), so they compile into release builds anyway. CI never passes --features (ci.yml:104-105).
+- **Problem:** A test seam controls where the shipped app reads and writes all config, including ~/.claude, ~/.codex and the .cc-switch DB. A stray or inherited env var, for example from a dev shell, a launcher, or a malicious .desktop/plist entry, silently redirects the app to a different home with no log line. Users then see 'providers disappeared' with no explanation. The feature flag suggests the test hooks are gated when they are not.
+- **Proposal:** Read CC_SWITCH_TEST_HOME only under cfg(any(test, feature = "test-hooks")). Enable that feature for integration tests via a dev-dependency self-reference or `required-features` in [[test]]. Gate the *_test_hook fns with #[cfg(feature = "test-hooks")] instead of doc(hidden). Log a warning whenever a home override is active.
+- **Acceptance:** `cargo build --release` produces a binary where setting CC_SWITCH_TEST_HOME has no effect, and `nm` or `rg` finds no *_test_hook symbols in the release binary. `cargo test` still passes with the feature enabled in CI.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### TEST-38: Several modules bypass the get_home_dir() seam, so tests can touch the real user profile
+
+**Type:** test · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** Direct dirs::home_dir() calls outside config.rs: src-tauri/src/claude_plugin.rs:14 (writes ~/.claude/config.json via write_claude_config :51), services/env_manager.rs:70 (backup dir ~/.cc-switch/backups, which also ignores the app_config_dir override used by config.rs:183-188), settings.rs:710-718 and app_store.rs:111-119 ('~' expansion of override dirs), prompt_files.rs:50, session_manager/providers/opencode.rs:22, commands/misc.rs:1502, panic_hook.rs:23. services/skill.rs:537 and :3070 document an earlier regression of exactly this kind ('曾直呼 dirs::home_dir() 绕过 CC_SWITCH_TEST_HOME'). support.rs:15-20 notes that on Windows dirs::home_dir ignores HOME/USERPROFILE, and the windows-latest CI job runs cargo test (ci.yml:58-105).
+- **Problem:** The test-isolation seam is opt-in per call site. Any test that reaches one of these paths, now or after a refactor, reads or writes the real profile of the developer or CI runner on Windows. The env_manager backup dir also ignores the user's configured app-config-dir override in production.
+- **Proposal:** Route every home lookup through config::get_home_dir() (and backups through get_app_config_dir()). Enforce this with src-tauri/clippy.toml `disallowed-methods = [{ path = "dirs::home_dir", reason = "use crate::config::get_home_dir" }]`, with an #[allow] only in config.rs. Add a test for the '~/' expansion that asserts it resolves under the test home.
+- **Acceptance:** `rg 'dirs::home_dir\(' src-tauri/src` matches only config.rs, and clippy fails on any new direct call. env_manager backups land under get_app_config_dir()/backups.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### TEST-39: Clippy in CI skips all test code (no --all-targets)
+
+**Type:** ci · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** .github/workflows/ci.yml:101-102 `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` runs without --all-targets or --tests, so the ~50k LOC of #[cfg(test)] modules and the 12 files in src-tauri/tests/ are never linted. rustfmt covers formatting only.
+- **Problem:** Lints such as await_holding_lock, unused_must_use on Results in tests, let_underscore_future and needless_collect never run on test code. Tests that silently drop errors (for example `let _ = update_settings(...)` in tests/support.rs:52) or hold a std Mutex across .await in #[tokio::test] go unflagged. Those are exactly the hidden-flake and false-pass sources a test suite should catch.
+- **Proposal:** Change the step to `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`. Fix or explicitly #[allow] the existing warnings in one cleanup PR.
+- **Acceptance:** CI clippy runs with --all-targets and is green. A deliberately added `#[test] fn x(){ let v: Vec<_> = (0..3).collect(); v.len(); }` triggers a clippy failure.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### TEST-40: MSW is configured with onUnhandledRequest: 'warn', so unmocked invokes don't fail tests
+
+**Type:** test · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** tests/setupTests.ts:11 `server.listen({ onUnhandledRequest: "warn" })`. tests/msw/tauriMocks.ts:7-30 routes every invoke() to fetch('http://tauri.local/<cmd>'), so an unhandled command only logs a warning and then makes a real network request to a non-existent host. The resulting rejection is swallowed by react-query or by component try/catch blocks, and the test keeps going.
+- **Problem:** An unmocked command does not fail fast. It degrades into a swallowed network error, so tests can pass while the component under test silently runs its error path. Results also depend on DNS and network behaviour of the CI runner, which can be slow or hang. This differs from TEST-04's handler-coverage gap: even after handlers are added, a newly introduced invoke will not be noticed.
+- **Proposal:** Use `onUnhandledRequest: "error"` for http://tauri.local, and let other origins either error too or be allowlisted explicitly. Alternatively, make the invoke mock throw a distinctive `UnmockedTauriCommand: <cmd>` error and add an afterEach that fails the test if any were recorded. Fix the commands that this surfaces.
+- **Acceptance:** Adding a call to a fake command `invoke("no_such_cmd")` in any rendered component makes the corresponding test fail with a message naming the command. The full suite is green with the stricter setting.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
+### TEST-41: Release workflow builds and publishes without running any tests, on targets CI never tests
+
+**Type:** ci · **Priority:** P2 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** .github/workflows/release.yml:3-6 triggers on tag push `v*`. There is no `cargo test` or `pnpm test:unit` step, and no `needs:` on the CI workflow; the only needs are release->publish-release->assemble (:590, :639). The release matrix (:21-29) includes windows-11-arm and ubuntu-22.04-arm, while ci.yml:61 tests only ubuntu-22.04, windows-latest and macos-latest. Release also uses windows-2022 vs CI windows-latest.
+- **Problem:** A tag pushed from an untested commit, or from a commit whose CI was cancelled by `cancel-in-progress` (ci.yml:9-11), ships signed installers and updates latest.json for auto-update. ARM64 builds, which have their own path and arch-specific code, are never tested at all.
+- **Proposal:** Add a `verify` job to release.yml that runs `pnpm test:unit` and `cargo test --locked` (at least on the ARM runners), and make `release` depend on it via `needs: verify`. Or require a green CI check on the tagged SHA through a gh api check before building.
+- **Acceptance:** Pushing a tag on a commit with a failing unit test stops the release before any artifact upload, and ARM64 runners execute cargo test as part of release.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+- **Possible overlap with:** CI-41 (check before scheduling)
+
+### TEST-42: No test for schema-migration rollback, and a failed pre-migration backup is ignored
+
+**Type:** test · **Priority:** P2 · **Effort:** M · **Confidence:** medium
+
+- **Evidence:** src-tauri/src/database/schema.rs:429-531 wraps the v0..v15 chain in SAVEPOINT schema_migration and, on error, runs ROLLBACK TO/RELEASE with .ok() so errors are discarded (:526-528). `rg -i 'rollback' src-tauri/src/database/tests.rs` finds no rollback test. database/mod.rs:126-138 takes a pre-migration backup, but on failure only logs `Pre-migration backup failed, continuing migration` and proceeds to apply_schema_migrations (:140). migrate_v13_to_v14 (schema.rs:1393-1489) performs a destructive DROP TABLE proxy_config plus RENAME.
+- **Problem:** The only protection for user data during upgrades is the savepoint rollback plus the backup, and neither is verified. If a later step fails, for example the v14->v15 ALTER on a locked or odd DB, nothing proves that the earlier DROP/RENAME are undone. If the backup also failed because of a full disk or permissions, the user upgrades with no safety net and no warning in the UI.
+- **Proposal:** Add a test seam, such as a cfg(test) hook or a deliberately malformed table, that makes migrate_v14_to_v15 fail. Then assert that user_version is still 13 and that proxy_config rows are unchanged after Database::init or apply_schema_migrations. Treat a failed pre-migration backup as fatal unless the user confirms, or at least surface it through the existing init-error UI. Log ROLLBACK failures instead of discarding them with .ok().
+- **Acceptance:** A new test forces a mid-chain migration failure starting from v13 and asserts that user_version and the data are unchanged. A failed pre-migration backup produces an error or user-visible warning instead of a log-only message.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
+
 ### TEST-07: Zero tests for MCP sync services despite three recent MCP fixes
 
 **Type:** test · **Priority:** P3 · **Effort:** M · **Confidence:** high
@@ -351,3 +452,13 @@ Frontend: 72 vitest files (68 under `tests/`: components 30, config 10, hooks 18
 - **Problem:** Deep links are an external attack/UX surface (arbitrary URLs produce provider configs); the preview/confirm UI that protects users is unverified.
 - **Proposal:** Add handlers + `tests/components/DeepLinkImportDialog.test.tsx` covering: preview renders parsed provider/MCP/prompt/skill payloads, conflict warnings, cancel does not invoke import, import success triggers query invalidation, malformed link shows error; share the backend's deeplink fixtures (TEST-05 contract fixtures).
 - **Acceptance:** >= 8 tests; `import_from_deeplink` handler present; shared fixture reuse demonstrated.
+
+### TEST-43: CI uses Node 20 while the repo pins Node 22.12.0
+
+**Type:** ci · **Priority:** P3 · **Effort:** S · **Confidence:** high
+
+- **Evidence:** .node-version = 22.12.0; .github/workflows/ci.yml:23-24 and release.yml:36-38 hard-code `node-version: "20"` instead of `node-version-file: .node-version`.
+- **Problem:** Developers run the frontend tests, typecheck and vite build on Node 22, while CI and the shipped renderer bundle use Node 20. Differences in jsdom, undici fetch, structuredClone and other built-ins can make tests pass locally and fail in CI, or the reverse, and the bundle is built on an untested runtime.
+- **Proposal:** Use `actions/setup-node` with `node-version-file: .node-version` in both workflows, and add `engines.node` to package.json so the version is pinned in one place.
+- **Acceptance:** Both workflows read the Node version from .node-version, and `node --version` in the CI log matches it.
+- **Verification:** added by completeness-critic pass (not independently re-verified)
