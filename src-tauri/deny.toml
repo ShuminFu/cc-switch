@@ -23,11 +23,12 @@ yanked = "deny"
 # cannot fix belong here (CCS-018 baseline, pruned in CCS-214). Every new entry
 # needs a reason and a follow-up ticket.
 ignore = [
-    # zip 4.6.1, pulled in only by tauri-plugin-updater 2.10 (latest 2.x) and only
-    # on Windows. Our direct zip dependency is on 9.x, which fixes all three
-    # (CCS-215). The updater extracts a signature-verified bundle, and these
-    # advisories concern Unix SUID bits and symlinks. Drop the entries once the
-    # updater moves to zip >= 9.
+    # zip 4.6.1, pulled in only by tauri-plugin-updater 2.10 and only on Windows.
+    # Our direct zip dependency is on 9.x, which fixes all three (CCS-215). The
+    # updater extracts a signature-verified bundle, and these advisories concern
+    # Unix SUID bits and symlinks. tauri-plugin-updater 2.14.1 moves to zip 9 but
+    # needs tauri >= 2.12 and Rust 1.90 (above our 1.88 MSRV); drop the entries
+    # once we take that bump.
     { id = "RUSTSEC-2026-0367", reason = "transitive: zip 4.6.1 via tauri-plugin-updater (Windows only)" },
     { id = "RUSTSEC-2026-0368", reason = "transitive: zip 4.6.1 via tauri-plugin-updater (Windows only)" },
     { id = "RUSTSEC-2026-0369", reason = "transitive: zip 4.6.1 via tauri-plugin-updater (Windows only)" },

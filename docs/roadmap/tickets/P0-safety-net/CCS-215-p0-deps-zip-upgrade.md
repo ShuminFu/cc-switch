@@ -32,7 +32,7 @@ CCS-214 (`p0-deps-cargo-update-deny-baseline`).
 
 None of our code calls `ZipArchive::extract()`. Our extractors use `enclosed_name()`, write files with `File::create` and resolve symlinks under confinement. A new unix-only regression test, `extract_repo_archive_drops_setuid_setgid_and_sticky_bits`, pins down that SUID/SGID/sticky bits from an archive (mode `0o7755`) never reach an extracted file. Our extractor never copied these bits, so the test also passes against zip 2.x. It is a guard against future changes, not a reproduction of a bug.
 
-**tauri-plugin-updater copy.** tauri-plugin-updater 2.10.0 is the latest 2.x release (3.0 is still alpha). It still depends on zip 4.6.1, and only on Windows (`[target.'cfg(target_os = "windows")'.dependencies.zip]`), where it extracts a signature-verified update bundle. The three ignore entries in `src-tauri/deny.toml` stay, but are reworded to name only that transitive copy. Remove them once the updater moves to zip >= 9.
+**tauri-plugin-updater copy.** The lock has tauri-plugin-updater 2.10.0, which depends on zip 4.6.1, and only on Windows (`[target.'cfg(target_os = "windows")'.dependencies.zip]`), where it extracts a signature-verified update bundle. The three ignore entries in `src-tauri/deny.toml` stay, but are reworded to name only that transitive copy. (Corrected in review: 2.10.0 is not the latest 2.x; see Review below.)
 
 **Side effects in `deny.toml`.**
 - zip 9 brings in `libbz2-rs-sys` (license `bzip2-1.0.6`, a permissive BSD-style license). It is allowed with a per-crate `[licenses].exceptions` entry, not added to the global allow list.
@@ -51,3 +51,8 @@ None of our code calls `ZipArchive::extract()`. Our extractors use `enclosed_nam
 - `cargo fmt --check`: clean.
 - `cargo deny --manifest-path src-tauri/Cargo.toml check`: `advisories ok, bans ok, licenses ok, sources ok`.
 - With the three zip ignores removed, `cargo deny check advisories` fails only on `zip v4.6.1`, the updater copy. This confirms the direct dependency is clean and that the remaining entries cover only the updater copy.
+
+**Review.** Independent review found two gaps and fixed them in a follow-up commit:
+- The SUID regression test built its fixture with `SimpleFileOptions::unix_permissions(0o7755)`, but zip 9 masks that argument to `0o777`. The archive never carried SUID/SGID/sticky bits, so the test checked nothing. The fixture now sets `external_attributes(0o107755 << 16)`, and a pre-assertion checks the raw archive bytes for that value. (`unix_mode()` cannot be used here: zip 9 clears the special bits when reading.)
+- tauri-plugin-updater 2.10.0 is not the latest 2.x. 2.14.1 is out and moves its Windows zip dependency to `^9`, but it needs `tauri ^2.12` (we lock 2.10.3) and `rust-version` 1.90 (our MSRV is 1.88). Every 2.x release that fits our MSRV (up to 2.12.0) still uses zip 4. Bumping the MSRV and tauri is outside this ticket, so the ignores stay. The `deny.toml` comment now names 2.14.1 and that blocker; drop the ignores once that bump lands.
+- Re-verified: `cargo test --no-fail-fast` 3098 passed / 0 failed (before the test fix); `cargo test --lib services::skill` 12 passed after it; clippy `--all-targets -D warnings` and fmt clean; `cargo deny check` ok.

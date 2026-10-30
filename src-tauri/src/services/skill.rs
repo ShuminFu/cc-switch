@@ -3381,8 +3381,10 @@ mod tests {
         let dest = temp.path().join("dest");
         fs::create_dir_all(&dest).expect("create dest");
 
+        // unix_permissions() 会丢掉 0o777 以外的位，必须直接写 external attributes
+        // 才能让归档真正带上 SUID/SGID/sticky（普通文件 0o107755）
         let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        let options = zip::write::SimpleFileOptions::default().unix_permissions(0o7755);
+        let options = zip::write::SimpleFileOptions::default().external_attributes(0o107755 << 16);
         writer
             .add_directory("repo-main/", zip::write::SimpleFileOptions::default())
             .expect("add root dir");
@@ -3392,6 +3394,14 @@ mod tests {
         writer.write_all(b"#!/bin/sh\n").expect("write file");
         let mut zip = writer.finish().expect("finish zip");
         zip.set_position(0);
+
+        // 前置断言：中央目录里确实写入了带特权位的 external attributes，否则本测试
+        // 什么也没验证（zip 9 的 unix_mode() 读取时会清掉这些位，只能查原始字节）
+        let attrs = (0o107755u32 << 16).to_le_bytes();
+        assert!(
+            zip.get_ref().windows(4).any(|w| w == attrs),
+            "fixture archive lost the SUID/SGID/sticky bits"
+        );
 
         SkillService::extract_repo_archive(zip, &dest, 100, 1024 * 1024).expect("extract archive");
 
