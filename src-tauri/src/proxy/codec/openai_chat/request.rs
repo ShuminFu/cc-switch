@@ -103,7 +103,7 @@ fn encode_system(system: &[Part]) -> Vec<Value> {
 ///
 /// 显式 effort 优先：`low`/`medium`/`high` 原样，`max` → `xhigh`，未知值不注入；
 /// 否则 adaptive → `xhigh`，预算 <4 000 → `low`、<16 000 → `medium`、其余（含无预算）→ `high`。
-fn reasoning_effort(config: &ReasoningConfig) -> Option<&'static str> {
+pub(crate) fn reasoning_effort(config: &ReasoningConfig) -> Option<&'static str> {
     if let Some(effort) = &config.effort {
         return match effort.as_str() {
             "low" => Some("low"),
@@ -174,6 +174,7 @@ fn encode_message(message: &Message, preserve_reasoning_content: bool) -> Vec<Va
                 call_id,
                 content,
                 is_error,
+                ..
             } => {
                 let mut text = tool_result_text(content, &mut tool_image_parts);
                 if *is_error {

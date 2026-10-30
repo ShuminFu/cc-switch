@@ -21,6 +21,8 @@ pub struct AnthropicEventEncoder {
     usage: Option<UsageIR>,
     /// `message_start` 保留开始时 usage 的输出 token（旧 Gemini 转换器的形状）
     start_output_tokens: bool,
+    /// `tool_use` 的 `content_block_start` 带空 `input` 对象（Anthropic 官方流的形状）
+    tool_start_input: bool,
 }
 
 fn sse(event: &str, payload: &Value) -> Bytes {
@@ -45,6 +47,12 @@ impl AnthropicEventEncoder {
             start_output_tokens: true,
             ..Self::default()
         }
+    }
+
+    /// `tool_use` 块的开始事件带 `"input": {}`
+    pub fn with_tool_start_input(mut self) -> Self {
+        self.tool_start_input = true;
+        self
     }
 
     fn message_start(&mut self, id: &str, model: &str, usage: Option<UsageIR>) -> Bytes {
@@ -80,7 +88,7 @@ impl AnthropicEventEncoder {
         }
     }
 
-    fn block_start(index: usize, part: &Part) -> Option<(Bytes, Option<PartDelta>)> {
+    fn block_start(&self, index: usize, part: &Part) -> Option<(Bytes, Option<PartDelta>)> {
         // 可增量的字段在开始事件中置空，已有内容作为第一个增量补发
         let (block, delta) = match part {
             Part::Text { text } => (
@@ -104,10 +112,16 @@ impl AnthropicEventEncoder {
                 id,
                 name,
                 arguments,
-            } => (
-                json!({"type": "tool_use", "id": id, "name": name}),
-                (!arguments.is_empty()).then(|| PartDelta::ToolArguments(arguments.clone())),
-            ),
+            } => {
+                let mut block = json!({"type": "tool_use", "id": id, "name": name});
+                if self.tool_start_input {
+                    block["input"] = json!({});
+                }
+                (
+                    block,
+                    (!arguments.is_empty()).then(|| PartDelta::ToolArguments(arguments.clone())),
+                )
+            }
             Part::Image { .. } | Part::Document { .. } | Part::ToolResult { .. } => {
                 log::warn!("[Codec/Anthropic] Dropping a non-assistant content part from a stream");
                 return None;
@@ -165,7 +179,7 @@ impl EventEncoder for AnthropicEventEncoder {
             }
             StreamEvent::PartStart { index, part } => {
                 self.ensure_started(&mut frames);
-                if let Some((frame, delta)) = Self::block_start(*index, part) {
+                if let Some((frame, delta)) = self.block_start(*index, part) {
                     frames.push(frame);
                     frames.extend(delta.map(|delta| Self::block_delta(*index, &delta)));
                 }

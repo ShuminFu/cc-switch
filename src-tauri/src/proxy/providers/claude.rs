@@ -374,11 +374,14 @@ pub fn transform_claude_request_for_api_format(
             // Codex OAuth (ChatGPT Plus/Pro 反代) 需要在请求体里强制 store: false
             // + include: ["reasoning.encrypted_content"]，由 transform 层统一处理。
             let codex_fast_mode = provider.codex_fast_mode_enabled();
-            super::transform_responses::anthropic_to_responses(
+            crate::proxy::codec::bridge::anthropic_to_responses_request(
                 body,
-                cache_key,
-                is_codex_oauth,
-                codex_fast_mode,
+                crate::proxy::codec::responses::ResponsesUpstreamOptions {
+                    cache_key: cache_key.map(str::to_string),
+                    codex_oauth: is_codex_oauth,
+                    codex_fast_mode,
+                },
+                crate::settings::codec_engine(),
             )
         }
         ClaudeApiFormat::OpenAiChat => {

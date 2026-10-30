@@ -13,7 +13,8 @@
 //! 迁移期间由 [`CodecEngine`]（设置项 `codecEngine`）决定桥接走旧转换器还是编解码；
 //! 各桥接按 anthropic←openai_chat、gemini、responses 的顺序逐个迁移，入口见 [`bridge`]。
 //! 已迁移：anthropic←openai_chat（[`anthropic`] + [`openai_chat`]，CCS-176）、
-//! anthropic←gemini（[`anthropic`] + [`gemini`]，CCS-177）。
+//! anthropic←gemini（[`anthropic`] + [`gemini`]，CCS-177）、
+//! anthropic←responses（[`anthropic`] + [`responses`]，CCS-178）。
 
 // 桥接逐个迁移到编解码；尚未迁移的桥接对应的部分 IR 与编解码项暂无调用方。
 #![allow(dead_code)]
@@ -31,6 +32,7 @@ pub mod anthropic;
 pub mod bridge;
 pub mod gemini;
 pub mod openai_chat;
+pub mod responses;
 pub mod side_store;
 pub mod transcode;
 

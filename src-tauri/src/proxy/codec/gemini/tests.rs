@@ -167,6 +167,7 @@ fn encode_request_maps_ir_fields_in_legacy_order() {
                     call_id: "call_1".into(),
                     content: vec![Part::text("r1"), Part::text("r2")],
                     is_error: false,
+                    plain: false,
                 }],
             ),
         ],

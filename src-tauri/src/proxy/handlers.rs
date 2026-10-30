@@ -489,7 +489,10 @@ async fn handle_claude_transform(
 
     // 根据 api_format 选择非流式转换器
     let transform_result = if api_format == ClaudeApiFormat::OpenAiResponses {
-        transform_responses::responses_to_anthropic(upstream_response)
+        crate::proxy::codec::bridge::responses_to_anthropic_response(
+            upstream_response,
+            crate::settings::codec_engine(),
+        )
     } else if api_format == ClaudeApiFormat::GeminiNative {
         crate::proxy::codec::bridge::gemini_to_anthropic_response(
             upstream_response,

@@ -127,6 +127,7 @@ fn decode_block(block: &Value) -> Option<Part> {
                 .to_string(),
             content: decode_tool_result_content(block.get("content")),
             is_error: block.get("is_error").and_then(Value::as_bool) == Some(true),
+            plain: matches!(block.get("content"), Some(Value::String(_))),
         }),
         "thinking" => str_field(block, "thinking").map(|text| Part::Reasoning {
             text: text.to_string(),

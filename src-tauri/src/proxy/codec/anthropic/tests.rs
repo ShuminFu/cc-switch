@@ -89,6 +89,7 @@ fn decode_request_maps_messages_tools_and_reasoning() {
                         call_id: "c1".into(),
                         content: vec![Part::text(r#"{"type":"unknown","x":1}"#)],
                         is_error: true,
+                        plain: false,
                     },
                 ]
             ),

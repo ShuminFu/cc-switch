@@ -37,8 +37,7 @@ use super::transform_codex_chat::{
     responses_to_chat_completions_with_reasoning, CodexToolContext,
 };
 use super::transform_gemini::{extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints};
-use super::transform_responses::{anthropic_to_responses, responses_to_anthropic};
-use super::{streaming_codex_anthropic, streaming_codex_chat, streaming_responses};
+use super::{streaming_codex_anthropic, streaming_codex_chat};
 use crate::proxy::codec::bridge;
 pub use crate::proxy::codec::CodecEngine;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
@@ -472,9 +471,14 @@ pub fn convert_request_with(
             bridge::anthropic_to_gemini_request(body, None, None, None, engine)
         }
         // No prompt_cache_key and no fast mode: both depend on provider config.
-        Bridge::AnthropicResponses => {
-            anthropic_to_responses(body, None, fixture.meta.options.codex_oauth, false)
-        }
+        Bridge::AnthropicResponses => bridge::anthropic_to_responses_request(
+            body,
+            crate::proxy::codec::responses::ResponsesUpstreamOptions {
+                codex_oauth: fixture.meta.options.codex_oauth,
+                ..Default::default()
+            },
+            engine,
+        ),
         // The proxy first restores cached tool calls from the session history
         // (`codex_chat_history`) and applies provider reasoning config; fixtures
         // carry their full history and run without provider config.
@@ -510,7 +514,7 @@ pub fn convert_non_stream_with(
             fixture.tool_schema_hints().as_ref(),
             engine,
         ),
-        Bridge::AnthropicResponses => responses_to_anthropic(body),
+        Bridge::AnthropicResponses => bridge::responses_to_anthropic_response(body, engine),
         Bridge::ResponsesChat => {
             chat_completion_to_response_with_context(body, &fixture.codex_tool_context())
         }
@@ -559,7 +563,7 @@ pub fn stream_output_with(
                 .collect(),
         ),
         Bridge::AnthropicResponses => futures::executor::block_on(
-            streaming_responses::create_anthropic_sse_stream_from_responses(upstream).collect(),
+            bridge::responses_to_anthropic_sse(upstream, engine).collect(),
         ),
         Bridge::ResponsesChat => futures::executor::block_on(
             streaming_codex_chat::create_responses_sse_stream_from_chat_with_context(

@@ -13,7 +13,9 @@ use bytes::Bytes;
 use futures::Stream;
 use serde_json::Value;
 
-use crate::proxy::codec::bridge::{gemini_to_anthropic_sse, openai_chat_to_anthropic_sse};
+use crate::proxy::codec::bridge::{
+    gemini_to_anthropic_sse, openai_chat_to_anthropic_sse, responses_to_anthropic_sse,
+};
 use crate::proxy::codec::gemini::GeminiShadowSink;
 use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
 use crate::proxy::providers::{
@@ -24,7 +26,6 @@ use crate::proxy::providers::{
         responses_sse_events_from_anthropic_message,
     },
     streaming_codex_chat::create_responses_sse_stream_from_chat_with_context,
-    streaming_responses::create_anthropic_sse_stream_from_responses,
     transform_codex_chat::CodexToolContext,
     transform_gemini::AnthropicToolSchemaHints,
 };
@@ -84,7 +85,7 @@ impl StreamDecoder for ResponsesToAnthropic {
         WireFormat::AnthropicMessages
     }
     fn decode(self: Box<Self>, upstream: ByteStream) -> ByteStream {
-        Box::pin(create_anthropic_sse_stream_from_responses(upstream))
+        responses_to_anthropic_sse(upstream, crate::settings::codec_engine())
     }
 }
 

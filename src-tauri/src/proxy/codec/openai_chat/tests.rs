@@ -42,6 +42,7 @@ fn encode_request_builds_chat_messages() {
                     call_id: "c1".into(),
                     content: vec![Part::text("done")],
                     is_error: false,
+                    plain: false,
                 }],
             ),
         ],

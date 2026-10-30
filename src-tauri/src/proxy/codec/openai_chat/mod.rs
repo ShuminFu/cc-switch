@@ -8,7 +8,7 @@
 //! 没有客户端直接说 Chat 协议，反方向返回 [`CodecError::Unsupported`]；
 //! Responses→Chat 桥接迁移时只会用到同一侧的方向。
 
-mod request;
+pub(crate) mod request;
 mod response;
 mod stream;
 

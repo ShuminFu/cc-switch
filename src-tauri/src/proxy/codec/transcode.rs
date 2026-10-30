@@ -5,6 +5,8 @@
 //! 失败不能伪装成正常完成）。未以空行结束的最后一个事件按 SSE 规范丢弃。
 //! 上游传输错误默认编码为错误事件；[`TransportErrors::Propagate`] 改为把它作为
 //! 流的 `Err` 项原样交给客户端连接（旧 Gemini 转换器的行为）。
+//! [`TranscodeOptions::flush_final_event`] 让上游 EOF 时未以空行结束的最后一个事件
+//! 仍被处理（缓冲型反向代理常见，旧 Responses 转换器的行为）。
 
 use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
@@ -23,6 +25,14 @@ pub enum TransportErrors {
     Propagate,
 }
 
+/// 流式桥接驱动的选项
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TranscodeOptions {
+    pub transport_errors: TransportErrors,
+    /// EOF 时处理未以空行结束的最后一个事件
+    pub flush_final_event: bool,
+}
+
 /// 把上游字节流经一对编解码状态机转换为客户端 SSE 字节流
 pub fn transcode_sse_stream<E: std::error::Error + Send + 'static>(
     upstream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
@@ -35,10 +45,29 @@ pub fn transcode_sse_stream<E: std::error::Error + Send + 'static>(
 /// [`transcode_sse_stream`]，并指定上游传输错误的处理方式
 pub fn transcode_sse_stream_with<E: std::error::Error + Send + 'static>(
     upstream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
-    mut decoder: Box<dyn EventDecoder>,
-    mut encoder: Box<dyn EventEncoder>,
+    decoder: Box<dyn EventDecoder>,
+    encoder: Box<dyn EventEncoder>,
     transport_errors: TransportErrors,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+    transcode_sse_stream_opts(
+        upstream,
+        decoder,
+        encoder,
+        TranscodeOptions {
+            transport_errors,
+            ..TranscodeOptions::default()
+        },
+    )
+}
+
+/// [`transcode_sse_stream`]，并指定全部选项
+pub fn transcode_sse_stream_opts<E: std::error::Error + Send + 'static>(
+    upstream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
+    mut decoder: Box<dyn EventDecoder>,
+    mut encoder: Box<dyn EventEncoder>,
+    options: TranscodeOptions,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+    let transport_errors = options.transport_errors;
     async_stream::stream! {
         let mut sse = SseDecoder::new();
         let mut failed = false;
@@ -82,6 +111,23 @@ pub fn transcode_sse_stream_with<E: std::error::Error + Send + 'static>(
             }
         }
 
+        if !failed && options.flush_final_event {
+            if let Some(event) = sse.finish() {
+                let decoded = decoder
+                    .decode(event.event_name(), &event.data)
+                    .unwrap_or_else(|error| vec![decode_error(error)]);
+                for ir_event in decoded {
+                    let is_error = matches!(ir_event, StreamEvent::Error { .. });
+                    for frame in encoder.encode(&ir_event) {
+                        yield Ok(frame);
+                    }
+                    if is_error {
+                        failed = true;
+                        break;
+                    }
+                }
+            }
+        }
         if !failed {
             let tail = decoder
                 .finish()

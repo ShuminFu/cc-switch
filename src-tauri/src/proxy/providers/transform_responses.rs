@@ -17,7 +17,10 @@ use super::reasoning_bridge::{
     anthropic_block_from_openai_reasoning_item, openai_reasoning_item_from_anthropic_block,
 };
 
-pub(crate) const TOOL_RESULT_ERROR_MARKER: &str = "[cc-switch:tool-result-error]";
+pub(crate) use crate::proxy::codec::responses::{
+    sanitize_anthropic_tool_use_input, sanitize_anthropic_tool_use_input_json,
+    TOOL_RESULT_ERROR_MARKER,
+};
 
 fn anthropic_image_to_responses_part(block: &Value) -> Option<Value> {
     let source = block.get("source")?;
@@ -139,35 +142,6 @@ fn anthropic_tool_result_to_responses_output(block: &Value) -> Value {
     }
 
     Value::Array(output)
-}
-
-pub(crate) fn sanitize_anthropic_tool_use_input(name: &str, input: Value) -> Value {
-    if name != "Read" {
-        return input;
-    }
-
-    match input {
-        Value::Object(mut object) => {
-            if matches!(object.get("pages"), Some(Value::String(value)) if value.is_empty()) {
-                object.remove("pages");
-            }
-            Value::Object(object)
-        }
-        other => other,
-    }
-}
-
-pub(crate) fn sanitize_anthropic_tool_use_input_json(name: &str, raw: &str) -> String {
-    if name != "Read" || raw.is_empty() {
-        return raw.to_string();
-    }
-
-    let Ok(input) = serde_json::from_str::<Value>(raw) else {
-        return raw.to_string();
-    };
-
-    serde_json::to_string(&sanitize_anthropic_tool_use_input(name, input))
-        .unwrap_or_else(|_| raw.to_string())
 }
 
 /// Anthropic 请求 → OpenAI Responses 请求

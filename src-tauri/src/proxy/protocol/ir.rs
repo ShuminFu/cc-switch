@@ -71,10 +71,15 @@ pub enum Part {
         arguments: String,
     },
     /// 工具执行结果
+    ///
+    /// `plain` 表示来源把结果作为单个字符串给出（此时 `content` 恰为一个文本块）；
+    /// 区分「字符串」与「块数组」的格式（Anthropic `content`、Responses `output`）
+    /// 据此还原原有形状，其余格式忽略它。
     ToolResult {
         call_id: String,
         content: Vec<Part>,
         is_error: bool,
+        plain: bool,
     },
     /// 可见的 reasoning / thinking 文本，`signature` 为上游的不透明签名
     /// （Anthropic `signature`、Gemini `thoughtSignature`），回传时必须原样带回
@@ -697,6 +702,7 @@ mod tests {
                     call_id,
                     content,
                     is_error,
+                    plain: false,
                 })
         })
     }
