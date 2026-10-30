@@ -1641,6 +1641,10 @@ impl ProxyService {
     }
 
     /// 接管指定应用的 Live 配置（尽力而为：配置不存在/读取失败则跳过）
+    ///
+    /// Only a missing/unreadable live config is skipped. Once a rewritten config
+    /// exists, a failed write is returned so callers never report success while
+    /// live still points at the old proxy address (SVC-06).
     async fn takeover_live_config_best_effort(&self, app_type: &AppType) -> Result<(), String> {
         let (proxy_url, proxy_codex_base_url) = self.build_proxy_urls().await?;
         let proxy_grok_base_url = format!("{}/grokbuild/v1", proxy_url.trim_end_matches('/'));
@@ -1666,7 +1670,7 @@ impl ProxyService {
                             ClaudeTakeoverAuthPolicy::PreserveExistingOrAuthToken,
                         );
                     }
-                    let _ = self.write_claude_live(&live_config);
+                    self.write_claude_live(&live_config)?;
                 }
             }
             AppType::Codex => {
@@ -1696,13 +1700,13 @@ impl ProxyService {
                         });
                     }
 
-                    let _ = self.write_gemini_live(&live_config);
+                    self.write_gemini_live(&live_config)?;
                 }
             }
             AppType::GrokBuild => {
                 if let Ok(mut live_config) = self.read_grok_live() {
                     Self::apply_grok_takeover_fields(&mut live_config, &proxy_grok_base_url)?;
-                    let _ = self.write_grok_live(&live_config);
+                    self.write_grok_live(&live_config)?;
                 }
             }
             _ => {}
@@ -2805,6 +2809,10 @@ impl ProxyService {
     }
 
     fn write_claude_live(&self, config: &Value) -> Result<(), String> {
+        #[cfg(test)]
+        if tests::FAIL_CLAUDE_LIVE_WRITE.with(|fail| fail.get()) {
+            return Err("写入 Claude 配置失败: injected test failure".to_string());
+        }
         let path = get_claude_settings_path();
         let settings = crate::services::provider::sanitize_claude_settings_for_live(config);
         write_json_file(&path, &settings).map_err(|e| format!("写入 Claude 配置失败: {e}"))
@@ -3086,30 +3094,39 @@ impl ProxyService {
             drop(server_guard);
             if let Ok(takeover) = self.get_takeover_status().await {
                 let mut updated_any = false;
+                // Rewrite every taken-over app even if one fails, then report all
+                // failures together instead of claiming success (SVC-06).
+                let mut failures: Vec<String> = Vec::new();
 
-                if takeover.claude {
-                    self.takeover_live_config_best_effort(&AppType::Claude)
-                        .await?;
-                    updated_any = true;
-                }
-                if takeover.codex {
-                    self.takeover_live_config_best_effort(&AppType::Codex)
-                        .await?;
-                    updated_any = true;
-                }
-                if takeover.gemini {
-                    self.takeover_live_config_best_effort(&AppType::Gemini)
-                        .await?;
-                    updated_any = true;
-                }
-                if takeover.grokbuild {
-                    self.takeover_live_config_best_effort(&AppType::GrokBuild)
-                        .await?;
-                    updated_any = true;
+                for (taken_over, app_type) in [
+                    (takeover.claude, AppType::Claude),
+                    (takeover.codex, AppType::Codex),
+                    (takeover.gemini, AppType::Gemini),
+                    (takeover.grokbuild, AppType::GrokBuild),
+                ] {
+                    if !taken_over {
+                        continue;
+                    }
+                    match self.takeover_live_config_best_effort(&app_type).await {
+                        Ok(()) => updated_any = true,
+                        Err(e) => {
+                            log::error!(
+                                "更新 {} Live 配置中的代理地址失败: {e}",
+                                app_type.as_str()
+                            );
+                            failures.push(format!("{}: {e}", app_type.as_str()));
+                        }
+                    }
                 }
 
                 if updated_any {
                     log::info!("已同步更新 Live 配置中的代理地址");
+                }
+                if !failures.is_empty() {
+                    return Err(format!(
+                        "代理服务器已重启，但更新 Live 配置中的代理地址失败（客户端可能仍指向旧端口）: {}",
+                        failures.join("; ")
+                    ));
                 }
             }
 
@@ -3185,6 +3202,13 @@ mod tests {
     use serial_test::serial;
     use std::env;
     use tempfile::TempDir;
+
+    thread_local! {
+        /// Failure injection for `write_claude_live` (root ignores file modes, so a
+        /// read-only settings file cannot be used to make only the write fail).
+        pub(super) static FAIL_CLAUDE_LIVE_WRITE: std::cell::Cell<bool> =
+            const { std::cell::Cell::new(false) };
+    }
 
     struct TempHome {
         #[allow(dead_code)]
@@ -3723,6 +3747,100 @@ mod tests {
         assert!(
             !base_url.contains(":0"),
             "takeover must never write an unresolved :0 port"
+        );
+
+        service
+            .stop_with_restore()
+            .await
+            .expect("stop proxy and restore live config");
+    }
+
+    /// SVC-06: when the proxy restarts on a new port, a failed live rewrite must be
+    /// reported instead of swallowed, and must not stop the other apps from being
+    /// rewritten.
+    #[tokio::test]
+    #[serial]
+    async fn update_config_port_change_reports_failed_live_rewrite() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        use_ephemeral_proxy_port(&db).await;
+        let service = ProxyService::new(db.clone());
+
+        let provider = Provider::with_id(
+            "p1".to_string(),
+            "P1".to_string(),
+            json!({
+                "env": {
+                    "ANTHROPIC_API_KEY": "provider-key",
+                    "ANTHROPIC_BASE_URL": "https://api.example.com"
+                }
+            }),
+            None,
+        );
+        db.save_provider("claude", &provider)
+            .expect("save provider");
+        db.set_current_provider("claude", "p1")
+            .expect("set db current provider");
+        crate::settings::set_current_provider(&AppType::Claude, Some("p1"))
+            .expect("set local current provider");
+        service
+            .write_claude_live(&provider.settings_config)
+            .expect("seed claude live config");
+
+        let gemini_provider = Provider::with_id(
+            "g1".to_string(),
+            "G1".to_string(),
+            json!({
+                "env": {
+                    "GEMINI_API_KEY": "gemini-key",
+                    "GOOGLE_GEMINI_BASE_URL": "https://gemini.example.com"
+                }
+            }),
+            None,
+        );
+        db.save_provider("gemini", &gemini_provider)
+            .expect("save gemini provider");
+        db.set_current_provider("gemini", "g1")
+            .expect("set db current gemini provider");
+        crate::settings::set_current_provider(&AppType::Gemini, Some("g1"))
+            .expect("set local current gemini provider");
+        service
+            .write_gemini_live(&gemini_provider.settings_config)
+            .expect("seed gemini live config");
+
+        service
+            .set_takeover_for_app("claude", true)
+            .await
+            .expect("take over claude");
+        service
+            .set_takeover_for_app("gemini", true)
+            .await
+            .expect("take over gemini");
+        let old_port = service.get_status().await.expect("status").port;
+
+        // Restart on a fresh ephemeral port while the Claude rewrite fails.
+        let mut new_config = db.get_proxy_config().await.expect("read proxy config");
+        new_config.listen_port = 0;
+        FAIL_CLAUDE_LIVE_WRITE.with(|fail| fail.set(true));
+        let result = service.update_config(&new_config).await;
+        FAIL_CLAUDE_LIVE_WRITE.with(|fail| fail.set(false));
+
+        let err = result.expect_err("failed Claude live rewrite must be reported");
+        assert!(err.contains("claude"), "error should name the app: {err}");
+
+        let new_port = service.get_status().await.expect("status").port;
+        assert_ne!(new_port, old_port, "proxy should have restarted");
+
+        let gemini_live = service.read_gemini_live().expect("read gemini live");
+        assert_eq!(
+            gemini_live
+                .get("env")
+                .and_then(|env| env.get("GOOGLE_GEMINI_BASE_URL"))
+                .and_then(|value| value.as_str()),
+            Some(format!("http://127.0.0.1:{new_port}").as_str()),
+            "Gemini must still be rewritten to the new port"
         );
 
         service
