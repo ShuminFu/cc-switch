@@ -1433,23 +1433,9 @@ function ProviderFormFull({
       const needsClearEndpoints =
         hadEndpoints && draftCustomEndpoints.length === 0;
 
-      let mergedMeta = needsClearEndpoints
+      const mergedMeta = needsClearEndpoints
         ? mergeProviderMeta(initialData?.meta, {})
         : mergeProviderMeta(initialData?.meta, customEndpointsToSave);
-
-      if (activePreset?.isPartner) {
-        mergedMeta = {
-          ...(mergedMeta ?? {}),
-          isPartner: true,
-        };
-      }
-
-      if (activePreset?.partnerPromotionKey) {
-        mergedMeta = {
-          ...(mergedMeta ?? {}),
-          partnerPromotionKey: activePreset.partnerPromotionKey,
-        };
-      }
 
       if (mergedMeta !== undefined) {
         payload.meta = mergedMeta;
@@ -1565,6 +1551,16 @@ function ProviderFormFull({
 
     if (!isCodexOauthProvider && "codexFastMode" in nextMeta) {
       delete nextMeta.codexFastMode;
+    }
+
+    // Partner badge / promotion key come from the chosen preset and must be
+    // persisted on every add, not only when draft custom endpoints exist
+    // (FE-PROV-43).
+    if (!isEditMode && activePreset?.isPartner) {
+      nextMeta.isPartner = true;
+    }
+    if (!isEditMode && activePreset?.partnerPromotionKey) {
+      nextMeta.partnerPromotionKey = activePreset.partnerPromotionKey;
     }
 
     payload.meta = nextMeta;
