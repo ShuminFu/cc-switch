@@ -50,8 +50,12 @@ impl TokenUsage {
     /// 生成与 session 日志共享的 request_id，用于跨源去重。
     /// 有 message_id 时返回 `session:{id}`，否则回退到随机 UUID。
     pub fn dedup_request_id(&self) -> String {
+        // PROV-35: an empty/blank id would collapse every request onto the bare
+        // `session:` key and `INSERT OR REPLACE` would overwrite history.
         self.message_id
-            .as_ref()
+            .as_deref()
+            .map(str::trim)
+            .filter(|mid| !mid.is_empty())
             .map(|mid| format!("{SESSION_REQUEST_ID_PREFIX}{mid}"))
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
     }
@@ -91,6 +95,7 @@ impl TokenUsage {
         let message_id = body
             .get("id")
             .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
             .map(|s| s.to_string());
 
         Some(Self {
@@ -128,7 +133,11 @@ impl TokenUsage {
                                 }
                             }
                             if message_id.is_none() {
-                                if let Some(id) = message.get("id").and_then(|v| v.as_str()) {
+                                if let Some(id) = message
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .filter(|s| !s.trim().is_empty())
+                                {
                                     message_id = Some(id.to_string());
                                 }
                             }
@@ -512,6 +521,32 @@ impl TokenUsage {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_empty_message_id_does_not_collapse_dedup_key() {
+        let usage = TokenUsage {
+            message_id: Some(String::new()),
+            ..Default::default()
+        };
+        assert_ne!(usage.dedup_request_id(), SESSION_REQUEST_ID_PREFIX);
+        assert_ne!(usage.dedup_request_id(), usage.dedup_request_id());
+
+        let body = json!({"id": "", "usage": {"input_tokens": 1, "output_tokens": 1}});
+        assert!(TokenUsage::from_claude_response(&body)
+            .unwrap()
+            .message_id
+            .is_none());
+
+        let events = vec![
+            json!({"type": "message_start", "message": {"id": "", "usage": {"input_tokens": 3}}}),
+            json!({"type": "message_delta", "usage": {"output_tokens": 2}}),
+        ];
+        let parsed = TokenUsage::from_claude_stream_events(&events).unwrap();
+        assert!(parsed.message_id.is_none());
+        assert!(!parsed
+            .dedup_request_id()
+            .starts_with(SESSION_REQUEST_ID_PREFIX));
+    }
 
     #[test]
     fn test_claude_response_parsing() {

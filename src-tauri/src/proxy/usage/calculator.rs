@@ -25,6 +25,49 @@ pub struct ModelPricing {
     pub cache_creation_cost_per_million: Decimal,
 }
 
+/// Whether a usage record's `input_tokens` already includes the cache buckets
+/// (PROV-17).
+///
+/// This is the single source of truth for the rule that used to be repeated as
+/// `matches!(app_type, "codex" | "gemini" | "grokbuild")` string matches:
+/// - [`InputTokenSemantics::Fresh`]: Anthropic semantics, `input_tokens`
+///   excludes cache read/creation (every Claude-side bridge converts to it).
+/// - [`InputTokenSemantics::Total`]: OpenAI Responses / Gemini semantics,
+///   `input_tokens` includes cache read and creation tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputTokenSemantics {
+    Fresh,
+    Total,
+}
+
+impl InputTokenSemantics {
+    /// Semantics of the usage recorded for a proxy `app_type` (the client that
+    /// requested it). Claude-client traffic is always converted to Anthropic
+    /// usage, Codex / Gemini / Grok Build traffic keeps the upstream totals.
+    pub fn for_app_type(app_type: &str) -> Self {
+        if matches!(app_type, "codex" | "gemini" | "grokbuild") {
+            Self::Total
+        } else {
+            Self::Fresh
+        }
+    }
+
+    pub fn input_includes_cache(self) -> bool {
+        self == Self::Total
+    }
+
+    /// `input_tokens` billed at the input price (cache buckets removed).
+    pub fn fresh_input_tokens(self, usage: &TokenUsage) -> u32 {
+        match self {
+            Self::Fresh => usage.input_tokens,
+            Self::Total => usage
+                .input_tokens
+                .saturating_sub(usage.cache_read_tokens)
+                .saturating_sub(usage.cache_creation_tokens),
+        }
+    }
+}
+
 /// 成本计算器
 pub struct CostCalculator;
 
@@ -46,7 +89,7 @@ impl CostCalculator {
         pricing: &ModelPricing,
         cost_multiplier: Decimal,
     ) -> CostBreakdown {
-        Self::calculate_with_cache_semantics(usage, pricing, cost_multiplier, false)
+        Self::calculate_with_semantics(usage, pricing, cost_multiplier, InputTokenSemantics::Fresh)
     }
 
     /// 按 app_type 选择输入 token 语义后计算成本。
@@ -59,33 +102,26 @@ impl CostCalculator {
         pricing: &ModelPricing,
         cost_multiplier: Decimal,
     ) -> CostBreakdown {
-        let input_includes_cache_read = matches!(app_type, "codex" | "gemini" | "grokbuild");
-        Self::calculate_with_cache_semantics(
+        Self::calculate_with_semantics(
             usage,
             pricing,
             cost_multiplier,
-            input_includes_cache_read,
+            InputTokenSemantics::for_app_type(app_type),
         )
     }
 
-    fn calculate_with_cache_semantics(
+    /// Compute cost for usage whose input-token semantics are known explicitly.
+    pub fn calculate_with_semantics(
         usage: &TokenUsage,
         pricing: &ModelPricing,
         cost_multiplier: Decimal,
-        input_includes_cache_read: bool,
+        semantics: InputTokenSemantics,
     ) -> CostBreakdown {
         let million = Decimal::from(1_000_000);
 
         // OpenAI/Gemini 风格的 input_tokens 包含缓存读取和写入，需要扣除后再按输入价计费；
         // Claude/Anthropic 风格的 input_tokens 已经是 fresh input，不能再次扣减。
-        let billable_input_tokens = if input_includes_cache_read {
-            usage
-                .input_tokens
-                .saturating_sub(usage.cache_read_tokens)
-                .saturating_sub(usage.cache_creation_tokens)
-        } else {
-            usage.input_tokens
-        };
+        let billable_input_tokens = semantics.fresh_input_tokens(usage);
 
         // 各项基础成本（不含倍率）
         let input_cost =
@@ -151,6 +187,61 @@ impl ModelPricing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    /// PROV-17: the same upstream usage must cost the same regardless of which
+    /// parser / client produced the record, once semantics are applied.
+    #[test]
+    fn test_cost_is_identical_across_parsers_and_app_types() {
+        let pricing = ModelPricing::from_strings("3", "15", "0.3", "3.75").unwrap();
+        let one = Decimal::from(1);
+
+        // Upstream: 1000 prompt tokens of which 600 cache read and 100 cache write.
+        let openai_total = TokenUsage::from_codex_response(&json!({
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 50,
+                "input_tokens_details": {"cached_tokens": 600, "cache_write_tokens": 100}
+            }
+        }))
+        .unwrap();
+        let anthropic_fresh = TokenUsage::from_claude_response(&json!({
+            "usage": {
+                "input_tokens": 300,
+                "output_tokens": 50,
+                "cache_read_input_tokens": 600,
+                "cache_creation_input_tokens": 100
+            }
+        }))
+        .unwrap();
+
+        let reference =
+            CostCalculator::calculate_for_app("claude", &anthropic_fresh, &pricing, one).total_cost;
+        let cases: Vec<(&str, &TokenUsage)> = vec![
+            ("codex", &openai_total),
+            ("gemini", &openai_total),
+            ("grokbuild", &openai_total),
+            ("claude", &anthropic_fresh),
+            ("opencode", &anthropic_fresh),
+        ];
+        for (app, usage) in cases {
+            let semantics = InputTokenSemantics::for_app_type(app);
+            assert_eq!(
+                CostCalculator::calculate_for_app(app, usage, &pricing, one).total_cost,
+                reference,
+                "app = {app}"
+            );
+            assert_eq!(
+                CostCalculator::calculate_with_semantics(usage, &pricing, one, semantics)
+                    .total_cost,
+                reference,
+                "app = {app}"
+            );
+            assert_eq!(semantics.fresh_input_tokens(usage), 300, "app = {app}");
+        }
+        assert!(InputTokenSemantics::for_app_type("codex").input_includes_cache());
+        assert!(!InputTokenSemantics::for_app_type("claude").input_includes_cache());
+    }
 
     #[test]
     fn test_cost_calculation() {
