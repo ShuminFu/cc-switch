@@ -285,6 +285,16 @@ impl ProfileService {
 
     /// 创建新项目：只拍发起页所属分组的当前状态，其余分组槽位留 None
     /// （其他应用可能正处于别的项目，不能替用户拍进来）
+    /// 分组当前激活的项目 id（未使用项目时为 None）
+    pub fn current_id(state: &AppState, scope: ProfileScope) -> Result<Option<String>, AppError> {
+        state.db.get_current_profile_id(scope.as_str())
+    }
+
+    /// 退出分组当前项目（不改动 live 配置）
+    pub fn clear_current(state: &AppState, scope: ProfileScope) -> Result<(), AppError> {
+        state.db.set_current_profile_id(scope.as_str(), None)
+    }
+
     pub fn create(state: &AppState, name: &str, scope: ProfileScope) -> Result<Profile, AppError> {
         let name = name.trim();
         if name.is_empty() {

@@ -4,7 +4,8 @@
 // Usage:
 //   node scripts/check-ipc-orphans.mjs [--root <dir>]
 //
-// Reads the `tauri::generate_handler![...]` list in src-tauri/src/lib.rs and
+// Reads the per-domain command registry in src-tauri/src/commands/registry.rs
+// (the source of `generate_handler!` and the ACL permission sets, CCS-180) and
 // every non-test .ts/.tsx file under src/ (the generated src/shared/bindings.ts
 // is skipped, it lists every command). Reports:
 //   - orphans: registered commands no frontend source names as a string literal
@@ -15,7 +16,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const HANDLER_START = "tauri::generate_handler![";
+// Each domain is `<tier> "<id>" "<description>" [ <command paths> ]`.
+const DOMAIN_LIST = /"\s*\[([^\]]*)\]/g;
 const SNAKE_CASE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 // Type arguments may not contain parentheses: otherwise `invoke<T>(cmd)` in a
 // wrapper would lazily extend to a later `>("name"` and swallow the invokes in
@@ -24,17 +26,16 @@ const INVOKE_CALL =
   /\binvoke\s*(?:<[^()]*?>)?\s*\(\s*(["'`])([A-Za-z0-9_]+)\1/g;
 const STRING_LITERAL = /(["'`])([A-Za-z0-9_]+)\1/g;
 
-/** Command names in the `generate_handler!` list, in registration order. */
-export function registeredCommands(libSource) {
-  const start = libSource.indexOf(HANDLER_START);
-  if (start < 0) throw new Error("generate_handler! not found in lib.rs");
-  const body = libSource.slice(start + HANDLER_START.length);
-  const end = body.indexOf("]");
-  if (end < 0) throw new Error("unterminated generate_handler! list");
-  return body
-    .slice(0, end)
+/** Command names in the registry's domain lists, in registration order. */
+export function registeredCommands(registrySource) {
+  const code = registrySource
     .split("\n")
     .map((line) => line.split("//")[0])
+    .join("\n");
+  const lists = [...code.matchAll(DOMAIN_LIST)];
+  if (lists.length === 0) throw new Error("no command domains in registry.rs");
+  return lists
+    .map((m) => m[1])
     .join(",")
     .split(",")
     .map((entry) => entry.trim())
@@ -43,8 +44,8 @@ export function registeredCommands(libSource) {
 }
 
 /** Compare the registered commands with the frontend sources (path -> text). */
-export function checkIpcCommands(libSource, frontendFiles) {
-  const commands = registeredCommands(libSource);
+export function checkIpcCommands(registrySource, frontendFiles) {
+  const commands = registeredCommands(registrySource);
   const registered = new Set(commands);
   const literals = new Set();
   const unknown = new Set();
@@ -73,10 +74,10 @@ function walkFrontend(dir, out = []) {
   return out;
 }
 
-/** Read lib.rs and the non-test frontend sources under `<root>`. */
+/** Read the command registry and the non-test frontend sources under `<root>`. */
 export function readSources(root) {
-  const libSource = readFileSync(
-    path.join(root, "src-tauri/src/lib.rs"),
+  const registrySource = readFileSync(
+    path.join(root, "src-tauri/src/commands/registry.rs"),
     "utf8",
   );
   const bindings = path.join(root, "src/shared/bindings.ts");
@@ -85,7 +86,7 @@ export function readSources(root) {
     if (full === bindings) continue;
     frontendFiles[path.relative(root, full)] = readFileSync(full, "utf8");
   }
-  return { libSource, frontendFiles };
+  return { registrySource, frontendFiles };
 }
 
 function main(argv) {
@@ -95,8 +96,8 @@ function main(argv) {
     else throw new Error(`unknown argument: ${argv[i]}`);
   }
 
-  const { libSource, frontendFiles } = readSources(root);
-  const result = checkIpcCommands(libSource, frontendFiles);
+  const { registrySource, frontendFiles } = readSources(root);
+  const result = checkIpcCommands(registrySource, frontendFiles);
   const sections = [
     ["orphan commands (registered, never referenced by src/)", result.orphans],
     ["unknown commands (invoked, not registered)", result.unknown],

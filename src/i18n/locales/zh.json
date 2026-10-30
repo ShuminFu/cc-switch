@@ -494,6 +494,20 @@
           "usage": "用量统计",
           "sessionResume": "会话恢复"
         }
+      },
+      "startupReport": {
+        "title": "启动诊断",
+        "description": "各启动步骤（迁移、live 配置导入等）的执行结果与错误码",
+        "allOk": "所有启动步骤均已完成，没有错误",
+        "failedSummary": "{{count}} 个启动步骤失败",
+        "loadFailed": "加载启动报告失败",
+        "status": {
+          "ok": "成功",
+          "skipped": "已跳过",
+          "failed": "失败"
+        },
+        "toastTitle": "{{count}} 个启动步骤失败",
+        "toastDescription": "部分数据可能缺失，详情见 设置 → 高级 → 启动诊断。"
       }
     },
     "language": "界面语言",
@@ -877,6 +891,8 @@
     "toolInstall": "安装",
     "toolUpdate": "升级",
     "toolReady": "已就绪",
+    "toolCancel": "取消",
+    "toolActionCancelled": "已取消安装/升级",
     "toolActionDone": "{{count}} 个工具{{action}}完成",
     "toolActionPartial": "{{succeeded}} 个{{action}}成功，{{failed}} 个失败",
     "toolActionFailed": "安装/升级命令执行失败",

@@ -3,7 +3,7 @@
 //! 只在测试构建中启用（specta 系列为 dev-dependencies），运行时仍走
 //! `generate_handler!`。决策与已知问题见 `docs/dev/adr/bindings.md`。
 //!
-//! `bindings_are_up_to_date` 既是生成器也是脏检查：Rust DTO、已注册命令列表
+//! `bindings_are_up_to_date` 既是生成器也是脏检查：Rust DTO、已注册命令列表（`commands/registry.rs`）
 //! 变化而未重新生成时测试失败（CI 的 `Check generated bindings` 步骤单独运行它）。
 //! 重新生成：`UPDATE_BINDINGS=1 cargo test --lib bindings`。
 
@@ -13,23 +13,14 @@ use tauri_specta::{collect_commands, Builder, ErrorHandlingMode};
 
 const BINDINGS_PATH: &str = "../src/shared/bindings.ts";
 
-/// 从 `lib.rs` 的 `generate_handler!` 列表中提取全部已注册命令名（保持注册顺序）。
+/// 全部已注册命令名（`commands/registry.rs` 的命令域顺序，即注册顺序）。
 ///
 /// 前端用导出的 `COMMANDS` 校验每个命令都有 MSW handler 或在白名单中。
 fn registered_commands() -> Vec<String> {
-    let source = include_str!("lib.rs");
-    let start = source
-        .find("tauri::generate_handler![")
-        .expect("generate_handler! in lib.rs");
-    let body = &source[start + "tauri::generate_handler![".len()..];
-    let end = body.find(']').expect("end of generate_handler! list");
-    body[..end]
-        .lines()
-        .map(|line| line.split("//").next().unwrap_or_default().trim())
-        .flat_map(|line| line.split(','))
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| entry.rsplit("::").next().unwrap_or(entry).to_string())
+    crate::commands::registry::COMMAND_DOMAINS
+        .iter()
+        .flat_map(|domain| domain.commands.iter())
+        .map(|path| crate::commands::registry::command_name(path).to_string())
         .collect()
 }
 
@@ -64,6 +55,7 @@ fn builder() -> Builder<tauri::Wry> {
         .typ::<crate::database::MaintenanceReport>()
         .typ::<crate::services::session_usage::SessionRescanProgress>()
         .typ::<crate::error::IpcError>()
+        .typ::<crate::app_shell::bootstrap::StartupReport>()
         .constant("COMMANDS", registered_commands())
         // 现有前端 `invoke` 封装在失败时抛出归一化的 IpcError
         .error_handling(ErrorHandlingMode::Throw)
@@ -89,7 +81,7 @@ fn render() -> String {
 }
 
 #[test]
-fn registered_commands_are_parsed_from_generate_handler() {
+fn registered_commands_are_listed_by_the_domain_registry() {
     let commands = registered_commands();
     assert!(commands.len() > 100, "parsed {} commands", commands.len());
     for expected in ["get_providers", "get_usage_summary", "update_tray_menu"] {

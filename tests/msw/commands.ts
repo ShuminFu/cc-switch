@@ -8,7 +8,7 @@ import type {
   ProxyStatus,
 } from "@/shared/bindings";
 
-/** `src-tauri/src/lib.rs` 中 `generate_handler!` 注册的全部命令名（生成）。 */
+/** `src-tauri/src/commands/registry.rs` 中按域注册的全部命令名（生成）。 */
 export type CommandName = (typeof COMMANDS)[number];
 
 type SnakeToCamel<S extends string> = S extends `${infer Head}_${infer Tail}`

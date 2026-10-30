@@ -1,8 +1,13 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use tauri::Manager;
 
-static LIGHTWEIGHT_MODE: AtomicBool = AtomicBool::new(false);
+use crate::store::AppState;
+
+/// 写入 [`AppState`] 中的轻量模式标志；数据库恢复模式下未注册 AppState，忽略
+fn set_flag(app: &tauri::AppHandle, enabled: bool) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.set_lightweight_mode(enabled);
+    }
+}
 
 pub fn enter_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -24,7 +29,7 @@ pub fn enter_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
     }
     // else: already in lightweight mode or window not found, just set the flag
 
-    LIGHTWEIGHT_MODE.store(true, Ordering::Release);
+    set_flag(app, true);
     crate::tray::refresh_tray_menu(app);
     log::info!("进入轻量模式");
     Ok(())
@@ -49,7 +54,7 @@ pub fn exit_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
         {
             crate::tray::apply_tray_policy(app, true);
         }
-        LIGHTWEIGHT_MODE.store(false, Ordering::Release);
+        set_flag(app, false);
         crate::tray::refresh_tray_menu(app);
         log::info!("退出轻量模式");
         return Ok(());
@@ -89,12 +94,13 @@ pub fn exit_lightweight_mode(app: &tauri::AppHandle) -> Result<(), String> {
         crate::tray::apply_tray_policy(app, true);
     }
 
-    LIGHTWEIGHT_MODE.store(false, Ordering::Release);
+    set_flag(app, false);
     crate::tray::refresh_tray_menu(app);
     log::info!("退出轻量模式");
     Ok(())
 }
 
-pub fn is_lightweight_mode() -> bool {
-    LIGHTWEIGHT_MODE.load(Ordering::Acquire)
+pub fn is_lightweight_mode(app: &tauri::AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .is_some_and(|state| state.is_lightweight_mode())
 }

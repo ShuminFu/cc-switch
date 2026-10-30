@@ -17,7 +17,6 @@ doctest = false
 
 [features]
 default = []
-test-hooks = []
 # Exposes `proxy::providers::testkit` (golden bridge fixtures) and `proxy_harness`
 # (mock upstream + real proxy server, with a SQL statement counter) to integration tests.
 testkit = ["rusqlite/trace"]
@@ -50,7 +49,7 @@ arboard = "3.6"
 flate2 = "1"
 brotli = "8"
 zstd = "0.13"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync", "process", "io-util"] }
 futures = "0.3"
 async-stream = "0.3"
 bytes = "1.5"
@@ -143,4 +142,5 @@ cc-switch = { path = ".", features = ["testkit"] }
 specta = { version = "=2.0.0-rc.25", features = ["derive", "function", "serde_json"] }
 specta-typescript = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
-tauri = { version = "2.8.2", features = ["specta"] }
+# `test`: mock runtime for the command ACL tests (CCS-180).
+tauri = { version = "2.8.2", features = ["specta", "test"] }

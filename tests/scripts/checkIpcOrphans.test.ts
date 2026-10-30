@@ -10,20 +10,27 @@ import {
 const ROOT = path.resolve(__dirname, "../..");
 const SCRIPT = path.join(ROOT, "scripts/check-ipc-orphans.mjs");
 
-const LIB = [
-  "fn run() {",
-  "    builder.invoke_handler(tauri::generate_handler![",
-  "            commands::get_providers,",
-  "            // a comment, commands::not_registered",
-  "            commands::queryProviderUsage, commands::unused_command,",
-  "            crate::commands::open_external",
-  "        ]);",
+const REGISTRY = [
+  "macro_rules! for_each_command_domain {",
+  "    ($callback:ident) => {",
+  "        $callback! {",
+  '            standard "provider" "Providers." [',
+  "                commands::get_providers,",
+  "                // a comment, commands::not_registered",
+  "                commands::queryProviderUsage, commands::unused_command,",
+  "            ],",
+  '            privileged "privileged-x" "Writes [files]." [',
+  "                crate::commands::open_external",
+  "            ],",
+  "        }",
+  "    };",
   "}",
+  "pub commands: &'static [&'static str],",
 ].join("\n");
 
 describe("checkIpcOrphans", () => {
-  it("parses the generate_handler! list", () => {
-    expect(registeredCommands(LIB)).toEqual([
+  it("parses the command registry domain lists", () => {
+    expect(registeredCommands(REGISTRY)).toEqual([
       "get_providers",
       "queryProviderUsage",
       "unused_command",
@@ -32,7 +39,7 @@ describe("checkIpcOrphans", () => {
   });
 
   it("reports orphan, unknown and non-snake_case commands", () => {
-    const result = checkIpcCommands(LIB, {
+    const result = checkIpcCommands(REGISTRY, {
       "src/a.ts": [
         'await invoke<Provider[]>("get_providers", { app });',
         "return invoke(\n  'queryProviderUsage',\n  { providerId },\n);",

@@ -6,7 +6,7 @@ import {
   scanCommands,
 } from "../../scripts/count-ipc-error-commands.mjs";
 
-// CCS-114：P2 要求至少 50% 的 Tauri 命令返回 IpcError
+// CCS-114 / CCS-181：全部 Tauri 命令返回 IpcError
 const ROOT = path.resolve(__dirname, "../..");
 const SCRIPT = path.join(ROOT, "scripts/count-ipc-error-commands.mjs");
 
@@ -35,8 +35,8 @@ describe("countIpcErrorCommands", () => {
     expect(result.perFile).toEqual([{ file: "x.rs", total: 3, ipcError: 1 }]);
   });
 
-  it("reports at least 50% of the real commands returning IpcError", () => {
-    const r = spawnSync(process.execPath, [SCRIPT, "--min", "50"], {
+  it("reports every real command returning IpcError", () => {
+    const r = spawnSync(process.execPath, [SCRIPT, "--min", "100"], {
       cwd: ROOT,
       encoding: "utf8",
     });

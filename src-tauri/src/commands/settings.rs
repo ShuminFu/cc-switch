@@ -1,6 +1,7 @@
 use tauri::{AppHandle, Emitter};
 
 use crate::error::IpcError;
+use crate::services::proxy_settings::ProxySettingsService;
 use tauri_plugin_updater::UpdaterExt;
 
 /// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
@@ -106,65 +107,68 @@ pub async fn save_settings(
         .map_err(|e| IpcError::from(crate::error::AppError::InvalidInput(e.to_string())))?;
     let (existing, unify_codex_enabled) =
         persist_settings_for_save(settings).map_err(IpcError::from)?;
-    let unify_codex_changed = unify_codex_enabled != existing.unify_codex_session_history;
-
-    // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，
-    // 不必等下一次切换才生效。
-    if unify_codex_changed {
-        // live 重写失败时回滚设置并把保存整体报失败：若设置保持已切换状态，
-        // live 仍跑旧桶，后续的历史迁移/还原会让会话再次分裂（开启=历史
-        // 迁走而新会话仍写 openai 桶；关闭=会话还原而 live 仍写 custom）。
-        // 报错让前端 saved=false 短路还原；回滚是整次保存的事务语义
-        // （本开关的保存只携带开关相关字段）。
-        if let Err(err) =
-            crate::services::provider::reapply_current_codex_official_live(state.inner())
-        {
-            log::warn!("统一 Codex 会话历史开关变更后重写 live 配置失败，回滚设置: {err}");
-            // 回滚同样在写锁内与最新值合并，保留期间并发提交的迁移标记等后端状态
-            if let Err(rollback_err) = crate::settings::update_settings_with(|current| {
-                merge_settings_for_save(existing, current)
-            }) {
-                log::error!("回滚统一会话开关设置失败: {rollback_err}");
-            }
-            return Err(
-                format!("统一 Codex 会话历史开关未生效（live 配置重写失败）: {err}").into(),
-            );
-        }
-
-        if unify_codex_enabled {
-            // 后台执行存量迁移（openai 桶 → custom 桶；仅当用户勾选了迁入既有
-            // 会话，函数内部自门控）。大会话目录可能要读数秒，不能阻塞设置保存；
-            // 失败时不写完成标记，下次启动自动重试。
-            tauri::async_runtime::spawn_blocking(|| {
-                match crate::codex_history_migration::maybe_migrate_codex_official_history_to_unified_bucket() {
-                    Ok(outcome) => {
-                        if let Some(reason) = outcome.skipped_reason {
-                            log::debug!("○ Codex official history unify migration skipped: {reason}");
-                        } else {
-                            log::info!(
-                                "✓ Codex official history unify migration completed: jsonl_files={}, state_rows={}",
-                                outcome.migrated_jsonl_files,
-                                outcome.migrated_state_rows
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("✗ Codex official history unify migration failed: {e}");
-                    }
-                }
-            });
-        } else {
-            // 清除标记与迁移意愿，让重新开启并再次勾选时能补迁
-            // 关闭期间落入 openai 桶的官方会话。
-            if let Err(err) = crate::settings::clear_codex_official_history_unify_migration() {
-                log::warn!("清除统一会话迁移标记失败: {err}");
-            }
-            if let Err(err) = crate::settings::clear_codex_unify_migrate_existing() {
-                log::warn!("清除统一会话迁移意愿失败: {err}");
-            }
-        }
+    if unify_codex_enabled != existing.unify_codex_session_history {
+        apply_unify_codex_toggle(state.inner(), existing, unify_codex_enabled)?;
     }
     Ok(true)
+}
+
+/// 统一会话开关变更后立即重写当前官方 Codex 供应商的 live 配置，
+/// 不必等下一次切换才生效；随后在后台迁移存量会话（开启）或清除迁移标记（关闭）。
+fn apply_unify_codex_toggle(
+    state: &crate::store::AppState,
+    existing: crate::settings::AppSettings,
+    unify_codex_enabled: bool,
+) -> Result<(), IpcError> {
+    // live 重写失败时回滚设置并把保存整体报失败：若设置保持已切换状态，
+    // live 仍跑旧桶，后续的历史迁移/还原会让会话再次分裂（开启=历史
+    // 迁走而新会话仍写 openai 桶；关闭=会话还原而 live 仍写 custom）。
+    // 报错让前端 saved=false 短路还原；回滚是整次保存的事务语义
+    // （本开关的保存只携带开关相关字段）。
+    if let Err(err) = crate::services::provider::reapply_current_codex_official_live(state) {
+        log::warn!("统一 Codex 会话历史开关变更后重写 live 配置失败，回滚设置: {err}");
+        // 回滚同样在写锁内与最新值合并，保留期间并发提交的迁移标记等后端状态
+        if let Err(rollback_err) = crate::settings::update_settings_with(|current| {
+            merge_settings_for_save(existing, current)
+        }) {
+            log::error!("回滚统一会话开关设置失败: {rollback_err}");
+        }
+        return Err(format!("统一 Codex 会话历史开关未生效（live 配置重写失败）: {err}").into());
+    }
+
+    if unify_codex_enabled {
+        // 后台执行存量迁移（openai 桶 → custom 桶；仅当用户勾选了迁入既有
+        // 会话，函数内部自门控）。大会话目录可能要读数秒，不能阻塞设置保存；
+        // 失败时不写完成标记，下次启动自动重试。
+        tauri::async_runtime::spawn_blocking(|| {
+            match crate::codex_history_migration::maybe_migrate_codex_official_history_to_unified_bucket() {
+                Ok(outcome) => {
+                    if let Some(reason) = outcome.skipped_reason {
+                        log::debug!("○ Codex official history unify migration skipped: {reason}");
+                    } else {
+                        log::info!(
+                            "✓ Codex official history unify migration completed: jsonl_files={}, state_rows={}",
+                            outcome.migrated_jsonl_files,
+                            outcome.migrated_state_rows
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::warn!("✗ Codex official history unify migration failed: {e}");
+                }
+            }
+        });
+    } else {
+        // 清除标记与迁移意愿，让重新开启并再次勾选时能补迁
+        // 关闭期间落入 openai 桶的官方会话。
+        if let Err(err) = crate::settings::clear_codex_official_history_unify_migration() {
+            log::warn!("清除统一会话迁移标记失败: {err}");
+        }
+        if let Err(err) = crate::settings::clear_codex_unify_migrate_existing() {
+            log::warn!("清除统一会话迁移意愿失败: {err}");
+        }
+    }
+    Ok(())
 }
 
 #[derive(serde::Serialize)]
@@ -275,26 +279,18 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, IpcError
         return Ok(false);
     };
 
-    log::info!("开始下载应用更新: {}", update.version);
-    let progress_handle = app.clone();
-    let mut downloaded: u64 = 0;
-    let bytes = update
-        .download(
-            move |chunk_len, content_len| {
-                downloaded = downloaded.saturating_add(chunk_len as u64);
-                let _ = progress_handle.emit(
-                    "update-download-progress",
-                    UpdateDownloadProgress {
-                        downloaded,
-                        total: content_len,
-                    },
-                );
-            },
-            || {},
-        )
+    let bytes = download_update(&app, &update).await?;
+    install_and_restart(&app, update, bytes)
         .await
-        .map_err(|e| format!("下载更新失败: {e}"))?;
+        .map_err(IpcError::from)
+}
 
+/// 安装已下载的更新并重启应用（各平台的退出清理时机不同，见内部注释）
+async fn install_and_restart(
+    app: &AppHandle,
+    update: tauri_plugin_updater::Update,
+    bytes: Vec<u8>,
+) -> Result<bool, String> {
     log::info!("开始安装应用更新: {}", update.version);
 
     #[cfg(target_os = "windows")]
@@ -303,10 +299,10 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, IpcError
         // （插件内部 std::process::exit(0)，绕过 TrayIcon::drop、不发
         // NIM_DELETE，会残留死图标——与托盘"退出"路径相同的问题）。
         // 因此清理只能放在 install 前执行，且必须显式移除托盘图标。
-        crate::save_window_state_before_exit(&app);
-        crate::cleanup_before_exit(&app).await;
-        crate::remove_tray_icon_before_exit(&app);
-        crate::destroy_single_instance_lock(&app);
+        crate::save_window_state_before_exit(app);
+        crate::cleanup_before_exit(app).await;
+        crate::remove_tray_icon_before_exit(app);
+        crate::destroy_single_instance_lock(app);
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         update.install(bytes).map_err(|e| {
             format!(
@@ -323,13 +319,39 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, IpcError
             .install(bytes)
             .map_err(|e| format!("安装更新失败: {e}"))?;
 
-        crate::save_window_state_before_exit(&app);
-        crate::cleanup_before_exit(&app).await;
+        crate::save_window_state_before_exit(app);
+        crate::cleanup_before_exit(app).await;
 
         log::info!("应用更新安装完成，正在重启应用");
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        crate::restart_process(&app);
+        crate::restart_process(app);
     }
+}
+
+/// 下载更新包，下载进度经 `update-download-progress` 事件发给前端
+async fn download_update(
+    app: &AppHandle,
+    update: &tauri_plugin_updater::Update,
+) -> Result<Vec<u8>, String> {
+    log::info!("开始下载应用更新: {}", update.version);
+    let progress_handle = app.clone();
+    let mut downloaded: u64 = 0;
+    update
+        .download(
+            move |chunk_len, content_len| {
+                downloaded = downloaded.saturating_add(chunk_len as u64);
+                let _ = progress_handle.emit(
+                    "update-download-progress",
+                    UpdateDownloadProgress {
+                        downloaded,
+                        total: content_len,
+                    },
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| format!("下载更新失败: {e}"))
 }
 
 /// 检查是否有可用的应用更新，返回可用的新版本号（无更新时返回 None）。
@@ -949,7 +971,7 @@ pub async fn get_auto_launch_status() -> Result<bool, IpcError> {
 pub async fn get_rectifier_config(
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<crate::proxy::types::RectifierConfig, IpcError> {
-    state.db.get_rectifier_config().map_err(IpcError::from)
+    ProxySettingsService::rectifier_config(&state).map_err(IpcError::from)
 }
 
 /// 设置整流器配置
@@ -958,10 +980,7 @@ pub async fn set_rectifier_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::RectifierConfig,
 ) -> Result<bool, IpcError> {
-    state
-        .db
-        .set_rectifier_config(&config)
-        .map_err(IpcError::from)?;
+    ProxySettingsService::set_rectifier_config(&state, &config)?;
     Ok(true)
 }
 
@@ -970,7 +989,7 @@ pub async fn set_rectifier_config(
 pub async fn get_optimizer_config(
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<crate::proxy::types::OptimizerConfig, IpcError> {
-    state.db.get_optimizer_config().map_err(IpcError::from)
+    ProxySettingsService::optimizer_config(&state).map_err(IpcError::from)
 }
 
 /// 设置优化器配置
@@ -979,10 +998,7 @@ pub async fn set_optimizer_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::OptimizerConfig,
 ) -> Result<bool, IpcError> {
-    state
-        .db
-        .set_optimizer_config(&config)
-        .map_err(IpcError::from)?;
+    ProxySettingsService::set_optimizer_config(&state, &config)?;
     Ok(true)
 }
 
@@ -991,21 +1007,15 @@ pub async fn set_optimizer_config(
 pub async fn get_log_config(
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<crate::proxy::types::LogConfig, IpcError> {
-    state.db.get_log_config().map_err(IpcError::from)
+    ProxySettingsService::log_config(&state).map_err(IpcError::from)
 }
 
-/// 设置日志配置
+/// 设置日志配置（立即生效）
 #[tauri::command]
 pub async fn set_log_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::LogConfig,
 ) -> Result<bool, IpcError> {
-    state.db.set_log_config(&config).map_err(IpcError::from)?;
-    log::set_max_level(config.to_level_filter());
-    log::info!(
-        "日志配置已更新: enabled={}, level={}",
-        config.enabled,
-        config.level
-    );
+    ProxySettingsService::set_log_config(&state, &config)?;
     Ok(true)
 }

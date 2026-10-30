@@ -1,9 +1,11 @@
 //! 使用统计服务
 //!
-//! 提供使用量数据的聚合查询功能。这里只定义 DTO；查询 SQL 在
-//! [`crate::database::repo::usage`]（`impl Database` 的 Dashboard 查询方法也在那里）。
+//! 提供使用量数据的聚合查询功能。这里定义 DTO 与命令层入口 [`UsageStatsService`]；
+//! 查询 SQL 在 [`crate::database::repo::usage`]（`impl Database` 的 Dashboard 查询方法也在那里）。
 
+use crate::error::AppError;
 use crate::proxy::usage::parity::UsageParity;
+use crate::store::AppState;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use crate::database::repo::usage::{
@@ -182,6 +184,208 @@ pub struct ProviderLimitStatus {
     pub monthly_usage: String,
     pub monthly_limit: Option<String>,
     pub monthly_exceeded: bool,
+}
+
+/// 模型定价信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPricingInfo {
+    pub model_id: String,
+    pub display_name: String,
+    pub input_cost_per_million: String,
+    pub output_cost_per_million: String,
+    pub cache_read_cost_per_million: String,
+    pub cache_creation_cost_per_million: String,
+}
+
+/// 命令层入口（CCS-181）：Dashboard 查询与模型定价维护
+pub struct UsageStatsService;
+
+impl UsageStatsService {
+    pub fn summary(
+        state: &AppState,
+        start_date: Option<i64>,
+        end_date: Option<i64>,
+        app_type: Option<&str>,
+        provider_name: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<UsageSummary, AppError> {
+        state
+            .db
+            .get_usage_summary(start_date, end_date, app_type, provider_name, model)
+    }
+
+    pub fn summary_by_app(
+        state: &AppState,
+        start_date: Option<i64>,
+        end_date: Option<i64>,
+        provider_name: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Vec<UsageSummaryByApp>, AppError> {
+        state
+            .db
+            .get_usage_summary_by_app(start_date, end_date, provider_name, model)
+    }
+
+    pub fn daily_trends(
+        state: &AppState,
+        start_date: Option<i64>,
+        end_date: Option<i64>,
+        app_type: Option<&str>,
+        provider_name: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Vec<DailyStats>, AppError> {
+        state
+            .db
+            .get_daily_trends(start_date, end_date, app_type, provider_name, model)
+    }
+
+    pub fn provider_stats(
+        state: &AppState,
+        start_date: Option<i64>,
+        end_date: Option<i64>,
+        app_type: Option<&str>,
+        provider_name: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Vec<ProviderStats>, AppError> {
+        state
+            .db
+            .get_provider_stats(start_date, end_date, app_type, provider_name, model)
+    }
+
+    pub fn model_stats(
+        state: &AppState,
+        start_date: Option<i64>,
+        end_date: Option<i64>,
+        app_type: Option<&str>,
+        provider_name: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Vec<ModelStats>, AppError> {
+        state
+            .db
+            .get_model_stats(start_date, end_date, app_type, provider_name, model)
+    }
+
+    pub fn request_logs(
+        state: &AppState,
+        filters: &LogFilters,
+        page: u32,
+        page_size: u32,
+    ) -> Result<PaginatedLogs, AppError> {
+        state.db.get_request_logs(filters, page, page_size)
+    }
+
+    pub fn unpriced_model_stats(
+        state: &AppState,
+        filters: &LogFilters,
+    ) -> Result<Vec<UnpricedModelStats>, AppError> {
+        state.db.get_unpriced_model_stats(filters)
+    }
+
+    pub fn request_detail(
+        state: &AppState,
+        request_id: &str,
+    ) -> Result<Option<RequestLogDetail>, AppError> {
+        state.db.get_request_detail(request_id)
+    }
+
+    pub fn provider_limits(
+        state: &AppState,
+        provider_id: &str,
+        app_type: &str,
+    ) -> Result<ProviderLimitStatus, AppError> {
+        state.db.check_provider_limits(provider_id, app_type)
+    }
+
+    /// 生效中的模型定价列表；model_pricing 表缺失（迁移未完成）时返回空列表
+    pub fn model_pricing(state: &AppState) -> Result<Vec<ModelPricingInfo>, AppError> {
+        log::info!("获取模型定价列表");
+        let conn = crate::database::lock_conn!(state.db.conn);
+        let Some(rows) = crate::database::repo::pricing::list_active(&conn)? else {
+            log::error!("model_pricing 表不存在,可能需要重启应用以触发数据库迁移");
+            return Ok(Vec::new());
+        };
+        let pricing: Vec<ModelPricingInfo> = rows
+            .into_iter()
+            .map(|row| ModelPricingInfo {
+                model_id: row.model_id,
+                display_name: row.display_name,
+                input_cost_per_million: row.price.input,
+                output_cost_per_million: row.price.output,
+                cache_read_cost_per_million: row.price.cache_read,
+                cache_creation_cost_per_million: row.price.cache_creation,
+            })
+            .collect();
+        log::info!("成功获取 {} 条模型定价数据", pricing.len());
+        Ok(pricing)
+    }
+
+    /// 保存用户定价（价格为每百万 token 的非负十进制数），并回填该模型缺失的历史成本
+    pub fn update_model_pricing(
+        state: &AppState,
+        model_id: &str,
+        display_name: &str,
+        price: crate::pricing::catalog::CatalogPrice,
+    ) -> Result<(), AppError> {
+        let model_id = model_id.trim();
+        let display_name = display_name.trim();
+        if model_id.is_empty() {
+            return Err(AppError::localized(
+                "usage.modelIdRequired",
+                "模型 ID 不能为空",
+                "Model ID is required",
+            ));
+        }
+        if display_name.is_empty() {
+            return Err(AppError::localized(
+                "usage.displayNameRequired",
+                "显示名称不能为空",
+                "Display name is required",
+            ));
+        }
+        let price = crate::pricing::catalog::CatalogPrice {
+            input: validate_price("input_cost", &price.input)?,
+            output: validate_price("output_cost", &price.output)?,
+            cache_read: validate_price("cache_read_cost", &price.cache_read)?,
+            cache_creation: validate_price("cache_creation_cost", &price.cache_creation)?,
+        };
+
+        state
+            .db
+            .save_user_model_pricing(model_id, display_name, price)?;
+        if let Err(e) = state.db.backfill_missing_usage_costs_for_model(model_id) {
+            log::warn!("模型定价更新后回填历史用量成本失败 (model_id={model_id}): {e}");
+        }
+        Ok(())
+    }
+
+    pub fn delete_model_pricing(state: &AppState, model_id: &str) -> Result<(), AppError> {
+        state.db.delete_model_pricing(model_id)?;
+        log::info!("已删除模型定价: {model_id}");
+        Ok(())
+    }
+}
+
+/// 校验单项价格为非负十进制数，返回去掉首尾空白的原文
+fn validate_price(label: &str, value: &str) -> Result<String, AppError> {
+    use std::str::FromStr;
+
+    let parsed = rust_decimal::Decimal::from_str(value.trim()).map_err(|e| {
+        AppError::localized(
+            "usage.invalidPrice",
+            format!("{label} 价格无效: {value} - {e}"),
+            format!("{label} price is invalid: {value} - {e}"),
+        )
+    })?;
+    if parsed < rust_decimal::Decimal::ZERO {
+        return Err(AppError::localized(
+            "usage.invalidPrice",
+            format!("{label} 价格必须为非负数: {value}"),
+            format!("{label} price must be non-negative: {value}"),
+        ));
+    }
+    Ok(value.trim().to_string())
 }
 
 #[cfg(test)]

@@ -1,7 +1,8 @@
+use crate::error::IpcError;
 use crate::session_manager;
 
 #[tauri::command]
-pub async fn list_sessions() -> Result<Vec<session_manager::SessionMeta>, String> {
+pub async fn list_sessions() -> Result<Vec<session_manager::SessionMeta>, IpcError> {
     let sessions = tauri::async_runtime::spawn_blocking(session_manager::scan_sessions)
         .await
         .map_err(|e| format!("Failed to scan sessions: {e}"))?;
@@ -12,12 +13,13 @@ pub async fn list_sessions() -> Result<Vec<session_manager::SessionMeta>, String
 pub async fn get_session_messages(
     provider_id: String,
     source_path: String,
-) -> Result<Vec<session_manager::SessionMessage>, String> {
+) -> Result<Vec<session_manager::SessionMessage>, IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         session_manager::load_messages(&provider_id, &source_path)
     })
     .await
     .map_err(|e| format!("Failed to load session messages: {e}"))?
+    .map_err(IpcError::from)
 }
 
 /// 在终端中恢复会话。webview 只能指定 `{providerId, sessionId}`：
@@ -27,7 +29,7 @@ pub async fn get_session_messages(
 pub async fn launch_session_terminal(
     provider_id: String,
     session_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, IpcError> {
     // Read preferred terminal from global settings
     let preferred = crate::settings::get_preferred_terminal();
     // Map global setting terminal names to session terminal names
@@ -35,17 +37,13 @@ pub async fn launch_session_terminal(
     let target = match preferred.as_deref() {
         Some("iterm2") => "iterm".to_string(),
         Some(t) => t.to_string(),
-        None => "terminal".to_string(), // Default to Terminal.app on macOS
+        // Default to Terminal.app on macOS; Linux/Windows resolve their own preferred terminal
+        None => "terminal".to_string(),
     };
 
     tauri::async_runtime::spawn_blocking(move || {
         let resume = session_manager::resolve_resume_target(&provider_id, &session_id)?;
-        session_manager::terminal::launch_terminal(
-            &target,
-            &resume.command,
-            resume.cwd.as_deref(),
-            None,
-        )
+        crate::platform::terminal::launch_resume_terminal(&target, &resume, None)
     })
     .await
     .map_err(|e| format!("Failed to launch terminal: {e}"))??;
@@ -58,19 +56,20 @@ pub async fn delete_session(
     provider_id: String,
     session_id: String,
     source_path: String,
-) -> Result<bool, String> {
+) -> Result<bool, IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         session_manager::delete_session(&provider_id, &session_id, &source_path)
     })
     .await
     .map_err(|e| format!("Failed to delete session: {e}"))?
+    .map_err(IpcError::from)
 }
 
 #[tauri::command]
 pub async fn delete_sessions(
     items: Vec<session_manager::DeleteSessionRequest>,
-) -> Result<Vec<session_manager::DeleteSessionOutcome>, String> {
+) -> Result<Vec<session_manager::DeleteSessionOutcome>, IpcError> {
     tauri::async_runtime::spawn_blocking(move || session_manager::delete_sessions(&items))
         .await
-        .map_err(|e| format!("Failed to delete sessions: {e}"))
+        .map_err(|e| IpcError::from(format!("Failed to delete sessions: {e}")))
 }

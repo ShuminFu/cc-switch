@@ -8,7 +8,7 @@ use crate::commands::sync_support::{
 };
 use crate::database::backup::BackupEntry;
 use crate::database::{Database, DbStorageStats, Maintenance, MaintenanceReport};
-use crate::error::AppError;
+use crate::error::{AppError, IpcError};
 use crate::picked_paths::{self, PickPurpose};
 use crate::services::provider::ProviderService;
 use crate::store::AppState;
@@ -20,12 +20,12 @@ use crate::store::AppState;
 pub async fn export_config_to_file(
     file_path: String,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<Value, IpcError> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || export_sql_to_picked_path(&db, &file_path))
         .await
         .map_err(|e| format!("导出配置失败: {e}"))?
-        .map_err(|e: AppError| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// 导出到 `save_file_dialog` 选出的路径；其他路径一律拒绝
@@ -46,7 +46,7 @@ fn export_sql_to_picked_path(db: &Database, file_path: &str) -> Result<Value, Ap
 pub async fn import_config_from_file(
     file_path: String,
     state: State<'_, AppState>,
-) -> Result<Value, String> {
+) -> Result<Value, IpcError> {
     let db = state.db.clone();
     let db_for_sync = db.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -59,7 +59,7 @@ pub async fn import_config_from_file(
     })
     .await
     .map_err(|e| format!("导入配置失败: {e}"))?
-    .map_err(|e: AppError| e.to_string())
+    .map_err(IpcError::from)
 }
 
 /// 从 `open_file_dialog` 选出的路径导入；其他路径一律拒绝
@@ -70,7 +70,7 @@ fn import_sql_from_picked_path(db: &Database, file_path: &str) -> Result<String,
 }
 
 #[tauri::command]
-pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<Value, IpcError> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let app_state = AppState::new(db);
@@ -82,7 +82,7 @@ pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<V
     })
     .await
     .map_err(|e| format!("同步当前供应商失败: {e}"))?
-    .map_err(|e: AppError| e.to_string())
+    .map_err(IpcError::from)
 }
 
 // ─── File dialogs ────────────────────────────────────────────
@@ -92,7 +92,7 @@ pub async fn sync_current_providers_live(state: State<'_, AppState>) -> Result<V
 pub async fn save_file_dialog<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     default_name: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     let dialog = app.dialog();
     let result = dialog
         .file()
@@ -107,7 +107,7 @@ pub async fn save_file_dialog<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn open_file_dialog<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     let dialog = app.dialog();
     let result = dialog
         .file()
@@ -121,7 +121,7 @@ pub async fn open_file_dialog<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn open_zip_file_dialog<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     let dialog = app.dialog();
     let result = dialog
         .file()
@@ -136,7 +136,7 @@ pub async fn open_zip_file_dialog<R: tauri::Runtime>(
 pub async fn save_csv_file_dialog<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     default_name: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, IpcError> {
     let dialog = app.dialog();
     let result = dialog
         .file()
@@ -149,11 +149,11 @@ pub async fn save_csv_file_dialog<R: tauri::Runtime>(
 
 /// 把前端生成的 CSV 写到 `save_csv_file_dialog` 选出的路径
 #[tauri::command]
-pub async fn write_csv_export(file_path: String, content: String) -> Result<(), String> {
+pub async fn write_csv_export(file_path: String, content: String) -> Result<(), IpcError> {
     tauri::async_runtime::spawn_blocking(move || write_csv_to_picked_path(&file_path, &content))
         .await
         .map_err(|e| format!("导出 CSV 失败: {e}"))?
-        .map_err(|e: AppError| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// 只写入 CSV 对话框选出的路径；其他路径一律拒绝
@@ -173,9 +173,17 @@ fn register_pick(purpose: PickPurpose, path: String) -> String {
 
 /// Manually create a database backup
 #[tauri::command]
-pub async fn create_db_backup(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn create_db_backup(state: State<'_, AppState>) -> Result<String, IpcError> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || match db.backup_database_file()? {
+    tauri::async_runtime::spawn_blocking(move || create_backup_file(&db))
+        .await
+        .map_err(|e| format!("Backup failed: {e}"))?
+        .map_err(IpcError::from)
+}
+
+/// 立即备份数据库文件，返回备份文件名
+fn create_backup_file(db: &Database) -> Result<String, AppError> {
+    match db.backup_database_file()? {
         Some(path) => Ok(path
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
@@ -183,16 +191,13 @@ pub async fn create_db_backup(state: State<'_, AppState>) -> Result<String, Stri
         None => Err(AppError::Config(
             "Database file not found, backup skipped".to_string(),
         )),
-    })
-    .await
-    .map_err(|e| format!("Backup failed: {e}"))?
-    .map_err(|e: AppError| e.to_string())
+    }
 }
 
 /// List all database backup files
 #[tauri::command]
-pub fn list_db_backups() -> Result<Vec<BackupEntry>, String> {
-    Database::list_backups().map_err(|e| e.to_string())
+pub fn list_db_backups() -> Result<Vec<BackupEntry>, IpcError> {
+    Database::list_backups().map_err(IpcError::from)
 }
 
 /// Restore database from a backup file
@@ -200,64 +205,69 @@ pub fn list_db_backups() -> Result<Vec<BackupEntry>, String> {
 pub async fn restore_db_backup(
     state: State<'_, AppState>,
     filename: String,
-) -> Result<String, String> {
+) -> Result<String, IpcError> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || db.restore_from_backup(&filename))
+    tauri::async_runtime::spawn_blocking(move || restore_backup_file(&db, &filename))
         .await
         .map_err(|e| format!("Restore failed: {e}"))?
-        .map_err(|e: AppError| e.to_string())
+        .map_err(IpcError::from)
+}
+
+/// 用备份文件覆盖当前数据库，返回恢复前自动备份的文件名
+fn restore_backup_file(db: &Database, filename: &str) -> Result<String, AppError> {
+    db.restore_from_backup(filename)
 }
 
 /// Downgrade restore from the db_version_too_new recovery screen: replace the
 /// too-new database with a restorable (pre-migration) backup. The app must be
 /// restarted afterwards. Returns the filename the newer database was kept as.
 #[tauri::command]
-pub async fn restore_backup_over_newer_db(filename: String) -> Result<String, String> {
+pub async fn restore_backup_over_newer_db(filename: String) -> Result<String, IpcError> {
     let in_recovery = crate::init_status::get_init_error()
         .map(|p| p.kind.as_deref() == Some(crate::init_status::DB_VERSION_TOO_NEW))
         .unwrap_or(false);
     if !in_recovery {
         return Err(
-            "This restore is only available while the database is too new for this app".to_string(),
+            "This restore is only available while the database is too new for this app".into(),
         );
     }
     tauri::async_runtime::spawn_blocking(move || Database::restore_backup_over_newer_db(&filename))
         .await
         .map_err(|e| format!("Restore failed: {e}"))?
-        .map_err(|e: AppError| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// Rename a database backup file
 #[tauri::command]
-pub fn rename_db_backup(old_filename: String, new_name: String) -> Result<String, String> {
-    Database::rename_backup(&old_filename, &new_name).map_err(|e| e.to_string())
+pub fn rename_db_backup(old_filename: String, new_name: String) -> Result<String, IpcError> {
+    Database::rename_backup(&old_filename, &new_name).map_err(IpcError::from)
 }
 
 /// Delete a database backup file
 #[tauri::command]
-pub fn delete_db_backup(filename: String) -> Result<(), String> {
-    Database::delete_backup(&filename).map_err(|e| e.to_string())
+pub fn delete_db_backup(filename: String) -> Result<(), IpcError> {
+    Database::delete_backup(&filename).map_err(IpcError::from)
 }
 
 // ─── Database retention / maintenance ───────────────────────
 
 /// Database size and per-table row counts for the retention panel
 #[tauri::command]
-pub async fn get_db_storage_stats(state: State<'_, AppState>) -> Result<DbStorageStats, String> {
+pub async fn get_db_storage_stats(state: State<'_, AppState>) -> Result<DbStorageStats, IpcError> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || Maintenance::storage_stats(&db))
         .await
         .map_err(|e| format!("Failed to read database stats: {e}"))?
-        .map_err(|e: AppError| e.to_string())
+        .map_err(IpcError::from)
 }
 
 /// Run database maintenance now with the retention policy from the current settings
 #[tauri::command]
-pub async fn run_db_maintenance(state: State<'_, AppState>) -> Result<MaintenanceReport, String> {
+pub async fn run_db_maintenance(state: State<'_, AppState>) -> Result<MaintenanceReport, IpcError> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || run_maintenance_with_current_policy(&db))
         .await
-        .map_err(|e| format!("Maintenance failed: {e}"))
+        .map_err(|e| format!("Maintenance failed: {e}").into())
 }
 
 /// 读取当前设置中的保留策略（每次调用重新解析，保存设置后立即生效）并执行一次维护

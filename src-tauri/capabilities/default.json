@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "Core/plugin permissions plus the standard app command domains (see src/commands/registry.rs). Privileged commands are granted separately by capabilities/privileged.json.",
   "windows": [
     "main"
   ],
@@ -17,6 +17,21 @@
     "core:window:allow-close",
     "core:window:allow-set-decorations",
     "process:allow-restart",
-    "dialog:default"
+    "dialog:default",
+    "app",
+    "settings",
+    "config",
+    "provider",
+    "accounts",
+    "mcp",
+    "prompt",
+    "profile",
+    "skill",
+    "proxy",
+    "usage",
+    "sync",
+    "sessions",
+    "cli-tools",
+    "integrations"
   ]
 }

@@ -5,6 +5,7 @@ use crate::commands::sync_support::{
     attach_warning, post_sync_warning_from_result, run_post_import_sync,
 };
 use crate::error::AppError;
+use crate::error::IpcError;
 use crate::services::s3_sync as s3_sync_service;
 use crate::settings::{self, S3SyncSettings};
 use crate::store::AppState;
@@ -61,7 +62,7 @@ where
     s3_sync_service::run_with_sync_lock(operation).await
 }
 
-fn map_sync_result<T, F>(result: Result<T, AppError>, on_error: F) -> Result<T, String>
+fn map_sync_result<T, F>(result: Result<T, AppError>, on_error: F) -> Result<T, IpcError>
 where
     F: FnOnce(&AppError),
 {
@@ -69,7 +70,7 @@ where
         Ok(value) => Ok(value),
         Err(err) => {
             on_error(&err);
-            Err(err.to_string())
+            Err(err.into())
         }
     }
 }
@@ -78,13 +79,13 @@ where
 pub async fn s3_test_connection(
     settings: S3SyncSettings,
     preserve_empty_password: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, IpcError> {
     let preserve_empty = preserve_empty_password.unwrap_or(true);
     let resolved =
         resolve_secret_for_request(settings, settings::get_s3_sync_settings(), preserve_empty);
     s3_sync_service::check_connection(&resolved)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     Ok(json!({
         "success": true,
         "message": "S3 connection ok"
@@ -92,7 +93,7 @@ pub async fn s3_test_connection(
 }
 
 #[tauri::command]
-pub async fn s3_sync_upload(state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn s3_sync_upload(state: State<'_, AppState>) -> Result<Value, IpcError> {
     let db = state.db.clone();
     let mut settings = require_enabled_s3_settings()?;
 
@@ -106,7 +107,7 @@ pub async fn s3_sync_upload(state: State<'_, AppState>) -> Result<Value, String>
 pub async fn s3_sync_download(
     state: State<'_, AppState>,
     allow_unsigned: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, IpcError> {
     let allow_unsigned = allow_unsigned.unwrap_or(false);
     let db = state.db.clone();
     let db_for_sync = db.clone();
@@ -141,7 +142,7 @@ pub async fn s3_sync_download(
 pub async fn s3_sync_save_settings(
     settings: S3SyncSettings,
     password_touched: Option<bool>,
-) -> Result<Value, String> {
+) -> Result<Value, IpcError> {
     let password_touched = password_touched.unwrap_or(false);
     let existing = settings::get_s3_sync_settings();
     let mut sync_settings =
@@ -153,17 +154,17 @@ pub async fn s3_sync_save_settings(
     }
 
     sync_settings.normalize();
-    sync_settings.validate().map_err(|e| e.to_string())?;
-    settings::set_s3_sync_settings(Some(sync_settings)).map_err(|e| e.to_string())?;
+    sync_settings.validate().map_err(IpcError::from)?;
+    settings::set_s3_sync_settings(Some(sync_settings)).map_err(IpcError::from)?;
     Ok(json!({ "success": true }))
 }
 
 #[tauri::command]
-pub async fn s3_sync_fetch_remote_info() -> Result<Value, String> {
+pub async fn s3_sync_fetch_remote_info() -> Result<Value, IpcError> {
     let settings = require_enabled_s3_settings()?;
     let info = s3_sync_service::fetch_remote_info(&settings)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(IpcError::from)?;
     Ok(info.unwrap_or(json!({ "empty": true })))
 }
 

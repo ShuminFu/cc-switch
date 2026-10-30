@@ -177,6 +177,7 @@ export const UNMOCKED_COMMANDS = [
   "launch_session_terminal",
   "get_tool_versions",
   "run_tool_lifecycle_action",
+  "cancel_tool_lifecycle_action",
   "probe_tool_installations",
   "open_provider_terminal",
   "get_universal_providers",

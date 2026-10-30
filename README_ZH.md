@@ -494,9 +494,6 @@ cargo test
 
 # 运行特定测试
 cargo test test_name
-
-# 运行带测试 hooks 的测试
-cargo test --features test-hooks
 ```
 
 ### 测试说明

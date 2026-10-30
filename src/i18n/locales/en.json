@@ -494,6 +494,20 @@
           "usage": "Usage stats",
           "sessionResume": "Session resume"
         }
+      },
+      "startupReport": {
+        "title": "Startup Diagnostics",
+        "description": "Result of each startup step (migrations, live config import, ...) with error codes",
+        "allOk": "All startup steps completed without errors",
+        "failedSummary": "{{count}} startup step(s) failed",
+        "loadFailed": "Failed to load the startup report",
+        "status": {
+          "ok": "OK",
+          "skipped": "Skipped",
+          "failed": "Failed"
+        },
+        "toastTitle": "{{count}} startup step(s) failed",
+        "toastDescription": "Some data may be missing. See Settings → Advanced → Startup Diagnostics for details."
       }
     },
     "language": "Language",
@@ -877,6 +891,8 @@
     "toolInstall": "Install",
     "toolUpdate": "Update",
     "toolReady": "Ready",
+    "toolCancel": "Cancel",
+    "toolActionCancelled": "Install/update cancelled",
     "toolActionDone": "{{action}} completed for {{count}} tool(s)",
     "toolActionPartial": "{{action}} succeeded for {{succeeded}}, failed for {{failed}}",
     "toolActionFailed": "Install/update command failed",

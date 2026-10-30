@@ -2,6 +2,7 @@ use tauri::State;
 
 use crate::commands::codex_oauth::CodexOAuthState;
 use crate::commands::copilot::CopilotAuthState;
+use crate::error::IpcError;
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthError;
 use crate::proxy::providers::copilot_auth::{
     CopilotAuthError, GitHubAccount, GitHubDeviceCodeResponse,
@@ -84,7 +85,7 @@ pub async fn auth_start_login(
     github_domain: Option<String>,
     copilot_state: State<'_, CopilotAuthState>,
     codex_state: State<'_, CodexOAuthState>,
-) -> Result<ManagedAuthDeviceCodeResponse, String> {
+) -> Result<ManagedAuthDeviceCodeResponse, IpcError> {
     let auth_provider = ensure_auth_provider(&auth_provider)?;
     match auth_provider {
         AUTH_PROVIDER_GITHUB_COPILOT => {
@@ -92,7 +93,7 @@ pub async fn auth_start_login(
             let response = auth_manager
                 .start_device_flow(github_domain.as_deref())
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| IpcError::from(e.to_string()))?;
             Ok(map_device_code_response(auth_provider, response))
         }
         AUTH_PROVIDER_CODEX_OAUTH => {
@@ -100,7 +101,7 @@ pub async fn auth_start_login(
             let response = auth_manager
                 .start_device_flow()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| IpcError::from(e.to_string()))?;
             Ok(map_device_code_response(auth_provider, response))
         }
         _ => unreachable!(),
@@ -114,7 +115,7 @@ pub async fn auth_poll_for_account(
     github_domain: Option<String>,
     copilot_state: State<'_, CopilotAuthState>,
     codex_state: State<'_, CodexOAuthState>,
-) -> Result<Option<ManagedAuthAccount>, String> {
+) -> Result<Option<ManagedAuthAccount>, IpcError> {
     let auth_provider = ensure_auth_provider(&auth_provider)?;
     match auth_provider {
         AUTH_PROVIDER_GITHUB_COPILOT => {
@@ -130,7 +131,7 @@ pub async fn auth_poll_for_account(
                     }))
                 }
                 Err(CopilotAuthError::AuthorizationPending) => Ok(None),
-                Err(e) => Err(e.to_string()),
+                Err(e) => Err(e.to_string().into()),
             }
         }
         AUTH_PROVIDER_CODEX_OAUTH => {
@@ -143,7 +144,7 @@ pub async fn auth_poll_for_account(
                     }))
                 }
                 Err(CodexOAuthError::AuthorizationPending) => Ok(None),
-                Err(e) => Err(e.to_string()),
+                Err(e) => Err(e.to_string().into()),
             }
         }
         _ => unreachable!(),
@@ -155,7 +156,7 @@ pub async fn auth_list_accounts(
     auth_provider: String,
     copilot_state: State<'_, CopilotAuthState>,
     codex_state: State<'_, CodexOAuthState>,
-) -> Result<Vec<ManagedAuthAccount>, String> {
+) -> Result<Vec<ManagedAuthAccount>, IpcError> {
     let auth_provider = ensure_auth_provider(&auth_provider)?;
     match auth_provider {
         AUTH_PROVIDER_GITHUB_COPILOT => {
@@ -187,7 +188,7 @@ pub async fn auth_get_status(
     auth_provider: String,
     copilot_state: State<'_, CopilotAuthState>,
     codex_state: State<'_, CodexOAuthState>,
-) -> Result<ManagedAuthStatus, String> {
+) -> Result<ManagedAuthStatus, IpcError> {
     let auth_provider = ensure_auth_provider(&auth_provider)?;
     match auth_provider {
         AUTH_PROVIDER_GITHUB_COPILOT => {
@@ -236,7 +237,7 @@ pub async fn auth_remove_account(
     account_id: String,
     copilot_state: State<'_, CopilotAuthState>,
     codex_state: State<'_, CodexOAuthState>,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let auth_provider = ensure_auth_provider(&auth_provider)?;
     match auth_provider {
         AUTH_PROVIDER_GITHUB_COPILOT => {
@@ -244,14 +245,14 @@ pub async fn auth_remove_account(
             auth_manager
                 .remove_account(&account_id)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| IpcError::from(e.to_string()))
         }
         AUTH_PROVIDER_CODEX_OAUTH => {
             let auth_manager = codex_state.0.read().await;
             auth_manager
                 .remove_account(&account_id)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| IpcError::from(e.to_string()))
         }
         _ => unreachable!(),
     }
@@ -263,7 +264,7 @@ pub async fn auth_set_default_account(
     account_id: String,
     copilot_state: State<'_, CopilotAuthState>,
     codex_state: State<'_, CodexOAuthState>,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let auth_provider = ensure_auth_provider(&auth_provider)?;
     match auth_provider {
         AUTH_PROVIDER_GITHUB_COPILOT => {
@@ -271,14 +272,14 @@ pub async fn auth_set_default_account(
             auth_manager
                 .set_default_account(&account_id)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| IpcError::from(e.to_string()))
         }
         AUTH_PROVIDER_CODEX_OAUTH => {
             let auth_manager = codex_state.0.read().await;
             auth_manager
                 .set_default_account(&account_id)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| IpcError::from(e.to_string()))
         }
         _ => unreachable!(),
     }
@@ -289,16 +290,22 @@ pub async fn auth_logout(
     auth_provider: String,
     copilot_state: State<'_, CopilotAuthState>,
     codex_state: State<'_, CodexOAuthState>,
-) -> Result<(), String> {
+) -> Result<(), IpcError> {
     let auth_provider = ensure_auth_provider(&auth_provider)?;
     match auth_provider {
         AUTH_PROVIDER_GITHUB_COPILOT => {
             let auth_manager = copilot_state.0.read().await;
-            auth_manager.clear_auth().await.map_err(|e| e.to_string())
+            auth_manager
+                .clear_auth()
+                .await
+                .map_err(|e| IpcError::from(e.to_string()))
         }
         AUTH_PROVIDER_CODEX_OAUTH => {
             let auth_manager = codex_state.0.read().await;
-            auth_manager.clear_auth().await.map_err(|e| e.to_string())
+            auth_manager
+                .clear_auth()
+                .await
+                .map_err(|e| IpcError::from(e.to_string()))
         }
         _ => unreachable!(),
     }

@@ -21,7 +21,7 @@ interface SyncStatusUpdatedPayload {
 /**
  * 主窗口级的后端事件订阅与启动时一次性提示：
  * 供应商切换 / 统一供应商同步 / 项目应用 / 云同步状态 / 代理官方供应商警告 / live 配置漂移，
- * 以及配置迁移与 Skills 迁移结果。
+ * 以及配置迁移、Skills 迁移结果与启动诊断报告中的失败步骤。
  */
 export function useAppShellEvents(
   activeApp: AppId,
@@ -174,4 +174,33 @@ export function useAppShellEvents(
 
     checkSkillsMigration();
   }, [t, queryClient]);
+
+  // 启动诊断：迁移 / live 导入等步骤失败时提示，避免表现为无声的"供应商丢失"
+  useEffect(() => {
+    const checkStartupReport = async () => {
+      try {
+        const report = await settingsApi.getStartupReport();
+        const failed = report.steps.filter((step) => step.status === "failed");
+        if (failed.length > 0) {
+          toast.warning(
+            t("settings.advanced.startupReport.toastTitle", {
+              count: failed.length,
+            }),
+            {
+              description: t(
+                "settings.advanced.startupReport.toastDescription",
+              ),
+              closeButton: true,
+              duration: 10000,
+            },
+          );
+          console.warn("[App] Startup steps failed:", failed);
+        }
+      } catch (error) {
+        console.error("[App] Failed to load startup report:", error);
+      }
+    };
+
+    checkStartupReport();
+  }, [t]);
 }

@@ -2,6 +2,7 @@
 //!
 //! 提供前端调用的 API 接口
 
+use crate::ctx::{Ctx, TauriEventSink};
 use crate::error::{AppError, IpcError};
 use crate::proxy::capture::{
     CaptureStatus, CaptureStore, DEFAULT_CAPTURE_MINUTES, MAX_CAPTURE_MINUTES,
@@ -9,8 +10,9 @@ use crate::proxy::capture::{
 use crate::proxy::trace::{RequestTrace, TraceStore};
 use crate::proxy::types::*;
 use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats, CircuitProbeResult};
+use crate::services::failover::FailoverService;
+use crate::services::proxy_settings::ProxySettingsService;
 use crate::store::AppState;
-use std::str::FromStr;
 
 /// 启动代理服务器（仅启动服务，不接管 Live 配置）
 #[tauri::command]
@@ -111,8 +113,9 @@ pub async fn update_proxy_config(
 pub async fn get_global_proxy_config(
     state: tauri::State<'_, AppState>,
 ) -> Result<GlobalProxyConfig, IpcError> {
-    let db = &state.db;
-    db.get_global_proxy_config().await.map_err(IpcError::from)
+    ProxySettingsService::global_config(&state)
+        .await
+        .map_err(IpcError::from)
 }
 
 /// 更新全局代理配置
@@ -123,8 +126,7 @@ pub async fn update_global_proxy_config(
     state: tauri::State<'_, AppState>,
     config: GlobalProxyConfig,
 ) -> Result<(), IpcError> {
-    let db = &state.db;
-    db.update_global_proxy_config(config)
+    ProxySettingsService::update_global_config(&state, config)
         .await
         .map_err(IpcError::from)
 }
@@ -137,8 +139,7 @@ pub async fn get_proxy_config_for_app(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<AppProxyConfig, IpcError> {
-    let db = &state.db;
-    db.get_proxy_config_for_app(&app_type)
+    ProxySettingsService::app_config(&state, &app_type)
         .await
         .map_err(IpcError::from)
 }
@@ -151,35 +152,9 @@ pub async fn update_proxy_config_for_app(
     state: tauri::State<'_, AppState>,
     config: AppProxyConfig,
 ) -> Result<(), IpcError> {
-    let db = &state.db;
-    let app_type = config.app_type.clone();
-    let circuit_config = CircuitBreakerConfig::from(&config);
-
-    db.update_proxy_config_for_app(config)
-        .await
-        .map_err(IpcError::from)?;
-
-    state
-        .proxy_service
-        .update_circuit_breaker_config_for_app(&app_type, circuit_config)
+    ProxySettingsService::update_app_config(&state, config)
         .await
         .map_err(IpcError::from)
-}
-
-async fn get_default_cost_multiplier_internal(
-    state: &AppState,
-    app_type: &str,
-) -> Result<String, AppError> {
-    let db = &state.db;
-    db.get_default_cost_multiplier(app_type).await
-}
-
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
-pub async fn get_default_cost_multiplier_test_hook(
-    state: &AppState,
-    app_type: &str,
-) -> Result<String, AppError> {
-    get_default_cost_multiplier_internal(state, app_type).await
 }
 
 /// 获取默认成本倍率
@@ -188,27 +163,9 @@ pub async fn get_default_cost_multiplier(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<String, IpcError> {
-    get_default_cost_multiplier_internal(&state, &app_type)
+    ProxySettingsService::default_cost_multiplier(&state, &app_type)
         .await
         .map_err(IpcError::from)
-}
-
-async fn set_default_cost_multiplier_internal(
-    state: &AppState,
-    app_type: &str,
-    value: &str,
-) -> Result<(), AppError> {
-    let db = &state.db;
-    db.set_default_cost_multiplier(app_type, value).await
-}
-
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
-pub async fn set_default_cost_multiplier_test_hook(
-    state: &AppState,
-    app_type: &str,
-    value: &str,
-) -> Result<(), AppError> {
-    set_default_cost_multiplier_internal(state, app_type, value).await
 }
 
 /// 设置默认成本倍率
@@ -218,25 +175,9 @@ pub async fn set_default_cost_multiplier(
     app_type: String,
     value: String,
 ) -> Result<(), IpcError> {
-    set_default_cost_multiplier_internal(&state, &app_type, &value)
+    ProxySettingsService::set_default_cost_multiplier(&state, &app_type, &value)
         .await
         .map_err(IpcError::from)
-}
-
-async fn get_pricing_model_source_internal(
-    state: &AppState,
-    app_type: &str,
-) -> Result<String, AppError> {
-    let db = &state.db;
-    db.get_pricing_model_source(app_type).await
-}
-
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
-pub async fn get_pricing_model_source_test_hook(
-    state: &AppState,
-    app_type: &str,
-) -> Result<String, AppError> {
-    get_pricing_model_source_internal(state, app_type).await
 }
 
 /// 获取计费模式来源
@@ -245,27 +186,9 @@ pub async fn get_pricing_model_source(
     state: tauri::State<'_, AppState>,
     app_type: String,
 ) -> Result<String, IpcError> {
-    get_pricing_model_source_internal(&state, &app_type)
+    ProxySettingsService::pricing_model_source(&state, &app_type)
         .await
         .map_err(IpcError::from)
-}
-
-async fn set_pricing_model_source_internal(
-    state: &AppState,
-    app_type: &str,
-    value: &str,
-) -> Result<(), AppError> {
-    let db = &state.db;
-    db.set_pricing_model_source(app_type, value).await
-}
-
-#[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
-pub async fn set_pricing_model_source_test_hook(
-    state: &AppState,
-    app_type: &str,
-    value: &str,
-) -> Result<(), AppError> {
-    set_pricing_model_source_internal(state, app_type, value).await
 }
 
 /// 设置计费模式来源
@@ -275,7 +198,7 @@ pub async fn set_pricing_model_source(
     app_type: String,
     value: String,
 ) -> Result<(), IpcError> {
-    set_pricing_model_source_internal(&state, &app_type, &value)
+    ProxySettingsService::set_pricing_model_source(&state, &app_type, &value)
         .await
         .map_err(IpcError::from)
 }
@@ -303,27 +226,7 @@ pub async fn switch_proxy_provider(
     app_type: String,
     provider_id: String,
 ) -> Result<(), IpcError> {
-    // Codex's built-in official provider can use the client's native OpenAI
-    // login through takeover. Other official providers remain blocked.
-    let provider = state
-        .db
-        .get_provider_by_id(&provider_id, &app_type)
-        .map_err(|e| format!("读取供应商失败: {e}"))?
-        .ok_or_else(|| format!("供应商不存在: {provider_id}"))?;
-    let app = crate::app_config::AppType::from_str(&app_type)
-        .map_err(|e| format!("无效的应用类型: {e}"))?;
-    if provider.category.as_deref() == Some("official")
-        && !crate::services::provider::official_provider_supports_proxy_takeover(&app, &provider)
-    {
-        return Err(
-            "代理接管模式下不能切换到官方供应商 (Cannot switch to official provider during proxy takeover)"
-                .into(),
-        );
-    }
-
-    state
-        .proxy_service
-        .switch_proxy_target(&app_type, &provider_id)
+    ProxySettingsService::switch_proxy_provider(&state, &app_type, &provider_id)
         .await
         .map_err(IpcError::from)
 }
@@ -337,17 +240,15 @@ pub async fn get_provider_health(
     provider_id: String,
     app_type: String,
 ) -> Result<ProviderHealth, IpcError> {
-    let db = &state.db;
-    db.get_provider_health(&provider_id, &app_type)
+    FailoverService::provider_health(&state, &provider_id, &app_type)
         .await
         .map_err(IpcError::from)
 }
 
 /// 重置熔断器
 ///
-/// 重置后会检查是否应该切回队列中优先级更高的供应商：
-/// 1. 检查自动故障转移是否开启
-/// 2. 如果恢复的供应商在队列中优先级更高（queue_order 更小），则自动切换
+/// 重置后若恢复的供应商在故障转移队列中优先级更高，则自动切回
+/// （策略见 `FailoverService::reset_circuit_breaker`）
 #[tauri::command]
 pub async fn reset_circuit_breaker(
     app_handle: tauri::AppHandle,
@@ -355,76 +256,11 @@ pub async fn reset_circuit_breaker(
     provider_id: String,
     app_type: String,
 ) -> Result<(), IpcError> {
-    // 1. 重置数据库健康状态
-    let db = &state.db;
-    db.update_provider_health(&provider_id, &app_type, true, None)
+    let sink = TauriEventSink::new(app_handle);
+    FailoverService::reset_circuit_breaker(&Ctx::new(&state, &sink), &provider_id, &app_type)
         .await
-        .map_err(IpcError::from)?;
-
-    // 2. 如果代理正在运行，重置内存中的熔断器状态
-    state
-        .proxy_service
-        .reset_provider_circuit_breaker(&provider_id, &app_type)
-        .await?;
-
-    // 3. 检查是否应该切回优先级更高的供应商（从 proxy_config 表读取）
-    // 只有当该应用已被代理接管（enabled=true）且开启了自动故障转移时才执行
-    let (app_enabled, auto_failover_enabled) = match db.get_proxy_config_for_app(&app_type).await {
-        Ok(config) => (config.enabled, config.auto_failover_enabled),
-        Err(e) => {
-            log::error!("[{app_type}] Failed to read proxy_config: {e}, defaulting to disabled");
-            (false, false)
-        }
-    };
-
-    if app_enabled && auto_failover_enabled && state.proxy_service.is_running().await {
-        // 获取当前供应商 ID
-        let current_id = db.get_current_provider(&app_type).map_err(IpcError::from)?;
-
-        if let Some(current_id) = current_id {
-            // 获取故障转移队列
-            let queue = db.get_failover_queue(&app_type).map_err(IpcError::from)?;
-
-            // 找到恢复的供应商和当前供应商在队列中的位置（使用 sort_index）
-            let restored_order = queue
-                .iter()
-                .find(|item| item.provider_id == provider_id)
-                .and_then(|item| item.sort_index);
-
-            let current_order = queue
-                .iter()
-                .find(|item| item.provider_id == current_id)
-                .and_then(|item| item.sort_index);
-
-            // 如果恢复的供应商优先级更高（sort_index 更小），则切换
-            if let (Some(restored), Some(current)) = (restored_order, current_order) {
-                if restored < current {
-                    log::info!(
-                        "[Recovery] 供应商 {provider_id} 已恢复且优先级更高 (P{restored} vs P{current})，自动切换"
-                    );
-
-                    // 获取供应商名称用于日志和事件
-                    let provider_name = db
-                        .get_all_providers(&app_type)
-                        .ok()
-                        .and_then(|providers| providers.get(&provider_id).map(|p| p.name.clone()))
-                        .unwrap_or_else(|| provider_id.clone());
-
-                    // 创建故障转移切换管理器并执行切换
-                    let switch_manager =
-                        crate::proxy::failover_switch::FailoverSwitchManager::new(db.clone());
-                    if let Err(e) = switch_manager
-                        .try_switch(Some(&app_handle), &app_type, &provider_id, &provider_name)
-                        .await
-                    {
-                        log::error!("[Recovery] 自动切换失败: {e}");
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
+        .map(|_| ())
+        .map_err(IpcError::from)
 }
 
 /// 获取熔断器配置
@@ -432,8 +268,7 @@ pub async fn reset_circuit_breaker(
 pub async fn get_circuit_breaker_config(
     state: tauri::State<'_, AppState>,
 ) -> Result<CircuitBreakerConfig, IpcError> {
-    let db = &state.db;
-    db.get_circuit_breaker_config()
+    ProxySettingsService::circuit_breaker_config(&state)
         .await
         .map_err(IpcError::from)
 }
@@ -444,20 +279,9 @@ pub async fn update_circuit_breaker_config(
     state: tauri::State<'_, AppState>,
     config: CircuitBreakerConfig,
 ) -> Result<(), IpcError> {
-    let db = &state.db;
-
-    // 1. 更新数据库配置
-    db.update_circuit_breaker_config(&config)
+    ProxySettingsService::update_circuit_breaker_config(&state, config)
         .await
-        .map_err(IpcError::from)?;
-
-    // 2. 如果代理正在运行，热更新内存中的熔断器配置
-    state
-        .proxy_service
-        .update_circuit_breaker_configs(config)
-        .await?;
-
-    Ok(())
+        .map_err(IpcError::from)
 }
 
 /// 获取熔断器统计信息（仅当代理服务器运行时）
@@ -474,11 +298,7 @@ pub async fn get_circuit_breaker_stats(
         .await)
 }
 
-/// 立即探测熔断器（"probe now"）
-///
-/// 经 HalfOpen 路径发送一次最小探测请求（见 `StreamCheckService::probe_circuit_target`）：
-/// Open 状态下不等待超时；探测成功则熔断器直接 Closed，失败则重新 Open。
-/// 代理未运行时返回 None，不发请求。
+/// 立即探测熔断器（"probe now"），策略见 `FailoverService::probe_circuit_breaker`
 #[tauri::command]
 pub async fn probe_circuit_breaker(
     state: tauri::State<'_, AppState>,
@@ -486,27 +306,9 @@ pub async fn probe_circuit_breaker(
     provider_id: String,
     app_type: String,
 ) -> Result<Option<CircuitProbeResult>, IpcError> {
-    let app = crate::app_config::AppType::from_str(&app_type).map_err(IpcError::from)?;
-    let providers = state.db.get_all_providers(&app_type)?;
-    let provider = providers
-        .get(&provider_id)
-        .ok_or_else(|| AppError::Message(format!("供应商 {provider_id} 不存在")))?;
-    let config = state.db.get_stream_check_config()?;
-    let base_url_override =
-        super::stream_check::resolve_copilot_base_url_override(provider, &copilot_state).await?;
-
-    let result = state
-        .proxy_service
-        .probe_provider_circuit_breaker(&provider_id, &app_type, || {
-            crate::services::stream_check::StreamCheckService::probe_circuit_target(
-                &app,
-                provider,
-                &config,
-                base_url_override,
-            )
-        })
-        .await?;
-    Ok(result)
+    FailoverService::probe_circuit_breaker(&state, &copilot_state, &provider_id, &app_type)
+        .await
+        .map_err(IpcError::from)
 }
 
 // ==================== Bug Report Capture ====================

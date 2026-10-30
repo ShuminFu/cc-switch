@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "privileged",
+  "description": "Privileged app commands (env var delete/restore, terminals and installer processes, file writers at caller-supplied paths). Granted only to the local main window; never merge these into default.json.",
+  "windows": [
+    "main"
+  ],
+  "local": true,
+  "permissions": [
+    "privileged-env",
+    "privileged-terminal",
+    "privileged-file-write"
+  ]
+}

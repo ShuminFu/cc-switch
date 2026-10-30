@@ -123,7 +123,7 @@ pub async fn discover_available_skills(
     service: State<'_, SkillServiceState>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<DiscoverableSkill>, IpcError> {
-    let repos = app_state.db.get_skill_repos().map_err(IpcError::from)?;
+    let repos = SkillService::list_db_repos(&app_state.db).map_err(IpcError::from)?;
     service
         .0
         .discover_available(repos)
@@ -187,7 +187,7 @@ pub async fn get_skills(
     service: State<'_, SkillServiceState>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<Skill>, IpcError> {
-    let repos = app_state.db.get_skill_repos().map_err(IpcError::from)?;
+    let repos = SkillService::list_db_repos(&app_state.db).map_err(IpcError::from)?;
     service
         .0
         .list_skills(repos, &app_state.db)
@@ -228,7 +228,7 @@ pub async fn install_skill_for_app(
     let app_type = parse_app_type(&app)?;
 
     // 先获取技能信息
-    let repos = app_state.db.get_skill_repos().map_err(IpcError::from)?;
+    let repos = SkillService::list_db_repos(&app_state.db).map_err(IpcError::from)?;
     let skills = service
         .0
         .discover_available(repos)
@@ -296,16 +296,13 @@ pub fn uninstall_skill_for_app(
 /// 获取技能仓库列表
 #[tauri::command]
 pub fn get_skill_repos(app_state: State<'_, AppState>) -> Result<Vec<SkillRepo>, IpcError> {
-    app_state.db.get_skill_repos().map_err(IpcError::from)
+    SkillService::list_db_repos(&app_state.db).map_err(IpcError::from)
 }
 
 /// 添加技能仓库
 #[tauri::command]
 pub fn add_skill_repo(repo: SkillRepo, app_state: State<'_, AppState>) -> Result<bool, IpcError> {
-    app_state
-        .db
-        .save_skill_repo(&repo)
-        .map_err(IpcError::from)?;
+    SkillService::save_db_repo(&app_state.db, &repo).map_err(IpcError::from)?;
     Ok(true)
 }
 
@@ -316,10 +313,7 @@ pub fn remove_skill_repo(
     name: String,
     app_state: State<'_, AppState>,
 ) -> Result<bool, IpcError> {
-    app_state
-        .db
-        .delete_skill_repo(&owner, &name)
-        .map_err(IpcError::from)?;
+    SkillService::remove_db_repo(&app_state.db, &owner, &name).map_err(IpcError::from)?;
     Ok(true)
 }
 

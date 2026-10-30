@@ -72,6 +72,14 @@ jobs:
       - name: Check AppStream metainfo releases
         run: node scripts/sync-metainfo-releases.mjs --check
 
+      # Tauri commands are thin adapters: a body over 40 lines or a direct
+      # database query fails, and every command returns IpcError (CCS-181).
+      - name: Check thin command bodies
+        run: node scripts/check-command-bodies.mjs
+
+      - name: Check IpcError coverage
+        run: node scripts/count-ipc-error-commands.mjs --min 100
+
       - name: Unit tests
         run: pnpm test:unit
 
@@ -128,9 +136,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      # src/shared/bindings.ts is generated from the Rust DTOs and the
-      # generate_handler! command list (CCS-117). Regenerate it and fail with
-      # a diff when the committed file is stale.
+      # src/shared/bindings.ts is generated from the Rust DTOs and the command
+      # registry in src-tauri/src/commands/registry.rs (CCS-117, CCS-180).
+      # Regenerate it and fail with a diff when the committed file is stale.
       - name: Check generated bindings
         if: runner.os == 'Linux'
         shell: bash
@@ -140,6 +148,15 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --lib bindings
           if ! git diff --exit-code -- src/shared/bindings.ts; then
             echo "::error file=src/shared/bindings.ts::stale generated bindings; run 'UPDATE_BINDINGS=1 cargo test --lib bindings' in src-tauri and commit the result"
+            exit 1
+          fi
+          # build.rs regenerates the ACL permission sets from
+          # src-tauri/src/commands/registry.rs (CCS-180).
+          # `git status` also catches a new domain whose set was never committed.
+          if [ -n "$(git status --porcelain -- src-tauri/permissions)" ]; then
+            git status --porcelain -- src-tauri/permissions
+            git diff -- src-tauri/permissions
+            echo "::error file=src-tauri/permissions::stale command permission sets; rebuild src-tauri and commit src-tauri/permissions/*.toml"
             exit 1
           fi
 

@@ -494,6 +494,20 @@
           "usage": "使用量統計",
           "sessionResume": "セッション再開"
         }
+      },
+      "startupReport": {
+        "title": "起動診断",
+        "description": "各起動ステップ（移行、live 設定のインポートなど）の結果とエラーコード",
+        "allOk": "すべての起動ステップがエラーなく完了しました",
+        "failedSummary": "{{count}} 件の起動ステップが失敗しました",
+        "loadFailed": "起動レポートの読み込みに失敗しました",
+        "status": {
+          "ok": "成功",
+          "skipped": "スキップ",
+          "failed": "失敗"
+        },
+        "toastTitle": "{{count}} 件の起動ステップが失敗しました",
+        "toastDescription": "一部のデータが欠落している可能性があります。詳細は 設定 → 詳細 → 起動診断 を参照してください。"
       }
     },
     "language": "言語",
@@ -877,6 +891,8 @@
     "toolInstall": "インストール",
     "toolUpdate": "更新",
     "toolReady": "準備完了",
+    "toolCancel": "キャンセル",
+    "toolActionCancelled": "インストール/更新をキャンセルしました",
     "toolActionDone": "{{count}} 個のツールの{{action}}が完了しました",
     "toolActionPartial": "{{succeeded}} 個成功、{{failed}} 個失敗（{{action}}）",
     "toolActionFailed": "インストール/更新コマンドの実行に失敗しました",
