@@ -10,7 +10,6 @@
 use super::hyper_client::ProxyResponse;
 use super::{
     capture::CaptureHandle,
-    error_mapper::get_error_message,
     failover_switch::FailoverSwitchManager,
     pipeline::{
         auth,
@@ -22,6 +21,7 @@ use super::{
         rate_limit,
         recovery::{RecoveryDecision, RecoveryInput, RecoveryState},
         request_builder::{self, BodyStages, RouteFlags},
+        trace_attempt::record_attempt_outcome,
         transport::{self, TransportTimeouts, UpstreamRequest},
         validate::{ResponseValidator, SuccessCheck},
     },
@@ -269,23 +269,10 @@ impl RequestForwarder {
                 .send_with_recovery(request, provider, adapter.as_ref())
                 .await;
             if let Some(trace) = &self.req.trace {
-                let applied: Vec<&str> = recovery
-                    .applied()
-                    .iter()
-                    .map(|strategy| strategy.as_str())
-                    .collect();
-                match &outcome {
-                    Ok((response, _, _)) => {
-                        trace.succeed_attempt(response.status().as_u16(), &applied)
-                    }
-                    Err(error) => {
-                        let upstream_status = match error {
-                            ProxyError::UpstreamError { status, .. } => Some(*status),
-                            _ => None,
-                        };
-                        trace.fail_attempt(&get_error_message(error), upstream_status, &applied);
-                    }
-                }
+                let status = outcome
+                    .as_ref()
+                    .map(|(response, _, _)| response.status().as_u16());
+                record_attempt_outcome(trace, status, recovery.applied());
             }
             let error = match outcome {
                 Ok((response, plan, outbound_model)) => {
@@ -531,7 +518,7 @@ impl RequestForwarder {
             &target.url,
         )?;
 
-        log_outbound_request(adapter.name(), &target.url, &built.body);
+        transport::log_outbound_request(adapter.name(), &target.url, &built.body);
         if let Some(capture) = &self.req.capture {
             capture.record_upstream_request(
                 request.method,
@@ -600,24 +587,6 @@ struct ClientRequest<'a> {
     body: &'a Value,
     headers: &'a axum::http::HeaderMap,
     extensions: &'a Extensions,
-}
-
-/// 输出请求信息日志
-fn log_outbound_request(tag: &str, url: &str, body: &Value) {
-    let request_model = body
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("<none>");
-    log::info!("[{tag}] >>> 请求 URL: {url} (model={request_model})");
-    if log::log_enabled!(log::Level::Debug) {
-        if let Ok(body_str) = serde_json::to_string(body) {
-            log::debug!(
-                "[{tag}] >>> 请求体内容 ({}字节): {}",
-                body_str.len(),
-                body_str
-            );
-        }
-    }
 }
 
 #[cfg(test)]

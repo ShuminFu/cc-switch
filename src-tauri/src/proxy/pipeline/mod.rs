@@ -14,6 +14,7 @@
 //! - [`classify`]：失败分类与日志；
 //! - [`rate_limit`]：429 / 529 的 `Retry-After` 解析（provider 冷却）；
 //! - [`recovery`]：同一 provider 上的恢复策略；
+//! - [`trace_attempt`]：单次尝试结果写入请求追踪；
 //! - [`failover`]：故障转移记账。
 
 pub(crate) mod auth;
@@ -26,5 +27,6 @@ pub(crate) mod rate_limit;
 pub(crate) mod recovery;
 pub(crate) mod request_builder;
 pub(crate) mod stream_start;
+pub(crate) mod trace_attempt;
 pub(crate) mod transport;
 pub(crate) mod validate;

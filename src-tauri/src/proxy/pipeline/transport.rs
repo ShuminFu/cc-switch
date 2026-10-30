@@ -8,6 +8,7 @@ use crate::proxy::error::ProxyError;
 use crate::proxy::hyper_client::ProxyResponse;
 use crate::proxy::protocol::ClaudeApiFormat;
 use http::Extensions;
+use serde_json::Value;
 use std::time::Duration;
 
 /// 一次待发送的上游请求
@@ -135,6 +136,24 @@ pub(crate) fn should_preserve_exact_header_case(
         resolved_claude_api_format,
         None | Some(ClaudeApiFormat::Anthropic)
     )
+}
+
+/// 输出请求信息日志
+pub(crate) fn log_outbound_request(tag: &str, url: &str, body: &Value) {
+    let request_model = body
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("<none>");
+    log::info!("[{tag}] >>> 请求 URL: {url} (model={request_model})");
+    if log::log_enabled!(log::Level::Debug) {
+        if let Ok(body_str) = serde_json::to_string(body) {
+            log::debug!(
+                "[{tag}] >>> 请求体内容 ({}字节): {}",
+                body_str.len(),
+                body_str
+            );
+        }
+    }
 }
 
 fn map_reqwest_send_error(error: reqwest::Error) -> ProxyError {
