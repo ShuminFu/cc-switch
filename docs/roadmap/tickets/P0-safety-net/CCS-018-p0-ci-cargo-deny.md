@@ -17,8 +17,8 @@ Verified finding ci-no-audit: Dependabot opens version-bump PRs, but no CI step 
 - Add a weekly scheduled run.
 
 ## Acceptance criteria / verification
-- [ ] Pinning a crate version with a known RUSTSEC advisory fails the job
-- [ ] Local: `cargo deny --manifest-path src-tauri/Cargo.toml check`
+- [x] Pinning a crate version with a known RUSTSEC advisory fails the job
+- [x] Local: `cargo deny --manifest-path src-tauri/Cargo.toml check`
 
 ## Dependencies
 None.
@@ -122,7 +122,9 @@ Partial: making the checks required in branch protection still needs a human.
 ### Remaining after triage
 
 - Blocked: Make the cargo-deny and pnpm audit checks required on main. Needs a repo admin to change branch protection, after at least one Actions run.
-- Blocked: zstd 0.13 / zstd-safe 7 advisories (RUSTSEC-2026-0391/0398/0403). Need an upstream fixed release; re-check during CCS-214.
-- Follow-up [CCS-214](../P0-safety-net/CCS-214-p0-deps-cargo-update-deny-baseline.md): Refresh Cargo.lock and prune the cargo-deny advisory baseline.
-- Follow-up [CCS-215](../P0-safety-net/CCS-215-p0-deps-zip-upgrade.md): Upgrade the direct zip dependency to a release that fixes RUSTSEC-2026-0367/0368/0369.
-- Follow-up [CCS-216](../P0-safety-net/CCS-216-p0-deps-vitest-upgrade.md): Upgrade vitest 2.x to >=3.2.6 and drop the 4 ignored GHSAs from pnpm audit.
+
+Tracked elsewhere (no longer open on this ticket):
+- Done in [CCS-214](../P0-safety-net/CCS-214-p0-deps-cargo-update-deny-baseline.md) (`1d2d7a5`): Cargo.lock refreshed; the baseline is down to the zip and zstd entries. Re-checked there: `advisories ok` with the pruned list, and the `lru = "=0.6.6"` scratch pin still fails with RUSTSEC-2021-0130.
+- zip 2.x advisories (RUSTSEC-2026-0367/0368/0369): [CCS-215](../P0-safety-net/CCS-215-p0-deps-zip-upgrade.md).
+- zstd 0.13 / zstd-safe 7 advisories (RUSTSEC-2026-0391/0398/0403): fixed upstream in zstd 0.14.3 / zstd-safe 8.2.0, a breaking bump that zip 2.x also pins; follow-up noted in CCS-214.
+- vitest GHSAs: [CCS-216](../P0-safety-net/CCS-216-p0-deps-vitest-upgrade.md).
