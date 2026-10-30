@@ -13,6 +13,7 @@ import type {
 } from "@/types/proxy";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { getAppLabel, isAnyTakeoverActive } from "@/config/proxyApps";
+import { queryKeys } from "@/lib/query/keys";
 
 /**
  * 代理服务状态管理
@@ -23,7 +24,7 @@ export function useProxyStatus() {
 
   // 查询状态（自动轮询）
   const { data: status, isLoading } = useQuery({
-    queryKey: ["proxyStatus"],
+    queryKey: queryKeys.proxy.status,
     queryFn: () => invoke<ProxyStatus>("get_proxy_status"),
     // 仅在服务运行时轮询
     refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
@@ -33,7 +34,7 @@ export function useProxyStatus() {
 
   // 查询各应用接管状态
   const { data: takeoverStatus } = useQuery({
-    queryKey: ["proxyTakeoverStatus"],
+    queryKey: queryKeys.proxy.takeoverStatus,
     queryFn: () => invoke<ProxyTakeoverStatus>("get_proxy_takeover_status"),
     placeholderData: (previousData) => previousData,
   });
@@ -50,7 +51,7 @@ export function useProxyStatus() {
         }),
         { closeButton: true },
       );
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
     onError: (error: Error) => {
       const detail =
@@ -75,7 +76,7 @@ export function useProxyStatus() {
         }),
         { closeButton: true },
       );
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
     onError: (error: Error) => {
       const detail =
@@ -100,12 +101,18 @@ export function useProxyStatus() {
         }),
         { closeButton: true },
       );
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.proxy.takeoverStatus,
+      });
       // 彻底删除所有供应商健康状态缓存（后端已清空数据库记录）
-      queryClient.removeQueries({ queryKey: ["providerHealth"] });
+      queryClient.removeQueries({
+        queryKey: queryKeys.failover.providerHealthAll,
+      });
       // 彻底删除所有熔断器统计缓存（代理停止后熔断器状态已重置）
-      queryClient.removeQueries({ queryKey: ["circuitBreakerStats"] });
+      queryClient.removeQueries({
+        queryKey: queryKeys.failover.circuitBreakerStatsAll,
+      });
       // 注意：故障转移队列和开关状态会保留，不需要刷新
     },
     onError: (error: Error) => {
@@ -141,8 +148,10 @@ export function useProxyStatus() {
         { closeButton: true },
       );
 
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyTakeoverStatus"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.proxy.takeoverStatus,
+      });
     },
     onError: (error: Error) => {
       const detail =
@@ -167,7 +176,7 @@ export function useProxyStatus() {
       providerId: string;
     }) => invoke("switch_proxy_provider", { appType, providerId }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
     onError: (error: Error) => {
       const detail =

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { profilesApi, providersApi } from "@/lib/api";
 import type { ProfileScope } from "@/lib/api/profiles";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { queryKeys } from "./keys";
 
 const updateTrayMenuSafely = async () => {
   try {
@@ -15,7 +16,7 @@ const updateTrayMenuSafely = async () => {
 
 export const useProfilesQuery = () => {
   return useQuery({
-    queryKey: ["profiles"],
+    queryKey: queryKeys.profiles.all,
     queryFn: () => profilesApi.list(),
   });
 };
@@ -28,7 +29,7 @@ export const useCreateProfileMutation = () => {
     mutationFn: ({ name, scope }: { name: string; scope: ProfileScope }) =>
       profilesApi.create(name, scope),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.profiles.all });
       await updateTrayMenuSafely();
       toast.success(t("profiles.createSuccess"), { closeButton: true });
     },
@@ -58,7 +59,7 @@ export const useUpdateProfileMutation = () => {
       scope?: ProfileScope;
     }) => profilesApi.update(id, { name, resnapshot, scope }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.profiles.all });
       await updateTrayMenuSafely();
       toast.success(t("profiles.updateSuccess"), { closeButton: true });
     },
@@ -78,7 +79,7 @@ export const useDeleteProfileMutation = () => {
   return useMutation({
     mutationFn: (id: string) => profilesApi.delete(id),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.profiles.all });
       await updateTrayMenuSafely();
       toast.success(t("profiles.deleteSuccess"), { closeButton: true });
     },
@@ -98,7 +99,7 @@ export const useClearProfileMutation = () => {
   return useMutation({
     mutationFn: (scope: ProfileScope) => profilesApi.clearCurrent(scope),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.profiles.all });
       await updateTrayMenuSafely();
       toast.success(t("profiles.clearSuccess"), { closeButton: true });
     },
@@ -119,16 +120,16 @@ export const useApplyProfileMutation = () => {
     mutationFn: ({ id, scope }: { id: string; scope: ProfileScope }) =>
       profilesApi.apply(id, scope),
     onSuccess: async (warnings) => {
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
-      await queryClient.invalidateQueries({
-        queryKey: ["providers", "claude"],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["providers", "claude-desktop"],
-      });
-      await queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
-      await queryClient.invalidateQueries({ queryKey: ["mcp", "all"] });
-      await queryClient.invalidateQueries({ queryKey: ["skills"] });
+      await Promise.all(
+        [
+          queryKeys.profiles.all,
+          queryKeys.providers.byApp("claude"),
+          queryKeys.providers.byApp("claude-desktop"),
+          queryKeys.providers.byApp("codex"),
+          queryKeys.mcp.all,
+          queryKeys.skills.all,
+        ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+      );
       await updateTrayMenuSafely();
 
       if (warnings.length > 0) {

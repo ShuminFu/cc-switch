@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { ProxyConfig } from "@/types/proxy";
+import { queryKeys } from "@/lib/query/keys";
 
 /**
  * 代理配置管理
@@ -17,7 +18,7 @@ export function useProxyConfig() {
 
   // 查询配置
   const { data: config, isLoading } = useQuery({
-    queryKey: ["proxyConfig"],
+    queryKey: queryKeys.proxy.config,
     queryFn: () => invoke<ProxyConfig>("get_proxy_config"),
   });
 
@@ -27,8 +28,8 @@ export function useProxyConfig() {
       invoke("update_proxy_config", { config: newConfig }),
     onSuccess: () => {
       toast.success(t("proxy.settings.toast.saved"), { closeButton: true });
-      queryClient.invalidateQueries({ queryKey: ["proxyConfig"] });
-      queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.config });
+      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
     },
     onError: (error: Error) => {
       toast.error(

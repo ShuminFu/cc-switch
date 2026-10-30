@@ -20,6 +20,7 @@ import type {
 } from "@/types";
 import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { queryKeys } from "./keys";
 
 const sortProviders = (
   providers: Record<string, Provider>,
@@ -60,7 +61,7 @@ export const useProvidersQuery = (
   const { isProxyRunning = false } = options || {};
 
   return useQuery({
-    queryKey: ["providers", appId],
+    queryKey: queryKeys.providers.byApp(appId),
     placeholderData: keepPreviousData,
     // 当代理服务运行时，每 30 秒兜底刷新一次供应商列表，反映后端熔断器
     // 自动禁用代理目标的变更。故障转移切换本身会 emit `provider-switched`
@@ -93,7 +94,7 @@ export const useProvidersQuery = (
 
 export const useSettingsQuery = (): UseQueryResult<Settings> => {
   return useQuery({
-    queryKey: ["settings"],
+    queryKey: queryKeys.settings.all,
     queryFn: async () => settingsApi.get(),
   });
 };
@@ -308,7 +309,7 @@ export const useUsageQuery = (
 
 export const useSessionsQuery = () => {
   return useQuery<SessionMeta[]>({
-    queryKey: ["sessions"],
+    queryKey: queryKeys.sessions.all,
     queryFn: async () => sessionsApi.list(),
     staleTime: 30 * 1000,
   });
@@ -319,7 +320,7 @@ export const useSessionMessagesQuery = (
   sourcePath?: string,
 ) => {
   return useQuery<SessionMessage[]>({
-    queryKey: ["sessionMessages", providerId, sourcePath],
+    queryKey: queryKeys.sessions.messages(providerId, sourcePath),
     queryFn: async () => sessionsApi.getMessages(providerId!, sourcePath!),
     enabled: Boolean(providerId && sourcePath),
     staleTime: 30 * 1000,
