@@ -78,3 +78,9 @@ p4-mcp-projector, p4-adapter-additive
 - `pnpm format:check`: clean.
 
 **Not verified against a real install.** OpenClaw's schema (`mcp.servers` with a `transport` of `sse` or `streamable-http`) follows OpenClaw's `openclaw mcp set` config shape. There is no OpenClaw binary in this environment, so a manual check that OpenClaw loads a projected server is still open.
+
+**Review.** Checked every acceptance criterion against the code. The OpenClaw schema was compared with OpenClaw's own docs (`docs/cli/mcp/transports.md`): `mcp.servers.<name>` with `command`/`args`/`env`/`cwd` or `url`/`headers`/`transport` (`sse` default, `streamable-http`) matches. Follow-up fixes in `src-tauri/src/mcp/openclaw.rs`:
+- The upsert merge moved the user's extra keys (e.g. `connectionTimeoutMs`) to the top of the entry. It now keeps the entry's key order: existing keys stay in place, and new connection fields are appended.
+- OpenClaw also accepts `workingDirectory` for `cwd` and the CLI-native `type` for `transport`. These aliases are now connection fields CC Switch owns, so a stale alias is dropped on write and cannot conflict with the `cwd`/`transport` CC Switch writes. On import, `workingDirectory` is read as `cwd` when `cwd` is missing.
+- New unit tests `merge_keeps_the_user_key_order`, `merge_drops_stale_aliases_of_core_fields` and `working_directory_alias_imports_as_cwd`. The `openclaw_mcp` snapshots were updated for the key order.
+- Verification: `cargo fmt --check` and `cargo clippy (--tests) -- -D warnings` clean; full `cargo test --no-fail-fast` 2629 passed, 0 failed; `pnpm typecheck` clean.

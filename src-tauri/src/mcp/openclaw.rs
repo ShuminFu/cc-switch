@@ -24,14 +24,20 @@ use crate::openclaw_config;
 
 /// Connection fields CC Switch owns; every other key in an OpenClaw server
 /// entry is OpenClaw-specific and survives a CC Switch write.
+///
+/// `workingDirectory` (alias of `cwd`) and `type` (the CLI-native spelling of
+/// `transport`) are OpenClaw aliases: CC Switch writes `cwd` / `transport`, so
+/// a stale alias must not survive next to them with a conflicting value.
 const OPENCLAW_CORE_FIELDS: &[&str] = &[
     "command",
     "args",
     "env",
     "cwd",
+    "workingDirectory",
     "url",
     "headers",
     "transport",
+    "type",
 ];
 
 const TRANSPORT_SSE: &str = "sse";
@@ -113,6 +119,7 @@ fn convert_to_openclaw_format(spec: &Value) -> Result<Value, AppError> {
 ///
 /// Conversion rules:
 /// - If `command` exists: set `type: "stdio"`, extract `command`, `args`, `env`, `cwd`
+///   (falling back to the `workingDirectory` alias)
 /// - If `url` exists: `transport: "streamable-http"` (or `"http"`) becomes
 ///   `type: "http"`, anything else `type: "sse"`; extract `url`, `headers`
 /// - OpenClaw-specific fields are stripped
@@ -127,6 +134,11 @@ fn convert_from_openclaw_format(id: &str, spec: &Value) -> Result<Value, AppErro
         result.insert("type".into(), json!("stdio"));
         for key in ["command", "args", "env", "cwd"] {
             copy_non_empty(obj, &mut result, key);
+        }
+        if !result.contains_key("cwd") {
+            if let Some(dir) = obj.get("workingDirectory").filter(|v| v.is_string()) {
+                result.insert("cwd".into(), dir.clone());
+            }
         }
     } else if obj.contains_key("url") {
         let transport = obj
@@ -155,19 +167,26 @@ fn convert_from_openclaw_format(id: &str, spec: &Value) -> Result<Value, AppErro
 /// Core fields ([`OPENCLAW_CORE_FIELDS`]) come only from `new_spec`, so a field
 /// the new spec no longer has (e.g. `command` after switching to a remote
 /// server) is dropped. Every other key is kept from `existing`.
+///
+/// The user's key order is kept: existing keys stay where they are (core ones
+/// take the new value), and core fields the entry did not have are appended.
 fn merge_openclaw_spec(existing: &Value, new_spec: &Value) -> Value {
+    let empty = Map::new();
+    let new_obj = new_spec.as_object().unwrap_or(&empty);
     let mut result = Map::new();
 
     if let Some(existing_obj) = existing.as_object() {
         for (key, val) in existing_obj {
             if !OPENCLAW_CORE_FIELDS.contains(&key.as_str()) {
                 result.insert(key.clone(), val.clone());
+            } else if let Some(new_val) = new_obj.get(key) {
+                result.insert(key.clone(), new_val.clone());
             }
         }
     }
 
-    if let Some(new_obj) = new_spec.as_object() {
-        for (key, val) in new_obj {
+    for (key, val) in new_obj {
+        if !result.contains_key(key) {
             result.insert(key.clone(), val.clone());
         }
     }
@@ -335,6 +354,77 @@ mod tests {
                 "url": "https://example.com/mcp",
                 "transport": "streamable-http"
             })
+        );
+    }
+
+    #[test]
+    fn merge_keeps_the_user_key_order() {
+        let existing = json!({
+            "connectionTimeoutMs": 5000,
+            "url": "https://old.example.com/sse",
+            "transport": "sse",
+            "requestTimeoutMs": 20000
+        });
+        let new_spec = json!({
+            "url": "https://new.example.com/mcp",
+            "headers": { "A": "1" },
+            "transport": "streamable-http"
+        });
+
+        let merged = merge_openclaw_spec(&existing, &new_spec);
+        let keys: Vec<&str> = merged
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "connectionTimeoutMs",
+                "url",
+                "transport",
+                "requestTimeoutMs",
+                "headers"
+            ]
+        );
+        assert_eq!(merged["url"], "https://new.example.com/mcp");
+        assert_eq!(merged["transport"], "streamable-http");
+    }
+
+    #[test]
+    fn merge_drops_stale_aliases_of_core_fields() {
+        let existing = json!({
+            "command": "node",
+            "workingDirectory": "/old",
+            "connectionTimeoutMs": 5000
+        });
+        let new_spec = json!({ "command": "node", "cwd": "/new" });
+        assert_eq!(
+            merge_openclaw_spec(&existing, &new_spec),
+            json!({ "command": "node", "connectionTimeoutMs": 5000, "cwd": "/new" })
+        );
+
+        let existing = json!({ "url": "https://example.com/mcp", "type": "http" });
+        let new_spec = json!({ "url": "https://example.com/mcp", "transport": "sse" });
+        assert_eq!(
+            merge_openclaw_spec(&existing, &new_spec),
+            json!({ "url": "https://example.com/mcp", "transport": "sse" })
+        );
+    }
+
+    #[test]
+    fn working_directory_alias_imports_as_cwd() {
+        let spec = json!({ "command": "node", "workingDirectory": "/work" });
+        assert_eq!(
+            convert_from_openclaw_format("local", &spec).unwrap(),
+            json!({ "type": "stdio", "command": "node", "cwd": "/work" })
+        );
+
+        let both = json!({ "command": "node", "cwd": "/a", "workingDirectory": "/b" });
+        assert_eq!(
+            convert_from_openclaw_format("local", &both).unwrap()["cwd"],
+            "/a"
         );
     }
 }

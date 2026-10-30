@@ -14,12 +14,12 @@ write: ok
   mcp: {
     "servers": {
       "remote": {
-        "connectionTimeoutMs": 5000,
         "url": "https://new.example.com/mcp",
+        "transport": "streamable-http",
+        "connectionTimeoutMs": 5000,
         "headers": {
           "Authorization": "Bearer token"
-        },
-        "transport": "streamable-http"
+        }
       },
       "user-owned": {
         "command": "uvx",
