@@ -33,6 +33,15 @@ impl PromptService {
     ) -> Result<(), AppError> {
         // 检查是否为已启用的提示词
         let is_enabled = prompt.enabled;
+        // Only a prompt that was enabled before this save "owns" the live
+        // file. Saving a prompt that was already disabled (adding the first
+        // prompt as disabled, or importing the live file) must never touch the
+        // user's existing CLAUDE.md / AGENTS.md.
+        let was_enabled = state
+            .db
+            .get_prompts(app.as_str())?
+            .get(&prompt.id)
+            .is_some_and(|p| p.enabled);
 
         state.db.save_prompt(app.as_str(), &prompt)?;
 
@@ -40,7 +49,7 @@ impl PromptService {
             // 启用提示词：写入内容到文件
             let target_path = prompt_file_path(&app)?;
             write_text_file(&target_path, &prompt.content)?;
-        } else {
+        } else if was_enabled {
             // 禁用提示词：检查是否还有其他已启用的提示词
             let prompts = state.db.get_prompts(app.as_str())?;
             let any_enabled = prompts.values().any(|p| p.enabled);

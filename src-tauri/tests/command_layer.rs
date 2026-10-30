@@ -465,6 +465,27 @@ fn enabling_with_unmanaged_live_content_creates_a_backup_prompt() {
 }
 
 #[test]
+fn saving_a_disabled_prompt_never_wipes_an_unmanaged_live_file() {
+    let env = TestEnv::new();
+    let state = create_test_state().expect("create state");
+    std::fs::create_dir_all(env.home().join(".claude")).unwrap();
+    std::fs::write(claude_prompt_file(&env), "user's own CLAUDE.md").unwrap();
+
+    // First prompt added as disabled, then edited again while still disabled.
+    PromptService::upsert_prompt(&state, AppType::Claude, "a", prompt("a", "alpha", false))
+        .expect("upsert");
+    PromptService::upsert_prompt(&state, AppType::Claude, "a", prompt("a", "alpha2", false))
+        .expect("upsert again");
+    // Importing the live file (saved as a disabled prompt) must not wipe it either.
+    PromptService::import_from_file(&state, AppType::Claude).expect("import");
+
+    assert_eq!(
+        std::fs::read_to_string(claude_prompt_file(&env)).unwrap(),
+        "user's own CLAUDE.md"
+    );
+}
+
+#[test]
 fn enable_prompt_failures_leave_the_previous_selection_intact() {
     let env = TestEnv::new();
     let state = create_test_state().expect("create state");
