@@ -1567,7 +1567,16 @@ impl ProxyService {
                 return Ok(());
             }
         }
-        let raw = snapshot.to_json()?;
+        // 快照只影响恢复后的格式：序列化失败（如路径不是 UTF-8）同样不阻止接管
+        let raw = match snapshot.to_json() {
+            Ok(raw) => raw,
+            Err(e) => {
+                log::warn!(
+                    "{app_type_str} 接管快照无法序列化，不记录（恢复将按备份 JSON 写入）: {e}"
+                );
+                return Ok(());
+            }
+        };
         if let Err(e) = self
             .db
             .save_live_backup_raw_snapshot(app_type_str, &raw)
