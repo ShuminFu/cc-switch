@@ -28,6 +28,7 @@ import {
 } from "@/utils/providerConfigUtils";
 import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
 import { providerKeys } from "@/entities/provider/keys";
+import { invalidateProviderGraph } from "@/entities/provider/invalidate";
 
 /**
  * Hook for managing provider actions (add, update, delete, switch)
@@ -53,6 +54,35 @@ export function useProviderActions(
     switchProviderMutation.variables?.appId === activeApp
       ? switchProviderMutation.variables.providerId
       : undefined;
+
+  // 撤销最近一次切换（切换成功 toast 上的"撤销"按钮）
+  const undoSwitch = useCallback(
+    async (appId: AppId) => {
+      try {
+        await providersApi.revertLastSwitch(appId);
+        await invalidateProviderGraph(queryClient, appId);
+        try {
+          await providersApi.updateTrayMenu();
+        } catch (trayError) {
+          console.error(
+            "Failed to update tray menu after reverting switch",
+            trayError,
+          );
+        }
+        toast.success(t("notifications.switchReverted"), {
+          closeButton: true,
+        });
+      } catch (error) {
+        toast.error(
+          t("notifications.switchRevertFailed", {
+            error: extractErrorMessage(error) || t("common.unknown"),
+          }),
+          { duration: 6000 },
+        );
+      }
+    },
+    [queryClient, t],
+  );
 
   // Claude 插件同步逻辑
   const syncClaudePlugin = useCallback(
@@ -281,8 +311,17 @@ export function useProviderActions(
           } else if (activeApp === "opencode" || activeApp === "openclaw") {
             messageKey = "notifications.addToConfigSuccess";
           }
+          const appId = activeApp;
           toast.success(t(messageKey), {
             closeButton: true,
+            ...(result?.undoable
+              ? {
+                  action: {
+                    label: t("notifications.undoSwitch"),
+                    onClick: () => void undoSwitch(appId),
+                  },
+                }
+              : {}),
           });
         }
       } catch {
@@ -293,6 +332,7 @@ export function useProviderActions(
       switchProviderMutation,
       switchingProviderId,
       syncClaudePlugin,
+      undoSwitch,
       activeApp,
       isProxyRunning,
       isProxyTakeover,

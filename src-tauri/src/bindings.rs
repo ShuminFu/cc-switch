@@ -56,6 +56,7 @@ fn builder() -> Builder<tauri::Wry> {
         .typ::<crate::provider::Provider>()
         .typ::<crate::proxy::types::ProxyStatus>()
         .typ::<crate::services::provider::LiveWritePreview>()
+        .typ::<crate::services::provider::RevertSwitchResult>()
         .typ::<crate::services::drift::DriftReport>()
         .typ::<crate::services::drift::DriftResolution>()
         .typ::<crate::database::DbStorageStats>()

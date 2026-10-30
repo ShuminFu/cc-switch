@@ -325,6 +325,7 @@ fn atomic_write_impl(path: &Path, data: &[u8], owner_only: bool) -> Result<(), A
     if capture_write(path, Some(data)) {
         return Ok(());
     }
+    record_prior_contents(path);
 
     let resolved = resolve_write_target(path)?;
     let path = resolved.as_path();
@@ -657,6 +658,7 @@ pub fn delete_file(path: &Path) -> Result<(), AppError> {
     if capture_write(path, None) {
         return Ok(());
     }
+    record_prior_contents(path);
     if path.exists() {
         fs::remove_file(path).map_err(|e| AppError::io(path, e))?;
     }
@@ -753,6 +755,79 @@ fn captured_contents(path: &Path) -> Option<Option<Vec<u8>>> {
                 .map(|write| write.contents.clone())
         })
     })
+}
+
+// ============================================================================
+// 写入前内容记录（live 配置日志）
+// ============================================================================
+
+/// 一次真实写入前目标文件的原始内容：`before` 为 `None` 表示写入前文件不存在
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriorContent {
+    pub path: PathBuf,
+    pub before: Option<Vec<u8>>,
+}
+
+thread_local! {
+    static PRIOR_RECORD: std::cell::RefCell<Option<Vec<PriorContent>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// 在记录模式下执行 `op`：本线程内经 [`atomic_write`] / [`atomic_write_secret`] /
+/// [`write_json_file`] / [`write_text_file`] / [`delete_file`] 真实落盘的写入照常执行，
+/// 并在每个路径首次被写入前记录其原始内容（按首次写入顺序），供撤销时逐字节还原。
+///
+/// 与 [`capture_writes`] 不同，这里不拦截写入；捕获模式下的写入不落盘，也不记录。
+/// 嵌套调用时内层的记录同时并入外层（外层已记录的路径保持最早的内容）。
+pub fn record_writes<R>(op: impl FnOnce() -> R) -> (R, Vec<PriorContent>) {
+    /// 结束（含 panic）时恢复外层记录状态
+    struct Restore(Option<Vec<PriorContent>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let outer = self.0.take();
+            PRIOR_RECORD.with(|cell| *cell.borrow_mut() = outer);
+        }
+    }
+
+    let mut restore = Restore(PRIOR_RECORD.with(|cell| cell.borrow_mut().replace(Vec::new())));
+    let result = op();
+    let recorded = PRIOR_RECORD.with(|cell| cell.borrow_mut().take().unwrap_or_default());
+    if let Some(outer) = restore.0.as_mut() {
+        for prior in &recorded {
+            if !outer.iter().any(|seen| seen.path == prior.path) {
+                outer.push(prior.clone());
+            }
+        }
+    }
+    drop(restore);
+    (result, recorded)
+}
+
+/// 记录模式下首次写入 `path` 前保存其原始内容。
+///
+/// 读取失败（非"不存在"）时不记录该路径：无法确定原始内容就不能在撤销时覆盖它。
+fn record_prior_contents(path: &Path) {
+    PRIOR_RECORD.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        let Some(records) = cell.as_mut() else {
+            return;
+        };
+        if records.iter().any(|prior| prior.path == path) {
+            return;
+        }
+        let before = match fs::read(path) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                log::warn!("记录写入前内容失败，撤销时将跳过 {}: {e}", path.display());
+                return;
+            }
+        };
+        records.push(PriorContent {
+            path: path.to_path_buf(),
+            before,
+        });
+    });
 }
 
 #[cfg(test)]
@@ -1342,5 +1417,45 @@ mod tests {
         });
         assert!(result.is_err());
         assert!(!is_capturing_writes());
+    }
+
+    #[test]
+    fn record_writes_journal_keeps_first_prior_content_and_still_writes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let existing = dir.path().join("existing.json");
+        let created = dir.path().join("created.toml");
+        fs::write(&existing, b"original").expect("seed existing");
+
+        let (result, priors) = record_writes(|| -> Result<(), AppError> {
+            atomic_write(&existing, b"first")?;
+            atomic_write(&existing, b"second")?;
+            write_text_file(&created, "new")?;
+            Ok(())
+        });
+        result.expect("recorded writes succeed");
+
+        assert_eq!(fs::read(&existing).unwrap(), b"second");
+        assert_eq!(fs::read(&created).unwrap(), b"new");
+        assert_eq!(
+            priors,
+            vec![
+                PriorContent {
+                    path: existing.clone(),
+                    before: Some(b"original".to_vec()),
+                },
+                PriorContent {
+                    path: created.clone(),
+                    before: None,
+                },
+            ]
+        );
+
+        // 捕获模式下的写入不落盘，也不计入记录
+        let ((), priors) = record_writes(|| {
+            let (result, _) = capture_writes(|| atomic_write(&existing, b"preview"));
+            result.expect("captured write");
+        });
+        assert!(priors.is_empty());
+        assert_eq!(fs::read(&existing).unwrap(), b"second");
     }
 }

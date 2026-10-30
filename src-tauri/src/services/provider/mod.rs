@@ -4,6 +4,7 @@
 
 mod codex_official;
 mod endpoints;
+mod journal;
 mod live;
 mod preview;
 mod usage;
@@ -29,6 +30,7 @@ pub use live::{
     update_toml_common_config_snippet,
 };
 
+pub use journal::RevertSwitchResult;
 pub use preview::{LiveFilePreview, LivePreviewSkipReason, LiveWritePreview};
 
 // Internal re-exports (pub(crate))
@@ -59,6 +61,8 @@ pub struct ProviderService;
 #[serde(rename_all = "camelCase")]
 pub struct SwitchResult {
     pub warnings: Vec<String>,
+    /// 本次切换已记入 live 配置日志，可通过 `revert_last_switch` 撤销
+    pub undoable: bool,
 }
 
 #[cfg(test)]
@@ -2731,6 +2735,20 @@ impl ProviderService {
             return Ok(SwitchResult::default());
         }
 
+        // 记录本次切换改动的 live 文件原始内容，供撤销（见 journal.rs）
+        Self::switch_journaled(state, &app_type, id, || {
+            Self::switch_normal_live(state, app_type.clone(), provider, providers)
+        })
+    }
+
+    /// Normal switch flow for providers written to the app's live config
+    fn switch_normal_live(
+        state: &AppState,
+        app_type: AppType,
+        provider: &Provider,
+        providers: &indexmap::IndexMap<String, Provider>,
+    ) -> Result<SwitchResult, AppError> {
+        let id = provider.id.as_str();
         let mut result = SwitchResult::default();
 
         // Backfill: Backfill current live config to current provider

@@ -6,7 +6,7 @@ import type {
   UniversalProvidersMap,
 } from "@/types";
 import type { AppId } from "./types";
-import type { LiveWritePreview } from "@/shared/bindings";
+import type { LiveWritePreview, RevertSwitchResult } from "@/shared/bindings";
 
 export interface ProviderSortUpdate {
   id: string;
@@ -20,6 +20,8 @@ export interface ProviderSwitchEvent {
 
 export interface SwitchResult {
   warnings: string[];
+  /** 本次切换已记入 live 配置日志，可用 `revertLastSwitch` 撤销 */
+  undoable?: boolean;
 }
 
 export interface OpenTerminalOptions {
@@ -106,6 +108,11 @@ export const providersApi = {
 
   async switch(id: string, appId: AppId): Promise<SwitchResult> {
     return await invoke("switch_provider", { id, app: appId });
+  },
+
+  /** 撤销该应用最近一次切换：live 文件还原为切换前内容并恢复当前供应商 */
+  async revertLastSwitch(appId: AppId): Promise<RevertSwitchResult> {
+    return await invoke("revert_last_switch", { app: appId });
   },
 
   async importDefault(appId: AppId): Promise<boolean> {

@@ -60,6 +60,7 @@ vi.mock("@/lib/query", () => ({
 
 const providersApiUpdateMock = vi.fn();
 const providersApiUpdateTrayMenuMock = vi.fn();
+const providersApiRevertLastSwitchMock = vi.fn();
 const settingsApiGetMock = vi.fn();
 const settingsApiApplyMock = vi.fn();
 const openclawApiGetModelCatalogMock = vi.fn();
@@ -71,6 +72,8 @@ vi.mock("@/lib/api", () => ({
     update: (...args: unknown[]) => providersApiUpdateMock(...args),
     updateTrayMenu: (...args: unknown[]) =>
       providersApiUpdateTrayMenuMock(...args),
+    revertLastSwitch: (...args: unknown[]) =>
+      providersApiRevertLastSwitchMock(...args),
   },
   settingsApi: {
     get: (...args: unknown[]) => settingsApiGetMock(...args),
@@ -118,6 +121,7 @@ beforeEach(() => {
   switchProviderMutateAsync.mockReset();
   providersApiUpdateMock.mockReset();
   providersApiUpdateTrayMenuMock.mockReset();
+  providersApiRevertLastSwitchMock.mockReset();
   settingsApiGetMock.mockReset();
   settingsApiApplyMock.mockReset();
   openclawApiGetModelCatalogMock.mockReset();
@@ -210,6 +214,82 @@ describe("useProviderActions", () => {
       "切换成功，请重启客户端以生效",
       { closeButton: true },
     );
+  });
+
+  it("offers an Undo action that reverts a journaled switch", async () => {
+    switchProviderMutateAsync.mockResolvedValueOnce({
+      warnings: [],
+      undoable: true,
+    });
+    providersApiRevertLastSwitchMock.mockResolvedValueOnce({
+      providerId: "previous",
+      restoredFiles: ["/home/u/.claude/settings.json"],
+    });
+    providersApiUpdateTrayMenuMock.mockResolvedValueOnce(true);
+    const { wrapper } = createWrapper();
+    const provider = createProvider({ category: "custom" });
+
+    const { result } = renderHook(() => useProviderActions("claude"), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await result.current.switchProvider(provider);
+    });
+
+    expect(toastSuccessMock).toHaveBeenCalledTimes(1);
+    const [, options] = toastSuccessMock.mock.calls[0] as [
+      string,
+      { action?: { label: string; onClick: () => void } },
+    ];
+    expect(options.action?.label).toBe("撤销");
+
+    await act(async () => {
+      options.action?.onClick();
+      await vi.waitFor(() => expect(toastSuccessMock).toHaveBeenCalledTimes(2));
+    });
+
+    expect(providersApiRevertLastSwitchMock).toHaveBeenCalledWith("claude");
+    expect(providersApiUpdateTrayMenuMock).toHaveBeenCalledTimes(1);
+    expect(toastSuccessMock).toHaveBeenLastCalledWith(
+      "已撤销切换，已恢复之前的配置",
+      { closeButton: true },
+    );
+  });
+
+  it("reports a failed undo and omits Undo for non-journaled switches", async () => {
+    switchProviderMutateAsync.mockResolvedValueOnce({
+      warnings: [],
+      undoable: true,
+    });
+    providersApiRevertLastSwitchMock.mockRejectedValueOnce(new Error("stale"));
+    const { wrapper } = createWrapper();
+    const provider = createProvider({ category: "custom" });
+
+    const { result } = renderHook(() => useProviderActions("claude"), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await result.current.switchProvider(provider);
+    });
+    const [, options] = toastSuccessMock.mock.calls[0] as [
+      string,
+      { action?: { onClick: () => void } },
+    ];
+    await act(async () => {
+      options.action?.onClick();
+      await vi.waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(1));
+    });
+    expect(toastErrorMock.mock.calls[0][0]).toContain("stale");
+
+    switchProviderMutateAsync.mockResolvedValueOnce({ warnings: [] });
+    await act(async () => {
+      await result.current.switchProvider(provider);
+    });
+    expect(toastSuccessMock).toHaveBeenLastCalledWith("切换成功！", {
+      closeButton: true,
+    });
   });
 
   it("warns but still switches providers that require proxy when proxy is not running", async () => {

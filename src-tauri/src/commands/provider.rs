@@ -5,7 +5,7 @@ use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
 use crate::error::{AppError, IpcError};
 use crate::provider::{ClaudeDesktopMode, Provider};
-use crate::services::provider::LiveWritePreview;
+use crate::services::provider::{LiveWritePreview, RevertSwitchResult};
 use crate::services::{
     EndpointLatency, ProviderService, ProviderSortUpdate, SpeedtestService, SwitchResult,
 };
@@ -143,6 +143,24 @@ pub async fn switch_provider(
         switch_provider_internal(state.inner(), app_type, &id)
     })
     .await
+    .map_err(IpcError::from)
+}
+
+/// 撤销该应用最近一次供应商切换：live 文件还原为切换前内容并恢复当前供应商
+#[tauri::command]
+pub async fn revert_last_switch(
+    app_handle: tauri::AppHandle,
+    app: String,
+) -> Result<RevertSwitchResult, IpcError> {
+    let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
+    // 与切换相同：等待切换锁并做文件 I/O，放到阻塞线程池执行
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle.state::<AppState>();
+        ProviderService::revert_last_switch(state.inner(), app_type)
+    })
+    .await
+    .map_err(|e| AppError::Message(format!("撤销切换任务失败: {e}")))
+    .and_then(|result| result)
     .map_err(IpcError::from)
 }
 

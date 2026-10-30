@@ -112,6 +112,11 @@ export const handlers = [
     return true;
   }),
 
+  command("revert_last_switch", () => ({
+    providerId: null,
+    restoredFiles: [],
+  })),
+
   command("add_provider", async (request) => {
     const { provider, app } = await withJson<{
       provider: Provider & { id?: string };
