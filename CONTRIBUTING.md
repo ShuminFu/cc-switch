@@ -12,7 +12,7 @@ There are many ways to contribute:
 - **Suggest features** — Have an idea? [Submit a feature request](https://github.com/farion1231/cc-switch/issues/new?template=feature_request.yml).
 - **Improve docs** — Spot a typo or missing info? [Report a doc issue](https://github.com/farion1231/cc-switch/issues/new?template=doc_issue.yml).
 - **Contribute code** — Fix bugs or implement features via pull requests.
-- **Translate** — Help us improve translations for English, Chinese, and Japanese.
+- **Translate** — Help us improve translations for English, Simplified Chinese, Traditional Chinese, and Japanese.
 
 > **Security vulnerabilities**: Please do NOT use public issues. See our [Security Policy](./SECURITY.md) instead.
 
@@ -20,9 +20,10 @@ There are many ways to contribute:
 
 ### Prerequisites
 
-- Node.js 18+ and pnpm 8+
-- Rust 1.85+ and Cargo
-- [Tauri 2.0 prerequisites](https://v2.tauri.app/start/prerequisites/)
+- **Node.js** `^20.19.0` or `>=22.12.0` (required by Vite 7). `.node-version` pins `22.12.0`; CI runs Node 20.
+- **pnpm 10** — CI uses `10.12.3` (`pnpm-lock.yaml` is lockfile v9, which pnpm 8 cannot read). With corepack: `corepack prepare pnpm@10.12.3 --activate`.
+- **Rust** via [rustup](https://rustup.rs/). You do not need to pick a version: `rust-toolchain.toml` pins channel `1.95` (with `rustfmt` and `clippy`), and rustup installs it automatically on the first `cargo` command.
+- [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS (WebView2 on Windows, `webkit2gtk` etc. on Linux, Xcode Command Line Tools on macOS). The Tauri CLI comes from `devDependencies` (`@tauri-apps/cli` 2.8+), so no global install is needed.
 
 ### Quick Start
 
@@ -41,31 +42,35 @@ pnpm dev
 | `pnpm dev` | Start dev server (hot reload) |
 | `pnpm build` | Production build |
 | `pnpm typecheck` | TypeScript type checking |
-| `pnpm test:unit` | Run unit tests |
+| `pnpm dev:renderer` | Start only the Vite frontend (no Tauri shell) |
+| `pnpm test:unit` | Run unit tests (Vitest, `tests/`) |
+| `pnpm test:unit:watch` | Run unit tests in watch mode |
 | `pnpm lint` | ESLint check |
-| `pnpm format` | Format code (Prettier) |
+| `pnpm format` | Format code (Prettier, `src/**`) |
 | `pnpm format:check` | Check code formatting |
 
 For Rust backend:
 
 ```bash
 cd src-tauri
-cargo fmt        # Format Rust code
-cargo clippy     # Run linter
-cargo test       # Run tests
+cargo fmt                                # Format Rust code
+cargo clippy --all-targets -- -D warnings # Run linter (same flags as CI)
+cargo test                               # Run tests
 ```
+
+`pnpm build` and `cargo` builds need a `dist/` directory at the repo root; run `pnpm build:renderer` (or `mkdir -p dist`) first if `cargo test` complains it is missing.
 
 ## Code Style
 
 - **Frontend**: Prettier for formatting, ESLint for linting, strict TypeScript (`pnpm typecheck`)
 - **Backend**: `cargo fmt` for formatting, `cargo clippy` for linting
-- **Tauri 2.0**: Command names must use camelCase
+- **Tauri commands**: command functions are `snake_case` in Rust (e.g. `get_stream_check_config`) and are invoked with that same name from the frontend. Argument keys on the JS side are camelCase (Tauri converts them; some commands set `#[tauri::command(rename_all = "camelCase")]` explicitly).
 
 Run all checks before submitting:
 
 ```bash
-pnpm typecheck && pnpm format:check && pnpm test:unit
-cd src-tauri && cargo fmt --check && cargo clippy && cargo test
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 ## Pull Request Guidelines
@@ -78,9 +83,11 @@ cd src-tauri && cargo fmt --check && cargo clippy && cargo test
 ### PR Checklist
 
 - [ ] `pnpm typecheck` passes
+- [ ] `pnpm lint` passes
 - [ ] `pnpm format:check` passes
+- [ ] `pnpm test:unit` passes
 - [ ] `cargo clippy` passes (if Rust code changed)
-- [ ] Updated i18n files if user-facing text changed
+- [ ] Updated all four locale files if user-facing text changed
 
 ### Commit Convention
 
@@ -110,14 +117,16 @@ By submitting a PR, you agree to the following:
 
 ## Internationalization (i18n)
 
-CC Switch supports three languages. When modifying user-facing text:
+CC Switch ships four UI languages. English is the source language and the fallback (`fallbackLng: "en"` in `src/i18n/index.ts`). When modifying user-facing text:
 
-1. Update **all three** locale files:
-   - `src/locales/en/translation.json`
-   - `src/locales/zh/translation.json`
-   - `src/locales/ja/translation.json`
-2. Use the `t()` function from i18next for all UI text.
-3. Never hardcode user-facing strings.
+1. Add or change the key in **all four** locale files:
+   - `src/i18n/locales/en.json` — English (source)
+   - `src/i18n/locales/zh.json` — Simplified Chinese
+   - `src/i18n/locales/zh-TW.json` — Traditional Chinese
+   - `src/i18n/locales/ja.json` — Japanese
+2. Use the `t()` function from react-i18next for all UI text, and never hardcode user-facing strings. If you cannot translate a string, copy the English text into the other files rather than leaving the key out, and say so in the PR.
+3. Keep `{{placeholders}}`, brand and product names (Claude Code, Codex, Gemini CLI, OpenCode, ...), and Markdown/HTML tags unchanged in every translation.
+4. Adding a new locale means adding a JSON file next to the others and registering it in `src/i18n/index.ts`; open an issue first.
 
 ## Questions?
 
@@ -140,7 +149,7 @@ CC Switch supports three languages. When modifying user-facing text:
 - **建议功能** — 有想法？[提交功能请求](https://github.com/farion1231/cc-switch/issues/new?template=feature_request.yml)。
 - **改进文档** — 发现错误或缺失？[报告文档问题](https://github.com/farion1231/cc-switch/issues/new?template=doc_issue.yml)。
 - **贡献代码** — 通过 Pull Request 修复 Bug 或实现新功能。
-- **翻译** — 帮助改进英文、中文和日文的翻译。
+- **翻译** — 帮助改进英文、简体中文、繁体中文和日文的翻译。
 
 > **安全漏洞**：请不要使用公开 Issue 报告。请参阅我们的[安全策略](./SECURITY.md)。
 
@@ -148,9 +157,10 @@ CC Switch supports three languages. When modifying user-facing text:
 
 ### 前提条件
 
-- Node.js 18+ 和 pnpm 8+
-- Rust 1.85+ 和 Cargo
-- [Tauri 2.0 开发环境](https://v2.tauri.app/start/prerequisites/)
+- **Node.js** `^20.19.0` 或 `>=22.12.0`（Vite 7 的要求）。`.node-version` 固定为 `22.12.0`，CI 使用 Node 20。
+- **pnpm 10** — CI 使用 `10.12.3`（`pnpm-lock.yaml` 为 v9 格式，pnpm 8 无法读取）。使用 corepack：`corepack prepare pnpm@10.12.3 --activate`。
+- **Rust**：通过 [rustup](https://rustup.rs/) 安装即可，无需手动选择版本。`rust-toolchain.toml` 固定了 `1.95` 工具链（含 `rustfmt` 与 `clippy`），首次运行 `cargo` 时 rustup 会自动安装。
+- 对应操作系统的 [Tauri 2 开发环境](https://v2.tauri.app/start/prerequisites/)（Windows 需 WebView2，Linux 需 `webkit2gtk` 等，macOS 需 Xcode Command Line Tools）。Tauri CLI 已在 `devDependencies`（`@tauri-apps/cli` 2.8+）中，无需全局安装。
 
 ### 快速开始
 
@@ -169,31 +179,35 @@ pnpm dev
 | `pnpm dev` | 启动开发服务器（热重载） |
 | `pnpm build` | 构建生产版本 |
 | `pnpm typecheck` | TypeScript 类型检查 |
-| `pnpm test:unit` | 运行单元测试 |
+| `pnpm dev:renderer` | 仅启动 Vite 前端（不含 Tauri 外壳） |
+| `pnpm test:unit` | 运行单元测试（Vitest，`tests/`） |
+| `pnpm test:unit:watch` | 以监听模式运行单元测试 |
 | `pnpm lint` | ESLint 检查 |
-| `pnpm format` | 格式化代码（Prettier） |
+| `pnpm format` | 格式化代码（Prettier，`src/**`） |
 | `pnpm format:check` | 检查代码格式 |
 
 Rust 后端命令：
 
 ```bash
 cd src-tauri
-cargo fmt        # 格式化 Rust 代码
-cargo clippy     # 运行 Clippy 检查
-cargo test       # 运行测试
+cargo fmt                                # 格式化 Rust 代码
+cargo clippy --all-targets -- -D warnings # 运行 Clippy 检查（与 CI 参数一致）
+cargo test                               # 运行测试
 ```
+
+`pnpm build` 和 `cargo` 构建需要仓库根目录存在 `dist/` 目录；如果 `cargo test` 提示缺失，请先运行 `pnpm build:renderer`（或 `mkdir -p dist`）。
 
 ## 代码规范
 
 - **前端**：使用 Prettier 格式化、ESLint 检查、严格 TypeScript（`pnpm typecheck`）
 - **后端**：使用 `cargo fmt` 格式化、`cargo clippy` 检查
-- **Tauri 2.0**：命令名必须使用 camelCase
+- **Tauri 命令**：Rust 中的命令函数使用 `snake_case`（如 `get_stream_check_config`），前端以相同名称调用；JS 侧的参数键使用 camelCase（Tauri 会自动转换，部分命令显式声明了 `#[tauri::command(rename_all = "camelCase")]`）。
 
 提交前运行所有检查：
 
 ```bash
-pnpm typecheck && pnpm format:check && pnpm test:unit
-cd src-tauri && cargo fmt --check && cargo clippy && cargo test
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 ## Pull Request 指南
@@ -206,9 +220,11 @@ cd src-tauri && cargo fmt --check && cargo clippy && cargo test
 ### PR 检查清单
 
 - [ ] `pnpm typecheck` 通过
+- [ ] `pnpm lint` 通过
 - [ ] `pnpm format:check` 通过
+- [ ] `pnpm test:unit` 通过
 - [ ] `cargo clippy` 通过（如修改了 Rust 代码）
-- [ ] 如修改了用户可见文本，已更新国际化文件
+- [ ] 如修改了用户可见文本，已同步更新四个语言文件
 
 ### 提交信息规范
 
@@ -238,14 +254,16 @@ chore(deps): update dependencies
 
 ## 国际化（i18n）
 
-CC Switch 支持三种语言。修改用户可见文本时：
+CC Switch 提供四种界面语言。英文是源语言，也是回退语言（`src/i18n/index.ts` 中的 `fallbackLng: "en"`）。修改用户可见文本时：
 
-1. **同时更新三个**语言文件：
-   - `src/locales/en/translation.json`
-   - `src/locales/zh/translation.json`
-   - `src/locales/ja/translation.json`
-2. 所有 UI 文本使用 i18next 的 `t()` 函数。
-3. 不要硬编码用户可见的字符串。
+1. 在**全部四个**语言文件中新增或修改对应的键：
+   - `src/i18n/locales/en.json` — 英文（源语言）
+   - `src/i18n/locales/zh.json` — 简体中文
+   - `src/i18n/locales/zh-TW.json` — 繁体中文
+   - `src/i18n/locales/ja.json` — 日文
+2. 所有 UI 文本使用 react-i18next 的 `t()` 函数，不要硬编码用户可见的字符串。如果无法翻译某条文本，请先把英文原文填入其他语言文件，不要缺少键，并在 PR 中注明。
+3. 所有译文中保持 `{{占位符}}`、品牌与产品名称（Claude Code、Codex、Gemini CLI、OpenCode 等）以及 Markdown/HTML 标签不变。
+4. 新增语言需要在同目录添加 JSON 文件，并在 `src/i18n/index.ts` 中注册；请先开 Issue 讨论。
 
 ## 有疑问？
 

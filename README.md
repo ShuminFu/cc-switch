@@ -439,10 +439,10 @@ Download the latest Linux build from the [Releases](../../releases) page:
 
 ### Environment Requirements
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
-- Tauri CLI 2.8+
+- Node.js `^20.19.0` or `>=22.12.0` (`.node-version` pins 22.12.0)
+- pnpm 10 (CI uses 10.12.3)
+- Rust: installed automatically by rustup from `rust-toolchain.toml` (1.95)
+- Tauri CLI 2.8+ (bundled as a dev dependency)
 
 ### Development Commands
 
@@ -455,6 +455,9 @@ pnpm dev
 
 # Type check
 pnpm typecheck
+
+# Lint (ESLint)
+pnpm lint
 
 # Format code
 pnpm format
@@ -550,7 +553,7 @@ pnpm test:unit --coverage
 │   ├── lib/
 │   │   ├── api/                # Tauri API wrapper (type-safe)
 │   │   └── query/              # TanStack Query config
-│   ├── locales/                # Translations (zh/zh-TW/en/ja)
+│   ├── i18n/locales/           # Translations (en/zh/zh-TW/ja)
 │   ├── config/                 # Presets (providers/mcp)
 │   └── types/                  # TypeScript definitions
 ├── src-tauri/                  # Backend (Rust)

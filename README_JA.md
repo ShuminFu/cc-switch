@@ -439,10 +439,10 @@ paru -S cc-switch-bin
 
 ### 開発環境
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
-- Tauri CLI 2.8+
+- Node.js `^20.19.0` または `>=22.12.0`（`.node-version` は 22.12.0 を指定）
+- pnpm 10（CI は 10.12.3 を使用）
+- Rust：`rust-toolchain.toml`（1.95）に従い rustup が自動でインストール
+- Tauri CLI 2.8+（開発依存として同梱）
 
 ### 開発コマンド
 
@@ -455,6 +455,9 @@ pnpm dev
 
 # 型チェック
 pnpm typecheck
+
+# Lint（ESLint）
+pnpm lint
 
 # コード整形
 pnpm format
@@ -550,7 +553,7 @@ pnpm test:unit --coverage
 │   ├── lib/
 │   │   ├── api/                # Tauri API ラッパー（型安全）
 │   │   └── query/              # TanStack Query 設定
-│   ├── locales/                # 翻訳 (zh/zh-TW/en/ja)
+│   ├── i18n/locales/           # 翻訳 (en/zh/zh-TW/ja)
 │   ├── config/                 # プリセット (providers/mcp)
 │   └── types/                  # TypeScript 型定義
 ├── src-tauri/                  # バックエンド (Rust)

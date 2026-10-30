@@ -442,10 +442,10 @@ paru -S cc-switch-bin
 
 ### 环境要求
 
-- Node.js 18+
-- pnpm 8+
-- Rust 1.85+
-- Tauri CLI 2.8+
+- Node.js `^20.19.0` 或 `>=22.12.0`（`.node-version` 固定为 22.12.0）
+- pnpm 10（CI 使用 10.12.3）
+- Rust：由 rustup 根据 `rust-toolchain.toml`（1.95）自动安装
+- Tauri CLI 2.8+（已作为开发依赖提供）
 
 ### 开发命令
 
@@ -458,6 +458,9 @@ pnpm dev
 
 # 类型检查
 pnpm typecheck
+
+# 代码检查（ESLint）
+pnpm lint
 
 # 代码格式化
 pnpm format
@@ -553,7 +556,7 @@ pnpm test:unit --coverage
 │   ├── lib/
 │   │   ├── api/                # Tauri API 封装（类型安全）
 │   │   └── query/              # TanStack Query 配置
-│   ├── locales/                # 翻译 (zh/zh-TW/en/ja)
+│   ├── i18n/locales/           # 翻译 (en/zh/zh-TW/ja)
 │   ├── config/                 # 预设 (providers/mcp)
 │   └── types/                  # TypeScript 类型定义
 ├── src-tauri/                  # 后端 (Rust)
