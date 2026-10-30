@@ -433,6 +433,50 @@ pub(crate) const PROVIDER_LIMIT_WINDOW_SQL: &str = "SELECT COALESCE(SUM(cost), 0
       AND date >= ?5 AND date < ?6
 )";
 
+/// provider 在本地日 / 本地月窗口内的消费（USD）
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ProviderSpend {
+    pub daily_usd: f64,
+    pub monthly_usd: f64,
+}
+
+/// 限额统计窗口：`now` 所在本地日、本地月的半开区间 `[start, end)`
+struct SpendWindows {
+    today: NaiveDate,
+    tomorrow: NaiveDate,
+    month_start: NaiveDate,
+    next_month_start: NaiveDate,
+    day_start_ts: i64,
+    day_end_ts: i64,
+    month_start_ts: i64,
+    month_end_ts: i64,
+}
+
+impl SpendWindows {
+    fn at(now: chrono::DateTime<Local>) -> Result<Self, AppError> {
+        let today = now.date_naive();
+        let tomorrow = today
+            .succ_opt()
+            .ok_or_else(|| AppError::Database("限额日窗口溢出".to_string()))?;
+        let month_start = today
+            .with_day(1)
+            .ok_or_else(|| AppError::Database("限额月窗口计算失败".to_string()))?;
+        let next_month_start = month_start
+            .checked_add_months(chrono::Months::new(1))
+            .ok_or_else(|| AppError::Database("限额月窗口溢出".to_string()))?;
+        Ok(Self {
+            today,
+            tomorrow,
+            month_start,
+            next_month_start,
+            day_start_ts: local_midnight_timestamp(today)?,
+            day_end_ts: local_midnight_timestamp(tomorrow)?,
+            month_start_ts: local_midnight_timestamp(month_start)?,
+            month_end_ts: local_midnight_timestamp(next_month_start)?,
+        })
+    }
+}
+
 impl Database {
     /// 获取使用量汇总
     pub fn get_usage_summary(
@@ -1552,22 +1596,7 @@ impl Database {
         app_type: &str,
         now: chrono::DateTime<Local>,
     ) -> Result<ProviderLimitStatus, AppError> {
-        let today = now.date_naive();
-        let tomorrow = today
-            .succ_opt()
-            .ok_or_else(|| AppError::Database("限额日窗口溢出".to_string()))?;
-        let month_start = today
-            .with_day(1)
-            .ok_or_else(|| AppError::Database("限额月窗口计算失败".to_string()))?;
-        let next_month_start = month_start
-            .checked_add_months(chrono::Months::new(1))
-            .ok_or_else(|| AppError::Database("限额月窗口溢出".to_string()))?;
-
-        let day_start_ts = local_midnight_timestamp(today)?;
-        let day_end_ts = local_midnight_timestamp(tomorrow)?;
-        let month_start_ts = local_midnight_timestamp(month_start)?;
-        let month_end_ts = local_midnight_timestamp(next_month_start)?;
-
+        let windows = SpendWindows::at(now)?;
         let conn = lock_conn!(self.conn);
 
         // 获取 provider 的限额设置（provider 不存在视为未设置限额；meta 解析失败同样视为未设置）
@@ -1595,6 +1624,50 @@ impl Database {
             })
             .unwrap_or((None, None));
 
+        let ProviderSpend {
+            daily_usd: daily_usage,
+            monthly_usd: monthly_usage,
+        } = Self::provider_spend_on_conn(&conn, provider_id, app_type, &windows)?;
+
+        let daily_exceeded = limit_daily
+            .map(|limit| daily_usage >= limit)
+            .unwrap_or(false);
+        let monthly_exceeded = limit_monthly
+            .map(|limit| monthly_usage >= limit)
+            .unwrap_or(false);
+
+        Ok(ProviderLimitStatus {
+            provider_id: provider_id.to_string(),
+            daily_usage: format!("{daily_usage:.6}"),
+            daily_limit: limit_daily.map(|l| format!("{l:.2}")),
+            daily_exceeded,
+            monthly_usage: format!("{monthly_usage:.6}"),
+            monthly_limit: limit_monthly.map(|l| format!("{l:.2}")),
+            monthly_exceeded,
+        })
+    }
+
+    /// provider 在 `now` 所在本地日 / 本地月内的消费（USD，明细 + 汇总），
+    /// 与 [`Self::check_provider_limits_at`] 使用同一窗口与 SQL。
+    ///
+    /// 代理选路的限额执行（`proxy::spend_caps`）用它为内存累计值播种。
+    pub(crate) fn provider_spend_at(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        now: chrono::DateTime<Local>,
+    ) -> Result<ProviderSpend, AppError> {
+        let windows = SpendWindows::at(now)?;
+        let conn = lock_conn!(self.conn);
+        Self::provider_spend_on_conn(&conn, provider_id, app_type, &windows)
+    }
+
+    fn provider_spend_on_conn(
+        conn: &Connection,
+        provider_id: &str,
+        app_type: &str,
+        windows: &SpendWindows,
+    ) -> Result<ProviderSpend, AppError> {
         // 明细 [start_ts, end_ts) + 汇总 [start_date, end_date)
         let sum_window = |start_ts: i64,
                           end_ts: i64,
@@ -1617,26 +1690,22 @@ impl Database {
         };
 
         // 计算今日使用量 (detail logs + rollup)
-        let daily_usage = sum_window(day_start_ts, day_end_ts, today, tomorrow)?;
+        let daily_usd = sum_window(
+            windows.day_start_ts,
+            windows.day_end_ts,
+            windows.today,
+            windows.tomorrow,
+        )?;
         // 计算本月使用量 (detail logs + rollup)
-        let monthly_usage =
-            sum_window(month_start_ts, month_end_ts, month_start, next_month_start)?;
-
-        let daily_exceeded = limit_daily
-            .map(|limit| daily_usage >= limit)
-            .unwrap_or(false);
-        let monthly_exceeded = limit_monthly
-            .map(|limit| monthly_usage >= limit)
-            .unwrap_or(false);
-
-        Ok(ProviderLimitStatus {
-            provider_id: provider_id.to_string(),
-            daily_usage: format!("{daily_usage:.6}"),
-            daily_limit: limit_daily.map(|l| format!("{l:.2}")),
-            daily_exceeded,
-            monthly_usage: format!("{monthly_usage:.6}"),
-            monthly_limit: limit_monthly.map(|l| format!("{l:.2}")),
-            monthly_exceeded,
+        let monthly_usd = sum_window(
+            windows.month_start_ts,
+            windows.month_end_ts,
+            windows.month_start,
+            windows.next_month_start,
+        )?;
+        Ok(ProviderSpend {
+            daily_usd,
+            monthly_usd,
         })
     }
 

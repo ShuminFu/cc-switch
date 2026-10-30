@@ -13,7 +13,9 @@ use super::{
     content_encoding::{decompress_body, get_content_encoding, is_supported_content_encoding},
     endpoints::{BodyDecoding, ClientEndpoint, UpstreamEndpoint},
     error_mapper::{get_error_message, map_proxy_error_to_status},
-    errors::render::{handle_codex_chat_error_response, render_forward_error},
+    errors::render::{
+        handle_codex_chat_error_response, render_forward_error, render_selection_error,
+    },
     forwarder::ActiveConnectionGuard,
     handler_config::{
         parser_config_for, CLAUDE_PARSER_CONFIG, CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG,
@@ -180,7 +182,7 @@ pub(crate) async fn handle_proxied(
     };
 
     let app_type = &client.app_type;
-    let mut ctx = RequestContext::new(
+    let mut ctx = match RequestContext::new(
         &state,
         &body,
         &headers,
@@ -188,7 +190,12 @@ pub(crate) async fn handle_proxied(
         client.tag,
         client.app_type_str,
     )
-    .await?;
+    .await
+    {
+        Ok(ctx) => ctx,
+        // 选路失败（如所有供应商均已达到消费限额）按客户端线协议渲染
+        Err(error) => return Ok(render_selection_error(client.client_format, error)),
+    };
     if client.model_from_uri {
         // Gemini 的模型名称在 URI 中
         ctx = ctx.with_model_from_uri(&uri);

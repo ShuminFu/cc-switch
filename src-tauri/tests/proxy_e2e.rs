@@ -1354,6 +1354,92 @@ async fn request_logs_record_success_and_failure_rows() {
 }
 
 // ============================================================================
+// Spend caps (CCS-168)
+// ============================================================================
+
+#[tokio::test]
+async fn provider_at_its_spend_cap_routes_to_the_next_provider() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::message("from a", 10, 5)).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider_with_meta("a", &a, json!({ "limitDailyUsd": "0.50" }))
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+    // Spend logged before the proxy saw a request seeds the running total.
+    harness.seed_spend("a", "0.50");
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(first_text(&json_body(response).await), "from b");
+    assert_eq!(a.hits(), 0, "a provider at its cap is never tried");
+    assert_eq!(b.hits(), 1);
+
+    let status = harness.status().await;
+    assert_eq!(status.success_requests, 1);
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn spend_recorded_by_the_proxy_counts_toward_the_cap() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::message("from a", 1200, 300)).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider_with_meta("a", &a, json!({ "limitDailyUsd": "0.000001" }))
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    // Under the cap: a serves the request and its cost is added to the total.
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(first_text(&json_body(response).await), "from a");
+    let logs = harness.wait_for_request_logs(1).await;
+    let cost: f64 = logs[0].total_cost_usd.parse().expect("numeric cost");
+    assert!(cost > 0.000001, "the first request crosses the cap: {cost}");
+
+    // Now at its cap: the next request goes straight to b.
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(first_text(&json_body(response).await), "from b");
+    assert_eq!(a.hits(), 1);
+    assert_eq!(b.hits(), 1);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn all_providers_at_their_spend_cap_get_an_anthropic_rate_limit_error() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::message("from a", 10, 5)).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider_with_meta("a", &a, json!({ "limitDailyUsd": "1" }))
+        .provider_with_meta("b", &b, json!({ "limitMonthlyUsd": "2" }))
+        .failover(true)
+        .spawn()
+        .await;
+    harness.seed_spend("a", "1.25");
+    harness.seed_spend("b", "2");
+
+    let response = harness.messages(&simple_request()).await;
+    assert_eq!(response.status(), 429);
+    let body = json_body(response).await;
+    assert_eq!(body["type"], "error", "{body}");
+    assert_eq!(body["error"]["type"], "rate_limit_error", "{body}");
+    let message = body["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("Harness a (a): daily") && message.contains("Harness b (b): monthly"),
+        "{message}"
+    );
+    assert_eq!(a.hits() + b.hits(), 0, "no upstream is called");
+
+    harness.shutdown().await;
+}
+
+// ============================================================================
 // Inbound auth (CCS-049)
 // ============================================================================
 

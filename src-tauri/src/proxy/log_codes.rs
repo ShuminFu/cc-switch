@@ -48,6 +48,7 @@ pub mod fo {
     pub const LIVE_BACKUP_ERROR: &str = "FO-003";
     pub const ALL_CIRCUIT_OPEN: &str = "FO-004";
     pub const NO_PROVIDERS: &str = "FO-005";
+    pub const ALL_SPEND_CAPPED: &str = "FO-006";
 }
 
 /// 响应处理日志码

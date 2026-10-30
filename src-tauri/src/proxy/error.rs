@@ -35,6 +35,10 @@ pub enum ProxyError {
     #[error("未配置供应商")]
     NoProvidersConfigured,
 
+    /// 可选的供应商均已达到日 / 月消费限额
+    #[error("所有供应商均已达到消费限额: {0}")]
+    SpendCapExceeded(String),
+
     #[allow(dead_code)]
     #[error("Provider不健康: {0}")]
     ProviderUnhealthy(String),
@@ -134,6 +138,9 @@ impl IntoResponse for ProxyError {
                     }
                     ProxyError::NoProvidersConfigured => {
                         (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
+                    }
+                    ProxyError::SpendCapExceeded(_) => {
+                        (StatusCode::TOO_MANY_REQUESTS, self.to_string())
                     }
                     ProxyError::ProviderUnhealthy(_) => {
                         (StatusCode::SERVICE_UNAVAILABLE, self.to_string())

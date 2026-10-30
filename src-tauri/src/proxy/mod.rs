@@ -36,6 +36,7 @@ pub(crate) mod routing;
 pub(crate) mod runtime_config;
 pub(crate) mod server;
 pub mod session;
+pub(crate) mod spend_caps;
 pub(crate) mod sse;
 pub(crate) mod stream;
 pub(crate) mod switch_lock;

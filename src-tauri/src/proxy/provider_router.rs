@@ -12,6 +12,7 @@ use crate::proxy::circuit_breaker::{
 };
 use crate::proxy::protocol::{AppRef, BreakerKey};
 use crate::proxy::runtime_config::RuntimeConfigStore;
+use crate::proxy::spend_caps::{SpendCapHit, SpendCapTracker};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::future::Future;
@@ -70,6 +71,8 @@ pub struct ProviderRouter {
     cooldowns: Arc<Mutex<HashMap<BreakerKey, Instant>>>,
     /// 会话粘性路由表（仅在开启「会话粘性路由」时读写）
     sticky_sessions: Mutex<StickySessions>,
+    /// 日 / 月消费限额的内存累计值（达到限额的 provider 在选路时被跳过）
+    spend_caps: Arc<SpendCapTracker>,
 }
 
 impl ProviderRouter {
@@ -83,6 +86,7 @@ impl ProviderRouter {
     /// 使用共享的运行时配置快照创建路由器（代理服务器内与 `ProxyState` 共用同一份）
     pub fn with_runtime_config(db: Arc<Database>, runtime_config: Arc<RuntimeConfigStore>) -> Self {
         Self {
+            spend_caps: Arc::new(SpendCapTracker::new(db.clone())),
             db,
             runtime_config,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
@@ -97,6 +101,9 @@ impl ProviderRouter {
     /// - 故障转移关闭时：仅返回当前供应商
     /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）；
     ///   处于限流冷却中的 provider 被跳过，只有其余 provider 都不可用时才按队列顺序兜底返回
+    ///
+    /// 两种模式下达到日 / 月消费限额的 provider 都不会被选中；没有其他候选时返回
+    /// [`AppError::SpendCapExceeded`]（代理按客户端格式渲染为 429）。
     pub async fn select_providers(&self, app_type: &str) -> Result<Vec<Provider>, AppError> {
         self.select_providers_for_session(app_type, None).await
     }
@@ -115,6 +122,7 @@ impl ProviderRouter {
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
         let mut cooling_down = Vec::new();
+        let mut capped: Vec<SpendCapHit> = Vec::new();
 
         // 检查该应用的自动故障转移开关是否开启（proxy_config，经运行时配置快照）
         let auto_failover_enabled = match self.runtime_config.app_proxy_config(app_type).await {
@@ -142,6 +150,9 @@ impl ProviderRouter {
 
                 if !breaker.is_available().await {
                     circuit_open_count += 1;
+                } else if let Some(hit) = self.spend_caps.check(&provider, app_type) {
+                    log::info!("[{app_type}] 跳过已达到消费限额的供应商: {hit}");
+                    capped.push(hit);
                 } else if self.cooldown_remaining(&provider.id, app_type).is_some() {
                     cooling_down.push(provider);
                 } else {
@@ -168,7 +179,12 @@ impl ProviderRouter {
             if let Some(current_id) = current_id {
                 if let Some(current) = app_providers.all.get(&current_id).cloned() {
                     total_providers = 1;
-                    result.push(current);
+                    if let Some(hit) = self.spend_caps.check(&current, app_type) {
+                        log::info!("[{app_type}] 当前供应商已达到消费限额: {hit}");
+                        capped.push(hit);
+                    } else {
+                        result.push(current);
+                    }
                 }
             }
         }
@@ -177,6 +193,14 @@ impl ProviderRouter {
             if total_providers > 0 && circuit_open_count == total_providers {
                 log::warn!("[{app_type}] [FO-004] 所有供应商均已熔断");
                 return Err(AppError::AllProvidersCircuitOpen);
+            } else if !capped.is_empty() {
+                let detail = capped
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                log::warn!("[{app_type}] [FO-006] 可用供应商均已达到消费限额: {detail}");
+                return Err(AppError::SpendCapExceeded(detail));
             } else {
                 log::warn!("[{app_type}] [FO-005] 未配置供应商");
                 return Err(AppError::NoProvidersConfigured);
@@ -200,6 +224,11 @@ impl ProviderRouter {
                 result.insert(0, sticky);
             }
         }
+    }
+
+    /// 消费限额累计器（usage 日志写入后经它累加成本）
+    pub fn spend_caps(&self) -> &Arc<SpendCapTracker> {
+        &self.spend_caps
     }
 
     /// 记录成功服务该会话的 provider（会话粘性路由）
@@ -737,6 +766,77 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(breaker.state, CircuitState::Closed);
+    }
+
+    /// 日限额 $1 的 provider，并在今天记一笔 `spent` 美元的代理日志
+    fn save_capped_provider(db: &Database, id: &str, sort_index: usize, spent: &str) {
+        let mut provider = Provider::with_id(id.to_string(), id.to_string(), json!({}), None);
+        provider.sort_index = Some(sort_index);
+        provider.meta = Some(crate::provider::ProviderMeta {
+            limit_daily_usd: Some("1.00".to_string()),
+            ..Default::default()
+        });
+        db.save_provider("claude", &provider).unwrap();
+        db.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO proxy_request_logs (
+                    request_id, provider_id, app_type, model, total_cost_usd,
+                    latency_ms, status_code, created_at
+                ) VALUES (?1, ?2, 'claude', 'm', ?3, 1, 200, ?4)",
+                rusqlite::params![
+                    format!("seed-{id}"),
+                    id,
+                    spent,
+                    chrono::Utc::now().timestamp()
+                ],
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_spend_capped_provider_is_skipped_in_failover_queue() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        save_capped_provider(&db, "a", 0, "1.00");
+        save_capped_provider(&db, "b", 1, "0.10");
+        db.add_to_failover_queue("claude", "a").unwrap();
+        db.add_to_failover_queue("claude", "b").unwrap();
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        let ids = |providers: Vec<Provider>| -> Vec<String> {
+            providers.into_iter().map(|p| p.id).collect()
+        };
+        // a 已达到限额（≥ $1）：跳过，由 b 接手
+        assert_eq!(ids(router.select_providers("claude").await.unwrap()), ["b"]);
+
+        // 代理记录的消费让 b 也达到限额：没有候选时返回消费限额错误
+        router.spend_caps().record("b", "claude", 0.90);
+        let err = router.select_providers("claude").await.unwrap_err();
+        let AppError::SpendCapExceeded(detail) = err else {
+            panic!("expected SpendCapExceeded, got {err:?}");
+        };
+        assert!(detail.contains("(a)") && detail.contains("(b)"), "{detail}");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_spend_capped_current_provider_is_refused_without_failover() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        save_capped_provider(&db, "a", 0, "2.50");
+        db.set_current_provider("claude", "a").unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        assert!(matches!(
+            router.select_providers("claude").await,
+            Err(AppError::SpendCapExceeded(_))
+        ));
     }
 
     #[test]

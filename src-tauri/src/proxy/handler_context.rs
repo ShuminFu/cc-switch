@@ -172,6 +172,9 @@ impl RequestContext {
                     ProxyError::AllProvidersCircuitOpen
                 }
                 crate::error::AppError::NoProvidersConfigured => ProxyError::NoProvidersConfigured,
+                crate::error::AppError::SpendCapExceeded(detail) => {
+                    ProxyError::SpendCapExceeded(detail)
+                }
                 _ => ProxyError::DatabaseError(e.to_string()),
             })?;
 

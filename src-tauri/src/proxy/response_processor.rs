@@ -853,7 +853,8 @@ async fn log_usage_internal(
 
     let logger = UsageLogger::new(&state.db)
         .with_runtime_config(&state.runtime_config)
-        .with_usage_parity(raw_usage);
+        .with_usage_parity(raw_usage)
+        .with_spend_caps(state.provider_router.spend_caps());
     let (multiplier, pricing_model_source) =
         logger.resolve_pricing_config(provider_id, app_type).await;
     let pricing_model = if pricing_model_source == PRICING_SOURCE_REQUEST {

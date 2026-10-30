@@ -917,6 +917,33 @@ impl ProxyHarness {
             .expect("read request log rows")
     }
 
+    /// Record `cost_usd` of spend for a Claude provider today, as a priced
+    /// `proxy_request_logs` row written outside the running proxy (what the
+    /// spend cap tracker seeds its running totals from).
+    pub fn seed_spend(&self, provider_id: &str, cost_usd: &str) {
+        uncounted(|| {
+            self.db
+                .conn
+                .lock()
+                .expect("db lock")
+                .execute(
+                    "INSERT INTO proxy_request_logs (
+                        request_id, provider_id, app_type, model, total_cost_usd,
+                        latency_ms, status_code, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 200, ?6)",
+                    rusqlite::params![
+                        uuid::Uuid::new_v4().to_string(),
+                        provider_id,
+                        HARNESS_APP_TYPE,
+                        "seeded-spend",
+                        cost_usd,
+                        chrono::Utc::now().timestamp()
+                    ],
+                )
+                .expect("seed provider spend");
+        });
+    }
+
     /// Wait until at least `count` log rows exist; usage logs are written
     /// by a task spawned after the response is returned.
     pub async fn wait_for_request_logs(&self, count: usize) -> Vec<RequestLogRow> {

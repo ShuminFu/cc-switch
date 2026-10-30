@@ -7,9 +7,11 @@ use crate::database::{repo, Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RES
 use crate::error::AppError;
 use crate::pricing::resolver::{find_model_pricing_row, is_placeholder_pricing_model};
 use crate::proxy::runtime_config::RuntimeConfigStore;
+use crate::proxy::spend_caps::SpendCapTracker;
 use crate::services::sql_helpers::{
     input_token_semantics_for_app_type, INPUT_TOKEN_SEMANTICS_TOTAL,
 };
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
@@ -48,6 +50,8 @@ pub struct UsageLogger<'a> {
     runtime_config: Option<&'a RuntimeConfigStore>,
     /// 代理请求路径上开启 usage parity 检查：`Some(raw)` 为上游原始 usage 块（可缺失）
     parity_raw_usage: Option<Option<serde_json::Value>>,
+    /// 代理请求路径上把写入的成本累加进消费限额累计值
+    spend_caps: Option<&'a SpendCapTracker>,
 }
 
 impl<'a> UsageLogger<'a> {
@@ -56,6 +60,7 @@ impl<'a> UsageLogger<'a> {
             db,
             runtime_config: None,
             parity_raw_usage: None,
+            spend_caps: None,
         }
     }
 
@@ -69,6 +74,12 @@ impl<'a> UsageLogger<'a> {
     /// 不一致时把标记写入该行的 JSON 元数据，见 [`super::parity`]
     pub fn with_usage_parity(mut self, raw_usage: Option<serde_json::Value>) -> Self {
         self.parity_raw_usage = Some(raw_usage);
+        self
+    }
+
+    /// 写入成功后把本次成本累加到消费限额累计值（供选路执行日 / 月限额）
+    pub fn with_spend_caps(mut self, spend_caps: &'a SpendCapTracker) -> Self {
+        self.spend_caps = Some(spend_caps);
         self
     }
 
@@ -132,6 +143,13 @@ impl<'a> UsageLogger<'a> {
                 created_at: chrono::Utc::now().timestamp(),
             },
         )?;
+        drop(conn);
+
+        if let (Some(spend_caps), Some(cost)) = (self.spend_caps, log.cost.as_ref()) {
+            if let Some(total) = cost.total_cost.to_f64() {
+                spend_caps.record(&log.provider_id, &log.app_type, total);
+            }
+        }
 
         // 通知前端使用统计有更新（200ms 防抖合并，不阻塞写入路径）
         crate::usage_events::notify_log_recorded();

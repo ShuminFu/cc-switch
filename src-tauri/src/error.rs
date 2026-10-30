@@ -61,6 +61,9 @@ pub enum AppError {
     AllProvidersCircuitOpen,
     #[error("未配置供应商")]
     NoProvidersConfigured,
+    /// 可选的供应商均已达到日 / 月消费限额（内容为各供应商的限额说明）
+    #[error("所有供应商均已达到消费限额: {0}")]
+    SpendCapExceeded(String),
     /// 应用不具备某项能力（如 Claude Desktop 没有提示词文件）
     #[error("{app} 暂不支持 {feature} ({app} does not support {feature})")]
     Unsupported {
@@ -325,6 +328,7 @@ impl IpcError {
             AppError::OmoConfigNotFound => (ErrorCode::OmoConfigNotFound, None, None),
             AppError::AllProvidersCircuitOpen => (ErrorCode::CircuitOpen, None, None),
             AppError::NoProvidersConfigured => (ErrorCode::NoProvidersConfigured, None, None),
+            AppError::SpendCapExceeded(_) => (ErrorCode::Unknown, None, None),
             AppError::Unsupported { app, feature } => (
                 ErrorCode::Unsupported,
                 Some(json!({ "app": app, "feature": feature })),

@@ -41,6 +41,9 @@ pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
         // 未配置供应商：503 Service Unavailable
         ProxyError::NoProvidersConfigured => 503,
 
+        // 供应商均已达到消费限额：429 Too Many Requests
+        ProxyError::SpendCapExceeded(_) => 429,
+
         // 重试耗尽：503 Service Unavailable
         ProxyError::MaxRetriesExceeded => 503,
 

@@ -27,12 +27,63 @@ pub(crate) fn render_forward_error(
     error: ProxyError,
 ) -> Result<axum::response::Response, ProxyError> {
     match client_format {
+        _ if matches!(error, ProxyError::SpendCapExceeded(_)) => {
+            Ok(render_spend_cap_error(client_format, &error))
+        }
         WireFormat::AnthropicMessages => Ok(render_anthropic_error(error)),
         WireFormat::GeminiNative => Ok(render_gemini_error(error)),
         WireFormat::OpenAiChat | WireFormat::OpenAiResponses => {
             build_codex_proxy_error_response(ctx, endpoint, &error)
         }
     }
+}
+
+/// 渲染选路阶段（尚未建立 [`RequestContext`]）的失败
+///
+/// 消费限额耗尽（[`ProxyError::SpendCapExceeded`]）按客户端线协议渲染为 429，
+/// 让客户端看到各自 SDK 认识的限流/额度错误；其余错误沿用 [`ProxyError`] 的默认渲染。
+pub(crate) fn render_selection_error(
+    client_format: WireFormat,
+    error: ProxyError,
+) -> axum::response::Response {
+    match &error {
+        ProxyError::SpendCapExceeded(_) => render_spend_cap_error(client_format, &error),
+        _ => error.into_response(),
+    }
+}
+
+/// 供应商均已达到消费限额时的 429 错误体（按客户端线协议）
+fn render_spend_cap_error(
+    client_format: WireFormat,
+    error: &ProxyError,
+) -> axum::response::Response {
+    let status = axum::http::StatusCode::TOO_MANY_REQUESTS;
+    let message = format!("CC Switch spend limit reached. {error}");
+    let body = match client_format {
+        // Anthropic Messages 错误信封
+        WireFormat::AnthropicMessages => json!({
+            "type": "error",
+            "error": { "type": "rate_limit_error", "message": message },
+        }),
+        // Google API 错误体
+        WireFormat::GeminiNative => json!({
+            "error": {
+                "code": status.as_u16(),
+                "message": message,
+                "status": "RESOURCE_EXHAUSTED",
+            }
+        }),
+        // OpenAI 额度耗尽错误
+        WireFormat::OpenAiChat | WireFormat::OpenAiResponses => json!({
+            "error": {
+                "message": message,
+                "type": "insufficient_quota",
+                "code": codex_proxy_error_code(error),
+                "param": Value::Null,
+            }
+        }),
+    };
+    (status, axum::Json(body)).into_response()
 }
 
 /// Anthropic Messages 客户端：透传上游 JSON 错误体，其余错误包装为 `{"error": {...}}`
@@ -283,6 +334,7 @@ fn codex_proxy_error_code(error: &ProxyError) -> &'static str {
         ProxyError::NoAvailableProvider => "cc_switch_no_available_provider",
         ProxyError::AllProvidersCircuitOpen => "cc_switch_all_providers_circuit_open",
         ProxyError::NoProvidersConfigured => "cc_switch_no_providers_configured",
+        ProxyError::SpendCapExceeded(_) => "cc_switch_spend_cap_exceeded",
         ProxyError::MaxRetriesExceeded => "cc_switch_max_retries_exceeded",
         ProxyError::ProviderUnhealthy(_) => "cc_switch_provider_unhealthy",
         ProxyError::ConfigError(_) => "cc_switch_config_error",
@@ -318,8 +370,9 @@ fn compact_error_message(message: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::codex_proxy_error_json;
-    use crate::proxy::ProxyError;
+    use super::{codex_proxy_error_json, render_selection_error};
+    use crate::proxy::{protocol::WireFormat, ProxyError};
+    use http_body_util::BodyExt;
 
     #[test]
     fn codex_proxy_forward_error_includes_context_and_cause() {
@@ -385,5 +438,50 @@ mod tests {
         assert_eq!(body["error"]["provider"], "HCAI");
         assert_eq!(body["error"]["model"], "gpt-5.5");
         assert_eq!(body["error"]["endpoint"], "/responses");
+    }
+
+    async fn render_spend_cap(format: WireFormat) -> (u16, serde_json::Value) {
+        let error = ProxyError::SpendCapExceeded("P1 (p1): daily spend".to_string());
+        let response = render_selection_error(format, error);
+        let status = response.status().as_u16();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn spend_cap_error_renders_per_client_format() {
+        let (status, body) = render_spend_cap(WireFormat::AnthropicMessages).await;
+        assert_eq!(status, 429);
+        assert_eq!(body["type"], "error");
+        assert_eq!(body["error"]["type"], "rate_limit_error");
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("P1 (p1): daily spend"));
+
+        let (status, body) = render_spend_cap(WireFormat::GeminiNative).await;
+        assert_eq!(status, 429);
+        assert_eq!(body["error"]["code"], 429);
+        assert_eq!(body["error"]["status"], "RESOURCE_EXHAUSTED");
+
+        for format in [WireFormat::OpenAiChat, WireFormat::OpenAiResponses] {
+            let (status, body) = render_spend_cap(format).await;
+            assert_eq!(status, 429);
+            assert_eq!(body["error"]["type"], "insufficient_quota");
+            assert_eq!(body["error"]["code"], "cc_switch_spend_cap_exceeded");
+            assert!(body["error"]["param"].is_null());
+        }
+    }
+
+    #[tokio::test]
+    async fn other_selection_errors_keep_the_default_rendering() {
+        let response = render_selection_error(
+            WireFormat::AnthropicMessages,
+            ProxyError::NoProvidersConfigured,
+        );
+        assert_eq!(response.status().as_u16(), 503);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"]["type"], "proxy_error");
     }
 }
