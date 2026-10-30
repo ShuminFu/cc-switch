@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use crate::codex_config::{get_codex_config_dir, read_codex_config_text};
 use crate::codex_state_db::codex_state_db_paths;
+use crate::session_manager::cache::ScanCache;
 use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
@@ -36,9 +37,9 @@ struct SessionIndexEntry {
     thread_name: String,
 }
 
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(cache: &ScanCache) -> Vec<SessionMeta> {
     let roots = session_roots();
-    scan_sessions_in_roots(&roots)
+    scan_sessions_in_roots(&roots, cache)
 }
 
 pub fn session_roots() -> Vec<PathBuf> {
@@ -49,28 +50,33 @@ pub fn session_roots() -> Vec<PathBuf> {
     ]
 }
 
-fn scan_sessions_in_roots(roots: &[PathBuf]) -> Vec<SessionMeta> {
+fn scan_sessions_in_roots(roots: &[PathBuf], cache: &ScanCache) -> Vec<SessionMeta> {
     let thread_titles = load_thread_titles();
-    scan_sessions_in_roots_with_titles(roots, &thread_titles)
+    scan_sessions_in_roots_with_titles(roots, &thread_titles, cache)
 }
 
 fn scan_sessions_in_roots_with_titles(
     roots: &[PathBuf],
     thread_titles: &HashMap<String, String>,
+    cache: &ScanCache,
 ) -> Vec<SessionMeta> {
     let mut files = Vec::new();
     for root in roots {
         collect_jsonl_files(root, &mut files);
     }
 
-    let mut sessions = Vec::new();
-    for path in files {
-        if let Some(meta) = parse_session_with_titles(&path, thread_titles) {
-            sessions.push(meta);
-        }
-    }
-
-    sessions
+    // The per-file parse is cached without thread titles; titles come from
+    // `session_index.jsonl` / the state DB and are applied on every scan.
+    files
+        .iter()
+        .filter_map(|path| cache.get_or_parse(PROVIDER_ID, path, || parse_session(path)))
+        .map(|mut meta| {
+            if let Some(title) = thread_titles.get(&meta.session_id) {
+                meta.title = Some(truncate_summary(title, TITLE_MAX_CHARS));
+            }
+            meta
+        })
+        .collect()
 }
 
 fn load_thread_titles() -> HashMap<String, String> {
@@ -287,7 +293,57 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
         )
     })?;
 
+    // Keep Codex's own resume picker in sync. The `threads` table in the state
+    // DB is owned by Codex and left untouched.
+    let index_path = get_codex_config_dir().join(CODEX_SESSION_INDEX_FILENAME);
+    if let Err(err) = prune_session_index_entry(&index_path, session_id) {
+        log::warn!("{err}");
+    }
+
     Ok(true)
+}
+
+/// Remove the `session_index.jsonl` line(s) for `session_id`, rewriting the
+/// file atomically. Unparseable lines are preserved verbatim.
+fn prune_session_index_entry(index_path: &Path, session_id: &str) -> Result<bool, String> {
+    let content = match std::fs::read_to_string(index_path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => {
+            return Err(format!(
+                "Failed to read Codex session index {}: {err}",
+                index_path.display()
+            ))
+        }
+    };
+    let mut removed = false;
+    let mut kept = String::with_capacity(content.len());
+    for line in content.lines() {
+        let matches = serde_json::from_str::<Value>(line.trim())
+            .ok()
+            .and_then(|entry| {
+                entry
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(|id| id.trim() == session_id)
+            })
+            .unwrap_or(false);
+        if matches {
+            removed = true;
+        } else {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    if removed {
+        crate::config::atomic_write(index_path, kept.as_bytes()).map_err(|e| {
+            format!(
+                "Failed to update Codex session index {}: {e}",
+                index_path.display()
+            )
+        })?;
+    }
+    Ok(removed)
 }
 
 fn parse_session(path: &Path) -> Option<SessionMeta> {
@@ -404,6 +460,8 @@ fn parse_session_with_titles(
     let summary = summary.map(|text| truncate_summary(&text, 160));
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id: session_id.clone(),
         title,
@@ -556,7 +614,7 @@ mod tests {
             "Archived session",
         );
 
-        let sessions = scan_sessions_in_roots(&[active, archived]);
+        let sessions = scan_sessions_in_roots(&[active, archived], &ScanCache::disabled());
         let ids = sessions
             .into_iter()
             .map(|session| session.session_id)
@@ -996,5 +1054,22 @@ mod tests {
 
         assert_eq!(msgs[3].role, "assistant");
         assert_eq!(msgs[3].content, "Done.");
+    }
+
+    #[test]
+    fn prune_session_index_entry_removes_only_matching_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = temp.path().join(CODEX_SESSION_INDEX_FILENAME);
+        std::fs::write(
+            &index,
+            "{\"id\":\"keep\",\"thread_name\":\"A\"}\n{\"id\":\"gone\",\"thread_name\":\"B\"}\nnot json\n",
+        )
+        .unwrap();
+        assert!(prune_session_index_entry(&index, "gone").unwrap());
+        let content = std::fs::read_to_string(&index).unwrap();
+        assert!(content.contains("\"keep\""));
+        assert!(!content.contains("\"gone\""));
+        assert!(content.contains("not json"));
+        assert!(!prune_session_index_entry(&index, "missing").unwrap());
     }
 }

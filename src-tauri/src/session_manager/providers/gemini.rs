@@ -2,6 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::session_manager::cache::ScanCache;
 use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
@@ -9,7 +10,7 @@ use super::utils::{extract_text, parse_timestamp_to_ms, truncate_summary, TITLE_
 
 const PROVIDER_ID: &str = "gemini";
 
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(cache: &ScanCache) -> Vec<SessionMeta> {
     let gemini_dir = crate::gemini_config::get_gemini_dir();
     let tmp_dir = gemini_dir.join("tmp");
     if !tmp_dir.exists() {
@@ -46,7 +47,7 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            if let Some(meta) = parse_session(&path) {
+            if let Some(meta) = cache.get_or_parse(PROVIDER_ID, &path, || parse_session(&path)) {
                 sessions.push(SessionMeta {
                     project_dir: project_dir.clone(),
                     ..meta
@@ -166,6 +167,8 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
     let source_path = path.to_string_lossy().to_string();
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id: session_id.clone(),
         title: title.clone(),

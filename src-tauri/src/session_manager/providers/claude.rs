@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::config::get_claude_config_dir;
+use crate::session_manager::cache::ScanCache;
 use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
@@ -15,19 +16,15 @@ use super::utils::{
 
 const PROVIDER_ID: &str = "claude";
 
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(cache: &ScanCache) -> Vec<SessionMeta> {
     let root = get_claude_config_dir().join("projects");
     let mut files = Vec::new();
     collect_jsonl_files(&root, &mut files);
 
-    let mut sessions = Vec::new();
-    for path in files {
-        if let Some(meta) = parse_session(&path) {
-            sessions.push(meta);
-        }
-    }
-
-    sessions
+    files
+        .iter()
+        .filter_map(|path| cache.get_or_parse(PROVIDER_ID, path, || parse_session(path)))
+        .collect()
 }
 
 pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
@@ -245,6 +242,8 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
     let summary = summary.map(|text| truncate_summary(&text, 160));
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id: session_id.clone(),
         title,

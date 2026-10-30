@@ -6,6 +6,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::openclaw_config::get_openclaw_dir;
+use crate::session_manager::cache::ScanCache;
 use crate::{
     config::write_json_file,
     session_manager::{SessionMessage, SessionMeta},
@@ -27,7 +28,7 @@ fn strip_message_id_suffix(text: &str) -> &str {
     }
 }
 
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(cache: &ScanCache) -> Vec<SessionMeta> {
     let agents_dir = get_openclaw_dir().join("agents");
     if !agents_dir.exists() {
         return Vec::new();
@@ -65,7 +66,17 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
                 continue;
             }
 
-            if let Some(meta) = parse_session(&path, Some(&display_names)) {
+            // Cached without display names (they live in sessions.json and
+            // are applied on every scan).
+            if let Some(mut meta) =
+                cache.get_or_parse(PROVIDER_ID, &path, || parse_session(&path, None))
+            {
+                if let Some(name) = display_names
+                    .get(&meta.session_id)
+                    .filter(|name| !name.is_empty())
+                {
+                    meta.title = Some(truncate_summary(name, TITLE_MAX_CHARS));
+                }
                 sessions.push(meta);
             }
         }
@@ -287,6 +298,8 @@ fn parse_session(
     let summary = summary.map(|text| truncate_summary(&text, 160));
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id: session_id.clone(),
         title,

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::session_manager::cache::ScanCache;
 use crate::session_manager::resume::resume_command;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
@@ -40,14 +41,14 @@ pub fn session_roots() -> Vec<PathBuf> {
     ]
 }
 
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(cache: &ScanCache) -> Vec<SessionMeta> {
     let mut summaries = Vec::new();
     for root in session_roots() {
         collect_summary_files(&root, &mut summaries);
     }
     summaries
-        .into_iter()
-        .filter_map(|path| parse_summary(&path))
+        .iter()
+        .filter_map(|path| cache.get_or_parse("grokbuild", path, || parse_summary(path)))
         .collect()
 }
 
@@ -182,6 +183,8 @@ fn parse_summary(path: &Path) -> Option<SessionMeta> {
         .and_then(parse_timestamp_to_ms);
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: "grokbuild".to_string(),
         session_id: session_id.clone(),
         title,

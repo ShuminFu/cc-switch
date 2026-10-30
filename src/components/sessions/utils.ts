@@ -66,7 +66,10 @@ const extractCodexPromptFromIdeContext = (content: string) => {
   return prompt;
 };
 
+/** Stable key; the backend computes the same `provider:session:source`
+ * string as `sessionKey`, which is preferred when present. */
 export const getSessionKey = (session: SessionMeta) =>
+  session.sessionKey ??
   `${session.providerId}:${session.sessionId}:${session.sourcePath ?? ""}`;
 
 export const getSessionDirectoryGroupKey = (

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSessionSearch } from "@/hooks/useSessionSearch";
 import { useTranslation } from "react-i18next";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
@@ -22,11 +21,8 @@ import {
   ChevronRight,
   ChevronsDownUp,
 } from "lucide-react";
-import {
-  useDeleteSessionMutation,
-  useSessionMessagesQuery,
-  useSessionsQuery,
-} from "@/lib/query";
+import { useDeleteSessionMutation, useSessionMessagesQuery } from "@/lib/query";
+import { queryKeys } from "@/lib/query/keys";
 import { sessionsApi } from "@/lib/api";
 import type { SessionMeta } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -57,6 +53,11 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 import { isMac } from "@/lib/platform";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { SessionItem } from "./SessionItem";
+import {
+  useIndexedSessions,
+  useSessionTranscriptSearch,
+} from "./sessionIndexApi";
+import { filterSessionsByQuery } from "./sessionFilter";
 import { SessionMessageItem } from "./SessionMessageItem";
 import { SessionTocDialog, SessionTocSidebar } from "./SessionToc";
 import {
@@ -189,8 +190,13 @@ const filterSetToAllowedValues = (
 export function SessionManagerPage({ appId }: { appId: string }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { data, isLoading, refetch } = useSessionsQuery();
-  const sessions = data ?? [];
+  const {
+    sessions,
+    isLoading,
+    refetch,
+    errors: scanErrors,
+    error: scanError,
+  } = useIndexedSessions();
   const detailRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [activeMessageIndex, setActiveMessageIndex] = useState<number | null>(
@@ -226,15 +232,44 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     Set<string>
   >(() => initialGroupExpansionState.expandedDirectoryKeys);
 
-  // 使用 FlexSearch 全文搜索
-  const { search: searchSessions } = useSessionSearch({
-    sessions,
-    providerFilter,
-  });
+  // Transcript search runs in the backend FTS index; metadata search is a
+  // cheap substring filter over the (stable) session list.
+  const [transcriptSearch, setTranscriptSearch] = useState(false);
+  const transcriptQuery = useSessionTranscriptSearch(search, transcriptSearch);
+  const transcriptHits = transcriptQuery.data?.hits;
+
+  const providerSessions = useMemo(
+    () =>
+      providerFilter === "all"
+        ? sessions
+        : sessions.filter((session) => session.providerId === providerFilter),
+    [providerFilter, sessions],
+  );
+
+  const transcriptSnippets = useMemo(() => {
+    const map = new Map<string, string>();
+    transcriptHits?.forEach((hit) => {
+      if (hit.snippet) map.set(hit.sessionKey, hit.snippet);
+    });
+    return map;
+  }, [transcriptHits]);
 
   const filteredSessions = useMemo(() => {
-    return searchSessions(search);
-  }, [searchSessions, search]);
+    if (transcriptSearch && search.trim()) {
+      if (!transcriptHits) return [];
+      const byKey = new Map(
+        providerSessions.map((session) => [getSessionKey(session), session]),
+      );
+      return transcriptHits
+        .map((hit) => byKey.get(hit.sessionKey))
+        .filter((session): session is SessionMeta => Boolean(session));
+    }
+    return filterSessionsByQuery(providerSessions, search);
+  }, [providerSessions, search, transcriptHits, transcriptSearch]);
+
+  // In-session highlighting follows the transcript search only; the list's
+  // metadata search never matched message bodies (SESS-34).
+  const detailSearchQuery = transcriptSearch ? search : "";
 
   const groupedSessions = useMemo(
     () =>
@@ -320,11 +355,59 @@ export function SessionManagerPage({ appId }: { appId: string }) {
           defaultValue: "列表",
         });
 
-  const { data: messages = [], isLoading: isLoadingMessages } =
-    useSessionMessagesQuery(
-      selectedSession?.providerId,
-      selectedSession?.sourcePath,
-    );
+  const {
+    data: messages = [],
+    isLoading: isLoadingMessages,
+    error: messagesError,
+    refetch: refetchMessages,
+  } = useSessionMessagesQuery(
+    selectedSession?.providerId,
+    selectedSession?.sourcePath,
+  );
+
+  // A newer lastActiveAt in the list means the open transcript changed on
+  // disk: reload it instead of showing the cached copy (SESS-45).
+  const selectedLastActive = selectedSession?.lastActiveAt;
+  const selectedProviderId = selectedSession?.providerId;
+  const selectedSourcePath = selectedSession?.sourcePath;
+  const lastSeenActiveRef = useRef<{ key: string | null; ts?: number }>({
+    key: null,
+  });
+  useEffect(() => {
+    const previous = lastSeenActiveRef.current;
+    lastSeenActiveRef.current = { key: selectedKey, ts: selectedLastActive };
+    if (
+      previous.key === selectedKey &&
+      previous.ts !== undefined &&
+      selectedLastActive !== undefined &&
+      selectedLastActive !== previous.ts
+    ) {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions.messages(
+          selectedProviderId,
+          selectedSourcePath,
+        ),
+      });
+    }
+  }, [
+    queryClient,
+    selectedKey,
+    selectedLastActive,
+    selectedProviderId,
+    selectedSourcePath,
+  ]);
+
+  const handleRefresh = useCallback(() => {
+    void refetch();
+    if (selectedProviderId && selectedSourcePath) {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions.messages(
+          selectedProviderId,
+          selectedSourcePath,
+        ),
+      });
+    }
+  }, [queryClient, refetch, selectedProviderId, selectedSourcePath]);
   const deleteSessionMutation = useDeleteSessionMutation();
   const isDeleting = deleteSessionMutation.isPending || isBatchDeleting;
 
@@ -691,6 +774,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         isSelected={isSelected}
         selectionMode={selectionMode}
         searchQuery={search}
+        snippet={transcriptSnippets.get(sessionKey)}
         isChecked={selectedSessionKeys.has(sessionKey)}
         isCheckDisabled={!session.sourcePath}
         onSelect={setSelectedKey}
@@ -835,6 +919,34 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                         <X className="size-3" />
                       </Button>
                     </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={transcriptSearch ? "secondary" : "ghost"}
+                          size="icon"
+                          className="size-7"
+                          aria-pressed={transcriptSearch}
+                          aria-label={t("sessionManager.searchTranscripts", {
+                            defaultValue: "Search message contents",
+                          })}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => setTranscriptSearch((v) => !v)}
+                        >
+                          <FileText className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {transcriptSearch &&
+                        transcriptQuery.data?.complete === false
+                          ? t("sessionManager.searchIndexing", {
+                              defaultValue:
+                                "Indexing transcripts… results will grow",
+                            })
+                          : t("sessionManager.searchTranscripts", {
+                              defaultValue: "Search message contents",
+                            })}
+                      </TooltipContent>
+                    </Tooltip>
                     {selectionMode && (
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -1138,7 +1250,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               variant="ghost"
                               size="icon"
                               className="size-7"
-                              onClick={() => void refetch()}
+                              onClick={handleRefresh}
                             >
                               <RefreshCw className="size-3.5" />
                             </Button>
@@ -1218,6 +1330,31 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                   </div>
                 )}
               </CardHeader>
+              {(scanErrors.length > 0 || scanError) && (
+                <div
+                  role="alert"
+                  className="border-b bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+                >
+                  <p className="font-medium">
+                    {t("sessionManager.scanErrors", {
+                      defaultValue: "Some sessions could not be read",
+                    })}
+                  </p>
+                  {scanError ? (
+                    <p className="break-all">
+                      {extractErrorMessage(scanError)}
+                    </p>
+                  ) : null}
+                  {scanErrors.map((item) => (
+                    <p
+                      key={`${item.providerId}:${item.message}`}
+                      className="break-all"
+                    >
+                      {getProviderLabel(item.providerId, t)}: {item.message}
+                    </p>
+                  ))}
+                </div>
+              )}
               <CardContent className="flex-1 min-h-0 p-0">
                 <ScrollArea className="h-full">
                   <div className="p-2">
@@ -1639,6 +1776,27 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             <div className="flex items-center justify-center py-12">
                               <RefreshCw className="size-5 animate-spin text-muted-foreground" />
                             </div>
+                          ) : messagesError ? (
+                            <div
+                              role="alert"
+                              className="flex flex-col items-center justify-center gap-2 py-12 text-center"
+                            >
+                              <p className="text-sm text-destructive">
+                                {t("sessionManager.messagesLoadFailed", {
+                                  defaultValue: "Failed to load this session",
+                                })}
+                              </p>
+                              <p className="max-w-md break-all text-xs text-muted-foreground">
+                                {extractErrorMessage(messagesError)}
+                              </p>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void refetchMessages()}
+                              >
+                                {t("common.retry", { defaultValue: "Retry" })}
+                              </Button>
+                            </div>
                           ) : messages.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-12 text-center">
                               <MessageSquare className="size-8 text-muted-foreground/50 mb-2" />
@@ -1673,7 +1831,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                                       isActive={
                                         activeMessageIndex === virtualRow.index
                                       }
-                                      searchQuery={search}
+                                      searchQuery={detailSearchQuery}
                                       onCopy={handleMessageCopy}
                                     />
                                   </div>

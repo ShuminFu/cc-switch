@@ -127,6 +127,37 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/list_sessions`, () => success(listSessions())),
 
+  // Session index (SESS-09): the mock always returns the full list.
+  http.post(`${TAURI_ENDPOINT}/scan_sessions_report`, () =>
+    success({
+      sessions: listSessions(),
+      errors: [],
+      generation: Date.now(),
+      changed: true,
+      parsedFiles: 0,
+      unchanged: false,
+    }),
+  ),
+
+  http.post(`${TAURI_ENDPOINT}/get_session_index_snapshot`, () => success([])),
+
+  http.post(`${TAURI_ENDPOINT}/search_sessions`, async ({ request }) => {
+    const { query } = await withJson<{ query: string }>(request);
+    const needle = query.trim().toLowerCase();
+    const hits = listSessions()
+      .filter((session) =>
+        getSessionMessages(session.providerId, session.sourcePath ?? "").some(
+          (message) => message.content.toLowerCase().includes(needle),
+        ),
+      )
+      .map((session) => ({
+        sessionKey: `${session.providerId}:${session.sessionId}:${session.sourcePath ?? ""}`,
+        providerId: session.providerId,
+        sessionId: session.sessionId,
+      }));
+    return success({ hits, complete: true });
+  }),
+
   http.post(`${TAURI_ENDPOINT}/get_session_messages`, async ({ request }) => {
     const { providerId, sourcePath } = await withJson<{
       providerId: string;

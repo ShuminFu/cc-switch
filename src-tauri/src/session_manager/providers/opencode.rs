@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::session_manager::cache::ScanCache;
 use crate::session_manager::resume::resume_command;
+use crate::session_manager::source::SessionSource;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{open_tool_db, parse_timestamp_to_ms, path_basename, truncate_summary};
@@ -35,7 +37,7 @@ fn get_opencode_db_path() -> PathBuf {
 
 /// Scan sessions from both the legacy JSON files and the newer SQLite database,
 /// merging results with SQLite taking precedence on ID conflicts.
-pub fn scan_sessions() -> Vec<SessionMeta> {
+pub fn scan_sessions(_cache: &ScanCache) -> Vec<SessionMeta> {
     let json_sessions = scan_sessions_json();
     let sqlite_sessions = scan_sessions_sqlite();
 
@@ -80,17 +82,13 @@ fn scan_sessions_json() -> Vec<SessionMeta> {
     sessions
 }
 
-/// Parse a SQLite source reference in the format `sqlite:<db_path>:<session_id>`.
-///
-/// Uses `rfind(":ses_")` to split the path from the session ID because the
-/// db path itself may contain colons (e.g. `C:\Users\...` on Windows).
-/// This relies on the OpenCode convention that session IDs start with `ses_`.
+/// Parse a SQLite source reference (`sqlite:<db_path>:<ses_id>`); see
+/// [`SessionSource::from_legacy`] for the single implementation.
 fn parse_sqlite_source(source: &str) -> Option<(PathBuf, String)> {
-    let rest = source.strip_prefix("sqlite:")?;
-    let sep = rest.rfind(":ses_")?;
-    let db_path = PathBuf::from(&rest[..sep]);
-    let session_id = rest[sep + 1..].to_string();
-    Some((db_path, session_id))
+    match SessionSource::from_legacy(PROVIDER_ID, source).ok()? {
+        SessionSource::Sqlite { db, id } => Some((PathBuf::from(db), id)),
+        _ => None,
+    }
 }
 
 fn scan_sessions_sqlite() -> Vec<SessionMeta> {
@@ -143,6 +141,8 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
             Some(title)
         };
         sessions.push(SessionMeta {
+            source: None,
+            session_key: None,
             provider_id: PROVIDER_ID.to_string(),
             session_id: session_id.clone(),
             title: display_title.clone(),
@@ -420,6 +420,19 @@ pub fn delete_session_sqlite(session_id: &str, source: &str) -> Result<bool, Str
     tx.commit()
         .map_err(|e| format!("Failed to commit session deletion: {e}"))?;
 
+    // Sessions migrated from the legacy JSON storage keep their old files; the
+    // scan would list them again once the SQLite row is gone (SESS-40).
+    let storage = get_opencode_data_dir();
+    if find_session_file(&storage, session_id).is_some()
+        || storage.join("message").join(session_id).exists()
+    {
+        delete_session(
+            &storage,
+            &storage.join("message").join(session_id),
+            session_id,
+        )?;
+    }
+
     Ok(deleted > 0)
 }
 
@@ -468,6 +481,8 @@ fn parse_session(storage: &Path, path: &Path) -> Option<SessionMeta> {
     };
 
     Some(SessionMeta {
+        source: None,
+        session_key: None,
         provider_id: PROVIDER_ID.to_string(),
         session_id: session_id.clone(),
         title: display_title,
@@ -928,9 +943,31 @@ mod tests {
         .expect("insert part");
         drop(conn);
 
+        // Legacy JSON copy of the same session (migrated storage).
+        let storage = base_dir.join("storage");
+        std::fs::create_dir_all(storage.join("session/global")).unwrap();
+        std::fs::create_dir_all(storage.join("message/ses_1")).unwrap();
+        std::fs::write(
+            storage.join("session/global/ses_1.json"),
+            r#"{"id":"ses_1","title":"Session","directory":"/tmp/project-a","time":{"created":1000,"updated":3000}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            storage.join("message/ses_1/msg_1.json"),
+            r#"{"id":"msg_1","role":"user"}"#,
+        )
+        .unwrap();
+
         let source = format!("sqlite:{}:ses_1", db_path.display());
         let deleted = delete_session_sqlite("ses_1", &source).expect("delete sqlite session");
         assert!(deleted);
+        assert!(
+            scan_sessions(&ScanCache::disabled())
+                .iter()
+                .all(|s| s.session_id != "ses_1"),
+            "legacy JSON copy must not resurrect the deleted session"
+        );
+        assert!(!storage.join("session/global/ses_1.json").exists());
 
         let conn = Connection::open(&db_path).expect("re-open sqlite db");
         let remaining_sessions: i64 = conn
