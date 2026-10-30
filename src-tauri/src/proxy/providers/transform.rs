@@ -68,6 +68,55 @@ pub fn supports_reasoning_effort(model: &str) -> bool {
             .is_some_and(|c| c.is_ascii_digit() && c >= '5')
 }
 
+/// Detect OpenAI reasoning families (o-series and GPT-5+) that, through Chat
+/// Completions, reject `max_tokens` in favour of `max_completion_tokens`.
+/// A vendor prefix such as `openai/gpt-5` (OpenRouter style) is ignored.
+pub fn is_openai_reasoning_model(model: &str) -> bool {
+    let name = model
+        .rsplit('/')
+        .next()
+        .unwrap_or(model)
+        .to_ascii_lowercase();
+    supports_reasoning_effort(&name)
+}
+
+/// OpenAI reasoning models only accept the default sampling parameters and
+/// reject a non-default `temperature`/`top_p` with a 400. The `*-chat*`
+/// variants (e.g. `gpt-5-chat-latest`) are non-reasoning and accept them.
+fn rejects_custom_sampling(model: &str) -> bool {
+    is_openai_reasoning_model(model) && !model.to_ascii_lowercase().contains("-chat")
+}
+
+/// Write the Chat Completions token limit and sampling parameters for `model`:
+/// reasoning models get `max_completion_tokens` and no `temperature`/`top_p`;
+/// other models keep `max_tokens` and the sampling values as given.
+pub(crate) fn apply_chat_token_limit_and_sampling(
+    result: &mut Value,
+    model: &str,
+    max_tokens: Option<&Value>,
+    temperature: Option<&Value>,
+    top_p: Option<&Value>,
+) {
+    if let Some(v) = max_tokens {
+        if is_openai_reasoning_model(model) {
+            result["max_completion_tokens"] = v.clone();
+        } else {
+            result["max_tokens"] = v.clone();
+        }
+    }
+    let strip_sampling = rejects_custom_sampling(model);
+    for (key, value) in [("temperature", temperature), ("top_p", top_p)] {
+        let Some(value) = value else {
+            continue;
+        };
+        if strip_sampling {
+            log::debug!("[Transform] dropping `{key}` for OpenAI reasoning model {model}");
+        } else {
+            result[key] = value.clone();
+        }
+    }
+}
+
 /// Resolve the appropriate OpenAI `reasoning_effort` from an Anthropic request body.
 ///
 /// Priority:
@@ -171,21 +220,15 @@ pub fn anthropic_to_openai_with_reasoning_content(
     normalize_openai_system_messages(&mut messages);
     result["messages"] = json!(messages);
 
-    // 转换参数 — o-series 模型需要 max_completion_tokens
+    // 转换参数 — o-series / gpt-5+ 推理模型需要 max_completion_tokens，且不接受自定义采样参数
     let model = body.get("model").and_then(|m| m.as_str()).unwrap_or("");
-    if let Some(v) = body.get("max_tokens") {
-        if is_openai_o_series(model) {
-            result["max_completion_tokens"] = v.clone();
-        } else {
-            result["max_tokens"] = v.clone();
-        }
-    }
-    if let Some(v) = body.get("temperature") {
-        result["temperature"] = v.clone();
-    }
-    if let Some(v) = body.get("top_p") {
-        result["top_p"] = v.clone();
-    }
+    apply_chat_token_limit_and_sampling(
+        &mut result,
+        model,
+        body.get("max_tokens"),
+        body.get("temperature"),
+        body.get("top_p"),
+    );
     if let Some(v) = body.get("stop_sequences") {
         result["stop"] = v.clone();
     }
@@ -1752,6 +1795,56 @@ mod tests {
                 "{model} should use max_completion_tokens"
             );
         }
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_gpt5_uses_max_completion_tokens_and_drops_sampling() {
+        for model in &["gpt-5.4", "gpt-5-mini", "openai/gpt-5", "o3"] {
+            let input = json!({
+                "model": model,
+                "max_tokens": 100,
+                "temperature": 0,
+                "top_p": 0.9,
+                "messages": [{"role": "user", "content": "Hello"}]
+            });
+
+            let result = anthropic_to_openai(input).unwrap();
+            assert_eq!(result["max_completion_tokens"], 100, "{model}");
+            assert!(result.get("max_tokens").is_none(), "{model}");
+            assert!(result.get("temperature").is_none(), "{model}");
+            assert!(result.get("top_p").is_none(), "{model}");
+        }
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_gpt5_chat_keeps_sampling() {
+        let input = json!({
+            "model": "gpt-5-chat-latest",
+            "max_tokens": 100,
+            "temperature": 0.2,
+            "messages": [{"role": "user", "content": "Hello"}]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        assert_eq!(result["max_completion_tokens"], 100);
+        assert_eq!(result["temperature"], 0.2);
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_gpt41_keeps_max_tokens_and_temperature() {
+        let input = json!({
+            "model": "gpt-4.1",
+            "max_tokens": 100,
+            "temperature": 0,
+            "top_p": 0.5,
+            "messages": [{"role": "user", "content": "Hello"}]
+        });
+
+        let result = anthropic_to_openai(input).unwrap();
+        assert_eq!(result["max_tokens"], 100);
+        assert!(result.get("max_completion_tokens").is_none());
+        assert_eq!(result["temperature"], 0);
+        assert_eq!(result["top_p"], 0.5);
     }
 
     #[test]
