@@ -18,6 +18,8 @@ interface McpWizardModalProps {
   onClose: () => void;
   onApply: (title: string, json: string) => void;
   initialTitle?: string;
+  /** Lock the title (server ID), e.g. when editing an existing server. */
+  titleReadOnly?: boolean;
   initialServer?: McpServerSpec;
 }
 
@@ -78,6 +80,7 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
   onClose,
   onApply,
   initialTitle,
+  titleReadOnly = false,
   initialServer,
 }) => {
   const { t } = useTranslation();
@@ -305,6 +308,7 @@ const McpWizardModal: React.FC<McpWizardModalProps> = ({
               <Input
                 type="text"
                 value={wizardTitle}
+                disabled={titleReadOnly}
                 onChange={(e) => setWizardTitle(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={t("mcp.form.titlePlaceholder")}

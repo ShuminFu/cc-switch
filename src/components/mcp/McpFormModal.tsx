@@ -268,7 +268,11 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
   };
 
   const handleWizardApply = (title: string, json: string) => {
-    setFormId(title);
+    // 编辑模式下 ID 是锁定的：改 ID 会让 upsert 新建一份副本，
+    // 或者静默覆盖另一个同名服务器。
+    if (!isEditing) {
+      handleIdChange(title);
+    }
     if (!formName.trim()) {
       setFormName(title);
     }
@@ -288,7 +292,8 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
   };
 
   const handleSubmit = async () => {
-    const trimmedId = formId.trim();
+    // 编辑时始终按原 ID 保存，绝不重命名
+    const trimmedId = isEditing && editingId ? editingId : formId.trim();
     if (!trimmedId) {
       toast.error(t("mcp.error.idRequired"), { duration: 3000 });
       return;
@@ -741,6 +746,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
         onClose={() => setIsWizardOpen(false)}
         onApply={handleWizardApply}
         initialTitle={formId}
+        titleReadOnly={isEditing}
         initialServer={wizardInitialSpec}
       />
     </>
