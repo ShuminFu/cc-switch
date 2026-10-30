@@ -563,6 +563,14 @@ fn extract_codex_model_from_toml(config_text: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
+fn first_model_provider_base_url(doc: &TomlValue) -> Option<String> {
+    doc.get("model_providers")?
+        .as_table()?
+        .values()
+        .find_map(|block| block.get("base_url").and_then(|v| v.as_str()))
+        .map(ToString::to_string)
+}
+
 fn extract_codex_base_url_from_toml(config_text: &str) -> Option<String> {
     // Canonical parser lives in codex_config; keep this thin alias so the
     // proxy hot path and the usage-credential resolver share one implementation.
@@ -685,9 +693,31 @@ impl ProviderAdapter for CodexAdapter {
 
             // 尝试解析 TOML 字符串格式
             if let Some(config_str) = config.as_str() {
+                // PROV-38: resolve the *active* `model_provider` block first, the
+                // same parser the Chat/Anthropic bridge, prompt-cache-key and
+                // reasoning inference use, so routing and policy agree.
+                if let Some(url) = extract_codex_base_url_from_toml(config_str) {
+                    return Ok(url.trim_end_matches('/').to_string());
+                }
                 if let Some(url) = crate::grok_config::extract_base_url(config_str) {
                     return Ok(url.trim_end_matches('/').to_string());
                 }
+                if let Ok(doc) = config_str.parse::<TomlValue>() {
+                    // Valid TOML whose active provider has no base_url: keep the
+                    // legacy "first provider block" behaviour, but say so. Never
+                    // text-scan parseable TOML (commented-out lines would match).
+                    if let Some(url) = first_model_provider_base_url(&doc) {
+                        log::warn!(
+                            "[Codex] active model_provider has no base_url; falling back to the first [model_providers.*] base_url for provider {}",
+                            provider.id
+                        );
+                        return Ok(url.trim_end_matches('/').to_string());
+                    }
+                    return Err(ProxyError::ConfigError(
+                        "Codex Provider 缺少 base_url 配置".to_string(),
+                    ));
+                }
+                // Unparseable TOML: best-effort textual scan (legacy behaviour).
                 if let Some(start) = config_str.find("base_url = \"") {
                     let rest = &config_str[start + 12..];
                     if let Some(end) = rest.find('"') {
@@ -807,6 +837,27 @@ mod tests {
             icon_color: None,
             in_failover_queue: false,
         }
+    }
+
+    #[test]
+    fn extract_base_url_follows_active_model_provider_block() {
+        let provider = create_provider(json!({
+            "config": "model_provider = \"b\"\nmodel = \"m\"\n\n[model_providers.a]\nbase_url = \"https://a/v1\"\n\n[model_providers.b]\nbase_url = \"https://b/v1/chat/completions\"\n# base_url = \"https://commented/v1\"\n"
+        }));
+        let adapter = CodexAdapter::new();
+        assert_eq!(
+            adapter.extract_base_url(&provider).unwrap(),
+            "https://b/v1/chat/completions"
+        );
+        assert!(codex_provider_uses_chat_completions(&provider));
+    }
+
+    #[test]
+    fn extract_base_url_ignores_commented_lines_in_valid_toml() {
+        let provider = create_provider(json!({
+            "config": "# base_url = \"https://commented/v1\"\nmodel = \"m\"\n"
+        }));
+        assert!(CodexAdapter::new().extract_base_url(&provider).is_err());
     }
 
     #[test]

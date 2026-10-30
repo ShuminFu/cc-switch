@@ -120,79 +120,15 @@ impl ProviderType {
     /// 从 AppType 和 Provider 配置推断供应商类型
     ///
     /// 根据配置中的 base_url、auth_mode、api_key 格式等信息推断具体的供应商类型
-    #[allow(dead_code)]
+    /// PROV-29: delegates to the adapters' own classifiers so the forwarder,
+    /// the adapters and usage logging can never disagree for one provider.
     pub fn from_app_type_and_config(app_type: &AppType, provider: &Provider) -> Self {
         match app_type {
             AppType::Claude | AppType::ClaudeDesktop => {
-                if get_claude_api_format(provider) == "gemini_native" {
-                    let adapter = ClaudeAdapter::new();
-                    return match adapter.extract_auth(provider).map(|auth| auth.strategy) {
-                        Some(AuthStrategy::GoogleOAuth) => ProviderType::GeminiCli,
-                        _ => ProviderType::Gemini,
-                    };
-                }
-
-                // 检测是否为 GitHub Copilot
-                if let Some(meta) = provider.meta.as_ref() {
-                    if meta.provider_type.as_deref() == Some("github_copilot") {
-                        return ProviderType::GitHubCopilot;
-                    }
-                    if meta.provider_type.as_deref() == Some("codex_oauth") {
-                        return ProviderType::CodexOAuth;
-                    }
-                }
-
-                // 检测 base_url 是否为 GitHub Copilot
-                let adapter = ClaudeAdapter::new();
-                if let Ok(base_url) = adapter.extract_base_url(provider) {
-                    if base_url.contains("githubcopilot.com") {
-                        return ProviderType::GitHubCopilot;
-                    }
-                    // 检测是否为 OpenRouter
-                    if base_url.contains("openrouter.ai") {
-                        return ProviderType::OpenRouter;
-                    }
-                }
-                // 检测是否为中转服务（仅 Bearer 认证）
-                // 注意：ProviderMeta 没有直接的 auth_mode 字段，
-                // 我们通过检查 settings_config 中的配置来判断
-                // 检查 settings_config 中的 auth_mode
-                if let Some(auth_mode) = provider
-                    .settings_config
-                    .get("auth_mode")
-                    .and_then(|v| v.as_str())
-                {
-                    if auth_mode == "bearer_only" {
-                        return ProviderType::ClaudeAuth;
-                    }
-                }
-                // 检查 env 中的 auth_mode
-                if let Some(env) = provider.settings_config.get("env") {
-                    if let Some(auth_mode) = env.get("AUTH_MODE").and_then(|v| v.as_str()) {
-                        if auth_mode == "bearer_only" {
-                            return ProviderType::ClaudeAuth;
-                        }
-                    }
-                }
-                ProviderType::Claude
+                ClaudeAdapter::new().provider_type(provider)
             }
             AppType::Codex => ProviderType::Codex,
-            AppType::Gemini => {
-                // 检测是否为 CLI 模式（OAuth）
-                let adapter = GeminiAdapter::new();
-                if let Some(auth) = adapter.extract_auth(provider) {
-                    let key = &auth.api_key;
-                    // OAuth access_token 以 ya29. 开头
-                    if key.starts_with("ya29.") {
-                        return ProviderType::GeminiCli;
-                    }
-                    // JSON 格式的 OAuth 凭证
-                    if key.starts_with('{') {
-                        return ProviderType::GeminiCli;
-                    }
-                }
-                ProviderType::Gemini
-            }
+            AppType::Gemini => GeminiAdapter::new().provider_type(provider),
             AppType::GrokBuild => ProviderType::Codex,
             AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => ProviderType::Codex,
         }
