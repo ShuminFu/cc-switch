@@ -160,7 +160,11 @@ jobs:
             exit 1
           fi
 
+      # The [::1] proxy tests skip when IPv6 loopback is missing; on Linux
+      # and macOS a bind failure must fail the run instead (CCS-227).
       - name: Run tests
+        env:
+          CCS_REQUIRE_IPV6: ${{ runner.os != 'Windows' && '1' || '' }}
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
   # Proves the declared rust-version in src-tauri/Cargo.toml is real: the
