@@ -205,7 +205,9 @@ impl Database {
                 log::info!(
                     "Creating pre-migration database backup (v{version} → v{SCHEMA_VERSION})"
                 );
-                if let Err(e) = db.backup_database_file() {
+                if let Err(e) =
+                    db.backup_database_file_of_kind(backup::BackupKind::PreMigration, None)
+                {
                     log::warn!("Pre-migration backup failed, continuing migration: {e}");
                 }
             }
@@ -315,7 +317,7 @@ impl Database {
             log::info!(
                 "Detected auto_vacuum={mode}, rebuilding database to enable incremental vacuum"
             );
-            self.backup_database_file()?;
+            self.backup_database_file_of_kind(backup::BackupKind::PreMigration, None)?;
         }
 
         let rebuilt = {

@@ -8,7 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::commands::sync_support::{
     post_sync_warning_from_result, run_post_import_sync, success_payload_with_warning,
 };
-use crate::database::backup::BackupEntry;
+use crate::database::backup::{BackupEntry, BackupKind};
 use crate::database::Database;
 use crate::error::AppError;
 use crate::services::provider::ProviderService;
@@ -127,14 +127,16 @@ pub async fn open_zip_file_dialog<R: tauri::Runtime>(
 #[tauri::command]
 pub async fn create_db_backup(state: State<'_, AppState>) -> Result<String, String> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || match db.backup_database_file()? {
-        Some(path) => Ok(path
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_default()),
-        None => Err(AppError::Config(
-            "Database file not found, backup skipped".to_string(),
-        )),
+    tauri::async_runtime::spawn_blocking(move || {
+        match db.backup_database_file_of_kind(BackupKind::Manual, None)? {
+            Some(path) => Ok(path
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_default()),
+            None => Err(AppError::Config(
+                "Database file not found, backup skipped".to_string(),
+            )),
+        }
     })
     .await
     .map_err(|e| format!("Backup failed: {e}"))?
@@ -154,10 +156,20 @@ pub async fn restore_db_backup(
     filename: String,
 ) -> Result<String, String> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || db.restore_from_backup(&filename))
-        .await
-        .map_err(|e| format!("Restore failed: {e}"))?
-        .map_err(|e: AppError| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let safety_id = db.restore_from_backup(&filename)?;
+        // Same post-replace pipeline as SQL import and WebDAV/S3 download:
+        // rewrite live files from the restored current providers and reload
+        // settings. Takeover state is kept from this device by the restore, so
+        // the takeover-aware live sync stays consistent with the files on disk.
+        if let Some(msg) = post_sync_warning_from_result(Ok(run_post_import_sync(db))) {
+            log::warn!("[Restore] post-restore sync warning: {msg}");
+        }
+        Ok::<_, AppError>(safety_id)
+    })
+    .await
+    .map_err(|e| format!("Restore failed: {e}"))?
+    .map_err(|e: AppError| e.to_string())
 }
 
 /// Rename a database backup file
