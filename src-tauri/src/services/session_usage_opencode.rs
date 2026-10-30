@@ -14,13 +14,14 @@
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::opencode_config::get_opencode_db_path;
+use crate::pricing::resolver::find_model_pricing;
 use crate::proxy::usage::calculator::CostCalculator;
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
     get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
 };
 use crate::services::sql_helpers::input_token_semantics_for_app_type;
-use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
+use crate::services::usage_stats::{should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
 use std::fs;
 use std::time::SystemTime;

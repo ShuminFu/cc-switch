@@ -1,53 +1,32 @@
 //! Cost Calculator - 计算 API 请求成本
 //!
-//! 使用高精度 Decimal 类型避免浮点数精度问题
+//! 只是 [`crate::pricing::engine::cost`] 的薄封装：把代理侧的 [`TokenUsage`]
+//! 转成引擎的 token 计数，并按 app_type 选择 input 语义。
 
 use super::parser::TokenUsage;
-use crate::app_config::InputSemantics;
+use crate::pricing::engine::{self, InputBasis, TokenCounts};
 use rust_decimal::Decimal;
-use std::str::FromStr;
 
-/// 成本明细
-#[derive(Debug, Clone)]
-pub struct CostBreakdown {
-    pub input_cost: Decimal,
-    pub output_cost: Decimal,
-    pub cache_read_cost: Decimal,
-    pub cache_creation_cost: Decimal,
-    pub total_cost: Decimal,
-}
-
-/// 模型定价信息
-#[derive(Debug, Clone)]
-pub struct ModelPricing {
-    pub input_cost_per_million: Decimal,
-    pub output_cost_per_million: Decimal,
-    pub cache_read_cost_per_million: Decimal,
-    pub cache_creation_cost_per_million: Decimal,
-}
+pub use crate::pricing::engine::{CostBreakdown, ModelPricing};
 
 /// 成本计算器
 pub struct CostCalculator;
 
 impl CostCalculator {
-    /// 计算请求成本
+    /// 计算请求成本（Claude/Anthropic 语义：input_tokens 已经不包含 cache 部分）
     ///
-    /// # 参数
-    /// - `usage`: Token 使用量
-    /// - `pricing`: 模型定价
-    /// - `cost_multiplier`: 成本倍数 (provider 自定义)
-    ///
-    /// # 计算逻辑
-    /// - input_cost: input_tokens × 输入价格
-    /// - cache_read_cost: cache_read_tokens × 缓存读取价格
-    /// - Claude/Anthropic 的 input_tokens 已经不包含 cache_read_tokens
-    /// - total_cost: 各项成本之和 × 倍率（倍率只作用于最终总价）
+    /// 各项成本是基础成本（不含倍率），倍率只作用于最终总价。
     pub fn calculate(
         usage: &TokenUsage,
         pricing: &ModelPricing,
         cost_multiplier: Decimal,
     ) -> CostBreakdown {
-        Self::calculate_with_cache_semantics(usage, pricing, cost_multiplier, false)
+        engine::cost(
+            &token_counts(usage),
+            InputBasis::Fresh,
+            pricing,
+            cost_multiplier,
+        )
     }
 
     /// 按 app_type 选择输入 token 语义后计算成本。
@@ -61,57 +40,12 @@ impl CostCalculator {
         pricing: &ModelPricing,
         cost_multiplier: Decimal,
     ) -> CostBreakdown {
-        let input_includes_cache_read =
-            InputSemantics::for_app_type_str(app_type).is_cache_inclusive();
-        Self::calculate_with_cache_semantics(
-            usage,
+        engine::cost(
+            &token_counts(usage),
+            InputBasis::for_app_type(app_type),
             pricing,
             cost_multiplier,
-            input_includes_cache_read,
         )
-    }
-
-    fn calculate_with_cache_semantics(
-        usage: &TokenUsage,
-        pricing: &ModelPricing,
-        cost_multiplier: Decimal,
-        input_includes_cache_read: bool,
-    ) -> CostBreakdown {
-        let million = Decimal::from(1_000_000);
-
-        // OpenAI/Gemini 风格的 input_tokens 包含缓存读取和写入，需要扣除后再按输入价计费；
-        // Claude/Anthropic 风格的 input_tokens 已经是 fresh input，不能再次扣减。
-        let billable_input_tokens = if input_includes_cache_read {
-            usage
-                .input_tokens
-                .saturating_sub(usage.cache_read_tokens)
-                .saturating_sub(usage.cache_creation_tokens)
-        } else {
-            usage.input_tokens
-        };
-
-        // 各项基础成本（不含倍率）
-        let input_cost =
-            Decimal::from(billable_input_tokens) * pricing.input_cost_per_million / million;
-        let output_cost =
-            Decimal::from(usage.output_tokens) * pricing.output_cost_per_million / million;
-        let cache_read_cost =
-            Decimal::from(usage.cache_read_tokens) * pricing.cache_read_cost_per_million / million;
-        let cache_creation_cost = Decimal::from(usage.cache_creation_tokens)
-            * pricing.cache_creation_cost_per_million
-            / million;
-
-        // 总成本 = 各项基础成本之和 × 倍率
-        let base_total = input_cost + output_cost + cache_read_cost + cache_creation_cost;
-        let total_cost = base_total * cost_multiplier;
-
-        CostBreakdown {
-            input_cost,
-            output_cost,
-            cache_read_cost,
-            cache_creation_cost,
-            total_cost,
-        }
     }
 
     pub fn try_calculate_for_app(
@@ -124,26 +58,19 @@ impl CostCalculator {
     }
 }
 
-impl ModelPricing {
-    /// 从字符串创建定价信息
-    pub fn from_strings(
-        input: &str,
-        output: &str,
-        cache_read: &str,
-        cache_creation: &str,
-    ) -> Result<Self, rust_decimal::Error> {
-        Ok(Self {
-            input_cost_per_million: Decimal::from_str(input)?,
-            output_cost_per_million: Decimal::from_str(output)?,
-            cache_read_cost_per_million: Decimal::from_str(cache_read)?,
-            cache_creation_cost_per_million: Decimal::from_str(cache_creation)?,
-        })
+fn token_counts(usage: &TokenUsage) -> TokenCounts {
+    TokenCounts {
+        input: u64::from(usage.input_tokens),
+        output: u64::from(usage.output_tokens),
+        cache_read: u64::from(usage.cache_read_tokens),
+        cache_creation: u64::from(usage.cache_creation_tokens),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_cost_calculation() {

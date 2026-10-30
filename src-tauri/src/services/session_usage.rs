@@ -11,11 +11,12 @@
 use crate::config::get_claude_config_dir;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
+use crate::pricing::resolver::find_model_pricing;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::sql_helpers::input_token_semantics_for_app_type;
 use crate::services::usage_stats::{
-    effective_usage_log_filter, find_model_pricing, should_skip_session_insert, DedupKey,
+    effective_usage_log_filter, should_skip_session_insert, DedupKey,
 };
 use rusqlite::OptionalExtension;
 use rust_decimal::Decimal;

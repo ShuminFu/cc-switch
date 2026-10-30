@@ -4,9 +4,9 @@ use super::calculator::{CostBreakdown, CostCalculator, ModelPricing};
 use super::parser::TokenUsage;
 use crate::database::{Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 use crate::error::AppError;
+use crate::pricing::resolver::{find_model_pricing_row, is_placeholder_pricing_model};
 use crate::proxy::runtime_config::RuntimeConfigStore;
 use crate::services::sql_helpers::input_token_semantics_for_app_type;
-use crate::services::usage_stats::{find_model_pricing_row, is_placeholder_pricing_model};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
