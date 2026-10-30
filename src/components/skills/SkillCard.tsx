@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, Download, Trash2, Loader2 } from "lucide-react";
+import { ExternalLink, Download, Check, Loader2 } from "lucide-react";
 import { settingsApi } from "@/lib/api";
 import type { DiscoverableSkill } from "@/lib/api/skills";
 
@@ -19,16 +19,10 @@ type SkillCardSkill = DiscoverableSkill & { installed: boolean };
 interface SkillCardProps {
   skill: SkillCardSkill;
   onInstall: (key: string) => Promise<void>;
-  onUninstall: (key: string) => Promise<void>;
   installs?: number;
 }
 
-export function SkillCard({
-  skill,
-  onInstall,
-  onUninstall,
-  installs,
-}: SkillCardProps) {
+export function SkillCard({ skill, onInstall, installs }: SkillCardProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
 
@@ -36,15 +30,6 @@ export function SkillCard({
     setLoading(true);
     try {
       await onInstall(skill.key);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUninstall = async () => {
-    setLoading(true);
-    try {
-      await onUninstall(skill.key);
     } finally {
       setLoading(false);
     }
@@ -131,19 +116,18 @@ export function SkillCard({
           </Button>
         )}
         {skill.installed ? (
+          // Discovery cannot uninstall; show the state instead of an active
+          // button that only toasts (FE-UI-33). Uninstall lives in the
+          // installed-skills list.
           <Button
             variant="outline"
             size="sm"
-            onClick={handleUninstall}
-            disabled={loading}
-            className="flex-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900/50 dark:text-red-400 dark:hover:bg-red-950/50 dark:hover:text-red-300"
+            disabled
+            className="flex-1"
+            title={t("skills.uninstallInMainPanel")}
           >
-            {loading ? (
-              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-            ) : (
-              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-            )}
-            {loading ? t("skills.uninstalling") : t("skills.uninstall")}
+            <Check className="h-3.5 w-3.5 mr-1.5" />
+            {t("skills.installed")}
           </Button>
         ) : (
           <Button

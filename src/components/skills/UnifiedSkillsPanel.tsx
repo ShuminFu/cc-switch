@@ -97,6 +97,8 @@ const UnifiedSkillsPanel = React.forwardRef<
   } = useCheckSkillUpdates();
   const updateSkillMutation = useUpdateSkill();
   const [isUpdatingAll, setIsUpdatingAll] = useState(false);
+  // Progress of "update all" (FE-UI-33).
+  const [updateProgress, setUpdateProgress] = useState({ done: 0, total: 0 });
 
   const updatesMap = useMemo(() => {
     const map: Record<string, SkillUpdateInfo> = {};
@@ -233,21 +235,30 @@ const UnifiedSkillsPanel = React.forwardRef<
 
   const handleUpdateAll = async () => {
     if (!skillUpdates || skillUpdates.length === 0) return;
+    const queue = [...skillUpdates];
     setIsUpdatingAll(true);
+    setUpdateProgress({ done: 0, total: queue.length });
     let successCount = 0;
-    for (const update of skillUpdates) {
+    const failures: string[] = [];
+    for (const [index, update] of queue.entries()) {
       try {
         await updateSkillMutation.mutateAsync(update.id);
         successCount++;
       } catch (error) {
-        toast.error(t("skills.updateFailed"), {
-          description: `${update.name}: ${String(error)}`,
-        });
+        failures.push(`${update.name}: ${String(error)}`);
       }
+      setUpdateProgress({ done: index + 1, total: queue.length });
     }
     setIsUpdatingAll(false);
     if (successCount > 0) {
       toast.success(t("skills.updateAllSuccess", { count: successCount }), {
+        closeButton: true,
+      });
+    }
+    // One summary toast instead of one per failed skill.
+    if (failures.length > 0) {
+      toast.error(t("skills.updateFailed"), {
+        description: failures.join("\n"),
         closeButton: true,
       });
     }
@@ -361,7 +372,7 @@ const UnifiedSkillsPanel = React.forwardRef<
                 <RefreshCw size={12} />
               )}
               {isUpdatingAll
-                ? t("skills.updatingAll")
+                ? `${t("skills.updatingAll")} ${updateProgress.done}/${updateProgress.total}`
                 : t("skills.updateAll", { count: skillUpdates?.length ?? 0 })}
             </Button>
           </div>
