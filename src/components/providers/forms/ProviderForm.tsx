@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -406,6 +406,12 @@ function ProviderFormFull({
     mode: "onSubmit",
   });
   const { isSubmitting } = form.formState;
+  // Subscribe to settingsConfig so that edits made through the JSON editors
+  // (which only call form.setValue) re-render the form and the derived
+  // API-key / base-URL / model hooks always see the live config instead of a
+  // stale render-time snapshot (FE-PROV-01).
+  const watchedSettingsConfig =
+    useWatch({ control: form.control, name: "settingsConfig" }) ?? "";
 
   const handleSettingsConfigChange = useCallback(
     (config: string) => {
@@ -446,7 +452,7 @@ function ProviderFormFull({
     handleApiKeyChange,
     showApiKey: shouldShowApiKey,
   } = useApiKeyState({
-    initialConfig: form.getValues("settingsConfig"),
+    initialConfig: watchedSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
     selectedPresetId,
     category,
@@ -457,7 +463,7 @@ function ProviderFormFull({
   const { baseUrl, handleClaudeBaseUrlChange } = useBaseUrlState({
     appType: appId,
     category,
-    settingsConfig: form.getValues("settingsConfig"),
+    settingsConfig: watchedSettingsConfig,
     codexConfig: "",
     onSettingsConfigChange: handleSettingsConfigChange,
     onCodexConfigChange: () => {},
@@ -476,7 +482,7 @@ function ProviderFormFull({
     subagentModel,
     handleModelChange,
   } = useModelState({
-    settingsConfig: form.getValues("settingsConfig"),
+    settingsConfig: watchedSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
   });
 
@@ -713,7 +719,7 @@ function ProviderFormFull({
   } = useTemplateValues({
     selectedPresetId: appId === "claude" ? selectedPresetId : null,
     presetEntries: appId === "claude" ? presetEntries : [],
-    settingsConfig: form.getValues("settingsConfig"),
+    settingsConfig: watchedSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
   });
 
@@ -726,7 +732,7 @@ function ProviderFormFull({
     isExtracting: isClaudeExtracting,
     handleExtract: handleClaudeExtract,
   } = useCommonConfigSnippet({
-    settingsConfig: form.getValues("settingsConfig"),
+    settingsConfig: watchedSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
     initialData: appId === "claude" ? initialData : undefined,
     initialEnabled:
@@ -2090,8 +2096,8 @@ function ProviderFormFull({
               providerId={providerId}
               shouldShowApiKey={
                 (category !== "cloud_provider" ||
-                  hasApiKeyField(form.getValues("settingsConfig"), "claude")) &&
-                shouldShowApiKey(form.getValues("settingsConfig"), isEditMode)
+                  hasApiKeyField(watchedSettingsConfig, "claude")) &&
+                shouldShowApiKey(watchedSettingsConfig, isEditMode)
               }
               apiKey={apiKey}
               onApiKeyChange={handleApiKeyChange}
@@ -2220,7 +2226,7 @@ function ProviderFormFull({
             <GeminiFormFields
               providerId={providerId}
               shouldShowApiKey={shouldShowApiKey(
-                form.getValues("settingsConfig"),
+                watchedSettingsConfig,
                 isEditMode,
               )}
               apiKey={geminiApiKey}
@@ -2403,7 +2409,7 @@ function ProviderFormFull({
                   {t("provider.configJson")}
                 </Label>
                 <JsonEditor
-                  value={form.getValues("settingsConfig")}
+                  value={watchedSettingsConfig}
                   onChange={(config) => form.setValue("settingsConfig", config)}
                   placeholder={`{
   "npm": "@ai-sdk/openai-compatible",
@@ -2428,7 +2434,7 @@ function ProviderFormFull({
                   {t("provider.configJson")}
                 </Label>
                 <JsonEditor
-                  value={form.getValues("settingsConfig")}
+                  value={watchedSettingsConfig}
                   onChange={(config) => form.setValue("settingsConfig", config)}
                   placeholder={
                     appId === "hermes"
@@ -2463,7 +2469,7 @@ function ProviderFormFull({
           ) : (
             <>
               <CommonConfigEditor
-                value={form.getValues("settingsConfig")}
+                value={watchedSettingsConfig}
                 onChange={(value) => form.setValue("settingsConfig", value)}
                 useCommonConfig={useCommonConfig}
                 onCommonConfigToggle={handleCommonConfigToggle}
