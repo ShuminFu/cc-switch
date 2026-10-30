@@ -273,7 +273,8 @@ fn release_counter(counter: &AtomicU32) {
 }
 
 impl CircuitBreaker {
-    /// 创建新的熔断器
+    /// 创建新的熔断器（匿名：不注册、不上报状态变化；生产路径用 `new_registered`）
+    #[allow(dead_code)]
     pub fn new(config: CircuitBreakerConfig) -> Self {
         Self::with_key(None, config)
     }
