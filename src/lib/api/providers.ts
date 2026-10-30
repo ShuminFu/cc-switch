@@ -6,6 +6,7 @@ import type {
   UniversalProvidersMap,
 } from "@/types";
 import type { AppId } from "./types";
+import type { LiveWritePreview } from "@/shared/bindings";
 
 export interface ProviderSortUpdate {
   id: string;
@@ -69,6 +70,22 @@ export const providersApi = {
     originalId?: string,
   ): Promise<boolean> {
     return await invoke("update_provider", {
+      provider,
+      app: appId,
+      originalId,
+    });
+  },
+
+  /**
+   * Preview what saving the provider would write to the app's live config
+   * files, without writing anything.
+   */
+  async previewLiveWrite(
+    provider: Provider,
+    appId: AppId,
+    originalId?: string,
+  ): Promise<LiveWritePreview> {
+    return await invoke("preview_live_write", {
       provider,
       app: appId,
       originalId,

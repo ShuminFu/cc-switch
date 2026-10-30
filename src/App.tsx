@@ -13,7 +13,12 @@ import { useEnvConflicts } from "@/hooks/useEnvConflicts";
 import { useWindowChrome } from "@/hooks/useWindowChrome";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import { safeStorageSet } from "@/lib/storage";
-import { ALL_APP_IDS, appCaps, useAppCaps } from "@/entities/app/registry";
+import {
+  ALL_APP_IDS,
+  appCaps,
+  sharedFeatureAppOf,
+  useAppCaps,
+} from "@/entities/app/registry";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { LazyMount, lazyNamed } from "@/components/common/LazyMount";
 import type { SkillsPageSource } from "@/components/skills/skillsPageHeaderActions";
@@ -77,8 +82,7 @@ const OPENCLAW_HEALTH_VIEWS: readonly View[] = [
 
 function App() {
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
-  const sharedFeatureApp: AppId =
-    activeApp === "claude-desktop" ? "claude" : activeApp;
+  const sharedFeatureApp: AppId = sharedFeatureAppOf(activeApp);
   const sharedFeatureCaps = useAppCaps(sharedFeatureApp);
   const activeAppCaps = useAppCaps(activeApp);
   const [currentView, setCurrentView] = useState<View>(getInitialView);
@@ -144,7 +148,7 @@ function App() {
   const providers = useMemo(() => data?.providers ?? {}, [data]);
   const currentProviderId = data?.currentProviderId ?? "";
   const isOpenClawView =
-    activeApp === "openclaw" && OPENCLAW_HEALTH_VIEWS.includes(currentView);
+    activeAppCaps.healthCheck && OPENCLAW_HEALTH_VIEWS.includes(currentView);
   const { data: openclawHealthWarnings = [] } =
     useOpenClawHealth(isOpenClawView);
 
@@ -344,9 +348,7 @@ function App() {
         onOpenSettings={() => openSettings("general")}
         onAddProvider={() => setIsAddOpen(true)}
         onToggleTakeover={
-          settingsData?.enableLocalProxy &&
-          activeApp !== "claude-desktop" &&
-          !activeAppCaps.additive
+          settingsData?.enableLocalProxy && activeAppCaps.proxyTakeover
             ? () =>
                 void setTakeoverForApp({
                   appType: activeApp,

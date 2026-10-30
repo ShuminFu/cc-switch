@@ -367,6 +367,33 @@ impl ProxyService {
         Ok(())
     }
 
+    /// 代理运行期间保存当前供应商后，刷新被接管的 Live。
+    ///
+    /// Claude 总是刷新；Codex 只在 Live 已被接管时刷新（模型映射投影在生成的
+    /// model_catalog_json 中，不刷新会让旧的目录指针与能力继续生效）。
+    pub async fn refresh_live_after_provider_save(
+        &self,
+        app_type: &AppType,
+        provider: &Provider,
+        live_taken_over: bool,
+    ) -> Result<(), crate::error::AppError> {
+        match app_type {
+            AppType::Claude => self
+                .sync_claude_live_from_provider_while_proxy_active(provider)
+                .await
+                .map_err(|e| {
+                    crate::error::AppError::Message(format!("同步 Claude Live 配置失败: {e}"))
+                }),
+            AppType::Codex if live_taken_over => self
+                .sync_codex_live_from_provider_while_proxy_active(provider)
+                .await
+                .map_err(|e| {
+                    crate::error::AppError::Message(format!("同步 Codex Live 配置失败: {e}"))
+                }),
+            _ => Ok(()),
+        }
+    }
+
     pub async fn sync_codex_live_from_provider_while_proxy_active(
         &self,
         provider: &Provider,
@@ -2270,70 +2297,26 @@ impl ProxyService {
     }
 
     fn is_claude_live_taken_over(config: &Value) -> bool {
-        let env = match config.get("env").and_then(|v| v.as_object()) {
-            Some(env) => env,
-            None => return false,
-        };
-
-        for key in [
-            "ANTHROPIC_AUTH_TOKEN",
-            "ANTHROPIC_API_KEY",
-            "OPENROUTER_API_KEY",
-            "OPENAI_API_KEY",
-        ] {
-            if env
-                .get(key)
-                .and_then(|v| v.as_str())
-                .is_some_and(is_proxy_token)
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn codex_live_has_proxy_placeholder(config: &Value) -> bool {
-        if config
-            .get("auth")
-            .and_then(|v| v.as_object())
-            .and_then(|auth| auth.get("OPENAI_API_KEY"))
-            .and_then(|v| v.as_str())
-            .is_some_and(is_proxy_token)
-        {
-            return true;
-        }
-
-        config
-            .get("config")
-            .and_then(|v| v.as_str())
-            .and_then(crate::codex_config::extract_codex_experimental_bearer_token)
-            .is_some_and(|token| is_proxy_token(&token))
+        Self::adapter_live_has_placeholder(&AppType::Claude, config)
     }
 
     fn is_codex_live_taken_over(config: &Value) -> bool {
-        Self::codex_live_has_proxy_placeholder(config)
-            || config
-                .get("config")
-                .and_then(|v| v.as_str())
-                .is_some_and(crate::codex_config::codex_config_has_official_proxy_route)
+        Self::adapter_live_has_placeholder(&AppType::Codex, config)
     }
 
     fn is_gemini_live_taken_over(config: &Value) -> bool {
-        let env = match config.get("env").and_then(|v| v.as_object()) {
-            Some(env) => env,
-            None => return false,
-        };
-        env.get("GEMINI_API_KEY")
-            .and_then(|v| v.as_str())
-            .is_some_and(is_proxy_token)
+        Self::adapter_live_has_placeholder(&AppType::Gemini, config)
     }
 
     fn is_grok_live_taken_over(config: &Value) -> bool {
-        config
-            .get("config")
-            .and_then(Value::as_str)
-            .is_some_and(crate::grok_config::has_proxy_token)
+        Self::adapter_live_has_placeholder(&AppType::GrokBuild, config)
+    }
+
+    /// 占位符判定已迁移到 `AppAdapter::takeover()` 的应用
+    fn adapter_live_has_placeholder(app_type: &AppType, config: &Value) -> bool {
+        crate::apps::adapter(app_type)
+            .takeover()
+            .is_some_and(|takeover| takeover.has_placeholder(config))
     }
 
     /// 判断给定的 Live/备份配置是否已被代理接管（包含占位符）
@@ -3026,7 +3009,7 @@ impl ProxyService {
         // backup config), so the catalog tool profile can't be recovered here.
         // Default to ProxyChat: a restored native-direct backup keeps its inline
         // modelCatalog but would not get apply_patch re-stripped until the next
-        // provider switch rewrites it via write_live_snapshot. Acceptable known
+        // provider switch rewrites it via the Codex adapter. Acceptable known
         // limitation (restore-of-deleted-provider-backup only).
         let prepared_cfg = config_str
             .map(|cfg| {

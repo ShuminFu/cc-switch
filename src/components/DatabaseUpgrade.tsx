@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { exit } from "@tauri-apps/plugin-process";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import {
   Database,
@@ -12,10 +13,19 @@ import {
   FolderOpen,
   Loader2,
   AlertTriangle,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const RELEASES_URL = "https://github.com/farion1231/cc-switch/releases";
+
+/** 当前应用可恢复的备份（user_version ≤ 应用支持版本），通常是新版应用迁移前的快照 */
+export interface RestorableBackup {
+  filename: string;
+  sizeBytes: number;
+  createdAt: string;
+  dbVersion: number;
+}
 
 interface DatabaseUpgradeProps {
   payload: {
@@ -24,6 +34,7 @@ interface DatabaseUpgradeProps {
     kind?: string;
     db_version?: number;
     supported_version?: number;
+    restorable_backups?: RestorableBackup[];
   };
 }
 
@@ -53,8 +64,11 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
   const [availableVersion, setAvailableVersion] = useState<string | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [restoringFile, setRestoringFile] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
 
+  const restorableBackups = payload.restorable_backups ?? [];
   const dbVersion = payload.db_version;
   const supportedVersion = payload.supported_version;
 
@@ -115,6 +129,29 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
       setPhase("error");
     }
   }, []);
+
+  // 降级恢复：用迁移前备份替换过新的数据库（过新的库会另存一份），然后重启应用
+  const restoreBackup = useCallback(
+    async (backup: RestorableBackup) => {
+      const confirmed = await ask(
+        t("dbUpgrade.restoreConfirm", { filename: backup.filename }),
+        { title: t("dbUpgrade.restoreTitle"), kind: "warning" },
+      );
+      if (!confirmed) return;
+      setRestoringFile(backup.filename);
+      setRestoreError(null);
+      try {
+        await invoke<string>("restore_backup_over_newer_db", {
+          filename: backup.filename,
+        });
+        await invoke("restart_app");
+      } catch (e) {
+        setRestoreError(extractErrorMessage(e) || String(e));
+        setRestoringFile(null);
+      }
+    },
+    [t],
+  );
 
   const percent =
     progress && progress.total && progress.total > 0
@@ -234,6 +271,57 @@ export function DatabaseUpgrade({ payload }: DatabaseUpgradeProps) {
           <p className="rounded-lg border border-red-300/60 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-300">
             {errorMsg}
           </p>
+        )}
+
+        {restorableBackups.length > 0 && phase !== "updating" && (
+          <div className="space-y-2 rounded-lg border border-border/50 p-3">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <History className="h-4 w-4" />
+              {t("dbUpgrade.restoreTitle")}
+            </p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {t("dbUpgrade.restoreDescription")}
+            </p>
+            <ul className="space-y-1.5">
+              {restorableBackups.map((backup) => (
+                <li
+                  key={backup.filename}
+                  className="flex items-center justify-between gap-3 text-xs"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono">
+                      {backup.filename}
+                    </span>
+                    <span className="text-muted-foreground tabular-nums">
+                      {t("dbUpgrade.backupInfo", {
+                        version: backup.dbVersion,
+                        date: backup.createdAt
+                          ? new Date(backup.createdAt).toLocaleString()
+                          : "-",
+                      })}
+                    </span>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 gap-1.5"
+                    disabled={restoringFile !== null}
+                    onClick={() => void restoreBackup(backup)}
+                  >
+                    {restoringFile === backup.filename && (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    )}
+                    {t("dbUpgrade.restoreBackup")}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            {restoreError && (
+              <p className="break-words text-xs text-red-600 dark:text-red-400">
+                {restoreError}
+              </p>
+            )}
+          </div>
         )}
 
         <div className="flex flex-wrap items-center gap-2">

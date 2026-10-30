@@ -14,14 +14,18 @@
 //! - `event_msg` (type=token_count) → 提取累计 token 用量，计算 delta
 
 use crate::codex_config::get_codex_config_dir;
+use crate::database::repo::session_cursor::{self, SessionCursor};
+use crate::database::repo::usage::{self as usage_repo, SessionUsageRow, UsageCosts, UsageSource};
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
-use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
+use crate::pricing::resolver::find_model_pricing;
+use crate::proxy::usage::calculator::CostCalculator;
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    get_sync_state, metadata_modified_nanos, update_sync_state, SessionSyncResult,
+    get_sync_state, ingest_file, metadata_modified_nanos, update_sync_state, CompleteLines,
+    IngestBatch, SessionSyncResult,
 };
-use crate::services::usage_stats::{find_model_pricing, should_skip_session_insert, DedupKey};
+use crate::services::usage_stats::{should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -132,7 +136,7 @@ fn codex_history_replay_boundary(
     }
 
     let file = fs::File::open(file_path).ok()?;
-    for (index, line) in BufReader::new(file).lines().enumerate() {
+    for (index, line) in CompleteLines::new(BufReader::new(file)).enumerate() {
         let Ok(line) = line else {
             continue;
         };
@@ -184,31 +188,21 @@ fn get_codex_sync_state(db: &Database, file_path: &Path) -> Result<(i64, i64), A
     let Some(file_name) = file_path.file_name().and_then(|name| name.to_str()) else {
         return Ok(state);
     };
-    let slash_suffix = format!("/{file_name}");
-    let backslash_suffix = format!("\\{file_name}");
     let conn = lock_conn!(db.conn);
-    let inherited = conn.query_row(
-        "SELECT last_modified, last_line_offset
-         FROM session_log_sync
-         WHERE file_path <> ?1
-           AND (substr(file_path, -length(?2)) = ?2
-                OR substr(file_path, -length(?3)) = ?3)
-         ORDER BY last_line_offset DESC, last_modified DESC
-         LIMIT 1",
-        rusqlite::params![file_path_str, slash_suffix, backslash_suffix],
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-    );
+    let inherited = session_cursor::find_by_file_name(&conn, &file_path_str, file_name)?;
     drop(conn);
 
     match inherited {
-        Ok(inherited) => {
-            update_sync_state(db, &file_path_str, inherited.0, inherited.1)?;
-            Ok(inherited)
+        Some(inherited) => {
+            update_sync_state(
+                db,
+                &file_path_str,
+                inherited.last_modified,
+                inherited.last_offset,
+            )?;
+            Ok((inherited.last_modified, inherited.last_offset))
         }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(state),
-        Err(error) => Err(AppError::Database(format!(
-            "查询 Codex 归档文件同步状态失败: {error}"
-        ))),
+        None => Ok(state),
     }
 }
 
@@ -418,13 +412,15 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
     let mut line_offset: i64 = 0;
     let mut imported: u32 = 0;
     let mut skipped: u32 = 0;
+    let mut pending: Vec<PendingCodexEntry> = Vec::new();
 
-    for line_result in reader.lines() {
+    // 只遍历以 '\n' 结尾的完整行，正在写入的末尾半行不计入 offset
+    for line_result in CompleteLines::new(reader) {
         line_offset += 1;
 
         let line = match line_result {
             Ok(l) => l,
-            Err(_) => continue, // 容忍不完整的最后一行
+            Err(_) => continue, // 非 UTF-8 的完整行
         };
 
         if line.trim().is_empty() {
@@ -565,43 +561,71 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                match insert_codex_session_entry(
-                    db,
-                    &request_id,
-                    &delta,
-                    &state.current_model,
-                    state.thread_id.as_deref(),
-                    timestamp.as_deref(),
-                ) {
-                    Ok(true) => imported += 1,
-                    Ok(false) => skipped += 1,
-                    Err(e) => {
-                        log::warn!("[CODEX-SYNC] 插入失败 ({}): {e}", request_id);
-                        skipped += 1;
-                    }
-                }
+                pending.push(PendingCodexEntry {
+                    request_id,
+                    delta,
+                    model: state.current_model.clone(),
+                    thread_id: state.thread_id.clone(),
+                    timestamp,
+                });
             }
             _ => {}
         }
     }
 
-    // 更新同步状态
-    update_sync_state(db, &file_path_str, file_modified, line_offset)?;
+    // 本文件的所有行与游标在同一个事务里提交
+    let cursor = SessionCursor {
+        last_modified: file_modified,
+        last_offset: line_offset,
+    };
+    ingest_file(db, &file_path_str, |conn| {
+        let mut wrote_rows = false;
+        for entry in &pending {
+            match insert_codex_session_entry(
+                conn,
+                &entry.request_id,
+                &entry.delta,
+                &entry.model,
+                entry.thread_id.as_deref(),
+                entry.timestamp.as_deref(),
+            ) {
+                Ok(true) => {
+                    imported += 1;
+                    wrote_rows = true;
+                }
+                Ok(false) => skipped += 1,
+                Err(e) => {
+                    log::warn!("[CODEX-SYNC] 插入失败 ({}): {e}", entry.request_id);
+                    skipped += 1;
+                }
+            }
+        }
+        Ok(IngestBatch {
+            value: (imported, skipped),
+            wrote_rows,
+            cursor: Some(cursor),
+        })
+    })
+}
 
-    Ok((imported, skipped))
+/// 解析阶段收集、在文件事务里写入的一条 Codex 用量
+struct PendingCodexEntry {
+    request_id: String,
+    delta: DeltaTokens,
+    model: String,
+    thread_id: Option<String>,
+    timestamp: Option<String>,
 }
 
 /// 插入单条 Codex 会话记录到 proxy_request_logs
 fn insert_codex_session_entry(
-    db: &Database,
+    conn: &rusqlite::Connection,
     request_id: &str,
     delta: &DeltaTokens,
     model: &str,
     session_id: Option<&str>,
     timestamp: Option<&str>,
 ) -> Result<bool, AppError> {
-    let conn = lock_conn!(db.conn);
-
     let created_at = timestamp
         .and_then(|ts| {
             chrono::DateTime::parse_from_rfc3339(ts)
@@ -624,7 +648,7 @@ fn insert_codex_session_entry(
         cache_creation_tokens: 0,
         created_at,
     };
-    if should_skip_session_insert(&conn, request_id, &dedup_key)? {
+    if should_skip_session_insert(conn, request_id, &dedup_key)? {
         return Ok(false);
     }
 
@@ -638,77 +662,35 @@ fn insert_codex_session_entry(
         message_id: None,
     };
 
-    let pricing = find_codex_pricing(&conn, model);
+    // 计价基准为归一化后的模型名，落库供回填/重算使用
+    let pricing_model = normalize_codex_model(model);
+    let pricing = find_model_pricing(conn, &pricing_model);
     let multiplier = Decimal::from(1);
-    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) = match pricing
-    {
-        Some(p) => {
-            let cost = CostCalculator::calculate_for_app("codex", &usage, &p, multiplier);
-            (
-                cost.input_cost.to_string(),
-                cost.output_cost.to_string(),
-                cost.cache_read_cost.to_string(),
-                cost.cache_creation_cost.to_string(),
-                cost.total_cost.to_string(),
-            )
-        }
-        None => (
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-        ),
+    let costs = match pricing {
+        Some(p) => UsageCosts::from_breakdown(&CostCalculator::calculate_for_app(
+            "codex", &usage, &p, multiplier,
+        )),
+        None => UsageCosts::zero(),
     };
 
-    let inserted_rows = conn
-        .execute(
-            "INSERT OR IGNORE INTO proxy_request_logs (
-            request_id, provider_id, app_type, model, request_model,
-            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-            latency_ms, first_token_ms, status_code, error_message, session_id,
-            provider_type, is_streaming, cost_multiplier, created_at, data_source
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
-            rusqlite::params![
-                request_id,
-                "_codex_session",    // provider_id
-                "codex",             // app_type
-                model,
-                model,               // request_model = model
-                delta.input,
-                delta.output,
-                delta.cached_input,
-                0i64,                // cache_creation_tokens: Codex 日志无此数据
-                input_cost,
-                output_cost,
-                cache_read_cost,
-                cache_creation_cost,
-                total_cost,
-                0i64,                // latency_ms
-                Option::<i64>::None, // first_token_ms
-                200i64,              // status_code
-                Option::<String>::None, // error_message
-                session_id.map(|s| s.to_string()),
-                Some("codex_session"), // provider_type
-                1i64,                // is_streaming
-                "1.0",               // cost_multiplier
-                created_at,
-                "codex_session",     // data_source
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("插入 Codex 会话日志失败: {e}")))?;
-
-    if inserted_rows > 0 {
-        crate::usage_events::notify_log_recorded();
-    }
+    usage_repo::insert_session_row(
+        conn,
+        &SessionUsageRow {
+            request_id,
+            source: UsageSource::CodexSession,
+            model,
+            pricing_model: &pricing_model,
+            session_id,
+            input_tokens: delta.input,
+            output_tokens: delta.output,
+            cache_read_tokens: delta.cached_input,
+            cache_creation_tokens: 0, // Codex 日志无此数据
+            costs,
+            created_at,
+        },
+    )?;
 
     Ok(true)
-}
-
-/// 查找 Codex 模型定价（带归一化）
-fn find_codex_pricing(conn: &rusqlite::Connection, model_id: &str) -> Option<ModelPricing> {
-    find_model_pricing(conn, &normalize_codex_model(model_id))
 }
 
 #[cfg(test)]
@@ -1028,6 +1010,48 @@ mod tests {
     }
 
     #[test]
+    fn test_codex_defers_partial_trailing_line_until_complete() -> Result<(), AppError> {
+        // 回归：末尾半行不计入 offset，补全并更新 mtime 后应被导入。
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = temp.path().join("rollout-partial.jsonl");
+        write_jsonl(
+            &file,
+            &[
+                session_meta("partial", "partial"),
+                turn_context(),
+                token_count(100, 50, 10),
+            ],
+        );
+        let complete = fs::read_to_string(&file).unwrap();
+        let second = token_count(200, 100, 20).to_string();
+        let (head, tail) = second.split_at(second.len() / 2);
+        fs::write(&file, format!("{complete}{head}")).unwrap();
+
+        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        let (first_mtime, offset) = get_sync_state(&db, &file.to_string_lossy())?;
+        assert_eq!(offset, 3, "未写完的半行不能计入 offset");
+
+        // 补全第二行；回拨已记录的 mtime 模拟文件更新（避免依赖时间戳精度）
+        fs::write(&file, format!("{complete}{head}{tail}\n")).unwrap();
+        update_sync_state(&db, &file.to_string_lossy(), first_mtime - 1, offset)?;
+
+        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 4);
+
+        let conn = lock_conn!(db.conn);
+        let usage: (i64, i64, i64) = conn.query_row(
+            "SELECT input_tokens, cache_read_tokens, output_tokens
+             FROM proxy_request_logs
+             WHERE request_id LIKE 'codex_session:%:2'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(usage, (100, 50, 10), "第二个事件应只记录增量");
+        Ok(())
+    }
+
+    #[test]
     fn test_insert_codex_session_skips_matching_proxy_log() -> Result<(), AppError> {
         let db = Database::memory()?;
         {
@@ -1063,7 +1087,7 @@ mod tests {
             output: 2,
         };
         let inserted = insert_codex_session_entry(
-            &db,
+            &db.conn.lock().unwrap(),
             "codex-session-dup",
             &delta,
             "gpt-5.4",
@@ -1157,5 +1181,41 @@ mod tests {
         // 实际钳制在调用侧：delta.cached_input.min(delta.input)
         let clamped = delta.cached_input.min(delta.input);
         assert_eq!(clamped, 10);
+    }
+
+    #[test]
+    fn test_insert_codex_session_persists_semantics_and_pricing_model() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let delta = DeltaTokens {
+            input: 1000,
+            cached_input: 300,
+            output: 50,
+        };
+        assert!(insert_codex_session_entry(
+            &db.conn.lock().unwrap(),
+            "codex-session-sem",
+            &delta,
+            "openai/GPT-5.4",
+            Some("session-1"),
+            Some("1970-01-01T00:16:45Z"),
+        )?);
+
+        let conn = lock_conn!(db.conn);
+        let (pricing_model, semantics): (Option<String>, i64) = conn.query_row(
+            "SELECT pricing_model, input_token_semantics FROM proxy_request_logs
+             WHERE request_id = 'codex-session-sem'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        // 计价基准是归一化后的模型名
+        assert_eq!(
+            pricing_model.as_deref(),
+            Some(normalize_codex_model("openai/GPT-5.4").as_str())
+        );
+        assert_eq!(
+            semantics,
+            crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_TOTAL
+        );
+        Ok(())
     }
 }

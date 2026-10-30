@@ -2,7 +2,7 @@
 //!
 //! Parses ccswitch:// URLs into DeepLinkImportRequest structures.
 
-use super::utils::validate_url;
+use super::utils::{validate_no_control_chars, validate_url};
 use super::DeepLinkImportRequest;
 use crate::error::AppError;
 use std::collections::HashMap;
@@ -116,6 +116,14 @@ fn parse_provider_deeplink(
 
     // Extract optional fields
     let model = params.get("model").cloned();
+
+    // API key and model are written verbatim into live configs
+    if let Some(ref key) = api_key {
+        validate_no_control_chars(key, "apiKey")?;
+    }
+    if let Some(ref m) = model {
+        validate_no_control_chars(m, "model")?;
+    }
     let notes = params.get("notes").cloned();
     let haiku_model = params.get("haikuModel").cloned();
     let sonnet_model = params.get("sonnetModel").cloned();

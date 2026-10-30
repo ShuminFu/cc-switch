@@ -31,6 +31,7 @@ type RequestLogsKey = {
   providerName?: string;
   model?: string;
   statusCode?: number;
+  unpriced?: boolean;
 };
 
 // Query keys
@@ -137,6 +138,7 @@ export const usageKeys = {
       key.providerName ?? "",
       key.model ?? "",
       key.statusCode ?? -1,
+      key.unpriced ?? false,
       page,
       pageSize,
     ] as const,
@@ -319,6 +321,7 @@ export function useRequestLogs({
     providerName: filters.providerName ?? undefined,
     model: filters.model ?? undefined,
     statusCode: filters.statusCode ?? undefined,
+    unpriced: filters.unpriced ?? undefined,
   };
 
   return useQuery({

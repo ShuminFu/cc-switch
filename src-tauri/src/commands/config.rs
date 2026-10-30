@@ -3,11 +3,11 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::app_config::AppType;
-use crate::codex_config;
 use crate::config::{self, get_claude_settings_path};
-use crate::error::IpcError;
+use crate::error::{AppError, IpcError};
 use crate::settings;
 
+use std::path::PathBuf;
 use std::str::FromStr;
 
 fn invalid_json_format_error(error: serde_json::Error) -> String {
@@ -60,38 +60,23 @@ pub async fn get_claude_code_config_path() -> Result<String, IpcError> {
     Ok(get_claude_settings_path().to_string_lossy().to_string())
 }
 
+/// 应用配置目录（由各应用的 AppAdapter 解析）
+fn app_config_dir(app: &AppType) -> Result<PathBuf, AppError> {
+    crate::apps::adapter(app).config_dir()
+}
+
 #[tauri::command]
 pub async fn get_config_dir(app: String) -> Result<String, IpcError> {
-    let dir = match AppType::from_str(&app).map_err(IpcError::from)? {
-        AppType::Claude => config::get_claude_config_dir(),
-        AppType::ClaudeDesktop => {
-            crate::claude_desktop_config::get_config_library_path().map_err(IpcError::from)?
-        }
-        AppType::Codex => codex_config::get_codex_config_dir(),
-        AppType::Gemini => crate::gemini_config::get_gemini_dir(),
-        AppType::GrokBuild => crate::grok_config::get_grok_config_dir(),
-        AppType::OpenCode => crate::opencode_config::get_opencode_dir(),
-        AppType::OpenClaw => crate::openclaw_config::get_openclaw_dir(),
-        AppType::Hermes => crate::hermes_config::get_hermes_dir(),
-    };
+    let app = AppType::from_str(&app).map_err(IpcError::from)?;
+    let dir = app_config_dir(&app).map_err(IpcError::from)?;
 
     Ok(dir.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, IpcError> {
-    let config_dir = match AppType::from_str(&app).map_err(IpcError::from)? {
-        AppType::Claude => config::get_claude_config_dir(),
-        AppType::ClaudeDesktop => {
-            crate::claude_desktop_config::get_config_library_path().map_err(IpcError::from)?
-        }
-        AppType::Codex => codex_config::get_codex_config_dir(),
-        AppType::Gemini => crate::gemini_config::get_gemini_dir(),
-        AppType::GrokBuild => crate::grok_config::get_grok_config_dir(),
-        AppType::OpenCode => crate::opencode_config::get_opencode_dir(),
-        AppType::OpenClaw => crate::openclaw_config::get_openclaw_dir(),
-        AppType::Hermes => crate::hermes_config::get_hermes_dir(),
-    };
+    let app = AppType::from_str(&app).map_err(IpcError::from)?;
+    let config_dir = app_config_dir(&app).map_err(IpcError::from)?;
 
     if !config_dir.exists() {
         std::fs::create_dir_all(&config_dir).map_err(|e| format!("创建目录失败: {e}"))?;

@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs;
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::app_config::AppType;
+use crate::apps::registry;
 use crate::error::AppError;
 use crate::services::skill::{SkillStorageLocation, SyncMethod};
 
@@ -20,65 +22,214 @@ pub struct CustomEndpoint {
     pub last_used: Option<i64>,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 /// 主页面显示的应用配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+///
+/// 按应用规范标识（注册表 slug）存储；序列化时为每个已注册应用写出一个布尔键，
+/// 与旧版按字段定义的结构体 JSON 形状一致，旧版本读取新文件不受影响。
+/// 未知键（更新版本新增的应用）原样保留，降级再升级不会丢失。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct VisibleApps {
-    #[serde(default = "default_true")]
-    pub claude: bool,
-    #[serde(
-        rename = "claude-desktop",
-        alias = "claudeDesktop",
-        alias = "claude_desktop",
-        default = "default_true"
-    )]
-    pub claude_desktop: bool,
-    #[serde(default = "default_true")]
-    pub codex: bool,
-    #[serde(default = "default_true")]
-    pub gemini: bool,
-    #[serde(default = "default_true")]
-    pub grokbuild: bool,
-    #[serde(default = "default_true")]
-    pub opencode: bool,
-    #[serde(default = "default_true")]
-    pub openclaw: bool,
-    #[serde(default)]
-    pub hermes: bool,
-}
-
-impl Default for VisibleApps {
-    fn default() -> Self {
-        Self {
-            claude: true,
-            claude_desktop: true,
-            codex: true,
-            gemini: true,
-            grokbuild: true,
-            opencode: true,
-            openclaw: true,
-            hermes: false, // 默认不显示，需用户手动启用
-        }
-    }
+    /// 用户显式设置过的值；缺失的应用取注册表 `default_visible`
+    entries: BTreeMap<String, bool>,
 }
 
 impl VisibleApps {
     /// Check if the specified app is visible
     pub fn is_visible(&self, app: &AppType) -> bool {
-        match app {
-            AppType::Claude => self.claude,
-            AppType::ClaudeDesktop => self.claude_desktop,
-            AppType::Codex => self.codex,
-            AppType::Gemini => self.gemini,
-            AppType::GrokBuild => self.grokbuild,
-            AppType::OpenCode => self.opencode,
-            AppType::OpenClaw => self.openclaw,
-            AppType::Hermes => self.hermes,
+        let descriptor = registry::descriptor(app);
+        self.entries
+            .get(descriptor.slug)
+            .copied()
+            .unwrap_or(descriptor.default_visible)
+    }
+
+    /// 设置指定应用是否显示
+    pub fn set_visible(&mut self, app: &AppType, visible: bool) {
+        self.entries
+            .insert(registry::descriptor(app).slug.to_string(), visible);
+    }
+}
+
+impl Serialize for VisibleApps {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let unknown = self
+            .entries
+            .iter()
+            .filter(|(key, _)| registry::find_by_id(key).is_none());
+        let mut map = serializer.serialize_map(None)?;
+        for descriptor in registry::APPS {
+            map.serialize_entry(descriptor.slug, &self.is_visible(&descriptor.app))?;
         }
+        for (key, visible) in unknown {
+            map.serialize_entry(key, visible)?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for VisibleApps {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = BTreeMap::<String, bool>::deserialize(deserializer)?;
+        Ok(Self {
+            entries: canonicalize_app_keys(raw),
+        })
+    }
+}
+
+/// 把按应用分槽的键经注册表别名归一到规范 slug（如 `claudeDesktop` → `claude-desktop`）。
+/// 未注册的键原样保留；规范键与别名同时出现时规范键优先。
+fn canonicalize_app_keys<T>(raw: BTreeMap<String, T>) -> BTreeMap<String, T> {
+    let mut canonical = BTreeMap::new();
+    let mut from_alias = BTreeMap::new();
+    for (key, value) in raw {
+        match registry::find_by_id(&key.trim().to_lowercase()) {
+            Some(descriptor) if descriptor.slug == key => {
+                canonical.insert(key, value);
+            }
+            Some(descriptor) => {
+                from_alias.insert(descriptor.slug.to_string(), value);
+            }
+            None => {
+                canonical.insert(key, value);
+            }
+        }
+    }
+    for (key, value) in from_alias {
+        canonical.entry(key).or_insert(value);
+    }
+    canonical
+}
+
+/// 旧版扁平配置目录键（`slug` → camelCase 键）。只为旧版本兼容读写保留，
+/// 新应用只写入 `configDirs` 映射，不在这里登记。
+const LEGACY_CONFIG_DIR_KEYS: &[(&str, &str)] = &[
+    ("claude", "claudeConfigDir"),
+    ("codex", "codexConfigDir"),
+    ("gemini", "geminiConfigDir"),
+    ("grokbuild", "grokConfigDir"),
+    ("opencode", "opencodeConfigDir"),
+    ("openclaw", "openclawConfigDir"),
+    ("hermes", "hermesConfigDir"),
+];
+
+/// 旧版扁平当前供应商键（`slug` → camelCase 键），同上只为兼容保留
+const LEGACY_CURRENT_PROVIDER_KEYS: &[(&str, &str)] = &[
+    ("claude", "currentProviderClaude"),
+    ("claude-desktop", "currentProviderClaudeDesktop"),
+    ("codex", "currentProviderCodex"),
+    ("gemini", "currentProviderGemini"),
+    ("grokbuild", "currentProviderGrokbuild"),
+    ("opencode", "currentProviderOpencode"),
+    ("openclaw", "currentProviderOpenclaw"),
+    ("hermes", "currentProviderHermes"),
+];
+
+/// 按应用分槽的设备级状态：配置目录覆盖与当前供应商 ID。
+///
+/// 磁盘格式为以注册表 slug 为键的 `configDirs` / `currentProviders` 映射；
+/// 为了让降级后的旧版本仍能找到当前供应商与目录覆盖，序列化时同时写出
+/// 旧版扁平键（`claudeConfigDir`、`currentProviderClaude` ...），保留一个版本。
+/// 读取时映射优先，映射中缺失的应用再回落到旧扁平键（旧版本保存过的文件
+/// 只有扁平键，因为旧结构体会丢弃它不认识的映射）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PerAppSettings {
+    /// 设备级配置目录覆盖（键为应用 slug）
+    pub config_dirs: BTreeMap<String, String>,
+    /// 当前供应商 ID（键为应用 slug；本地存储，优先于数据库 is_current）
+    pub current_providers: BTreeMap<String, String>,
+}
+
+impl PerAppSettings {
+    /// 去掉旧扁平键已覆盖的应用在映射中的条目，使扁平键（无论是否存在）成为
+    /// 这些应用的唯一来源。用于前端整体保存：前端按旧扁平键编辑，回传的
+    /// 映射是读取时的旧值，若映射优先则用户的修改（含清空）会被吞掉。
+    pub fn strip_legacy_map_entries(value: &mut serde_json::Value) {
+        let Some(obj) = value.as_object_mut() else {
+            return;
+        };
+        for (map_key, legacy) in [
+            ("configDirs", LEGACY_CONFIG_DIR_KEYS),
+            ("currentProviders", LEGACY_CURRENT_PROVIDER_KEYS),
+        ] {
+            if let Some(map) = obj.get_mut(map_key).and_then(|m| m.as_object_mut()) {
+                let keys: Vec<String> = map.keys().cloned().collect();
+                for key in keys {
+                    let slug = registry::find_by_id(&key.trim().to_lowercase())
+                        .map(|d| d.slug)
+                        .unwrap_or(key.as_str());
+                    if legacy.iter().any(|(legacy_slug, _)| *legacy_slug == slug) {
+                        map.remove(&key);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PerAppSettingsRepr {
+    #[serde(default)]
+    config_dirs: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    current_providers: Option<BTreeMap<String, String>>,
+    #[serde(flatten)]
+    rest: BTreeMap<String, serde_json::Value>,
+}
+
+fn merge_legacy_keys(
+    map: Option<BTreeMap<String, String>>,
+    legacy: &[(&str, &str)],
+    rest: &BTreeMap<String, serde_json::Value>,
+) -> BTreeMap<String, String> {
+    let mut merged = canonicalize_app_keys(map.unwrap_or_default());
+    for (slug, key) in legacy {
+        if let Some(value) = rest.get(*key).and_then(|v| v.as_str()) {
+            merged
+                .entry((*slug).to_string())
+                .or_insert_with(|| value.to_string());
+        }
+    }
+    merged
+}
+
+impl<'de> Deserialize<'de> for PerAppSettings {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let repr = PerAppSettingsRepr::deserialize(deserializer)?;
+        Ok(Self {
+            config_dirs: merge_legacy_keys(repr.config_dirs, LEGACY_CONFIG_DIR_KEYS, &repr.rest),
+            current_providers: merge_legacy_keys(
+                repr.current_providers,
+                LEGACY_CURRENT_PROVIDER_KEYS,
+                &repr.rest,
+            ),
+        })
+    }
+}
+
+impl Serialize for PerAppSettings {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        if !self.config_dirs.is_empty() {
+            map.serialize_entry("configDirs", &self.config_dirs)?;
+        }
+        if !self.current_providers.is_empty() {
+            map.serialize_entry("currentProviders", &self.current_providers)?;
+        }
+        // 旧版扁平键双写（保留一个版本，供降级后的旧版本读取）
+        for (values, legacy) in [
+            (&self.config_dirs, LEGACY_CONFIG_DIR_KEYS),
+            (&self.current_providers, LEGACY_CURRENT_PROVIDER_KEYS),
+        ] {
+            for (slug, key) in legacy {
+                if let Some(value) = values.get(*slug) {
+                    map.serialize_entry(key, value)?;
+                }
+            }
+        }
+        map.end()
     }
 }
 
@@ -297,6 +448,11 @@ pub struct LocalMigrations {
     /// 这样重新开启能把"关闭期间"落入 openai 桶的官方会话补迁进来。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_official_history_unify_v1: Option<CodexOfficialHistoryUnifyMigration>,
+    /// 用户删除过的内置模型定价 ID（P1 的删除标记）。v18 起删除以 `model_pricing`
+    /// 墓碑为准，启动同步时这些 ID 会并入墓碑；这里仍双写，供旧版本与旧快照使用。
+    /// 用户重新添加同名定价时移除。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deleted_builtin_model_pricing: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -415,47 +571,9 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_apps: Option<VisibleApps>,
 
-    // ===== 设备级目录覆盖 =====
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_config_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codex_config_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gemini_config_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grok_config_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opencode_config_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub openclaw_config_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hermes_config_dir: Option<String>,
-
-    // ===== 当前供应商 ID（设备级）=====
-    /// 当前 Claude 供应商 ID（本地存储，优先于数据库 is_current）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_provider_claude: Option<String>,
-    /// 当前 Claude Desktop 供应商 ID（本地存储，优先于数据库 is_current）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_provider_claude_desktop: Option<String>,
-    /// 当前 Codex 供应商 ID（本地存储，优先于数据库 is_current）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_provider_codex: Option<String>,
-    /// 当前 Gemini 供应商 ID（本地存储，优先于数据库 is_current）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_provider_gemini: Option<String>,
-    /// 当前 Grok Build 供应商 ID（本地存储，优先于数据库 is_current）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_provider_grokbuild: Option<String>,
-    /// 当前 OpenCode 供应商 ID（本地存储，对 OpenCode 可能无意义，但保持结构一致）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_provider_opencode: Option<String>,
-    /// 当前 OpenClaw 供应商 ID（本地存储，对 OpenClaw 可能无意义，但保持结构一致）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_provider_openclaw: Option<String>,
-    /// 当前 Hermes 供应商 ID（本地存储，保持结构一致）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_provider_hermes: Option<String>,
+    // ===== 按应用分槽的设备级状态（目录覆盖、当前供应商 ID）=====
+    #[serde(flatten)]
+    pub per_app: PerAppSettings,
 
     // ===== Skill 同步设置 =====
     /// Skill 同步方式：auto（默认，优先 symlink）、symlink、copy
@@ -535,21 +653,7 @@ impl Default for AppSettings {
             common_config_confirmed: None,
             language: None,
             visible_apps: None,
-            claude_config_dir: None,
-            codex_config_dir: None,
-            gemini_config_dir: None,
-            grok_config_dir: None,
-            opencode_config_dir: None,
-            openclaw_config_dir: None,
-            hermes_config_dir: None,
-            current_provider_claude: None,
-            current_provider_claude_desktop: None,
-            current_provider_codex: None,
-            current_provider_gemini: None,
-            current_provider_grokbuild: None,
-            current_provider_opencode: None,
-            current_provider_openclaw: None,
-            current_provider_hermes: None,
+            per_app: PerAppSettings::default(),
             skill_sync_method: SyncMethod::default(),
             skill_storage_location: SkillStorageLocation::default(),
             webdav_sync: None,
@@ -564,60 +668,67 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+    /// 该应用的配置目录覆盖（原始值，未解析 `~`）
+    pub fn config_dir(&self, app: &AppType) -> Option<&str> {
+        self.per_app
+            .config_dirs
+            .get(registry::descriptor(app).slug)
+            .map(String::as_str)
+    }
+
+    /// 设置或清除（`None`）该应用的配置目录覆盖
+    pub fn set_config_dir(&mut self, app: &AppType, dir: Option<String>) {
+        let slug = registry::descriptor(app).slug.to_string();
+        match dir {
+            Some(dir) => self.per_app.config_dirs.insert(slug, dir),
+            None => self.per_app.config_dirs.remove(&slug),
+        };
+    }
+
+    /// 构造用：返回设置了该应用配置目录覆盖的副本
+    pub fn with_config_dir(mut self, app: &AppType, dir: impl Into<String>) -> Self {
+        self.set_config_dir(app, Some(dir.into()));
+        self
+    }
+
+    /// 该应用在本机记录的当前供应商 ID
+    pub fn current_provider_id(&self, app: &AppType) -> Option<&str> {
+        self.per_app
+            .current_providers
+            .get(registry::descriptor(app).slug)
+            .map(String::as_str)
+    }
+
+    /// 设置或清除（`None`）该应用在本机记录的当前供应商 ID
+    pub fn set_current_provider_id(&mut self, app: &AppType, id: Option<String>) {
+        let slug = registry::descriptor(app).slug.to_string();
+        match id {
+            Some(id) => self.per_app.current_providers.insert(slug, id),
+            None => self.per_app.current_providers.remove(&slug),
+        };
+    }
+
+    /// 解析前端 `save_settings` 传入的设置。前端仍按旧扁平键
+    /// （`claudeConfigDir`、`currentProviderClaude` ...）编辑并回传读取时的
+    /// 映射旧值，因此这些应用以扁平键为准，见 [`PerAppSettings::strip_legacy_map_entries`]。
+    pub fn from_frontend_value(mut value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        PerAppSettings::strip_legacy_map_entries(&mut value);
+        serde_json::from_value(value)
+    }
+
     fn settings_path() -> Option<PathBuf> {
         // settings.json 保留用于旧版本迁移和无数据库场景
         Some(crate::paths::current().settings_path())
     }
 
     fn normalize_paths(&mut self) {
-        self.claude_config_dir = self
-            .claude_config_dir
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-
-        self.codex_config_dir = self
-            .codex_config_dir
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-
-        self.gemini_config_dir = self
-            .gemini_config_dir
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-
-        self.grok_config_dir = self
-            .grok_config_dir
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-
-        self.opencode_config_dir = self
-            .opencode_config_dir
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-
-        self.openclaw_config_dir = self
-            .openclaw_config_dir
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-
-        self.hermes_config_dir = self
-            .hermes_config_dir
-            .as_ref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
+        self.per_app.config_dirs = std::mem::take(&mut self.per_app.config_dirs)
+            .into_iter()
+            .filter_map(|(app, dir)| {
+                let trimmed = dir.trim();
+                (!trimmed.is_empty()).then(|| (app, trimmed.to_string()))
+            })
+            .collect();
 
         self.language = self
             .language
@@ -641,82 +752,182 @@ impl AppSettings {
         }
     }
 
-    fn load_from_file() -> Self {
+    /// 从 settings.json 加载设置
+    ///
+    /// 文件不存在时返回默认值；文件存在但无法读取或解析时同样返回默认值，
+    /// 并附带 [`SettingsLoadFailure`]：解析失败会先把原始字节备份到
+    /// `settings.json.corrupt-<ts>`，避免下一次保存静默覆盖 WebDAV/S3 凭据、
+    /// 当前供应商和 `local_migrations` 标记。
+    fn load_from_file() -> (Self, Option<SettingsLoadFailure>) {
         let Some(path) = Self::settings_path() else {
-            return Self::default();
+            return (Self::default(), None);
         };
-        if let Ok(content) = fs::read_to_string(&path) {
-            match serde_json::from_str::<AppSettings>(&content) {
-                Ok(mut settings) => {
-                    settings.normalize_paths();
-                    settings
-                }
-                Err(err) => {
-                    log::warn!(
-                        "解析设置文件失败，将使用默认设置。路径: {}, 错误: {}",
-                        path.display(),
-                        err
-                    );
-                    Self::default()
-                }
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return (Self::default(), None);
             }
-        } else {
-            Self::default()
+            Err(err) => {
+                log::error!(
+                    "读取设置文件失败，将使用默认设置且禁止覆盖该文件。路径: {}, 错误: {}",
+                    path.display(),
+                    err
+                );
+                let failure = SettingsLoadFailure {
+                    path,
+                    error: err.to_string(),
+                    backup_path: None,
+                };
+                return (Self::default(), Some(failure));
+            }
+        };
+        match serde_json::from_slice::<AppSettings>(&bytes) {
+            Ok(mut settings) => {
+                settings.normalize_paths();
+                (settings, None)
+            }
+            Err(err) => {
+                let backup_path = match backup_corrupt_settings(&path, &bytes) {
+                    Ok(backup) => {
+                        log::warn!(
+                            "解析设置文件失败，将使用默认设置；原文件已备份。路径: {}, 备份: {}, 错误: {}",
+                            path.display(),
+                            backup.display(),
+                            err
+                        );
+                        Some(backup)
+                    }
+                    Err(backup_err) => {
+                        log::error!(
+                            "解析设置文件失败且备份失败，将使用默认设置并禁止覆盖该文件。路径: {}, 错误: {}, 备份错误: {}",
+                            path.display(),
+                            err,
+                            backup_err
+                        );
+                        None
+                    }
+                };
+                let failure = SettingsLoadFailure {
+                    path,
+                    error: err.to_string(),
+                    backup_path,
+                };
+                (Self::default(), Some(failure))
+            }
         }
     }
 }
 
-fn save_settings_file(settings: &AppSettings) -> Result<(), AppError> {
+/// settings.json 加载失败的记录（供前端提示用户）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsLoadFailure {
+    /// 加载失败的 settings.json 路径
+    pub path: PathBuf,
+    /// 读取或解析错误信息
+    pub error: String,
+    /// 原始内容的备份路径；为 `None` 时表示未能备份，保存会被拒绝直到用户确认
+    pub backup_path: Option<PathBuf>,
+}
+
+impl SettingsLoadFailure {
+    /// 原文件未备份时禁止覆盖，以免丢失其中的凭据与迁移标记
+    fn blocks_save(&self) -> bool {
+        self.backup_path.is_none()
+    }
+}
+
+/// 把无法解析的 settings.json 原样备份到 `settings.json.corrupt-<ts>`（仅属主可读写）
+fn backup_corrupt_settings(path: &Path, bytes: &[u8]) -> Result<PathBuf, AppError> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| AppError::Config("无效的文件名".to_string()))?
+        .to_string_lossy()
+        .to_string();
+    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let base = path.with_file_name(format!("{file_name}.corrupt-{ts}"));
+    let mut backup = base.clone();
+    let mut n = 1;
+    while fs::symlink_metadata(&backup).is_ok() {
+        backup = PathBuf::from(format!("{}-{n}", base.display()));
+        n += 1;
+    }
+    crate::config::atomic_write_secret(&backup, bytes)?;
+    Ok(backup)
+}
+
+fn save_settings_file(store: &SettingsStore, settings: &AppSettings) -> Result<(), AppError> {
+    if let Some(failure) = store
+        .load_failure()
+        .filter(SettingsLoadFailure::blocks_save)
+    {
+        return Err(AppError::Config(format!(
+            "设置文件 {} 加载失败且未能备份（{}），为避免覆盖其中的数据已拒绝保存；请修复该文件或确认重置后重试",
+            failure.path.display(),
+            failure.error
+        )));
+    }
+
     let mut normalized = settings.clone();
     normalized.normalize_paths();
     let Some(path) = AppSettings::settings_path() else {
         return Err(AppError::Config("无法获取用户主目录".to_string()));
     };
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
-    }
-
     let json = serde_json::to_string_pretty(&normalized)
         .map_err(|e| AppError::JsonSerialize { source: e })?;
-    #[cfg(unix)]
-    {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|e| AppError::io(&path, e))?;
-        file.write_all(json.as_bytes())
-            .map_err(|e| AppError::io(&path, e))?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        fs::write(&path, json).map_err(|e| AppError::io(&path, e))?;
-    }
-
-    Ok(())
+    // 设置中包含 WebDAV/S3 凭据：原子写入并强制仅属主可访问（unix 0600）
+    crate::config::atomic_write_secret(&path, json.as_bytes())
 }
 
-static SETTINGS_STORE: OnceLock<Arc<RwLock<AppSettings>>> = OnceLock::new();
+/// 进程级设置缓存及其加载状态
+struct SettingsStore {
+    settings: RwLock<AppSettings>,
+    load_failure: RwLock<Option<SettingsLoadFailure>>,
+}
+
+impl SettingsStore {
+    fn load() -> Self {
+        let (settings, load_failure) = AppSettings::load_from_file();
+        Self {
+            settings: RwLock::new(settings),
+            load_failure: RwLock::new(load_failure),
+        }
+    }
+
+    fn load_failure(&self) -> Option<SettingsLoadFailure> {
+        self.load_failure
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn set_load_failure(&self, failure: Option<SettingsLoadFailure>) {
+        *self.load_failure.write().unwrap_or_else(|e| e.into_inner()) = failure;
+    }
+}
+
+impl std::ops::Deref for SettingsStore {
+    type Target = RwLock<AppSettings>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.settings
+    }
+}
+
+static SETTINGS_STORE: OnceLock<Arc<SettingsStore>> = OnceLock::new();
 
 thread_local! {
-    static SCOPED_SETTINGS_STORE: RefCell<Option<Arc<RwLock<AppSettings>>>> =
+    static SCOPED_SETTINGS_STORE: RefCell<Option<Arc<SettingsStore>>> =
         const { RefCell::new(None) };
 }
 
-fn settings_store() -> Arc<RwLock<AppSettings>> {
+fn settings_store() -> Arc<SettingsStore> {
     if let Some(store) = SCOPED_SETTINGS_STORE.with(|scoped| scoped.borrow().clone()) {
         return store;
     }
     SETTINGS_STORE
-        .get_or_init(|| Arc::new(RwLock::new(AppSettings::load_from_file())))
+        .get_or_init(|| Arc::new(SettingsStore::load()))
         .clone()
 }
 
@@ -724,7 +935,7 @@ fn settings_store() -> Arc<RwLock<AppSettings>> {
 /// guard 释放时恢复之前的缓存。仅用于测试隔离：配合 [`crate::paths::scoped`] 使用，
 /// 避免并行测试共享进程级设置缓存。
 pub fn scoped_settings_store() -> ScopedSettingsStore {
-    let store = Arc::new(RwLock::new(AppSettings::load_from_file()));
+    let store = Arc::new(SettingsStore::load());
     let previous = SCOPED_SETTINGS_STORE.with(|scoped| scoped.borrow_mut().replace(store));
     ScopedSettingsStore {
         previous,
@@ -735,7 +946,7 @@ pub fn scoped_settings_store() -> ScopedSettingsStore {
 /// [`scoped_settings_store`] 返回的 guard
 #[must_use = "dropping the guard immediately restores the previous settings store"]
 pub struct ScopedSettingsStore {
-    previous: Option<Arc<RwLock<AppSettings>>>,
+    previous: Option<Arc<SettingsStore>>,
     _not_send: PhantomData<*const ()>,
 }
 
@@ -743,6 +954,29 @@ impl Drop for ScopedSettingsStore {
     fn drop(&mut self) {
         let previous = self.previous.take();
         SCOPED_SETTINGS_STORE.with(|scoped| *scoped.borrow_mut() = previous);
+    }
+}
+
+/// 当前线程所用设置缓存的句柄，用于在测试中把同一份缓存注入其他线程，
+/// 以覆盖跨线程并发写入。
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct SharedSettingsStore(Arc<SettingsStore>);
+
+#[cfg(test)]
+impl SharedSettingsStore {
+    pub(crate) fn current() -> Self {
+        Self(settings_store())
+    }
+
+    /// 在当前线程注入该缓存，guard 释放时恢复之前的缓存
+    pub(crate) fn install(&self) -> ScopedSettingsStore {
+        let previous =
+            SCOPED_SETTINGS_STORE.with(|scoped| scoped.borrow_mut().replace(self.0.clone()));
+        ScopedSettingsStore {
+            previous,
+            _not_send: PhantomData,
+        }
     }
 }
 
@@ -787,18 +1021,29 @@ pub fn get_settings_for_frontend() -> AppSettings {
     settings
 }
 
-pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
-    new_settings.normalize_paths();
-    save_settings_file(&new_settings)?;
+/// 整体替换设置。写锁覆盖"写文件 + 替换内存"，与其他写入方串行，
+/// 保证文件与内存缓存不会因并发写入而不一致。
+pub fn update_settings(new_settings: AppSettings) -> Result<(), AppError> {
+    update_settings_with(|_| new_settings).map(|_| ())
+}
 
+/// 在设置写锁内基于当前值构造新设置：`build` 读到的是锁内的最新值，
+/// 构造结果经路径归一化后写入文件并替换内存缓存，返回替换前的旧值。
+/// 用于需要与现有值合并的整体保存（如前端保存设置），避免"锁外快照 →
+/// 整体替换"覆盖掉期间 [`mutate_settings`] 提交的迁移标记、同步状态等。
+pub fn update_settings_with<F>(build: F) -> Result<AppSettings, AppError>
+where
+    F: FnOnce(&AppSettings) -> AppSettings,
+{
     let store = settings_store();
-
     let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
     });
-    *guard = new_settings;
-    Ok(())
+    let mut next = build(&guard);
+    next.normalize_paths();
+    save_settings_file(&store, &next)?;
+    Ok(std::mem::replace(&mut *guard, next))
 }
 
 fn mutate_settings<F>(mutator: F) -> Result<(), AppError>
@@ -813,7 +1058,7 @@ where
     let mut next = guard.clone();
     mutator(&mut next);
     next.normalize_paths();
-    save_settings_file(&next)?;
+    save_settings_file(&store, &next)?;
     *guard = next;
     Ok(())
 }
@@ -900,6 +1145,34 @@ pub fn clear_codex_official_history_unify_migration() -> Result<(), AppError> {
     })
 }
 
+/// 用户删除过的内置模型定价 ID（seed 时跳过）
+pub fn deleted_builtin_model_pricing_ids() -> Vec<String> {
+    get_settings()
+        .local_migrations
+        .map(|migrations| migrations.deleted_builtin_model_pricing)
+        .unwrap_or_default()
+}
+
+/// 记录或清除"内置模型定价已被用户删除"的标记。状态未变化时不写文件。
+pub fn set_builtin_model_pricing_deleted(model_id: &str, deleted: bool) -> Result<(), AppError> {
+    let already = deleted_builtin_model_pricing_ids()
+        .iter()
+        .any(|id| id == model_id);
+    if already == deleted {
+        return Ok(());
+    }
+    mutate_settings(|settings| {
+        let migrations = settings
+            .local_migrations
+            .get_or_insert_with(Default::default);
+        let ids = &mut migrations.deleted_builtin_model_pricing;
+        ids.retain(|id| id != model_id);
+        if deleted {
+            ids.push(model_id.to_string());
+        }
+    })
+}
+
 pub fn unify_codex_migrate_existing_requested() -> bool {
     get_settings().unify_codex_migrate_existing.unwrap_or(false)
 }
@@ -913,8 +1186,9 @@ pub fn clear_codex_unify_migrate_existing() -> Result<(), AppError> {
 /// 从文件重新加载设置到内存缓存
 /// 用于导入配置等场景，确保内存缓存与文件同步
 pub fn reload_settings() -> Result<(), AppError> {
-    let fresh_settings = AppSettings::load_from_file();
+    let (fresh_settings, load_failure) = AppSettings::load_from_file();
     let store = settings_store();
+    store.set_load_failure(load_failure);
     let mut guard = store.write().unwrap_or_else(|e| {
         log::warn!("设置锁已毒化，使用恢复值: {e}");
         e.into_inner()
@@ -923,67 +1197,26 @@ pub fn reload_settings() -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn get_claude_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .claude_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
+/// 启动（或最近一次重新加载）时 settings.json 的加载失败记录，供前端提示用户
+pub fn get_settings_load_failure() -> Option<SettingsLoadFailure> {
+    settings_store().load_failure()
 }
 
-pub fn get_codex_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .codex_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
+/// 用户确认后清除加载失败记录：之后的保存将以当前（默认）设置覆盖 settings.json
+pub fn acknowledge_settings_load_failure() {
+    settings_store().set_load_failure(None);
 }
 
-pub fn get_gemini_override_dir() -> Option<PathBuf> {
+/// 返回用户在 settings.json 中为该应用配置的配置目录覆盖（已解析 `~`）。
+///
+/// 没有覆盖、或应用不支持目录覆盖（Claude Desktop）时返回 `None`。
+pub fn override_dir(app: &AppType) -> Option<PathBuf> {
+    if matches!(app, AppType::ClaudeDesktop) {
+        return None;
+    }
     let store = settings_store();
     let settings = store.read().ok()?;
-    settings
-        .gemini_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_grok_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .grok_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_opencode_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .opencode_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_openclaw_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .openclaw_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
-}
-
-pub fn get_hermes_override_dir() -> Option<PathBuf> {
-    let store = settings_store();
-    let settings = store.read().ok()?;
-    settings
-        .hermes_config_dir
-        .as_ref()
-        .map(|p| resolve_override_path(p))
+    settings.config_dir(app).map(resolve_override_path)
 }
 
 pub fn preserve_codex_official_auth_on_switch() -> bool {
@@ -1026,16 +1259,7 @@ pub fn sticky_session_routing_enabled() -> bool {
 pub fn get_current_provider(app_type: &AppType) -> Option<String> {
     let store = settings_store();
     let settings = store.read().ok()?;
-    match app_type {
-        AppType::Claude => settings.current_provider_claude.clone(),
-        AppType::ClaudeDesktop => settings.current_provider_claude_desktop.clone(),
-        AppType::Codex => settings.current_provider_codex.clone(),
-        AppType::Gemini => settings.current_provider_gemini.clone(),
-        AppType::GrokBuild => settings.current_provider_grokbuild.clone(),
-        AppType::OpenCode => settings.current_provider_opencode.clone(),
-        AppType::OpenClaw => settings.current_provider_openclaw.clone(),
-        AppType::Hermes => settings.current_provider_hermes.clone(),
-    }
+    settings.current_provider_id(app_type).map(str::to_string)
 }
 
 /// 设置指定应用类型的当前供应商 ID（保存到本地 settings）
@@ -1043,16 +1267,8 @@ pub fn get_current_provider(app_type: &AppType) -> Option<String> {
 /// 这是设备级别的设置，不随数据库同步。
 /// 传入 `None` 会清除当前供应商设置。
 pub fn set_current_provider(app_type: &AppType, id: Option<&str>) -> Result<(), AppError> {
-    let id_owned = id.map(|s| s.to_string());
-    mutate_settings(|settings| match app_type {
-        AppType::Claude => settings.current_provider_claude = id_owned.clone(),
-        AppType::ClaudeDesktop => settings.current_provider_claude_desktop = id_owned.clone(),
-        AppType::Codex => settings.current_provider_codex = id_owned.clone(),
-        AppType::Gemini => settings.current_provider_gemini = id_owned.clone(),
-        AppType::GrokBuild => settings.current_provider_grokbuild = id_owned.clone(),
-        AppType::OpenCode => settings.current_provider_opencode = id_owned.clone(),
-        AppType::OpenClaw => settings.current_provider_openclaw = id_owned.clone(),
-        AppType::Hermes => settings.current_provider_hermes = id_owned.clone(),
+    mutate_settings(|settings| {
+        settings.set_current_provider_id(app_type, id.map(str::to_string));
     })
 }
 
@@ -1242,5 +1458,381 @@ mod tests {
         .expect("visible apps");
 
         assert!(!visible.is_visible(&AppType::ClaudeDesktop));
+    }
+
+    /// 旧版（双写引入前）`AppSettings` 中按应用分槽字段的冻结副本，用于验证降级兼容：
+    /// 新版本写出的 settings.json 由旧结构体读取时仍能找到当前供应商、目录覆盖与可见应用。
+    /// 旧结构体没有 `deny_unknown_fields`，其余字段与本测试无关，故只保留这些字段。
+    /// 不要随新版本修改此副本。
+    mod legacy_v1 {
+        use serde::Deserialize;
+
+        fn default_true() -> bool {
+            true
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct VisibleApps {
+            #[serde(default = "default_true")]
+            pub claude: bool,
+            #[serde(
+                rename = "claude-desktop",
+                alias = "claudeDesktop",
+                alias = "claude_desktop",
+                default = "default_true"
+            )]
+            pub claude_desktop: bool,
+            #[serde(default = "default_true")]
+            pub codex: bool,
+            #[serde(default = "default_true")]
+            pub gemini: bool,
+            #[serde(default = "default_true")]
+            pub grokbuild: bool,
+            #[serde(default = "default_true")]
+            pub opencode: bool,
+            #[serde(default = "default_true")]
+            pub openclaw: bool,
+            #[serde(default)]
+            pub hermes: bool,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct AppSettings {
+            #[serde(default)]
+            pub visible_apps: Option<VisibleApps>,
+            #[serde(default)]
+            pub claude_config_dir: Option<String>,
+            #[serde(default)]
+            pub codex_config_dir: Option<String>,
+            #[serde(default)]
+            pub gemini_config_dir: Option<String>,
+            #[serde(default)]
+            pub grok_config_dir: Option<String>,
+            #[serde(default)]
+            pub opencode_config_dir: Option<String>,
+            #[serde(default)]
+            pub openclaw_config_dir: Option<String>,
+            #[serde(default)]
+            pub hermes_config_dir: Option<String>,
+            #[serde(default)]
+            pub current_provider_claude: Option<String>,
+            #[serde(default)]
+            pub current_provider_claude_desktop: Option<String>,
+            #[serde(default)]
+            pub current_provider_codex: Option<String>,
+            #[serde(default)]
+            pub current_provider_gemini: Option<String>,
+            #[serde(default)]
+            pub current_provider_grokbuild: Option<String>,
+            #[serde(default)]
+            pub current_provider_opencode: Option<String>,
+            #[serde(default)]
+            pub current_provider_openclaw: Option<String>,
+            #[serde(default)]
+            pub current_provider_hermes: Option<String>,
+        }
+    }
+
+    fn settings_with_every_app() -> AppSettings {
+        let mut settings = AppSettings::default();
+        let mut visible = VisibleApps::default();
+        for app in AppType::all() {
+            let slug = app.as_str();
+            settings.set_current_provider_id(&app, Some(format!("p-{slug}")));
+            if !matches!(app, AppType::ClaudeDesktop) {
+                settings.set_config_dir(&app, Some(format!("/cfg/{slug}")));
+            }
+            visible.set_visible(&app, matches!(app, AppType::Hermes));
+        }
+        settings.visible_apps = Some(visible);
+        settings
+    }
+
+    #[test]
+    fn new_settings_json_is_readable_by_the_old_struct() {
+        let json = serde_json::to_string(&settings_with_every_app()).expect("serialize");
+        let old: legacy_v1::AppSettings = serde_json::from_str(&json).expect("old struct parses");
+
+        assert_eq!(old.current_provider_claude.as_deref(), Some("p-claude"));
+        assert_eq!(
+            old.current_provider_claude_desktop.as_deref(),
+            Some("p-claude-desktop")
+        );
+        assert_eq!(old.current_provider_codex.as_deref(), Some("p-codex"));
+        assert_eq!(old.current_provider_gemini.as_deref(), Some("p-gemini"));
+        assert_eq!(
+            old.current_provider_grokbuild.as_deref(),
+            Some("p-grokbuild")
+        );
+        assert_eq!(old.current_provider_opencode.as_deref(), Some("p-opencode"));
+        assert_eq!(old.current_provider_openclaw.as_deref(), Some("p-openclaw"));
+        assert_eq!(old.current_provider_hermes.as_deref(), Some("p-hermes"));
+
+        assert_eq!(old.claude_config_dir.as_deref(), Some("/cfg/claude"));
+        assert_eq!(old.codex_config_dir.as_deref(), Some("/cfg/codex"));
+        assert_eq!(old.gemini_config_dir.as_deref(), Some("/cfg/gemini"));
+        assert_eq!(old.grok_config_dir.as_deref(), Some("/cfg/grokbuild"));
+        assert_eq!(old.opencode_config_dir.as_deref(), Some("/cfg/opencode"));
+        assert_eq!(old.openclaw_config_dir.as_deref(), Some("/cfg/openclaw"));
+        assert_eq!(old.hermes_config_dir.as_deref(), Some("/cfg/hermes"));
+
+        let visible = old.visible_apps.expect("visible apps");
+        assert!(!visible.claude && !visible.claude_desktop && !visible.codex);
+        assert!(!visible.gemini && !visible.grokbuild && !visible.opencode);
+        assert!(!visible.openclaw && visible.hermes);
+    }
+
+    #[test]
+    fn settings_serialize_keyed_maps_and_roundtrip() {
+        let settings = settings_with_every_app();
+        let value = serde_json::to_value(&settings).expect("serialize");
+        assert_eq!(
+            value["currentProviders"]["claude-desktop"],
+            "p-claude-desktop"
+        );
+        assert_eq!(value["configDirs"]["grokbuild"], "/cfg/grokbuild");
+        assert_eq!(value["visibleApps"]["claude-desktop"], false);
+
+        let back: AppSettings = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(back.per_app, settings.per_app);
+        assert_eq!(back.visible_apps, settings.visible_apps);
+        for app in AppType::all() {
+            assert_eq!(
+                back.current_provider_id(&app),
+                Some(format!("p-{}", app.as_str()).as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn old_flat_settings_json_still_loads() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "currentProviderClaude": "c1",
+            "currentProviderClaudeDesktop": "d1",
+            "currentProviderGrokbuild": "g1",
+            "claudeConfigDir": "/old/claude",
+            "grokConfigDir": "/old/grok",
+            "visibleApps": { "claude": true, "claudeDesktop": false, "hermes": true }
+        }))
+        .expect("old settings");
+
+        assert_eq!(settings.current_provider_id(&AppType::Claude), Some("c1"));
+        assert_eq!(
+            settings.current_provider_id(&AppType::ClaudeDesktop),
+            Some("d1")
+        );
+        assert_eq!(
+            settings.current_provider_id(&AppType::GrokBuild),
+            Some("g1")
+        );
+        assert_eq!(settings.current_provider_id(&AppType::Codex), None);
+        assert_eq!(settings.config_dir(&AppType::Claude), Some("/old/claude"));
+        assert_eq!(settings.config_dir(&AppType::GrokBuild), Some("/old/grok"));
+        let visible = settings.visible_apps.expect("visible apps");
+        assert!(!visible.is_visible(&AppType::ClaudeDesktop));
+        assert!(visible.is_visible(&AppType::Hermes));
+        assert!(
+            visible.is_visible(&AppType::Codex),
+            "missing key uses default"
+        );
+    }
+
+    #[test]
+    fn keyed_map_wins_over_flat_keys_and_keeps_unknown_apps() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "currentProviders": { "claude": "from-map", "claude_desktop": "desk", "ninth": "n1" },
+            "currentProviderClaude": "from-flat",
+            "currentProviderCodex": "codex-flat",
+            "configDirs": { "ninth": "/ninth" },
+            "visibleApps": { "ninth": false }
+        }))
+        .expect("settings");
+
+        assert_eq!(
+            settings.current_provider_id(&AppType::Claude),
+            Some("from-map")
+        );
+        assert_eq!(
+            settings.current_provider_id(&AppType::ClaudeDesktop),
+            Some("desk"),
+            "map keys are normalized through registry aliases"
+        );
+        assert_eq!(
+            settings.current_provider_id(&AppType::Codex),
+            Some("codex-flat"),
+            "apps missing from the map fall back to the flat key"
+        );
+
+        // 未注册应用（更新版本新增）的槽位原样保留，降级再升级不丢失
+        let value = serde_json::to_value(&settings).expect("serialize");
+        assert_eq!(value["currentProviders"]["ninth"], "n1");
+        assert_eq!(value["configDirs"]["ninth"], "/ninth");
+        assert_eq!(value["visibleApps"]["ninth"], false);
+        assert!(value.get("currentProviderNinth").is_none());
+    }
+
+    #[test]
+    fn frontend_save_uses_flat_keys_for_legacy_apps() {
+        // 前端回传读取时的映射旧值，但按扁平键编辑：改 Codex 目录、清空 Claude 目录
+        let mut value = serde_json::to_value(settings_with_every_app()).expect("serialize");
+        let obj = value.as_object_mut().unwrap();
+        obj.insert("codexConfigDir".into(), serde_json::json!("/edited/codex"));
+        obj.remove("claudeConfigDir");
+        obj.get_mut("configDirs")
+            .and_then(|m| m.as_object_mut())
+            .unwrap()
+            .insert("ninth".into(), serde_json::json!("/ninth"));
+
+        let saved = AppSettings::from_frontend_value(value).expect("frontend settings");
+        assert_eq!(saved.config_dir(&AppType::Codex), Some("/edited/codex"));
+        assert_eq!(
+            saved.config_dir(&AppType::Claude),
+            None,
+            "cleared by the form"
+        );
+        assert_eq!(saved.config_dir(&AppType::Gemini), Some("/cfg/gemini"));
+        assert_eq!(
+            saved.per_app.config_dirs.get("ninth").map(String::as_str),
+            Some("/ninth"),
+            "apps without a legacy flat key keep their map entry"
+        );
+    }
+
+    #[test]
+    fn normalize_trims_and_drops_empty_config_dirs() {
+        let mut settings = AppSettings::default()
+            .with_config_dir(&AppType::Claude, "  /x  ")
+            .with_config_dir(&AppType::Codex, "   ");
+        settings.normalize_paths();
+        assert_eq!(settings.config_dir(&AppType::Claude), Some("/x"));
+        assert_eq!(settings.config_dir(&AppType::Codex), None);
+    }
+
+    mod persistence {
+        use super::super::*;
+        use crate::paths::{self, Paths};
+
+        struct Env {
+            _settings: ScopedSettingsStore,
+            _paths: paths::ScopedPaths,
+            _temp: tempfile::TempDir,
+            path: PathBuf,
+        }
+
+        /// 隔离 home 目录，可选预先写入 settings.json，再加载线程内设置缓存
+        fn env_with(initial: Option<&[u8]>) -> Env {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let paths_guard = paths::scoped(Paths::with_home(temp.path()));
+            let path = paths::current().settings_path();
+            if let Some(bytes) = initial {
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                crate::config::atomic_write(&path, bytes).unwrap();
+            }
+            Env {
+                _settings: scoped_settings_store(),
+                _paths: paths_guard,
+                _temp: temp,
+                path,
+            }
+        }
+
+        fn dir_entries(dir: &Path) -> Vec<String> {
+            let mut names: Vec<String> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+                .collect();
+            names.sort();
+            names
+        }
+
+        #[cfg(unix)]
+        fn mode(path: &Path) -> u32 {
+            use std::os::unix::fs::PermissionsExt;
+            fs::metadata(path).unwrap().permissions().mode() & 0o777
+        }
+
+        #[test]
+        fn invalid_json_is_backed_up_before_save_overwrites_it() {
+            let original: &[u8] = b"{\"webdavSync\": {\"password\": \"secret\"},, broken";
+            let env = env_with(Some(original));
+
+            let failure = get_settings_load_failure().expect("load failure recorded");
+            let backup = failure.backup_path.clone().expect("backup created");
+            assert_eq!(fs::read(&backup).unwrap(), original);
+            assert!(backup
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("settings.json.corrupt-"));
+
+            update_settings(AppSettings::default()).expect("save allowed once backed up");
+
+            assert_eq!(fs::read(&backup).unwrap(), original);
+            let saved: AppSettings =
+                serde_json::from_slice(&fs::read(&env.path).unwrap()).expect("saved valid json");
+            assert!(saved.webdav_sync.is_none());
+            #[cfg(unix)]
+            assert_eq!(mode(&backup), 0o600);
+        }
+
+        #[test]
+        fn invalid_utf8_is_treated_as_corrupt_and_backed_up() {
+            let original: &[u8] = &[b'{', 0xff, 0xfe, b'}'];
+            let _env = env_with(Some(original));
+
+            let failure = get_settings_load_failure().expect("load failure recorded");
+            assert_eq!(fs::read(failure.backup_path.unwrap()).unwrap(), original);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn save_is_refused_when_unreadable_file_cannot_be_backed_up() {
+            // 以目录占位 settings.json：读取失败（非 NotFound），无法备份
+            let temp = tempfile::tempdir().expect("tempdir");
+            let _paths = paths::scoped(Paths::with_home(temp.path()));
+            let path = paths::current().settings_path();
+            fs::create_dir_all(&path).unwrap();
+            let _settings = scoped_settings_store();
+
+            let failure = get_settings_load_failure().expect("load failure recorded");
+            assert!(failure.backup_path.is_none());
+
+            let err = update_settings(AppSettings::default()).expect_err("save refused");
+            assert!(err.to_string().contains("拒绝保存"), "{err}");
+            assert!(mutate_settings(|s| s.show_in_tray = false).is_err());
+            assert!(path.is_dir(), "unreadable settings must not be replaced");
+
+            acknowledge_settings_load_failure();
+            assert!(get_settings_load_failure().is_none());
+        }
+
+        #[test]
+        fn missing_or_valid_file_records_no_failure() {
+            let _env = env_with(None);
+            assert!(get_settings_load_failure().is_none());
+            update_settings(AppSettings::default()).expect("save");
+            reload_settings().expect("reload");
+            assert!(get_settings_load_failure().is_none());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn save_is_atomic_owner_only_and_leaves_no_tmp_files() {
+            use std::os::unix::fs::PermissionsExt;
+
+            let env = env_with(None);
+            let dir = env.path.parent().unwrap().to_path_buf();
+
+            update_settings(AppSettings::default()).expect("create");
+            assert_eq!(mode(&env.path), 0o600);
+
+            fs::set_permissions(&env.path, fs::Permissions::from_mode(0o644)).unwrap();
+            mutate_settings(|s| s.show_in_tray = false).expect("rewrite");
+            assert_eq!(mode(&env.path), 0o600);
+
+            assert_eq!(dir_entries(&dir), vec!["settings.json".to_string()]);
+        }
     }
 }

@@ -10,6 +10,7 @@ import type { Provider } from "@/types";
 
 const apiMocks = vi.hoisted(() => ({
   getCurrent: vi.fn(),
+  previewLiveWrite: vi.fn(),
   getLiveProviderSettings: vi.fn(),
   getOpenClawLiveProvider: vi.fn(),
 }));
@@ -20,6 +21,7 @@ const formMounts = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 vi.mock("@/lib/api", () => ({
   providersApi: {
     getCurrent: apiMocks.getCurrent,
+    previewLiveWrite: apiMocks.previewLiveWrite,
   },
   vscodeApi: {
     getLiveProviderSettings: apiMocks.getLiveProviderSettings,
@@ -112,6 +114,13 @@ import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 describe("EditProviderDialog", () => {
   beforeEach(() => {
     apiMocks.getCurrent.mockReset();
+    apiMocks.previewLiveWrite.mockReset();
+    // 默认：保存不写 live，不弹 diff
+    apiMocks.previewLiveWrite.mockResolvedValue({
+      writesLive: false,
+      skipReason: "notCurrent",
+      files: [],
+    });
     apiMocks.getLiveProviderSettings.mockReset();
     apiMocks.getOpenClawLiveProvider.mockReset();
     formMounts.length = 0;
@@ -402,5 +411,116 @@ describe("EditProviderDialog", () => {
     expect(screen.getByTestId("settings-config")).toBeInTheDocument();
     expect(screen.queryByTestId("edit-provider-loading")).toBeNull();
     expect(apiMocks.getCurrent).not.toHaveBeenCalled();
+  });
+  describe("live 配置 diff 预览（CCS-205）", () => {
+    const provider: Provider = {
+      id: "relay",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: {
+        env: { ANTHROPIC_BASE_URL: "https://new.example.com" },
+      },
+    };
+    const settingsPath = "/home/u/.claude/settings.json";
+    const previewWithChanges = {
+      writesLive: true,
+      skipReason: null,
+      files: [
+        {
+          path: settingsPath,
+          before:
+            '{\n  "env": {\n    "ANTHROPIC_BASE_URL": "https://old.example.com"\n  }\n}',
+          after:
+            '{\n  "env": {\n    "ANTHROPIC_BASE_URL": "https://new.example.com"\n  }\n}',
+        },
+        // 内容不变的文件不展示
+        {
+          path: "/home/u/.claude/unchanged.json",
+          before: "{}",
+          after: "{}",
+        },
+      ],
+    };
+
+    const renderDialog = (
+      handleSubmit = vi.fn().mockResolvedValue(undefined),
+    ) => {
+      apiMocks.getCurrent.mockResolvedValue("other");
+      render(
+        <EditProviderDialog
+          open
+          provider={provider}
+          onOpenChange={vi.fn()}
+          onSubmit={handleSubmit}
+          appId="claude"
+        />,
+      );
+      return handleSubmit;
+    };
+
+    it("保存前并排渲染 live 文件的 diff，确认后才保存", async () => {
+      apiMocks.previewLiveWrite.mockResolvedValue(previewWithChanges);
+      const handleSubmit = renderDialog();
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "common.save" }),
+      );
+
+      const table = await screen.findByRole("table", { name: settingsPath });
+      expect(apiMocks.previewLiveWrite).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "relay" }),
+        "claude",
+        "relay",
+      );
+      expect(screen.getAllByTestId("live-diff-file")).toHaveLength(1);
+      const changed = table.querySelector('tr[data-diff-kind="changed"]');
+      expect(changed).not.toBeNull();
+      const cells = Array.from(changed!.querySelectorAll("td")).map(
+        (cell) => cell.textContent,
+      );
+      expect(cells).toEqual([
+        "3",
+        '    "ANTHROPIC_BASE_URL": "https://old.example.com"',
+        "3",
+        '    "ANTHROPIC_BASE_URL": "https://new.example.com"',
+      ]);
+      expect(handleSubmit).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId("live-diff-confirm"));
+      await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
+    });
+
+    it("在 diff 中返回编辑时不保存", async () => {
+      apiMocks.previewLiveWrite.mockResolvedValue(previewWithChanges);
+      const handleSubmit = renderDialog();
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "common.save" }),
+      );
+      await screen.findByRole("table", { name: settingsPath });
+      fireEvent.click(
+        screen.getByRole("button", { name: "providerForm.liveDiff.back" }),
+      );
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("table", { name: settingsPath }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(handleSubmit).not.toHaveBeenCalled();
+    });
+
+    it("不写 live 或预览失败时直接保存", async () => {
+      apiMocks.previewLiveWrite.mockRejectedValueOnce(new Error("boom"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const handleSubmit = renderDialog();
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "common.save" }),
+      );
+      await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
+      expect(screen.queryByTestId("live-diff-file")).not.toBeInTheDocument();
+      warn.mockRestore();
+    });
   });
 });

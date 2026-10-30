@@ -4,140 +4,84 @@ use std::str::FromStr;
 
 use crate::services::skill::SkillStore;
 
-/// MCP 服务器应用状态（标记应用到哪些客户端）
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-pub struct McpApps {
-    #[serde(default)]
-    pub claude: bool,
-    #[serde(default)]
-    pub codex: bool,
-    #[serde(default)]
-    pub gemini: bool,
-    #[serde(default)]
-    pub grokbuild: bool,
-    #[serde(default)]
-    pub opencode: bool,
-    #[serde(default)]
-    pub hermes: bool,
+/// 应用集合：MCP 服务器 / Skill 启用到哪些客户端（取代原先每应用一个字段的 McpApps / SkillApps）
+///
+/// - 只接纳注册表中具备 MCP 或 Skills 能力的应用，其余应用（OpenClaw、Claude Desktop）
+///   恒为未启用；新增应用只需在 [`APPS`] 中声明能力位，无需改这里，也无需数据库迁移
+///   （持久化在 `mcp_server_apps` / `skill_apps` 关联表中）。
+/// - 序列化为扁平对象 `{ "claude": true, "codex": false, ... }`，键为每个可接纳应用的
+///   规范标识，与旧结构的 JSON 形状一致（前端、config.json、深链接都依赖它）。
+/// - 反序列化读取旧的扁平键（也接受注册表别名），未知键忽略，缺失键视为未启用。
+///   值必须是布尔（与旧结构一致）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppSet {
+    /// 已启用的应用，按 [`APPS`] 顺序排列、无重复（因此派生的 `PartialEq` 与顺序无关）
+    apps: Vec<AppType>,
 }
 
-impl McpApps {
+impl AppSet {
+    /// 应用能否出现在集合中（具备 MCP 或 Skills 能力）
+    pub fn accepts(app: &AppType) -> bool {
+        let caps = crate::apps::registry::descriptor(app).caps;
+        caps.contains(crate::apps::AppCaps::MCP) || caps.contains(crate::apps::AppCaps::SKILLS)
+    }
+
+    /// 所有可接纳的应用（按 [`APPS`] 顺序）
+    pub fn supported_apps() -> impl Iterator<Item = &'static AppDescriptor> {
+        APPS.iter().filter(|d| Self::accepts(&d.app))
+    }
+
+    /// 由应用列表构建（不可接纳的应用被忽略）
+    pub fn from_apps<'a>(apps: impl IntoIterator<Item = &'a AppType>) -> Self {
+        let mut set = Self::default();
+        for app in apps {
+            set.set_enabled_for(app, true);
+        }
+        set
+    }
+
     /// 检查指定应用是否启用
     pub fn is_enabled_for(&self, app: &AppType) -> bool {
-        match app {
-            AppType::Claude => self.claude,
-            AppType::Codex => self.codex,
-            AppType::Gemini => self.gemini,
-            AppType::GrokBuild => self.grokbuild,
-            AppType::OpenCode => self.opencode,
-            AppType::OpenClaw => false, // OpenClaw doesn't support MCP
-            AppType::Hermes => self.hermes,
-            AppType::ClaudeDesktop => false,
-        }
+        self.apps.contains(app)
     }
 
-    /// 设置指定应用的启用状态
+    /// 设置指定应用的启用状态（不可接纳的应用被忽略）
     pub fn set_enabled_for(&mut self, app: &AppType, enabled: bool) {
-        match app {
-            AppType::Claude => self.claude = enabled,
-            AppType::Codex => self.codex = enabled,
-            AppType::Gemini => self.gemini = enabled,
-            AppType::GrokBuild => self.grokbuild = enabled,
-            AppType::OpenCode => self.opencode = enabled,
-            AppType::OpenClaw => {} // OpenClaw doesn't support MCP, ignore
-            AppType::Hermes => self.hermes = enabled,
-            AppType::ClaudeDesktop => {} // Claude Desktop 3P provider config doesn't support MCP here
+        if !enabled {
+            self.apps.retain(|a| a != app);
+            return;
         }
+        if !Self::accepts(app) || self.apps.contains(app) {
+            return;
+        }
+        self.apps.push(app.clone());
+        self.apps
+            .sort_by_key(|a| APPS.iter().position(|d| d.app == *a).unwrap_or(usize::MAX));
     }
 
-    /// 获取所有启用的应用列表
+    /// 获取所有启用的应用列表（按 [`APPS`] 顺序）
     pub fn enabled_apps(&self) -> Vec<AppType> {
-        crate::apps::registry::with_caps(crate::apps::AppCaps::MCP)
-            .map(|d| d.app.clone())
-            .filter(|app| self.is_enabled_for(app))
-            .collect()
+        self.apps.clone()
+    }
+
+    /// 遍历启用的应用（按 [`APPS`] 顺序）
+    pub fn iter(&self) -> impl Iterator<Item = &AppType> {
+        self.apps.iter()
     }
 
     /// 检查是否所有应用都未启用
     pub fn is_empty(&self) -> bool {
-        !self.claude
-            && !self.codex
-            && !self.gemini
-            && !self.grokbuild
-            && !self.opencode
-            && !self.hermes
-    }
-}
-
-/// Skill 应用启用状态（标记 Skill 应用到哪些客户端）
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-pub struct SkillApps {
-    #[serde(default)]
-    pub claude: bool,
-    #[serde(default)]
-    pub codex: bool,
-    #[serde(default)]
-    pub gemini: bool,
-    #[serde(default)]
-    pub grokbuild: bool,
-    #[serde(default)]
-    pub opencode: bool,
-    #[serde(default)]
-    pub hermes: bool,
-}
-
-impl SkillApps {
-    /// 检查指定应用是否启用
-    pub fn is_enabled_for(&self, app: &AppType) -> bool {
-        match app {
-            AppType::Claude => self.claude,
-            AppType::Codex => self.codex,
-            AppType::Gemini => self.gemini,
-            AppType::GrokBuild => self.grokbuild,
-            AppType::OpenCode => self.opencode,
-            AppType::Hermes => self.hermes,
-            AppType::OpenClaw => false, // OpenClaw doesn't support Skills
-            AppType::ClaudeDesktop => false,
-        }
+        self.apps.is_empty()
     }
 
-    /// 设置指定应用的启用状态
-    pub fn set_enabled_for(&mut self, app: &AppType, enabled: bool) {
-        match app {
-            AppType::Claude => self.claude = enabled,
-            AppType::Codex => self.codex = enabled,
-            AppType::Gemini => self.gemini = enabled,
-            AppType::GrokBuild => self.grokbuild = enabled,
-            AppType::OpenCode => self.opencode = enabled,
-            AppType::Hermes => self.hermes = enabled,
-            AppType::OpenClaw => {} // OpenClaw doesn't support Skills, ignore
-            AppType::ClaudeDesktop => {} // Claude Desktop 3P profiles don't use CC Switch skill sync
-        }
-    }
-
-    /// 获取所有启用的应用列表
-    pub fn enabled_apps(&self) -> Vec<AppType> {
-        crate::apps::registry::with_caps(crate::apps::AppCaps::SKILLS)
-            .map(|d| d.app.clone())
-            .filter(|app| self.is_enabled_for(app))
-            .collect()
-    }
-
-    /// 检查是否所有应用都未启用
-    pub fn is_empty(&self) -> bool {
-        !self.claude
-            && !self.codex
-            && !self.gemini
-            && !self.grokbuild
-            && !self.opencode
-            && !self.hermes
+    /// 两个集合的并集
+    pub fn union(&self, other: &Self) -> Self {
+        Self::from_apps(self.apps.iter().chain(other.apps.iter()))
     }
 
     /// 仅启用指定应用（其他应用设为禁用）
     pub fn only(app: &AppType) -> Self {
-        let mut apps = Self::default();
-        apps.set_enabled_for(app, true);
-        apps
+        Self::from_apps([app])
     }
 
     /// 从来源标签列表构建启用状态
@@ -152,6 +96,37 @@ impl SkillApps {
             }
         }
         apps
+    }
+}
+
+impl Serialize for AppSet {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let supported: Vec<&AppDescriptor> = Self::supported_apps().collect();
+        let mut map = serializer.serialize_map(Some(supported.len()))?;
+        for d in supported {
+            map.serialize_entry(d.slug, &self.is_enabled_for(&d.app))?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for AppSet {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = HashMap::<String, serde_json::Value>::deserialize(deserializer)?;
+        let mut set = Self::default();
+        for (key, value) in raw {
+            let Ok(app) = key.parse::<AppType>() else {
+                continue;
+            };
+            let enabled = bool::deserialize(value)
+                .map_err(|e| <D::Error as serde::de::Error>::custom(format!("apps.{key}: {e}")))?;
+            // 只收集为 true 的键：同一应用的规范标识与别名同时出现时结果与顺序无关
+            if enabled {
+                set.set_enabled_for(&app, true);
+            }
+        }
+        Ok(set)
     }
 }
 
@@ -181,7 +156,7 @@ pub struct InstalledSkill {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub readme_url: Option<String>,
     /// 应用启用状态
-    pub apps: SkillApps,
+    pub apps: AppSet,
     /// 安装时间（Unix 时间戳）
     pub installed_at: i64,
     /// 内容哈希（SHA-256，用于更新检测）
@@ -215,7 +190,7 @@ pub struct McpServer {
     pub id: String,
     pub name: String,
     pub server: serde_json::Value,
-    pub apps: McpApps,
+    pub apps: AppSet,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -327,7 +302,7 @@ pub struct PromptRoot {
     pub hermes: PromptConfig,
 }
 
-use crate::apps::{AppDescriptor, SyncMode, APPS};
+use crate::apps::{AppDescriptor, InputTokenSemantics, SyncMode, APPS};
 use crate::config::{copy_file, get_app_config_dir, get_app_config_path, write_json_file};
 use crate::error::AppError;
 use crate::prompt_files::prompt_file_path;
@@ -371,9 +346,45 @@ impl AppType {
         self.descriptor().sync_mode == SyncMode::Additive
     }
 
+    /// 该应用上游上报的 `input_tokens` 是否包含 cache 部分。
+    ///
+    /// 这是 ingest 计价、logger 落库语义、聚合 SQL 与历史回填共用的唯一来源。
+    /// 取值来自应用注册表 [`APPS`] 的 `input_token_semantics`（新增 AppType 时
+    /// 必须在注册表中表态，`every_variant_registered_exactly_once` 会校验）。
+    pub fn input_semantics(&self) -> InputSemantics {
+        match self.descriptor().input_token_semantics {
+            InputTokenSemantics::CacheInclusive => InputSemantics::CacheInclusive,
+            InputTokenSemantics::Fresh => InputSemantics::CacheExclusive,
+        }
+    }
+
     /// Return an iterator over all app types
     pub fn all() -> impl Iterator<Item = AppType> {
         APPS.iter().map(|d| d.app.clone())
+    }
+}
+
+/// `input_tokens` 与 cache token 的关系，见 [`AppType::input_semantics`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputSemantics {
+    /// cache-inclusive：input 包含 cache read/write（OpenAI Responses、Gemini 风格），
+    /// 计费前需要扣除 cache 部分。
+    CacheInclusive,
+    /// input 已经是 fresh input（Anthropic 风格），不能再次扣减。
+    CacheExclusive,
+}
+
+impl InputSemantics {
+    /// 按落库的 `app_type` 字符串取语义；无法识别的值按 [`InputSemantics::CacheExclusive`]
+    /// 处理，避免对未知来源的行误扣 cache。
+    pub fn for_app_type_str(app_type: &str) -> Self {
+        AppType::from_str(app_type)
+            .map(|app| app.input_semantics())
+            .unwrap_or(InputSemantics::CacheExclusive)
+    }
+
+    pub fn is_cache_inclusive(self) -> bool {
+        self == InputSemantics::CacheInclusive
     }
 }
 
@@ -395,54 +406,54 @@ impl FromStr for AppType {
 }
 
 /// 通用配置片段（按应用分治）
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+///
+/// 以应用规范标识（注册表 slug）为键；JSON 形状与旧版按字段定义的结构体一致
+/// （`{"claude": "...", "codex": "..."}`），键经注册表别名归一，未知键原样保留。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommonConfigSnippets {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub codex: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gemini: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub opencode: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub openclaw: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hermes: Option<String>,
+    snippets: std::collections::BTreeMap<String, String>,
 }
 
 impl CommonConfigSnippets {
     /// 获取指定应用的通用配置片段
     pub fn get(&self, app: &AppType) -> Option<&String> {
-        match app {
-            AppType::Claude => self.claude.as_ref(),
-            AppType::ClaudeDesktop => None,
-            AppType::Codex => self.codex.as_ref(),
-            AppType::Gemini => self.gemini.as_ref(),
-            AppType::GrokBuild => None,
-            AppType::OpenCode => self.opencode.as_ref(),
-            AppType::OpenClaw => self.openclaw.as_ref(),
-            AppType::Hermes => self.hermes.as_ref(),
-        }
+        self.snippets.get(app.as_str())
     }
 
     /// 设置指定应用的通用配置片段
     pub fn set(&mut self, app: &AppType, snippet: Option<String>) {
-        match app {
-            AppType::Claude => self.claude = snippet,
-            AppType::ClaudeDesktop => {}
-            AppType::Codex => self.codex = snippet,
-            AppType::Gemini => self.gemini = snippet,
-            AppType::GrokBuild => {}
-            AppType::OpenCode => self.opencode = snippet,
-            AppType::OpenClaw => self.openclaw = snippet,
-            AppType::Hermes => self.hermes = snippet,
+        match snippet {
+            Some(snippet) => self.snippets.insert(app.as_str().to_string(), snippet),
+            None => self.snippets.remove(app.as_str()),
+        };
+    }
+}
+
+impl Serialize for CommonConfigSnippets {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.snippets.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CommonConfigSnippets {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = std::collections::BTreeMap::<String, Option<String>>::deserialize(deserializer)?;
+        let mut snippets = std::collections::BTreeMap::new();
+        let mut from_alias = Vec::new();
+        for (key, snippet) in raw {
+            let Some(snippet) = snippet else { continue };
+            match crate::apps::registry::find_by_id(&key.trim().to_lowercase()) {
+                Some(d) if d.slug != key => from_alias.push((d.slug.to_string(), snippet)),
+                _ => {
+                    snippets.insert(key, snippet);
+                }
+            }
         }
+        // 规范键与别名同时出现时规范键优先
+        for (slug, snippet) in from_alias {
+            snippets.entry(slug).or_insert(snippet);
+        }
+        Ok(Self { snippets })
     }
 }
 
@@ -593,7 +604,9 @@ impl MultiAppConfig {
             log::info!(
                 "迁移通用配置：claude_common_config_snippet → common_config_snippets.claude"
             );
-            config.common_config_snippets.claude = Some(old_claude_snippet);
+            config
+                .common_config_snippets
+                .set(&AppType::Claude, Some(old_claude_snippet));
             updated = true;
         }
 
@@ -887,7 +900,7 @@ impl MultiAppConfig {
                         })
                         .unwrap_or_default();
 
-                    let mut apps = McpApps::default();
+                    let mut apps = AppSet::default();
                     apps.set_enabled_for(&app, enabled);
 
                     unified_servers.insert(
@@ -944,6 +957,80 @@ mod tests {
     use std::env;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn app_set_keeps_flat_json_shape_and_reads_old_keys() {
+        let apps = AppSet::from_apps(&[AppType::Codex, AppType::Claude]);
+        assert_eq!(
+            apps.enabled_apps(),
+            vec![AppType::Claude, AppType::Codex],
+            "registry order"
+        );
+        assert_eq!(
+            serde_json::to_value(&apps).expect("serialize"),
+            serde_json::json!({
+                "claude": true,
+                "codex": true,
+                "gemini": false,
+                "grokbuild": false,
+                "opencode": false,
+                "hermes": false
+            }),
+            "same keys as the old McpApps / SkillApps structs"
+        );
+
+        // 旧结构写出的 JSON：别名可用，未知键忽略，缺失键为 false
+        let parsed: AppSet = serde_json::from_value(serde_json::json!({
+            "claude": false,
+            "grok": true,
+            "hermes": true,
+            "ninth": true
+        }))
+        .expect("deserialize");
+        assert_eq!(
+            parsed,
+            AppSet::from_apps(&[AppType::GrokBuild, AppType::Hermes])
+        );
+        assert!(serde_json::from_value::<AppSet>(serde_json::json!({ "codex": "yes" })).is_err());
+    }
+
+    #[test]
+    fn app_set_ignores_apps_without_mcp_or_skills() {
+        let mut apps = AppSet::default();
+        apps.set_enabled_for(&AppType::OpenClaw, true);
+        apps.set_enabled_for(&AppType::ClaudeDesktop, true);
+        assert!(apps.is_empty());
+        apps.set_enabled_for(&AppType::Gemini, true);
+        apps.set_enabled_for(&AppType::Gemini, true);
+        assert_eq!(apps.enabled_apps(), vec![AppType::Gemini]);
+        apps.set_enabled_for(&AppType::Gemini, false);
+        assert!(apps.is_empty());
+    }
+
+    #[test]
+    fn common_config_snippets_keep_json_shape_and_map_aliases() {
+        let snippets: CommonConfigSnippets = serde_json::from_value(serde_json::json!({
+            "claude": "{\"a\":1}",
+            "codex": null,
+            "grok": "g = 1",
+            "ninth": "n"
+        }))
+        .expect("snippets");
+        assert_eq!(
+            snippets.get(&AppType::Claude).map(String::as_str),
+            Some("{\"a\":1}")
+        );
+        assert_eq!(snippets.get(&AppType::Codex), None);
+        assert_eq!(
+            snippets.get(&AppType::GrokBuild).map(String::as_str),
+            Some("g = 1"),
+            "alias keys are normalized through the registry"
+        );
+        assert_eq!(
+            serde_json::to_value(&snippets).unwrap(),
+            serde_json::json!({ "claude": "{\"a\":1}", "grokbuild": "g = 1", "ninth": "n" })
+        );
+    }
 
     #[test]
     fn app_type_parses_claude_desktop_aliases() {

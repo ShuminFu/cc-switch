@@ -6,30 +6,35 @@
 //! summing `input_tokens` across providers must route through
 //! [`fresh_input_sql`] to recover a consistent semantics.
 
-use crate::apps::InputTokenSemantics;
+use crate::app_config::{AppType, InputSemantics};
 
-/// Set of `app_type` values whose stored `input_tokens` already includes
-/// `cache_read_tokens`. Aggregations subtract cache reads from these rows
-/// to recover the fresh-input semantics used by Claude.
-///
-/// Why list providers explicitly: new providers default to the
-/// Claude-style "input excludes cache" semantics, which is safer if the
-/// caller forgets to update this list. The wrong direction (a new OpenAI-
-/// style provider not added here) shows up loudly as a too-low cache hit
-/// rate, which is easier to catch than the silent over-deduction that
-/// would happen with the opposite default.
-///
-/// The list is derived from [`crate::apps::APPS`] (`input_token_semantics`).
-fn cache_inclusive_app_types() -> impl Iterator<Item = &'static str> {
-    crate::apps::APPS
-        .iter()
-        .filter(|d| d.input_token_semantics == InputTokenSemantics::CacheInclusive)
-        .map(|d| d.slug)
+/// Quoted, comma-separated list of `app_type` values whose stored
+/// `input_tokens` already includes the cache portion, derived from
+/// [`AppType::input_semantics`] so the SQL CASE can never drift from the
+/// Rust-side cost paths.
+fn input_includes_cache_app_type_list() -> String {
+    AppType::all()
+        .filter(|app| app.input_semantics().is_cache_inclusive())
+        .map(|app| format!("'{}'", app.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(crate) const INPUT_TOKEN_SEMANTICS_LEGACY: i64 = 0;
 pub(crate) const INPUT_TOKEN_SEMANTICS_TOTAL: i64 = 1;
 pub(crate) const INPUT_TOKEN_SEMANTICS_FRESH: i64 = 2;
+
+/// `input_token_semantics` value to stamp on a newly written
+/// `proxy_request_logs` row for `app_type`, derived from
+/// [`AppType::input_semantics`]. Shared by the proxy logger and the
+/// session-log importers so new rows never fall back to LEGACY.
+pub(crate) fn input_token_semantics_for_app_type(app_type: &str) -> i64 {
+    if InputSemantics::for_app_type_str(app_type).is_cache_inclusive() {
+        INPUT_TOKEN_SEMANTICS_TOTAL
+    } else {
+        INPUT_TOKEN_SEMANTICS_FRESH
+    }
+}
 
 /// Build an SQL expression that returns the cache-normalized `input_tokens`
 /// for a single row in `proxy_request_logs` or `usage_daily_rollups`.
@@ -46,10 +51,7 @@ pub fn fresh_input_sql(alias: &str) -> String {
     } else {
         format!("{alias}.")
     };
-    let app_type_list = cache_inclusive_app_types()
-        .map(|t| format!("'{t}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let app_type_list = input_includes_cache_app_type_list();
     format!(
         "CASE \
               WHEN {prefix}input_token_semantics = {INPUT_TOKEN_SEMANTICS_FRESH} THEN {prefix}input_tokens \
@@ -85,6 +87,20 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn fresh_input_app_list_matches_app_type_input_semantics() {
+        let sql = fresh_input_sql("");
+        for app in AppType::all() {
+            let quoted = format!("'{}'", app.as_str());
+            assert_eq!(
+                sql.contains(&quoted),
+                app.input_semantics().is_cache_inclusive(),
+                "{} must be listed iff its input includes cache",
+                app.as_str()
+            );
+        }
     }
 
     #[test]
@@ -179,8 +195,10 @@ mod tests {
 
     #[test]
     fn cache_inclusive_apps_come_from_registry() {
-        let apps: Vec<&str> = cache_inclusive_app_types().collect();
-        assert_eq!(apps, vec!["codex", "gemini", "grokbuild"]);
+        assert_eq!(
+            input_includes_cache_app_type_list(),
+            "'codex', 'gemini', 'grokbuild'"
+        );
         assert!(fresh_input_sql("").contains("app_type IN ('codex', 'gemini', 'grokbuild')"));
     }
 

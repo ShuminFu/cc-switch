@@ -1115,6 +1115,17 @@
       "hint": "それでも保存しますか？保存後、このプロバイダーへの切り替えが失敗する可能性がありますが、後から補完できます。",
       "saveAnyway": "それでも保存"
     },
+    "liveDiff": {
+      "title": "設定ファイルの変更を確認",
+      "description": "保存すると、以下の変更がアプリの live 設定ファイルに書き込まれます。確認してから保存してください。",
+      "current": "現在",
+      "afterSave": "保存後",
+      "newFile": "新規ファイル",
+      "deletedFile": "削除されます",
+      "unchangedLines": "変更のない {{count}} 行",
+      "back": "編集に戻る",
+      "confirm": "保存"
+    },
     "unsavedChanges": {
       "title": "未保存の変更を破棄しますか？",
       "message": "このプロバイダーには保存されていない変更があります。今閉じると変更は失われます。",
@@ -1704,7 +1715,12 @@
     "modelsDevDefaultHint": "最新リリース順に {{shown}} 件を表示しています（全 {{total}} 件）。キーワード入力で全件検索できます",
     "cacheReadCostPerMillion": "キャッシュ読み取りコスト（100万トークンあたり、USD）",
     "cacheCreationCostPerMillion": "キャッシュ書き込みコスト（100万トークンあたり、USD）",
-    "unpriced": "価格未設定"
+    "unpriced": "価格未設定",
+    "unpricedOnly": "価格未設定のみ",
+    "exportUnpriced": "価格未設定を CSV 出力",
+    "exportUnpricedEmpty": "現在の範囲に価格未設定のリクエストはありません",
+    "exportUnpricedSuccess": "価格未設定のモデル {{count}} 件をエクスポートしました",
+    "exportUnpricedFailed": "価格未設定リクエストのエクスポートに失敗しました: {{detail}}"
   },
   "usageScript": {
     "title": "利用状況を設定",
@@ -1809,7 +1825,12 @@
     "retry": "更新を再試行",
     "openReleases": "リリースページを開く",
     "openConfigDir": "設定フォルダを開く",
-    "quit": "終了"
+    "quit": "終了",
+    "restoreTitle": "アップグレード前のバックアップを復元",
+    "restoreDescription": "以下は新しいバージョンがデータベースをアップグレードする前に作成されたバックアップで、このバージョンで開けます。復元すると現在のデータベースが置き換えられ（現在のデータベースはバックアップフォルダにコピーが保存されます）、アプリが再起動します。バックアップ以降の変更は含まれません。",
+    "backupInfo": "データベース v{{version}} · {{date}}",
+    "restoreBackup": "復元",
+    "restoreConfirm": "{{filename}} を復元しますか？現在のデータベースはバックアップフォルダにコピーが保存され、アプリが再起動します。"
   },
   "errors": {
     "usage_query_failed": "利用状況の取得に失敗しました",

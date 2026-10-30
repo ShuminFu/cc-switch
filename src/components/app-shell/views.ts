@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import type { AppId } from "@/lib/api";
-import { isAppId } from "@/entities/app/registry";
+import { resolveAppId } from "@/entities/app/registry";
 import { safeStorageGet } from "@/lib/storage";
 
 /** 主窗口中可切换的视图；"providers" 为首页（供应商列表） */
@@ -71,8 +71,8 @@ export const APP_STORAGE_KEY = "cc-switch-last-app";
 export const VIEW_STORAGE_KEY = "cc-switch-last-view";
 
 export const getInitialApp = (): AppId => {
-  const saved = safeStorageGet(APP_STORAGE_KEY);
-  return isAppId(saved) ? saved : "claude";
+  // 旧版本可能存过别名（如 claude_desktop），经注册表归一
+  return resolveAppId(safeStorageGet(APP_STORAGE_KEY)) ?? "claude";
 };
 
 export const getInitialView = (): View => {

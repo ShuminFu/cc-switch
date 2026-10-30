@@ -32,7 +32,7 @@
 
 use crate::config::{atomic_write, get_app_config_dir};
 use crate::error::AppError;
-use crate::settings::{effective_backup_retain_count, get_hermes_override_dir};
+use crate::settings::effective_backup_retain_count;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -51,7 +51,7 @@ use std::sync::{Mutex, OnceLock};
 ///   2. `HERMES_HOME` 环境变量(trim 后非空;按原样,不展开 `~`,与 Hermes `Path(val)` 一致)
 ///   3. 平台默认(Windows: `%LOCALAPPDATA%\hermes`,Mac/Linux: `~/.hermes`)
 pub fn get_hermes_dir() -> PathBuf {
-    if let Some(override_dir) = get_hermes_override_dir() {
+    if let Some(override_dir) = crate::settings::override_dir(&crate::app_config::AppType::Hermes) {
         return override_dir;
     }
 
@@ -357,6 +357,10 @@ fn replace_yaml_section(
 
 fn create_hermes_backup(source: &str) -> Result<PathBuf, AppError> {
     let backup_dir = get_app_config_dir().join("backups").join("hermes");
+    // 写入预览不落盘，也不该创建备份或清理旧备份
+    if crate::config::is_capturing_writes() {
+        return Ok(backup_dir);
+    }
     fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
 
     let base_id = format!("hermes_{}", Local::now().format("%Y%m%d_%H%M%S"));
@@ -447,7 +451,11 @@ fn write_yaml_section_to_config_locked(
         None
     };
 
-    if let Some(parent) = config_path.parent() {
+    // 写入预览只捕获内容，不建目录
+    if let Some(parent) = config_path
+        .parent()
+        .filter(|_| !crate::config::is_capturing_writes())
+    {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
@@ -2251,7 +2259,7 @@ user_profile_enabled: false
         with_test_home(|| {
             // Clear any settings override so resolution reaches the HERMES_HOME branch.
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
+            s.set_config_dir(&crate::app_config::AppType::Hermes, None);
             crate::settings::update_settings(s).unwrap();
 
             let old = std::env::var_os("HERMES_HOME");
@@ -2280,7 +2288,10 @@ user_profile_enabled: false
             let custom_path = custom.path().to_path_buf();
 
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = Some(custom_path.to_string_lossy().to_string());
+            s.set_config_dir(
+                &crate::app_config::AppType::Hermes,
+                Some(custom_path.to_string_lossy().to_string()),
+            );
             crate::settings::update_settings(s).unwrap();
 
             let old = std::env::var_os("HERMES_HOME");
@@ -2293,7 +2304,7 @@ user_profile_enabled: false
                 None => std::env::remove_var("HERMES_HOME"),
             }
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
+            s.set_config_dir(&crate::app_config::AppType::Hermes, None);
             crate::settings::update_settings(s).unwrap();
 
             assert_eq!(
@@ -2308,7 +2319,7 @@ user_profile_enabled: false
     fn blank_hermes_home_falls_through_to_platform_default() {
         with_test_home(|| {
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
+            s.set_config_dir(&crate::app_config::AppType::Hermes, None);
             crate::settings::update_settings(s).unwrap();
 
             let old = std::env::var_os("HERMES_HOME");
@@ -2333,7 +2344,7 @@ user_profile_enabled: false
     fn default_hermes_dir_without_override_is_platform_correct() {
         with_test_home(|| {
             let mut s = crate::settings::get_settings();
-            s.hermes_config_dir = None;
+            s.set_config_dir(&crate::app_config::AppType::Hermes, None);
             crate::settings::update_settings(s).unwrap();
 
             let old = std::env::var_os("HERMES_HOME");

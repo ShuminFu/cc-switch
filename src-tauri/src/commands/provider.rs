@@ -1,10 +1,11 @@
 use indexmap::IndexMap;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
 use crate::error::{AppError, IpcError};
 use crate::provider::{ClaudeDesktopMode, Provider};
+use crate::services::provider::LiveWritePreview;
 use crate::services::{
     EndpointLatency, ProviderService, ProviderSortUpdate, SpeedtestService, SwitchResult,
 };
@@ -63,6 +64,19 @@ pub fn update_provider(
         .map_err(IpcError::from)
 }
 
+/// 预览保存供应商时将写入 live 配置的内容（不写盘）
+#[tauri::command]
+pub fn preview_live_write(
+    state: State<'_, AppState>,
+    app: String,
+    provider: Provider,
+    original_id: Option<String>,
+) -> Result<LiveWritePreview, IpcError> {
+    let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
+    ProviderService::preview_live_write(state.inner(), app_type, original_id.as_deref(), provider)
+        .map_err(IpcError::from)
+}
+
 #[tauri::command]
 pub fn delete_provider(
     state: State<'_, AppState>,
@@ -104,14 +118,32 @@ pub fn switch_provider_test_hook(
     switch_provider_internal(state, app_type, id)
 }
 
+/// 在阻塞线程池上执行供应商切换。
+///
+/// `ProviderService::switch` 会 block_on 每个应用的切换锁并做文件 I/O；
+/// 若在主线程同步执行，并发的接管/热切换持锁时会卡住 UI。
+pub(crate) async fn run_switch_off_main<F>(switch: F) -> Result<SwitchResult, AppError>
+where
+    F: FnOnce() -> Result<SwitchResult, AppError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(switch)
+        .await
+        .map_err(|e| AppError::Message(format!("切换供应商任务失败: {e}")))?
+}
+
 #[tauri::command]
-pub fn switch_provider(
-    state: State<'_, AppState>,
+pub async fn switch_provider(
+    app_handle: tauri::AppHandle,
     app: String,
     id: String,
 ) -> Result<SwitchResult, IpcError> {
     let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
-    switch_provider_internal(&state, app_type, &id).map_err(IpcError::from)
+    run_switch_off_main(move || {
+        let state = app_handle.state::<AppState>();
+        switch_provider_internal(state.inner(), app_type, &id)
+    })
+    .await
+    .map_err(IpcError::from)
 }
 
 fn import_default_config_internal(state: &AppState, app_type: AppType) -> Result<bool, AppError> {

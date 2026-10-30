@@ -7,6 +7,9 @@
 //! test paths, the statement counter and the allocation counter are all
 //! per-thread, so concurrent tests in this binary do not disturb each other.
 
+// 测试夹具直接写文件即可，无需走 atomic_write（见 clippy.toml）
+#![allow(clippy::disallowed_methods)]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::path::PathBuf;

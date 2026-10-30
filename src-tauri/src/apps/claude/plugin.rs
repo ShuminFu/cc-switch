@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use crate::config::atomic_write;
 use crate::error::AppError;
 
 const CLAUDE_DIR: &str = ".claude";
@@ -8,7 +9,7 @@ const CLAUDE_CONFIG_FILE: &str = "config.json";
 
 fn claude_dir() -> Result<PathBuf, AppError> {
     // 优先使用设置中的覆盖目录
-    if let Some(dir) = crate::settings::get_claude_override_dir() {
+    if let Some(dir) = crate::settings::override_dir(&crate::app_config::AppType::Claude) {
         return Ok(dir);
     }
     let home = dirs::home_dir().ok_or_else(|| AppError::Config("无法获取用户主目录".into()))?;
@@ -69,7 +70,7 @@ pub fn write_claude_config() -> Result<bool, AppError> {
     if changed || !path.exists() {
         let serialized = serde_json::to_string_pretty(&obj)
             .map_err(|e| AppError::JsonSerialize { source: e })?;
-        fs::write(&path, format!("{serialized}\n")).map_err(|e| AppError::io(&path, e))?;
+        atomic_write(&path, format!("{serialized}\n").as_bytes())?;
         Ok(true)
     } else {
         Ok(false)
@@ -103,6 +104,6 @@ pub fn clear_claude_config() -> Result<bool, AppError> {
 
     let serialized =
         serde_json::to_string_pretty(&value).map_err(|e| AppError::JsonSerialize { source: e })?;
-    fs::write(&path, format!("{serialized}\n")).map_err(|e| AppError::io(&path, e))?;
+    atomic_write(&path, format!("{serialized}\n").as_bytes())?;
     Ok(true)
 }

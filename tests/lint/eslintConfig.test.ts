@@ -10,7 +10,7 @@ import { ALL_APP_IDS } from "@/entities/app/registry";
 const ROOT = path.resolve(__dirname, "../..");
 
 // 基线中 app-id 字面量比较的总数上限：只能下降，修掉后请同步调低。
-const APP_LITERAL_BUDGET = 173;
+const APP_LITERAL_BUDGET = 142;
 // 现有直接 import invoke 的文件；不允许新增。
 const RAW_INVOKE_BASELINE = [
   "src/components/DatabaseUpgrade.tsx",
@@ -238,6 +238,26 @@ describe("eslint config", { timeout: 30_000 }, () => {
     );
     expect(total).toBeLessThanOrEqual(APP_LITERAL_BUDGET);
     expect(APP_LITERAL_BUDGET).toBeLessThanOrEqual(200);
+  });
+
+  it("lints files cleaned up by CCS-211 without suppressions", async () => {
+    const files = [
+      "src/App.tsx",
+      "src/components/DeepLinkImportDialog.tsx",
+      "src/components/providers/ProviderActions.tsx",
+    ];
+    const suppressions = readSuppressions();
+    const eslint = new ESLint({ cwd: ROOT });
+    const results = await eslint.lintFiles(
+      files.map((file) => path.join(ROOT, file)),
+    );
+    for (const [i, file] of files.entries()) {
+      expect(suppressions[file], `${file} is in the baseline`).toBeUndefined();
+      expect(
+        results[i].messages.map((m) => `${m.line}: ${m.ruleId}`),
+        file,
+      ).toEqual([]);
+    }
   });
 
   it("never adds files to the raw invoke baseline", () => {

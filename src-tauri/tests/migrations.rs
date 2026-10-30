@@ -6,6 +6,7 @@
 //! - `user_version == SCHEMA_VERSION`
 //! - 归一化后的 sqlite_master / table_info 与全新数据库一致
 //! - 用户数据行被保留
+//! - `schema_migrations` 审计表恰好记录本次执行的每个迁移步骤（CCS-145）
 //! - 再次启动迁移是 no-op（数据与 schema 不变，不再创建迁移前备份）
 //! - `SCHEMA_VERSION + 1` 的数据库会被当前应用拒绝
 //!
@@ -16,9 +17,11 @@ mod support;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use cc_switch_lib::{paths, Database, MultiAppConfig, SCHEMA_VERSION};
+use cc_switch_lib::{
+    paths, update_settings, AppSettings, Database, MultiAppConfig, SCHEMA_VERSION,
+};
 use rusqlite::types::Value;
-use rusqlite::Connection;
+use rusqlite::{Connection, DatabaseName};
 use support::TestEnv;
 
 /// 至少覆盖的不同起始版本数（验收标准）
@@ -52,6 +55,7 @@ const USER_DATA_TABLES: &[&str] = &[
     "providers",
     "provider_endpoints",
     "mcp_servers",
+    "mcp_server_apps",
     "prompts",
     "skill_repos",
     "settings",
@@ -62,7 +66,9 @@ const USER_DATA_TABLES: &[&str] = &[
     "session_log_sync",
     "profiles",
     "skills",
+    "skill_apps",
     "proxy_config",
+    "schema_migrations",
 ];
 
 fn fixtures_dir() -> PathBuf {
@@ -92,6 +98,45 @@ fn db_path() -> PathBuf {
 fn backup_count() -> usize {
     let dir = paths::current().app_config_dir().join("backups");
     std::fs::read_dir(dir).map(|it| it.count()).unwrap_or(0)
+}
+
+/// backups 目录中以 `suffix` 结尾的文件（按文件名排序）
+fn backup_files(suffix: &str) -> Vec<PathBuf> {
+    let dir = paths::current().app_config_dir().join("backups");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|it| {
+            it.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.to_string_lossy().ends_with(suffix))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+/// 唯一的迁移前数据库备份（auto-vacuum 重建前的备份是迁移后的 SCHEMA_VERSION，据此区分）
+fn premigration_db_backup(label: &str) -> PathBuf {
+    let backups: Vec<PathBuf> = backup_files(".db")
+        .into_iter()
+        .filter(|p| user_version(&open(p)) < SCHEMA_VERSION)
+        .collect();
+    assert_eq!(
+        backups.len(),
+        1,
+        "{label}: expected exactly one pre-migration backup, found {backups:?}"
+    );
+    backups.into_iter().next().expect("one backup")
+}
+
+/// 迁移前备份必须与升级前的数据库完全一致（版本、schema、全部数据行）
+fn assert_backup_matches(label: &str, pre: &(i32, SchemaShape, BTreeMap<String, Vec<Row>>)) {
+    let backup = full_snapshot(&open(&premigration_db_backup(label)));
+    assert_eq!(backup.0, pre.0, "{label}: backup user_version");
+    assert_schema_eq(&format!("{label} (backup)"), &backup.1, &pre.1);
+    assert_eq!(
+        backup.2, pre.2,
+        "{label}: backup data differs from pre-upgrade state"
+    );
 }
 
 fn open(path: &Path) -> Connection {
@@ -466,6 +511,17 @@ fn fresh_schema() -> SchemaShape {
     schema_shape(&conn)
 }
 
+/// `schema_migrations` 审计表中版本大于 `version` 的记录（按执行顺序）
+fn applied_migrations_after(conn: &Connection, version: i32) -> Vec<i32> {
+    let mut stmt = conn
+        .prepare("SELECT version FROM schema_migrations WHERE version > ?1 ORDER BY id")
+        .expect("prepare schema_migrations query");
+    stmt.query_map([version], |row| row.get(0))
+        .expect("query schema_migrations")
+        .collect::<Result<_, _>>()
+        .expect("read schema_migrations")
+}
+
 /// 在当前测试环境中再次启动，断言没有任何变化，也不会再做迁移前备份
 fn assert_second_init_is_noop(label: &str) {
     let before = full_snapshot(&open(&db_path()));
@@ -518,16 +574,28 @@ fn every_released_schema_migrates_to_current() {
         let path = db_path();
         std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
 
-        let before = Connection::open_in_memory().expect("open memory db");
-        load_fixture(&before, &sql_path);
+        load_fixture(&open(&path), &sql_path);
+        // 从同一份已加载的文件复制对照库，而不是再加载一次 fixture：两次加载跨秒时
+        // 刷新后的时间戳不同，会让「数据保留」断言偶发失败
+        let mut before = Connection::open_in_memory().expect("open memory db");
+        before
+            .restore(
+                DatabaseName::Main,
+                &path,
+                None::<fn(rusqlite::backup::Progress)>,
+            )
+            .expect("copy fixture db into memory");
         assert_eq!(
             user_version(&before),
             version,
             "{label}: fixture user_version"
         );
-        load_fixture(&open(&path), &sql_path);
+        let pre = full_snapshot(&open(&path));
 
         drop(Database::init().unwrap_or_else(|e| panic!("{label}: init failed: {e}")));
+        if version < SCHEMA_VERSION {
+            assert_backup_matches(&label, &pre);
+        }
 
         let after = open(&path);
         assert_eq!(
@@ -537,10 +605,158 @@ fn every_released_schema_migrates_to_current() {
         );
         assert_schema_eq(&label, &schema_shape(&after), &expected);
         assert_rows_preserved(&label, &before, &after);
+        assert_eq!(
+            applied_migrations_after(&after, version),
+            ((version + 1)..=SCHEMA_VERSION).collect::<Vec<_>>(),
+            "{label}: schema_migrations must record each applied step once"
+        );
         drop(after);
 
         assert_second_init_is_noop(&label);
     }
+}
+
+/// v0（尚未设置 user_version 的数据库）同样要在任何 DDL 之前做迁移前备份
+#[test]
+fn v0_database_gets_premigration_backup() {
+    let _env = TestEnv::new();
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    {
+        let conn = open(&path);
+        load_fixture(&conn, &fixtures_dir().join("db/v1.sql"));
+        conn.execute_batch("PRAGMA user_version = 0;")
+            .expect("reset user_version");
+    }
+    let pre = full_snapshot(&open(&path));
+    assert_eq!(pre.0, 0);
+
+    drop(Database::init().expect("init v0 database"));
+    assert_eq!(user_version(&open(&path)), SCHEMA_VERSION);
+    assert_backup_matches("v0", &pre);
+    assert_second_init_is_noop("v0");
+}
+
+/// WAL 模式下尚未 checkpoint 的写入只存在于 -wal 文件中：直接复制主库文件会丢失它们，
+/// 迁移前备份（Online Backup API）必须包含这些写入
+#[test]
+fn premigration_backup_includes_uncheckpointed_wal_writes() {
+    let _env = TestEnv::new();
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    {
+        let conn = open(&path);
+        load_fixture(&conn, &fixtures_dir().join("db/v13.sql"));
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode = WAL;", [], |row| row.get(0))
+            .expect("enable WAL");
+        assert_eq!(mode, "wal");
+    }
+
+    // 保持连接打开，关闭自动 checkpoint，让写入停留在 WAL 中
+    let writer = open(&path);
+    writer
+        .execute_batch("PRAGMA wal_autocheckpoint = 0;")
+        .expect("disable autocheckpoint");
+    writer
+        .execute(
+            "INSERT INTO settings (key, value) VALUES ('wal_marker', 'uncheckpointed')",
+            [],
+        )
+        .expect("write marker");
+    let wal_path = PathBuf::from(format!("{}-wal", path.display()));
+    assert!(
+        std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0) > 0,
+        "marker write must still be in the WAL"
+    );
+
+    // 对照：只复制主库文件拿不到 WAL 中的写入
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let copied = scratch.path().join("copy.db");
+    std::fs::copy(&path, &copied).expect("copy main db file");
+    let marker_in = |conn: &Connection| -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'wal_marker' AND value = 'uncheckpointed'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("query marker")
+            > 0
+    };
+    assert!(
+        !marker_in(&open(&copied)),
+        "a plain file copy unexpectedly saw the WAL write"
+    );
+
+    drop(Database::init().expect("init WAL database"));
+    let backup = open(&premigration_db_backup("wal"));
+    assert_eq!(user_version(&backup), 13);
+    assert!(
+        marker_in(&backup),
+        "pre-migration backup is missing the uncheckpointed WAL write"
+    );
+    drop(writer);
+}
+
+/// 备份保留数为最小值 1 时，同一次启动中 auto-vacuum 重建不得再备份而把迁移前快照清理掉
+#[test]
+fn premigration_backup_survives_minimum_retention() {
+    let _env = TestEnv::new();
+    update_settings(AppSettings {
+        backup_retain_count: Some(1),
+        ..AppSettings::default()
+    })
+    .expect("set backup retention to 1");
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    {
+        let conn = open(&path);
+        load_fixture(&conn, &fixtures_dir().join("db/v1.sql"));
+        let mode: i64 = conn
+            .query_row("PRAGMA auto_vacuum;", [], |row| row.get(0))
+            .expect("read auto_vacuum");
+        assert_ne!(mode, 2, "fixture must need an auto-vacuum rebuild");
+    }
+    let pre = full_snapshot(&open(&path));
+
+    drop(Database::init().expect("init v1 database"));
+    assert_eq!(user_version(&open(&path)), SCHEMA_VERSION);
+    assert_backup_matches("retain=1", &pre);
+}
+
+/// 迁移失败时，启动错误信息中必须包含迁移前备份 ID，且该备份文件存在
+#[test]
+fn failed_migration_error_names_the_backup_id() {
+    let _env = TestEnv::new();
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    // providers 是视图而非表：v0 → v1 的 ALTER TABLE ADD COLUMN 必然失败
+    open(&path)
+        .execute_batch("CREATE VIEW providers AS SELECT 1 AS id; PRAGMA user_version = 0;")
+        .expect("create broken v0 database");
+
+    let err = match Database::init() {
+        Ok(_) => panic!("migration of a broken v0 database must fail"),
+        Err(e) => e.to_string(),
+    };
+    let backup = premigration_db_backup("broken v0");
+    let backup_id = backup
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .expect("backup id")
+        .to_string();
+    assert!(
+        err.contains(&backup_id),
+        "startup error must name the backup id {backup_id}: {err}"
+    );
+    let view: String = open(&backup)
+        .query_row(
+            "SELECT type FROM sqlite_master WHERE name = 'providers'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("backup keeps pre-upgrade schema");
+    assert_eq!(view, "view");
 }
 
 #[test]
@@ -570,11 +786,111 @@ fn newer_schema_version_is_rejected() {
     );
 }
 
+/// 从 v17 升级（CCS-158）：改过的内置定价与自定义定价标为用户行，未改过的内置行
+/// （含仍等于旧价的行）跟随目录；settings 中 P1 的删除标记变成墓碑，重启后保持删除。
+#[test]
+fn pricing_provenance_survives_upgrade_from_v17() {
+    let _env = TestEnv::new();
+    let settings: AppSettings = serde_json::from_value(serde_json::json!({
+        "localMigrations": { "deletedBuiltinModelPricing": ["claude-sonnet-5"] }
+    }))
+    .expect("settings with a P1 pricing deletion");
+    update_settings(settings).expect("store P1 pricing deletion");
+
+    let path = db_path();
+    std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+    {
+        let conn = open(&path);
+        load_fixture(&conn, &fixtures_dir().join("db/v17.sql"));
+        conn.execute_batch(
+            "DELETE FROM model_pricing;
+             INSERT INTO model_pricing VALUES
+                ('claude-opus-4-7', 'Claude Opus 4.7', '5', '25', '0.50', '6.25'),
+                ('gpt-5.6-sol', 'GPT-5.6 Sol', '5', '30', '0.50', '0'),
+                ('claude-opus-4-8', 'Claude Opus 4.8', '99', '25', '0.50', '6.25'),
+                ('claude-opus-4-6-20260206', 'My Opus', '5', '25', '0.50', '6.25'),
+                ('my-custom-model', 'Custom', '1', '2', '0', '0');",
+        )
+        .expect("seed v17 pricing rows");
+    }
+
+    type PricingRow = (String, i64, String, String);
+    let pricing = |id: &str| -> Option<PricingRow> {
+        open(&db_path())
+            .query_row(
+                "SELECT source, deleted, input_cost_per_million, cache_creation_cost_per_million
+                 FROM model_pricing WHERE model_id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .ok()
+    };
+    let row = |source: &str, deleted: i64, input: &str, cache_creation: &str| {
+        Some((
+            source.to_string(),
+            deleted,
+            input.to_string(),
+            cache_creation.to_string(),
+        ))
+    };
+
+    for label in ["upgrade", "restart"] {
+        drop(Database::init().unwrap_or_else(|e| panic!("{label}: init failed: {e}")));
+        assert_eq!(user_version(&open(&path)), SCHEMA_VERSION);
+        assert_eq!(
+            pricing("claude-opus-4-7"),
+            row("builtin", 0, "5", "6.25"),
+            "{label}: untouched built-in"
+        );
+        assert_eq!(
+            pricing("gpt-5.6-sol"),
+            row("builtin", 0, "5", "6.25"),
+            "{label}: a row at a superseded built-in price is upgraded"
+        );
+        assert_eq!(
+            pricing("claude-opus-4-8"),
+            row("user", 0, "99", "6.25"),
+            "{label}: an edited built-in is user-owned and kept"
+        );
+        assert_eq!(
+            pricing("my-custom-model"),
+            row("user", 0, "1", "0"),
+            "{label}: custom pricing is user-owned"
+        );
+        let renamed: (String, String) = open(&path)
+            .query_row(
+                "SELECT source, display_name FROM model_pricing
+                 WHERE model_id = 'claude-opus-4-6-20260206'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("renamed built-in row");
+        assert_eq!(
+            renamed,
+            ("user".to_string(), "My Opus".to_string()),
+            "{label}: a built-in renamed at the current price keeps its name"
+        );
+        let deleted = pricing("claude-sonnet-5").expect("tombstone row");
+        assert_eq!(
+            (deleted.0.as_str(), deleted.1),
+            ("user", 1),
+            "{label}: the P1 deletion becomes a tombstone"
+        );
+        // 目录里的新模型照常追加
+        assert_eq!(
+            pricing("claude-haiku-4-5-20251001").map(|r| r.0),
+            Some("builtin".to_string()),
+            "{label}: new catalog rows are seeded"
+        );
+    }
+    assert_second_init_is_noop("pricing provenance");
+}
+
 // ---------------------------------------------------------------------------
 // 旧版 config.json → SQLite
 // ---------------------------------------------------------------------------
 
-/// 模拟应用启动：config.json 存在而数据库不存在时，先加载 JSON，再 init + migrate_from_json
+/// 模拟应用启动：config.json 存在而数据库不存在时，先备份 config.json 并加载 JSON，再 init + migrate_from_json
 fn migrate_legacy_json(name: &str) -> Connection {
     let src = fixtures_dir().join("legacy").join(name);
     let dir = paths::current().app_config_dir();
@@ -583,11 +899,27 @@ fn migrate_legacy_json(name: &str) -> Connection {
         .unwrap_or_else(|e| panic!("copy {}: {e}", src.display()));
     assert!(!db_path().exists());
 
+    let backup_id = Database::backup_legacy_config_json()
+        .unwrap_or_else(|e| panic!("{name}: config.json backup failed: {e}"))
+        .expect("config.json exists, a backup id is expected");
     let config = MultiAppConfig::load().unwrap_or_else(|e| panic!("{name}: load failed: {e}"));
     let db = Database::init().expect("init database");
     db.migrate_from_json(&config)
         .unwrap_or_else(|e| panic!("{name}: migrate_from_json failed: {e}"));
     drop(db);
+
+    // JSON → SQLite 升级前，旧版 config.json 被原样备份
+    let json_backups = backup_files(".config.json");
+    assert_eq!(
+        json_backups,
+        vec![dir.join("backups").join(format!("{backup_id}.config.json"))],
+        "{name}: expected exactly the config.json backup {backup_id}"
+    );
+    assert_eq!(
+        std::fs::read(&json_backups[0]).expect("read config.json backup"),
+        std::fs::read(&src).expect("read fixture"),
+        "{name}: config.json backup differs from the pre-upgrade file"
+    );
 
     let conn = open(&db_path());
     assert_eq!(user_version(&conn), SCHEMA_VERSION, "{name}: user_version");
@@ -748,4 +1080,307 @@ fn legacy_config_json_v36_per_app_mcp_migrates() {
     drop(conn);
 
     assert_second_init_is_noop(name);
+}
+
+// ---------------------------------------------------------------------------
+// MCP / Skill 应用启用关联表（CCS-156）
+// ---------------------------------------------------------------------------
+
+mod dao {
+    use super::*;
+    use cc_switch_lib::{AppSet, AppType, InstalledSkill, McpServer};
+
+    /// v17 之前每应用一列的旧启用列 `enabled_<slug>`
+    const LEGACY_FLAG_APPS: &[&str] = &[
+        "claude",
+        "codex",
+        "gemini",
+        "grokbuild",
+        "opencode",
+        "hermes",
+    ];
+
+    /// v16 DAO 读取 MCP 启用状态的原始查询（较旧构建读取新 dump 时用的就是它）
+    const V16_MCP_SELECT: &str = "SELECT id, enabled_claude, enabled_codex, enabled_gemini, \
+        enabled_grokbuild, enabled_opencode, enabled_hermes FROM mcp_servers ORDER BY id";
+    /// v16 DAO 读取 Skill 启用状态的原始查询
+    const V16_SKILL_SELECT: &str = "SELECT id, enabled_claude, enabled_codex, enabled_gemini, \
+        enabled_grokbuild, enabled_opencode, enabled_hermes FROM skills ORDER BY id";
+
+    type Flags = BTreeMap<String, BTreeSet<String>>;
+
+    fn slugs(apps: &AppSet) -> BTreeSet<String> {
+        apps.iter().map(|app| app.as_str().to_string()).collect()
+    }
+
+    /// 按旧的 `enabled_<slug>` 列读取每行启用的应用（只看表中存在的列）
+    fn legacy_flags(conn: &Connection, table: &str) -> Flags {
+        if !table_exists(conn, table) {
+            return Flags::new();
+        }
+        let columns: BTreeSet<String> = {
+            let mut stmt = conn
+                .prepare(&format!("PRAGMA table_info(\"{table}\")"))
+                .expect("table_info");
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .expect("query table_info")
+                .collect::<Result<_, _>>()
+                .expect("read table_info")
+        };
+        if !columns.contains("id") {
+            return Flags::new();
+        }
+        let mut flags = Flags::new();
+        let ids: Vec<String> = query_strings(conn, &format!("SELECT id FROM \"{table}\""));
+        for id in ids {
+            let mut enabled = BTreeSet::new();
+            for slug in LEGACY_FLAG_APPS {
+                let column = format!("enabled_{slug}");
+                if !columns.contains(&column) {
+                    continue;
+                }
+                let on: bool = conn
+                    .query_row(
+                        &format!("SELECT \"{column}\" FROM \"{table}\" WHERE id = ?1"),
+                        [&id],
+                        |row| row.get(0),
+                    )
+                    .expect("read legacy flag");
+                if on {
+                    enabled.insert(slug.to_string());
+                }
+            }
+            flags.insert(id, enabled);
+        }
+        flags
+    }
+
+    fn dao_flags(db: &Database) -> (Flags, Flags) {
+        let mcp = db
+            .get_all_mcp_servers()
+            .expect("read mcp servers")
+            .into_iter()
+            .map(|(id, server)| (id, slugs(&server.apps)))
+            .collect();
+        let skills = db
+            .get_all_installed_skills()
+            .expect("read skills")
+            .into_iter()
+            .map(|(id, skill)| (id, slugs(&skill.apps)))
+            .collect();
+        (mcp, skills)
+    }
+
+    /// 用 v16 DAO 的原始查询读取（不依赖关联表）
+    fn v16_reader_flags(conn: &Connection, sql: &str) -> Flags {
+        let mut stmt = conn.prepare(sql).expect("prepare v16 select");
+        stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let mut enabled = BTreeSet::new();
+            for (i, slug) in LEGACY_FLAG_APPS.iter().enumerate() {
+                if row.get::<_, bool>(i + 1)? {
+                    enabled.insert(slug.to_string());
+                }
+            }
+            Ok((id, enabled))
+        })
+        .expect("query v16 select")
+        .collect::<Result<_, _>>()
+        .expect("read v16 select")
+    }
+
+    fn server(id: &str, apps: &[AppType]) -> McpServer {
+        McpServer {
+            id: id.to_string(),
+            name: id.to_string(),
+            server: serde_json::json!({ "type": "stdio", "command": "echo" }),
+            apps: AppSet::from_apps(apps),
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        }
+    }
+
+    fn skill(id: &str, apps: &[AppType]) -> InstalledSkill {
+        InstalledSkill {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: None,
+            directory: id.to_string(),
+            repo_owner: None,
+            repo_name: None,
+            repo_branch: None,
+            readme_url: None,
+            apps: AppSet::from_apps(apps),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        }
+    }
+
+    /// 每个旧版本 fixture 升级后，DAO 读到的应用启用状态与 fixture 旧列一致（从旧列回填）
+    #[test]
+    fn every_fixture_keeps_mcp_and_skill_app_flags() {
+        for (version, sql_path) in db_fixtures() {
+            let label = format!("v{version} fixture");
+            let _env = TestEnv::new();
+            let path = db_path();
+            std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+            load_fixture(&open(&path), &sql_path);
+            let before = open(&path);
+            let expected_mcp = legacy_flags(&before, "mcp_servers");
+            let expected_skills = legacy_flags(&before, "skills");
+            drop(before);
+
+            let db = Database::init().unwrap_or_else(|e| panic!("{label}: init failed: {e}"));
+            let (mcp, skills) = dao_flags(&db);
+            assert_eq!(mcp, expected_mcp, "{label}: MCP app flags");
+            assert_eq!(skills, expected_skills, "{label}: skill app flags");
+            if version >= 3 {
+                assert!(
+                    mcp.values().chain(skills.values()).any(|s| !s.is_empty()),
+                    "{label}: fixture should have at least one enabled flag"
+                );
+            }
+        }
+    }
+
+    /// 较旧构建读取新构建的 dump：旧列被双写，v16 的原始查询读到的启用状态与 DAO 一致；
+    /// 由 v16 fixture 升级来的库导入这份 dump 后也保留启用状态
+    #[test]
+    fn older_readers_of_a_new_dump_keep_app_flags() {
+        let _env = TestEnv::new();
+        let db = Database::init().expect("init fresh database");
+        db.save_mcp_server(&server(
+            "m1",
+            &[AppType::Claude, AppType::Gemini, AppType::Hermes],
+        ))
+        .expect("save m1");
+        db.save_mcp_server(&server("m2", &[])).expect("save m2");
+        db.save_skill(&skill("s1", &[AppType::Codex, AppType::OpenCode]))
+            .expect("save s1");
+        db.update_skill_apps(
+            "s1",
+            &AppSet::from_apps(&[AppType::GrokBuild, AppType::OpenCode]),
+        )
+        .expect("update s1 apps");
+        let expected = dao_flags(&db);
+        let dump = db.export_sql_string().expect("export dump");
+        drop(db);
+
+        let raw = Connection::open_in_memory().expect("open memory db");
+        raw.execute_batch(&dump).expect("load dump");
+        assert_eq!(
+            v16_reader_flags(&raw, V16_MCP_SELECT),
+            expected.0,
+            "v16 MCP reader"
+        );
+        assert_eq!(
+            v16_reader_flags(&raw, V16_SKILL_SELECT),
+            expected.1,
+            "v16 skill reader"
+        );
+
+        let _env = TestEnv::new();
+        let path = db_path();
+        std::fs::create_dir_all(path.parent().expect("db dir")).expect("create db dir");
+        load_fixture(&open(&path), &fixtures_dir().join("db/v16.sql"));
+        let db = Database::init().expect("migrate v16 fixture");
+        db.import_sql_string(&dump).expect("import new dump");
+        assert_eq!(dao_flags(&db), expected, "after importing the new dump");
+    }
+
+    /// 较旧构建上传的 dump（只有旧列，没有关联表）被新构建导入时，启用状态从旧列回填
+    #[test]
+    fn new_build_importing_an_older_dump_keeps_app_flags() {
+        let fixture_path = fixtures_dir().join("db/v16.sql");
+        let fixture = std::fs::read_to_string(&fixture_path).expect("read v16");
+        let raw = Connection::open_in_memory().expect("open memory db");
+        load_fixture(&raw, &fixture_path);
+        let expected = (
+            legacy_flags(&raw, "mcp_servers"),
+            legacy_flags(&raw, "skills"),
+        );
+        assert!(!expected.0.is_empty(), "v16 fixture has MCP servers");
+
+        let _env = TestEnv::new();
+        let db = Database::init().expect("init fresh database");
+        // 改成 CC Switch 导出的形状：同样的头部、加载期间关闭外键检查，
+        // 且不含 sqlite_* 内部表（dump_sql 会跳过它们，导入也不允许写入）
+        let body: String = fixture
+            .lines()
+            .filter(|line| !line.contains("\"sqlite_sequence\""))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        db.import_sql_string(&format!(
+            "-- CC Switch SQLite 导出\nPRAGMA foreign_keys=OFF;\n{body}"
+        ))
+        .expect("import v16 dump");
+        assert_eq!(dao_flags(&db), expected);
+    }
+
+    /// 新增第 9 个应用不需要 Schema 迁移：关联表与 proxy_config 都接受任意 app_type，
+    /// 本构建保存时保留它不认识的应用的行，导出 / 导入也原样带上
+    #[test]
+    fn ninth_app_needs_no_migration() {
+        let _env = TestEnv::new();
+        let db = Database::init().expect("init fresh database");
+        db.save_mcp_server(&server("m1", &[AppType::Claude]))
+            .expect("save m1");
+        db.save_skill(&skill("s1", &[AppType::Claude]))
+            .expect("save s1");
+        let schema_before = schema_shape(&open(&db_path()));
+
+        let conn = open(&db_path());
+        conn.execute_batch(
+            "INSERT INTO mcp_server_apps (server_id, app_type) VALUES ('m1', 'ninth');
+             INSERT INTO skill_apps (skill_id, app_type) VALUES ('s1', 'ninth');
+             INSERT INTO proxy_config (app_type) VALUES ('ninth');",
+        )
+        .expect("a new app_type needs no DDL");
+        drop(conn);
+
+        // 本构建不认识 ninth：读取忽略，保存时保留
+        let servers = db.get_all_mcp_servers().expect("read servers");
+        assert_eq!(
+            slugs(&servers["m1"].apps),
+            BTreeSet::from(["claude".to_string()])
+        );
+        db.save_mcp_server(&server("m1", &[AppType::Codex]))
+            .expect("save m1 again");
+        db.update_skill_apps("s1", &AppSet::default())
+            .expect("update s1 apps");
+
+        let dump = db.export_sql_string().expect("export dump");
+        let _env2 = TestEnv::new();
+        let imported = Database::init().expect("init second database");
+        imported.import_sql_string(&dump).expect("import dump");
+        drop(imported);
+
+        let conn = open(&db_path());
+        assert_eq!(
+            query_strings(
+                &conn,
+                "SELECT server_id || ':' || app_type FROM mcp_server_apps ORDER BY 1"
+            ),
+            ["m1:codex", "m1:ninth"]
+        );
+        assert_eq!(
+            query_strings(
+                &conn,
+                "SELECT skill_id || ':' || app_type FROM skill_apps ORDER BY 1"
+            ),
+            ["s1:ninth"]
+        );
+        assert_eq!(
+            query_strings(
+                &conn,
+                "SELECT app_type FROM proxy_config WHERE app_type = 'ninth'"
+            ),
+            ["ninth"]
+        );
+        assert_eq!(user_version(&conn), SCHEMA_VERSION);
+        assert_schema_eq("ninth app", &schema_shape(&conn), &schema_before);
+    }
 }

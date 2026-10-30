@@ -156,7 +156,7 @@ const CODEX_RESERVED_MODEL_PROVIDER_IDS: &[&str] = &[
 
 /// 获取 Codex 配置目录路径
 pub fn get_codex_config_dir() -> PathBuf {
-    if let Some(custom) = crate::settings::get_codex_override_dir() {
+    if let Some(custom) = crate::settings::override_dir(&crate::app_config::AppType::Codex) {
         return custom;
     }
 
@@ -217,7 +217,11 @@ pub fn write_codex_live_atomic(
     let auth_path = get_codex_auth_path();
     let config_path = get_codex_config_path();
 
-    if let Some(parent) = auth_path.parent() {
+    // 写入预览只捕获内容，不建目录
+    if let Some(parent) = auth_path
+        .parent()
+        .filter(|_| !crate::config::is_capturing_writes())
+    {
         std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
@@ -844,7 +848,7 @@ fn load_codex_model_template_from_bundled() -> Result<Option<Value>, AppError> {
 }
 
 fn load_codex_model_template_static() -> Option<Value> {
-    let text = include_str!("resources/gpt5_5_template.json");
+    let text = include_str!("../../resources/gpt5_5_template.json");
     match serde_json::from_str(text) {
         Ok(template) => Some(template),
         Err(e) => {
@@ -862,7 +866,7 @@ fn load_codex_model_template_static() -> Option<Value> {
 /// fall back to `models_cache.json` here (that would reintroduce gpt-5.5's
 /// freeform apply_patch).
 fn load_codex_native_responses_template() -> Value {
-    let text = include_str!("resources/codex_native_responses_template.json");
+    let text = include_str!("../../resources/codex_native_responses_template.json");
     serde_json::from_str(text).expect("bundled codex native responses template must be valid JSON")
 }
 

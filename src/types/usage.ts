@@ -22,6 +22,7 @@ export type {
   ModelStats,
   ProviderStats,
   SessionSyncResult,
+  UnpricedModelStats,
   UsageSummary,
   UsageSummaryByApp,
 } from "@/shared/bindings";
@@ -169,6 +170,53 @@ export function isUnpricedUsage(log: UsageCostLog): boolean {
     (!Number.isFinite(multiplier) || multiplier !== 0) &&
     totalCost === 0
   );
+}
+
+/** 与后端 `is_placeholder_pricing_model` 同口径的占位模型名 */
+function isPlaceholderPricingModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return (
+    normalized === "" ||
+    normalized === "unknown" ||
+    normalized === "null" ||
+    normalized === "none"
+  );
+}
+
+/** 与后端 `clean_model_id_for_pricing` 同口径：查价前的模型名归一化 */
+function cleanModelIdForPricing(model: string): string {
+  const lastSegment = model.slice(model.lastIndexOf("/") + 1);
+  let normalized = lastSegment
+    .split(":")[0]
+    .trim()
+    .replace(/@/g, "-")
+    .toLowerCase();
+  while (normalized.endsWith("[1m]")) {
+    normalized = normalized.slice(0, -"[1m]".length);
+  }
+  return normalized.trim();
+}
+
+/**
+ * 补价时应填写的模型 ID（与后端回填查价、未计价导出的分组键一致）：
+ * 落库的计价模型优先，占位符时退回 model 列，model 也是占位符时才用
+ * request_model；再按查价规则归一化，原样保存带前缀的 ID 查价时匹配不到。
+ */
+export function getPricingModelId(
+  log: Pick<RequestLog, "model" | "pricingModel" | "requestModel">,
+): string {
+  let raw = log.model;
+  if (log.pricingModel && !isPlaceholderPricingModel(log.pricingModel)) {
+    raw = log.pricingModel;
+  } else if (
+    isPlaceholderPricingModel(log.model) &&
+    log.requestModel &&
+    !isPlaceholderPricingModel(log.requestModel)
+  ) {
+    raw = log.requestModel;
+  }
+  const cleaned = cleanModelIdForPricing(raw);
+  return isPlaceholderPricingModel(cleaned) ? raw : cleaned;
 }
 
 export interface StatsFilters {

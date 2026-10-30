@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 /// 获取 Gemini 配置目录路径（支持设置覆盖）
 pub fn get_gemini_dir() -> PathBuf {
-    if let Some(custom) = crate::settings::get_gemini_override_dir() {
+    if let Some(custom) = crate::settings::override_dir(&crate::app_config::AppType::Gemini) {
         return custom;
     }
 
@@ -21,29 +21,60 @@ pub fn get_gemini_env_path() -> PathBuf {
     get_gemini_dir().join(".env")
 }
 
+/// 环境变量名是否合法：`[A-Za-z_][A-Za-z0-9_]*`
+fn is_valid_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// 拆分一行 `[export ]KEY=VALUE`，返回去除首尾空白的 key 与原始 value 部分
+fn split_env_line(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let line = line
+        .strip_prefix("export")
+        .filter(|rest| rest.starts_with([' ', '\t']))
+        .map(str::trim_start)
+        .unwrap_or(line);
+    let (key, value) = line.split_once('=')?;
+    Some((key.trim(), value.trim()))
+}
+
+/// 去掉一对匹配的首尾引号（`"` 或 `'`）
+fn unquote_env_value(value: &str) -> &str {
+    for quote in ['"', '\''] {
+        if value.len() >= 2 && value.starts_with(quote) && value.ends_with(quote) {
+            return &value[1..value.len() - 1];
+        }
+    }
+    value
+}
+
+/// 去掉文件开头的 UTF-8 BOM
+fn strip_bom(content: &str) -> &str {
+    content.strip_prefix('\u{feff}').unwrap_or(content)
+}
+
 /// 解析 .env 文件内容为键值对
 ///
 /// 此函数宽松地解析 .env 文件，跳过无效行。
+/// 支持 `export KEY=VALUE`，并去掉值两侧的一对匹配引号。
 /// 对于需要严格验证的场景，请使用 `parse_env_file_strict`。
 pub fn parse_env_file(content: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
-    for line in content.lines() {
-        let line = line.trim();
-
-        // 跳过空行和注释
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        // 解析 KEY=VALUE
-        if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim().to_string();
-            let value = value.trim().to_string();
-
-            // 验证 key 是否有效（不为空，只包含字母、数字和下划线）
-            if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                map.insert(key, value);
+    for line in strip_bom(content).lines() {
+        // 跳过空行、注释和无法解析的行
+        if let Some((key, value)) = split_env_line(line) {
+            // 验证 key 是否有效
+            if is_valid_env_key(key) {
+                map.insert(key.to_string(), unquote_env_value(value).to_string());
             }
         }
     }
@@ -76,7 +107,7 @@ pub fn parse_env_file(content: &str) -> HashMap<String, String> {
 pub fn parse_env_file_strict(content: &str) -> Result<HashMap<String, String>, AppError> {
     let mut map = HashMap::new();
 
-    for (line_num, line) in content.lines().enumerate() {
+    for (line_num, line) in strip_bom(content).lines().enumerate() {
         let line = line.trim();
         let line_number = line_num + 1; // 行号从 1 开始
 
@@ -86,59 +117,137 @@ pub fn parse_env_file_strict(content: &str) -> Result<HashMap<String, String>, A
         }
 
         // 检查是否包含 =
-        if !line.contains('=') {
+        let Some((key, value)) = split_env_line(line) else {
             return Err(AppError::localized(
                 "gemini.env.parse_error.no_equals",
                 format!("Gemini .env 文件格式错误（第 {line_number} 行）：缺少 '=' 分隔符\n行内容: {line}"),
                 format!("Invalid Gemini .env format (line {line_number}): missing '=' separator\nLine: {line}"),
             ));
+        };
+
+        // 验证 key 不为空
+        if key.is_empty() {
+            return Err(AppError::localized(
+                "gemini.env.parse_error.empty_key",
+                format!("Gemini .env 文件格式错误（第 {line_number} 行）：环境变量名不能为空\n行内容: {line}"),
+                format!("Invalid Gemini .env format (line {line_number}): variable name cannot be empty\nLine: {line}"),
+            ));
         }
 
-        // 解析 KEY=VALUE
-        if let Some((key, value)) = line.split_once('=') {
-            let key = key.trim();
-            let value = value.trim();
-
-            // 验证 key 不为空
-            if key.is_empty() {
-                return Err(AppError::localized(
-                    "gemini.env.parse_error.empty_key",
-                    format!("Gemini .env 文件格式错误（第 {line_number} 行）：环境变量名不能为空\n行内容: {line}"),
-                    format!("Invalid Gemini .env format (line {line_number}): variable name cannot be empty\nLine: {line}"),
-                ));
-            }
-
-            // 验证 key 只包含字母、数字和下划线
-            if !key.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                return Err(AppError::localized(
-                    "gemini.env.parse_error.invalid_key",
-                    format!("Gemini .env 文件格式错误（第 {line_number} 行）：环境变量名只能包含字母、数字和下划线\n变量名: {key}"),
-                    format!("Invalid Gemini .env format (line {line_number}): variable name can only contain letters, numbers, and underscores\nVariable: {key}"),
-                ));
-            }
-
-            map.insert(key.to_string(), value.to_string());
+        // 验证 key 符合 [A-Za-z_][A-Za-z0-9_]*
+        if !is_valid_env_key(key) {
+            return Err(AppError::localized(
+                "gemini.env.parse_error.invalid_key",
+                format!("Gemini .env 文件格式错误（第 {line_number} 行）：环境变量名只能包含字母、数字和下划线，且不能以数字开头\n变量名: {key}"),
+                format!("Invalid Gemini .env format (line {line_number}): variable name can only contain letters, numbers, and underscores, and cannot start with a digit\nVariable: {key}"),
+            ));
         }
+
+        map.insert(key.to_string(), unquote_env_value(value).to_string());
     }
 
     Ok(map)
 }
 
-/// 将键值对序列化为 .env 格式
-pub fn serialize_env_file(map: &HashMap<String, String>) -> String {
+/// 校验并编码一个待写入的键值对
+///
+/// 拒绝非法 key 以及包含 `\r`、`\n`、`\0` 的值（否则可注入额外的行）。
+/// 首尾有空白、含 `#` 或以引号开头的值会加引号，保证读回时与原值一致。
+/// 已被一对匹配引号包裹的值（旧版解析器会把引号存进配置）原样写出，
+/// 避免再套一层引号导致 Gemini CLI 读到带引号的密钥。
+fn encode_env_entry(key: &str, value: &str) -> Result<String, AppError> {
+    if !is_valid_env_key(key) {
+        return Err(AppError::localized(
+            "gemini.env.write_error.invalid_key",
+            format!("Gemini 环境变量名无效（只能包含字母、数字和下划线，且不能以数字开头）: {key}"),
+            format!("Invalid Gemini env variable name (letters, digits and underscores only, not starting with a digit): {key}"),
+        ));
+    }
+    if value.contains(['\r', '\n', '\0']) {
+        return Err(AppError::localized(
+            "gemini.env.write_error.invalid_value",
+            format!("Gemini 环境变量 {key} 的值不能包含换行符或 NUL 字符"),
+            format!("Gemini env variable {key} must not contain line breaks or NUL characters"),
+        ));
+    }
+
+    if is_legacy_quoted_value(value) {
+        return Ok(format!("{key}={value}"));
+    }
+
+    let needs_quotes =
+        value.trim() != value || value.contains('#') || value.starts_with(['"', '\'', '`']);
+    if !needs_quotes {
+        return Ok(format!("{key}={value}"));
+    }
+    if !value.contains('\'') {
+        return Ok(format!("{key}='{value}'"));
+    }
+    if !value.contains('"') && !value.contains('\\') {
+        return Ok(format!("{key}=\"{value}\""));
+    }
+    Err(AppError::localized(
+        "gemini.env.write_error.unquotable_value",
+        format!("Gemini 环境变量 {key} 的值同时包含单引号和双引号，无法安全写入 .env"),
+        format!("Gemini env variable {key} contains both single and double quotes and cannot be written to .env safely"),
+    ))
+}
+
+/// 值是否已被一对匹配引号完整包裹，且原样写出后读回为去引号的内容
+fn is_legacy_quoted_value(value: &str) -> bool {
+    let inner = unquote_env_value(value);
+    if inner.len() == value.len() {
+        return false;
+    }
+    if value.starts_with('"') {
+        !inner.contains(['"', '\\'])
+    } else {
+        !inner.contains('\'')
+    }
+}
+
+/// 将键值对合并进现有 .env 内容
+///
+/// - 注释、空行和无法解析的行原样保留
+/// - map 中的键就地更新（同名重复行只保留第一处）
+/// - 不在 map 中的合法键被删除：读取 live 时所有合法键都会进入供应商配置
+///   （切换前会回填），map 即完整的变量集合；保留它们会把上一个供应商的
+///   自定义变量带入下一个供应商，并让编辑器里删除的变量无法生效
+/// - 键名不合法的行（解析器不会读取）原样保留
+/// - map 中的新键按键名排序追加到末尾
+///
+/// 任何非法的键或值都会返回错误，不会产生部分写入的内容。
+pub fn merge_env_file(existing: &str, map: &HashMap<String, String>) -> Result<String, AppError> {
+    let mut encoded = HashMap::new();
+    for (key, value) in map {
+        encoded.insert(key.as_str(), encode_env_entry(key, value)?);
+    }
+
     let mut lines = Vec::new();
+    let mut written = std::collections::HashSet::new();
 
-    // 按键排序以保证输出稳定
-    let mut keys: Vec<_> = map.keys().collect();
-    keys.sort();
-
-    for key in keys {
-        if let Some(value) = map.get(key) {
-            lines.push(format!("{key}={value}"));
+    for line in strip_bom(existing).lines() {
+        let Some((key, _)) = split_env_line(line) else {
+            lines.push(line.to_string());
+            continue;
+        };
+        if let Some(entry) = encoded.get(key) {
+            if written.insert(key.to_string()) {
+                lines.push(entry.clone());
+            }
+        } else if !is_valid_env_key(key) {
+            lines.push(line.to_string());
         }
     }
 
-    lines.join("\n")
+    // 按键排序追加新键以保证输出稳定
+    let mut keys: Vec<_> = encoded.keys().filter(|k| !written.contains(**k)).collect();
+    keys.sort();
+    for key in keys {
+        lines.push(encoded[key].clone());
+    }
+
+    Ok(lines.join("\n"))
 }
 
 /// 读取 Gemini .env 文件
@@ -158,8 +267,9 @@ pub fn read_gemini_env() -> Result<HashMap<String, String>, AppError> {
 pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppError> {
     let path = get_gemini_env_path();
 
-    // 确保目录存在
-    if let Some(parent) = path.parent() {
+    // 确保目录存在（写入预览只捕获内容，不建目录、不改权限）
+    let capturing = crate::config::is_capturing_writes();
+    if let Some(parent) = path.parent().filter(|_| !capturing) {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
 
         // 设置目录权限为 700（仅所有者可读写执行）
@@ -174,12 +284,18 @@ pub fn write_gemini_env_atomic(map: &HashMap<String, String>) -> Result<(), AppE
         }
     }
 
-    let content = serialize_env_file(map);
+    // 合并到现有内容，保留注释和用户手写的变量
+    let existing = if path.exists() {
+        fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?
+    } else {
+        String::new()
+    };
+    let content = merge_env_file(&existing, map)?;
     write_text_file(&path, &content)?;
 
     // 设置文件权限为 600（仅所有者可读写）
     #[cfg(unix)]
-    {
+    if !capturing {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(&path)
             .map_err(|e| AppError::io(&path, e))?
@@ -296,18 +412,12 @@ pub fn get_gemini_settings_path() -> PathBuf {
 fn update_selected_type(selected_type: &str) -> Result<(), AppError> {
     let settings_path = get_gemini_settings_path();
 
-    // 确保目录存在
-    if let Some(parent) = settings_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
-    }
-
-    // 读取现有的 settings.json（如果存在）
-    let mut settings_content = if settings_path.exists() {
-        let content =
-            fs::read_to_string(&settings_path).map_err(|e| AppError::io(&settings_path, e))?;
-        serde_json::from_str::<Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
+    // 读取现有的 settings.json（如果存在；写入预览期间读到本次已捕获的待写内容）
+    let mut settings_content = match crate::config::read_text_file_if_exists(&settings_path)? {
+        Some(content) => {
+            serde_json::from_str::<Value>(&content).unwrap_or_else(|_| serde_json::json!({}))
+        }
+        None => serde_json::json!({}),
     };
 
     // 只更新 security.auth.selectedType 字段
@@ -376,6 +486,11 @@ pub fn write_google_oauth_settings() -> Result<(), AppError> {
 mod tests {
     use super::*;
 
+    /// 将键值对序列化为全新的 .env 内容
+    fn serialize_env_file(map: &HashMap<String, String>) -> Result<String, AppError> {
+        merge_env_file("", map)
+    }
+
     #[test]
     fn test_parse_env_file() {
         let content = r#"
@@ -407,10 +522,146 @@ GEMINI_MODEL=gemini-3.5-flash
         map.insert("GEMINI_API_KEY".to_string(), "sk-test".to_string());
         map.insert("GEMINI_MODEL".to_string(), "gemini-3.5-flash".to_string());
 
-        let content = serialize_env_file(&map);
+        let content = serialize_env_file(&map).unwrap();
 
-        assert!(content.contains("GEMINI_API_KEY=sk-test"));
-        assert!(content.contains("GEMINI_MODEL=gemini-3.5-flash"));
+        assert_eq!(
+            content,
+            "GEMINI_API_KEY=sk-test\nGEMINI_MODEL=gemini-3.5-flash"
+        );
+    }
+
+    #[test]
+    fn test_serialize_env_file_rejects_line_injection() {
+        for value in ["k\nEVIL=1", "k\rEVIL=1", "k\0"] {
+            let mut map = HashMap::new();
+            map.insert("GEMINI_API_KEY".to_string(), value.to_string());
+            assert!(
+                serialize_env_file(&map).is_err(),
+                "value {value:?} must be rejected"
+            );
+            assert!(merge_env_file("GEMINI_API_KEY=old", &map).is_err());
+        }
+    }
+
+    #[test]
+    fn test_serialize_env_file_rejects_invalid_keys() {
+        for key in ["", "1ABC", "BAD KEY", "BAD-KEY", "A=B", "KEY\nEVIL", "ÄKEY"] {
+            let mut map = HashMap::new();
+            map.insert(key.to_string(), "v".to_string());
+            assert!(
+                serialize_env_file(&map).is_err(),
+                "key {key:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_env_file_strips_quotes_and_export() {
+        let content = "GOOGLE_GEMINI_BASE_URL=\"https://example.com\"\n\
+                       export GEMINI_API_KEY='sk-test'\n\
+                       GEMINI_MODEL=\"unbalanced'\n\
+                       EMPTY=\"\"\n\
+                       exporter=kept";
+
+        let map = parse_env_file(content);
+        assert_eq!(map["GOOGLE_GEMINI_BASE_URL"], "https://example.com");
+        assert_eq!(map["GEMINI_API_KEY"], "sk-test");
+        assert_eq!(map["GEMINI_MODEL"], "\"unbalanced'");
+        assert_eq!(map["EMPTY"], "");
+        assert_eq!(map["exporter"], "kept");
+
+        let strict = parse_env_file_strict(content).unwrap();
+        assert_eq!(strict, map);
+    }
+
+    #[test]
+    fn test_merge_env_file_keeps_comments_and_drops_stale_keys() {
+        let existing = "\u{feff}# written by hand\n\
+                        GEMINI_API_KEY=old-key\n\
+                        \n\
+                        export CUSTOM_VAR=\"keep me\"\n\
+                        PREV_PROVIDER_VAR=secret\n\
+                        GEMINI_MODEL=old-model\n\
+                        GOOGLE_GEMINI_BASE_URL=https://old.example.com\n\
+                        BAD-KEY=untouched\n\
+                        not a valid line";
+
+        // map 是完整的变量集合（切换前 live 已回填进供应商配置）
+        let mut map = HashMap::new();
+        map.insert("GEMINI_API_KEY".to_string(), "new-key".to_string());
+        map.insert("CUSTOM_VAR".to_string(), "keep me".to_string());
+        map.insert(
+            "GOOGLE_GEMINI_BASE_URL".to_string(),
+            "https://new.example.com".to_string(),
+        );
+        map.insert("ZZ_NEW".to_string(), "value # with hash".to_string());
+
+        let merged = merge_env_file(existing, &map).unwrap();
+        assert_eq!(
+            merged,
+            "# written by hand\n\
+             GEMINI_API_KEY=new-key\n\
+             \n\
+             CUSTOM_VAR=keep me\n\
+             GOOGLE_GEMINI_BASE_URL=https://new.example.com\n\
+             BAD-KEY=untouched\n\
+             not a valid line\n\
+             ZZ_NEW='value # with hash'"
+        );
+
+        // 读回：map 中的值原样还原，不在 map 中的键（上一个供应商的变量）被删除
+        let parsed = parse_env_file(&merged);
+        assert_eq!(parsed["GEMINI_API_KEY"], "new-key");
+        assert_eq!(parsed["ZZ_NEW"], "value # with hash");
+        assert_eq!(parsed["CUSTOM_VAR"], "keep me");
+        assert!(!parsed.contains_key("GEMINI_MODEL"));
+        assert!(!parsed.contains_key("PREV_PROVIDER_VAR"));
+
+        // 再次写入同一 map 结果不变
+        assert_eq!(merge_env_file(&merged, &map).unwrap(), merged);
+    }
+
+    #[test]
+    fn test_env_value_legacy_quoted_written_verbatim() {
+        // 旧版解析器会把引号存进配置；原样写出，读回为去引号的值
+        for (stored, expected) in [
+            ("\"sk-abc\"", "sk-abc"),
+            ("'sk-abc'", "sk-abc"),
+            ("\"a # b\"", "a # b"),
+        ] {
+            let mut map = HashMap::new();
+            map.insert("GEMINI_API_KEY".to_string(), stored.to_string());
+            let content = serialize_env_file(&map).unwrap();
+            assert_eq!(content, format!("GEMINI_API_KEY={stored}"));
+            assert_eq!(parse_env_file(&content)["GEMINI_API_KEY"], expected);
+        }
+    }
+
+    #[test]
+    fn test_env_value_quoting_round_trips() {
+        for value in [
+            "plain",
+            " leading",
+            "trailing ",
+            "\"unbalanced",
+            "'x",
+            "it's # here",
+            "a=b=c",
+            "",
+        ] {
+            let mut map = HashMap::new();
+            map.insert("KEY".to_string(), value.to_string());
+            let content = serialize_env_file(&map).unwrap();
+            assert_eq!(
+                parse_env_file(&content).get("KEY").map(String::as_str),
+                Some(value),
+                "round-trip of {value:?} via {content:?}"
+            );
+        }
+
+        let mut map = HashMap::new();
+        map.insert("KEY".to_string(), "'both\" #".to_string());
+        assert!(serialize_env_file(&map).is_err());
     }
 
     #[test]

@@ -154,6 +154,43 @@ fn test_parse_missing_required_field() {
         .contains("Missing 'name' parameter"));
 }
 
+#[test]
+fn test_parse_gemini_deeplink_rejects_newline_in_api_key() {
+    // %0A would otherwise inject an extra KEY=value line into ~/.gemini/.env
+    let url = "ccswitch://v1/import?resource=provider&app=gemini&name=G&endpoint=https%3A%2F%2Fapi.example.com&apiKey=k%0AEVIL%3D1";
+    let err = parse_deeplink_url(url).unwrap_err().to_string();
+    assert!(err.contains("apiKey"), "unexpected error: {err}");
+
+    let url = "ccswitch://v1/import?resource=provider&app=gemini&name=G&endpoint=https%3A%2F%2Fapi.example.com&apiKey=k&model=m%0D%0AEVIL%3D1";
+    let err = parse_deeplink_url(url).unwrap_err().to_string();
+    assert!(err.contains("model"), "unexpected error: {err}");
+
+    let url = "ccswitch://v1/import?resource=provider&app=gemini&name=G&endpoint=https%3A%2F%2Fapi.example.com&apiKey=k%00";
+    assert!(parse_deeplink_url(url).is_err());
+}
+
+#[test]
+fn test_build_gemini_provider_rejects_control_chars_from_config() {
+    use super::provider::build_provider_from_request;
+
+    // Values merged from the inline config skip the URL parser checks
+    let config_json =
+        r#"{"GEMINI_API_KEY":"k\nEVIL=1","GOOGLE_GEMINI_BASE_URL":"https://api.example.com"}"#;
+    let mut request = parse_deeplink_url(
+        "ccswitch://v1/import?resource=provider&app=gemini&name=G&homepage=https%3A%2F%2Fexample.com",
+    )
+    .unwrap();
+    request.config = Some(BASE64_STANDARD.encode(config_json.as_bytes()));
+    request.config_format = Some("json".to_string());
+
+    let merged = parse_and_merge_config(&request).unwrap();
+    assert_eq!(merged.api_key.as_deref(), Some("k\nEVIL=1"));
+    let err = build_provider_from_request(&AppType::Gemini, &merged)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("apiKey"), "unexpected error: {err}");
+}
+
 // =============================================================================
 // Utils Tests
 // =============================================================================
@@ -929,19 +966,19 @@ fn test_import_prompt_allows_space_in_base64_content() {
 #[test]
 fn test_parse_mcp_apps() {
     let apps = parse_mcp_apps("claude,codex").unwrap();
-    assert!(apps.claude);
-    assert!(apps.codex);
-    assert!(!apps.gemini);
+    assert!(apps.is_enabled_for(&AppType::Claude));
+    assert!(apps.is_enabled_for(&AppType::Codex));
+    assert!(!apps.is_enabled_for(&AppType::Gemini));
 
     let apps = parse_mcp_apps("gemini").unwrap();
-    assert!(!apps.claude);
-    assert!(!apps.codex);
-    assert!(apps.gemini);
+    assert!(!apps.is_enabled_for(&AppType::Claude));
+    assert!(!apps.is_enabled_for(&AppType::Codex));
+    assert!(apps.is_enabled_for(&AppType::Gemini));
 
     let apps = parse_mcp_apps("grokbuild,opencode,hermes").unwrap();
-    assert!(apps.grokbuild);
-    assert!(apps.opencode);
-    assert!(apps.hermes);
+    assert!(apps.is_enabled_for(&AppType::GrokBuild));
+    assert!(apps.is_enabled_for(&AppType::OpenCode));
+    assert!(apps.is_enabled_for(&AppType::Hermes));
 
     let err = parse_mcp_apps("invalid").unwrap_err();
     assert!(err.to_string().contains("Invalid app"));
@@ -1240,7 +1277,7 @@ fn test_preview_provider_without_risk_writes_live_when_first() {
 #[serial_test::serial]
 fn test_preview_mcp_lists_commands_and_marks_existing_servers() {
     use super::preview::{preview_deeplink_import, PreviewRisk};
-    use crate::app_config::{McpApps, McpServer};
+    use crate::app_config::{AppSet, McpServer};
 
     let _test_home = TestHomeGuard::new();
     let state = preview_state();
@@ -1250,7 +1287,7 @@ fn test_preview_mcp_lists_commands_and_marks_existing_servers() {
             id: "known".to_string(),
             name: "known".to_string(),
             server: serde_json::json!({ "command": "old-cmd" }),
-            apps: McpApps::default(),
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,

@@ -22,6 +22,8 @@ pub enum PickPurpose {
     SkillZip,
     /// `pick_directory`：选择目录
     Directory,
+    /// `save_csv_file_dialog`：导出 CSV（如未计价请求）
+    CsvExport,
 }
 
 fn registry() -> &'static Mutex<VecDeque<(PickPurpose, PathBuf)>> {

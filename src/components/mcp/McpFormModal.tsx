@@ -346,12 +346,14 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
       }
     }
 
-    if (serverSpec?.type === "stdio" && !serverSpec?.command?.trim()) {
+    // A missing type means stdio, matching the backend validator
+    const specType = serverSpec?.type ?? "stdio";
+    if (specType === "stdio" && !serverSpec?.command?.trim()) {
       toast.error(t("mcp.error.commandRequired"), { duration: 3000 });
       return;
     }
     if (
-      (serverSpec?.type === "http" || serverSpec?.type === "sse") &&
+      (specType === "http" || specType === "sse") &&
       !serverSpec?.url?.trim()
     ) {
       toast.error(t("mcp.wizard.urlRequired"), { duration: 3000 });

@@ -1,9 +1,12 @@
+// 测试夹具直接写文件即可，无需走 atomic_write（见 clippy.toml）
+#![allow(clippy::disallowed_methods)]
+
 use serde_json::json;
 use std::fs;
 
 use cc_switch_lib::{
-    get_claude_settings_path, read_json_file, AppError, AppType, ConfigService, MultiAppConfig,
-    Provider, ProviderMeta,
+    get_claude_settings_path, read_json_file, AppError, AppSet, AppType, ConfigService,
+    MultiAppConfig, Provider, ProviderMeta,
 };
 
 #[path = "support.rs"]
@@ -676,7 +679,7 @@ url = "https://example.com"
 
     let echo = servers.get("echo_server").expect("echo server");
     assert!(
-        echo.apps.codex,
+        echo.apps.is_enabled_for(&AppType::Codex),
         "Codex app should be enabled for echo_server"
     );
     let server_spec = echo.server.as_object().expect("server spec");
@@ -690,7 +693,7 @@ url = "https://example.com"
 
     let http = servers.get("http_server").expect("http server");
     assert!(
-        http.apps.codex,
+        http.apps.is_enabled_for(&AppType::Codex),
         "Codex app should be enabled for http_server"
     );
     let http_spec = http.server.as_object().expect("http spec");
@@ -698,6 +701,39 @@ url = "https://example.com"
         http_spec.get("url").and_then(|v| v.as_str()).unwrap_or(""),
         "https://example.com"
     );
+}
+
+#[test]
+fn import_from_codex_skips_unknown_type_without_dropping_later_servers() {
+    let _test_env = TestEnv::new();
+    let path = cc_switch_lib::get_codex_config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create codex dir");
+    }
+    fs::write(
+        &path,
+        r#"[mcp_servers.a_websocket]
+type = "ws"
+url = "wss://example.com"
+
+[mcp_servers.b_echo]
+type = "stdio"
+command = "echo"
+"#,
+    )
+    .expect("write codex config");
+
+    let mut config = MultiAppConfig::default();
+    let changed = cc_switch_lib::import_from_codex(&mut config).expect("import codex");
+    assert_eq!(changed, 1, "only the stdio server is importable");
+
+    let servers = config.mcp.servers.as_ref().expect("unified servers");
+    assert!(!servers.contains_key("a_websocket"));
+    assert!(servers
+        .get("b_echo")
+        .expect("b_echo imported")
+        .apps
+        .is_enabled_for(&AppType::Codex));
 }
 
 #[test]
@@ -728,14 +764,7 @@ command = "echo"
                 "type": "stdio",
                 "command": "prev"
             }),
-            apps: cc_switch_lib::McpApps {
-                claude: false,
-                codex: false, // 初始未启用
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,
@@ -756,7 +785,10 @@ command = "echo"
         .expect("existing entry");
 
     // 验证 Codex 应用已启用
-    assert!(entry.apps.codex, "Codex app should be enabled after import");
+    assert!(
+        entry.apps.is_enabled_for(&AppType::Codex),
+        "Codex app should be enabled after import"
+    );
 
     // 验证现有配置被保留（server 不应被覆盖）
     let spec = entry.server.as_object().expect("server spec");
@@ -856,14 +888,7 @@ fn import_from_claude_merges_into_config() {
                 "type": "stdio",
                 "command": "prev"
             }),
-            apps: cc_switch_lib::McpApps {
-                claude: false, // 初始未启用
-                codex: false,
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::default(),
             description: None,
             homepage: None,
             docs: None,
@@ -885,7 +910,7 @@ fn import_from_claude_merges_into_config() {
 
     // 验证 Claude 应用已启用
     assert!(
-        entry.apps.claude,
+        entry.apps.is_enabled_for(&AppType::Claude),
         "Claude app should be enabled after import"
     );
 

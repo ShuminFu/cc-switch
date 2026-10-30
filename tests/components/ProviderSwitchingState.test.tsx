@@ -197,4 +197,43 @@ describe("ProviderActions while a switch is pending", () => {
     expect(enable).toBeDisabled();
     expect(enable).toHaveAttribute("aria-busy", "true");
   });
+
+  it("labels the OpenClaw default button and keeps it usable during a switch", () => {
+    const onSetAsDefault = vi.fn();
+    render(
+      <ProviderActions
+        {...baseProps}
+        appId="openclaw"
+        isCurrent={false}
+        isInConfig
+        onRemoveFromConfig={vi.fn()}
+        onSetAsDefault={onSetAsDefault}
+        isSwitchPending
+      />,
+    );
+    const setDefault = screen.getByRole("button", {
+      name: "provider.setAsDefault",
+    });
+    expect(setDefault).toBeEnabled();
+    fireEvent.click(setDefault);
+    expect(onSetAsDefault).toHaveBeenCalled();
+    // Additive mode: in-config providers offer remove, not switch
+    expect(screen.getByTestId("provider-main-action")).toBeEnabled();
+  });
+
+  it("shows no default button for apps without a default selection", () => {
+    render(
+      <ProviderActions
+        {...baseProps}
+        appId="opencode"
+        isCurrent={false}
+        isInConfig
+        onRemoveFromConfig={vi.fn()}
+        onSetAsDefault={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "provider.setAsDefault" }),
+    ).toBeNull();
+  });
 });

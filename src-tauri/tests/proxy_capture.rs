@@ -4,6 +4,9 @@
 //! `tests/proxy_golden.rs`, reproduce the client stream the proxy sent, and
 //! carry none of the keys that crossed the proxy.
 
+// 测试夹具直接写文件即可，无需走 atomic_write（见 clippy.toml）
+#![allow(clippy::disallowed_methods)]
+
 use std::io::Read;
 use std::path::Path;
 use std::time::{Duration, Instant};

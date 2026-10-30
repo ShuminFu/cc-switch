@@ -1,18 +1,19 @@
 //! Cost golden table：同一组 (app_type × input_token_semantics × usage × 定价行)
 //! 必须在所有成本路径上算出同一个价格。
 //!
-//! 覆盖的四条路径：
+//! 覆盖的四条路径（全部经过唯一的成本函数 `pricing::engine::cost`）：
 //! 1. ingest：`CostCalculator::calculate_for_app`（按 app_type 推断语义）
 //! 2. logger：`UsageLogger::log_with_calculation` 落库的 semantics 与 total_cost_usd
 //! 3. 聚合：`fresh_input_sql` 归一化后的 fresh input 再按定价计费
 //! 4. 回填：`Database::backfill_missing_usage_costs` 对零成本行的重算
 //!
+//! 另外要求同一行的回填结果与 ingest 落库结果逐字相同（五个成本列）。
+//!
 //! ingest/logger 只会写出 app_type 对应的那一种语义，因此它们只跑语义匹配的行；
 //! 聚合与回填会读到历史行，三种语义全部要跑。
 //!
-//! 已知分歧：回填没有把 grokbuild 视为 cache-inclusive，grokbuild 的 LEGACY/TOTAL
-//! 行在回填路径上多计了 cache 部分的输入。这些行被单独放进 #[ignore] 测试，
-//! 修复见 docs/roadmap/tickets/P1-trust-release/CCS-092-p1-usage-input-semantics.md。
+//! 四条路径都从 `AppType::input_semantics` 取 input 语义（CCS-092）；下面的
+//! `ingest_semantics` 是独立写出的期望值，用来防止单一来源本身写错。
 
 use super::calculator::{CostCalculator, ModelPricing};
 use super::logger::UsageLogger;
@@ -20,6 +21,7 @@ use super::parser::TokenUsage;
 use crate::app_config::AppType;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
+use crate::pricing::engine::{self, InputBasis, TokenCounts};
 use crate::services::sql_helpers::{
     fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_LEGACY,
     INPUT_TOKEN_SEMANTICS_TOTAL,
@@ -29,9 +31,9 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Semantics {
-    /// v12 及更早：cache-inclusive app 的 input 只包含 cache read
+    /// v12 及更早：input 含 cache 的 app 只包含 cache read
     Legacy,
-    /// cache-inclusive：input 同时包含 cache read 与 cache write
+    /// input 含 cache：同时包含 cache read 与 cache write
     Total,
     /// cache-exclusive：input 已经是 fresh input
     Fresh,
@@ -69,7 +71,7 @@ struct Scenario {
     multiplier: &'static str,
 }
 
-const SCENARIOS: [Scenario; 2] = [
+const SCENARIOS: [Scenario; 3] = [
     Scenario {
         name: "small",
         model_id: "cost-golden-model-small",
@@ -84,6 +86,14 @@ const SCENARIOS: [Scenario; 2] = [
         pricing: ("1.25", "10", "0.125", "1.5"),
         multiplier: "2",
     },
+    // 亚微美元级成本：曾被回填按 6 位小数截断，与 ingest 落库值不一致。
+    Scenario {
+        name: "tiny-x1.25",
+        model_id: "cost-golden-model-tiny",
+        usage: (40, 3, 11, 5),
+        pricing: ("0.075", "0.3", "0.01875", "0.075"),
+        multiplier: "1.25",
+    },
 ];
 
 /// 期望总价（已含倍率），按 [LEGACY, TOTAL, FRESH] 排列。
@@ -92,27 +102,69 @@ const SCENARIOS: [Scenario; 2] = [
 ///   fresh input 1000 → 0.003；legacy 800 → 0.0024；total 700 → 0.0021。
 /// large-x2：output 1.0 + read 0.0625 + write 0.375 = 1.4375，
 ///   fresh input 2M → 2.5；legacy 1.5M → 1.875；total 1.25M → 1.5625；再 ×2。
+/// tiny-x1.25：output 0.0000009 + read 0.00000020625 + write 0.000000375 = 0.00000148125，
+///   fresh input 40 → 0.000003；legacy 29 → 0.000002175；total 24 → 0.0000018；再 ×1.25。
 const GOLDEN: &[(&str, &str, [&str; 3])] = &[
     ("claude", "small", ["0.010935", "0.010935", "0.010935"]),
     ("claude", "large-x2", ["7.875", "7.875", "7.875"]),
+    (
+        "claude",
+        "tiny-x1.25",
+        ["0.0000056015625", "0.0000056015625", "0.0000056015625"],
+    ),
     (
         "claude-desktop",
         "small",
         ["0.010935", "0.010935", "0.010935"],
     ),
     ("claude-desktop", "large-x2", ["7.875", "7.875", "7.875"]),
+    (
+        "claude-desktop",
+        "tiny-x1.25",
+        ["0.0000056015625", "0.0000056015625", "0.0000056015625"],
+    ),
     ("codex", "small", ["0.010335", "0.010035", "0.010935"]),
     ("codex", "large-x2", ["6.625", "6.0", "7.875"]),
+    (
+        "codex",
+        "tiny-x1.25",
+        ["0.0000045703125", "0.0000041015625", "0.0000056015625"],
+    ),
     ("gemini", "small", ["0.010335", "0.010035", "0.010935"]),
     ("gemini", "large-x2", ["6.625", "6.0", "7.875"]),
+    (
+        "gemini",
+        "tiny-x1.25",
+        ["0.0000045703125", "0.0000041015625", "0.0000056015625"],
+    ),
     ("grokbuild", "small", ["0.010335", "0.010035", "0.010935"]),
     ("grokbuild", "large-x2", ["6.625", "6.0", "7.875"]),
+    (
+        "grokbuild",
+        "tiny-x1.25",
+        ["0.0000045703125", "0.0000041015625", "0.0000056015625"],
+    ),
     ("opencode", "small", ["0.010935", "0.010935", "0.010935"]),
     ("opencode", "large-x2", ["7.875", "7.875", "7.875"]),
+    (
+        "opencode",
+        "tiny-x1.25",
+        ["0.0000056015625", "0.0000056015625", "0.0000056015625"],
+    ),
     ("openclaw", "small", ["0.010935", "0.010935", "0.010935"]),
     ("openclaw", "large-x2", ["7.875", "7.875", "7.875"]),
+    (
+        "openclaw",
+        "tiny-x1.25",
+        ["0.0000056015625", "0.0000056015625", "0.0000056015625"],
+    ),
     ("hermes", "small", ["0.010935", "0.010935", "0.010935"]),
     ("hermes", "large-x2", ["7.875", "7.875", "7.875"]),
+    (
+        "hermes",
+        "tiny-x1.25",
+        ["0.0000056015625", "0.0000056015625", "0.0000056015625"],
+    ),
 ];
 
 #[derive(Debug, Clone)]
@@ -156,11 +208,6 @@ impl GoldenRow {
 
     fn is_ingest_row(&self) -> bool {
         ingest_semantics(&self.app) == self.semantics
-    }
-
-    /// 回填路径的已知分歧（CCS-092）。
-    fn is_known_backfill_divergence(&self) -> bool {
-        self.app == AppType::GrokBuild && self.semantics != Semantics::Fresh
     }
 }
 
@@ -246,6 +293,18 @@ fn stored_total_cost(db: &Database, request_id: &str) -> Result<Decimal, AppErro
     Ok(Decimal::from_str(&raw).unwrap())
 }
 
+/// 落库的五个成本列（input, output, cache_read, cache_creation, total），原样字符串。
+fn stored_cost_columns(db: &Database, request_id: &str) -> Result<[String; 5], AppError> {
+    let conn = lock_conn!(db.conn);
+    Ok(conn.query_row(
+        "SELECT input_cost_usd, output_cost_usd, cache_read_cost_usd,
+                cache_creation_cost_usd, total_cost_usd
+         FROM proxy_request_logs WHERE request_id = ?1",
+        [request_id],
+        |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?]),
+    )?)
+}
+
 /// 路径 1：ingest 计算器。
 fn ingest_cost(row: &GoldenRow) -> Decimal {
     CostCalculator::calculate_for_app(
@@ -306,20 +365,20 @@ fn aggregation_costs(rows: &[&GoldenRow]) -> Result<Vec<Decimal>, AppError> {
         fresh_input_sql("l")
     );
     let conn = lock_conn!(db.conn);
-    let million = Decimal::from(1_000_000);
     rows.iter()
         .map(|row| {
             let fresh_input: i64 = conn.query_row(&sql, [row.id()], |r| r.get(0))?;
             let usage = row.usage();
-            let pricing = row.pricing();
-            let base = Decimal::from(fresh_input) * pricing.input_cost_per_million / million
-                + Decimal::from(usage.output_tokens) * pricing.output_cost_per_million / million
-                + Decimal::from(usage.cache_read_tokens) * pricing.cache_read_cost_per_million
-                    / million
-                + Decimal::from(usage.cache_creation_tokens)
-                    * pricing.cache_creation_cost_per_million
-                    / million;
-            Ok(base * row.multiplier())
+            let tokens = TokenCounts {
+                input: fresh_input as u64,
+                output: u64::from(usage.output_tokens),
+                cache_read: u64::from(usage.cache_read_tokens),
+                cache_creation: u64::from(usage.cache_creation_tokens),
+            };
+            Ok(
+                engine::cost(&tokens, InputBasis::Fresh, &row.pricing(), row.multiplier())
+                    .total_cost,
+            )
         })
         .collect()
 }
@@ -357,6 +416,10 @@ fn cost_golden_table_covers_every_app_and_semantics() {
     let rows = golden_rows();
     assert_eq!(AppType::all().count(), 8);
     assert_eq!(rows.len(), 8 * Semantics::ALL.len() * SCENARIOS.len());
+    assert!(
+        rows.len() >= 50,
+        "cost golden table must keep at least 50 rows"
+    );
     for app in AppType::all() {
         for semantics in Semantics::ALL {
             assert!(
@@ -408,10 +471,25 @@ fn cost_golden_aggregation_path() -> Result<(), AppError> {
 #[test]
 fn cost_golden_backfill_path() -> Result<(), AppError> {
     let rows = golden_rows();
+    let all: Vec<&GoldenRow> = rows.iter().collect();
+    let mut failures = Vec::new();
+    for (row, cost) in all.iter().zip(backfill_costs(&all)?) {
+        check(&mut failures, "backfill", row, cost);
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    Ok(())
+}
+
+/// CCS-092 回归：grokbuild 的 LEGACY/TOTAL 历史行在回填时曾被当作 fresh input，
+/// 多计了 cache 部分的输入成本。
+#[test]
+fn cost_golden_backfill_path_grokbuild_cache_rows() -> Result<(), AppError> {
+    let rows = golden_rows();
     let selected: Vec<&GoldenRow> = rows
         .iter()
-        .filter(|r| !r.is_known_backfill_divergence())
+        .filter(|r| r.app == AppType::GrokBuild && r.semantics != Semantics::Fresh)
         .collect();
+    assert_eq!(selected.len(), 2 * SCENARIOS.len());
     let mut failures = Vec::new();
     for (row, cost) in selected.iter().zip(backfill_costs(&selected)?) {
         check(&mut failures, "backfill", row, cost);
@@ -421,18 +499,63 @@ fn cost_golden_backfill_path() -> Result<(), AppError> {
 }
 
 #[test]
-#[ignore = "known grokbuild backfill divergence, fixed by CCS-092: \
-            docs/roadmap/tickets/P1-trust-release/CCS-092-p1-usage-input-semantics.md"]
-fn cost_golden_backfill_path_grokbuild_known_divergence() -> Result<(), AppError> {
+fn cost_golden_expected_semantics_match_app_type_input_semantics() {
+    for app in AppType::all() {
+        assert_eq!(
+            ingest_semantics(&app) == Semantics::Total,
+            app.input_semantics().is_cache_inclusive(),
+            "{}",
+            app.as_str()
+        );
+    }
+}
+
+/// CCS-157：同一行经 ingest（logger）落库与经零成本回填写出的五个成本列必须逐字相同。
+/// 回填曾按 6 位小数格式化，亚微美元级成本与 ingest 落库值不一致。
+#[test]
+fn cost_golden_backfill_output_equals_ingest_output() -> Result<(), AppError> {
     let rows = golden_rows();
-    let selected: Vec<&GoldenRow> = rows
-        .iter()
-        .filter(|r| r.is_known_backfill_divergence())
-        .collect();
-    assert_eq!(selected.len(), 2 * SCENARIOS.len());
+    let ingest_rows: Vec<&GoldenRow> = rows.iter().filter(|r| r.is_ingest_row()).collect();
+
+    let ingest_db = Database::memory()?;
+    seed_pricing(&ingest_db)?;
+    let logger = UsageLogger::new(&ingest_db);
+    let backfill_db = Database::memory()?;
+    seed_pricing(&backfill_db)?;
+    for row in &ingest_rows {
+        logger.log_with_calculation(
+            row.id(),
+            "provider-golden".to_string(),
+            row.app.as_str().to_string(),
+            row.scenario.model_id.to_string(),
+            row.scenario.model_id.to_string(),
+            row.scenario.model_id.to_string(),
+            row.usage(),
+            row.multiplier(),
+            100,
+            None,
+            200,
+            None,
+            None,
+            false,
+        )?;
+        insert_zero_cost_row(&backfill_db, row)?;
+    }
+    assert_eq!(
+        backfill_db.backfill_missing_usage_costs()? as usize,
+        ingest_rows.len()
+    );
+
     let mut failures = Vec::new();
-    for (row, cost) in selected.iter().zip(backfill_costs(&selected)?) {
-        check(&mut failures, "backfill", row, cost);
+    for row in &ingest_rows {
+        let ingest = stored_cost_columns(&ingest_db, &row.id())?;
+        let backfill = stored_cost_columns(&backfill_db, &row.id())?;
+        if ingest != backfill {
+            failures.push(format!(
+                "{}: ingest {ingest:?} != backfill {backfill:?}",
+                row.id()
+            ));
+        }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     Ok(())

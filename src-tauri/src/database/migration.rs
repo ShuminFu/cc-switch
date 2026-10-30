@@ -3,7 +3,7 @@
 //! 将旧版 config.json (MultiAppConfig) 数据迁移到 SQLite 数据库。
 
 use super::{lock_conn, to_json_string, Database};
-use crate::app_config::MultiAppConfig;
+use crate::app_config::{AppType, McpServer, MultiAppConfig};
 use crate::error::AppError;
 use rusqlite::{params, Connection};
 
@@ -28,7 +28,6 @@ impl Database {
     pub fn migrate_from_json_dry_run(config: &MultiAppConfig) -> Result<(), AppError> {
         let mut conn =
             Connection::open_in_memory().map_err(|e| AppError::Database(e.to_string()))?;
-        Self::create_tables_on_conn(&conn)?;
         Self::apply_schema_migrations_on_conn(&conn)?;
 
         let tx = conn
@@ -124,25 +123,13 @@ impl Database {
     ) -> Result<(), AppError> {
         if let Some(servers) = &config.mcp.servers {
             for (id, server) in servers {
-                tx.execute(
-                    "INSERT OR REPLACE INTO mcp_servers (
-                        id, name, server_config, description, homepage, docs, tags,
-                        enabled_claude, enabled_codex, enabled_gemini
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                    params![
-                        id,
-                        server.name,
-                        to_json_string(&server.server)?,
-                        server.description,
-                        server.homepage,
-                        server.docs,
-                        to_json_string(&server.tags)?,
-                        server.apps.claude,
-                        server.apps.codex,
-                        server.apps.gemini,
-                    ],
-                )
-                .map_err(|e| AppError::Database(format!("Migrate mcp server failed: {e}")))?;
+                // 以 map 的键为主键（与旧实现一致），不信任条目内的 id 字段
+                let server = McpServer {
+                    id: id.clone(),
+                    ..server.clone()
+                };
+                Self::save_mcp_server_on_conn(tx, &server)
+                    .map_err(|e| AppError::Database(format!("Migrate mcp server failed: {e}")))?;
             }
         }
         Ok(())
@@ -218,26 +205,14 @@ impl Database {
         tx: &rusqlite::Transaction<'_>,
         config: &MultiAppConfig,
     ) -> Result<(), AppError> {
-        if let Some(snippet) = &config.common_config_snippets.claude {
-            tx.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-                params!["common_config_claude", snippet],
-            )
-            .map_err(|e| AppError::Database(format!("Migrate settings failed: {e}")))?;
-        }
-        if let Some(snippet) = &config.common_config_snippets.codex {
-            tx.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-                params!["common_config_codex", snippet],
-            )
-            .map_err(|e| AppError::Database(format!("Migrate settings failed: {e}")))?;
-        }
-        if let Some(snippet) = &config.common_config_snippets.gemini {
-            tx.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-                params!["common_config_gemini", snippet],
-            )
-            .map_err(|e| AppError::Database(format!("Migrate settings failed: {e}")))?;
+        for app in [AppType::Claude, AppType::Codex, AppType::Gemini] {
+            if let Some(snippet) = config.common_config_snippets.get(&app) {
+                tx.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                    params![format!("common_config_{}", app.as_str()), snippet],
+                )
+                .map_err(|e| AppError::Database(format!("Migrate settings failed: {e}")))?;
+            }
         }
 
         Ok(())

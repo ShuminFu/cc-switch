@@ -17,15 +17,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { toast } from "sonner";
 import { useRequestLogs } from "@/lib/query/usage";
 import { useProxyCaptureStatus } from "@/lib/query/proxy";
+import { usageApi } from "@/lib/api/usage";
+import { resolveUsageRange } from "@/lib/usageRange";
 import {
   getFreshInputTokens,
+  getPricingModelId,
   isUnpricedUsage,
   type LogFilters,
   type UsageRangeSelection,
 } from "@/types/usage";
-import { ChevronLeft, ChevronRight, Route } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Plus, Route } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import { RequestTracePanel } from "./RequestTracePanel";
 import { UsageParityBadge } from "./UsageParityBadge";
@@ -33,6 +37,8 @@ import {
   BugReportCaptureToggle,
   ExportBugReportButton,
 } from "./BugReportCapture";
+import { PricingEditModal } from "./PricingEditModal";
+import { buildUnpricedModelsCsv, unpricedCsvFileName } from "./unpricedExport";
 import {
   fmtInt,
   fmtUsd,
@@ -64,6 +70,10 @@ export function RequestLogTable({
   // 应用/Provider/模型筛选已上移到 Dashboard 顶栏（全局生效）；
   // 这里只保留日志特有的状态码筛选。
   const [statusCode, setStatusCode] = useState<number | undefined>(undefined);
+  const [unpricedOnly, setUnpricedOnly] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  // 「补充定价」弹窗预填的模型 ID；null 表示关闭
+  const [pricingModelId, setPricingModelId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [pageInput, setPageInput] = useState("");
   const [traceRequestId, setTraceRequestId] = useState<string | null>(null);
@@ -77,6 +87,7 @@ export function RequestLogTable({
     providerName,
     model,
     statusCode,
+    unpriced: unpricedOnly || undefined,
   };
 
   const { data: result, isLoading } = useRequestLogs({
@@ -118,6 +129,32 @@ export function RequestLogTable({
     setPageInput("");
   };
 
+  const handleExportUnpriced = async () => {
+    setIsExporting(true);
+    try {
+      // 导出始终只含未计价请求，其余筛选与当前列表一致
+      const stats = await usageApi.getUnpricedModelStats({
+        ...effectiveFilters,
+        unpriced: true,
+        ...resolveUsageRange(range),
+      });
+      if (stats.length === 0) {
+        toast.info(t("usage.exportUnpricedEmpty"));
+        return;
+      }
+      const filePath = await usageApi.saveCsvFileDialog(unpricedCsvFileName());
+      if (!filePath) return;
+      await usageApi.writeCsvExport(filePath, buildUnpricedModelsCsv(stats));
+      toast.success(t("usage.exportUnpricedSuccess", { count: stats.length }), {
+        closeButton: true,
+      });
+    } catch (error) {
+      toast.error(t("usage.exportUnpricedFailed", { detail: String(error) }));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const language = i18n.resolvedLanguage || i18n.language || "en";
   const locale = getLocaleFromLanguage(language);
 
@@ -148,6 +185,32 @@ export function RequestLogTable({
               <SelectItem value="500">500</SelectItem>
             </SelectContent>
           </Select>
+
+          <Button
+            type="button"
+            size="sm"
+            variant={unpricedOnly ? "default" : "outline"}
+            className="h-8 text-xs"
+            aria-pressed={unpricedOnly}
+            onClick={() => {
+              setUnpricedOnly((v) => !v);
+              setPage(0);
+            }}
+          >
+            {t("usage.unpricedOnly")}
+          </Button>
+
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs"
+            disabled={isExporting}
+            onClick={() => void handleExportUnpriced()}
+          >
+            <Download className="mr-1 h-3.5 w-3.5" />
+            {t("usage.exportUnpriced")}
+          </Button>
 
           {onRangeChange && (
             <UsageDateRangePicker
@@ -296,6 +359,21 @@ export function RequestLogTable({
                             {unpriced
                               ? t("usage.unpriced")
                               : fmtUsd(log.totalCostUsd, 4)}
+                            {unpriced && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="ml-1 h-6 w-6 p-0"
+                                title={t("usage.addPricing")}
+                                aria-label={`${t("usage.addPricing")}: ${getPricingModelId(log)}`}
+                                onClick={() =>
+                                  setPricingModelId(getPricingModelId(log))
+                                }
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                           </div>
                           {parseFiniteNumber(log.costMultiplier) != null &&
                             parseFiniteNumber(log.costMultiplier) !== 1 && (
@@ -448,6 +526,22 @@ export function RequestLogTable({
         <RequestTracePanel
           requestId={traceRequestId}
           onClose={() => setTraceRequestId(null)}
+        />
+      )}
+
+      {pricingModelId !== null && (
+        <PricingEditModal
+          open
+          isNew
+          model={{
+            modelId: pricingModelId,
+            displayName: pricingModelId,
+            inputCostPerMillion: "0",
+            outputCostPerMillion: "0",
+            cacheReadCostPerMillion: "0",
+            cacheCreationCostPerMillion: "0",
+          }}
+          onClose={() => setPricingModelId(null)}
         />
       )}
     </div>

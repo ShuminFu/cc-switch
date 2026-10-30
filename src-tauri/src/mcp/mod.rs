@@ -5,6 +5,7 @@
 //! ## 模块结构
 //!
 //! - `validation` - 服务器配置验证
+//! - `common` - 各应用共用的启用项收集与导入合并
 //! - `claude` - Claude MCP 同步和导入
 //! - `codex` - Codex MCP 同步和导入（含 TOML 转换）
 //! - `gemini` - Gemini MCP 同步和导入
@@ -13,6 +14,7 @@
 
 mod claude;
 mod codex;
+mod common;
 mod gemini;
 mod grokbuild;
 mod hermes;
@@ -34,7 +36,14 @@ pub use gemini::{
 pub use grokbuild::{
     import_from_grokbuild, remove_server_from_grokbuild, sync_single_server_to_grokbuild,
 };
-pub use hermes::{import_from_hermes, remove_server_from_hermes, sync_single_server_to_hermes};
-pub use opencode::{
-    import_from_opencode, remove_server_from_opencode, sync_single_server_to_opencode,
-};
+pub use hermes::{remove_server_from_hermes, sync_single_server_to_hermes};
+pub use opencode::{remove_server_from_opencode, sync_single_server_to_opencode};
+pub use validation::validate_server_spec;
+
+pub(crate) use claude::read_servers_from_claude;
+pub(crate) use codex::read_servers_from_codex;
+pub(crate) use common::{imported_server, valid_imports};
+pub(crate) use gemini::read_servers_from_gemini;
+pub(crate) use grokbuild::read_servers_from_grokbuild;
+pub(crate) use hermes::read_servers_from_hermes;
+pub(crate) use opencode::read_servers_from_opencode;

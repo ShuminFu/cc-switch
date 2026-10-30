@@ -150,6 +150,15 @@ SAMPLES = {
              description="Fetch MCP", homepage="https://example.com/fetch",
              tags='["web"]', enabled_claude=1, enabled_codex=1, enabled_gemini=0),
     ],
+    # v17+: per-app enablement lives in join tables (the enabled_* columns above
+    # are still dual-written); rows match those flags
+    "mcp_server_apps": [
+        dict(server_id="fetch", app_type="claude"),
+        dict(server_id="fetch", app_type="codex"),
+    ],
+    "skill_apps": [
+        dict(skill_id="local:fixture-skill", app_type="claude"),
+    ],
     "prompts": [
         dict(id="prompt-claude", app_type="claude", name="House rules",
              content="# Rules\nBe concise.", description="fixture prompt",

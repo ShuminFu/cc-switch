@@ -3,11 +3,13 @@
 use super::calculator::{CostBreakdown, CostCalculator, ModelPricing};
 use super::parity::{check_usage_parity, encode_log_metadata};
 use super::parser::TokenUsage;
-use crate::database::{Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
+use crate::database::{repo, Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 use crate::error::AppError;
+use crate::pricing::resolver::{find_model_pricing_row, is_placeholder_pricing_model};
 use crate::proxy::runtime_config::RuntimeConfigStore;
-use crate::services::sql_helpers::{INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL};
-use crate::services::usage_stats::{find_model_pricing_row, is_placeholder_pricing_model};
+use crate::services::sql_helpers::{
+    input_token_semantics_for_app_type, INPUT_TOKEN_SEMANTICS_TOTAL,
+};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
@@ -74,32 +76,12 @@ impl<'a> UsageLogger<'a> {
     pub fn log_request(&self, log: &RequestLog) -> Result<(), AppError> {
         let conn = crate::database::lock_conn!(self.db.conn);
 
-        let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) =
-            if let Some(cost) = &log.cost {
-                (
-                    cost.input_cost.to_string(),
-                    cost.output_cost.to_string(),
-                    cost.cache_read_cost.to_string(),
-                    cost.cache_creation_cost.to_string(),
-                    cost.total_cost.to_string(),
-                )
-            } else {
-                (
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                    "0".to_string(),
-                )
-            };
+        let costs = log
+            .cost
+            .as_ref()
+            .map(repo::usage::UsageCosts::from_breakdown)
+            .unwrap_or_else(repo::usage::UsageCosts::zero);
 
-        let created_at = chrono::Utc::now().timestamp();
-        let input_token_semantics =
-            if matches!(log.app_type.as_str(), "codex" | "gemini" | "grokbuild") {
-                INPUT_TOKEN_SEMANTICS_TOTAL
-            } else {
-                INPUT_TOKEN_SEMANTICS_FRESH
-            };
         // 非流式响应完全没有 usage 块时不是生成类响应（如 Gemini countTokens、
         // GET models），不做 parity 检查；流缺 usage 仍按全 0 打标。
         let error_message = match &self.parity_raw_usage {
@@ -110,7 +92,8 @@ impl<'a> UsageLogger<'a> {
             {
                 check_usage_parity(
                     &log.usage,
-                    input_token_semantics == INPUT_TOKEN_SEMANTICS_TOTAL,
+                    input_token_semantics_for_app_type(&log.app_type)
+                        == INPUT_TOKEN_SEMANTICS_TOTAL,
                     raw_usage.as_ref(),
                 )
                 .map(|parity| {
@@ -124,44 +107,31 @@ impl<'a> UsageLogger<'a> {
             _ => log.error_message.clone(),
         };
 
-        conn.execute(
-            "INSERT OR REPLACE INTO proxy_request_logs (
-                request_id, provider_id, app_type, model, request_model, pricing_model,
-                input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-                input_token_semantics,
-                input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
-                latency_ms, first_token_ms, status_code, error_message, session_id,
-                provider_type, is_streaming, cost_multiplier, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
-            rusqlite::params![
-                log.request_id,
-                log.provider_id,
-                log.app_type,
-                log.model,
-                log.request_model,
-                log.pricing_model,
-                log.usage.input_tokens,
-                log.usage.output_tokens,
-                log.usage.cache_read_tokens,
-                log.usage.cache_creation_tokens,
-                input_token_semantics,
-                input_cost,
-                output_cost,
-                cache_read_cost,
-                cache_creation_cost,
-                total_cost,
-                log.latency_ms as i64,
-                log.first_token_ms.map(|v| v as i64),
-                log.status_code as i64,
-                error_message,
-                log.session_id,
-                log.provider_type,
-                log.is_streaming as i64,
-                log.cost_multiplier,
-                created_at,
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("记录请求日志失败: {e}")))?;
+        repo::usage::insert_proxy_row(
+            &conn,
+            &repo::usage::ProxyUsageRow {
+                request_id: &log.request_id,
+                provider_id: &log.provider_id,
+                app_type: &log.app_type,
+                model: &log.model,
+                request_model: &log.request_model,
+                pricing_model: &log.pricing_model,
+                input_tokens: log.usage.input_tokens,
+                output_tokens: log.usage.output_tokens,
+                cache_read_tokens: log.usage.cache_read_tokens,
+                cache_creation_tokens: log.usage.cache_creation_tokens,
+                costs,
+                latency_ms: log.latency_ms,
+                first_token_ms: log.first_token_ms,
+                status_code: log.status_code,
+                error_message: error_message.as_deref(),
+                session_id: log.session_id.as_deref(),
+                provider_type: log.provider_type.as_deref(),
+                is_streaming: log.is_streaming,
+                cost_multiplier: &log.cost_multiplier,
+                created_at: chrono::Utc::now().timestamp(),
+            },
+        )?;
 
         // 通知前端使用统计有更新（200ms 防抖合并，不阻塞写入路径）
         crate::usage_events::notify_log_recorded();
@@ -445,6 +415,7 @@ impl<'a> UsageLogger<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_TOTAL;
 
     #[test]
     fn test_log_request() -> Result<(), AppError> {

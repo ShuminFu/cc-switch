@@ -10,6 +10,7 @@ import {
 } from "@/components/providers/forms/ProviderForm";
 import { openclawApi, providersApi, vscodeApi, type AppId } from "@/lib/api";
 import { useUnsavedChangesGuard } from "@/features/providers/forms/useUnsavedChangesGuard";
+import { useLiveDiffPreview } from "@/features/providers/forms/LiveDiffPreviewDialog";
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -36,6 +37,9 @@ export function EditProviderDialog({
   const closePanel = useCallback(() => onOpenChange(false), [onOpenChange]);
   // 用户主动关闭（Esc/返回）时若有未保存修改先确认；保存成功后直接关闭
   const unsavedGuard = useUnsavedChangesGuard(closePanel);
+  // 保存会改动 live 配置文件时，先并排展示 diff 并等待确认
+  const { confirmBeforeSave, dialog: liveDiffDialog } =
+    useLiveDiffPreview(appId);
 
   // 默认使用传入的 provider.settingsConfig，若当前编辑对象是"当前生效供应商"，则尝试读取实时配置替换初始值
   const [liveSettings, setLiveSettings] = useState<Record<
@@ -199,13 +203,18 @@ export function EditProviderDialog({
         ...(values.meta ? { meta: values.meta } : {}),
       };
 
+      // 用户在 diff 对话框中返回编辑：不保存，保留表单内容
+      if (!(await confirmBeforeSave(updatedProvider, provider.id))) {
+        return;
+      }
+
       await onSubmit({
         provider: updatedProvider,
         originalId: provider.id,
       });
       onOpenChange(false);
     },
-    [appId, onSubmit, onOpenChange, provider],
+    [appId, confirmBeforeSave, onSubmit, onOpenChange, provider],
   );
 
   if (!provider || !initialData) {
@@ -254,6 +263,7 @@ export function EditProviderDialog({
       )}
 
       {unsavedGuard.confirmDialog}
+      {liveDiffDialog}
     </FullScreenPanel>
   );
 }

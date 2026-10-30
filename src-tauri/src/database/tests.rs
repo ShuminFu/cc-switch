@@ -187,7 +187,6 @@ fn existing_skill_repo_selection_is_not_supplemented() {
 fn schema_migration_sets_user_version_when_missing() {
     let conn = Connection::open_in_memory().expect("open memory db");
 
-    Database::create_tables_on_conn(&conn).expect("create tables");
     assert_eq!(
         Database::get_user_version(&conn).expect("read version before"),
         0
@@ -204,7 +203,7 @@ fn schema_migration_sets_user_version_when_missing() {
 #[test]
 fn schema_migration_rejects_future_version() {
     let conn = Connection::open_in_memory().expect("open memory db");
-    Database::create_tables_on_conn(&conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("create tables");
     Database::set_user_version(&conn, SCHEMA_VERSION + 1).expect("set future version");
 
     let err =
@@ -301,9 +300,9 @@ fn schema_migration_aligns_column_defaults_and_types() {
 }
 
 #[test]
-fn schema_create_tables_include_pricing_model_columns() {
+fn schema_fresh_database_includes_pricing_model_columns() {
     let conn = Connection::open_in_memory().expect("open memory db");
-    Database::create_tables_on_conn(&conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("migrate fresh database");
 
     let multiplier = get_column_info(&conn, "proxy_config", "default_cost_multiplier");
     assert_eq!(multiplier.r#type, "TEXT");
@@ -459,109 +458,6 @@ fn migration_v10_to_v11_rebuilds_rollups_with_request_model_dimension() {
 }
 
 #[test]
-fn schema_create_tables_repairs_dev_global_profile_marker() {
-    let conn = Connection::open_in_memory().expect("open memory db");
-
-    // 模拟跑过未发布开发版的库：user_version 已是 12（迁移不会再跑），
-    // 但 current 标记还是全局 key（现按应用分组）
-    conn.execute_batch(
-        r#"
-        CREATE TABLE profiles (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            payload TEXT NOT NULL,
-            sort_order INTEGER,
-            created_at INTEGER,
-            updated_at INTEGER
-        );
-        INSERT INTO profiles (id, name, payload) VALUES ('p1', 'Project A', '{}');
-        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
-        INSERT INTO settings (key, value) VALUES ('current_profile_id', 'p1');
-        "#,
-    )
-    .expect("seed dev v12 shape");
-    Database::set_user_version(&conn, 12).expect("set user_version=12");
-
-    Database::create_tables_on_conn(&conn).expect("create tables should repair marker");
-
-    // 全局 current 标记改名为 claude 组标记，旧 key 删除
-    let claude_marker: String = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'current_profile_id_claude'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("scoped current marker");
-    assert_eq!(claude_marker, "p1");
-    let old_marker: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM settings WHERE key = 'current_profile_id'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("count old marker");
-    assert_eq!(old_marker, 0);
-
-    // 修复必须幂等：再跑一遍不应破坏已迁移的标记
-    Database::create_tables_on_conn(&conn).expect("repair is idempotent");
-    let claude_marker: String = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'current_profile_id_claude'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("scoped current marker survives");
-    assert_eq!(claude_marker, "p1");
-}
-
-#[test]
-fn schema_create_tables_repairs_legacy_proxy_config_singleton_to_per_app() {
-    let conn = Connection::open_in_memory().expect("open memory db");
-
-    // 模拟测试版 v2：user_version=2，但 proxy_config 仍是单例结构（无 app_type）
-    Database::set_user_version(&conn, 2).expect("set user_version");
-    conn.execute_batch(
-        r#"
-        CREATE TABLE proxy_config (
-            id INTEGER PRIMARY KEY,
-            enabled INTEGER NOT NULL DEFAULT 0,
-            listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
-            listen_port INTEGER NOT NULL DEFAULT 5000,
-            max_retries INTEGER NOT NULL DEFAULT 3,
-            request_timeout INTEGER NOT NULL DEFAULT 300,
-            enable_logging INTEGER NOT NULL DEFAULT 1,
-            target_app TEXT NOT NULL DEFAULT 'claude',
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO proxy_config (id, enabled) VALUES (1, 1);
-        "#,
-    )
-    .expect("seed legacy proxy_config");
-
-    Database::create_tables_on_conn(&conn).expect("create tables should repair proxy_config");
-
-    assert!(
-        Database::has_column(&conn, "proxy_config", "app_type").expect("check app_type"),
-        "proxy_config should be migrated to per-app structure"
-    );
-
-    let count: i32 = conn
-        .query_row("SELECT COUNT(*) FROM proxy_config", [], |r| r.get(0))
-        .expect("count rows");
-    assert_eq!(count, 4, "per-app proxy_config should have 4 rows");
-
-    // 新结构下应能按 app_type 查询
-    let _: i32 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM proxy_config WHERE app_type = 'claude'",
-            [],
-            |r| r.get(0),
-        )
-        .expect("query by app_type");
-}
-
-#[test]
 fn migration_from_v3_8_schema_v1_to_current_schema_v3() {
     let conn = Connection::open_in_memory().expect("open memory db");
     conn.execute("PRAGMA foreign_keys = ON;", [])
@@ -602,8 +498,7 @@ fn migration_from_v3_8_schema_v1_to_current_schema_v3() {
     )
     .expect("seed legacy skill");
 
-    // 按应用启动流程：先 create_tables（补齐新增表），再 apply_schema_migrations（按 user_version 迁移）
-    Database::create_tables_on_conn(&conn).expect("create tables");
+    // 按应用启动流程：按 user_version 逐步迁移（新增表由引入它们的步骤创建）
     Database::apply_schema_migrations_on_conn(&conn).expect("apply migrations");
 
     assert_eq!(
@@ -847,12 +742,14 @@ fn model_pricing_seed_repairs_known_outdated_builtin_prices() {
             [],
         )
         .expect("restore old DeepSeek price");
+        // 用户编辑（与 save_user_model_pricing 一样把行标为 user）
         conn.execute(
             "UPDATE model_pricing
              SET input_cost_per_million = '9',
                  output_cost_per_million = '9',
                  cache_read_cost_per_million = '9',
-                 cache_creation_cost_per_million = '0'
+                 cache_creation_cost_per_million = '0',
+                 source = 'user'
              WHERE model_id = 'glm-5.1'",
             [],
         )
@@ -899,7 +796,7 @@ fn ensure_incremental_auto_vacuum_rebuilds_existing_file_db() {
     let conn = Connection::open(&path).expect("open temp db");
     conn.execute("PRAGMA auto_vacuum = NONE;", [])
         .expect("set none auto_vacuum");
-    Database::create_tables_on_conn(&conn).expect("create tables");
+    Database::apply_schema_migrations_on_conn(&conn).expect("create tables");
 
     assert_eq!(
         Database::get_auto_vacuum_mode(&conn).expect("auto_vacuum before rebuild"),
@@ -918,4 +815,533 @@ fn ensure_incremental_auto_vacuum_rebuilds_existing_file_db() {
         2,
         "file db should persist INCREMENTAL auto_vacuum after VACUUM rebuild"
     );
+}
+
+/// 在隔离的 home 下写入一个备份文件，返回其文件名
+fn write_backup_file(
+    home: &std::path::Path,
+    filename: &str,
+    version: i32,
+    provider_id: Option<&str>,
+) -> String {
+    let backup_dir = home.join(".cc-switch").join("backups");
+    std::fs::create_dir_all(&backup_dir).expect("create backup dir");
+    let conn = Connection::open(backup_dir.join(filename)).expect("open backup db");
+    Database::apply_schema_migrations_on_conn(&conn).expect("create backup tables");
+    if let Some(id) = provider_id {
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, meta)
+             VALUES (?1, 'claude', 'Backup Provider', '{}', '{}')",
+            params![id],
+        )
+        .expect("insert backup provider");
+    }
+    Database::set_user_version(&conn, version).expect("set backup version");
+    filename.to_string()
+}
+
+fn seed_main_provider(db: &Database) {
+    let conn = db.conn.lock().expect("lock conn");
+    conn.execute(
+        "INSERT INTO providers (id, app_type, name, settings_config, meta)
+         VALUES ('main-provider', 'claude', 'Main Provider', '{}', '{}')",
+        [],
+    )
+    .expect("insert main provider");
+    Database::set_user_version(&conn, SCHEMA_VERSION).expect("set main version");
+}
+
+fn provider_ids(db: &Database) -> Vec<String> {
+    let conn = db.conn.lock().expect("lock conn");
+    let mut stmt = conn
+        .prepare("SELECT id FROM providers ORDER BY id")
+        .expect("prepare");
+    let ids = stmt
+        .query_map([], |row| row.get(0))
+        .expect("query providers")
+        .collect::<Result<Vec<String>, _>>()
+        .expect("collect providers");
+    ids
+}
+
+fn main_user_version(db: &Database) -> i32 {
+    let conn = db.conn.lock().expect("lock conn");
+    Database::get_user_version(&conn).expect("read main version")
+}
+
+#[test]
+fn restore_from_backup_rejects_newer_version_and_keeps_main_db() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let db = Database::memory().expect("create memory db");
+    seed_main_provider(&db);
+    db.set_setting("local_marker", "kept").expect("set marker");
+
+    let future = write_backup_file(
+        home.path(),
+        "future.db",
+        SCHEMA_VERSION + 1,
+        Some("future-provider"),
+    );
+    let err = db
+        .restore_from_backup(&future)
+        .expect_err("restoring a backup from a newer version must fail");
+    match &err {
+        AppError::Localized { key, .. } => assert_eq!(*key, "error.backupFromNewerVersion"),
+        other => panic!("unexpected error: {other}"),
+    }
+
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+    assert_eq!(
+        db.get_setting("local_marker")
+            .expect("read marker")
+            .as_deref(),
+        Some("kept")
+    );
+}
+
+#[test]
+fn restore_from_backup_rejects_invalid_backup_and_keeps_main_db() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let db = Database::memory().expect("create memory db");
+    seed_main_provider(&db);
+
+    // 空库（无供应商/MCP）在临时库校验阶段被拒绝
+    let empty = write_backup_file(home.path(), "empty.db", SCHEMA_VERSION, None);
+    assert!(db.restore_from_backup(&empty).is_err());
+
+    // 非 SQLite 文件
+    let garbage_path = home
+        .path()
+        .join(".cc-switch")
+        .join("backups")
+        .join("garbage.db");
+    std::fs::write(&garbage_path, b"definitely not a sqlite database file").expect("write garbage");
+    assert!(db.restore_from_backup("garbage.db").is_err());
+
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+}
+
+#[test]
+fn restore_from_backup_replaces_main_db_after_temp_validation() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let db = Database::memory().expect("create memory db");
+    seed_main_provider(&db);
+
+    let good = write_backup_file(
+        home.path(),
+        "good.db",
+        SCHEMA_VERSION,
+        Some("backup-provider"),
+    );
+    db.restore_from_backup(&good).expect("restore valid backup");
+
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["backup-provider".to_string()]);
+}
+
+fn journal_mode(db: &Database) -> String {
+    let conn = db.conn.lock().expect("lock conn");
+    journal::current_journal_mode(&conn).expect("read journal_mode")
+}
+
+#[test]
+fn init_uses_wal_with_busy_timeout_on_local_dir() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let _settings = crate::settings::scoped_settings_store();
+
+    let db = Database::init().expect("init database");
+    assert_eq!(journal_mode(&db), "wal");
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous;", [], |r| r.get(0))
+            .expect("synchronous");
+        assert_eq!(sync, 1, "WAL database should use synchronous=NORMAL");
+        let timeout: i64 = conn
+            .query_row("PRAGMA busy_timeout;", [], |r| r.get(0))
+            .expect("busy_timeout");
+        assert_eq!(timeout, 5000);
+        // 切换 WAL 不能影响新库的 incremental auto_vacuum
+        assert_eq!(
+            Database::get_auto_vacuum_mode(&conn).expect("auto_vacuum"),
+            2
+        );
+    }
+
+    // WAL 下读者不被未提交的写事务阻塞
+    let db_path = home.path().join(".cc-switch").join("cc-switch.db");
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        conn.execute_batch(
+            "BEGIN IMMEDIATE; INSERT INTO settings (key, value) VALUES ('pending', 'x');",
+        )
+        .expect("open write transaction");
+        let reader = Connection::open(&db_path).expect("open reader");
+        let count: i64 = reader
+            .query_row(
+                "SELECT COUNT(*) FROM settings WHERE key = 'pending'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("read while writer holds the lock");
+        assert_eq!(count, 0);
+        conn.execute_batch("COMMIT;").expect("commit");
+    }
+
+    // 快照备份文件不应保持 WAL（只读打开时会留下 -wal / -shm）
+    let backup = db
+        .backup_database_file()
+        .expect("backup")
+        .expect("backup path");
+    let backup_conn = Connection::open(&backup).expect("open backup");
+    assert_eq!(
+        journal::current_journal_mode(&backup_conn).expect("backup journal_mode"),
+        "delete"
+    );
+    drop(backup_conn);
+
+    // 内存快照（WebDAV / S3 导出路径）可见已提交的写入
+    let snapshot = db.snapshot_to_memory().expect("snapshot");
+    let count: i64 = snapshot
+        .query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'pending'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("query snapshot");
+    assert_eq!(count, 1);
+    let sql = db.export_sql_string_for_sync().expect("export for sync");
+    assert!(sql.contains("'pending'"));
+}
+
+#[test]
+fn init_keeps_delete_journal_in_cloud_sync_dir() {
+    let root = tempfile::tempdir().expect("tempdir");
+    // 模拟 HOME 位于 Dropbox 中：数据目录为 <tmp>/Dropbox/.cc-switch
+    let home = root.path().join("Dropbox");
+    std::fs::create_dir_all(&home).expect("create simulated cloud home");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(&home));
+    let _settings = crate::settings::scoped_settings_store();
+
+    let db = Database::init().expect("init database");
+    assert_eq!(journal_mode(&db), "delete");
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        let timeout: i64 = conn
+            .query_row("PRAGMA busy_timeout;", [], |r| r.get(0))
+            .expect("busy_timeout");
+        assert_eq!(timeout, 5000);
+    }
+    drop(db);
+    let dir = home.join(".cc-switch");
+    assert!(!dir.join("cc-switch.db-wal").exists());
+    assert!(!dir.join("cc-switch.db-shm").exists());
+}
+
+/// 把 SQL 导出中的 `PRAGMA user_version=N;` 改写为 `version`，模拟更新版本的导出
+fn with_dump_user_version(sql: &str, version: i32) -> String {
+    assert!(
+        sql.lines()
+            .any(|line| line.starts_with("PRAGMA user_version=")),
+        "dump has no user_version"
+    );
+    sql.lines()
+        .map(|line| {
+            if line.starts_with("PRAGMA user_version=") {
+                format!("PRAGMA user_version={version};")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn import_of_newer_schema_dump_is_rejected_and_leaves_db_unchanged() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let db = Database::memory().expect("create memory db");
+    seed_main_provider(&db);
+
+    let remote = Database::memory().expect("create remote db");
+    {
+        let conn = remote.conn.lock().expect("lock conn");
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, meta)
+             VALUES ('remote-provider', 'claude', 'Remote Provider', '{}', '{}')",
+            [],
+        )
+        .expect("insert remote provider");
+    }
+    let newer = with_dump_user_version(
+        &remote.export_sql_string().expect("export"),
+        SCHEMA_VERSION + 1,
+    );
+
+    for (label, result) in [
+        ("manual import", db.import_sql_string(&newer)),
+        ("sync import", db.import_sql_string_for_sync(&newer)),
+    ] {
+        match result {
+            Err(AppError::Localized { key, en, .. }) => {
+                assert_eq!(key, "backup.sql.newer_schema", "{label}");
+                assert!(en.contains("No local data was changed"), "{label}: {en}");
+            }
+            other => panic!("{label}: unexpected result: {other:?}"),
+        }
+    }
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+
+    // 头部被改写为受支持版本、但实际执行后 user_version 更新的导出同样被拒绝
+    let forged = format!(
+        "{}\nPRAGMA user_version={};\n",
+        remote.export_sql_string().expect("export"),
+        SCHEMA_VERSION + 1
+    );
+    match db.import_sql_string(&forged) {
+        Err(AppError::Localized { key, .. }) => assert_eq!(key, "backup.sql.newer_schema"),
+        other => panic!("forged dump: unexpected result: {other:?}"),
+    }
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+}
+
+/// 模拟「新版应用迁移后回退到旧版」：磁盘上的库比当前应用新，backups 里有
+/// 新版应用迁移前留下的快照（以及一个同样过新、不可恢复的备份）。
+fn setup_newer_db_with_premigration_backup(home: &std::path::Path) -> std::path::PathBuf {
+    let db = Database::init().expect("init database");
+    seed_main_provider(&db);
+    drop(db);
+    let dir = home.join(".cc-switch");
+    let db_path = dir.join("cc-switch.db");
+    let backup_dir = dir.join("backups");
+    std::fs::create_dir_all(&backup_dir).expect("create backup dir");
+    {
+        let conn = Connection::open(&db_path).expect("open main db");
+        let mut dest =
+            Connection::open(backup_dir.join("db_backup_20260101_000000.db")).expect("open dest");
+        rusqlite::backup::Backup::new(&conn, &mut dest)
+            .and_then(|b| b.step(-1))
+            .expect("copy pre-migration backup");
+        Database::set_user_version(&conn, SCHEMA_VERSION + 1).expect("bump main version");
+        conn.execute(
+            "INSERT INTO providers (id, app_type, name, settings_config, meta)
+             VALUES ('newer-provider', 'claude', 'Newer Provider', '{}', '{}')",
+            [],
+        )
+        .expect("insert newer provider");
+    }
+    write_backup_file(
+        home,
+        "db_backup_20260102_000000.db",
+        SCHEMA_VERSION + 1,
+        None,
+    );
+    std::fs::write(
+        backup_dir.join("db_backup_20260103_000000.db"),
+        b"not sqlite",
+    )
+    .expect("write corrupt backup");
+    db_path
+}
+
+#[test]
+fn db_version_too_new_payload_lists_restorable_premigration_backups() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let _settings = crate::settings::scoped_settings_store();
+    let db_path = setup_newer_db_with_premigration_backup(home.path());
+
+    let version = Database::stored_user_version_exceeds_supported(&db_path)
+        .expect("precheck")
+        .expect("database must be flagged as too new");
+    let payload = crate::init_status::db_version_too_new_payload(&db_path, version);
+
+    assert_eq!(
+        payload.kind.as_deref(),
+        Some(crate::init_status::DB_VERSION_TOO_NEW)
+    );
+    assert_eq!(payload.db_version, Some(SCHEMA_VERSION + 1));
+    assert_eq!(payload.supported_version, Some(SCHEMA_VERSION));
+    let backups = payload.restorable_backups.expect("backups listed");
+    let names: Vec<&str> = backups.iter().map(|b| b.filename.as_str()).collect();
+    assert_eq!(names, vec!["db_backup_20260101_000000.db"]);
+    assert_eq!(backups[0].db_version, SCHEMA_VERSION);
+
+    let json = serde_json::to_value(crate::init_status::db_version_too_new_payload(
+        &db_path, version,
+    ))
+    .expect("serialize payload");
+    assert_eq!(
+        json["restorable_backups"][0]["filename"],
+        json!("db_backup_20260101_000000.db")
+    );
+    assert_eq!(
+        json["restorable_backups"][0]["dbVersion"],
+        json!(SCHEMA_VERSION)
+    );
+}
+
+#[test]
+fn restore_backup_over_newer_db_downgrades_and_keeps_newer_copy() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let _settings = crate::settings::scoped_settings_store();
+    let db_path = setup_newer_db_with_premigration_backup(home.path());
+
+    match Database::restore_backup_over_newer_db("db_backup_20260102_000000.db") {
+        Err(AppError::Localized { key, .. }) => assert_eq!(key, "error.backupFromNewerVersion"),
+        other => panic!("unexpected result: {other:?}"),
+    }
+    assert!(Database::restore_backup_over_newer_db("../cc-switch.db").is_err());
+    assert_eq!(
+        Database::stored_user_version_exceeds_supported(&db_path).expect("precheck"),
+        Some(SCHEMA_VERSION + 1),
+        "a refused restore must leave the newer database in place"
+    );
+
+    let preserved = Database::restore_backup_over_newer_db("db_backup_20260101_000000.db")
+        .expect("restore pre-migration backup");
+    assert!(preserved.starts_with(&format!("db_newer_v{}_", SCHEMA_VERSION + 1)));
+    assert!(preserved.ends_with(".sqlite"));
+    let backup_dir = home.path().join(".cc-switch").join("backups");
+    let kept = Connection::open(backup_dir.join(&preserved)).expect("open preserved db");
+    assert_eq!(
+        Database::get_user_version(&kept).expect("preserved version"),
+        SCHEMA_VERSION + 1
+    );
+    let newer_rows: i64 = kept
+        .query_row(
+            "SELECT COUNT(*) FROM providers WHERE id = 'newer-provider'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count newer rows");
+    assert_eq!(newer_rows, 1, "the newer database must be preserved");
+    // 保留的新版库不是 .db 备份：不会被列出，也不会被备份保留数清理
+    assert!(Database::list_backups()
+        .expect("list backups")
+        .iter()
+        .all(|b| b.filename != preserved));
+
+    assert_eq!(
+        Database::stored_user_version_exceeds_supported(&db_path).expect("precheck"),
+        None
+    );
+    let db = Database::init().expect("app starts after downgrade restore");
+    assert_eq!(main_user_version(&db), SCHEMA_VERSION);
+    assert_eq!(provider_ids(&db), vec!["main-provider".to_string()]);
+}
+
+fn model_pricing_ids(db: &Database) -> Vec<String> {
+    let conn = db.conn.lock().expect("lock conn");
+    let mut stmt = conn
+        .prepare("SELECT model_id FROM model_pricing WHERE deleted = 0")
+        .expect("prepare pricing query");
+    stmt.query_map([], |row| row.get(0))
+        .expect("query pricing")
+        .collect::<Result<_, _>>()
+        .expect("collect pricing")
+}
+
+#[test]
+fn deleted_builtin_model_pricing_stays_deleted_after_restart() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+    let builtin = "claude-sonnet-5";
+
+    {
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::init().expect("init database");
+        assert!(model_pricing_ids(&db).iter().any(|id| id == builtin));
+
+        db.delete_model_pricing(builtin)
+            .expect("delete builtin pricing");
+        // 自定义定价不需要删除标记
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute(
+                "INSERT INTO model_pricing (model_id, display_name, input_cost_per_million,
+                     output_cost_per_million) VALUES ('my-custom-model', 'Custom', '1', '2')",
+                [],
+            )
+            .expect("insert custom pricing");
+        }
+        db.delete_model_pricing("my-custom-model")
+            .expect("delete custom pricing");
+        assert_eq!(
+            crate::settings::deleted_builtin_model_pricing_ids(),
+            vec![builtin.to_string()]
+        );
+
+        // 读取前的 seed（旧的读取路径）也不能把它插回来
+        db.ensure_model_pricing_seeded().expect("ensure seeded");
+        assert!(!model_pricing_ids(&db).iter().any(|id| id == builtin));
+    }
+
+    // 模拟重启：重新从 settings.json 加载设置并重新打开数据库
+    {
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::init().expect("re-init database");
+        let ids = model_pricing_ids(&db);
+        assert!(
+            !ids.iter().any(|id| id == builtin),
+            "deleted builtin pricing was reseeded on restart"
+        );
+        assert!(ids.iter().any(|id| id == "claude-opus-4-8"));
+
+        // 目录更新（新版本给这一行换了价格）也不会恢复它
+        let next = crate::pricing::catalog::next_catalog_for_test(&[builtin]);
+        crate::pricing::catalog::sync_with(&db.conn.lock().expect("lock conn"), &next, &[])
+            .expect("apply catalog update");
+        assert!(!model_pricing_ids(&db).iter().any(|id| id == builtin));
+
+        // 仅清除 settings 中的删除标记不会恢复它：墓碑在数据库里
+        crate::settings::set_builtin_model_pricing_deleted(builtin, false)
+            .expect("clear deleted marker");
+    }
+
+    {
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::init().expect("re-init database");
+        assert!(!model_pricing_ids(&db).iter().any(|id| id == builtin));
+
+        // 用户重新添加同名定价：覆盖墓碑，行变为用户行
+        db.save_user_model_pricing(
+            builtin,
+            "Mine",
+            crate::pricing::catalog::CatalogPrice {
+                input: "1".into(),
+                output: "2".into(),
+                cache_read: "0".into(),
+                cache_creation: "0".into(),
+            },
+        )
+        .expect("re-add pricing");
+    }
+
+    {
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::init().expect("re-init database");
+        assert!(model_pricing_ids(&db).iter().any(|id| id == builtin));
+        assert!(crate::settings::deleted_builtin_model_pricing_ids().is_empty());
+        let name: String = db
+            .conn
+            .lock()
+            .expect("lock conn")
+            .query_row(
+                "SELECT display_name FROM model_pricing WHERE model_id = ?1",
+                [builtin],
+                |row| row.get(0),
+            )
+            .expect("query re-added pricing");
+        assert_eq!(name, "Mine", "a re-added row is user-owned");
+    }
 }

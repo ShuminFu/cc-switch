@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 #[cfg(any(target_os = "macos", windows))]
 use crate::config::get_home_dir;
-use crate::config::{atomic_write, delete_file, read_json_file, write_json_file};
+use crate::config::{atomic_write, delete_file, write_json_file};
 use crate::database::Database;
 use crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID;
 use crate::error::AppError;
@@ -1051,10 +1051,10 @@ fn build_gateway_profile(
 }
 
 fn read_json_or_empty(path: &Path) -> Result<Value, AppError> {
-    let value = if path.exists() {
-        read_json_file(path)?
-    } else {
-        json!({})
+    // 写入预览期间读到本次已捕获的待写内容（恢复官方时先写 deploymentMode 再剥 enterpriseConfig）
+    let value = match crate::config::read_text_file_if_exists(path)? {
+        Some(content) => serde_json::from_str(&content).map_err(|e| AppError::json(path, e))?,
+        None => json!({}),
     };
 
     if value.is_object() {
@@ -1118,10 +1118,6 @@ fn write_deployment_mode(path: &Path, mode: &str) -> Result<(), AppError> {
 }
 
 fn remove_cc_switch_enterprise_config(path: &Path) -> Result<(), AppError> {
-    if !path.exists() {
-        return Ok(());
-    }
-
     let mut value = read_json_or_empty(path)?;
     let Some(obj) = value.as_object_mut() else {
         return Ok(());
@@ -1328,6 +1324,7 @@ fn unsupported_platform_error() -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::read_json_file;
     use crate::database::Database;
     use crate::provider::{ClaudeDesktopModelRoute, ProviderMeta};
     use serde_json::json;
@@ -2127,6 +2124,52 @@ mod tests {
         let meta: Value = read_json_file(&paths.meta_path).expect("read meta");
         assert_eq!(meta["appliedId"], json!(PROFILE_ID));
         assert!(meta["entries"].as_array().is_some());
+    }
+
+    #[test]
+    fn claude_desktop_restore_preview_matches_real_restore() {
+        let temp = TempDir::new().expect("tempdir");
+        let paths = test_paths(temp.path());
+        let provider = direct_provider("direct");
+        let db = test_db();
+
+        apply_provider_to_paths(&db, &provider, &paths).expect("apply provider");
+        write_json_file(
+            &paths.threep_config_path,
+            &json!({
+                "deploymentMode": "3p",
+                "enterpriseConfig": {
+                    "inferenceProvider": "gateway",
+                    "keep": true
+                }
+            }),
+        )
+        .expect("seed 3p enterprise config");
+        let threep_before = fs::read(&paths.threep_config_path).expect("read 3p");
+
+        // 预览：同一流程里先写 deploymentMode 再剥 enterpriseConfig，第二步要读到第一步的结果
+        let (result, writes) = crate::config::capture_writes(|| restore_official_at_paths(&paths));
+        result.expect("preview restore");
+        assert_eq!(
+            fs::read(&paths.threep_config_path).expect("read 3p"),
+            threep_before,
+            "preview must not touch disk"
+        );
+        let previewed = writes
+            .iter()
+            .rev()
+            .find(|write| write.path == paths.threep_config_path)
+            .and_then(|write| write.contents.clone())
+            .expect("3p config captured");
+
+        restore_official_at_paths(&paths).expect("restore official");
+        assert_eq!(
+            fs::read(&paths.threep_config_path).expect("read 3p"),
+            previewed
+        );
+        let threep: Value = read_json_file(&paths.threep_config_path).expect("read 3p config");
+        assert_eq!(threep["deploymentMode"], json!("1p"));
+        assert_eq!(threep["enterpriseConfig"], json!({"keep": true}));
     }
 
     #[test]

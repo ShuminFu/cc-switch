@@ -17,6 +17,9 @@
 //! `INSTA_UPDATE=always cargo test --test config_writers` (or
 //! `cargo insta review`) and review the diff.
 
+// 测试夹具直接写文件即可，无需走 atomic_write（见 clippy.toml）
+#![allow(clippy::disallowed_methods)]
+
 mod support;
 
 use std::collections::HashMap;
@@ -93,17 +96,16 @@ impl LiveEnv {
     fn with_settings(base: AppSettings) -> Self {
         let env = TestEnv::new();
         let home = env.home().to_path_buf();
-        let dir = |rel: &str| Some(home.join(rel).to_string_lossy().into_owned());
-        update_settings(AppSettings {
-            claude_config_dir: dir(".claude"),
-            codex_config_dir: dir(".codex"),
-            gemini_config_dir: dir(".gemini"),
-            grok_config_dir: dir(".grok"),
-            opencode_config_dir: dir(".config/opencode"),
-            openclaw_config_dir: dir(".openclaw"),
-            hermes_config_dir: dir(".hermes"),
-            ..base
-        })
+        let dir = |rel: &str| home.join(rel).to_string_lossy().into_owned();
+        update_settings(
+            base.with_config_dir(&AppType::Claude, dir(".claude"))
+                .with_config_dir(&AppType::Codex, dir(".codex"))
+                .with_config_dir(&AppType::Gemini, dir(".gemini"))
+                .with_config_dir(&AppType::GrokBuild, dir(".grok"))
+                .with_config_dir(&AppType::OpenCode, dir(".config/opencode"))
+                .with_config_dir(&AppType::OpenClaw, dir(".openclaw"))
+                .with_config_dir(&AppType::Hermes, dir(".hermes")),
+        )
         .expect("pin app config dirs");
         Self { home, _env: env }
     }
@@ -268,6 +270,42 @@ fn codex_config_toml_and_auth_json() {
             + &env.render_files(&[".codex/auth.json", ".codex/config.toml"]);
         assert_snapshot(W, variant, &text);
     }
+}
+
+/// `auth.json` and `config.toml` are written as a pair: when the second write
+/// fails, the first one is rolled back so Codex never sees a half-switched live.
+#[cfg(unix)]
+#[test]
+fn codex_failed_config_write_rolls_back_auth_json() {
+    const W: &str = "codex";
+    let env = LiveEnv::new();
+    let auth = fixture(W, "auth.json");
+    env.seed(".codex/auth.json", &auth);
+    // A dangling config.toml symlink whose target's parent is a regular file:
+    // the atomic write follows the link and cannot create the parent dir.
+    env.seed(".codex/blocker", "");
+    std::os::unix::fs::symlink(
+        env.path(".codex/blocker/config.toml"),
+        env.path(".codex/config.toml"),
+    )
+    .expect("symlink config.toml");
+
+    let result = write_live(AppType::Codex, W, "relay", "Relay");
+    assert!(result.is_err(), "config.toml write should fail: {result:?}");
+    assert_eq!(
+        fs::read_to_string(env.path(".codex/auth.json")).expect("read auth.json"),
+        auth,
+        "auth.json must be rolled back when config.toml cannot be written"
+    );
+
+    // Without the blocker the same write does replace auth.json, so the
+    // assertion above really exercised the rollback.
+    fs::remove_file(env.path(".codex/config.toml")).expect("remove symlink");
+    write_live(AppType::Codex, W, "relay", "Relay").expect("write codex live");
+    assert_ne!(
+        fs::read_to_string(env.path(".codex/auth.json")).expect("read auth.json"),
+        auth
+    );
 }
 
 #[test]
@@ -582,6 +620,29 @@ async fn written_file_modes() {
     settings.set_omit_expression(true);
     settings.set_description("file modes after every writer (seeded files are 0644)");
     settings.bind(|| insta::assert_snapshot!("file_modes", text));
+}
+
+/// A missing `~/.claude/config.json` is created through `atomic_write`, so it
+/// starts owner-only instead of inheriting the umask (CCS-082).
+#[cfg(unix)]
+#[test]
+fn claude_plugin_creates_new_config_owner_only() {
+    let env = LiveEnv::new();
+    let path = env.path(".claude/config.json");
+    assert!(!path.exists());
+
+    assert!(kit::write_claude_plugin_config().expect("claude plugin"));
+
+    assert_private_mode(&path);
+    let leftovers: Vec<_> = fs::read_dir(env.path(".claude"))
+        .expect("read .claude")
+        .map(|e| e.expect("entry").file_name())
+        .filter(|name| name != "config.json")
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "temp files left behind: {leftovers:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

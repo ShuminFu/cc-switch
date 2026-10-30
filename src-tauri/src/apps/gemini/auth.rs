@@ -135,7 +135,7 @@ pub(crate) fn ensure_google_oauth_security_flag(provider: &Provider) -> Result<(
     }
 
     // Write to Gemini directory settings.json (~/.gemini/settings.json)
-    use crate::gemini_config::write_google_oauth_settings;
+    use super::config::write_google_oauth_settings;
     write_google_oauth_settings()?;
 
     Ok(())

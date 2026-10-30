@@ -1,9 +1,12 @@
+// 测试夹具直接写文件即可，无需走 atomic_write（见 clippy.toml）
+#![allow(clippy::disallowed_methods)]
+
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
 use cc_switch_lib::{
     get_codex_auth_path, get_codex_config_path, import_default_config_test_hook, read_json_file,
-    switch_provider_test_hook, write_codex_live_atomic, AppError, AppType, McpApps, McpServer,
+    switch_provider_test_hook, write_codex_live_atomic, AppError, AppSet, AppType, McpServer,
     MultiAppConfig, Provider, ProviderService,
 };
 
@@ -361,14 +364,7 @@ command = "say"
                 "type": "stdio",
                 "command": "echo"
             }),
-            apps: McpApps {
-                claude: false,
-                codex: true, // 启用 Codex
-                gemini: false,
-                grokbuild: false,
-                opencode: false,
-                hermes: false,
-            },
+            apps: AppSet::from_apps(&[AppType::Codex]),
             description: None,
             homepage: None,
             docs: None,

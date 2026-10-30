@@ -84,9 +84,10 @@ impl ProfileScope {
     }
 }
 
-/// 按 app 分槽的载荷容器；字段名与 AppType 的 serde 形式一致
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+/// 按 app 分槽的载荷容器；字段名与 AppType 的 serde 形式一致。
+/// 读取时键经注册表别名归一（如 `claude_desktop` → `claude-desktop`），
+/// 规范键优先于别名，未知应用的槽位忽略。
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PerApp<T> {
     pub claude: T,
     #[serde(rename = "claude-desktop")]
@@ -111,6 +112,47 @@ impl<T> PerApp<T> {
             AppType::Codex => Some(&mut self.codex),
             _ => None,
         }
+    }
+}
+
+impl<'de, T: Deserialize<'de> + Default> Deserialize<'de> for PerApp<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct PerAppVisitor<T>(std::marker::PhantomData<T>);
+
+        impl<'de, T: Deserialize<'de> + Default> serde::de::Visitor<'de> for PerAppVisitor<T> {
+            type Value = PerApp<T>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a map keyed by app id")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut out = PerApp::<T>::default();
+                let mut canonical_seen: HashSet<String> = HashSet::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    let descriptor = crate::apps::registry::find_by_id(&key.trim().to_lowercase());
+                    let Some(slot) = descriptor.and_then(|d| out.get_mut(&d.app)) else {
+                        map.next_value::<serde::de::IgnoredAny>()?;
+                        continue;
+                    };
+                    let slug = descriptor.map(|d| d.slug).unwrap_or_default();
+                    if key == slug {
+                        canonical_seen.insert(key);
+                        *slot = map.next_value()?;
+                    } else if canonical_seen.contains(slug) {
+                        map.next_value::<serde::de::IgnoredAny>()?;
+                    } else {
+                        *slot = map.next_value()?;
+                    }
+                }
+                Ok(out)
+            }
+        }
+
+        deserializer.deserialize_map(PerAppVisitor(std::marker::PhantomData))
     }
 }
 
@@ -504,6 +546,28 @@ mod tests {
         assert!(json.contains("\"codex\""));
         let back: ProfilePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back, payload);
+    }
+
+    #[test]
+    fn test_payload_maps_app_keys_through_registry_aliases() {
+        let back: ProfilePayload = serde_json::from_str(
+            r#"{
+                "providers": {"claude_desktop": "d1", "codex": "c1", "ninth": "n1"},
+                "mcp": {"claudedesktop": ["m1"], "claude-desktop": ["m2"]}
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(back.providers.claude_desktop, Some("d1".to_string()));
+        assert_eq!(back.providers.codex, Some("c1".to_string()));
+        assert_eq!(
+            back.mcp.claude_desktop,
+            Some(ids(&["m2"])),
+            "canonical key wins over alias"
+        );
+        // 写回时只用规范键
+        let json = serde_json::to_string(&back).unwrap();
+        assert!(json.contains("\"claude-desktop\":\"d1\""));
+        assert!(!json.contains("claude_desktop"));
     }
 
     #[test]

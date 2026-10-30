@@ -135,6 +135,19 @@ pub fn get_request_logs(
         .map_err(IpcError::from)
 }
 
+/// 按模型汇总未计价请求（导出 CSV 用）
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub fn get_unpriced_model_stats(
+    state: State<'_, AppState>,
+    filters: LogFilters,
+) -> Result<Vec<UnpricedModelStats>, IpcError> {
+    state
+        .db
+        .get_unpriced_model_stats(&filters)
+        .map_err(IpcError::from)
+}
+
 /// 获取单个请求详情
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
@@ -153,47 +166,24 @@ pub fn get_request_detail(
 #[cfg_attr(test, specta::specta)]
 pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, IpcError> {
     log::info!("获取模型定价列表");
-    state.db.ensure_model_pricing_seeded()?;
-
     let db = state.db.clone();
     let conn = crate::database::lock_conn!(db.conn);
 
-    // 检查表是否存在
-    let table_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='model_pricing'",
-            [],
-            |row| row.get::<_, i64>(0).map(|count| count > 0),
-        )
-        .unwrap_or(false);
-
-    if !table_exists {
+    let Some(rows) = crate::database::repo::pricing::list_active(&conn)? else {
         log::error!("model_pricing 表不存在,可能需要重启应用以触发数据库迁移");
         return Ok(Vec::new());
-    }
-
-    let mut stmt = conn.prepare(
-        "SELECT model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-         FROM model_pricing
-         ORDER BY display_name",
-    )?;
-
-    let rows = stmt.query_map([], |row| {
-        Ok(ModelPricingInfo {
-            model_id: row.get(0)?,
-            display_name: row.get(1)?,
-            input_cost_per_million: row.get(2)?,
-            output_cost_per_million: row.get(3)?,
-            cache_read_cost_per_million: row.get(4)?,
-            cache_creation_cost_per_million: row.get(5)?,
+    };
+    let pricing: Vec<ModelPricingInfo> = rows
+        .into_iter()
+        .map(|row| ModelPricingInfo {
+            model_id: row.model_id,
+            display_name: row.display_name,
+            input_cost_per_million: row.price.input,
+            output_cost_per_million: row.price.output,
+            cache_read_cost_per_million: row.price.cache_read,
+            cache_creation_cost_per_million: row.price.cache_creation,
         })
-    })?;
-
-    let mut pricing = Vec::new();
-    for row in rows {
-        pricing.push(row?);
-    }
+        .collect();
 
     log::info!("成功获取 {} 条模型定价数据", pricing.len());
     Ok(pricing)
@@ -254,24 +244,16 @@ pub fn update_model_pricing(
         }
     }
 
-    {
-        let conn = crate::database::lock_conn!(db.conn);
-        conn.execute(
-            "INSERT OR REPLACE INTO model_pricing (
-                model_id, display_name, input_cost_per_million, output_cost_per_million,
-                cache_read_cost_per_million, cache_creation_cost_per_million
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![
-                model_id,
-                display_name,
-                input_cost.trim(),
-                output_cost.trim(),
-                cache_read_cost.trim(),
-                cache_creation_cost.trim()
-            ],
-        )
-        .map_err(|e| AppError::Database(format!("更新模型定价失败: {e}")))?;
-    }
+    db.save_user_model_pricing(
+        &model_id,
+        &display_name,
+        crate::pricing::catalog::CatalogPrice {
+            input: input_cost.trim().to_string(),
+            output: output_cost.trim().to_string(),
+            cache_read: cache_read_cost.trim().to_string(),
+            cache_creation: cache_creation_cost.trim().to_string(),
+        },
+    )?;
 
     if let Err(e) = db.backfill_missing_usage_costs_for_model(&model_id) {
         log::warn!("模型定价更新后回填历史用量成本失败 (model_id={model_id}): {e}");
@@ -298,14 +280,7 @@ pub fn check_provider_limits(
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), IpcError> {
-    let db = state.db.clone();
-    let conn = crate::database::lock_conn!(db.conn);
-
-    conn.execute(
-        "DELETE FROM model_pricing WHERE model_id = ?1",
-        rusqlite::params![model_id],
-    )
-    .map_err(|e| AppError::Database(format!("删除模型定价失败: {e}")))?;
+    state.db.delete_model_pricing(&model_id)?;
 
     log::info!("已删除模型定价: {model_id}");
     Ok(())

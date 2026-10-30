@@ -12,9 +12,12 @@
 //! ```text
 //! database/
 //! ├── mod.rs        - Database 结构体 + 初始化
-//! ├── schema.rs     - 表结构定义 + Schema 迁移
+//! ├── schema.rs     - Schema 辅助方法 + 内置模型定价
+//! ├── migrations/   - 版本化迁移（MIGRATIONS、v1 冻结基线、schema_migrations 审计表）
 //! ├── backup.rs     - SQL 导入导出 + 快照备份
+//! ├── journal.rs    - journal_mode / synchronous / busy_timeout
 //! ├── migration.rs  - JSON → SQLite 数据迁移
+//! ├── repo/         - 使用量 / 定价 / 会话导入游标仓库（UsageQuery、UsageSource）
 //! └── dao/          - 数据访问对象
 //!     ├── providers.rs
 //!     ├── mcp.rs
@@ -25,7 +28,10 @@
 
 pub(crate) mod backup;
 mod dao;
+pub(crate) mod journal;
 mod migration;
+mod migrations;
+pub(crate) mod repo;
 mod schema;
 
 #[cfg(test)]
@@ -39,6 +45,7 @@ pub(crate) use dao::proxy::{
     validate_cost_multiplier, validate_pricing_source, PRICING_SOURCE_REQUEST,
     PRICING_SOURCE_RESPONSE,
 };
+pub(crate) use dao::usage_rollup::local_midnight_timestamp;
 pub use dao::FailoverQueueItem;
 pub use dao::Profile;
 
@@ -52,8 +59,8 @@ use std::sync::{Arc, Mutex};
 // DAO 方法通过 impl Database 提供，无需额外导出
 
 /// 当前 Schema 版本号
-/// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-pub const SCHEMA_VERSION: i32 = 15;
+/// 每次修改表结构时递增，并在 `migrations::MIGRATIONS` 末尾追加对应的迁移步骤
+pub const SCHEMA_VERSION: i32 = 18;
 
 /// 安全地序列化 JSON，避免 unwrap panic
 pub(crate) fn to_json_string<T: Serialize>(value: &T) -> Result<String, AppError> {
@@ -109,7 +116,7 @@ fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>)
 }
 
 impl Database {
-    /// 初始化数据库连接并创建表
+    /// 初始化数据库连接并应用 Schema 迁移（全新数据库从 v0 迁移）
     ///
     /// 数据库文件位于 `~/.cc-switch/cc-switch.db`
     pub fn init() -> Result<Self, AppError> {
@@ -132,32 +139,40 @@ impl Database {
             conn.execute("PRAGMA auto_vacuum = INCREMENTAL;", [])
                 .map_err(|e| AppError::Database(e.to_string()))?;
         }
+        // WAL + busy_timeout（云同步目录 / 网络文件系统保持 DELETE）；
+        // 必须在 auto_vacuum 之后：切换 WAL 会写入库头，之后新库无法再设置 auto_vacuum
+        if let Some(parent) = db_path.parent() {
+            journal::configure_file_connection(&conn, parent)?;
+        }
         let config_generation = Arc::new(AtomicU64::new(0));
         register_db_change_hook(&conn, config_generation.clone());
+
+        // Pre-migration backup: must run before any DDL (schema migrations), for every
+        // older version (v0 too). JSON-era upgrades back up config.json before loading it,
+        // see `backup_legacy_config_json`.
+        let backup_id = match Self::create_premigration_backup(&conn, db_exists) {
+            Ok(id) => id,
+            Err(e) => {
+                log::warn!("Pre-migration backup failed, continuing migration: {e}");
+                None
+            }
+        };
+        let with_backup_hint = |e: AppError| match &backup_id {
+            Some(id) => AppError::Database(format!(
+                "{e}\n迁移前备份 ID：{id}（位于 {}），可用于恢复数据",
+                get_app_config_dir().join("backups").display()
+            )),
+            None => e,
+        };
 
         let db = Self {
             conn: Mutex::new(conn),
             config_generation,
         };
-        db.create_tables()?;
-
-        // Pre-migration backup: only when upgrading from an existing database
-        {
-            let conn = lock_conn!(db.conn);
-            let version = Self::get_user_version(&conn)?;
-            drop(conn);
-            if version > 0 && version < SCHEMA_VERSION {
-                log::info!(
-                    "Creating pre-migration database backup (v{version} → v{SCHEMA_VERSION})"
-                );
-                if let Err(e) = db.backup_database_file() {
-                    log::warn!("Pre-migration backup failed, continuing migration: {e}");
-                }
-            }
-        }
-
-        db.apply_schema_migrations()?;
-        if let Err(e) = db.ensure_incremental_auto_vacuum() {
+        db.apply_schema_migrations().map_err(&with_backup_hint)?;
+        // 本次启动已做过迁移前快照时不再重复备份：否则在较小的备份保留数（最小 1）下，
+        // 重建前的备份会把迁移前快照清理掉
+        if let Err(e) = db.ensure_incremental_auto_vacuum(backup_id.is_none()) {
             log::warn!("Failed to ensure incremental auto-vacuum: {e}");
         }
         db.ensure_model_pricing_seeded()?;
@@ -212,10 +227,16 @@ impl Database {
             conn: Mutex::new(conn),
             config_generation,
         };
-        db.create_tables()?;
+        db.apply_schema_migrations()?;
         db.ensure_model_pricing_seeded()?;
 
         Ok(db)
+    }
+
+    /// 应用 Schema 迁移
+    pub(crate) fn apply_schema_migrations(&self) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        Self::apply_schema_migrations_on_conn(&conn)
     }
 
     /// 配置类数据的变更代数。
@@ -272,7 +293,11 @@ impl Database {
         Ok(true)
     }
 
-    pub(crate) fn ensure_incremental_auto_vacuum(&self) -> Result<bool, AppError> {
+    /// `backup_before_rebuild` 为 true 时，在 VACUUM 重建已有数据库之前先备份
+    pub(crate) fn ensure_incremental_auto_vacuum(
+        &self,
+        backup_before_rebuild: bool,
+    ) -> Result<bool, AppError> {
         let mode = {
             let conn = lock_conn!(self.conn);
             Self::get_auto_vacuum_mode(&conn)?
@@ -289,7 +314,9 @@ impl Database {
             log::info!(
                 "Detected auto_vacuum={mode}, rebuilding database to enable incremental vacuum"
             );
-            self.backup_database_file()?;
+            if backup_before_rebuild {
+                self.backup_database_file()?;
+            }
         }
 
         let rebuilt = {

@@ -1115,6 +1115,17 @@
       "hint": "Save anyway? Switching to this provider may fail; you can fill these in later.",
       "saveAnyway": "Save anyway"
     },
+    "liveDiff": {
+      "title": "Review changes to config files",
+      "description": "Saving writes these changes to the app's live config files. Check them before saving.",
+      "current": "Current",
+      "afterSave": "After save",
+      "newFile": "New file",
+      "deletedFile": "Will be deleted",
+      "unchangedLines": "{{count}} unchanged lines",
+      "back": "Back to editing",
+      "confirm": "Save"
+    },
     "unsavedChanges": {
       "title": "Discard unsaved changes?",
       "message": "You have unsaved edits in this provider. Closing now will discard them.",
@@ -1704,7 +1715,12 @@
     "modelsDevDefaultHint": "Showing the {{shown}} most recently released models (of {{total}}) — type to search all",
     "cacheReadCostPerMillion": "Cache Read Cost (per million tokens, USD)",
     "cacheCreationCostPerMillion": "Cache Write Cost (per million tokens, USD)",
-    "unpriced": "Unpriced"
+    "unpriced": "Unpriced",
+    "unpricedOnly": "Unpriced only",
+    "exportUnpriced": "Export unpriced CSV",
+    "exportUnpricedEmpty": "No unpriced requests in the current range",
+    "exportUnpricedSuccess": "Exported {{count}} unpriced models",
+    "exportUnpricedFailed": "Failed to export unpriced requests: {{detail}}"
   },
   "usageScript": {
     "title": "Configure Usage Query",
@@ -1809,7 +1825,12 @@
     "retry": "Retry upgrade",
     "openReleases": "Open releases page",
     "openConfigDir": "Open config folder",
-    "quit": "Quit"
+    "quit": "Quit",
+    "restoreTitle": "Restore a pre-upgrade backup",
+    "restoreDescription": "These backups were taken before a newer version upgraded the database and can be opened by this version. Restoring replaces the current database (a copy of it is kept in the backups folder) and restarts the app; changes made after the backup are not included.",
+    "backupInfo": "Database v{{version}} · {{date}}",
+    "restoreBackup": "Restore",
+    "restoreConfirm": "Restore {{filename}}? The current database will be kept as a copy in the backups folder, and the app will restart."
   },
   "errors": {
     "usage_query_failed": "Usage query failed",

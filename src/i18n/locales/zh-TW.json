@@ -1115,6 +1115,17 @@
       "hint": "仍要儲存嗎？儲存後切換此供應商時可能失敗，可以之後再補全。",
       "saveAnyway": "仍要儲存"
     },
+    "liveDiff": {
+      "title": "確認設定檔變更",
+      "description": "儲存後將把以下變更寫入應用的 live 設定檔，請確認後再儲存。",
+      "current": "目前",
+      "afterSave": "儲存後",
+      "newFile": "新檔案",
+      "deletedFile": "將被刪除",
+      "unchangedLines": "{{count}} 行未變更",
+      "back": "返回編輯",
+      "confirm": "儲存"
+    },
     "unsavedChanges": {
       "title": "放棄未儲存的變更？",
       "message": "此供應商有尚未儲存的修改，現在關閉將遺失這些修改。",
@@ -1704,7 +1715,12 @@
     "modelsDevDefaultHint": "預設展示最新發布的 {{shown}} 個模型（共 {{total}} 個），輸入關鍵字可全量搜尋",
     "cacheReadCostPerMillion": "快取讀取成本 (每百萬 tokens, USD)",
     "cacheCreationCostPerMillion": "快取寫入成本 (每百萬 tokens, USD)",
-    "unpriced": "未定價"
+    "unpriced": "未定價",
+    "unpricedOnly": "僅看未定價",
+    "exportUnpriced": "匯出未定價 CSV",
+    "exportUnpricedEmpty": "目前範圍內沒有未定價請求",
+    "exportUnpricedSuccess": "已匯出 {{count}} 個未定價模型",
+    "exportUnpricedFailed": "匯出未定價請求失敗：{{detail}}"
   },
   "usageScript": {
     "title": "設定用量查詢",
@@ -1809,7 +1825,12 @@
     "retry": "重試升級",
     "openReleases": "開啟發佈頁",
     "openConfigDir": "開啟設定目錄",
-    "quit": "結束"
+    "quit": "結束",
+    "restoreTitle": "還原升級前的備份",
+    "restoreDescription": "以下備份是較新版本升級資料庫之前留下的，目前版本可以開啟。還原會取代目前的資料庫（目前的資料庫會另存一份到備份資料夾）並重新啟動應用程式；備份之後的變更不會包含在內。",
+    "backupInfo": "資料庫 v{{version}} · {{date}}",
+    "restoreBackup": "還原",
+    "restoreConfirm": "確定還原 {{filename}}？目前的資料庫會另存一份到備份資料夾，應用程式隨後將重新啟動。"
   },
   "errors": {
     "usage_query_failed": "用量查詢失敗",

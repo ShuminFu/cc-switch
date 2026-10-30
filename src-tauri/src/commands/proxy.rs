@@ -571,7 +571,7 @@ pub async fn export_proxy_bug_report<R: tauri::Runtime>(
     let path = picked
         .into_path()
         .map_err(|e| AppError::Message(format!("无效的保存路径: {e}")))?;
-    std::fs::write(&path, zip).map_err(|e| AppError::io(&path, e))?;
+    crate::config::atomic_write(&path, &zip)?;
     Ok(Some(path.display().to_string()))
 }
 

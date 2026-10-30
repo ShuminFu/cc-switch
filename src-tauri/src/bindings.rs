@@ -42,6 +42,7 @@ fn builder() -> Builder<tauri::Wry> {
             get_provider_stats,
             get_model_stats,
             get_request_logs,
+            get_unpriced_model_stats,
             get_request_detail,
             get_model_pricing,
             update_model_pricing,
@@ -54,6 +55,7 @@ fn builder() -> Builder<tauri::Wry> {
         .typ::<crate::app_config::AppType>()
         .typ::<crate::provider::Provider>()
         .typ::<crate::proxy::types::ProxyStatus>()
+        .typ::<crate::services::provider::LiveWritePreview>()
         .typ::<crate::error::IpcError>()
         .constant("COMMANDS", registered_commands())
         // 现有前端 `invoke` 封装在失败时抛出归一化的 IpcError

@@ -2,7 +2,7 @@
 //!
 //! Handles importing provider configurations via ccswitch:// URLs.
 
-use super::utils::{decode_base64_param, infer_homepage_from_endpoint};
+use super::utils::{decode_base64_param, infer_homepage_from_endpoint, validate_no_control_chars};
 use super::DeepLinkImportRequest;
 use crate::error::AppError;
 use crate::provider::{ClaudeDesktopMode, Provider, ProviderMeta, UsageScript};
@@ -161,6 +161,14 @@ pub(crate) fn build_provider_from_request(
     app_type: &AppType,
     request: &DeepLinkImportRequest,
 ) -> Result<Provider, AppError> {
+    // Values merged from an inline config bypass the URL parser checks
+    if let Some(api_key) = &request.api_key {
+        validate_no_control_chars(api_key, "apiKey")?;
+    }
+    if let Some(model) = &request.model {
+        validate_no_control_chars(model, "model")?;
+    }
+
     let settings_config = match app_type {
         AppType::Claude | AppType::ClaudeDesktop => build_claude_settings(request),
         AppType::Codex => build_codex_settings(request),

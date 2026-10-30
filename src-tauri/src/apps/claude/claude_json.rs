@@ -119,6 +119,117 @@ fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
     atomic_write(path, json.as_bytes())
 }
 
+/// 读-改-写冲突时最多尝试的次数（含首次）
+const MAX_UPDATE_ATTEMPTS: usize = 3;
+
+/// 读取时记录的文件指纹：长度、修改时间与内容哈希；文件不存在时为 None
+#[derive(Debug, PartialEq, Eq)]
+struct FileFingerprint {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    hash: [u8; 32],
+}
+
+fn fingerprint_of(path: &Path, bytes: &[u8]) -> Result<FileFingerprint, AppError> {
+    use sha2::{Digest, Sha256};
+    let meta = fs::metadata(path).map_err(|e| AppError::io(path, e))?;
+    Ok(FileFingerprint {
+        len: meta.len(),
+        modified: meta.modified().ok(),
+        hash: Sha256::digest(bytes).into(),
+    })
+}
+
+/// 读取文件内容及其指纹；文件不存在时返回空对象与 None
+fn read_with_fingerprint(path: &Path) -> Result<(Value, Option<FileFingerprint>), AppError> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((serde_json::json!({}), None));
+        }
+        Err(e) => return Err(AppError::io(path, e)),
+    };
+    let fingerprint = fingerprint_of(path, &bytes)?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|e| AppError::json(path, e))?;
+    Ok((value, Some(fingerprint)))
+}
+
+/// 仅重新计算指纹（不解析 JSON），用于写入前确认文件未被他人修改
+fn current_fingerprint(path: &Path) -> Result<Option<FileFingerprint>, AppError> {
+    match fs::read(path) {
+        Ok(bytes) => fingerprint_of(path, &bytes).map(Some),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(AppError::io(path, e)),
+    }
+}
+
+#[cfg(test)]
+type BeforeCommitHook = Box<dyn FnMut(&Path)>;
+
+#[cfg(test)]
+thread_local! {
+    /// 测试钩子：在修改完成、写入前的指纹校验之前调用，用于模拟 Claude Code 并发保存
+    static BEFORE_COMMIT_HOOK: std::cell::RefCell<Option<BeforeCommitHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn run_before_commit_hook(path: &Path) {
+    BEFORE_COMMIT_HOOK.with(|hook| {
+        if let Some(f) = hook.borrow_mut().as_mut() {
+            f(path);
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn run_before_commit_hook(_path: &Path) {}
+
+/// 以乐观并发方式对 ~/.claude.json 做读-改-写
+///
+/// 读取时记录文件的长度、修改时间与哈希；`mutate` 在内存中对根对象做键级修改，
+/// 返回 false 表示无需写入。写入前再次校验指纹，若文件已被他人（如 Claude Code）
+/// 修改，则重新读取并重新应用 `mutate`，最多尝试 [`MAX_UPDATE_ATTEMPTS`] 次；
+/// 次数用尽后按最后一次读取的结果写入，与旧行为一致。
+///
+/// 返回是否实际写入了文件。
+fn update_json_file<F>(path: &Path, mut mutate: F) -> Result<bool, AppError>
+where
+    F: FnMut(&mut Value, bool) -> Result<bool, AppError>,
+{
+    for attempt in 1..=MAX_UPDATE_ATTEMPTS {
+        let (mut root, fingerprint) = read_with_fingerprint(path)?;
+        if !mutate(&mut root, fingerprint.is_some())? {
+            return Ok(false);
+        }
+
+        run_before_commit_hook(path);
+
+        if current_fingerprint(path)? != fingerprint {
+            if attempt < MAX_UPDATE_ATTEMPTS {
+                log::info!(
+                    "{} 在读取后被修改，重新读取并应用变更（第 {attempt} 次）",
+                    path.display()
+                );
+                continue;
+            }
+            log::warn!(
+                "{} 持续被并发修改，已重试 {MAX_UPDATE_ATTEMPTS} 次，按最后一次读取结果写入",
+                path.display()
+            );
+        }
+
+        write_json_value(path, &root)?;
+        return Ok(true);
+    }
+    unreachable!("MAX_UPDATE_ATTEMPTS 至少为 1")
+}
+
+fn root_object_mut(root: &mut Value) -> Result<&mut Map<String, Value>, AppError> {
+    root.as_object_mut()
+        .ok_or_else(|| AppError::Config("~/.claude.json 根必须是对象".into()))
+}
+
 pub fn get_mcp_status() -> Result<McpStatus, AppError> {
     let path = user_config_path();
     let (exists, count) = if path.exists() {
@@ -148,50 +259,31 @@ pub fn read_mcp_json() -> Result<Option<String>, AppError> {
 /// 在 ~/.claude.json 根对象写入 hasCompletedOnboarding=true（用于跳过 Claude Code 初次安装确认）
 /// 仅增量写入该字段，其他字段保持不变
 pub fn set_has_completed_onboarding() -> Result<bool, AppError> {
-    let path = user_config_path();
-    let mut root = if path.exists() {
-        read_json_value(&path)?
-    } else {
-        serde_json::json!({})
-    };
-
-    let obj = root
-        .as_object_mut()
-        .ok_or_else(|| AppError::Config("~/.claude.json 根必须是对象".into()))?;
-
-    let already = obj
-        .get("hasCompletedOnboarding")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    if already {
-        return Ok(false);
-    }
-
-    obj.insert("hasCompletedOnboarding".into(), Value::Bool(true));
-    write_json_value(&path, &root)?;
-    Ok(true)
+    update_json_file(&user_config_path(), |root, _exists| {
+        let obj = root_object_mut(root)?;
+        let already = obj
+            .get("hasCompletedOnboarding")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if already {
+            return Ok(false);
+        }
+        obj.insert("hasCompletedOnboarding".into(), Value::Bool(true));
+        Ok(true)
+    })
 }
 
 /// 删除 ~/.claude.json 根对象的 hasCompletedOnboarding 字段（恢复 Claude Code 初次安装确认）
 /// 仅增量删除该字段，其他字段保持不变
 pub fn clear_has_completed_onboarding() -> Result<bool, AppError> {
-    let path = user_config_path();
-    if !path.exists() {
-        return Ok(false);
-    }
-
-    let mut root = read_json_value(&path)?;
-    let obj = root
-        .as_object_mut()
-        .ok_or_else(|| AppError::Config("~/.claude.json 根必须是对象".into()))?;
-
-    let existed = obj.remove("hasCompletedOnboarding").is_some();
-    if !existed {
-        return Ok(false);
-    }
-
-    write_json_value(&path, &root)?;
-    Ok(true)
+    update_json_file(&user_config_path(), |root, exists| {
+        if !exists {
+            return Ok(false);
+        }
+        Ok(root_object_mut(root)?
+            .remove("hasCompletedOnboarding")
+            .is_some())
+    })
 }
 
 pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
@@ -236,54 +328,39 @@ pub fn upsert_mcp_server(id: &str, spec: Value) -> Result<bool, AppError> {
         }
     }
 
-    let path = user_config_path();
-    let mut root = if path.exists() {
-        read_json_value(&path)?
-    } else {
-        serde_json::json!({})
-    };
-
-    // 确保 mcpServers 对象存在
-    {
-        let obj = root
-            .as_object_mut()
-            .ok_or_else(|| AppError::Config("mcp.json 根必须是对象".into()))?;
-        if !obj.contains_key("mcpServers") {
-            obj.insert("mcpServers".into(), serde_json::json!({}));
+    update_json_file(&user_config_path(), |root, exists| {
+        // 确保 mcpServers 对象存在
+        {
+            let obj = root
+                .as_object_mut()
+                .ok_or_else(|| AppError::Config("mcp.json 根必须是对象".into()))?;
+            if !obj.contains_key("mcpServers") {
+                obj.insert("mcpServers".into(), serde_json::json!({}));
+            }
         }
-    }
 
-    let before = root.clone();
-    if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-        servers.insert(id.to_string(), spec);
-    }
+        let before = root.clone();
+        if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+            servers.insert(id.to_string(), spec.clone());
+        }
 
-    if before == root && path.exists() {
-        return Ok(false);
-    }
-
-    write_json_value(&path, &root)?;
-    Ok(true)
+        Ok(!(before == *root && exists))
+    })
 }
 
 pub fn delete_mcp_server(id: &str) -> Result<bool, AppError> {
     if id.trim().is_empty() {
         return Err(AppError::InvalidInput("MCP 服务器 ID 不能为空".into()));
     }
-    let path = user_config_path();
-    if !path.exists() {
-        return Ok(false);
-    }
-    let mut root = read_json_value(&path)?;
-    let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) else {
-        return Ok(false);
-    };
-    let existed = servers.remove(id).is_some();
-    if !existed {
-        return Ok(false);
-    }
-    write_json_value(&path, &root)?;
-    Ok(true)
+    update_json_file(&user_config_path(), |root, exists| {
+        if !exists {
+            return Ok(false);
+        }
+        let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) else {
+            return Ok(false);
+        };
+        Ok(servers.remove(id).is_some())
+    })
 }
 
 pub fn validate_command_in_path(cmd: &str) -> Result<bool, AppError> {
@@ -345,16 +422,16 @@ pub fn read_mcp_servers_map() -> Result<std::collections::HashMap<String, Value>
 pub fn set_mcp_servers_map(
     servers: &std::collections::HashMap<String, Value>,
 ) -> Result<(), AppError> {
-    let path = user_config_path();
-    let mut root = if path.exists() {
-        read_json_value(&path)?
-    } else {
-        serde_json::json!({})
-    };
+    set_mcp_servers_map_at(&user_config_path(), servers)
+}
 
+fn set_mcp_servers_map_at(
+    path: &Path,
+    servers: &std::collections::HashMap<String, Value>,
+) -> Result<(), AppError> {
     // 构建 mcpServers 对象：移除 UI 辅助字段（enabled/source），仅保留实际 MCP 规范
     // 检测目标路径是否为 WSL，若是则跳过 cmd /c 包装
-    let is_wsl_target = is_wsl_path(&path);
+    let is_wsl_target = is_wsl_path(path);
     if is_wsl_target {
         log::info!("检测到 WSL 路径，跳过 cmd /c 包装: {}", path.display());
     }
@@ -392,14 +469,11 @@ pub fn set_mcp_servers_map(
         out.insert(id.clone(), Value::Object(obj));
     }
 
-    {
-        let obj = root
-            .as_object_mut()
-            .ok_or_else(|| AppError::Config("~/.claude.json 根必须是对象".into()))?;
-        obj.insert("mcpServers".into(), Value::Object(out));
-    }
-
-    write_json_value(&path, &root)?;
+    let out = Value::Object(out);
+    update_json_file(path, |root, _exists| {
+        root_object_mut(root)?.insert("mcpServers".into(), out.clone());
+        Ok(true)
+    })?;
     Ok(())
 }
 
@@ -407,6 +481,136 @@ pub fn set_mcp_servers_map(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// 设置写入前钩子，返回时自动清除
+    struct HookGuard;
+
+    impl HookGuard {
+        fn install(f: impl FnMut(&Path) + 'static) -> Self {
+            BEFORE_COMMIT_HOOK.with(|hook| *hook.borrow_mut() = Some(Box::new(f)));
+            HookGuard
+        }
+    }
+
+    impl Drop for HookGuard {
+        fn drop(&mut self) {
+            BEFORE_COMMIT_HOOK.with(|hook| *hook.borrow_mut() = None);
+        }
+    }
+
+    /// 模拟 Claude Code 在读取与写入之间保存了文件（递增 numStartups）
+    fn bump_num_startups(path: &Path) {
+        let mut root: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let n = root["numStartups"].as_u64().unwrap_or(0);
+        root["numStartups"] = json!(n + 1);
+        fs::write(path, serde_json::to_vec_pretty(&root).unwrap()).unwrap();
+    }
+
+    fn read_root(path: &Path) -> Value {
+        serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn set_mcp_servers_map_keeps_concurrent_num_startups_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&json!({"numStartups": 5, "mcpServers": {}})).unwrap(),
+        )
+        .unwrap();
+
+        // 仅在第一次写入前模拟一次并发保存
+        let mut fired = false;
+        let _guard = HookGuard::install(move |p| {
+            if !fired {
+                fired = true;
+                bump_num_startups(p);
+            }
+        });
+
+        let mut servers = std::collections::HashMap::new();
+        servers.insert(
+            "echo".to_string(),
+            json!({"command": "echo", "args": ["hi"]}),
+        );
+        set_mcp_servers_map_at(&path, &servers).unwrap();
+
+        let root = read_root(&path);
+        assert_eq!(root["numStartups"], json!(6));
+        assert_eq!(root["mcpServers"]["echo"]["command"], json!("echo"));
+    }
+
+    #[test]
+    fn update_json_file_gives_up_after_max_attempts_and_still_applies_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+        fs::write(&path, br#"{"numStartups": 0}"#).unwrap();
+
+        // 每次写入前都被并发修改：重试用尽后仍写入本次变更，且保留最后一次读取到的内容
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let calls_in_hook = calls.clone();
+        let _guard = HookGuard::install(move |p| {
+            calls_in_hook.set(calls_in_hook.get() + 1);
+            bump_num_startups(p);
+        });
+
+        let mut applied = 0;
+        let wrote = update_json_file(&path, |root, _| {
+            applied += 1;
+            root_object_mut(root)?.insert("hasCompletedOnboarding".into(), Value::Bool(true));
+            Ok(true)
+        })
+        .unwrap();
+
+        assert!(wrote);
+        assert_eq!(applied, MAX_UPDATE_ATTEMPTS);
+        assert_eq!(calls.get(), MAX_UPDATE_ATTEMPTS);
+        let root = read_root(&path);
+        assert_eq!(root["hasCompletedOnboarding"], json!(true));
+        assert_eq!(root["numStartups"], json!(MAX_UPDATE_ATTEMPTS as u64 - 1));
+    }
+
+    #[test]
+    fn update_json_file_skips_write_when_mutation_reports_no_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+
+        let wrote = update_json_file(&path, |_, exists| {
+            assert!(!exists);
+            Ok(false)
+        })
+        .unwrap();
+
+        assert!(!wrote);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn update_json_file_creates_missing_file_and_detects_concurrent_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+
+        // 读取时文件不存在，写入前被 Claude Code 创建：应重新读取并保留其内容
+        let mut fired = false;
+        let _guard = HookGuard::install(move |p| {
+            if !fired {
+                fired = true;
+                fs::write(p, br#"{"numStartups": 1}"#).unwrap();
+            }
+        });
+
+        let wrote = update_json_file(&path, |root, _| {
+            root_object_mut(root)?.insert("mcpServers".into(), json!({}));
+            Ok(true)
+        })
+        .unwrap();
+
+        assert!(wrote);
+        let root = read_root(&path);
+        assert_eq!(root["numStartups"], json!(1));
+        assert_eq!(root["mcpServers"], json!({}));
+    }
 
     /// 测试 Windows 命令包装功能
     /// 由于使用条件编译，在非 Windows 平台上测试的是空函数

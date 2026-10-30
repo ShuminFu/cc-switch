@@ -1,0 +1,9 @@
+# Config files must be written through `config::atomic_write` (temp file +
+# fsync + rename, 0600 for new files) so a crash never leaves a truncated
+# file behind (CCS-082). Test fixtures may write directly: unit tests via the
+# `cfg_attr(test, ...)` allow in src/lib.rs, integration test
+# crates under tests/ opt out with `#![allow(clippy::disallowed_methods)]`.
+# OpenOptions-based writers are guarded separately by tests/write_lint.rs.
+disallowed-methods = [
+    { path = "std::fs::write", reason = "use crate::config::atomic_write so config writes are atomic" },
+]

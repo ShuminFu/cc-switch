@@ -75,7 +75,7 @@ pub(crate) fn restore_skills_zip(raw: &[u8]) -> Result<(), AppError> {
         )
     })?;
     let zip_path = tmp.path().join(REMOTE_SKILLS_ZIP);
-    fs::write(&zip_path, raw).map_err(|e| AppError::io(&zip_path, e))?;
+    crate::config::atomic_write(&zip_path, raw)?;
 
     let file = fs::File::open(&zip_path).map_err(|e| AppError::io(&zip_path, e))?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| {

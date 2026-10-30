@@ -2,15 +2,17 @@
 //!
 //! 提供 SQL 导出/导入和二进制快照备份功能。
 
-use super::{lock_conn, Database};
+use super::{lock_conn, Database, SCHEMA_VERSION};
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
 use chrono::{Local, Utc};
 use rusqlite::backup::Backup;
+use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+use rusqlite::limits::Limit;
 use rusqlite::types::ValueRef;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tempfile::NamedTempFile;
 
 const CC_SWITCH_SQL_EXPORT_HEADER: &str = "-- CC Switch SQLite 导出";
@@ -23,6 +25,8 @@ const SYNC_SKIP_TABLES: &[&str] = &[
     "proxy_live_backup",
     "usage_daily_rollups",
     "session_log_sync",
+    // 迁移审计记录属于本设备
+    "schema_migrations",
 ];
 
 /// Tables whose local data is preserved (restored from local snapshot) during WebDAV import.
@@ -33,11 +37,16 @@ const SYNC_PRESERVE_TABLES: &[&str] = &[
     "proxy_live_backup",
     "usage_daily_rollups",
     "session_log_sync",
+    // 迁移审计记录属于本设备
+    "schema_migrations",
 ];
 
 /// Settings rows that belong to this install only: never exported, and kept
 /// from the local database on SQL import, sync import and backup restore.
 const LOCAL_ONLY_SETTING_KEYS: &[&str] = &[crate::proxy::inbound_auth::INBOUND_TOKEN_SETTING_KEY];
+
+/// PRAGMAs that an imported SQL file may run; `dump_sql` only emits these.
+const SQL_IMPORT_ALLOWED_PRAGMAS: &[&str] = &["foreign_keys", "user_version"];
 
 /// A database backup entry for the UI
 #[derive(Debug, serde::Serialize)]
@@ -46,6 +55,17 @@ pub struct BackupEntry {
     pub filename: String,
     pub size_bytes: u64,
     pub created_at: String, // ISO 8601
+}
+
+/// A backup that this app can restore (its `user_version` is not newer than
+/// [`SCHEMA_VERSION`]); listed on the db_version_too_new recovery screen.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorableBackup {
+    pub filename: String,
+    pub size_bytes: u64,
+    pub created_at: String, // ISO 8601
+    pub db_version: i32,
 }
 
 impl Database {
@@ -104,6 +124,8 @@ impl Database {
     ) -> Result<String, AppError> {
         let sql_content = sql_raw.trim_start_matches('\u{feff}');
         Self::validate_cc_switch_sql_export(sql_content)?;
+        // 更新版本的导出在任何备份/写入之前拒绝，避免部分导入
+        Self::ensure_sql_dump_version_supported(sql_content)?;
 
         // 导入前备份现有数据库
         let backup_path = self.backup_database_file()?;
@@ -125,12 +147,17 @@ impl Database {
         let temp_conn =
             Connection::open(&temp_path).map_err(|e| AppError::Database(e.to_string()))?;
 
-        temp_conn
-            .execute_batch(sql_content)
-            .map_err(|e| AppError::Database(format!("执行 SQL 导入失败: {e}")))?;
+        // 导入文件内容不可信（头部可伪造，同步的 SHA256 也来自同一远端）：
+        // 禁止 ATTACH（含 VACUUM INTO 内部的 ATTACH），并只放行导出格式所需的语句
+        temp_conn.set_limit(Limit::SQLITE_LIMIT_ATTACHED, 0);
+        temp_conn.authorizer(Some(Self::authorize_sql_import));
+        let import_result = temp_conn.execute_batch(sql_content);
+        temp_conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        import_result.map_err(|e| AppError::Database(format!("执行 SQL 导入失败: {e}")))?;
+        // 头部可伪造：以实际执行后的 user_version 再校验一次
+        Self::ensure_dump_version_supported(Self::get_user_version(&temp_conn)?)?;
 
-        // 补齐缺失表/索引并进行基础校验
-        Self::create_tables_on_conn(&temp_conn)?;
+        // 迁移到当前 schema 并进行基础校验
         Self::apply_schema_migrations_on_conn(&temp_conn)?;
         Self::validate_basic_state(&temp_conn)?;
         if let Some(local_snapshot) = local_snapshot.as_ref() {
@@ -174,6 +201,36 @@ impl Database {
         Ok(snapshot)
     }
 
+    /// SQL 导入期间的授权回调：仅允许 `dump_sql` 产生的语句类型
+    /// （事务、CREATE TABLE/INDEX、INSERT 及白名单 PRAGMA；REINDEX 只重建已有索引），其余一律拒绝。
+    fn authorize_sql_import(ctx: AuthContext<'_>) -> Authorization {
+        match ctx.action {
+            AuthAction::Transaction { .. }
+            | AuthAction::CreateTable { .. }
+            | AuthAction::CreateIndex { .. }
+            | AuthAction::Insert { .. }
+            | AuthAction::Read { .. }
+            | AuthAction::Select
+            | AuthAction::Reindex { .. }
+            | AuthAction::Function { .. } => Authorization::Allow,
+            // CREATE TABLE/INDEX 内部更新 sqlite_master；用户语句直接改写它需要
+            // writable_schema，而该 PRAGMA 不在白名单内
+            AuthAction::Update { table_name, .. }
+                if table_name.eq_ignore_ascii_case("sqlite_master") =>
+            {
+                Authorization::Allow
+            }
+            AuthAction::Pragma { pragma_name, .. }
+                if SQL_IMPORT_ALLOWED_PRAGMAS
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(pragma_name)) =>
+            {
+                Authorization::Allow
+            }
+            _ => Authorization::Deny,
+        }
+    }
+
     fn validate_cc_switch_sql_export(sql: &str) -> Result<(), AppError> {
         let trimmed = sql.trim_start();
         if trimmed.starts_with(CC_SWITCH_SQL_EXPORT_HEADER) {
@@ -184,6 +241,47 @@ impl Database {
             "backup.sql.invalid_format",
             "仅支持导入由 CC Switch 导出的 SQL 备份文件。",
             "Only SQL backups exported by CC Switch are supported.",
+        ))
+    }
+
+    /// 读取 `dump_sql` 写入的 `PRAGMA user_version=N;`（缺失时返回 None）
+    fn sql_dump_user_version(sql: &str) -> Option<i32> {
+        sql.lines().find_map(|line| {
+            let line = line.trim();
+            let (name, value) = line
+                .strip_prefix("PRAGMA ")
+                .or_else(|| line.strip_prefix("pragma "))?
+                .split_once('=')?;
+            if !name.trim().eq_ignore_ascii_case("user_version") {
+                return None;
+            }
+            value.trim().trim_end_matches(';').trim().parse().ok()
+        })
+    }
+
+    /// SQL 导出（含同步快照 db.sql）来自更新的 schema 时返回本地化错误。
+    ///
+    /// 仅检查文本，不触碰数据库或 Skills；同步导入在替换任何本地数据前调用，
+    /// 保证不会出现部分导入。
+    pub(crate) fn ensure_sql_dump_version_supported(sql: &str) -> Result<(), AppError> {
+        match Self::sql_dump_user_version(sql) {
+            Some(version) => Self::ensure_dump_version_supported(version),
+            None => Ok(()),
+        }
+    }
+
+    fn ensure_dump_version_supported(version: i32) -> Result<(), AppError> {
+        if version <= SCHEMA_VERSION {
+            return Ok(());
+        }
+        Err(AppError::localized(
+            "backup.sql.newer_schema",
+            format!(
+                "该数据来自更新版本的 CC Switch（数据库版本 {version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再导入。本地数据未做任何修改。"
+            ),
+            format!(
+                "This data was exported by a newer version of CC Switch (database version {version}); this app supports up to {SCHEMA_VERSION}. Update the app before importing it. No local data was changed."
+            ),
         ))
     }
 
@@ -312,36 +410,106 @@ impl Database {
             return Ok(None);
         }
 
-        let backup_dir = db_path
-            .parent()
-            .ok_or_else(|| AppError::Config("无效的数据库路径".to_string()))?
-            .join("backups");
+        let (_, backup_path) = {
+            let conn = lock_conn!(self.conn);
+            Self::snapshot_connection_to_backup(&conn)?
+        };
+        Ok(Some(backup_path))
+    }
 
+    /// 迁移前备份：在任何 DDL（schema 迁移）之前调用。
+    ///
+    /// 已有数据库且 `user_version < SCHEMA_VERSION`（含 v0）时，用 SQLite Online Backup API
+    /// 生成快照（WAL 中尚未 checkpoint 的写入也会包含在内）；旧版 `config.json` 仍存在时
+    /// 一并复制为 `<backup_id>.config.json`。
+    ///
+    /// 返回备份 ID（无需备份时返回 None），供迁移失败时提示用户恢复。
+    pub(crate) fn create_premigration_backup(
+        conn: &Connection,
+        db_existed: bool,
+    ) -> Result<Option<String>, AppError> {
+        if !db_existed {
+            // JSON → SQLite 升级的 config.json 备份由启动流程在加载配置前完成
+            // （见 backup_legacy_config_json），此时数据库还是空的，无需快照
+            return Ok(None);
+        }
+        let version = Self::get_user_version(conn)?;
+        if version >= SCHEMA_VERSION {
+            return Ok(None);
+        }
+        log::info!("Creating pre-migration database backup (v{version} → v{SCHEMA_VERSION})");
+        let (backup_id, _) = Self::snapshot_connection_to_backup(conn)?;
+        // 数据库快照已完成，config.json 复制失败不应让调用方丢失备份 ID
+        if let Err(e) = Self::copy_legacy_config_json(&backup_id) {
+            log::warn!("Pre-migration config.json backup failed: {e}");
+        }
+        Ok(Some(backup_id))
+    }
+
+    /// JSON → SQLite 升级前备份旧版 `config.json`（原样复制为 `<backup_id>.config.json`）。
+    ///
+    /// 必须在 `MultiAppConfig::load()` 之前调用：加载时会就地升级并重写 config.json
+    /// （如 v3.6 → v3.7 MCP 结构迁移）。config.json 不存在时返回 None。
+    pub fn backup_legacy_config_json() -> Result<Option<String>, AppError> {
+        let backup_dir = get_app_config_dir().join("backups");
+        if !get_app_config_dir().join("config.json").exists() {
+            return Ok(None);
+        }
         fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+        let (backup_id, _) = Self::next_backup_id(&backup_dir);
+        Self::copy_legacy_config_json(&backup_id)?;
+        Ok(Some(backup_id))
+    }
 
+    /// 若 config.json 存在，复制到 `backups/<backup_id>.config.json`
+    fn copy_legacy_config_json(backup_id: &str) -> Result<(), AppError> {
+        let app_dir = get_app_config_dir();
+        let json_path = app_dir.join("config.json");
+        if !json_path.exists() {
+            return Ok(());
+        }
+        let backup_dir = app_dir.join("backups");
+        fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+        let dest = backup_dir.join(format!("{backup_id}.config.json"));
+        log::info!("Backing up legacy config.json to {}", dest.display());
+        fs::copy(&json_path, &dest).map_err(|e| AppError::io(&dest, e))?;
+        Ok(())
+    }
+
+    /// 生成一个未被占用的备份 ID（`db_backup_YYYYMMDD_HHMMSS[_N]`）及对应的 `.db` 路径。
+    /// 同名的 `.db` 或 `.config.json` 已存在时都会追加序号。
+    fn next_backup_id(backup_dir: &Path) -> (String, PathBuf) {
         let base_id = format!("db_backup_{}", Local::now().format("%Y%m%d_%H%M%S"));
         let mut backup_id = base_id.clone();
-        let mut backup_path = backup_dir.join(format!("{backup_id}.db"));
         let mut counter = 1;
-        while backup_path.exists() {
+        loop {
+            let backup_path = backup_dir.join(format!("{backup_id}.db"));
+            let json_path = backup_dir.join(format!("{backup_id}.config.json"));
+            if !backup_path.exists() && !json_path.exists() {
+                return (backup_id, backup_path);
+            }
             backup_id = format!("{base_id}_{counter}");
-            backup_path = backup_dir.join(format!("{backup_id}.db"));
             counter += 1;
         }
+    }
 
+    /// 使用 SQLite Online Backup API 将 `conn` 快照到 backups 目录，返回 (备份 ID, 路径)
+    fn snapshot_connection_to_backup(conn: &Connection) -> Result<(String, PathBuf), AppError> {
+        let backup_dir = get_app_config_dir().join("backups");
+        fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+
+        let (backup_id, backup_path) = Self::next_backup_id(&backup_dir);
         {
-            let conn = lock_conn!(self.conn);
             let mut dest_conn =
                 Connection::open(&backup_path).map_err(|e| AppError::Database(e.to_string()))?;
-            let backup = Backup::new(&conn, &mut dest_conn)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            backup
-                .step(-1)
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            Self::copy_database(conn, &mut dest_conn)?;
+            // Backup API 会连同库头复制 WAL 标记；备份文件独立存放、常以只读方式打开，
+            // 切回 DELETE 以免留下 -wal / -shm 文件
+            super::journal::set_journal_mode(&dest_conn, "delete")?;
         }
 
         Self::cleanup_db_backups(&backup_dir)?;
-        Ok(Some(backup_path))
+        Ok((backup_id, backup_path))
     }
 
     /// 清理旧的数据库备份，保留最新的 N 个
@@ -610,18 +778,124 @@ impl Database {
         Ok(entries)
     }
 
+    /// List the backups this app can restore (`user_version <= SCHEMA_VERSION`),
+    /// newest first. Used by the db_version_too_new startup path, where these are
+    /// the pre-migration snapshots taken before a newer app upgraded the database.
+    /// Unreadable backups are skipped.
+    pub fn list_restorable_backups() -> Result<Vec<RestorableBackup>, AppError> {
+        let backup_dir = get_app_config_dir().join("backups");
+        let entries = Self::list_backups()?
+            .into_iter()
+            .filter_map(|entry| {
+                let path = backup_dir.join(&entry.filename);
+                let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .map_err(|e| log::warn!("Skipping unreadable backup {}: {e}", entry.filename))
+                    .ok()?;
+                let db_version = Self::get_user_version(&conn)
+                    .map_err(|e| log::warn!("Skipping unreadable backup {}: {e}", entry.filename))
+                    .ok()?;
+                (db_version <= SCHEMA_VERSION).then_some(RestorableBackup {
+                    filename: entry.filename,
+                    size_bytes: entry.size_bytes,
+                    created_at: entry.created_at,
+                    db_version,
+                })
+            })
+            .collect();
+        Ok(entries)
+    }
+
+    /// Downgrade restore for the db_version_too_new recovery screen: replace the
+    /// on-disk database (too new for this app, so never opened by [`Database::init`])
+    /// with a restorable backup.
+    ///
+    /// The backup is migrated and validated in a temp database first. The newer
+    /// database is kept as `backups/db_newer_v{N}_<timestamp>.sqlite` (not a `.db`
+    /// file, so backup retention never prunes it and it is not listed as a backup).
+    /// Returns that preserved filename.
+    pub fn restore_backup_over_newer_db(filename: &str) -> Result<String, AppError> {
+        validate_backup_filename(filename)?;
+
+        let app_dir = get_app_config_dir();
+        let backup_dir = app_dir.join("backups");
+        let backup_path = backup_dir.join(filename);
+        let db_path = app_dir.join("cc-switch.db");
+
+        if !backup_path.exists() {
+            return Err(AppError::InvalidInput(format!(
+                "Backup file not found: {filename}"
+            )));
+        }
+
+        let source_conn =
+            Connection::open_with_flags(&backup_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        let backup_version = Self::get_user_version(&source_conn)?;
+        if backup_version > SCHEMA_VERSION {
+            return Err(AppError::localized(
+                "error.backupFromNewerVersion",
+                format!(
+                    "该备份来自更新版本的 CC Switch（数据库版本 {backup_version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再恢复。"
+                ),
+                format!(
+                    "This backup was created by a newer version of CC Switch (database version {backup_version}); this app supports up to {SCHEMA_VERSION}. Please update the app before restoring it."
+                ),
+            ));
+        }
+
+        let temp_file = NamedTempFile::new().map_err(|e| AppError::IoContext {
+            context: "创建临时数据库文件失败".to_string(),
+            source: e,
+        })?;
+        let mut temp_conn =
+            Connection::open(temp_file.path()).map_err(|e| AppError::Database(e.to_string()))?;
+        Self::copy_database(&source_conn, &mut temp_conn)?;
+        drop(source_conn);
+
+        Self::apply_schema_migrations_on_conn(&temp_conn)?;
+        Self::validate_basic_state(&temp_conn)?;
+        Self::ensure_model_pricing_seeded_on_conn(&temp_conn)?;
+
+        fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+        let mut preserved_name = String::new();
+        if db_path.exists() {
+            let newer_conn =
+                Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+            let newer_version = Self::get_user_version(&newer_conn)?;
+            let base = format!(
+                "db_newer_v{newer_version}_{}",
+                Local::now().format("%Y%m%d_%H%M%S")
+            );
+            preserved_name = format!("{base}.sqlite");
+            let mut counter = 1;
+            while backup_dir.join(&preserved_name).exists() {
+                preserved_name = format!("{base}_{counter}.sqlite");
+                counter += 1;
+            }
+            let preserved_path = backup_dir.join(&preserved_name);
+            let mut preserved_conn =
+                Connection::open(&preserved_path).map_err(|e| AppError::Database(e.to_string()))?;
+            Self::copy_database(&newer_conn, &mut preserved_conn)?;
+            super::journal::set_journal_mode(&preserved_conn, "delete")?;
+        }
+
+        {
+            let mut main_conn =
+                Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
+            Self::copy_database(&temp_conn, &mut main_conn)?;
+        }
+
+        log::info!(
+            "Database restored from backup {filename} (v{backup_version}); newer database kept as {preserved_name}"
+        );
+        Ok(preserved_name)
+    }
+
     /// Restore database from a backup file. Returns the safety backup ID.
     pub fn restore_from_backup(&self, filename: &str) -> Result<String, AppError> {
         // Security: validate filename to prevent path traversal
-        if filename.contains("..")
-            || filename.contains('/')
-            || filename.contains('\\')
-            || !filename.ends_with(".db")
-        {
-            return Err(AppError::InvalidInput(
-                "Invalid backup filename".to_string(),
-            ));
-        }
+        validate_backup_filename(filename)?;
 
         let backup_dir = get_app_config_dir().join("backups");
         let backup_path = backup_dir.join(filename);
@@ -632,54 +906,92 @@ impl Database {
             )));
         }
 
+        // Step 1: Open the backup read-only and reject newer schemas before touching anything
+        let source_conn =
+            Connection::open_with_flags(&backup_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+        let backup_version = Self::get_user_version(&source_conn)?;
+        if backup_version > SCHEMA_VERSION {
+            return Err(AppError::localized(
+                "error.backupFromNewerVersion",
+                format!(
+                    "该备份来自更新版本的 CC Switch（数据库版本 {backup_version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再恢复。"
+                ),
+                format!(
+                    "This backup was created by a newer version of CC Switch (database version {backup_version}); this app supports up to {SCHEMA_VERSION}. Please update the app before restoring it."
+                ),
+            ));
+        }
+
         let local_settings = self.read_local_only_settings()?;
 
-        // Step 1: Create safety backup of current database
+        // Step 2: Copy the backup into a temp database and migrate/validate it there,
+        // so a broken backup never replaces the main database
+        let temp_file = NamedTempFile::new().map_err(|e| AppError::IoContext {
+            context: "创建临时数据库文件失败".to_string(),
+            source: e,
+        })?;
+        let mut temp_conn =
+            Connection::open(temp_file.path()).map_err(|e| AppError::Database(e.to_string()))?;
+        Self::copy_database(&source_conn, &mut temp_conn)?;
+        drop(source_conn);
+
+        Self::apply_schema_migrations_on_conn(&temp_conn)?;
+        Self::validate_basic_state(&temp_conn)?;
+        Self::ensure_model_pricing_seeded_on_conn(&temp_conn)?;
+        Self::write_local_only_settings(&temp_conn, &local_settings)?;
+
+        // Step 3: Create safety backup of current database
         let safety_backup = self.backup_database_file()?;
         let safety_id = safety_backup
+            .as_ref()
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
             .unwrap_or_default();
 
-        // Step 2: Open the backup file and restore it to the main database
-        let source_conn =
-            Connection::open(&backup_path).map_err(|e| AppError::Database(e.to_string()))?;
-
-        {
+        // Step 4: Write the validated temp database into the main database;
+        // roll back to the safety backup if the copy fails midway
+        let restore_result = {
             let mut main_conn = lock_conn!(self.conn);
-            let backup = Backup::new(&source_conn, &mut main_conn)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-            backup
-                .step(-1)
-                .map_err(|e| AppError::Database(e.to_string()))?;
-        }
+            Self::copy_database(&temp_conn, &mut main_conn)
+        };
         // Backup API 整库覆盖不经过 update hook，需手动让运行时配置快照失效
+        // （成功与回滚两条路径都可能已改写主库内容）
         self.mark_config_changed();
-
-        // Step 3: Run schema migrations (backup may be from an older version)
-        self.create_tables()?;
-        self.apply_schema_migrations()?;
-        self.ensure_model_pricing_seeded()?;
-        {
-            let conn = lock_conn!(self.conn);
-            Self::write_local_only_settings(&conn, &local_settings)?;
+        if let Err(err) = restore_result {
+            log::error!("Restoring backup {filename} failed, rolling back: {err}");
+            if let Some(safety_path) = safety_backup.as_ref() {
+                let rollback =
+                    Connection::open_with_flags(safety_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+                        .map_err(|e| AppError::Database(e.to_string()))
+                        .and_then(|safety_conn| {
+                            let mut main_conn = lock_conn!(self.conn);
+                            Self::copy_database(&safety_conn, &mut main_conn)
+                        });
+                self.mark_config_changed();
+                if let Err(rollback_err) = rollback {
+                    log::error!("Rolling back to safety backup {safety_id} failed: {rollback_err}");
+                }
+            }
+            return Err(err);
         }
 
         log::info!("Database restored from backup: {filename}, safety backup: {safety_id}");
         Ok(safety_id)
     }
 
+    /// 使用 SQLite Backup API 将 `source` 完整复制到 `dest`
+    fn copy_database(source: &Connection, dest: &mut Connection) -> Result<(), AppError> {
+        let backup = Backup::new(source, dest).map_err(|e| AppError::Database(e.to_string()))?;
+        backup
+            .step(-1)
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
     /// Rename a backup file. Returns the new filename.
     pub fn rename_backup(old_filename: &str, new_name: &str) -> Result<String, AppError> {
         // Validate old filename (path traversal + .db suffix)
-        if old_filename.contains("..")
-            || old_filename.contains('/')
-            || old_filename.contains('\\')
-            || !old_filename.ends_with(".db")
-        {
-            return Err(AppError::InvalidInput(
-                "Invalid backup filename".to_string(),
-            ));
-        }
+        validate_backup_filename(old_filename)?;
 
         // Clean new name
         let trimmed = new_name.trim();
@@ -709,6 +1021,11 @@ impl Database {
         }
 
         let new_filename = format!("{name_part}.db");
+        if validate_backup_filename(&new_filename).is_err() {
+            return Err(AppError::InvalidInput(
+                "Invalid characters in new name".to_string(),
+            ));
+        }
 
         let backup_dir = get_app_config_dir().join("backups");
         let old_path = backup_dir.join(old_filename);
@@ -734,15 +1051,7 @@ impl Database {
     /// Delete a backup file permanently.
     pub fn delete_backup(filename: &str) -> Result<(), AppError> {
         // Validate filename (path traversal + .db suffix)
-        if filename.contains("..")
-            || filename.contains('/')
-            || filename.contains('\\')
-            || !filename.ends_with(".db")
-        {
-            return Err(AppError::InvalidInput(
-                "Invalid backup filename".to_string(),
-            ));
-        }
+        validate_backup_filename(filename)?;
 
         let backup_path = get_app_config_dir().join("backups").join(filename);
         if !backup_path.exists() {
@@ -754,6 +1063,30 @@ impl Database {
         fs::remove_file(&backup_path).map_err(|e| AppError::io(&backup_path, e))?;
         log::info!("Deleted backup: {filename}");
         Ok(())
+    }
+}
+
+/// 校验备份文件名只能指向 backups 目录下的单个 `.db` 文件。
+///
+/// 除了 `..` 和路径分隔符外，还拒绝 `:`（Windows 盘符相对路径如 `C:x.db`
+/// 会让 `backup_dir.join()` 丢弃 backups 目录）和 NUL；允许非 ASCII 名称（如中文）。
+fn validate_backup_filename(filename: &str) -> Result<(), AppError> {
+    let invalid = || AppError::InvalidInput("Invalid backup filename".to_string());
+
+    if filename.contains("..")
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.contains(':')
+        || filename.contains('\0')
+        || !filename.ends_with(".db")
+    {
+        return Err(invalid());
+    }
+
+    let mut components = Path::new(filename).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(name)), None) if name == std::ffi::OsStr::new(filename) => Ok(()),
+        _ => Err(invalid()),
     }
 }
 
@@ -1057,5 +1390,151 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn sql_import_rejects_attach_vacuum_into_and_unsafe_statements() -> Result<(), AppError> {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let attach_target = dir.path().join("pwned.db");
+        let vacuum_target = dir.path().join("v.db");
+        let header = "-- CC Switch SQLite 导出\n";
+
+        let db = Database::memory()?;
+        db.set_setting("local_marker", "kept")?;
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO providers (id, app_type, name, settings_config, meta)
+                 VALUES ('p1', 'claude', 'Provider', '{}', '{}')",
+                [],
+            )?;
+        }
+
+        let attach_sql = format!(
+            "{header}ATTACH DATABASE '{}' AS x; CREATE TABLE x.t(a);",
+            attach_target.display()
+        );
+        let vacuum_sql = format!("{header}VACUUM INTO '{}';", vacuum_target.display());
+        let cases = [
+            attach_sql,
+            vacuum_sql,
+            format!("{header}CREATE TABLE t(a); CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END;"),
+            format!("{header}CREATE VIEW v AS SELECT 1;"),
+            format!("{header}PRAGMA writable_schema=ON;"),
+            format!("{header}CREATE TABLE t(a); DELETE FROM t;"),
+        ];
+
+        for sql in &cases {
+            assert!(
+                db.import_sql_string(sql).is_err(),
+                "import should reject: {sql}"
+            );
+            assert!(
+                db.import_sql_string_for_sync(sql).is_err(),
+                "sync import should reject: {sql}"
+            );
+        }
+
+        assert!(!attach_target.exists(), "ATTACH created {attach_target:?}");
+        assert!(
+            !vacuum_target.exists(),
+            "VACUUM INTO created {vacuum_target:?}"
+        );
+        assert_eq!(
+            db.get_setting("local_marker")?.as_deref(),
+            Some("kept"),
+            "rejected import must not touch the main database"
+        );
+
+        // A genuine export (PRAGMA, transaction, CREATE TABLE/INDEX, INSERT) still imports.
+        let export = db.export_sql_string()?;
+        let fresh_db = Database::memory()?;
+        fresh_db.import_sql_string(&export)?;
+        assert_eq!(
+            fresh_db.get_setting("local_marker")?.as_deref(),
+            Some("kept")
+        );
+        Ok(())
+    }
+
+    fn assert_invalid_filename(result: Result<impl std::fmt::Debug, AppError>) {
+        match result {
+            Err(AppError::InvalidInput(msg)) => {
+                assert!(
+                    msg.starts_with("Invalid"),
+                    "expected filename validation error, got: {msg}"
+                )
+            }
+            other => panic!("expected InvalidInput, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_backup_filename_rejects_drive_relative_and_nul_names() {
+        for name in ["C:x.db", "C:..x.db", "foo:bar.db", "\0.db", "a\0b.db"] {
+            assert_invalid_filename(super::validate_backup_filename(name));
+        }
+        for name in [
+            "../x.db", "a/b.db", "a\\b.db", "/abs.db", "x.sql", ".db.bak", "",
+        ] {
+            assert_invalid_filename(super::validate_backup_filename(name));
+        }
+        for name in ["db_backup_20260101_000000.db", "我的备份.db", "a b.db"] {
+            super::validate_backup_filename(name).expect(name);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn backup_commands_reject_colon_filenames_without_touching_files() -> Result<(), AppError> {
+        let home = tempfile::tempdir().expect("tempdir");
+        let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+        let backup_dir = crate::config::get_app_config_dir().join("backups");
+        std::fs::create_dir_all(&backup_dir).expect("create backups dir");
+        let ok_path = backup_dir.join("ok.db");
+        std::fs::write(&ok_path, b"x").expect("write ok backup");
+
+        let db = Database::memory()?;
+        for name in ["C:x.db", "C:..x.db", "foo:bar.db", "\0.db"] {
+            assert_invalid_filename(db.restore_from_backup(name));
+            assert_invalid_filename(Database::delete_backup(name));
+            assert_invalid_filename(Database::rename_backup(name, "renamed"));
+            assert_invalid_filename(Database::rename_backup("ok.db", name));
+        }
+        assert_invalid_filename(Database::rename_backup("ok.db", "C:evil"));
+
+        // On Unix a ':' is a legal filename character, so this file really exists;
+        // it must still be rejected instead of being deleted.
+        #[cfg(unix)]
+        {
+            let colon_path = backup_dir.join("foo:bar.db");
+            std::fs::write(&colon_path, b"x").expect("write colon backup");
+            assert_invalid_filename(Database::delete_backup("foo:bar.db"));
+            assert!(colon_path.exists(), "colon-named file must not be deleted");
+        }
+
+        // Non-ASCII names stay supported.
+        assert_eq!(Database::rename_backup("ok.db", "我的备份")?, "我的备份.db");
+        assert!(backup_dir.join("我的备份.db").exists());
+        Database::delete_backup("我的备份.db")?;
+        assert!(!backup_dir.join("我的备份.db").exists());
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn drive_relative_names_are_not_single_normal_components_on_windows() {
+        use std::path::{Component, Path};
+
+        for name in ["C:x.db", "C:..x.db"] {
+            let first = Path::new(name).components().next();
+            assert!(
+                matches!(first, Some(Component::Prefix(_))),
+                "{name} should parse as a drive prefix"
+            );
+            let joined = Path::new(r"D:\backups").join(name);
+            assert!(!joined.starts_with(r"D:\backups"));
+            assert_invalid_filename(super::validate_backup_filename(name));
+        }
     }
 }

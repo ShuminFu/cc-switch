@@ -87,61 +87,61 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-079](P1-trust-release/CCS-079-p1-atomic-write-durable.md) | bug | p1 | S | [config] Make atomic_write durable, Windows-safe and free of leftover temp files | CCS-012 | Partial |
 | [CCS-080](P1-trust-release/CCS-080-p1-atomic-write-perms.md) | security | p1 | S | [config] Create new files written by atomic_write with 0600 permissions | CCS-079 | Done |
 | [CCS-081](P1-trust-release/CCS-081-p1-atomic-write-symlink.md) | bug | p2 | S | [config] Write through symlinked config files instead of replacing the link | CCS-079 | Done |
-| [CCS-082](P1-trust-release/CCS-082-p1-route-writes-atomic-lint.md) | refactor | p2 | S | [config] Route the remaining config writers through atomic_write and ban std::fs::write | CCS-080, CCS-012 | Open |
-| [CCS-083](P1-trust-release/CCS-083-p1-oauth-token-store-hardening.md) | security | p2 | M | [auth] Harden the Copilot and Codex OAuth token stores | CCS-080 | Open |
-| [CCS-084](P1-trust-release/CCS-084-p1-settings-atomic-save.md) | bug | p1 | S | [settings] Save settings.json atomically and back up a corrupt file instead of silently resetting | CCS-080 | Open |
-| [CCS-085](P1-trust-release/CCS-085-p1-settings-save-race.md) | bug | p2 | S | [settings] Hold the settings write lock across merge, save and swap | CCS-084 | Open |
-| [CCS-086](P1-trust-release/CCS-086-p1-sql-import-sandbox.md) | security | p1 | S | [db] Block ATTACH, VACUUM INTO and unsafe statements during SQL import and sync restore |  | Open |
-| [CCS-087](P1-trust-release/CCS-087-p1-restore-backup-temp-first.md) | bug | p2 | S | [db] Restore backups into a temp DB and validate before overwriting the main DB | CCS-011 | Open |
-| [CCS-088](P1-trust-release/CCS-088-p1-backup-filename-validation.md) | security | p3 | S | [db] Validate backup file names so drive-relative Windows paths cannot escape the backups dir |  | Open |
-| [CCS-089](P1-trust-release/CCS-089-p1-db-premigration-backup.md) | bug | p1 | S | [db] Take a consistent pre-migration backup before any DDL, including v0 and JSON upgrades | CCS-011 | Open |
-| [CCS-090](P1-trust-release/CCS-090-p1-db-wal-busy-timeout.md) | refactor | p2 | S | [db] Enable WAL, synchronous=NORMAL and busy_timeout on local DB paths | CCS-089 | Open |
-| [CCS-091](P1-trust-release/CCS-091-p1-db-compat-policy.md) | chore | p1 | M | [db] Define and test the downgrade and mixed-version sync policy | CCS-089 | Open |
-| [CCS-092](P1-trust-release/CCS-092-p1-usage-input-semantics.md) | bug | p1 | S | [usage] Make AppType::input_semantics() the single source and fix the grokbuild backfill cost | CCS-010 | Open |
-| [CCS-093](P1-trust-release/CCS-093-p1-usage-session-importer-semantics.md) | bug | p2 | S | [usage] Persist input_token_semantics and pricing_model from session importers, and fix the dead Gemini UPSERT | CCS-092 | Open |
-| [CCS-094](P1-trust-release/CCS-094-p1-pricing-no-reseed.md) | bug | p2 | S | [pricing] Stop reseeding built-in prices on every read so deleted prices stay deleted |  | Open |
-| [CCS-095](P1-trust-release/CCS-095-p1-spend-limits-correct.md) | bug | p2 | S | [usage] Fix spend-limit windows, add an index and surface DB errors | CCS-091 | Open |
-| [CCS-096](P1-trust-release/CCS-096-p1-session-sync-partial-line.md) | bug | p2 | S | [usage] Advance the session-log offset only past complete newline-terminated lines |  | Open |
-| [CCS-097](P1-trust-release/CCS-097-p1-session-sync-final-entry.md) | bug | p2 | S | [usage] Upgrade imported partial streaming snapshots when the final session entry arrives | CCS-096 | Open |
-| [CCS-098](P1-trust-release/CCS-098-p1-switch-provider-off-main.md) | bug | p3 | S | [providers] Run the switch_provider command off the main thread |  | Open |
-| [CCS-099](P1-trust-release/CCS-099-p1-switch-lock-all-apps.md) | bug | p3 | S | [providers] Take the per-app switch lock for every app type | CCS-098 | Open |
-| [CCS-100](P1-trust-release/CCS-100-p1-subscription-keychain-blocking.md) | bug | p2 | S | [usage] Run macOS keychain reads off the async workers, with a timeout |  | Open |
-| [CCS-101](P1-trust-release/CCS-101-p1-skill-zip-extraction.md) | security | p3 | S | [skills] Use enclosed_name and size limits when extracting skill repo archives |  | Open |
-| [CCS-102](P1-trust-release/CCS-102-p1-gemini-env-writer.md) | bug | p3 | S | [gemini] Validate .env keys and values, strip quotes when parsing, and keep unknown lines | CCS-012 | Open |
-| [CCS-103](P1-trust-release/CCS-103-p1-claude-json-optimistic.md) | bug | p3 | S | [claude] Use optimistic concurrency for read-modify-write of ~/.claude.json | CCS-079 | Open |
-| [CCS-104](P1-trust-release/CCS-104-p1-powershell-quote.md) | bug | p3 | S | [terminal] Escape apostrophes in PowerShell launch paths | CCS-036 | Open |
+| [CCS-082](P1-trust-release/CCS-082-p1-route-writes-atomic-lint.md) | refactor | p2 | S | [config] Route the remaining config writers through atomic_write and ban std::fs::write | CCS-080, CCS-012 | Done |
+| [CCS-083](P1-trust-release/CCS-083-p1-oauth-token-store-hardening.md) | security | p2 | M | [auth] Harden the Copilot and Codex OAuth token stores | CCS-080 | Partial |
+| [CCS-084](P1-trust-release/CCS-084-p1-settings-atomic-save.md) | bug | p1 | S | [settings] Save settings.json atomically and back up a corrupt file instead of silently resetting | CCS-080 | Partial |
+| [CCS-085](P1-trust-release/CCS-085-p1-settings-save-race.md) | bug | p2 | S | [settings] Hold the settings write lock across merge, save and swap | CCS-084 | Done |
+| [CCS-086](P1-trust-release/CCS-086-p1-sql-import-sandbox.md) | security | p1 | S | [db] Block ATTACH, VACUUM INTO and unsafe statements during SQL import and sync restore |  | Done |
+| [CCS-087](P1-trust-release/CCS-087-p1-restore-backup-temp-first.md) | bug | p2 | S | [db] Restore backups into a temp DB and validate before overwriting the main DB | CCS-011 | Done |
+| [CCS-088](P1-trust-release/CCS-088-p1-backup-filename-validation.md) | security | p3 | S | [db] Validate backup file names so drive-relative Windows paths cannot escape the backups dir |  | Done |
+| [CCS-089](P1-trust-release/CCS-089-p1-db-premigration-backup.md) | bug | p1 | S | [db] Take a consistent pre-migration backup before any DDL, including v0 and JSON upgrades | CCS-011 | Done |
+| [CCS-090](P1-trust-release/CCS-090-p1-db-wal-busy-timeout.md) | refactor | p2 | S | [db] Enable WAL, synchronous=NORMAL and busy_timeout on local DB paths | CCS-089 | Done |
+| [CCS-091](P1-trust-release/CCS-091-p1-db-compat-policy.md) | chore | p1 | M | [db] Define and test the downgrade and mixed-version sync policy | CCS-089 | Done |
+| [CCS-092](P1-trust-release/CCS-092-p1-usage-input-semantics.md) | bug | p1 | S | [usage] Make AppType::input_semantics() the single source and fix the grokbuild backfill cost | CCS-010 | Done |
+| [CCS-093](P1-trust-release/CCS-093-p1-usage-session-importer-semantics.md) | bug | p2 | S | [usage] Persist input_token_semantics and pricing_model from session importers, and fix the dead Gemini UPSERT | CCS-092 | Done |
+| [CCS-094](P1-trust-release/CCS-094-p1-pricing-no-reseed.md) | bug | p2 | S | [pricing] Stop reseeding built-in prices on every read so deleted prices stay deleted |  | Done |
+| [CCS-095](P1-trust-release/CCS-095-p1-spend-limits-correct.md) | bug | p2 | S | [usage] Fix spend-limit windows, add an index and surface DB errors | CCS-091 | Done |
+| [CCS-096](P1-trust-release/CCS-096-p1-session-sync-partial-line.md) | bug | p2 | S | [usage] Advance the session-log offset only past complete newline-terminated lines |  | Done |
+| [CCS-097](P1-trust-release/CCS-097-p1-session-sync-final-entry.md) | bug | p2 | S | [usage] Upgrade imported partial streaming snapshots when the final session entry arrives | CCS-096 | Done |
+| [CCS-098](P1-trust-release/CCS-098-p1-switch-provider-off-main.md) | bug | p3 | S | [providers] Run the switch_provider command off the main thread |  | Done |
+| [CCS-099](P1-trust-release/CCS-099-p1-switch-lock-all-apps.md) | bug | p3 | S | [providers] Take the per-app switch lock for every app type | CCS-098 | Done |
+| [CCS-100](P1-trust-release/CCS-100-p1-subscription-keychain-blocking.md) | bug | p2 | S | [usage] Run macOS keychain reads off the async workers, with a timeout |  | Partial |
+| [CCS-101](P1-trust-release/CCS-101-p1-skill-zip-extraction.md) | security | p3 | S | [skills] Use enclosed_name and size limits when extracting skill repo archives |  | Done |
+| [CCS-102](P1-trust-release/CCS-102-p1-gemini-env-writer.md) | bug | p3 | S | [gemini] Validate .env keys and values, strip quotes when parsing, and keep unknown lines | CCS-012 | Done |
+| [CCS-103](P1-trust-release/CCS-103-p1-claude-json-optimistic.md) | bug | p3 | S | [claude] Use optimistic concurrency for read-modify-write of ~/.claude.json | CCS-079 | Done |
+| [CCS-104](P1-trust-release/CCS-104-p1-powershell-quote.md) | bug | p3 | S | [terminal] Escape apostrophes in PowerShell launch paths | CCS-036 | Done |
 | [CCS-105](P1-trust-release/CCS-105-p1-fe-jsoneditor-onchange.md) | bug | p2 | S | [editor] Stop JsonEditor capturing a stale onChange, which makes the MCP modal overwrite ID and name |  | Done |
 | [CCS-106](P1-trust-release/CCS-106-p1-fe-managed-auth-timers.md) | bug | p2 | S | [auth-ui] Prevent leaked and overlapping managed-auth polling timers |  | Done |
 | [CCS-107](P1-trust-release/CCS-107-p1-fe-edit-dialog-reset.md) | bug | p3 | S | [provider-form] Do not reset typed input when live settings finish loading in the edit dialog |  | Done |
-| [CCS-108](P1-trust-release/CCS-108-p1-fe-mcp-stdio-validation.md) | bug | p3 | S | [mcp] Treat a missing type as stdio when validating MCP server specs, in the UI and the backend |  | Open |
-| [CCS-109](P1-trust-release/CCS-109-p1-fe-skills-cache-dedupe.md) | bug | p3 | S | [skills] Dedupe the installed-skills cache by id and skip same-name folders in one ZIP |  | Open |
+| [CCS-108](P1-trust-release/CCS-108-p1-fe-mcp-stdio-validation.md) | bug | p3 | S | [mcp] Treat a missing type as stdio when validating MCP server specs, in the UI and the backend |  | Done |
+| [CCS-109](P1-trust-release/CCS-109-p1-fe-skills-cache-dedupe.md) | bug | p3 | S | [skills] Dedupe the installed-skills cache by id and skip same-name folders in one ZIP |  | Done |
 
 ## P2: [P2 (v3.20): Typed vocabulary, app registry, IPC contract and generated bindings](P2-typed-vocabulary/CCS-003-epic-p2.md)
 
 | ID | Kind | Pri | Effort | Title | Depends on | Status |
 |---|---|---|---|---|---|---|
-| [CCS-110](P2-typed-vocabulary/CCS-110-p2-proxy-format-types.md) | refactor | p2 | M | [proxy] Introduce WireFormat, ClaudeApiFormat, AppRef and BreakerKey types | CCS-009, CCS-014 | Open |
-| [CCS-111](P2-typed-vocabulary/CCS-111-p2-proxy-dead-code-purge.md) | refactor | p3 | S | [proxy] Delete dead proxy abstractions and cut #[allow(dead_code)] from 69 to 15 or fewer | CCS-110 | Open |
-| [CCS-112](P2-typed-vocabulary/CCS-112-p2-app-registry.md) | refactor | p1 | M | [apps] Add the AppDescriptor registry and replace hard-coded app lists | CCS-012 | Open |
-| [CCS-113](P2-typed-vocabulary/CCS-113-p2-app-registry-ipc.md) | refactor | p2 | S | [apps] Expose get_app_registry, add the exhaustiveness test, and fix the prompt and skills-dir edge cases | CCS-112 | Open |
-| [CCS-114](P2-typed-vocabulary/CCS-114-p2-ipc-error-type.md) | refactor | p2 | M | [ipc] Introduce IpcError with stable error codes |  | Open |
-| [CCS-115](P2-typed-vocabulary/CCS-115-p2-ipc-error-frontend.md) | refactor | p2 | S | [errors] Switch frontend error handling on IpcError.code | CCS-114 | Open |
-| [CCS-116](P2-typed-vocabulary/CCS-116-p2-bindings-spike.md) | chore | p1 | S | [ipc] Time-boxed tauri-specta spike on the usage domain, with a written decision | CCS-114 | Open |
-| [CCS-117](P2-typed-vocabulary/CCS-117-p2-bindings-generate.md) | refactor | p1 | L | [ipc] Generate src/shared/bindings.ts with a CI dirty check and typed MSW handlers | CCS-116 | Open |
-| [CCS-118](P2-typed-vocabulary/CCS-118-p2-ipc-naming-orphans.md) | chore | p3 | M | [ipc] Normalize command and argument casing, and wire up or delete orphan commands | CCS-117 | Open |
+| [CCS-110](P2-typed-vocabulary/CCS-110-p2-proxy-format-types.md) | refactor | p2 | M | [proxy] Introduce WireFormat, ClaudeApiFormat, AppRef and BreakerKey types | CCS-009, CCS-014 | Done |
+| [CCS-111](P2-typed-vocabulary/CCS-111-p2-proxy-dead-code-purge.md) | refactor | p3 | S | [proxy] Delete dead proxy abstractions and cut #[allow(dead_code)] from 69 to 15 or fewer | CCS-110 | Done |
+| [CCS-112](P2-typed-vocabulary/CCS-112-p2-app-registry.md) | refactor | p1 | M | [apps] Add the AppDescriptor registry and replace hard-coded app lists | CCS-012 | Done |
+| [CCS-113](P2-typed-vocabulary/CCS-113-p2-app-registry-ipc.md) | refactor | p2 | S | [apps] Expose get_app_registry, add the exhaustiveness test, and fix the prompt and skills-dir edge cases | CCS-112 | Done |
+| [CCS-114](P2-typed-vocabulary/CCS-114-p2-ipc-error-type.md) | refactor | p2 | M | [ipc] Introduce IpcError with stable error codes |  | Done |
+| [CCS-115](P2-typed-vocabulary/CCS-115-p2-ipc-error-frontend.md) | refactor | p2 | S | [errors] Switch frontend error handling on IpcError.code | CCS-114 | Done |
+| [CCS-116](P2-typed-vocabulary/CCS-116-p2-bindings-spike.md) | chore | p1 | S | [ipc] Time-boxed tauri-specta spike on the usage domain, with a written decision | CCS-114 | Done |
+| [CCS-117](P2-typed-vocabulary/CCS-117-p2-bindings-generate.md) | refactor | p1 | L | [ipc] Generate src/shared/bindings.ts with a CI dirty check and typed MSW handlers | CCS-116 | Done |
+| [CCS-118](P2-typed-vocabulary/CCS-118-p2-ipc-naming-orphans.md) | chore | p3 | M | [ipc] Normalize command and argument casing, and wire up or delete orphan commands | CCS-117 | Done |
 | [CCS-119](P2-typed-vocabulary/CCS-119-p2-fe-app-registry.md) | refactor | p2 | M | [apps-ui] Add the frontend app registry and replace VALID_APPS and the capability chains | CCS-113 | Partial |
 | [CCS-120](P2-typed-vocabulary/CCS-120-p2-eslint-ratchets.md) | chore | p2 | S | [lint] Ban raw invoke outside the bindings layer and ratchet app-literal comparisons | CCS-117, CCS-119, CCS-017 | Done |
-| [CCS-121](P2-typed-vocabulary/CCS-121-p2-deps-modernize.md) | chore | p3 | M | [deps] Replace serde_yaml, consolidate the JSON5 crates and drop once_cell | CCS-012 | Open |
-| [CCS-122](P2-typed-vocabulary/CCS-122-p2-feature-actionable-errors.md) | feature | p3 | M | [errors] Add actions to error toasts based on IpcError codes | CCS-115 | Open |
+| [CCS-121](P2-typed-vocabulary/CCS-121-p2-deps-modernize.md) | chore | p3 | M | [deps] Replace serde_yaml, consolidate the JSON5 crates and drop once_cell | CCS-012 | Done |
+| [CCS-122](P2-typed-vocabulary/CCS-122-p2-feature-actionable-errors.md) | feature | p3 | M | [errors] Add actions to error toasts based on IpcError codes | CCS-115 | Done |
 
 ## P3: [P3 (v3.21): Proxy request path with endpoint table, RoutePlan, attempt pipeline, canonical usage and stream taps](P3-proxy-request-path/CCS-004-epic-p3.md)
 
 | ID | Kind | Pri | Effort | Title | Depends on | Status |
 |---|---|---|---|---|---|---|
-| [CCS-123](P3-proxy-request-path/CCS-123-p3-endpoint-table.md) | refactor | p2 | M | [proxy] Build routes from a ClientEndpoint table with one handle_proxied and per-format error renderers | CCS-110 | Open |
-| [CCS-124](P3-proxy-request-path/CCS-124-p3-runtime-config-snapshot.md) | refactor | p2 | M | [proxy] Cache runtime config in an ArcSwap snapshot and remove DB reads from the request path | CCS-123 | Open |
-| [CCS-125](P3-proxy-request-path/CCS-125-p3-router-lock-db-read.md) | bug | p3 | S | [proxy] Read the breaker config before taking the breaker-map write lock | CCS-124 | Open |
-| [CCS-126](P3-proxy-request-path/CCS-126-p3-route-plan.md) | refactor | p1 | M | [proxy] Resolve a RoutePlan once per attempt and carry it in ForwardResult | CCS-123 | Open |
+| [CCS-123](P3-proxy-request-path/CCS-123-p3-endpoint-table.md) | refactor | p2 | M | [proxy] Build routes from a ClientEndpoint table with one handle_proxied and per-format error renderers | CCS-110 | Done |
+| [CCS-124](P3-proxy-request-path/CCS-124-p3-runtime-config-snapshot.md) | refactor | p2 | M | [proxy] Cache runtime config in an ArcSwap snapshot and remove DB reads from the request path | CCS-123 | Done |
+| [CCS-125](P3-proxy-request-path/CCS-125-p3-router-lock-db-read.md) | bug | p3 | S | [proxy] Read the breaker config before taking the breaker-map write lock | CCS-124 | Done |
+| [CCS-126](P3-proxy-request-path/CCS-126-p3-route-plan.md) | refactor | p1 | M | [proxy] Resolve a RoutePlan once per attempt and carry it in ForwardResult | CCS-123 | Done |
 | [CCS-127](P3-proxy-request-path/CCS-127-p3-attempt-recorder.md) | refactor | p2 | M | [proxy] Add AttemptRecorder to own status, breaker, health and try_switch for each attempt | CCS-126, CCS-051 | Open |
 | [CCS-128](P3-proxy-request-path/CCS-128-p3-failover-flapping.md) | bug | p3 | S | [proxy] Count failovers only when a request actually failed over, and report recovery separately | CCS-127 | Open |
 | [CCS-129](P3-proxy-request-path/CCS-129-p3-recovery-strategy.md) | refactor | p2 | M | [proxy] Replace nested forward() retries with a RecoveryStrategy list | CCS-127 | Open |
@@ -241,3 +241,4 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-208](F-frontend/CCS-208-f-command-palette.md) | feature | p3 | S | [shell] Add a Cmd/Ctrl-K command palette to search and switch providers across apps | CCS-194, CCS-207 | Done |
 | [CCS-209](F-frontend/CCS-209-f-unpriced-requests-export.md) | feature | p3 | S | [usage] Filter and export unpriced requests, with a shortcut to add model pricing | CCS-159, CCS-021 | Open |
 | [CCS-210](F-frontend/CCS-210-f-markdowneditor-stale-onchange.md) | bug | p3 | S | [editor] Stop MarkdownEditor capturing a stale onChange |  | Done |
+| [CCS-211](F-frontend/CCS-211-f-lint-green.md) | chore | p1 | S | [lint] Make pnpm lint green again after the P1/P2 merges |  | Open |

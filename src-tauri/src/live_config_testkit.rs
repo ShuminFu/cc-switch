@@ -1,4 +1,5 @@
-//! Live-config writer testkit, used by `tests/config_writers.rs`.
+//! Live-config writer testkit, used by `tests/config_writers.rs` and
+//! `tests/app_adapter_conformance.rs`.
 //!
 //! Exposes the production entry points that rewrite users' CLI configs, the
 //! OAuth token stores and the Codex state DB migration, so the integration
@@ -21,6 +22,13 @@ pub use crate::codex_config::CC_SWITCH_CODEX_MODEL_PROVIDER_ID;
 pub use crate::codex_history_migration::maybe_migrate_codex_third_party_history_provider_bucket;
 pub use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
 pub use crate::proxy::providers::copilot_auth::CopilotAuthManager;
+
+/// The app adapter surface, used by `tests/app_adapter_conformance.rs` to run
+/// one contract over every entry in [`APPS`] (and a test-only extra app).
+pub use crate::apps::adapter::{
+    AppAdapter, CommonSnippet, Credentials, McpProjector, ProxyTakeover, SessionSource,
+};
+pub use crate::apps::{adapter, AppCaps, AppDescriptor, SyncMode, APPS};
 
 /// File name of the Codex state DB (`state_5.sqlite`).
 pub const CODEX_STATE_DB_FILENAME: &str = crate::codex_state_db::CODEX_STATE_DB_FILENAME;

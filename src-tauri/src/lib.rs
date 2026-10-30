@@ -1,24 +1,18 @@
+// 生产代码由 lib 目标按 clippy.toml 检查；单元测试可直接用 std::fs::write 准备夹具
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
+
 mod app_config;
 mod app_store;
 mod apps;
 mod auto_launch;
 #[cfg(test)]
 mod bindings;
-mod claude_desktop_config;
-mod claude_mcp;
-mod claude_plugin;
-mod codex_config;
-mod codex_history_migration;
-mod codex_state_db;
 mod commands;
 mod config;
 mod database;
 mod deeplink;
 mod error;
-mod gemini_config;
 mod gemini_mcp;
-mod grok_config;
-pub mod hermes_config;
 mod init_status;
 mod lightweight;
 #[cfg(target_os = "linux")]
@@ -28,11 +22,10 @@ mod linux_fix;
 pub mod live_config_testkit;
 mod mcp;
 mod model_capabilities;
-mod openclaw_config;
-mod opencode_config;
 mod panic_hook;
 pub mod paths;
 mod picked_paths;
+mod pricing;
 mod prompt;
 mod prompt_files;
 mod provider;
@@ -51,7 +44,20 @@ mod tray;
 mod usage_events;
 mod usage_script;
 
-pub use app_config::{AppType, InstalledSkill, McpApps, McpServer, MultiAppConfig, SkillApps};
+// 配置读写代码已迁入 apps/<app>/；保留旧路径别名，调用方无需改动
+use apps::claude::claude_json as claude_mcp;
+use apps::claude::plugin as claude_plugin;
+use apps::claude_desktop::config as claude_desktop_config;
+use apps::codex::config as codex_config;
+use apps::codex::history_migration as codex_history_migration;
+use apps::codex::state_db as codex_state_db;
+use apps::gemini::config as gemini_config;
+use apps::grok::config as grok_config;
+pub use apps::hermes::config as hermes_config;
+use apps::openclaw::config as openclaw_config;
+use apps::opencode::config as opencode_config;
+
+pub use app_config::{AppSet, AppType, InstalledSkill, McpServer, MultiAppConfig};
 pub use codex_config::{get_codex_auth_path, get_codex_config_path, write_codex_live_atomic};
 pub use commands::open_provider_terminal;
 pub use commands::*;
@@ -70,7 +76,10 @@ pub use prompt::Prompt;
 pub use provider::{Provider, ProviderMeta};
 pub use services::{
     profile::{ProfilePayload, ProfileScope, ProfileService},
-    provider::reapply_current_codex_official_live,
+    provider::{
+        reapply_current_codex_official_live, LiveFilePreview, LivePreviewSkipReason,
+        LiveWritePreview,
+    },
     skill::{migrate_skills_to_ssot, ImportSkillSelection},
     ConfigService, EndpointLatency, McpService, PromptService, ProviderService, ProxyService,
     SkillService, SpeedtestService,
@@ -262,7 +271,7 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 数据库版本过新的恢复模式下没有托盘可唤回，关闭即退出，避免应用隐身后台
                 let in_db_recovery = crate::init_status::get_init_error()
-                    .map(|p| p.kind.as_deref() == Some("db_version_too_new"))
+                    .map(|p| p.kind.as_deref() == Some(crate::init_status::DB_VERSION_TOO_NEW))
                     .unwrap_or(false);
                 if in_db_recovery {
                     api.prevent_close();
@@ -371,8 +380,15 @@ pub fn run() {
 
             // 如果需要迁移，先验证 config.json 是否可以加载（在创建数据库之前）
             // 这样如果加载失败用户选择退出，数据库文件还没被创建，下次可以正常重试
+            let mut legacy_json_backup_id = None;
             let migration_config = if !has_db && has_json {
                 log::info!("检测到旧版配置文件，验证配置文件...");
+
+                // 加载会就地升级并重写 config.json，必须先原样备份
+                match crate::database::Database::backup_legacy_config_json() {
+                    Ok(id) => legacy_json_backup_id = id,
+                    Err(e) => log::warn!("迁移前备份 config.json 失败，继续迁移: {e}"),
+                }
 
                 // 循环：支持用户重试加载配置文件
                 loop {
@@ -404,21 +420,15 @@ pub fn run() {
             // 若迁移失败（数据库损坏/权限不足/user_version 过新等），需要给用户明确提示，
             // 否则表现可能只是“应用打不开/闪退”。
             //
-            // 预检：数据库版本过新时，必须先于任何 schema 写操作（create_tables 内含
+            // 预检：数据库版本过新时，必须先于任何 schema 写操作（迁移步骤内含
             // DROP/ALTER 等 DDL）进入恢复界面，避免旧应用对读不懂的更新版 DB 落写。
             match crate::database::Database::stored_user_version_exceeds_supported(&db_path) {
                 Ok(Some(version)) => {
                     log::warn!("数据库版本过新（v{version}），引导用户在应用内升级应用");
-                    crate::init_status::set_init_error(crate::init_status::InitErrorPayload {
-                        path: db_path.display().to_string(),
-                        error: format!(
-                            "数据库版本过新（{version}），当前应用仅支持 {}，请升级应用后再尝试。",
-                            crate::database::SCHEMA_VERSION
-                        ),
-                        kind: Some("db_version_too_new".to_string()),
-                        db_version: Some(version),
-                        supported_version: Some(crate::database::SCHEMA_VERSION),
-                    });
+                    // 附带可恢复的迁移前备份，恢复界面据此提供降级恢复（见 docs/dev/DB_COMPATIBILITY.md）
+                    crate::init_status::set_init_error(
+                        crate::init_status::db_version_too_new_payload(&db_path, version),
+                    );
                     // 主窗口默认 visible:false，恢复界面必须强制显示
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();
@@ -468,7 +478,12 @@ pub fn run() {
                     }
                     Err(e) => {
                         // 配置加载成功但迁移失败的情况极少（磁盘满等），仅记录日志
-                        log::error!("配置迁移失败: {e}，将从现有配置导入");
+                        match &legacy_json_backup_id {
+                            Some(id) => log::error!(
+                                "配置迁移失败: {e}，将从现有配置导入（迁移前备份 ID：{id}）"
+                            ),
+                            None => log::error!("配置迁移失败: {e}，将从现有配置导入"),
+                        }
                     }
                 }
             }
@@ -744,52 +759,18 @@ pub fn run() {
             if app_state.db.is_mcp_table_empty().unwrap_or(false) {
                 log::info!("MCP table empty, importing from live configurations...");
 
-                match crate::services::mcp::McpService::import_from_claude(&app_state) {
-                    Ok(count) if count > 0 => {
-                        log::info!("✓ Imported {count} MCP server(s) from Claude");
+                for descriptor in crate::apps::registry::with_caps(crate::apps::AppCaps::MCP) {
+                    let name = descriptor.display_name;
+                    match crate::services::mcp::McpService::import_from_app(
+                        &app_state,
+                        &descriptor.app,
+                    ) {
+                        Ok(count) if count > 0 => {
+                            log::info!("✓ Imported {count} MCP server(s) from {name}");
+                        }
+                        Ok(_) => log::debug!("○ No {name} MCP servers found to import"),
+                        Err(e) => log::warn!("✗ Failed to import {name} MCP: {e}"),
                     }
-                    Ok(_) => log::debug!("○ No Claude MCP servers found to import"),
-                    Err(e) => log::warn!("✗ Failed to import Claude MCP: {e}"),
-                }
-
-                match crate::services::mcp::McpService::import_from_codex(&app_state) {
-                    Ok(count) if count > 0 => {
-                        log::info!("✓ Imported {count} MCP server(s) from Codex");
-                    }
-                    Ok(_) => log::debug!("○ No Codex MCP servers found to import"),
-                    Err(e) => log::warn!("✗ Failed to import Codex MCP: {e}"),
-                }
-
-                match crate::services::mcp::McpService::import_from_gemini(&app_state) {
-                    Ok(count) if count > 0 => {
-                        log::info!("✓ Imported {count} MCP server(s) from Gemini");
-                    }
-                    Ok(_) => log::debug!("○ No Gemini MCP servers found to import"),
-                    Err(e) => log::warn!("✗ Failed to import Gemini MCP: {e}"),
-                }
-
-                match crate::services::mcp::McpService::import_from_grokbuild(&app_state) {
-                    Ok(count) if count > 0 => {
-                        log::info!("✓ Imported {count} MCP server(s) from Grok Build");
-                    }
-                    Ok(_) => log::debug!("○ No Grok Build MCP servers found to import"),
-                    Err(e) => log::warn!("✗ Failed to import Grok Build MCP: {e}"),
-                }
-
-                match crate::services::mcp::McpService::import_from_opencode(&app_state) {
-                    Ok(count) if count > 0 => {
-                        log::info!("✓ Imported {count} MCP server(s) from OpenCode");
-                    }
-                    Ok(_) => log::debug!("○ No OpenCode MCP servers found to import"),
-                    Err(e) => log::warn!("✗ Failed to import OpenCode MCP: {e}"),
-                }
-
-                match crate::services::mcp::McpService::import_from_hermes(&app_state) {
-                    Ok(count) if count > 0 => {
-                        log::info!("✓ Imported {count} MCP server(s) from Hermes");
-                    }
-                    Ok(_) => log::debug!("○ No Hermes MCP servers found to import"),
-                    Err(e) => log::warn!("✗ Failed to import Hermes MCP: {e}"),
                 }
             }
 
@@ -1211,6 +1192,7 @@ pub fn run() {
             commands::get_current_provider,
             commands::add_provider,
             commands::update_provider,
+            commands::preview_live_write,
             commands::delete_provider,
             commands::remove_provider_from_live_config,
             commands::switch_provider,
@@ -1239,6 +1221,8 @@ pub fn run() {
             commands::read_live_provider_settings,
             commands::get_settings,
             commands::save_settings,
+            commands::get_settings_load_failure,
+            commands::acknowledge_settings_load_failure,
             commands::has_codex_unify_history_backup,
             commands::restore_codex_unified_history,
             commands::get_rectifier_config,
@@ -1323,11 +1307,14 @@ pub fn run() {
             commands::s3_sync_save_settings,
             commands::s3_sync_fetch_remote_info,
             commands::save_file_dialog,
+            commands::save_csv_file_dialog,
+            commands::write_csv_export,
             commands::open_file_dialog,
             commands::open_zip_file_dialog,
             commands::create_db_backup,
             commands::list_db_backups,
             commands::restore_db_backup,
+            commands::restore_backup_over_newer_db,
             commands::rename_db_backup,
             commands::delete_db_backup,
             commands::sync_current_providers_live,
@@ -1418,6 +1405,7 @@ pub fn run() {
             commands::get_provider_stats,
             commands::get_model_stats,
             commands::get_request_logs,
+            commands::get_unpriced_model_stats,
             commands::get_request_detail,
             commands::get_model_pricing,
             commands::update_model_pricing,

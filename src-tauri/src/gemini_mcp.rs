@@ -2,7 +2,7 @@ use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::atomic_write;
+use crate::config::{atomic_write, read_text_file_if_exists};
 use crate::error::AppError;
 use crate::gemini_config::get_gemini_settings_path;
 
@@ -12,16 +12,19 @@ fn user_config_path() -> PathBuf {
 }
 
 fn read_json_value(path: &Path) -> Result<Value, AppError> {
-    if !path.exists() {
+    let Some(content) = read_text_file_if_exists(path)? else {
         return Ok(serde_json::json!({}));
-    }
-    let content = fs::read_to_string(path).map_err(|e| AppError::io(path, e))?;
+    };
     let value: Value = serde_json::from_str(&content).map_err(|e| AppError::json(path, e))?;
     Ok(value)
 }
 
 fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
+    // 写入预览只捕获内容，不建目录
+    if let Some(parent) = path
+        .parent()
+        .filter(|_| !crate::config::is_capturing_writes())
+    {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
     let json =
@@ -37,10 +40,6 @@ fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
 /// - 仅有 command 字段 → 补齐 type: "stdio"
 pub fn read_mcp_servers_map() -> Result<std::collections::HashMap<String, Value>, AppError> {
     let path = user_config_path();
-    if !path.exists() {
-        return Ok(std::collections::HashMap::new());
-    }
-
     let root = read_json_value(&path)?;
     let mut servers: std::collections::HashMap<String, Value> = root
         .get("mcpServers")
@@ -77,11 +76,7 @@ pub fn set_mcp_servers_map(
     servers: &std::collections::HashMap<String, Value>,
 ) -> Result<(), AppError> {
     let path = user_config_path();
-    let mut root = if path.exists() {
-        read_json_value(&path)?
-    } else {
-        serde_json::json!({})
-    };
+    let mut root = read_json_value(&path)?;
 
     // 构建 mcpServers 对象：移除 UI 辅助字段（enabled/source），仅保留实际 MCP 规范
     let mut out: Map<String, Value> = Map::new();
