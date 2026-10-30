@@ -1,0 +1,32 @@
+{
+  "model": "claude-sonnet-4-5",
+  "max_tokens": 8192,
+  "thinking": {
+    "type": "enabled",
+    "budget_tokens": 4096
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is 6 * 7?"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "Six times seven is forty-two.",
+          "signature": "sig_abc123"
+        },
+        {
+          "type": "text",
+          "text": "42"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "And 6 * 8?"
+    }
+  ]
+}

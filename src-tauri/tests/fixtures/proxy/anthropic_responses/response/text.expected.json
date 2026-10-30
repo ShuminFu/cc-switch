@@ -1,0 +1,19 @@
+{
+  "id": "resp_001",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Au revoir !"
+    }
+  ],
+  "model": "gpt-5",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 6,
+    "cache_read_input_tokens": 10
+  }
+}

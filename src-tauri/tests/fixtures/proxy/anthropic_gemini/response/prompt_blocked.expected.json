@@ -1,0 +1,18 @@
+{
+  "id": "gem-resp-blocked",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Request blocked by Gemini safety filters: SAFETY"
+    }
+  ],
+  "model": "gemini-2.5-pro",
+  "stop_reason": "refusal",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 25,
+    "output_tokens": 0
+  }
+}

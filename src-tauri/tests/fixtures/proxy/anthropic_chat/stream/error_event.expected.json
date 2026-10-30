@@ -1,0 +1,50 @@
+[
+  {
+    "event": "message_start",
+    "data": {
+      "type": "message_start",
+      "message": {
+        "id": "chatcmpl-s7",
+        "type": "message",
+        "role": "assistant",
+        "model": "gpt-4o-2024-08-06",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      }
+    }
+  },
+  {
+    "event": "content_block_start",
+    "data": {
+      "type": "content_block_start",
+      "index": 0,
+      "content_block": {
+        "type": "text",
+        "text": ""
+      }
+    }
+  },
+  {
+    "event": "content_block_delta",
+    "data": {
+      "type": "content_block_delta",
+      "index": 0,
+      "delta": {
+        "type": "text_delta",
+        "text": "Hel"
+      }
+    }
+  },
+  {
+    "event": "error",
+    "data": {
+      "type": "error",
+      "error": {
+        "type": "server_error",
+        "message": "Upstream overloaded"
+      }
+    }
+  }
+]

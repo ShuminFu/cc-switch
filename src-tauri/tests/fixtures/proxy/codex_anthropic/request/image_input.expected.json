@@ -1,0 +1,23 @@
+{
+  "model": "gpt-5-codex",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUg=="
+          }
+        },
+        {
+          "type": "text",
+          "text": "Describe this screenshot."
+        }
+      ]
+    }
+  ],
+  "max_tokens": 8192
+}

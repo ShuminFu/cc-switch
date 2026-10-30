@@ -1,0 +1,51 @@
+{
+  "model": "gpt-5-codex",
+  "instructions": "You are Codex.",
+  "reasoning": {
+    "effort": "high",
+    "summary": "auto"
+  },
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "What is 6 * 7?"
+        }
+      ]
+    },
+    {
+      "type": "reasoning",
+      "id": "rs_prev",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "Multiply."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "42"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "And 6 * 8?"
+        }
+      ]
+    }
+  ],
+  "stream": false
+}

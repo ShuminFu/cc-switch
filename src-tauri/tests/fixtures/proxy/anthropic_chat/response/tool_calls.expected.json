@@ -1,0 +1,34 @@
+{
+  "id": "chatcmpl-002",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Checking both cities."
+    },
+    {
+      "type": "tool_use",
+      "id": "call_paris",
+      "name": "get_weather",
+      "input": {
+        "city": "Paris"
+      }
+    },
+    {
+      "type": "tool_use",
+      "id": "call_rome",
+      "name": "get_weather",
+      "input": {
+        "city": "Rome"
+      }
+    }
+  ],
+  "model": "gpt-4o-2024-08-06",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 80,
+    "output_tokens": 30
+  }
+}

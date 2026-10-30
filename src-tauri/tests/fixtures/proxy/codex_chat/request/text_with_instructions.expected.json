@@ -1,0 +1,18 @@
+{
+  "model": "gpt-5-codex",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are Codex, a coding agent."
+    },
+    {
+      "role": "user",
+      "content": "List the files."
+    }
+  ],
+  "max_completion_tokens": 2000,
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  }
+}

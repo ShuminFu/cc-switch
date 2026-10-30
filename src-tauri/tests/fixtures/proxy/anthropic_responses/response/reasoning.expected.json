@@ -1,0 +1,24 @@
+{
+  "id": "resp_001",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "6*8 = 48.",
+      "signature": "ccswitch-openai-reasoning-v1:eyJ0eXBlIjoicmVhc29uaW5nIiwiaWQiOiJyc18wMDEiLCJzdW1tYXJ5IjpbeyJ0eXBlIjoic3VtbWFyeV90ZXh0IiwidGV4dCI6IjYqOCA9IDQ4LiJ9XSwiZW5jcnlwdGVkX2NvbnRlbnQiOiJnQUFBQUFCZW5jcnlwdGVkIn0"
+    },
+    {
+      "type": "text",
+      "text": "48"
+    }
+  ],
+  "model": "gpt-5",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 6,
+    "cache_read_input_tokens": 10
+  }
+}

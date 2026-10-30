@@ -1,0 +1,24 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Au revoir !"
+          }
+        ]
+      },
+      "index": 0,
+      "finishReason": "STOP"
+    }
+  ],
+  "modelVersion": "gemini-2.5-pro",
+  "responseId": "gem-resp-001",
+  "usageMetadata": {
+    "promptTokenCount": 25,
+    "candidatesTokenCount": 6,
+    "totalTokenCount": 31,
+    "cachedContentTokenCount": 10
+  }
+}

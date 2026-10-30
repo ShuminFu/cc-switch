@@ -1,0 +1,28 @@
+[
+  {
+    "event": "message_start",
+    "data": {
+      "type": "message_start",
+      "message": {
+        "id": "gem-resp-001",
+        "type": "message",
+        "role": "assistant",
+        "model": "gemini-2.5-pro",
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      }
+    }
+  },
+  {
+    "event": "error",
+    "data": {
+      "type": "error",
+      "error": {
+        "type": "stream_error",
+        "message": "Stream error: fixture: upstream connection reset"
+      }
+    }
+  }
+]
