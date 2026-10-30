@@ -43,3 +43,8 @@ p4-usage-repo, p0-i18n-missing-keys
 - `cargo fmt` clean; `cargo clippy -- -D warnings` clean; `cargo test --lib`: 2400 passed, 0 failed (2 ignored); `UPDATE_BINDINGS=1 cargo test --lib bindings` then `bindings_are_up_to_date` passes.
 - `pnpm typecheck` clean; `pnpm format:check` clean; `pnpm test:unit`: 157 files / 1531 tests, all passing after updating the usage-bindings command count (13 -> 14).
 
+
+**Review**
+- Defect fixed: the "Add pricing" pre-fill and the CSV grouping key used the raw stored model name, but `update_model_pricing` saves the id verbatim while price lookup only tries normalized candidates (`clean_model_id_for_pricing`: namespace / `:` suffix stripped, lowercased, `@` -> `-`, `[1m]` trimmed). For ids like `openrouter/Mystery-Chat:free` the suggested price row could never match, so the row stayed unpriced. Both the backend `unpriced_model_id` and frontend `getPricingModelId` now return the normalized id (same casing variants group together), and also follow the backfill's `request_model` fallback when both `pricing_model` and `model` are placeholders.
+- Tests: `database::repo::tests::unpriced_model_stats_use_the_id_a_price_lookup_matches` (namespaced + plain rows group to one id; adding pricing under the exported ids clears the unpriced filter and the export), plus `getPricingModelId` normalization cases in `tests/components/unpricedExport.test.ts`.
+- Re-verified: `cargo fmt --check`, `cargo clippy -- -D warnings` clean; `cargo test --lib` 2401 passed / 0 failed; `pnpm typecheck`, `pnpm format:check` clean; `pnpm test:unit` 157 files / 1532 tests passing.

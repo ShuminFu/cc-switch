@@ -11,8 +11,8 @@ use crate::database::{local_midnight_timestamp, lock_conn, Database};
 use crate::error::AppError;
 use crate::pricing::engine::{self, InputBasis, ModelPricing, TokenCounts};
 use crate::pricing::resolver::{
-    find_model_pricing_row, is_placeholder_pricing_model, model_pricing_candidates,
-    should_try_pricing_prefix_match,
+    clean_model_id_for_pricing, find_model_pricing_row, is_placeholder_pricing_model,
+    model_pricing_candidates, should_try_pricing_prefix_match,
 };
 use crate::services::sql_helpers::{fresh_input_sql, input_token_semantics_for_app_type};
 use crate::services::usage_stats::{
@@ -207,13 +207,30 @@ fn unpriced_log_filter(log_alias: &str) -> String {
     )
 }
 
-/// 补价时应填写的模型 ID：与回填查价同序，落库的计价模型优先，占位符时退回 model 列
+/// 补价时应填写的模型 ID：与回填查价同序（落库的计价模型优先，占位符时退回
+/// model 列，model 也是占位符时才用 request_model），并按查价规则归一化
+/// （去命名空间 / `:` 后缀、小写等）——原样保存带前缀的 ID 查价时匹配不到。
 fn unpriced_model_id(log: &RequestLogDetail) -> String {
-    log.pricing_model
+    let raw = log
+        .pricing_model
         .as_deref()
         .filter(|pm| !is_placeholder_pricing_model(pm))
-        .unwrap_or(&log.model)
-        .to_string()
+        .or_else(|| {
+            if is_placeholder_pricing_model(&log.model) {
+                log.request_model
+                    .as_deref()
+                    .filter(|rm| !is_placeholder_pricing_model(rm))
+            } else {
+                None
+            }
+        })
+        .unwrap_or(&log.model);
+    let cleaned = clean_model_id_for_pricing(raw);
+    if is_placeholder_pricing_model(&cleaned) {
+        raw.to_string()
+    } else {
+        cleaned
+    }
 }
 
 pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {

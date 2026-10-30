@@ -293,6 +293,55 @@ fn unpriced_filter_and_model_stats_only_cover_unpriced_rows() -> Result<(), AppE
     Ok(())
 }
 
+#[test]
+fn unpriced_model_stats_use_the_id_a_price_lookup_matches() -> Result<(), AppError> {
+    let db = Database::memory()?;
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        insert_proxy_row(
+            &conn,
+            &unpriced_row("ns", "openrouter/Mystery-Chat:free", 10),
+        )?;
+        insert_proxy_row(&conn, &unpriced_row("plain", "mystery-chat", 20))?;
+        // model 与 pricing_model 都是占位符：回填查价退回 request_model
+        insert_proxy_row(
+            &conn,
+            &ProxyUsageRow {
+                model: "unknown",
+                request_model: "mystery-alias",
+                pricing_model: "",
+                ..proxy_row("alias", "claude", 30)
+            },
+        )?;
+    }
+
+    let filters = crate::services::usage_stats::LogFilters {
+        unpriced: Some(true),
+        ..Default::default()
+    };
+    let stats = db.get_unpriced_model_stats(&filters)?;
+    let models: Vec<_> = stats
+        .iter()
+        .map(|s| (s.model.as_str(), s.request_count))
+        .collect();
+    assert_eq!(models, [("mystery-chat", 2), ("mystery-alias", 1)]);
+
+    // 按导出的 ID 补价后，这些行都能被回填、不再算未计价
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        for model_id in ["mystery-chat", "mystery-alias"] {
+            conn.execute(
+                "INSERT INTO model_pricing (model_id, display_name, input_cost_per_million, output_cost_per_million)
+                 VALUES (?1, ?1, '1', '2')",
+                [model_id],
+            )?;
+        }
+    }
+    assert_eq!(db.get_request_logs(&filters, 0, 50)?.total, 0);
+    assert!(db.get_unpriced_model_stats(&filters)?.is_empty());
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // 会话导入：一个文件一个事务
 // ---------------------------------------------------------------------------

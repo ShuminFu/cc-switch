@@ -52,4 +52,25 @@ describe("getPricingModelId", () => {
     expect(getPricingModelId({ model: "echo", pricingModel: "" })).toBe("echo");
     expect(getPricingModelId({ model: "echo" })).toBe("echo");
   });
+
+  it("normalizes the id the way the backend price lookup does", () => {
+    expect(
+      getPricingModelId({
+        model: "echo",
+        pricingModel: "openrouter/Mystery-Chat:free",
+      }),
+    ).toBe("mystery-chat");
+    expect(getPricingModelId({ model: "Vendor@V1[1m]" })).toBe("vendor-v1");
+    // model 也是占位符时才退回 request_model
+    expect(
+      getPricingModelId({
+        model: "unknown",
+        pricingModel: "",
+        requestModel: "mystery-alias",
+      }),
+    ).toBe("mystery-alias");
+    expect(getPricingModelId({ model: "real", requestModel: "alias" })).toBe(
+      "real",
+    );
+  });
 });
