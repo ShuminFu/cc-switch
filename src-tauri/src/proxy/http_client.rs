@@ -325,13 +325,84 @@ pub fn mask_url(url: &str) -> String {
             None => format!("{}://{}", parsed.scheme(), host),
         }
     } else {
-        // URL 解析失败，返回部分内容
-        if url.len() > 20 {
-            format!("{}...", &url[..20])
+        // URL 解析失败：先去掉可能的 `user:pass@` 凭据，再返回部分内容
+        let without_credentials = match url.rfind('@') {
+            Some(at) => {
+                let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+                if at >= scheme_end {
+                    format!("{}***@{}", &url[..scheme_end], &url[at + 1..])
+                } else {
+                    url.to_string()
+                }
+            }
+            None => url.to_string(),
+        };
+        if without_credentials.chars().count() > 20 {
+            let head: String = without_credentials.chars().take(20).collect();
+            format!("{head}...")
         } else {
-            url.to_string()
+            without_credentials
         }
     }
+}
+
+/// Maximum number of bytes of a request/response body written to the log.
+///
+/// Logs end up in `cc-switch.log` and are routinely attached to bug reports, so
+/// they must never contain whole prompts, source code or model output.
+pub(crate) const LOG_BODY_EXCERPT_BYTES: usize = 512;
+
+/// Header names whose values are credentials or session identifiers and must
+/// never be written to the log.
+const SENSITIVE_HEADERS: &[&str] = &[
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "x-goog-api-key",
+    "api-key",
+    "cookie",
+    "set-cookie",
+    "chatgpt-account-id",
+    "x-auth-token",
+    "x-amz-security-token",
+];
+
+/// Whether a header's value must be redacted before logging.
+pub(crate) fn is_sensitive_header(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    SENSITIVE_HEADERS.contains(&lower.as_str())
+        || lower.contains("token")
+        || lower.contains("secret")
+        || lower.ends_with("-key")
+}
+
+/// Format headers as `name=value, ...` for logging, with credential values
+/// replaced by `<redacted>`.
+pub(crate) fn format_headers_redacted(headers: &http::HeaderMap) -> String {
+    headers
+        .iter()
+        .map(|(key, value)| {
+            if is_sensitive_header(key.as_str()) {
+                format!("{key}=<redacted>")
+            } else {
+                format!("{key}={}", value.to_str().unwrap_or("<non-utf8>"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Bounded excerpt of a body for logging: at most [`LOG_BODY_EXCERPT_BYTES`]
+/// bytes (cut on a char boundary) followed by the total size when truncated.
+pub(crate) fn log_body_excerpt(text: &str) -> String {
+    if text.len() <= LOG_BODY_EXCERPT_BYTES {
+        return text.to_string();
+    }
+    let mut end = LOG_BODY_EXCERPT_BYTES;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…(truncated, {} bytes total)", &text[..end], text.len())
 }
 
 #[cfg(test)]
@@ -364,6 +435,41 @@ mod tests {
             mask_url("https://user:pass@proxy.example.com"),
             "https://proxy.example.com"
         );
+    }
+
+    #[test]
+    fn mask_url_fallback_strips_credentials() {
+        let masked = mask_url("::not a url user:hunter2@host");
+        assert!(!masked.contains("hunter2"), "{masked}");
+    }
+
+    #[test]
+    fn redacted_headers_never_contain_credentials() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("authorization", "Bearer sk-ant-secret".parse().unwrap());
+        headers.insert("x-api-key", "sk-ant-secret".parse().unwrap());
+        headers.insert("x-goog-api-key", "AIza-secret".parse().unwrap());
+        headers.insert("set-cookie", "session=abc".parse().unwrap());
+        headers.insert("cookie", "session=abc".parse().unwrap());
+        headers.insert("chatgpt-account-id", "acct-1".parse().unwrap());
+        headers.insert("content-type", "application/json".parse().unwrap());
+
+        let out = format_headers_redacted(&headers);
+        assert!(!out.contains("Bearer"), "{out}");
+        assert!(!out.contains("secret"), "{out}");
+        assert!(!out.contains("session=abc"), "{out}");
+        assert!(!out.contains("acct-1"), "{out}");
+        assert!(out.contains("content-type=application/json"), "{out}");
+        assert!(out.contains("authorization=<redacted>"), "{out}");
+    }
+
+    #[test]
+    fn body_excerpt_is_bounded_and_char_safe() {
+        assert_eq!(log_body_excerpt("short"), "short");
+        let long = "提示".repeat(1000);
+        let out = log_body_excerpt(&long);
+        assert!(out.len() < LOG_BODY_EXCERPT_BYTES + 64, "{}", out.len());
+        assert!(out.contains(&format!("{} bytes total", long.len())));
     }
 
     #[test]

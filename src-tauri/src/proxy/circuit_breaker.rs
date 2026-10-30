@@ -5,9 +5,10 @@
 use super::log_codes::cb as log_cb;
 use super::types::AppProxyConfig;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// 熔断器状态
@@ -32,6 +33,16 @@ impl std::fmt::Display for CircuitState {
     }
 }
 
+/// Default consecutive-failure threshold. Single source of truth for the
+/// breaker default and for the router's fallback when the per-app config
+/// cannot be read (matches the DB schema default).
+pub const DEFAULT_FAILURE_THRESHOLD: u32 = 4;
+
+/// Outcomes older than this no longer count towards the error rate, so a long
+/// healthy history cannot mask a burst of failures and a stale blip cannot
+/// open the breaker much later.
+pub const ERROR_RATE_WINDOW: Duration = Duration::from_secs(60);
+
 /// 熔断器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +56,9 @@ pub struct CircuitBreakerConfig {
     /// 错误率阈值 - 错误率超过此值时打开熔断器 (0.0-1.0)
     pub error_rate_threshold: f64,
     /// 最小请求数 - 计算错误率前的最小请求数
+    ///
+    /// Also the size of the sliding window: the error rate is computed over the
+    /// most recent `min_requests` outcomes within [`ERROR_RATE_WINDOW`].
     pub min_requests: u32,
 }
 
@@ -63,7 +77,7 @@ impl From<&AppProxyConfig> for CircuitBreakerConfig {
 impl Default for CircuitBreakerConfig {
     fn default() -> Self {
         Self {
-            failure_threshold: 4,
+            failure_threshold: DEFAULT_FAILURE_THRESHOLD,
             success_threshold: 2,
             timeout_seconds: 60,
             error_rate_threshold: 0.6,
@@ -90,6 +104,12 @@ pub struct CircuitBreaker {
     config: Arc<RwLock<CircuitBreakerConfig>>,
     /// 半开状态已放行的请求数（用于限流）
     half_open_requests: Arc<AtomicU32>,
+    /// 每次进入 HalfOpen 递增；用于让过期的 `HalfOpenPermit` 在 Drop 时
+    /// 不去释放新一轮 HalfOpen 的探测名额
+    half_open_generation: Arc<AtomicU64>,
+    /// Sliding window of recent outcomes (`true` = failure) used for the error
+    /// rate. Bounded by `min_requests` entries and [`ERROR_RATE_WINDOW`] age.
+    recent_outcomes: std::sync::Mutex<VecDeque<(Instant, bool)>>,
 }
 
 /// 熔断器放行结果
@@ -100,6 +120,73 @@ pub struct CircuitBreaker {
 pub struct AllowResult {
     pub allowed: bool,
     pub used_half_open_permit: bool,
+}
+
+/// RAII guard for a HalfOpen probe permit.
+///
+/// If the request future is dropped before the result is recorded (client
+/// disconnect, Ctrl+C, cancellation), `Drop` releases the permit so the breaker
+/// cannot get stuck in HalfOpen with its only probe slot taken.
+///
+/// Callers that record the result explicitly call [`HalfOpenPermit::take`]
+/// to obtain the `used_half_open_permit` flag for `record_success` /
+/// `record_failure` / `release_half_open_permit`; that hands release
+/// responsibility over and disarms the guard, so the permit is released once.
+#[derive(Debug)]
+#[must_use = "dropping the guard releases the HalfOpen permit immediately"]
+pub struct HalfOpenPermit {
+    slot: Option<(Arc<AtomicU32>, Arc<AtomicU64>, u64)>,
+}
+
+impl HalfOpenPermit {
+    /// A guard that holds no permit (Closed state, or breaker bypassed).
+    pub fn none() -> Self {
+        Self { slot: None }
+    }
+
+    /// Whether the guard still holds an unreleased permit.
+    #[allow(dead_code)]
+    pub fn is_held(&self) -> bool {
+        self.slot.is_some()
+    }
+
+    /// Hand the permit over to an explicit record/release call.
+    ///
+    /// Returns `true` the first time when a permit is held, `false` afterwards.
+    pub fn take(&mut self) -> bool {
+        self.slot.take().is_some()
+    }
+}
+
+impl Drop for HalfOpenPermit {
+    fn drop(&mut self) {
+        if let Some((counter, generation, held_generation)) = self.slot.take() {
+            // A newer HalfOpen round already reset the counter; releasing now would
+            // free someone else's probe slot.
+            if generation.load(Ordering::SeqCst) != held_generation {
+                return;
+            }
+            log::debug!(
+                "[{}] HalfOpen probe dropped before completion, releasing permit",
+                log_cb::HALF_OPEN_PROBE_FAILED
+            );
+            release_counter(&counter);
+        }
+    }
+}
+
+/// Saturating decrement used for every HalfOpen permit release.
+fn release_counter(counter: &AtomicU32) {
+    let mut current = counter.load(Ordering::SeqCst);
+    loop {
+        if current == 0 {
+            return;
+        }
+        match counter.compare_exchange(current, current - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return,
+            Err(actual) => current = actual,
+        }
+    }
 }
 
 impl CircuitBreaker {
@@ -114,12 +201,47 @@ impl CircuitBreaker {
             last_opened_at: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(config)),
             half_open_requests: Arc::new(AtomicU32::new(0)),
+            half_open_generation: Arc::new(AtomicU64::new(0)),
+            recent_outcomes: std::sync::Mutex::new(VecDeque::new()),
         }
     }
 
-    /// 更新熔断器配置（热更新，不重置状态）
+    /// 更新熔断器配置（热更新，不重置熔断状态）
+    ///
+    /// The error-rate window is cleared so a new `min_requests` /
+    /// `error_rate_threshold` is never compared against samples collected
+    /// under the old settings.
     pub async fn update_config(&self, new_config: CircuitBreakerConfig) {
         *self.config.write().await = new_config;
+        self.clear_outcomes();
+    }
+
+    fn clear_outcomes(&self) {
+        if let Ok(mut window) = self.recent_outcomes.lock() {
+            window.clear();
+        }
+    }
+
+    /// Push an outcome into the sliding window and return `(samples, failures)`
+    /// currently inside it.
+    fn push_outcome_at(&self, at: Instant, failed: bool, capacity: u32) -> (u32, u32) {
+        let Ok(mut window) = self.recent_outcomes.lock() else {
+            return (0, 0);
+        };
+        window.push_back((at, failed));
+        let capacity = capacity.max(1) as usize;
+        while window.len() > capacity {
+            window.pop_front();
+        }
+        while let Some((ts, _)) = window.front() {
+            if at.saturating_duration_since(*ts) > ERROR_RATE_WINDOW {
+                window.pop_front();
+            } else {
+                break;
+            }
+        }
+        let failures = window.iter().filter(|(_, f)| *f).count() as u32;
+        (window.len() as u32, failures)
     }
 
     /// 判断当前 Provider 是否“可被纳入候选链路”
@@ -199,6 +321,24 @@ impl CircuitBreaker {
         }
     }
 
+    /// Like [`allow_request`](Self::allow_request), but also returns an RAII
+    /// guard that releases the HalfOpen permit if it is dropped unrecorded.
+    pub async fn allow_request_guarded(&self) -> (AllowResult, HalfOpenPermit) {
+        let result = self.allow_request().await;
+        let permit = if result.used_half_open_permit {
+            HalfOpenPermit {
+                slot: Some((
+                    self.half_open_requests.clone(),
+                    self.half_open_generation.clone(),
+                    self.half_open_generation.load(Ordering::SeqCst),
+                )),
+            }
+        } else {
+            HalfOpenPermit::none()
+        };
+        (result, permit)
+    }
+
     /// 记录成功
     pub async fn record_success(&self, used_half_open_permit: bool) {
         let state = *self.state.read().await;
@@ -211,6 +351,7 @@ impl CircuitBreaker {
         // 重置失败计数
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.total_requests.fetch_add(1, Ordering::SeqCst);
+        self.push_outcome_at(Instant::now(), false, config.min_requests);
 
         if state == CircuitState::HalfOpen {
             let successes = self.consecutive_successes.fetch_add(1, Ordering::SeqCst) + 1;
@@ -239,6 +380,8 @@ impl CircuitBreaker {
         let failures = self.consecutive_failures.fetch_add(1, Ordering::SeqCst) + 1;
         self.total_requests.fetch_add(1, Ordering::SeqCst);
         self.failed_requests.fetch_add(1, Ordering::SeqCst);
+        let (window_total, window_failed) =
+            self.push_outcome_at(Instant::now(), true, config.min_requests);
 
         // 重置成功计数
         self.consecutive_successes.store(0, Ordering::SeqCst);
@@ -264,12 +407,9 @@ impl CircuitBreaker {
                     drop(config); // 释放读锁再转换状态
                     self.transition_to_open().await;
                 } else {
-                    // 检查错误率
-                    let total = self.total_requests.load(Ordering::SeqCst);
-                    let failed = self.failed_requests.load(Ordering::SeqCst);
-
-                    if total >= config.min_requests {
-                        let error_rate = failed as f64 / total as f64;
+                    // 检查错误率（滑动窗口：最近 min_requests 次且不超过 ERROR_RATE_WINDOW）
+                    if window_total >= config.min_requests.max(1) {
+                        let error_rate = window_failed as f64 / window_total as f64;
 
                         if error_rate >= config.error_rate_threshold {
                             log::warn!(
@@ -337,27 +477,13 @@ impl CircuitBreaker {
     /// 用于整流器等场景：请求结果不应计入 Provider 健康度，
     /// 但仍需释放占用的探测名额，避免 HalfOpen 状态卡死
     pub fn release_half_open_permit(&self) {
-        let mut current = self.half_open_requests.load(Ordering::SeqCst);
-        loop {
-            if current == 0 {
-                return;
-            }
-
-            match self.half_open_requests.compare_exchange(
-                current,
-                current - 1,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            ) {
-                Ok(_) => return,
-                Err(actual) => current = actual,
-            }
-        }
+        release_counter(&self.half_open_requests);
     }
 
     /// 转换到打开状态
     async fn transition_to_open(&self) {
         *self.state.write().await = CircuitState::Open;
+        self.clear_outcomes();
         *self.last_opened_at.write().await = Some(Instant::now());
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
@@ -371,6 +497,7 @@ impl CircuitBreaker {
         }
 
         *state = CircuitState::HalfOpen;
+        self.half_open_generation.fetch_add(1, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
         // 重置半开状态的请求限流计数
         self.half_open_requests.store(0, Ordering::SeqCst);
@@ -384,6 +511,7 @@ impl CircuitBreaker {
         // 重置计数器
         self.total_requests.store(0, Ordering::SeqCst);
         self.failed_requests.store(0, Ordering::SeqCst);
+        self.clear_outcomes();
     }
 }
 
@@ -472,6 +600,167 @@ mod tests {
         let second = breaker.allow_request().await;
         assert!(!second.allowed);
         assert!(!second.used_half_open_permit);
+    }
+
+    #[tokio::test]
+    async fn dropped_half_open_probe_releases_permit() {
+        let breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
+            timeout_seconds: 0,
+            ..Default::default()
+        }));
+        breaker.transition_to_open().await;
+
+        // Simulate a request handler that takes the probe permit and then awaits a
+        // pending upstream; the client disconnects and the future is dropped.
+        let b = breaker.clone();
+        let (acquired_tx, acquired_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let (allow, mut permit) = b.allow_request_guarded().await;
+            assert!(allow.allowed && permit.is_held());
+            let _ = acquired_tx.send(());
+            futures::future::pending::<()>().await;
+            b.record_success(permit.take()).await;
+        });
+        acquired_rx.await.unwrap();
+        assert_eq!(breaker.get_state().await, CircuitState::HalfOpen);
+        assert!(!breaker.allow_request().await.allowed, "slot is taken");
+
+        task.abort();
+        let _ = task.await;
+
+        let next = breaker.allow_request().await;
+        assert!(
+            next.allowed,
+            "permit must be released when the future is dropped"
+        );
+        assert!(next.used_half_open_permit);
+    }
+
+    #[tokio::test]
+    async fn taken_permit_is_released_once() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig {
+            timeout_seconds: 0,
+            success_threshold: 5,
+            ..Default::default()
+        });
+        breaker.transition_to_open().await;
+
+        let (_, mut permit) = breaker.allow_request_guarded().await;
+        assert!(permit.take());
+        assert!(!permit.take(), "second take must not release again");
+        breaker.record_success(true).await;
+
+        // Another probe takes the slot; dropping the already-taken guard must not free it.
+        let (allow, _second) = breaker.allow_request_guarded().await;
+        assert!(allow.allowed);
+        drop(permit);
+        assert!(!breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn stale_permit_does_not_release_newer_half_open_round() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig {
+            timeout_seconds: 0,
+            ..Default::default()
+        });
+        breaker.transition_to_open().await;
+        let (_, stale) = breaker.allow_request_guarded().await;
+        assert!(stale.is_held());
+
+        // A new Open → HalfOpen round starts while the stale probe is still around.
+        breaker.transition_to_open().await;
+        let (allow, _fresh) = breaker.allow_request_guarded().await;
+        assert!(allow.allowed);
+
+        drop(stale);
+        assert!(
+            !breaker.allow_request().await.allowed,
+            "stale guard must not free the fresh probe's slot"
+        );
+    }
+
+    /// Config where only the error-rate rule can open the breaker.
+    fn rate_only_config() -> CircuitBreakerConfig {
+        CircuitBreakerConfig {
+            failure_threshold: u32::MAX,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn error_rate_uses_recent_window_not_lifetime_totals() {
+        let breaker = CircuitBreaker::new(rate_only_config());
+        for _ in 0..1000 {
+            breaker.record_success(false).await;
+        }
+        // Last 10 requests: 6 failures interleaved with 4 successes.
+        for i in 0..10 {
+            if i % 5 < 3 {
+                breaker.record_failure(false).await;
+            } else {
+                breaker.record_success(false).await;
+            }
+        }
+        assert_eq!(
+            breaker.get_state().await,
+            CircuitState::Open,
+            "6/10 recent failures must open despite 1000 earlier successes"
+        );
+    }
+
+    #[tokio::test]
+    async fn old_outcomes_expire_from_the_window() {
+        let breaker = CircuitBreaker::new(rate_only_config());
+        let long_ago = Instant::now()
+            .checked_sub(ERROR_RATE_WINDOW + Duration::from_secs(1))
+            .expect("monotonic clock far enough from boot");
+        for _ in 0..100 {
+            breaker.push_outcome_at(long_ago, false, 10);
+        }
+        breaker.record_failure(false).await;
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+
+        let (samples, failures) = breaker.push_outcome_at(Instant::now(), false, 10);
+        assert_eq!((samples, failures), (3, 2), "expired samples are dropped");
+    }
+
+    #[tokio::test]
+    async fn early_blip_below_min_requests_does_not_open() {
+        let breaker = CircuitBreaker::new(rate_only_config());
+        for _ in 0..9 {
+            breaker.record_failure(false).await;
+        }
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+    }
+
+    #[tokio::test]
+    async fn update_config_resets_error_rate_window() {
+        let breaker = CircuitBreaker::new(rate_only_config());
+        for _ in 0..5 {
+            breaker.record_failure(false).await;
+        }
+        breaker
+            .update_config(CircuitBreakerConfig {
+                min_requests: 6,
+                ..rate_only_config()
+            })
+            .await;
+        // Without the reset this failure would be the 6th sample at 100% → Open.
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
+    }
+
+    #[test]
+    fn default_failure_threshold_is_single_source() {
+        assert_eq!(
+            CircuitBreakerConfig::default().failure_threshold,
+            DEFAULT_FAILURE_THRESHOLD
+        );
+        assert_eq!(
+            DEFAULT_FAILURE_THRESHOLD, 4,
+            "must match the DB schema default"
+        );
     }
 
     #[tokio::test]

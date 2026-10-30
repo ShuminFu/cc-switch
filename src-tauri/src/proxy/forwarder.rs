@@ -2,6 +2,7 @@
 //!
 //! 负责将请求转发到上游Provider，支持故障转移
 
+use super::circuit_breaker::HalfOpenPermit;
 use super::hyper_client::ProxyResponse;
 use super::{
     body_filter::filter_private_params_with_whitelist,
@@ -432,14 +433,17 @@ impl RequestForwarder {
 
             // 发起请求前先获取熔断器放行许可（HalfOpen 会占用探测名额）
             // 单 Provider 场景下跳过此检查，避免熔断器阻塞所有请求
-            let (allowed, used_half_open_permit) = if bypass_circuit_breaker {
-                (true, false)
+            // `half_open_permit` 是 RAII guard：若此 future 在记录结果前被丢弃（客户端断连、
+            // 取消），Drop 会释放 HalfOpen 探测名额，避免 Provider 卡死在 HalfOpen。
+            // 显式记录处通过 `take()` 交出名额（只会返回一次 true）。
+            let (allowed, mut half_open_permit) = if bypass_circuit_breaker {
+                (true, HalfOpenPermit::none())
             } else {
-                let permit = self
+                let (permit, guard) = self
                     .router
-                    .allow_provider_request(&provider.id, app_type_str)
+                    .allow_provider_request_guarded(&provider.id, app_type_str)
                     .await;
-                (permit.allowed, permit.used_half_open_permit)
+                (permit.allowed, guard)
             };
 
             if !allowed {
@@ -492,7 +496,7 @@ impl RequestForwarder {
                 Ok((response, claude_api_format, outbound_model)) => {
                     // 成功：普通闭合熔断状态异步记录，避免阻塞流式首包返回；
                     // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
-                    self.record_success_result(&provider.id, app_type_str, used_half_open_permit)
+                    self.record_success_result(&provider.id, app_type_str, half_open_permit.take())
                         .await;
 
                     // 更新当前应用类型使用的 provider
@@ -595,7 +599,7 @@ impl RequestForwarder {
                                     self.record_success_result(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.take(),
                                     )
                                     .await;
 
@@ -653,7 +657,7 @@ impl RequestForwarder {
                                             retry_err,
                                             provider,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            half_open_permit.take(),
                                             "media 降级",
                                             &mut last_error,
                                             &mut last_provider,
@@ -682,7 +686,7 @@ impl RequestForwarder {
                                     .release_permit_neutral(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.take(),
                                     )
                                     .await;
                                 let mut status = self.status.write().await;
@@ -739,7 +743,7 @@ impl RequestForwarder {
                                         self.record_success_result(
                                             &provider.id,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            half_open_permit.take(),
                                         )
                                         .await;
 
@@ -802,7 +806,7 @@ impl RequestForwarder {
                                                 retry_err,
                                                 provider,
                                                 app_type_str,
-                                                used_half_open_permit,
+                                                half_open_permit.take(),
                                                 "整流",
                                                 &mut last_error,
                                                 &mut last_provider,
@@ -834,7 +838,7 @@ impl RequestForwarder {
                                     .release_permit_neutral(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.take(),
                                     )
                                     .await;
                                 let mut status = self.status.write().await;
@@ -860,7 +864,7 @@ impl RequestForwarder {
                                     .release_permit_neutral(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.take(),
                                     )
                                     .await;
                                 let mut status = self.status.write().await;
@@ -905,7 +909,7 @@ impl RequestForwarder {
                                     self.record_success_result(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        half_open_permit.take(),
                                     )
                                     .await;
 
@@ -962,7 +966,7 @@ impl RequestForwarder {
                                             retry_err,
                                             provider,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            half_open_permit.take(),
                                             "budget 整流",
                                             &mut last_error,
                                             &mut last_provider,
@@ -982,7 +986,7 @@ impl RequestForwarder {
                             .release_permit_neutral(
                                 &provider.id,
                                 app_type_str,
-                                used_half_open_permit,
+                                half_open_permit.take(),
                             )
                             .await;
                         let mut status = self.status.write().await;
@@ -1012,7 +1016,7 @@ impl RequestForwarder {
                                 .record_result(
                                     &provider.id,
                                     app_type_str,
-                                    used_half_open_permit,
+                                    half_open_permit.take(),
                                     false,
                                     Some(e.to_string()),
                                 )
@@ -1043,7 +1047,7 @@ impl RequestForwarder {
                                 .release_permit_neutral(
                                     &provider.id,
                                     app_type_str,
-                                    used_half_open_permit,
+                                    half_open_permit.take(),
                                 )
                                 .await;
                             {
@@ -2086,7 +2090,7 @@ impl RequestForwarder {
                 log::debug!(
                     "[{tag}] >>> 请求体内容 ({}字节): {}",
                     body_str.len(),
-                    body_str
+                    super::http_client::log_body_excerpt(&body_str)
                 );
             }
         }
