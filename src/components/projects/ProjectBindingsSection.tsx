@@ -16,8 +16,9 @@ import { settingsApi } from "@/lib/api/settings";
 import { projectsApi, type ProjectApplyReport } from "@/lib/api/projects";
 import type { Profile } from "@/lib/api/profiles";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { queryKeys } from "@/lib/query/keys";
 
-export const projectBindingsQueryKey = ["projectBindings"] as const;
+export const projectBindingsQueryKey = queryKeys.projects.bindings;
 
 interface ProjectBindingsSectionProps {
   profiles: Profile[];

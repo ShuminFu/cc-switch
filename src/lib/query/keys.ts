@@ -295,6 +295,10 @@ export const queryKeys = {
     vaultStatus: ["secretsVaultStatus"] as const,
   },
 
+  projects: {
+    bindings: ["projectBindings"] as const,
+  },
+
   managedAuth: {
     status: (authProvider: string) =>
       ["managed-auth-status", authProvider] as const,
