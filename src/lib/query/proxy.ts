@@ -388,44 +388,6 @@ export function useSwitchProxyProvider() {
   });
 }
 
-// ========== 代理配置 Hooks ==========
-
-/**
- * 获取代理配置（`@/hooks/useProxyConfig` re-exports this）
- */
-export function useProxyConfig() {
-  const queryClient = useQueryClient();
-  const { t } = useTranslation();
-
-  const { data: config, isLoading } = useQuery({
-    queryKey: queryKeys.proxy.config,
-    queryFn: () => proxyApi.getProxyConfig(),
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: proxyApi.updateProxyConfig,
-    onSuccess: () => {
-      toast.success(t("proxy.settings.toast.saved"), { closeButton: true });
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.config });
-      queryClient.invalidateQueries({ queryKey: queryKeys.proxy.status });
-    },
-    onError: (error: unknown) => {
-      toast.error(
-        t("proxy.settings.toast.saveFailed", {
-          error: extractErrorMessage(error),
-        }),
-      );
-    },
-  });
-
-  return {
-    config,
-    isLoading,
-    updateConfig: updateMutation.mutateAsync,
-    isUpdating: updateMutation.isPending,
-  };
-}
-
 // ========== v3+ 全局/应用级配置 Hooks ==========
 
 /**
