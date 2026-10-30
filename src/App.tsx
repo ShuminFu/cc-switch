@@ -755,7 +755,8 @@ function App() {
         const errorMessage = extractErrorMessage(error);
         toast.error(
           t("provider.duplicateLiveIdsLoadFailed", {
-            defaultValue: "读取配置中的供应商标识失败，请先修复配置后再试",
+            defaultValue:
+              "Failed to read provider keys from the config. Fix the config and try again",
           }) + (errorMessage ? `: ${errorMessage}` : ""),
         );
         return;

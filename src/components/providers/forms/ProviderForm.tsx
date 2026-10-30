@@ -1069,7 +1069,8 @@ function ProviderFormFull({
       if (isProviderKeyLockStateLoading) {
         toast.error(
           t("providerForm.providerKeyStatusLoading", {
-            defaultValue: "正在加载供应商标识状态，请稍后再试",
+            defaultValue:
+              "Still loading provider key status, please try again in a moment",
           }),
         );
         return;
@@ -1098,7 +1099,8 @@ function ProviderFormFull({
       if (isProviderKeyLockStateLoading) {
         toast.error(
           t("providerForm.providerKeyStatusLoading", {
-            defaultValue: "正在加载供应商标识状态，请稍后再试",
+            defaultValue:
+              "Still loading provider key status, please try again in a moment",
           }),
         );
         return;
@@ -1124,7 +1126,8 @@ function ProviderFormFull({
       if (isProviderKeyLockStateLoading) {
         toast.error(
           t("providerForm.providerKeyStatusLoading", {
-            defaultValue: "正在加载供应商标识状态，请稍后再试",
+            defaultValue:
+              "Still loading provider key status, please try again in a moment",
           }),
         );
         return;

@@ -44,7 +44,7 @@ export function ClaudeDesktopRouteToggle({
         toast.warning(
           t("claudeDesktop.route.stopBlockedByTakeover", {
             defaultValue:
-              "其它应用正在使用代理接管。请先在设置中关闭对应应用接管，再停止本地路由。",
+              "Another app is still using routing takeover. Turn off that app's takeover in Settings first, then stop local routing.",
           }),
           { duration: 5000 },
         );

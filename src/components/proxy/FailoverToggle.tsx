@@ -45,7 +45,7 @@ export function FailoverToggle({ className, activeApp }: FailoverToggleProps) {
   const tooltipText = !takeoverEnabled
     ? t("failover.tooltip.takeoverRequired", {
         app: appLabel,
-        defaultValue: `请先接管 ${appLabel}，再启用故障转移`,
+        defaultValue: "Enable {{app}} takeover before turning on failover",
       })
     : isEnabled
       ? t("failover.tooltip.enabled", {

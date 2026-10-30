@@ -166,6 +166,7 @@
     "usageSaveFailed": "利用状況設定の保存に失敗しました",
     "geminiConfig": "Gemini 設定",
     "geminiConfigHint": ".env 形式で Gemini を設定してください",
+    "duplicateLiveIdsLoadFailed": "設定からプロバイダーキーを読み込めませんでした。設定を修正してから再試行してください",
     "form": {
       "gemini": {
         "model": "モデル",
@@ -222,7 +223,8 @@
       "tooltip": {
         "active": "Claude Desktop ローカルルーティングは起動中です - {{address}}:{{port}}",
         "inactive": "モデルマッピングや形式変換が必要なプロバイダー向けに Claude Desktop ローカルルーティングを起動します。設定アドレス: {{address}}:{{port}}"
-      }
+      },
+      "stopBlockedByTakeover": "他のアプリがプロキシ引き継ぎを使用中です。先に設定で該当アプリの引き継ぎをオフにしてから、ローカルルーティングを停止してください。"
     }
   },
   "notifications": {
@@ -269,7 +271,8 @@
     "backfillWarning": "切り替え成功しましたが、前のプロバイダーへの設定保存に失敗しました",
     "windowControlFailed": "ウィンドウ操作に失敗しました: {{error}}",
     "officialBlockedByProxy": "ローカルルーティングモード中は公式プロバイダーに切り替えできません。ルーティング経由で公式 API にアクセスするとアカウントが停止される可能性があります。",
-    "proxyOfficialWarning": "現在のプロバイダー {{name}} は公式です。ローカルルーティングを使用する前にサードパーティプロバイダーに切り替えてください。"
+    "proxyOfficialWarning": "現在のプロバイダー {{name}} は公式です。ローカルルーティングを使用する前にサードパーティプロバイダーに切り替えてください。",
+    "proxyReasonClaudeDesktop": "Claude Desktop ローカルルーティングモードを使用しており"
   },
   "confirm": {
     "deleteProvider": "プロバイダーを削除",
@@ -1163,7 +1166,9 @@
     "fetchModelsAuthFailed": "API Key が無効か、権限がありません",
     "fetchModelsNotSupported": "このプロバイダーはモデル一覧の取得に対応していません",
     "fetchModelsEndpointNotFound": "利用可能なモデル一覧エンドポイントが見つかりません。Base URL を確認するか、プロバイダーが該当 API を公開しているかご確認ください",
-    "fetchModelsTimeout": "リクエストがタイムアウトしました。ネットワーク接続を確認してください"
+    "fetchModelsTimeout": "リクエストがタイムアウトしました。ネットワーク接続を確認してください",
+    "providerKeyStatusLoading": "プロバイダーキーの状態を読み込み中です。しばらくしてから再試行してください",
+    "requiredFields": "プロバイダー名、API エンドポイント、API Key、モデルを入力してください"
   },
   "copilot": {
     "authSection": "GitHub Copilot 認証",
@@ -1335,7 +1340,8 @@
     "reasoningEffortHint": "上流が low/high/max などの思考の深さの制御に対応している場合に有効化します。有効にすると思考モードも自動的にオンになり、Codex の reasoning.effort を上流の Chat パラメータに変換します。",
     "reasoningGroupTitle": "思考能力",
     "reasoningSectionHint": "プリセットの供給元は自動的に設定され、カスタム供給元は名前/URL から自動推論されます。自動識別が正しくない場合のみ手動で上書きしてください。",
-    "advancedSectionHint": "上流フォーマット、モデルマッピング、思考能力、カスタム User-Agent の設定を含みます。Chat Completions プロトコルを使用するプロバイダーはルーティング引き継ぎの有効化が必要です。"
+    "advancedSectionHint": "上流フォーマット、モデルマッピング、思考能力、カスタム User-Agent の設定を含みます。Chat Completions プロトコルを使用するプロバイダーはルーティング引き継ぎの有効化が必要です。",
+    "noCommonConfigToApply": "共通設定スニペットが空か、書き込める内容がありません"
   },
   "geminiConfig": {
     "envFile": "環境変数 (.env)",
@@ -1591,7 +1597,8 @@
     "modelsDevTruncated": "{{total}} 件中、先頭 {{shown}} 件のみ表示しています。検索条件を絞り込んでください",
     "modelsDevDefaultHint": "最新リリース順に {{shown}} 件を表示しています（全 {{total}} 件）。キーワード入力で全件検索できます",
     "cacheReadCostPerMillion": "キャッシュ読み取りコスト（100万トークンあたり、USD）",
-    "cacheCreationCostPerMillion": "キャッシュ書き込みコスト（100万トークンあたり、USD）"
+    "cacheCreationCostPerMillion": "キャッシュ書き込みコスト（100万トークンあたり、USD）",
+    "unpriced": "価格未設定"
   },
   "usageScript": {
     "title": "利用状況を設定",
@@ -2474,7 +2481,8 @@
     },
     "tooltip": {
       "enabled": "{{app}} フェイルオーバーが有効\nキューの優先度（P1→P2→...）で使用します",
-      "disabled": "{{app}} フェイルオーバーを有効にする\nキューの P1 に即時切替し、失敗時は次を順に試行します"
+      "disabled": "{{app}} フェイルオーバーを有効にする\nキューの P1 に即時切替し、失敗時は次を順に試行します",
+      "takeoverRequired": "フェイルオーバーを有効にする前に {{app}} を引き継いでください"
     }
   },
   "proxy": {
@@ -2652,7 +2660,9 @@
     },
     "server": {
       "started": "ルーティングサービスが開始されました - {{address}}:{{port}}",
-      "startFailed": "ルーティングサービスの開始に失敗しました: {{detail}}"
+      "startFailed": "ルーティングサービスの開始に失敗しました: {{detail}}",
+      "stopped": "ルーティングサービスが停止しました",
+      "stopFailed": "ルーティングサービスの停止に失敗しました: {{detail}}"
     },
     "stoppedWithRestore": "ルーティングサービスが停止し、すべてのルーティング設定が復元されました",
     "stopWithRestoreFailed": "停止に失敗しました: {{detail}}"

@@ -70,7 +70,7 @@ export function useProxyStatus() {
     onSuccess: () => {
       toast.success(
         t("proxy.server.stopped", {
-          defaultValue: "代理服务已停止",
+          defaultValue: "Routing service stopped",
         }),
         { closeButton: true },
       );
@@ -83,7 +83,7 @@ export function useProxyStatus() {
       toast.error(
         t("proxy.server.stopFailed", {
           detail,
-          defaultValue: `停止代理服务失败: ${detail}`,
+          defaultValue: "Failed to stop routing service: {{detail}}",
         }),
       );
     },

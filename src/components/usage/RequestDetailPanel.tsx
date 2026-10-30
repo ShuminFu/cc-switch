@@ -286,7 +286,7 @@ export function RequestDetailPanel({
                   }`}
                 >
                   {unpriced
-                    ? t("usage.unpriced", "未定价")
+                    ? t("usage.unpriced", "Unpriced")
                     : `$${parseFloat(request.totalCostUsd).toFixed(6)}`}
                 </dd>
               </div>
