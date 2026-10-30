@@ -2,8 +2,8 @@
 //!
 //! 提供获取、设置和测试全局代理的 Tauri 命令。
 
+use super::run_blocking_with_state;
 use crate::proxy::http_client;
-use crate::store::AppState;
 use serde::Serialize;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::time::{Duration, Instant};
@@ -12,16 +12,19 @@ use std::time::{Duration, Instant};
 ///
 /// 返回当前配置的代理 URL，null 表示直连。
 #[tauri::command]
-pub fn get_global_proxy_url(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
-    let result = state.db.get_global_proxy_url().map_err(|e| e.to_string())?;
-    log::debug!(
-        "[GlobalProxy] [GP-010] Read from database: {}",
-        result
-            .as_ref()
-            .map(|u| http_client::mask_url(u))
-            .unwrap_or_else(|| "None".to_string())
-    );
-    Ok(result)
+pub async fn get_global_proxy_url(handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    run_blocking_with_state(handle, move |state| {
+        let result = state.db.get_global_proxy_url().map_err(|e| e.to_string())?;
+        log::debug!(
+            "[GlobalProxy] [GP-010] Read from database: {}",
+            result
+                .as_ref()
+                .map(|u| http_client::mask_url(u))
+                .unwrap_or_else(|| "None".to_string())
+        );
+        Ok(result)
+    })
+    .await
 }
 
 /// 设置全局代理 URL
@@ -32,41 +35,45 @@ pub fn get_global_proxy_url(state: tauri::State<'_, AppState>) -> Result<Option<
 /// 执行顺序：先验证 → 写 DB → 再应用
 /// 这样确保 DB 写失败时不会出现运行态与持久化不一致的问题
 #[tauri::command]
-pub fn set_global_proxy_url(state: tauri::State<'_, AppState>, url: String) -> Result<(), String> {
-    // 调试：显示接收到的 URL 信息（不包含敏感内容）
-    let has_auth = url.contains('@') && (url.starts_with("http://") || url.starts_with("socks"));
-    log::debug!(
-        "[GlobalProxy] [GP-011] Received URL: length={}, has_auth={}",
-        url.len(),
-        has_auth
-    );
+pub async fn set_global_proxy_url(handle: tauri::AppHandle, url: String) -> Result<(), String> {
+    run_blocking_with_state(handle, move |state| {
+        // 调试：显示接收到的 URL 信息（不包含敏感内容）
+        let has_auth =
+            url.contains('@') && (url.starts_with("http://") || url.starts_with("socks"));
+        log::debug!(
+            "[GlobalProxy] [GP-011] Received URL: length={}, has_auth={}",
+            url.len(),
+            has_auth
+        );
 
-    let url_opt = if url.trim().is_empty() {
-        None
-    } else {
-        Some(url.as_str())
-    };
+        let url_opt = if url.trim().is_empty() {
+            None
+        } else {
+            Some(url.as_str())
+        };
 
-    // 1. 先验证代理配置是否有效（不应用）
-    http_client::validate_proxy(url_opt)?;
+        // 1. 先验证代理配置是否有效（不应用）
+        http_client::validate_proxy(url_opt)?;
 
-    // 2. 验证成功后保存到数据库
-    state
-        .db
-        .set_global_proxy_url(url_opt)
-        .map_err(|e| e.to_string())?;
+        // 2. 验证成功后保存到数据库
+        state
+            .db
+            .set_global_proxy_url(url_opt)
+            .map_err(|e| e.to_string())?;
 
-    // 3. DB 写入成功后再应用到运行态
-    http_client::apply_proxy(url_opt)?;
+        // 3. DB 写入成功后再应用到运行态
+        http_client::apply_proxy(url_opt)?;
 
-    log::info!(
-        "[GlobalProxy] [GP-009] Configuration updated: {}",
-        url_opt
-            .map(http_client::mask_url)
-            .unwrap_or_else(|| "direct connection".to_string())
-    );
+        log::info!(
+            "[GlobalProxy] [GP-009] Configuration updated: {}",
+            url_opt
+                .map(http_client::mask_url)
+                .unwrap_or_else(|| "direct connection".to_string())
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 /// 代理测试结果

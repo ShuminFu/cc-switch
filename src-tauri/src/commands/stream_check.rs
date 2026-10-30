@@ -3,6 +3,7 @@
 //! 注意：本检查只探测 base_url 是否可达，不发真实大模型请求，也不触碰故障转移
 //! 熔断器（熔断器由真实转发流量驱动）。详见 `services::stream_check`。
 
+use super::run_blocking_with_state;
 use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
 use crate::error::AppError;
@@ -113,17 +114,22 @@ pub async fn stream_check_all_providers(
 
 /// 获取连通性检查配置
 #[tauri::command]
-pub fn get_stream_check_config(state: State<'_, AppState>) -> Result<StreamCheckConfig, AppError> {
-    state.db.get_stream_check_config()
+pub async fn get_stream_check_config(
+    handle: tauri::AppHandle,
+) -> Result<StreamCheckConfig, AppError> {
+    run_blocking_with_state(handle, move |state| state.db.get_stream_check_config()).await
 }
 
 /// 保存连通性检查配置
 #[tauri::command]
-pub fn save_stream_check_config(
-    state: State<'_, AppState>,
+pub async fn save_stream_check_config(
+    handle: tauri::AppHandle,
     config: StreamCheckConfig,
 ) -> Result<(), AppError> {
-    state.db.save_stream_check_config(&config)
+    run_blocking_with_state(handle, move |state| {
+        state.db.save_stream_check_config(&config)
+    })
+    .await
 }
 
 /// Copilot 供应商的 base_url 需要从 OAuth 管理器动态解析（按账号或默认端点）。

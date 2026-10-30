@@ -1,7 +1,9 @@
 //! 项目 Profile 管理命令
 
 use serde::Serialize;
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
+
+use super::run_blocking_with_state;
 
 use crate::database::Profile;
 use crate::services::profile::{ProfilePayload, ProfileScope, ProfileService};
@@ -92,9 +94,8 @@ pub fn emit_profile_apply_events(
     crate::tray::refresh_tray_menu(app);
 }
 
-#[tauri::command]
-pub fn list_profiles(state: State<'_, AppState>) -> Result<ProfilesResponse, String> {
-    let profiles = ProfileService::list(&state).map_err(|e| e.to_string())?;
+fn list_profiles_inner(state: &AppState) -> Result<ProfilesResponse, String> {
+    let profiles = ProfileService::list(state).map_err(|e| e.to_string())?;
     let current_ids = CurrentProfileIds {
         claude: state
             .db
@@ -116,20 +117,28 @@ pub fn list_profiles(state: State<'_, AppState>) -> Result<ProfilesResponse, Str
 }
 
 #[tauri::command]
-pub fn create_profile(
-    state: State<'_, AppState>,
+pub async fn list_profiles(handle: AppHandle) -> Result<ProfilesResponse, String> {
+    run_blocking_with_state(handle, list_profiles_inner).await
+}
+
+#[tauri::command]
+pub async fn create_profile(
+    handle: AppHandle,
     name: String,
     scope: String,
 ) -> Result<ProfileDto, String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
-    ProfileService::create(&state, &name, scope)
-        .map(ProfileDto::from)
-        .map_err(|e| e.to_string())
+    run_blocking_with_state(handle, move |state| {
+        ProfileService::create(state, &name, scope)
+            .map(ProfileDto::from)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn update_profile(
-    state: State<'_, AppState>,
+pub async fn update_profile(
+    handle: AppHandle,
     id: String,
     name: Option<String>,
     resnapshot: Option<bool>,
@@ -139,56 +148,78 @@ pub fn update_profile(
         .map(|s| ProfileScope::parse(&s))
         .transpose()
         .map_err(|e| e.to_string())?;
-    ProfileService::update(&state, &id, name, resnapshot.unwrap_or(false), scope)
-        .map(ProfileDto::from)
-        .map_err(|e| e.to_string())
+    run_blocking_with_state(handle, move |state| {
+        ProfileService::update(state, &id, name, resnapshot.unwrap_or(false), scope)
+            .map(ProfileDto::from)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_profile(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    ProfileService::delete(&state, &id).map_err(|e| e.to_string())
+pub async fn delete_profile(handle: AppHandle, id: String) -> Result<(), String> {
+    run_blocking_with_state(handle, move |state| {
+        ProfileService::delete(state, &id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn clear_current_profile(state: State<'_, AppState>, scope: String) -> Result<(), String> {
+pub async fn clear_current_profile(handle: AppHandle, scope: String) -> Result<(), String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
-    state
-        .db
-        .set_current_profile_id(scope.as_str(), None)
-        .map_err(|e| e.to_string())
+    run_blocking_with_state(handle, move |state| {
+        state
+            .db
+            .set_current_profile_id(scope.as_str(), None)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// 应用项目快照（只作用于发起页所属分组内的应用）。
 ///
-/// 注意：必须保持同步命令（跑在 Tauri 线程池）——`ProviderService::switch`
-/// 内部使用 block_on 获取切换锁，放进 async 命令会在运行时线程上 panic。
+/// 应用过程会写多份 live 文件并可能等待代理的按应用切换锁，整体在阻塞
+/// 线程池执行（`ProviderService` 内部通过 `block_on_async` 安全地等待代理
+/// future），不会占用 UI 线程或 tokio worker。
 #[tauri::command]
-pub fn apply_profile(
+pub async fn apply_profile(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
     id: String,
     scope: String,
 ) -> Result<Vec<String>, String> {
     let scope = ProfileScope::parse(&scope).map_err(|e| e.to_string())?;
-    let (warnings, should_stop_proxy) =
-        ProfileService::apply(&state, &id, scope).map_err(|e| e.to_string())?;
+    let profile_id = id.clone();
+    let (warnings, should_stop_proxy) = run_blocking_with_state(app.clone(), move |state| {
+        ProfileService::apply(state, &profile_id, scope).map_err(|e| e.to_string())
+    })
+    .await?;
 
     if should_stop_proxy {
-        // sync 命令线程没有 Tokio runtime，无法直接 await stop()；
-        // 把停止服务放到 Tauri async runtime，停止后再补发事件刷新 UI。
+        // 停止代理可能等待服务端退出，放到后台执行，停止后再补发事件刷新 UI
+        //（与托盘入口的行为一致）。
         let app_handle = app.clone();
         let profile_id = id.clone();
-        let proxy_service = state.proxy_service.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = proxy_service.stop().await {
-                log::warn!("切换项目后停止代理服务失败: {e}");
-            }
             if let Some(app_state) = app_handle.try_state::<AppState>() {
-                emit_profile_apply_events(&app_handle, app_state.inner(), &profile_id, scope);
+                if let Err(e) = app_state.proxy_service.stop().await {
+                    log::warn!("切换项目后停止代理服务失败: {e}");
+                }
             }
+            let handle_for_events = app_handle.clone();
+            let _ = run_blocking_with_state(app_handle, move |state| -> Result<(), String> {
+                emit_profile_apply_events(&handle_for_events, state, &profile_id, scope);
+                Ok(())
+            })
+            .await;
         });
     } else {
-        emit_profile_apply_events(&app, &state, &id, scope);
+        // 事件发射与托盘重建本身也会读 DB / settings，放到阻塞线程池。
+        let app_for_events = app.clone();
+        let _ = run_blocking_with_state(app, move |state| -> Result<(), String> {
+            emit_profile_apply_events(&app_for_events, state, &id, scope);
+            Ok(())
+        })
+        .await;
     }
 
     Ok(warnings)
