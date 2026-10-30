@@ -1,4 +1,5 @@
 pub mod balance;
+pub mod cli_tools;
 pub mod codex_oauth_models;
 pub mod coding_plan;
 pub mod config;
@@ -25,6 +26,7 @@ pub mod stream_check;
 pub mod subscription;
 pub mod sync_protocol;
 pub mod usage_cache;
+pub mod usage_query;
 pub mod usage_stats;
 pub mod webdav;
 pub mod webdav_auto_sync;
