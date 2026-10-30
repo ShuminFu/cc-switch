@@ -9,9 +9,7 @@ use crate::settings::{effective_backup_retain_count, get_openclaw_override_dir};
 use chrono::Local;
 use indexmap::IndexMap;
 use json_five::rt::parser::{
-    from_str as rt_from_str, JSONKeyValuePair as RtJSONKeyValuePair,
-    JSONObjectContext as RtJSONObjectContext, JSONText as RtJSONText, JSONValue as RtJSONValue,
-    KeyValuePairContext as RtKeyValuePairContext,
+    from_str as rt_from_str, JSONText as RtJSONText, JSONValue as RtJSONValue,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -245,12 +243,13 @@ impl OpenClawConfigDocument {
         let source = original_source
             .clone()
             .unwrap_or_else(|| OPENCLAW_DEFAULT_SOURCE.to_string());
-        let text = rt_from_str(&source).map_err(|e| {
+        let mut text = rt_from_str(&source).map_err(|e| {
             AppError::Config(format!(
                 "Failed to parse OpenClaw config as round-trip JSON5 document: {}",
                 e.message
             ))
         })?;
+        crate::adapters::json5_doc::repair_block_comments(&mut text, &source);
 
         Ok(Self {
             path,
@@ -259,66 +258,18 @@ impl OpenClawConfigDocument {
         })
     }
 
+    /// Replace a root section, patching only the parts of it that changed so
+    /// comments inside the section survive (CFG-37).
     fn set_root_section(&mut self, key: &str, value: &Value) -> Result<(), AppError> {
-        let RtJSONValue::JSONObject {
-            key_value_pairs,
-            context,
-        } = &mut self.text.value
-        else {
+        if !matches!(self.text.value, RtJSONValue::JSONObject { .. }) {
             return Err(AppError::Config(
                 "OpenClaw config root must be a JSON5 object".to_string(),
             ));
-        };
-
-        if key_value_pairs.is_empty()
-            && context
-                .as_ref()
-                .map(|ctx| ctx.wsc.0.is_empty())
-                .unwrap_or(true)
-        {
-            *context = Some(RtJSONObjectContext {
-                wsc: ("\n  ".to_string(),),
-            });
         }
-
-        let leading_ws = context
-            .as_ref()
-            .map(|ctx| ctx.wsc.0.clone())
-            .unwrap_or_default();
-        let entry_separator_ws = derive_entry_separator(&leading_ws);
-        let child_indent = extract_trailing_indent(&leading_ws);
-        let new_value = value_to_rt_value(value, &child_indent)?;
-
-        if let Some(existing) = key_value_pairs
-            .iter_mut()
-            .find(|pair| json5_key_name(&pair.key) == Some(key))
-        {
-            existing.value = new_value;
-            return Ok(());
-        }
-
-        let new_pair = if let Some(last_pair) = key_value_pairs.last_mut() {
-            let last_ctx = ensure_kvp_context(last_pair);
-            let closing_ws = if let Some(after_comma) = last_ctx.wsc.3.clone() {
-                last_ctx.wsc.3 = Some(entry_separator_ws.clone());
-                after_comma
-            } else {
-                let closing_ws = std::mem::take(&mut last_ctx.wsc.2);
-                last_ctx.wsc.3 = Some(entry_separator_ws.clone());
-                closing_ws
-            };
-
-            make_root_pair(key, new_value, closing_ws)
-        } else {
-            make_root_pair(
-                key,
-                new_value,
-                derive_closing_ws_from_separator(&leading_ws),
-            )
-        };
-
-        key_value_pairs.push(new_pair);
-        Ok(())
+        let mut root = crate::adapters::json5_doc::rt_to_value(&self.text.value)?;
+        ensure_object(&mut root).insert(key.to_string(), value.clone());
+        let source = self.text.to_string();
+        crate::adapters::json5_doc::apply_to_root(&mut self.text.value, &source, &root)
     }
 
     fn save(self) -> Result<OpenClawWriteOutcome, AppError> {
@@ -441,127 +392,6 @@ fn ensure_object(value: &mut Value) -> &mut Map<String, Value> {
     value
         .as_object_mut()
         .expect("value should be object after normalization")
-}
-
-fn ensure_kvp_context(pair: &mut RtJSONKeyValuePair) -> &mut RtKeyValuePairContext {
-    pair.context.get_or_insert_with(|| RtKeyValuePairContext {
-        wsc: (String::new(), " ".to_string(), String::new(), None),
-    })
-}
-
-fn extract_trailing_indent(separator_ws: &str) -> String {
-    separator_ws
-        .rsplit_once('\n')
-        .map(|(_, tail)| tail.to_string())
-        .unwrap_or_default()
-}
-
-fn derive_closing_ws_from_separator(separator_ws: &str) -> String {
-    let Some((prefix, indent)) = separator_ws.rsplit_once('\n') else {
-        return String::new();
-    };
-
-    let reduced_indent = if indent.ends_with('\t') {
-        &indent[..indent.len().saturating_sub(1)]
-    } else if indent.ends_with("  ") {
-        &indent[..indent.len().saturating_sub(2)]
-    } else if indent.ends_with(' ') {
-        &indent[..indent.len().saturating_sub(1)]
-    } else {
-        indent
-    };
-
-    format!("{prefix}\n{reduced_indent}")
-}
-
-fn derive_entry_separator(leading_ws: &str) -> String {
-    if leading_ws.is_empty() {
-        return String::new();
-    }
-
-    if leading_ws.contains('\n') {
-        return format!("\n{}", extract_trailing_indent(leading_ws));
-    }
-
-    String::new()
-}
-
-fn value_to_rt_value(value: &Value, parent_indent: &str) -> Result<RtJSONValue, AppError> {
-    // `json-five` 0.3.1 can panic when pretty-printing nested empty maps/arrays.
-    // Serialize with `serde_json` instead; the resulting JSON is valid JSON5 and
-    // can still be parsed back into the round-trip AST we use for insertion.
-    let source = serde_json::to_string_pretty(value)
-        .map_err(|e| AppError::Config(format!("Failed to serialize JSON section: {e}")))?;
-
-    let adjusted = reindent_json5_block(&source, parent_indent);
-    let text = rt_from_str(&adjusted).map_err(|e| {
-        AppError::Config(format!(
-            "Failed to parse generated JSON5 section: {}",
-            e.message
-        ))
-    })?;
-    Ok(text.value)
-}
-
-fn reindent_json5_block(source: &str, parent_indent: &str) -> String {
-    let normalized = normalize_json_five_output(source);
-    if parent_indent.is_empty() || !normalized.contains('\n') {
-        return normalized;
-    }
-
-    let mut lines = normalized.lines();
-    let Some(first_line) = lines.next() else {
-        return String::new();
-    };
-
-    let mut result = String::from(first_line);
-    for line in lines {
-        result.push('\n');
-        result.push_str(parent_indent);
-        result.push_str(line);
-    }
-    result
-}
-
-fn normalize_json_five_output(source: &str) -> String {
-    source.replace("\\/", "/")
-}
-
-fn make_root_pair(key: &str, value: RtJSONValue, closing_ws: String) -> RtJSONKeyValuePair {
-    RtJSONKeyValuePair {
-        key: make_json5_key(key),
-        value,
-        context: Some(RtKeyValuePairContext {
-            wsc: (String::new(), " ".to_string(), closing_ws, None),
-        }),
-    }
-}
-
-fn make_json5_key(key: &str) -> RtJSONValue {
-    if is_identifier_key(key) {
-        RtJSONValue::Identifier(key.to_string())
-    } else {
-        RtJSONValue::DoubleQuotedString(key.to_string())
-    }
-}
-
-fn is_identifier_key(key: &str) -> bool {
-    let mut chars = key.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-
-    matches!(first, 'a'..='z' | 'A'..='Z' | '_' | '$')
-        && chars.all(|ch| matches!(ch, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '$'))
-}
-
-fn json5_key_name(key: &RtJSONValue) -> Option<&str> {
-    match key {
-        RtJSONValue::Identifier(name)
-        | RtJSONValue::DoubleQuotedString(name)
-        | RtJSONValue::SingleQuotedString(name) => Some(name),
-        _ => None,
-    }
 }
 
 fn warning(code: &str, message: impl Into<String>, path: Option<&str>) -> OpenClawHealthWarning {
@@ -1083,7 +913,8 @@ mod tests {
             assert!(providers.is_empty());
 
             let written = fs::read_to_string(get_openclaw_config_path()).unwrap();
-            assert!(written.contains("\"providers\": {}"));
+            // the key keeps the document's identifier style
+            assert!(written.contains("providers: {}"), "{written}");
         });
     }
 }
