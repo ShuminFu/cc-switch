@@ -12,6 +12,7 @@ use crate::apps::registry;
 use crate::error::AppError;
 use crate::secret_store::{self, SecretPolicy};
 use crate::services::skill::{SkillStorageLocation, SyncMethod};
+use crate::services::sync_protocol::SyncKey;
 
 /// 自定义端点配置（历史兼容，实际存储在 provider.meta.custom_endpoints）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,6 +252,9 @@ pub struct WebDavSyncStatus {
     pub last_local_manifest_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_remote_manifest_hash: Option<String>,
+    /// 已与该远端同步过签名快照：之后拒绝未签名的快照（防降级），清除同步密钥时复位
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub signed_sync: bool,
 }
 
 fn default_remote_root() -> String {
@@ -1534,6 +1538,59 @@ pub fn update_webdav_sync_status(status: WebDavSyncStatus) -> Result<(), AppErro
     })
 }
 
+// ===== 同步快照密钥 =====
+
+/// 读取 WebDAV/S3 快照签名密钥（PBKDF2 派生值，保存在凭据存储中）；未配置时返回 `None`
+pub(crate) fn get_sync_snapshot_key() -> Result<Option<SyncKey>, AppError> {
+    let Some(path) = AppSettings::settings_path() else {
+        return Ok(None);
+    };
+    let policy = settings_secret_policy(&path);
+    let Some(stored) = policy
+        .store()
+        .get(secret_store::SYNC_SNAPSHOT_KEY)?
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(None);
+    };
+    SyncKey::from_hex(&stored).map(Some).ok_or_else(|| {
+        AppError::localized(
+            "sync.key_unreadable",
+            "凭据存储中的同步密钥已损坏，请重新输入",
+            "The stored sync key is corrupted. Enter it again.",
+        )
+    })
+}
+
+/// 设置或清除快照签名密钥，返回新密钥的指纹。
+/// 清除时同时复位 WebDAV/S3 的 `signed_sync`，即用户主动退出签名校验。
+pub(crate) fn set_sync_snapshot_key(passphrase: Option<&str>) -> Result<Option<String>, AppError> {
+    let path = AppSettings::settings_path()
+        .ok_or_else(|| AppError::Config("无法获取用户主目录".to_string()))?;
+    let policy = settings_secret_policy(&path);
+    match passphrase.filter(|value| !value.is_empty()) {
+        Some(passphrase) => {
+            let key = SyncKey::from_passphrase(passphrase)?;
+            policy
+                .store()
+                .set(secret_store::SYNC_SNAPSHOT_KEY, &key.to_hex())?;
+            Ok(Some(key.key_id()))
+        }
+        None => {
+            policy.store().delete(secret_store::SYNC_SNAPSHOT_KEY)?;
+            mutate_settings(|current| {
+                if let Some(sync) = current.webdav_sync.as_mut() {
+                    sync.status.signed_sync = false;
+                }
+                if let Some(s3) = current.s3_sync.as_mut() {
+                    s3.status.signed_sync = false;
+                }
+            })?;
+            Ok(None)
+        }
+    }
+}
+
 // ===== S3 同步设置管理函数 =====
 
 pub fn get_s3_sync_settings() -> Option<S3SyncSettings> {
@@ -2067,6 +2124,61 @@ mod tests {
 
         fn on_disk(path: &Path) -> serde_json::Value {
             serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+        }
+
+        #[test]
+        fn sync_snapshot_key_is_stored_outside_settings_and_clearing_resets_signed_sync() {
+            let store = Arc::new(MemorySecretStore::new());
+            let env = env_with(
+                legacy_settings("dav-pass", "s3-secret"),
+                store.clone(),
+                false,
+            );
+            assert_eq!(get_sync_snapshot_key().unwrap(), None);
+
+            let key_id = set_sync_snapshot_key(Some("correct horse battery"))
+                .unwrap()
+                .expect("key id");
+            let key = get_sync_snapshot_key().unwrap().expect("stored key");
+            assert_eq!(key.key_id(), key_id);
+            assert_eq!(
+                store.get(crate::secret_store::SYNC_SNAPSHOT_KEY).unwrap(),
+                Some(key.to_hex()),
+                "the derived key, not the passphrase, is stored"
+            );
+            assert!(!fs::read_to_string(&env.path)
+                .unwrap()
+                .contains("correct horse battery"));
+
+            update_webdav_sync_status(WebDavSyncStatus {
+                signed_sync: true,
+                ..Default::default()
+            })
+            .unwrap();
+            update_s3_sync_status(WebDavSyncStatus {
+                signed_sync: true,
+                ..Default::default()
+            })
+            .unwrap();
+            assert_eq!(
+                on_disk(&env.path)["webdavSync"]["status"]["signedSync"],
+                true
+            );
+
+            assert_eq!(set_sync_snapshot_key(None).unwrap(), None);
+            assert_eq!(get_sync_snapshot_key().unwrap(), None);
+            assert!(!get_webdav_sync_settings().unwrap().status.signed_sync);
+            assert!(!get_s3_sync_settings().unwrap().status.signed_sync);
+        }
+
+        #[test]
+        fn corrupted_sync_snapshot_key_is_an_error_not_a_missing_key() {
+            let store = Arc::new(MemorySecretStore::new());
+            let _env = env_with(legacy_settings("", ""), store.clone(), false);
+            store
+                .set(crate::secret_store::SYNC_SNAPSHOT_KEY, "not-hex")
+                .unwrap();
+            assert!(get_sync_snapshot_key().is_err());
         }
 
         #[test]

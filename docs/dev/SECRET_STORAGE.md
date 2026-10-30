@@ -8,11 +8,32 @@ CC Switch keeps the following credentials out of its plaintext JSON files:
 | S3 sync Secret Access Key | `~/.cc-switch/settings.json` → `s3Sync.secretAccessKey` | `settings.s3.secret_access_key` |
 | GitHub Copilot OAuth token (per account) | `<app config dir>/copilot_auth.json` → `accounts.<id>.github_token` | `copilot.github_token.<id>` |
 | Codex (ChatGPT) OAuth refresh token (per account) | `<app config dir>/codex_oauth_auth.json` → `accounts.<id>.refresh_token` | `codex_oauth.refresh_token.<id>` |
+| WebDAV/S3 snapshot signing key (CCS-173) | never stored in a file | `settings.sync.snapshot_key` (PBKDF2-derived key, hex) |
 
 Provider API keys are **not** moved. The CLIs (Claude Code, Codex, Gemini CLI, …) read
 them from their own live config files, so they stay where they are.
 
 The code is in `src-tauri/src/secret_store.rs` (the `SecretStore` trait and `SecretPolicy`).
+
+## Sync snapshot signing key
+
+Sync manifests (`manifest.json` on WebDAV/S3) carry an HMAC-SHA256 `signature`
+over the other manifest fields, keyed with a sync key that the user enters on each
+device (`set_sync_snapshot_key`). The key is PBKDF2-HMAC-SHA256 (600k rounds, fixed
+salt) of the passphrase; only the derived key is stored. With a key configured:
+
+- uploads are signed; downloads verify the signature before any artifact is fetched;
+  a bad MAC (`sync.manifest_signature_invalid`) or another key
+  (`sync.manifest_key_mismatch`) is always refused;
+- an unsigned remote (uploaded by an older version) is refused with
+  `sync.manifest_unsigned` unless the download is retried with `allowUnsigned: true`
+  (the one-time migration confirmation);
+- after the first signed upload/download (or the confirmed migration import) the
+  transport's `status.signedSync` is set and unsigned remotes are refused for good
+  (`sync.manifest_unsigned_rejected`); clearing the key resets it.
+
+Without a key and before any signed sync, sync behaves as before (unsigned).
+The remote-info payload reports `signature`: `valid`, `invalid`, `unsigned` or `keyMissing`.
 
 ## Backends
 

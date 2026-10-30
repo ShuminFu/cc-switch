@@ -85,6 +85,8 @@ export const UNMOCKED_COMMANDS = [
   "s3_sync_download",
   "s3_sync_save_settings",
   "s3_sync_fetch_remote_info",
+  "get_sync_snapshot_key_status",
+  "set_sync_snapshot_key",
   "save_csv_file_dialog",
   "write_csv_export",
   "open_zip_file_dialog",

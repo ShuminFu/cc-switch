@@ -30,6 +30,8 @@ pub const SECRET_STORE_ENV: &str = "CC_SWITCH_SECRET_STORE";
 pub const WEBDAV_PASSWORD_KEY: &str = "settings.webdav.password";
 /// S3 同步 Secret Access Key
 pub const S3_SECRET_ACCESS_KEY: &str = "settings.s3.secret_access_key";
+/// WebDAV/S3 快照签名密钥（PBKDF2 派生值的十六进制，两种传输共用）
+pub const SYNC_SNAPSHOT_KEY: &str = "settings.sync.snapshot_key";
 
 /// Copilot 账号 GitHub OAuth 令牌的键
 pub fn copilot_token_key(account_id: &str) -> String {
@@ -334,7 +336,6 @@ impl SecretPolicy {
         Self { store, inline }
     }
 
-    #[cfg(test)]
     pub fn store(&self) -> &Arc<dyn SecretStore> {
         &self.store
     }

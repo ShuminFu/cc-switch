@@ -7,6 +7,7 @@ use std::fs;
 use std::process::Command;
 
 use chrono::Utc;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
@@ -36,6 +37,17 @@ pub(crate) const REMOTE_MANIFEST: &str = "manifest.json";
 pub(crate) const MAX_DEVICE_NAME_LEN: usize = 64;
 pub(crate) const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_SYNC_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
+/// Manifest signature algorithm (HMAC over [`manifest_signing_bytes`]).
+pub(crate) const SIGNATURE_ALG: &str = "HMAC-SHA256";
+/// Domain tag prepended to the signed manifest bytes.
+const SIGNATURE_DOMAIN: &[u8] = b"cc-switch-sync-manifest-v1\n";
+/// PBKDF2 salt for deriving the sync key from the passphrase. Fixed so every
+/// device derives the same key from the same passphrase.
+const SYNC_KEY_SALT: &[u8] = b"cc-switch-sync-snapshot-key-v1";
+/// PBKDF2-HMAC-SHA256 rounds. The derived key is stored, so this runs only
+/// when the passphrase is entered.
+pub(crate) const SYNC_KEY_PBKDF2_ROUNDS: u32 = 600_000;
+pub(crate) const MIN_SYNC_PASSPHRASE_CHARS: usize = 8;
 
 // ─── Error helpers ───────────────────────────────────────────
 
@@ -74,6 +86,18 @@ pub(crate) struct SyncManifest {
     pub created_at: String,
     pub artifacts: BTreeMap<String, ArtifactMeta>,
     pub snapshot_id: String,
+    /// HMAC of the other fields with the user's sync key. Older apps ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<ManifestSignature>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ManifestSignature {
+    pub alg: String,
+    /// Fingerprint of the signing key, to tell a different key from tampering.
+    pub key_id: String,
+    pub mac: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,8 +130,10 @@ impl RemoteLayout {
 
 // ─── Snapshot building ───────────────────────────────────────
 
+/// Build the local snapshot; the manifest is signed when a sync key is configured.
 pub(crate) fn build_local_snapshot(
     db: &crate::database::Database,
+    key: Option<&SyncKey>,
 ) -> Result<LocalSnapshot, AppError> {
     // Export database to SQL string
     let sql_string = db.export_sql_string_for_sync()?;
@@ -144,7 +170,7 @@ pub(crate) fn build_local_snapshot(
     );
 
     let snapshot_id = compute_snapshot_id(&artifacts);
-    let manifest = SyncManifest {
+    let mut manifest = SyncManifest {
         format: PROTOCOL_FORMAT.to_string(),
         version: PROTOCOL_VERSION,
         db_compat_version: Some(DB_COMPAT_VERSION),
@@ -152,7 +178,11 @@ pub(crate) fn build_local_snapshot(
         created_at: Utc::now().to_rfc3339(),
         artifacts,
         snapshot_id,
+        signature: None,
     };
+    if let Some(key) = key {
+        sign_manifest(&mut manifest, key)?;
+    }
     let manifest_bytes =
         serde_json::to_vec_pretty(&manifest).map_err(|e| AppError::JsonSerialize { source: e })?;
     let manifest_hash = sha256_hex(&manifest_bytes);
@@ -247,6 +277,244 @@ pub(crate) fn validate_manifest_compat(
         _ => {}
     }
     Ok(())
+}
+
+// ─── Manifest authentication ─────────────────────────────────
+
+/// Symmetric key that signs and verifies manifests, derived from the
+/// passphrase the user enters on each device. Stored in the SecretStore as hex.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct SyncKey([u8; 32]);
+
+impl std::fmt::Debug for SyncKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SyncKey({})", self.key_id())
+    }
+}
+
+impl SyncKey {
+    pub(crate) fn from_passphrase(passphrase: &str) -> Result<Self, AppError> {
+        if passphrase.trim().chars().count() < MIN_SYNC_PASSPHRASE_CHARS {
+            return Err(localized(
+                "sync.key_too_short",
+                format!("同步密钥至少需要 {MIN_SYNC_PASSPHRASE_CHARS} 个字符"),
+                format!("The sync key must be at least {MIN_SYNC_PASSPHRASE_CHARS} characters."),
+            ));
+        }
+        let mut key = [0u8; 32];
+        pbkdf2::pbkdf2_hmac::<Sha256>(
+            passphrase.as_bytes(),
+            SYNC_KEY_SALT,
+            SYNC_KEY_PBKDF2_ROUNDS,
+            &mut key,
+        );
+        Ok(Self(key))
+    }
+
+    pub(crate) fn from_hex(value: &str) -> Option<Self> {
+        let bytes = decode_hex(value.trim())?;
+        Some(Self(bytes.try_into().ok()?))
+    }
+
+    pub(crate) fn to_hex(&self) -> String {
+        encode_hex(&self.0)
+    }
+
+    /// Short public fingerprint (not secret) shown in the UI and the manifest.
+    pub(crate) fn key_id(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(b"cc-switch-sync-key-id\0");
+        hasher.update(self.0);
+        encode_hex(&hasher.finalize()[..8])
+    }
+
+    fn mac(&self) -> Hmac<Sha256> {
+        <Hmac<Sha256> as Mac>::new_from_slice(&self.0).expect("HMAC accepts any key length")
+    }
+}
+
+/// Bytes covered by the signature: a domain tag plus the manifest without its
+/// `signature` field. Remote manifests are re-serialized from the parsed struct,
+/// so unknown or reordered JSON fields cannot change what is verified.
+pub(crate) fn manifest_signing_bytes(manifest: &SyncManifest) -> Result<Vec<u8>, AppError> {
+    let mut unsigned = manifest.clone();
+    unsigned.signature = None;
+    let body = serde_json::to_vec(&unsigned).map_err(|e| AppError::JsonSerialize { source: e })?;
+    let mut bytes = Vec::with_capacity(SIGNATURE_DOMAIN.len() + body.len());
+    bytes.extend_from_slice(SIGNATURE_DOMAIN);
+    bytes.extend_from_slice(&body);
+    Ok(bytes)
+}
+
+pub(crate) fn sign_manifest(manifest: &mut SyncManifest, key: &SyncKey) -> Result<(), AppError> {
+    let mut mac = key.mac();
+    mac.update(&manifest_signing_bytes(manifest)?);
+    manifest.signature = Some(ManifestSignature {
+        alg: SIGNATURE_ALG.to_string(),
+        key_id: key.key_id(),
+        mac: encode_hex(&mac.finalize().into_bytes()),
+    });
+    Ok(())
+}
+
+/// Verify the manifest signature with `key`. An unsigned manifest is an error here;
+/// callers decide about unsigned remotes with [`authorize_manifest`].
+pub(crate) fn verify_manifest_signature(
+    manifest: &SyncManifest,
+    key: &SyncKey,
+) -> Result<(), AppError> {
+    let Some(signature) = manifest.signature.as_ref() else {
+        return Err(unsigned_manifest_error());
+    };
+    if signature.alg != SIGNATURE_ALG {
+        return Err(localized(
+            "sync.manifest_signature_unsupported",
+            format!("远端 manifest 签名算法不受支持: {}", signature.alg),
+            format!(
+                "Remote manifest signature algorithm is not supported: {}",
+                signature.alg
+            ),
+        ));
+    }
+    let local_key_id = key.key_id();
+    if signature.key_id != local_key_id {
+        return Err(localized(
+            "sync.manifest_key_mismatch",
+            format!(
+                "远端快照由其他同步密钥签名 (远端: {}, 本地: {local_key_id})，请在本设备输入相同的同步密钥",
+                signature.key_id
+            ),
+            format!(
+                "Remote snapshot was signed with a different sync key (remote: {}, local: {local_key_id}). Enter the same sync key on this device.",
+                signature.key_id
+            ),
+        ));
+    }
+    let invalid = || {
+        localized(
+            "sync.manifest_signature_invalid",
+            "远端 manifest 签名校验失败，快照可能被篡改，已拒绝导入",
+            "Remote manifest signature is invalid; the snapshot may have been tampered with and was not imported.",
+        )
+    };
+    let expected = decode_hex(&signature.mac).ok_or_else(invalid)?;
+    let mut mac = key.mac();
+    mac.update(&manifest_signing_bytes(manifest)?);
+    mac.verify_slice(&expected).map_err(|_| invalid())
+}
+
+/// How a remote manifest was trusted by [`authorize_manifest`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ManifestTrust {
+    /// Signature verified with the local sync key.
+    Signed,
+    /// Unsigned manifest accepted: no sync key configured yet (legacy), or the
+    /// user confirmed the one-time migration import.
+    Unsigned,
+}
+
+/// Device-side inputs for [`authorize_manifest`].
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SignaturePolicy {
+    /// This device already synced a signed snapshot for this remote; unsigned
+    /// manifests are a downgrade from then on and are always refused.
+    pub signed_sync: bool,
+    /// The user confirmed the one-time import of an unsigned (pre-signing) remote.
+    pub allow_unsigned: bool,
+}
+
+/// Decide whether a remote manifest may be imported.
+///
+/// - signed: verified with the local key; missing key, other key or a bad MAC is refused;
+/// - unsigned, after a signed sync: refused (no override);
+/// - unsigned, sync key configured: refused with `sync.manifest_unsigned` unless the
+///   user confirmed the one-time migration (`allow_unsigned`);
+/// - unsigned, no sync key and never signed: accepted as before signing existed.
+pub(crate) fn authorize_manifest(
+    manifest: &SyncManifest,
+    key: Option<&SyncKey>,
+    policy: SignaturePolicy,
+) -> Result<ManifestTrust, AppError> {
+    if manifest.signature.is_some() {
+        let key = key.ok_or_else(sync_key_missing_error)?;
+        verify_manifest_signature(manifest, key)?;
+        return Ok(ManifestTrust::Signed);
+    }
+    match key {
+        None if policy.signed_sync => Err(sync_key_missing_error()),
+        None => {
+            log::warn!("[Sync] Importing an unsigned snapshot: no sync key is configured");
+            Ok(ManifestTrust::Unsigned)
+        }
+        Some(_) if policy.signed_sync => Err(localized(
+            "sync.manifest_unsigned_rejected",
+            "远端快照未签名，而本设备此前已同步过签名快照，可能遭到降级攻击，已拒绝导入",
+            "Remote snapshot is unsigned but this device already synced signed snapshots; it may be a downgrade attack and was not imported.",
+        )),
+        Some(_) if policy.allow_unsigned => {
+            log::warn!("[Sync] Importing an unsigned snapshot after one-time migration confirmation");
+            Ok(ManifestTrust::Unsigned)
+        }
+        Some(_) => Err(unsigned_manifest_error()),
+    }
+}
+
+/// Key to sign an upload with. Without a key the upload stays unsigned, except
+/// after a signed sync: then an unsigned upload would overwrite a signed remote
+/// that other devices refuse, so it is rejected.
+pub(crate) fn upload_signing_key(
+    key: Option<SyncKey>,
+    signed_sync: bool,
+) -> Result<Option<SyncKey>, AppError> {
+    match key {
+        None if signed_sync => Err(sync_key_missing_error()),
+        key => Ok(key),
+    }
+}
+
+/// Short status of a remote manifest's signature, for remote-info payloads.
+pub(crate) fn manifest_signature_status(
+    manifest: &SyncManifest,
+    key: Option<&SyncKey>,
+) -> &'static str {
+    match (manifest.signature.as_ref(), key) {
+        (None, _) => "unsigned",
+        (Some(_), None) => "keyMissing",
+        (Some(_), Some(key)) => match verify_manifest_signature(manifest, key) {
+            Ok(()) => "valid",
+            Err(_) => "invalid",
+        },
+    }
+}
+
+fn unsigned_manifest_error() -> AppError {
+    localized(
+        "sync.manifest_unsigned",
+        "远端快照未签名（由旧版本上传）。确认来源可信后可一次性导入，之后上传将带签名",
+        "Remote snapshot is unsigned (uploaded by an older version). Confirm it is trusted to import it once; later uploads will be signed.",
+    )
+}
+
+pub(crate) fn sync_key_missing_error() -> AppError {
+    localized(
+        "sync.key_missing",
+        "未配置同步密钥，无法校验或签名快照；请在每台设备上输入相同的同步密钥",
+        "No sync key is configured, so snapshots cannot be verified or signed. Enter the same sync key on each device.",
+    )
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn decode_hex(value: &str) -> Option<Vec<u8>> {
+    if !value.len().is_multiple_of(2) || !value.is_ascii() {
+        return None;
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&value[i..i + 2], 16).ok())
+        .collect()
 }
 
 // ─── Artifact verification ───────────────────────────────────
@@ -500,6 +768,7 @@ mod tests {
             created_at: "2026-02-12T00:00:00Z".to_string(),
             artifacts,
             snapshot_id: "snap-1".to_string(),
+            signature: None,
         }
     }
 
@@ -731,6 +1000,300 @@ mod tests {
             err.to_string().contains("verification failed") || err.to_string().contains("校验失败"),
             "unexpected error: {err}"
         );
+    }
+
+    // ─── Manifest authentication ─────────────────────────────
+
+    fn test_key(byte: u8) -> SyncKey {
+        SyncKey([byte; 32])
+    }
+
+    fn signed_manifest_bytes(key: &SyncKey) -> Vec<u8> {
+        let mut manifest =
+            manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(DB_COMPAT_VERSION));
+        sign_manifest(&mut manifest, key).expect("sign");
+        serde_json::to_vec_pretty(&manifest).expect("serialize")
+    }
+
+    fn parse(bytes: &[u8]) -> SyncManifest {
+        serde_json::from_slice(bytes).expect("parse manifest")
+    }
+
+    fn authorize_err_key(
+        manifest: &SyncManifest,
+        key: Option<&SyncKey>,
+        policy: SignaturePolicy,
+    ) -> &'static str {
+        match authorize_manifest(manifest, key, policy) {
+            Err(AppError::Localized { key, .. }) => key,
+            other => panic!("expected localized rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn signed_manifest_is_accepted_after_a_json_round_trip() {
+        let key = test_key(7);
+        let manifest = parse(&signed_manifest_bytes(&key));
+        let signature = manifest.signature.as_ref().expect("signature");
+        assert_eq!(signature.alg, SIGNATURE_ALG);
+        assert_eq!(signature.key_id, key.key_id());
+        assert_eq!(signature.mac.len(), 64);
+        assert_eq!(
+            authorize_manifest(&manifest, Some(&key), SignaturePolicy::default()).unwrap(),
+            ManifestTrust::Signed
+        );
+        // Even after a signed sync and without the migration override.
+        let strict = SignaturePolicy {
+            signed_sync: true,
+            allow_unsigned: false,
+        };
+        assert_eq!(
+            authorize_manifest(&manifest, Some(&key), strict).unwrap(),
+            ManifestTrust::Signed
+        );
+        assert_eq!(manifest_signature_status(&manifest, Some(&key)), "valid");
+    }
+
+    #[test]
+    fn tampered_manifest_is_rejected() {
+        let key = test_key(7);
+        let original: serde_json::Value =
+            serde_json::from_slice(&signed_manifest_bytes(&key)).unwrap();
+        type Tamper = Box<dyn Fn(&mut serde_json::Value)>;
+        let tamperings: Vec<(&str, Tamper)> = vec![
+            (
+                "artifact hash",
+                Box::new(|m| {
+                    m["artifacts"]["db.sql"]["sha256"] = "evil".into();
+                }),
+            ),
+            (
+                "artifact size",
+                Box::new(|m| m["artifacts"]["skills.zip"]["size"] = 999.into()),
+            ),
+            (
+                "added artifact",
+                Box::new(|m| {
+                    m["artifacts"]["extra.bin"] = serde_json::json!({"sha256": "x", "size": 1})
+                }),
+            ),
+            (
+                "device name",
+                Box::new(|m| m["deviceName"] = "Attacker".into()),
+            ),
+            (
+                "created at",
+                Box::new(|m| m["createdAt"] = "2030-01-01T00:00:00Z".into()),
+            ),
+            (
+                "snapshot id",
+                Box::new(|m| m["snapshotId"] = "snap-2".into()),
+            ),
+            (
+                "db compat version",
+                Box::new(|m| m["dbCompatVersion"] = (DB_COMPAT_VERSION - 1).into()),
+            ),
+            (
+                "mac",
+                Box::new(|m| {
+                    let mac = m["signature"]["mac"].as_str().unwrap().to_string();
+                    let flipped = if mac.starts_with('0') { "1" } else { "0" };
+                    m["signature"]["mac"] = format!("{flipped}{}", &mac[1..]).into();
+                }),
+            ),
+            (
+                "malformed mac",
+                Box::new(|m| m["signature"]["mac"] = "zz".into()),
+            ),
+        ];
+        for (what, tamper) in tamperings {
+            let mut value = original.clone();
+            tamper(&mut value);
+            let manifest: SyncManifest = serde_json::from_value(value).expect(what);
+            assert_eq!(
+                authorize_err_key(&manifest, Some(&key), SignaturePolicy::default()),
+                "sync.manifest_signature_invalid",
+                "tampered {what} must be rejected"
+            );
+            assert_eq!(manifest_signature_status(&manifest, Some(&key)), "invalid");
+        }
+    }
+
+    #[test]
+    fn unknown_manifest_fields_do_not_affect_the_signature() {
+        let key = test_key(7);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&signed_manifest_bytes(&key)).unwrap();
+        value["futureField"] = "ignored".into();
+        let manifest: SyncManifest = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            authorize_manifest(&manifest, Some(&key), SignaturePolicy::default()).unwrap(),
+            ManifestTrust::Signed
+        );
+    }
+
+    #[test]
+    fn manifest_signed_with_another_key_is_rejected() {
+        let manifest = parse(&signed_manifest_bytes(&test_key(1)));
+        assert_eq!(
+            authorize_err_key(&manifest, Some(&test_key(2)), SignaturePolicy::default()),
+            "sync.manifest_key_mismatch"
+        );
+    }
+
+    #[test]
+    fn forged_signature_claiming_the_local_key_id_is_rejected() {
+        let local = test_key(1);
+        let mut manifest = parse(&signed_manifest_bytes(&test_key(2)));
+        manifest.signature.as_mut().unwrap().key_id = local.key_id();
+        assert_eq!(
+            authorize_err_key(&manifest, Some(&local), SignaturePolicy::default()),
+            "sync.manifest_signature_invalid"
+        );
+    }
+
+    #[test]
+    fn unsupported_signature_algorithm_is_rejected() {
+        let key = test_key(1);
+        let mut manifest = parse(&signed_manifest_bytes(&key));
+        manifest.signature.as_mut().unwrap().alg = "none".to_string();
+        assert_eq!(
+            authorize_err_key(&manifest, Some(&key), SignaturePolicy::default()),
+            "sync.manifest_signature_unsupported"
+        );
+    }
+
+    #[test]
+    fn signed_manifest_without_local_key_is_rejected() {
+        let manifest = parse(&signed_manifest_bytes(&test_key(1)));
+        assert_eq!(
+            authorize_err_key(&manifest, None, SignaturePolicy::default()),
+            "sync.key_missing"
+        );
+        assert_eq!(manifest_signature_status(&manifest, None), "keyMissing");
+    }
+
+    #[test]
+    fn unsigned_manifest_needs_one_time_migration_confirmation_when_key_is_set() {
+        let key = test_key(1);
+        let manifest = manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(DB_COMPAT_VERSION));
+        assert_eq!(manifest_signature_status(&manifest, Some(&key)), "unsigned");
+        assert_eq!(
+            authorize_err_key(&manifest, Some(&key), SignaturePolicy::default()),
+            "sync.manifest_unsigned"
+        );
+        let confirmed = SignaturePolicy {
+            signed_sync: false,
+            allow_unsigned: true,
+        };
+        assert_eq!(
+            authorize_manifest(&manifest, Some(&key), confirmed).unwrap(),
+            ManifestTrust::Unsigned
+        );
+    }
+
+    #[test]
+    fn unsigned_manifest_is_refused_after_a_signed_sync_even_when_confirmed() {
+        let key = test_key(1);
+        // A signed manifest with its signature stripped (downgrade attempt).
+        let mut manifest = parse(&signed_manifest_bytes(&key));
+        manifest.signature = None;
+        let policy = SignaturePolicy {
+            signed_sync: true,
+            allow_unsigned: true,
+        };
+        assert_eq!(
+            authorize_err_key(&manifest, Some(&key), policy),
+            "sync.manifest_unsigned_rejected"
+        );
+        assert_eq!(
+            authorize_err_key(&manifest, None, policy),
+            "sync.key_missing",
+            "removing the key does not reopen unsigned imports"
+        );
+    }
+
+    #[test]
+    fn unsigned_manifest_without_key_keeps_legacy_behaviour() {
+        let manifest = manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, None);
+        assert_eq!(
+            authorize_manifest(&manifest, None, SignaturePolicy::default()).unwrap(),
+            ManifestTrust::Unsigned
+        );
+    }
+
+    #[test]
+    fn legacy_manifest_json_without_signature_still_parses() {
+        let manifest: SyncManifest = serde_json::from_str(
+            r#"{"format":"cc-switch-webdav-sync","version":2,"deviceName":"Old",
+                "createdAt":"2025-01-01T00:00:00Z","artifacts":{},"snapshotId":"s"}"#,
+        )
+        .expect("legacy manifest");
+        assert!(manifest.signature.is_none());
+        let value = serde_json::to_value(&manifest).unwrap();
+        assert!(value.get("signature").is_none());
+    }
+
+    #[test]
+    fn upload_without_key_is_refused_only_after_a_signed_sync() {
+        assert_eq!(upload_signing_key(None, false).unwrap(), None);
+        assert_eq!(
+            upload_signing_key(Some(test_key(3)), true).unwrap(),
+            Some(test_key(3))
+        );
+        match upload_signing_key(None, true) {
+            Err(AppError::Localized { key, .. }) => assert_eq!(key, "sync.key_missing"),
+            other => panic!("expected key_missing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sync_key_derivation_is_deterministic_and_validated() {
+        let a = SyncKey::from_passphrase("correct horse battery").unwrap();
+        let b = SyncKey::from_passphrase("correct horse battery").unwrap();
+        let c = SyncKey::from_passphrase("correct horse battery!").unwrap();
+        assert_eq!(a, b, "every device derives the same key");
+        assert_ne!(a, c);
+        assert_eq!(SyncKey::from_hex(&a.to_hex()), Some(a.clone()));
+        assert_eq!(a.key_id().len(), 16);
+        assert!(
+            !format!("{a:?}").contains(&a.to_hex()),
+            "Debug hides the key"
+        );
+        assert!(SyncKey::from_hex("abcd").is_none());
+        assert!(SyncKey::from_hex("zz").is_none());
+        match SyncKey::from_passphrase("  short ") {
+            Err(AppError::Localized { key, .. }) => assert_eq!(key, "sync.key_too_short"),
+            other => panic!("expected key_too_short, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_local_snapshot_signs_manifest_when_key_is_configured() {
+        use crate::database::Database;
+
+        let home = tempfile::tempdir().expect("tempdir");
+        let _paths = crate::paths::scoped(crate::paths::Paths::with_home(home.path()));
+        let _settings = crate::settings::scoped_settings_store();
+        let db = Database::memory().expect("db");
+        let key = test_key(9);
+
+        let signed = build_local_snapshot(&db, Some(&key)).expect("signed snapshot");
+        assert_eq!(signed.manifest_hash, sha256_hex(&signed.manifest_bytes));
+        let manifest = parse(&signed.manifest_bytes);
+        assert_eq!(
+            authorize_manifest(&manifest, Some(&key), SignaturePolicy::default()).unwrap(),
+            ManifestTrust::Signed
+        );
+        verify_artifact(
+            &signed.db_sql,
+            REMOTE_DB_SQL,
+            &manifest.artifacts[REMOTE_DB_SQL],
+        )
+        .expect("signed artifact hash");
+
+        let unsigned = build_local_snapshot(&db, None).expect("unsigned snapshot");
+        assert!(parse(&unsigned.manifest_bytes).signature.is_none());
     }
 
     #[test]

@@ -1350,6 +1350,8 @@ pub fn run() {
             commands::s3_sync_download,
             commands::s3_sync_save_settings,
             commands::s3_sync_fetch_remote_info,
+            commands::get_sync_snapshot_key_status,
+            commands::set_sync_snapshot_key,
             commands::save_file_dialog,
             commands::save_csv_file_dialog,
             commands::write_csv_export,

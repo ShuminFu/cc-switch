@@ -12,12 +12,15 @@ use serde_json::Value;
 
 use crate::error::AppError;
 use crate::services::s3::{self, S3Credentials};
-use crate::settings::{update_s3_sync_status, S3SyncSettings, WebDavSyncStatus};
+use crate::settings::{
+    get_sync_snapshot_key, update_s3_sync_status, S3SyncSettings, WebDavSyncStatus,
+};
 
 use super::sync_protocol::{
-    apply_snapshot, build_local_snapshot, localized, persist_sync_success_best_effort, sha256_hex,
-    validate_artifact_size_limit, validate_manifest_compat, verify_artifact, ArtifactMeta,
-    RemoteLayout, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES,
+    apply_snapshot, authorize_manifest, build_local_snapshot, localized, manifest_signature_status,
+    persist_sync_success_best_effort, sha256_hex, upload_signing_key, validate_artifact_size_limit,
+    validate_manifest_compat, verify_artifact, ArtifactMeta, ManifestTrust, RemoteLayout,
+    SignaturePolicy, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES,
     PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
 };
 
@@ -53,7 +56,8 @@ pub async fn upload(
     settings.validate()?;
     let creds = creds_for(settings);
 
-    let snapshot = build_local_snapshot(db)?;
+    let key = upload_signing_key(get_sync_snapshot_key()?, settings.status.signed_sync)?;
+    let snapshot = build_local_snapshot(db, key.as_ref())?;
 
     // Upload order: artifacts first, manifest last (best-effort consistency)
     let db_key = s3_key(settings, REMOTE_DB_SQL);
@@ -80,6 +84,9 @@ pub async fn upload(
         }
     };
 
+    if key.is_some() {
+        settings.status.signed_sync = true;
+    }
     let _persisted = persist_sync_success_best_effort(
         settings,
         snapshot.manifest_hash,
@@ -90,9 +97,14 @@ pub async fn upload(
 }
 
 /// Download remote snapshot and apply to local database + skills.
+///
+/// The manifest must carry a valid signature from the local sync key; an
+/// unsigned remote is imported only per [`authorize_manifest`] (`allow_unsigned`
+/// is the user's one-time migration confirmation).
 pub async fn download(
     db: &crate::database::Database,
     settings: &mut S3SyncSettings,
+    allow_unsigned: bool,
 ) -> Result<Value, AppError> {
     settings.validate()?;
     let creds = creds_for(settings);
@@ -114,6 +126,16 @@ pub async fn download(
             source: e,
         })?;
 
+    // Authenticate the manifest before trusting any hash in it.
+    let key = get_sync_snapshot_key()?;
+    let trust = authorize_manifest(
+        &manifest,
+        key.as_ref(),
+        SignaturePolicy {
+            signed_sync: settings.status.signed_sync,
+            allow_unsigned,
+        },
+    )?;
     validate_manifest_compat(&manifest, RemoteLayout::Current)?;
 
     // Download and verify artifacts
@@ -124,10 +146,18 @@ pub async fn download(
     // Apply snapshot
     apply_snapshot(db, &db_sql, &skills_zip)?;
 
+    // With a key, any accepted import (signed, or the one-time unsigned migration)
+    // means unsigned remotes are refused from now on.
+    if key.is_some() {
+        settings.status.signed_sync = true;
+    }
     let manifest_hash = sha256_hex(&manifest_bytes);
     let _persisted =
         persist_sync_success_best_effort(settings, manifest_hash, etag, persist_sync_success);
-    Ok(serde_json::json!({ "status": "downloaded" }))
+    Ok(serde_json::json!({
+        "status": "downloaded",
+        "signed": trust == ManifestTrust::Signed,
+    }))
 }
 
 /// Fetch remote manifest info without downloading artifacts.
@@ -146,6 +176,7 @@ pub async fn fetch_remote_info(settings: &S3SyncSettings) -> Result<Option<Value
     })?;
 
     let compatible = validate_manifest_compat(&manifest, RemoteLayout::Current).is_ok();
+    let signature = manifest_signature_status(&manifest, info_sync_key().as_ref());
 
     let payload = serde_json::json!({
         "deviceName": manifest.device_name,
@@ -155,12 +186,21 @@ pub async fn fetch_remote_info(settings: &S3SyncSettings) -> Result<Option<Value
         "protocolVersion": manifest.version,
         "dbCompatVersion": manifest.db_compat_version,
         "compatible": compatible,
+        "signature": signature,
         "artifacts": manifest.artifacts.keys().collect::<Vec<_>>(),
         "layout": RemoteLayout::Current.as_str(),
         "remotePath": s3_dir_display(settings),
     });
 
     Ok(Some(payload))
+}
+
+/// Sync key for the remote-info preview; a read failure only hides the status.
+fn info_sync_key() -> Option<super::sync_protocol::SyncKey> {
+    get_sync_snapshot_key().unwrap_or_else(|e| {
+        log::warn!("[S3] Failed to read sync key: {e}");
+        None
+    })
 }
 
 // ─── Sync status persistence ─────────────────────────────────
@@ -177,6 +217,7 @@ fn persist_sync_success(
         last_local_manifest_hash: Some(manifest_hash.clone()),
         last_remote_manifest_hash: Some(manifest_hash),
         last_remote_etag: etag,
+        signed_sync: settings.status.signed_sync,
     };
     settings.status = status.clone();
     update_s3_sync_status(status)

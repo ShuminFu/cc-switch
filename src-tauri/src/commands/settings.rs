@@ -201,6 +201,31 @@ pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreR
     })
 }
 
+/// WebDAV/S3 快照签名密钥的状态：是否已配置及其指纹（不返回密钥本身）
+#[tauri::command]
+pub async fn get_sync_snapshot_key_status() -> Result<serde_json::Value, IpcError> {
+    let key = crate::settings::get_sync_snapshot_key()?;
+    Ok(serde_json::json!({
+        "configured": key.is_some(),
+        "keyId": key.map(|key| key.key_id()),
+    }))
+}
+
+/// 设置（每台设备输入相同的口令）或清除（传空）快照签名密钥
+#[tauri::command]
+pub async fn set_sync_snapshot_key(key: Option<String>) -> Result<serde_json::Value, IpcError> {
+    // PBKDF2 派生较慢，放到阻塞线程池
+    let key_id = tauri::async_runtime::spawn_blocking(move || {
+        crate::settings::set_sync_snapshot_key(key.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(serde_json::json!({
+        "configured": key_id.is_some(),
+        "keyId": key_id,
+    }))
+}
+
 /// 重启应用程序（当 app_config_dir 变更后使用）
 #[tauri::command]
 pub async fn restart_app(app: AppHandle) -> Result<bool, IpcError> {
