@@ -60,3 +60,14 @@ No files under `src-tauri/src/proxy/**` were touched.
 - `pnpm test:unit`: 159 files / 1542 tests passed (frontend unchanged).
 - Not verified here: whether the OS actually displays the notification on Windows and macOS
   (macOS needs the bundled app identity). This needs a manual check on those platforms.
+
+**Review.** Checked each acceptance criterion against 90a7891: the hook is in the debounced
+emitter, which every usage write path calls; the limit windows reuse `check_provider_limits_at`;
+the dedup state is local-only; and the notification plugin is only called from Rust, so it
+needs no capability. One gap was fixed. The dedup mark did not record the limit, so if the user
+raised a limit after an alert in the same period, crossing 80% or 100% of the new limit sent
+nothing. Each mark now stores the limit it was raised against (older state without it still
+deduplicates as before), and a changed limit is evaluated again from scratch. The new test is
+`budget_raised_limit_alerts_again_against_new_limit`. Re-verified: `cargo test --lib budget`
+34 passed; full `cargo test --no-fail-fast` 0 failed (lib 2450 passed / 3 ignored); fmt and
+clippy `-D warnings` clean; `pnpm test:unit` 159 files / 1542 tests passed.

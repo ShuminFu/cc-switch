@@ -87,6 +87,9 @@ pub struct BudgetAlert {
 struct AlertMark {
     period: String,
     level: BudgetLevel,
+    /// 告警时的限额（两位小数文本）；限额被修改后按新限额重新计档
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    limit: Option<String>,
 }
 
 /// 持久化的去重状态
@@ -102,16 +105,23 @@ impl AlertState {
         serde_json::json!([app_type, provider_id, period.as_str()]).to_string()
     }
 
-    /// 记录本次档位；返回 true 表示需要告警（本周期首次达到该档或更高档）。
-    fn record(&mut self, key: &str, period_key: &str, level: BudgetLevel) -> bool {
+    /// 记录本次档位；返回 true 表示需要告警（本周期、当前限额下首次达到该档或更高档）。
+    fn record(&mut self, key: &str, period_key: &str, limit: &str, level: BudgetLevel) -> bool {
         match self.entries.get(key) {
-            Some(mark) if mark.period == period_key && mark.level >= level => false,
+            Some(mark)
+                if mark.period == period_key
+                    && mark.limit.as_deref().is_none_or(|l| l == limit)
+                    && mark.level >= level =>
+            {
+                false
+            }
             _ => {
                 self.entries.insert(
                     key.to_string(),
                     AlertMark {
                         period: period_key.to_string(),
                         level,
+                        limit: Some(limit.to_string()),
                     },
                 );
                 true
@@ -184,18 +194,20 @@ pub(crate) fn collect_budget_alerts(
                 status.monthly_limit.as_deref(),
             ),
         ];
-        for (period, usage, limit) in windows {
-            let (Some(usage), Some(limit)) = (
-                usage.parse::<f64>().ok(),
-                limit.and_then(|l| l.parse::<f64>().ok()),
-            ) else {
+        for (period, usage, limit_raw) in windows {
+            let Some(limit_raw) = limit_raw else {
+                continue;
+            };
+            let (Some(usage), Some(limit)) =
+                (usage.parse::<f64>().ok(), limit_raw.parse::<f64>().ok())
+            else {
                 continue;
             };
             let Some(level) = level_for(usage, limit) else {
                 continue;
             };
             let key = AlertState::key(&app_type, &provider_id, period);
-            if state.record(&key, &period.period_key(now), level) {
+            if state.record(&key, &period.period_key(now), limit_raw, level) {
                 alerts.push(BudgetAlert {
                     app_type: app_type.clone(),
                     provider_id: provider_id.clone(),
@@ -428,6 +440,36 @@ mod tests {
             vec![(BudgetPeriod::Daily, BudgetLevel::Warning)]
         );
         assert!(collect_budget_alerts(&db, tomorrow)?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn budget_raised_limit_alerts_again_against_new_limit() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        insert_provider(&db, "p1", r#"{"limitDailyUsd":"1"}"#)?;
+        let now = local_dt(2026, 3, 15, 12);
+
+        add_usage(&db, "p1", "2026-03-15", "m1", "1.2");
+        assert_eq!(
+            summary(&collect_budget_alerts(&db, now)?),
+            vec![(BudgetPeriod::Daily, BudgetLevel::Exceeded)]
+        );
+
+        // 用户把限额调高到 2：当前 60% 不告警，之后按新限额重新告警
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                r#"UPDATE providers SET meta = '{"limitDailyUsd":"2"}' WHERE id = 'p1'"#,
+                [],
+            )?;
+        }
+        assert!(collect_budget_alerts(&db, now)?.is_empty());
+        add_usage(&db, "p1", "2026-03-15", "m2", "0.5");
+        assert_eq!(
+            summary(&collect_budget_alerts(&db, now)?),
+            vec![(BudgetPeriod::Daily, BudgetLevel::Warning)]
+        );
+        assert!(collect_budget_alerts(&db, now)?.is_empty());
         Ok(())
     }
 
