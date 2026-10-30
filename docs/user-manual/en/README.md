@@ -1,6 +1,6 @@
 # CC Switch User Manual
 
-> All-in-One Assistant for Claude Code / Claude Desktop / Codex / Gemini CLI / OpenCode / OpenClaw / Hermes
+> All-in-One Assistant for Claude Code / Claude Desktop / Codex / Gemini CLI / Grok Build / OpenCode / OpenClaw / Hermes
 
 ## Table of Contents
 
@@ -12,7 +12,8 @@ CC Switch User Manual
 │   ├── 1.2 Installation Guide
 │   ├── 1.3 Interface Overview
 │   ├── 1.4 Quick Start
-│   └── 1.5 Personalization
+│   ├── 1.5 Personalization
+│   └── 1.6 Projects
 │
 ├── 2. Provider Management
 │   ├── 2.1 Add Provider
@@ -20,7 +21,8 @@ CC Switch User Manual
 │   ├── 2.3 Edit Provider
 │   ├── 2.4 Sort & Duplicate
 │   ├── 2.5 Usage Query
-│   └── 2.6 Claude Desktop
+│   ├── 2.6 Claude Desktop
+│   └── 2.7 Grok Build
 │
 ├── 3. Extensions
 │   ├── 3.1 MCP Server Management
@@ -53,7 +55,8 @@ CC Switch User Manual
 | [1.2-installation.md](./1-getting-started/1.2-installation.md) | Windows/macOS/Linux installation guide |
 | [1.3-interface.md](./1-getting-started/1.3-interface.md) | Interface layout, navigation bar, provider cards |
 | [1.4-quickstart.md](./1-getting-started/1.4-quickstart.md) | 5-minute quick start tutorial |
-| [1.5-settings.md](./1-getting-started/1.5-settings.md) | Language, theme, directories, cloud sync settings |
+| [1.5-settings.md](./1-getting-started/1.5-settings.md) | Language, theme, directories, backups, WebDAV / S3 cloud sync |
+| [1.6-projects.md](./1-getting-started/1.6-projects.md) | Project profiles: save and switch provider / MCP / Skills / prompt snapshots |
 
 ### 2. Provider Management
 
@@ -65,6 +68,7 @@ CC Switch User Manual
 | [2.4-sort-duplicate.md](./2-providers/2.4-sort-duplicate.md) | Drag-to-reorder, duplicate provider, delete |
 | [2.5-usage-query.md](./2-providers/2.5-usage-query.md) | Usage query, remaining balance, multi-plan display |
 | [2.6-claude-desktop.md](./2-providers/2.6-claude-desktop.md) | Claude Desktop third-party providers, direct mode, and model mapping |
+| [2.7-grok-build.md](./2-providers/2.7-grok-build.md) | Grok Build providers, `config.toml`, proxy takeover |
 
 ### 3. Extensions
 
@@ -80,7 +84,7 @@ CC Switch User Manual
 
 | File | Description |
 |------|-------------|
-| [4.1-service.md](./4-proxy/4.1-service.md) | Start proxy, configuration, running status |
+| [4.1-service.md](./4-proxy/4.1-service.md) | Start proxy, configuration, LAN access token, running status |
 | [4.2-routing.md](./4-proxy/4.2-routing.md) | App routing, configuration changes, status indicators |
 | [4.3-failover.md](./4-proxy/4.3-failover.md) | Failover queue, circuit breaker, health status |
 | [4.4-usage.md](./4-proxy/4.4-usage.md) | Usage statistics, trend charts, pricing configuration |
@@ -101,14 +105,30 @@ CC Switch User Manual
 - **Installation issues**: See [1.2 Installation Guide](./1-getting-started/1.2-installation.md)
 - **Configure providers**: See [2.1 Add Provider](./2-providers/2.1-add.md)
 - **Use Claude Desktop**: See [2.6 Claude Desktop](./2-providers/2.6-claude-desktop.md)
+- **Use Grok Build**: See [2.7 Grok Build](./2-providers/2.7-grok-build.md)
+- **Switch whole setups at once**: See [1.6 Projects](./1-getting-started/1.6-projects.md)
 - **Using proxy**: See [4.1 Proxy Service](./4-proxy/4.1-service.md)
 - **Having trouble**: See [5.2 FAQ](./5-faq/5.2-questions.md)
 
 ## Version Information
 
-- Documentation version: v3.16.0
-- Last updated: 2026-05-29
-- Applicable to CC Switch v3.16.0+
+- Documentation version: v3.17.0
+- Last updated: 2026-10-30
+- Applicable to CC Switch v3.17.0+
+
+### Changes After v3.17.0 (Next Release)
+
+- **Proxy access token for LAN access**: when the proxy listens on a non-loopback address, other devices must send a per-install access token; the panel shows a warning and the token. See [4.1 Proxy Service](./4-proxy/4.1-service.md)
+- **Deep link opt-in**: a deep link no longer switches providers, enables MCP servers or enables usage scripts unless you tick the matching checkbox; MCP imports show the full command. See [5.3 Deep Link Protocol](./5-faq/5.3-deeplink.md)
+- **Sync conflict detection**: WebDAV / S3 uploads and downloads refuse to overwrite changes made on another device or locally since the last sync; plain `http://` endpoints are flagged. See [1.5 Personalization](./1-getting-started/1.5-settings.md)
+- **Backup kinds**: database backups are named by kind (scheduled, manual, safety, pre-migration) and rotated per kind; manual backups are never auto-deleted; restores are validated first. See [1.5 Personalization](./1-getting-started/1.5-settings.md)
+- **Live file safety**: live config files are backed up before they are overwritten, and an unparsable file stops the switch instead of being replaced. See [5.1 Configuration Files](./5-faq/5.1-config-files.md)
+
+### v3.17.0 Highlights
+
+- **Project profiles**: save the provider, MCP, Skills and prompt state of Claude Code, Codex or Claude Desktop as a named project and switch it from the header or the tray. See [1.6 Projects](./1-getting-started/1.6-projects.md)
+- **Grok Build**: first-class support for xAI's Grok Build CLI, including providers, MCP, Skills, prompts, sessions and proxy takeover. See [2.7 Grok Build](./2-providers/2.7-grok-build.md)
+- **Codex official sessions through the proxy**: official ChatGPT-subscription Codex sessions can be routed through the local proxy takeover; Codex providers can also target a native Anthropic Messages upstream. See [2.1 Add Provider](./2-providers/2.1-add.md)
 
 ### v3.16.0 Highlights
 

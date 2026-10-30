@@ -56,6 +56,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # package.json, Cargo.toml, Cargo.lock and tauri.conf.json must carry the
+      # same version; on a v* tag (release.yml calls this workflow first) the
+      # tag must match it too, so a mismatched tag fails before any build.
+      - name: Check version consistency
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            node scripts/bump-version.mjs --check --tag "$GITHUB_REF_NAME"
+          else
+            node scripts/bump-version.mjs --check
+          fi
+
       - name: TypeScript type check
         run: pnpm typecheck
 
@@ -180,8 +192,5 @@ jobs:
         with:
           node-version-file: .node-version
 
-      # Report-only: production deps currently have open advisories
-      # (smol-toml, zod). Make this blocking once they are upgraded.
       - name: pnpm audit (production dependencies)
-        continue-on-error: true
         run: pnpm audit --prod --audit-level=high

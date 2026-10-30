@@ -1,6 +1,6 @@
 # CC Switch 用户手册
 
-> Claude Code / Claude Desktop / Codex / Gemini CLI / OpenCode / OpenClaw / Hermes 全方位辅助工具
+> Claude Code / Claude Desktop / Codex / Gemini CLI / Grok Build / OpenCode / OpenClaw / Hermes 全方位辅助工具
 
 ## 目录结构
 
@@ -12,7 +12,8 @@
 │   ├── 1.2 安装指南
 │   ├── 1.3 界面概览
 │   ├── 1.4 快速上手
-│   └── 1.5 个性化配置
+│   ├── 1.5 个性化配置
+│   └── 1.6 项目
 │
 ├── 2. 供应商管理
 │   ├── 2.1 添加供应商
@@ -20,7 +21,8 @@
 │   ├── 2.3 编辑供应商
 │   ├── 2.4 排序与复制
 │   ├── 2.5 用量查询
-│   └── 2.6 Claude Desktop
+│   ├── 2.6 Claude Desktop
+│   └── 2.7 Grok Build
 │
 ├── 3. 扩展功能
 │   ├── 3.1 MCP 服务器管理
@@ -53,7 +55,8 @@
 | [1.2-installation.md](./1-getting-started/1.2-installation.md) | Windows/macOS/Linux 安装指南 |
 | [1.3-interface.md](./1-getting-started/1.3-interface.md) | 界面布局、导航栏、供应商卡片说明 |
 | [1.4-quickstart.md](./1-getting-started/1.4-quickstart.md) | 5 分钟快速上手教程 |
-| [1.5-settings.md](./1-getting-started/1.5-settings.md) | 语言、主题、目录、云同步配置 |
+| [1.5-settings.md](./1-getting-started/1.5-settings.md) | 语言、主题、目录、备份、WebDAV / S3 云同步 |
+| [1.6-projects.md](./1-getting-started/1.6-projects.md) | 项目：保存并切换供应商 / MCP / Skills / 提示词快照 |
 
 ### 2. 供应商管理
 
@@ -65,6 +68,7 @@
 | [2.4-sort-duplicate.md](./2-providers/2.4-sort-duplicate.md) | 拖拽排序、复制供应商、删除 |
 | [2.5-usage-query.md](./2-providers/2.5-usage-query.md) | 用量查询、剩余额度、多套餐显示 |
 | [2.6-claude-desktop.md](./2-providers/2.6-claude-desktop.md) | Claude Desktop 第三方供应商、直连与模型映射 |
+| [2.7-grok-build.md](./2-providers/2.7-grok-build.md) | Grok Build 供应商、`config.toml`、代理接管 |
 
 ### 3. 扩展功能
 
@@ -80,7 +84,7 @@
 
 | 文件 | 内容 |
 |------|------|
-| [4.1-service.md](./4-proxy/4.1-service.md) | 启动代理、配置项、运行状态 |
+| [4.1-service.md](./4-proxy/4.1-service.md) | 启动代理、配置项、局域网访问令牌、运行状态 |
 | [4.2-routing.md](./4-proxy/4.2-routing.md) | 应用路由、配置修改、状态指示 |
 | [4.3-failover.md](./4-proxy/4.3-failover.md) | 故障转移队列、熔断器、健康状态 |
 | [4.4-usage.md](./4-proxy/4.4-usage.md) | 用量统计、趋势图表、定价配置 |
@@ -101,14 +105,30 @@
 - **安装问题**：查看 [1.2 安装指南](./1-getting-started/1.2-installation.md)
 - **配置供应商**：查看 [2.1 添加供应商](./2-providers/2.1-add.md)
 - **使用 Claude Desktop**：查看 [2.6 Claude Desktop](./2-providers/2.6-claude-desktop.md)
+- **使用 Grok Build**：查看 [2.7 Grok Build](./2-providers/2.7-grok-build.md)
+- **一键切换整套配置**：查看 [1.6 项目](./1-getting-started/1.6-projects.md)
 - **使用代理**：查看 [4.1 代理服务](./4-proxy/4.1-service.md)
 - **遇到问题**：查看 [5.2 FAQ](./5-faq/5.2-questions.md)
 
 ## 版本信息
 
-- 文档版本：v3.16.0
-- 最后更新：2026-05-29
-- 适用于 CC Switch v3.16.0+
+- 文档版本：v3.17.0
+- 最后更新：2026-10-30
+- 适用于 CC Switch v3.17.0+
+
+### v3.17.0 之后的变更（下一版本）
+
+- **局域网访问令牌**：代理监听非回环地址时，其他设备必须携带每次安装生成的访问令牌；面板会显示警告和令牌 — 详见 [4.1 代理服务](./4-proxy/4.1-service.md)
+- **深度链接需主动确认**：深度链接不再自动切换供应商、启用 MCP 服务器或启用用量脚本，除非你勾选对应复选框；MCP 导入会显示完整命令 — 详见 [5.3 深度链接协议](./5-faq/5.3-deeplink.md)
+- **同步冲突检测**：WebDAV / S3 上传和下载不会覆盖上次同步后其他设备或本机所做的修改；明文 `http://` 地址会被标记 — 详见 [1.5 个性化配置](./1-getting-started/1.5-settings.md)
+- **备份类型**：数据库备份按类型命名（定时、手动、安全、迁移前）并分别轮换；手动备份永不自动删除；恢复前先校验 — 详见 [1.5 个性化配置](./1-getting-started/1.5-settings.md)
+- **Live 文件安全**：覆盖 live 配置文件前会先备份，无法解析的文件会中止切换而不是被替换 — 详见 [5.1 配置文件说明](./5-faq/5.1-config-files.md)
+
+### v3.17.0 亮点
+
+- **项目（Project Profiles）**：把 Claude Code、Codex 或 Claude Desktop 的供应商、MCP、Skills 与提示词状态保存为命名项目，并从顶部栏或托盘一键切换 — 详见 [1.6 项目](./1-getting-started/1.6-projects.md)
+- **Grok Build**：一级支持 xAI 的 Grok Build CLI，包括供应商、MCP、Skills、提示词、会话与代理接管 — 详见 [2.7 Grok Build](./2-providers/2.7-grok-build.md)
+- **Codex 官方会话走代理**：ChatGPT 订阅的 Codex 官方会话可通过本地代理接管路由；Codex 供应商还可以对接原生 Anthropic Messages 上游 — 详见 [2.1 添加供应商](./2-providers/2.1-add.md)
 
 ### v3.16.0 亮点
 
