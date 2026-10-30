@@ -20,7 +20,7 @@ Covers verified findings backend-terminal-tmp-key and backend-terminal-script-na
 
 ## Acceptance criteria / verification
 - [x] Unit test: the helper returns distinct paths across calls, and on unix mode & 0o077 == 0
-- [ ] Manual (Linux): `ls -l` shows -rw-------; the file is gone after exiting claude; A then B quickly each print their own config path
+- [x] Manual (Linux): `ls -l` shows -rw-------; the file is gone after exiting claude; A then B quickly each print their own config path (verified headless with xterm under xvfb-run and a stub claude, see "Linux verification (CCS-223)")
 - [x] `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal` and clippy (was `commands::misc` before the code moved in CCS-179/181)
 
 ## Dependencies
@@ -106,3 +106,28 @@ Re-run on the lane2/followups tree at f13a403 (Linux):
   → clean.
 - The unit-test and test+clippy boxes are ticked. The manual desktop check and
   the macOS/Windows compile stay open (see "Remaining after triage").
+
+### Linux verification (CCS-223)
+
+`ccs036_e2e` (ignored by default) in `src-tauri/src/platform/terminal/tempfiles.rs`
+runs the real `launch_terminal_with_env` path with `preferred_terminal = "xterm"`,
+`SHELL=/bin/sh` and a stub `claude` first on `PATH`, launching provider A and then
+provider B straight away. It runs once with a 0700 `XDG_RUNTIME_DIR` and once with it
+unset (fallback `<app_config_dir>/tmp`). Run on lane2/followups at a2ec202:
+
+```
+$ xvfb-run -a cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored ccs036_e2e --nocapture
+ccs036_e2e provA: path: "/tmp/.tmpQlSlC1/claude_provA_8Qhl4Lab7sfU.json", mode: "600", ls: "-rw------- 1 root root 104 ... claude_provA_8Qhl4Lab7sfU.json", launcher_modes: ["700", "700"], ANTHROPIC_AUTH_TOKEN: "sk-provA"
+ccs036_e2e provB: path: "/tmp/.tmpQlSlC1/claude_provB_IVG400Or0jgl.json", mode: "600", ls: "-rw------- 1 root root 104 ... claude_provB_IVG400Or0jgl.json", launcher_modes: ["700", "700"], ANTHROPIC_AUTH_TOKEN: "sk-provB"
+test platform::terminal::tempfiles::tests::ccs036_e2e::ccs036_e2e_xdg_runtime_dir ... ok
+ccs036_e2e provA: path: "/tmp/.tmp6PKUhH/.cc-switch/tmp/claude_provA_3AVGB6touD7v.json", mode: "600", ls: "-rw------- ...", ANTHROPIC_AUTH_TOKEN: "sk-provA"
+ccs036_e2e provB: path: "/tmp/.tmp6PKUhH/.cc-switch/tmp/claude_provB_Y6eWlI66eA9R.json", mode: "600", ls: "-rw------- ...", ANTHROPIC_AUTH_TOKEN: "sk-provB"
+test platform::terminal::tempfiles::tests::ccs036_e2e::ccs036_e2e_app_config_fallback ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2857 filtered out; finished in 2.40s
+```
+
+Each launch got its own config path holding its own provider's env, mode 600
+(`-rw-------`), launchers were 0700, and no `claude_*` config or
+`cc_switch_launcher_*.sh` was left once the stub exited. The Linux manual box is ticked
+on this evidence. A run with gnome-terminal/konsole and the real claude CLI was not done,
+and the macOS/Windows compile is still open, so the status stays Partial.
