@@ -10,6 +10,7 @@ mod auto_launch;
 mod bindings;
 mod commands;
 mod config;
+pub mod ctx;
 mod database;
 mod deeplink;
 mod error;
@@ -83,6 +84,7 @@ pub use services::{
         reapply_current_codex_official_live, LiveFilePreview, LivePreviewSkipReason,
         LiveWritePreview,
     },
+    proxy_settings::ProxySettingsService,
     skill::{migrate_skills_to_ssot, ImportSkillSelection},
     ConfigService, EndpointLatency, McpService, PromptService, ProviderService, ProxyService,
     SkillService, SpeedtestService,
@@ -119,7 +121,7 @@ fn set_windows_app_user_model_id(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
-async fn update_tray_menu(app: tauri::AppHandle) -> Result<bool, String> {
+async fn update_tray_menu(app: tauri::AppHandle) -> Result<bool, crate::error::IpcError> {
     match tray::rebuild_tray_menu(&app).await {
         Ok(updated) => Ok(updated),
         Err(err) => {

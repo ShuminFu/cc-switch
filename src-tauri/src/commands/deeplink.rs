@@ -3,6 +3,7 @@ use crate::deeplink::{
     import_skill_from_deeplink, preview_deeplink_import as build_deeplink_preview,
     DeepLinkImportPreview, DeepLinkImportRequest,
 };
+use crate::error::IpcError;
 use crate::store::AppState;
 use tauri::State;
 
@@ -11,9 +12,9 @@ use tauri::State;
 #[tauri::command]
 pub fn merge_deeplink_config(
     request: DeepLinkImportRequest,
-) -> Result<DeepLinkImportRequest, String> {
+) -> Result<DeepLinkImportRequest, IpcError> {
     log::info!("Merging config for deep link request: {:?}", request.name);
-    crate::deeplink::parse_and_merge_config(&request).map_err(|e| e.to_string())
+    crate::deeplink::parse_and_merge_config(&request).map_err(IpcError::from)
 }
 
 /// Build the confirm-dialog preview of a deep link request: the merged
@@ -23,9 +24,9 @@ pub fn merge_deeplink_config(
 pub fn preview_deeplink_import(
     state: State<AppState>,
     request: DeepLinkImportRequest,
-) -> Result<DeepLinkImportPreview, String> {
+) -> Result<DeepLinkImportPreview, IpcError> {
     log::info!("Building import preview for {} deep link", request.resource);
-    build_deeplink_preview(&state, &request).map_err(|e| e.to_string())
+    build_deeplink_preview(&state, &request).map_err(IpcError::from)
 }
 
 /// Import resource from a deep link request (unified handler)
@@ -33,28 +34,27 @@ pub fn preview_deeplink_import(
 pub async fn import_from_deeplink_unified(
     state: State<'_, AppState>,
     request: DeepLinkImportRequest,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, IpcError> {
     log::info!("Importing {} resource from deep link", request.resource);
 
     match request.resource.as_str() {
         "provider" => {
             let provider_id =
-                import_provider_from_deeplink(&state, request).map_err(|e| e.to_string())?;
+                import_provider_from_deeplink(&state, request).map_err(IpcError::from)?;
             Ok(serde_json::json!({
                 "type": "provider",
                 "id": provider_id
             }))
         }
         "prompt" => {
-            let prompt_id =
-                import_prompt_from_deeplink(&state, request).map_err(|e| e.to_string())?;
+            let prompt_id = import_prompt_from_deeplink(&state, request).map_err(IpcError::from)?;
             Ok(serde_json::json!({
                 "type": "prompt",
                 "id": prompt_id
             }))
         }
         "mcp" => {
-            let result = import_mcp_from_deeplink(&state, request).map_err(|e| e.to_string())?;
+            let result = import_mcp_from_deeplink(&state, request).map_err(IpcError::from)?;
             // Add type field to the result
             Ok(serde_json::json!({
                 "type": "mcp",
@@ -64,13 +64,12 @@ pub async fn import_from_deeplink_unified(
             }))
         }
         "skill" => {
-            let skill_key =
-                import_skill_from_deeplink(&state, request).map_err(|e| e.to_string())?;
+            let skill_key = import_skill_from_deeplink(&state, request).map_err(IpcError::from)?;
             Ok(serde_json::json!({
                 "type": "skill",
                 "key": skill_key
             }))
         }
-        _ => Err(format!("Unsupported resource type: {}", request.resource)),
+        _ => Err(format!("Unsupported resource type: {}", request.resource).into()),
     }
 }

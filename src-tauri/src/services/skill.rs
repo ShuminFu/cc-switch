@@ -507,6 +507,21 @@ impl SkillService {
 
     // ========== 统一管理方法 ==========
 
+    /// 已配置的技能仓库
+    pub fn list_db_repos(db: &Arc<Database>) -> Result<Vec<SkillRepo>> {
+        Ok(db.get_skill_repos()?)
+    }
+
+    /// 添加（或更新）技能仓库
+    pub fn save_db_repo(db: &Arc<Database>, repo: &SkillRepo) -> Result<()> {
+        Ok(db.save_skill_repo(repo)?)
+    }
+
+    /// 删除技能仓库
+    pub fn remove_db_repo(db: &Arc<Database>, owner: &str, name: &str) -> Result<()> {
+        Ok(db.delete_skill_repo(owner, name)?)
+    }
+
     /// 获取所有已安装的 Skills
     pub fn get_all_installed(db: &Arc<Database>) -> Result<Vec<InstalledSkill>> {
         let skills = db.get_all_installed_skills()?;

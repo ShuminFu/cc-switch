@@ -15,6 +15,66 @@ impl McpService {
         state.db.get_all_mcp_servers()
     }
 
+    /// 在某个应用中启用（必要时新建）MCP 服务器；`sync_other_side` 时同时启用
+    /// Claude / Codex / Gemini / OpenCode
+    pub fn upsert_server_for_app(
+        state: &AppState,
+        app_ty: &AppType,
+        id: &str,
+        spec: serde_json::Value,
+        sync_other_side: bool,
+    ) -> Result<(), AppError> {
+        // 读取现有的服务器（如果存在）
+        let existing_server = {
+            let servers = state.db.get_all_mcp_servers()?;
+            servers.get(id).cloned()
+        };
+
+        // 构建新的统一服务器结构
+        let mut new_server = if let Some(mut existing) = existing_server {
+            // 更新现有服务器
+            existing.server = spec.clone();
+            existing.apps.set_enabled_for(app_ty, true);
+            existing
+        } else {
+            // 创建新服务器
+            let mut apps = crate::app_config::AppSet::default();
+            apps.set_enabled_for(app_ty, true);
+
+            // 尝试从 spec 中提取 name，否则使用 id
+            let name = spec
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(id)
+                .to_string();
+
+            McpServer {
+                id: id.to_string(),
+                name,
+                server: spec,
+                apps,
+                description: None,
+                homepage: None,
+                docs: None,
+                tags: Vec::new(),
+            }
+        };
+
+        // 如果 sync_other_side 为 true，也启用其他应用
+        if sync_other_side {
+            for app in [
+                AppType::Claude,
+                AppType::Codex,
+                AppType::Gemini,
+                AppType::OpenCode,
+            ] {
+                new_server.apps.set_enabled_for(&app, true);
+            }
+        }
+
+        Self::upsert_server(state, new_server)
+    }
+
     /// 添加或更新 MCP 服务器
     pub fn upsert_server(state: &AppState, server: McpServer) -> Result<(), AppError> {
         // 先校验连接定义，避免无效配置（如缺少 command 的 stdio）写入数据库

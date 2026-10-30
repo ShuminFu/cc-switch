@@ -4,6 +4,7 @@
 //! 构建 mock 应用，从 IPC 入口验证：已授予的命令可调用，未授予的命令以 "not allowed" 被拒。
 
 use super::registry::{command_name, COMMAND_DOMAINS};
+use crate::error::IpcError;
 use std::collections::BTreeSet;
 use tauri::test::{get_ipc_response, mock_builder, MockRuntime, INVOKE_KEY};
 use tauri::webview::InvokeRequest;
@@ -11,24 +12,24 @@ use tauri::{Manager, WebviewWindow};
 
 // 与真实命令同名的替身：ACL 只按命令名判定，替身避免依赖 AppState。
 #[tauri::command]
-fn get_providers() -> &'static str {
-    "ok"
+fn get_providers() -> Result<&'static str, IpcError> {
+    Ok("ok")
 }
 
 #[tauri::command]
-fn delete_env_vars() -> &'static str {
-    "ok"
+fn delete_env_vars() -> Result<&'static str, IpcError> {
+    Ok("ok")
 }
 
 #[tauri::command]
-fn write_workspace_file() -> &'static str {
-    "ok"
+fn write_workspace_file() -> Result<&'static str, IpcError> {
+    Ok("ok")
 }
 
 /// 已注册到 handler、但不属于任何命令域（因此没有任何权限）的命令
 #[tauri::command]
-fn unlisted_command() -> &'static str {
-    "ok"
+fn unlisted_command() -> Result<&'static str, IpcError> {
+    Ok("ok")
 }
 
 fn mock_app() -> tauri::App<MockRuntime> {

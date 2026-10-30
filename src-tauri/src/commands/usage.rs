@@ -1,10 +1,8 @@
 //! 使用统计相关命令
 
-use crate::error::{AppError, IpcError};
+use crate::error::IpcError;
 use crate::services::usage_stats::*;
 use crate::store::AppState;
-use rust_decimal::Decimal;
-use std::str::FromStr;
 use tauri::State;
 
 /// 获取使用量汇总
@@ -18,16 +16,15 @@ pub fn get_usage_summary(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<UsageSummary, IpcError> {
-    state
-        .db
-        .get_usage_summary(
-            start_date,
-            end_date,
-            app_type.as_deref(),
-            provider_name.as_deref(),
-            model.as_deref(),
-        )
-        .map_err(IpcError::from)
+    UsageStatsService::summary(
+        &state,
+        start_date,
+        end_date,
+        app_type.as_deref(),
+        provider_name.as_deref(),
+        model.as_deref(),
+    )
+    .map_err(IpcError::from)
 }
 
 /// 获取按 app_type 拆分的使用量汇总
@@ -40,15 +37,14 @@ pub fn get_usage_summary_by_app(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<UsageSummaryByApp>, IpcError> {
-    state
-        .db
-        .get_usage_summary_by_app(
-            start_date,
-            end_date,
-            provider_name.as_deref(),
-            model.as_deref(),
-        )
-        .map_err(IpcError::from)
+    UsageStatsService::summary_by_app(
+        &state,
+        start_date,
+        end_date,
+        provider_name.as_deref(),
+        model.as_deref(),
+    )
+    .map_err(IpcError::from)
 }
 
 /// 获取每日趋势
@@ -62,16 +58,15 @@ pub fn get_usage_trends(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<DailyStats>, IpcError> {
-    state
-        .db
-        .get_daily_trends(
-            start_date,
-            end_date,
-            app_type.as_deref(),
-            provider_name.as_deref(),
-            model.as_deref(),
-        )
-        .map_err(IpcError::from)
+    UsageStatsService::daily_trends(
+        &state,
+        start_date,
+        end_date,
+        app_type.as_deref(),
+        provider_name.as_deref(),
+        model.as_deref(),
+    )
+    .map_err(IpcError::from)
 }
 
 /// 获取 Provider 统计
@@ -85,16 +80,15 @@ pub fn get_provider_stats(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<ProviderStats>, IpcError> {
-    state
-        .db
-        .get_provider_stats(
-            start_date,
-            end_date,
-            app_type.as_deref(),
-            provider_name.as_deref(),
-            model.as_deref(),
-        )
-        .map_err(IpcError::from)
+    UsageStatsService::provider_stats(
+        &state,
+        start_date,
+        end_date,
+        app_type.as_deref(),
+        provider_name.as_deref(),
+        model.as_deref(),
+    )
+    .map_err(IpcError::from)
 }
 
 /// 获取模型统计
@@ -108,16 +102,15 @@ pub fn get_model_stats(
     provider_name: Option<String>,
     model: Option<String>,
 ) -> Result<Vec<ModelStats>, IpcError> {
-    state
-        .db
-        .get_model_stats(
-            start_date,
-            end_date,
-            app_type.as_deref(),
-            provider_name.as_deref(),
-            model.as_deref(),
-        )
-        .map_err(IpcError::from)
+    UsageStatsService::model_stats(
+        &state,
+        start_date,
+        end_date,
+        app_type.as_deref(),
+        provider_name.as_deref(),
+        model.as_deref(),
+    )
+    .map_err(IpcError::from)
 }
 
 /// 获取请求日志列表
@@ -129,10 +122,7 @@ pub fn get_request_logs(
     page: u32,
     page_size: u32,
 ) -> Result<PaginatedLogs, IpcError> {
-    state
-        .db
-        .get_request_logs(&filters, page, page_size)
-        .map_err(IpcError::from)
+    UsageStatsService::request_logs(&state, &filters, page, page_size).map_err(IpcError::from)
 }
 
 /// 按模型汇总未计价请求（导出 CSV 用）
@@ -142,10 +132,7 @@ pub fn get_unpriced_model_stats(
     state: State<'_, AppState>,
     filters: LogFilters,
 ) -> Result<Vec<UnpricedModelStats>, IpcError> {
-    state
-        .db
-        .get_unpriced_model_stats(&filters)
-        .map_err(IpcError::from)
+    UsageStatsService::unpriced_model_stats(&state, &filters).map_err(IpcError::from)
 }
 
 /// 获取单个请求详情
@@ -155,38 +142,14 @@ pub fn get_request_detail(
     state: State<'_, AppState>,
     request_id: String,
 ) -> Result<Option<RequestLogDetail>, IpcError> {
-    state
-        .db
-        .get_request_detail(&request_id)
-        .map_err(IpcError::from)
+    UsageStatsService::request_detail(&state, &request_id).map_err(IpcError::from)
 }
 
 /// 获取模型定价列表
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, IpcError> {
-    log::info!("获取模型定价列表");
-    let db = state.db.clone();
-    let conn = crate::database::lock_conn!(db.conn);
-
-    let Some(rows) = crate::database::repo::pricing::list_active(&conn)? else {
-        log::error!("model_pricing 表不存在,可能需要重启应用以触发数据库迁移");
-        return Ok(Vec::new());
-    };
-    let pricing: Vec<ModelPricingInfo> = rows
-        .into_iter()
-        .map(|row| ModelPricingInfo {
-            model_id: row.model_id,
-            display_name: row.display_name,
-            input_cost_per_million: row.price.input,
-            output_cost_per_million: row.price.output,
-            cache_read_cost_per_million: row.price.cache_read,
-            cache_creation_cost_per_million: row.price.cache_creation,
-        })
-        .collect();
-
-    log::info!("成功获取 {} 条模型定价数据", pricing.len());
-    Ok(pricing)
+    UsageStatsService::model_pricing(&state).map_err(IpcError::from)
 }
 
 /// 更新模型定价
@@ -201,65 +164,18 @@ pub fn update_model_pricing(
     cache_read_cost: String,
     cache_creation_cost: String,
 ) -> Result<(), IpcError> {
-    let db = state.db.clone();
-    let model_id = model_id.trim().to_string();
-    let display_name = display_name.trim().to_string();
-    if model_id.is_empty() {
-        return Err(AppError::localized(
-            "usage.modelIdRequired",
-            "模型 ID 不能为空",
-            "Model ID is required",
-        )
-        .into());
-    }
-    if display_name.is_empty() {
-        return Err(AppError::localized(
-            "usage.displayNameRequired",
-            "显示名称不能为空",
-            "Display name is required",
-        )
-        .into());
-    }
-
-    for (label, value) in [
-        ("input_cost", &input_cost),
-        ("output_cost", &output_cost),
-        ("cache_read_cost", &cache_read_cost),
-        ("cache_creation_cost", &cache_creation_cost),
-    ] {
-        let parsed = Decimal::from_str(value.trim()).map_err(|e| {
-            AppError::localized(
-                "usage.invalidPrice",
-                format!("{label} 价格无效: {value} - {e}"),
-                format!("{label} price is invalid: {value} - {e}"),
-            )
-        })?;
-        if parsed < Decimal::ZERO {
-            return Err(AppError::localized(
-                "usage.invalidPrice",
-                format!("{label} 价格必须为非负数: {value}"),
-                format!("{label} price must be non-negative: {value}"),
-            )
-            .into());
-        }
-    }
-
-    db.save_user_model_pricing(
+    UsageStatsService::update_model_pricing(
+        &state,
         &model_id,
         &display_name,
         crate::pricing::catalog::CatalogPrice {
-            input: input_cost.trim().to_string(),
-            output: output_cost.trim().to_string(),
-            cache_read: cache_read_cost.trim().to_string(),
-            cache_creation: cache_creation_cost.trim().to_string(),
+            input: input_cost,
+            output: output_cost,
+            cache_read: cache_read_cost,
+            cache_creation: cache_creation_cost,
         },
-    )?;
-
-    if let Err(e) = db.backfill_missing_usage_costs_for_model(&model_id) {
-        log::warn!("模型定价更新后回填历史用量成本失败 (model_id={model_id}): {e}");
-    }
-
-    Ok(())
+    )
+    .map_err(IpcError::from)
 }
 
 /// 检查 Provider 使用限额
@@ -270,20 +186,14 @@ pub fn check_provider_limits(
     provider_id: String,
     app_type: String,
 ) -> Result<crate::services::usage_stats::ProviderLimitStatus, IpcError> {
-    state
-        .db
-        .check_provider_limits(&provider_id, &app_type)
-        .map_err(IpcError::from)
+    UsageStatsService::provider_limits(&state, &provider_id, &app_type).map_err(IpcError::from)
 }
 
 /// 删除模型定价
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), IpcError> {
-    state.db.delete_model_pricing(&model_id)?;
-
-    log::info!("已删除模型定价: {model_id}");
-    Ok(())
+    UsageStatsService::delete_model_pricing(&state, &model_id).map_err(IpcError::from)
 }
 
 /// 手动触发会话日志同步
@@ -320,17 +230,4 @@ pub fn get_usage_data_sources(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::services::session_usage::DataSourceSummary>, IpcError> {
     crate::services::session_usage::get_data_source_breakdown(&state.db).map_err(IpcError::from)
-}
-
-/// 模型定价信息
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(test, derive(specta::Type))]
-#[serde(rename_all = "camelCase")]
-pub struct ModelPricingInfo {
-    pub model_id: String,
-    pub display_name: String,
-    pub input_cost_per_million: String,
-    pub output_cost_per_million: String,
-    pub cache_read_cost_per_million: String,
-    pub cache_creation_cost_per_million: String,
 }

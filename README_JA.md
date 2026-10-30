@@ -491,9 +491,6 @@ cargo test
 
 # 特定テストのみ実行
 cargo test test_name
-
-# test-hooks フィーチャー付きでテスト
-cargo test --features test-hooks
 ```
 
 ### テストガイド

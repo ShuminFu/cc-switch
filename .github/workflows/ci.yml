@@ -72,6 +72,14 @@ jobs:
       - name: Check AppStream metainfo releases
         run: node scripts/sync-metainfo-releases.mjs --check
 
+      # Tauri commands are thin adapters: a body over 40 lines or a direct
+      # database query fails, and every command returns IpcError (CCS-181).
+      - name: Check thin command bodies
+        run: node scripts/check-command-bodies.mjs
+
+      - name: Check IpcError coverage
+        run: node scripts/count-ipc-error-commands.mjs --min 100
+
       - name: Unit tests
         run: pnpm test:unit
 

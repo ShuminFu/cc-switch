@@ -2,6 +2,7 @@
 //!
 //! 提供 Tauri 命令，供前端在供应商表单中获取可用模型列表。
 
+use crate::error::IpcError;
 use crate::services::model_fetch::{self, FetchedModel};
 
 /// 获取供应商的可用模型列表
@@ -15,7 +16,7 @@ pub async fn fetch_models_for_config(
     is_full_url: Option<bool>,
     models_url: Option<String>,
     custom_user_agent: Option<String>,
-) -> Result<Vec<FetchedModel>, String> {
+) -> Result<Vec<FetchedModel>, IpcError> {
     // 与转发 / 检测路径共用 parse_custom_user_agent：非法 UA 静默忽略（不阻断取模型）。
     let user_agent = crate::provider::parse_custom_user_agent(custom_user_agent.as_deref())
         .ok()
@@ -28,4 +29,5 @@ pub async fn fetch_models_for_config(
         user_agent,
     )
     .await
+    .map_err(IpcError::from)
 }

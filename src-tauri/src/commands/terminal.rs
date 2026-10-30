@@ -2,6 +2,7 @@
 //! 终端选择、临时文件与引号处理见 `platform::terminal`。
 
 use crate::app_config::AppType;
+use crate::error::IpcError;
 use crate::platform::terminal::{launch_terminal_with_env, resolve_launch_cwd};
 use crate::services::ProviderService;
 use std::str::FromStr;
@@ -17,8 +18,8 @@ pub async fn open_provider_terminal(
     app: String,
     provider_id: String,
     cwd: Option<String>,
-) -> Result<bool, String> {
-    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
+) -> Result<bool, IpcError> {
+    let app_type = AppType::from_str(&app).map_err(IpcError::from)?;
     let launch_cwd = resolve_launch_cwd(cwd)?;
 
     // 获取提供商配置

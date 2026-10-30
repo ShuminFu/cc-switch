@@ -7,9 +7,9 @@ use std::fs;
 use serde_json::json;
 
 use cc_switch_lib::{
-    get_claude_mcp_path, get_claude_mcp_status, get_claude_settings_path,
-    import_default_config_test_hook, read_claude_mcp_config, update_settings, AppError, AppSet,
-    AppSettings, AppType, McpServer, McpService, MultiAppConfig,
+    get_claude_mcp_path, get_claude_mcp_status, get_claude_settings_path, read_claude_mcp_config,
+    update_settings, AppError, AppSet, AppSettings, AppType, McpServer, McpService, MultiAppConfig,
+    ProviderService,
 };
 
 #[path = "support.rs"]
@@ -41,7 +41,7 @@ fn import_default_config_claude_persists_provider() {
     config.ensure_app(&AppType::Claude);
     let state = create_test_state_with_config(&config).expect("create test state");
 
-    import_default_config_test_hook(&state, AppType::Claude)
+    ProviderService::import_default_config_with_common_snippet(&state, AppType::Claude)
         .expect("import default config succeeds");
 
     // 验证内存状态
@@ -76,7 +76,7 @@ fn import_default_config_without_live_file_returns_error() {
 
     let state = create_test_state().expect("create test state");
 
-    let err = import_default_config_test_hook(&state, AppType::Claude)
+    let err = ProviderService::import_default_config_with_common_snippet(&state, AppType::Claude)
         .expect_err("missing live file should error");
     match err {
         AppError::Localized { zh, .. } => assert!(

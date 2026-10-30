@@ -491,9 +491,6 @@ cargo test
 
 # Run specific tests
 cargo test test_name
-
-# Run tests with test-hooks feature
-cargo test --features test-hooks
 ```
 
 ### Testing Guide

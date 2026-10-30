@@ -3135,6 +3135,47 @@ impl ProviderService {
         import_default_config(state, app_type)
     }
 
+    /// 用户手动导入 live 配置：导入成功后按需抽取通用配置片段并迁移旧版
+    /// 通用配置用法（与启动时的导入流程一致）
+    pub fn import_default_config_with_common_snippet(
+        state: &AppState,
+        app_type: AppType,
+    ) -> Result<bool, AppError> {
+        let imported = import_default_config(state, app_type.clone())?;
+        if !imported {
+            return Ok(false);
+        }
+
+        if state
+            .db
+            .should_auto_extract_config_snippet(app_type.as_str())?
+        {
+            match Self::extract_common_config_snippet(state, app_type.clone()) {
+                Ok(snippet) if !snippet.is_empty() && snippet != "{}" => {
+                    let _ = state
+                        .db
+                        .set_config_snippet(app_type.as_str(), Some(snippet));
+                    let _ = state
+                        .db
+                        .set_config_snippet_cleared(app_type.as_str(), false);
+                }
+                _ => {}
+            }
+        }
+
+        Self::migrate_legacy_common_config_usage_if_needed(state, app_type)?;
+        Ok(true)
+    }
+
+    /// 确保内置官方供应商存在（用户删除过时补回），返回是否新建
+    pub fn ensure_official_provider(
+        state: &AppState,
+        seed_id: &str,
+        app_type: AppType,
+    ) -> Result<bool, AppError> {
+        state.db.ensure_official_seed_by_id(seed_id, app_type)
+    }
+
     pub fn should_import_default_config_on_startup(
         state: &AppState,
         app_type: &AppType,

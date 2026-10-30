@@ -5,6 +5,7 @@
 //! 大部分认证命令通过通用 `auth_*` 命令（参见 `commands::auth`）暴露给前端，
 //! 此处定义 State wrapper 以及 Codex OAuth 专属的订阅额度和模型列表查询命令。
 
+use crate::error::IpcError;
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
 use crate::services::model_fetch::FetchedModel;
 use crate::services::subscription::{query_codex_quota, CredentialStatus, SubscriptionQuota};
@@ -34,7 +35,7 @@ impl CodexOAuthState {
 pub async fn get_codex_oauth_quota(
     account_id: Option<String>,
     state: State<'_, CodexOAuthState>,
-) -> Result<SubscriptionQuota, String> {
+) -> Result<SubscriptionQuota, IpcError> {
     let manager = state.0.read().await;
 
     // 解析最终使用的账号 ID：显式 > 默认账号 > 无账号 (not_found)
@@ -66,6 +67,7 @@ pub async fn get_codex_oauth_quota(
         "Codex OAuth access token expired or rejected. Please re-login via cc-switch.",
     )
     .await
+    .map_err(IpcError::from)
 }
 
 /// 获取 Codex OAuth (ChatGPT Plus/Pro) 可用模型列表
@@ -77,7 +79,7 @@ pub async fn get_codex_oauth_quota(
 pub async fn get_codex_oauth_models(
     account_id: Option<String>,
     state: State<'_, CodexOAuthState>,
-) -> Result<Vec<FetchedModel>, String> {
+) -> Result<Vec<FetchedModel>, IpcError> {
     let manager = state.0.read().await;
     let resolved = match account_id
         .as_deref()
@@ -88,7 +90,7 @@ pub async fn get_codex_oauth_models(
         None => manager.default_account_id().await,
     };
     let Some(id) = resolved else {
-        return Err("No ChatGPT account available".to_string());
+        return Err("No ChatGPT account available".into());
     };
 
     let token = manager
@@ -96,5 +98,7 @@ pub async fn get_codex_oauth_models(
         .await
         .map_err(|e| format!("Codex OAuth token unavailable: {e}"))?;
 
-    crate::services::codex_oauth_models::fetch_models_with_token(&token, &id).await
+    crate::services::codex_oauth_models::fetch_models_with_token(&token, &id)
+        .await
+        .map_err(IpcError::from)
 }

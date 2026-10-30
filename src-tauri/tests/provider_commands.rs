@@ -5,9 +5,8 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 
 use cc_switch_lib::{
-    get_codex_auth_path, get_codex_config_path, import_default_config_test_hook, read_json_file,
-    switch_provider_test_hook, write_codex_live_atomic, AppError, AppSet, AppType, McpServer,
-    MultiAppConfig, Provider, ProviderService,
+    get_codex_auth_path, get_codex_config_path, read_json_file, write_codex_live_atomic, AppError,
+    AppSet, AppType, McpServer, MultiAppConfig, Provider, ProviderService,
 };
 
 #[path = "support.rs"]
@@ -49,7 +48,7 @@ fn grokbuild_import_and_switch_write_live_config() {
     std::fs::write(&live_path, &imported_config).expect("seed Grok Build config");
 
     let state = create_test_state().expect("create test state");
-    import_default_config_test_hook(&state, AppType::GrokBuild)
+    ProviderService::import_default_config_with_common_snippet(&state, AppType::GrokBuild)
         .expect("import Grok Build default provider");
 
     let imported = state
@@ -79,7 +78,7 @@ fn grokbuild_import_and_switch_write_live_config() {
         )
         .expect("save second Grok Build provider");
 
-    switch_provider_test_hook(&state, AppType::GrokBuild, "relay")
+    ProviderService::switch(&state, AppType::GrokBuild, "relay")
         .expect("switch Grok Build provider");
 
     assert_eq!(
@@ -114,7 +113,8 @@ fn codex_startup_import_fresh_install_imports_once_and_syncs_current_setting() {
         "empty Codex provider set should import on startup"
     );
 
-    import_default_config_test_hook(&state, AppType::Codex).expect("import codex default");
+    ProviderService::import_default_config_with_common_snippet(&state, AppType::Codex)
+        .expect("import codex default");
 
     let providers = state
         .db
@@ -197,7 +197,7 @@ experimental_bearer_token = "live-key"
     );
 
     let state = create_test_state().expect("create test state");
-    import_default_config_test_hook(&state, AppType::Codex)
+    ProviderService::import_default_config_with_common_snippet(&state, AppType::Codex)
         .expect("import codex config-only default");
 
     let providers = state
@@ -238,7 +238,8 @@ command = "echo"
     write_codex_live_atomic(&auth, Some(config)).expect("seed oauth-only codex live config");
 
     let state = create_test_state().expect("create test state");
-    import_default_config_test_hook(&state, AppType::Codex).expect("import codex default");
+    ProviderService::import_default_config_with_common_snippet(&state, AppType::Codex)
+        .expect("import codex default");
 
     let providers = state
         .db
@@ -374,7 +375,7 @@ command = "say"
 
     let app_state = create_test_state_with_config(&config).expect("create test state");
 
-    switch_provider_test_hook(&app_state, AppType::Codex, "new-provider")
+    ProviderService::switch(&app_state, AppType::Codex, "new-provider")
         .expect("switch provider should succeed");
 
     let auth_value: serde_json::Value =
@@ -459,7 +460,7 @@ fn switch_provider_missing_provider_returns_error() {
 
     let app_state = create_test_state_with_config(&config).expect("create test state");
 
-    let err = switch_provider_test_hook(&app_state, AppType::Claude, "missing-provider")
+    let err = ProviderService::switch(&app_state, AppType::Claude, "missing-provider")
         .expect_err("switching to a missing provider should fail");
 
     let err_str = err.to_string();
@@ -526,7 +527,7 @@ fn switch_provider_updates_claude_live_and_state() {
 
     let app_state = create_test_state_with_config(&config).expect("create test state");
 
-    switch_provider_test_hook(&app_state, AppType::Claude, "new-provider")
+    ProviderService::switch(&app_state, AppType::Claude, "new-provider")
         .expect("switch provider should succeed");
 
     let live_after: serde_json::Value =
@@ -623,7 +624,7 @@ fn switch_provider_codex_missing_auth_returns_error_and_keeps_state() {
 
     let app_state = create_test_state_with_config(&config).expect("create test state");
 
-    let err = switch_provider_test_hook(&app_state, AppType::Codex, "invalid")
+    let err = ProviderService::switch(&app_state, AppType::Codex, "invalid")
         .expect_err("switching should fail when auth missing");
     match err {
         AppError::Config(msg) => assert!(
@@ -658,7 +659,7 @@ fn import_refuses_live_config_under_proxy_takeover() {
 
     let state = create_test_state().expect("create test state");
 
-    import_default_config_test_hook(&state, AppType::Codex)
+    ProviderService::import_default_config_with_common_snippet(&state, AppType::Codex)
         .expect_err("importing a taken-over live config must fail");
 
     let providers = state

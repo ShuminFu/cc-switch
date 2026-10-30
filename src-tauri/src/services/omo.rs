@@ -218,6 +218,25 @@ impl OmoService {
 
     // ── Public API (variant-parameterized) ─────────────────
 
+    /// 当前启用的 OMO 供应商 ID（未启用时为空字符串）
+    pub fn current_provider_id(state: &AppState, v: &OmoVariant) -> Result<String, AppError> {
+        let provider = state.db.get_current_omo_provider("opencode", v.category)?;
+        Ok(provider.map(|p| p.id).unwrap_or_default())
+    }
+
+    /// 取消该变体所有供应商的启用状态并删除其配置文件
+    pub fn disable_current(state: &AppState, v: &OmoVariant) -> Result<(), AppError> {
+        let providers = state.db.get_all_providers("opencode")?;
+        for (id, p) in &providers {
+            if p.category.as_deref() == Some(v.category) {
+                state
+                    .db
+                    .clear_omo_provider_current("opencode", id, v.category)?;
+            }
+        }
+        Self::delete_config_file(v)
+    }
+
     pub fn delete_config_file(v: &OmoVariant) -> Result<(), AppError> {
         let base_dir = get_opencode_dir();
         let mut deleted_paths = Vec::new();
