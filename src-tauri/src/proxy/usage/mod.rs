@@ -2,6 +2,7 @@
 //!
 //! 提供 API 请求的使用量跟踪、成本计算和日志记录功能
 
+pub mod anthropic_fields;
 pub mod calculator;
 #[cfg(test)]
 mod cost_golden;
@@ -9,6 +10,8 @@ pub mod ir;
 pub mod logger;
 pub mod parity;
 pub mod parser;
+#[cfg(test)]
+pub mod test_data;
 
 // 仅导出内部使用的类型,避免未使用警告
 #[allow(unused_imports)]

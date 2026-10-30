@@ -30,9 +30,6 @@ export const ALLOWLIST = {
     "remove with CCS-178 deletion",
   "src-tauri/src/proxy/providers/transform_responses.rs":
     "remove with CCS-178 deletion",
-  "src-tauri/src/proxy/stream/taps.rs": "remove when CCS-244 moves it",
-  "src-tauri/src/services/session_usage.rs": "remove when CCS-244 moves it",
-  "src-tauri/src/proxy/providers/testkit.rs": "remove when CCS-244 moves it",
 };
 
 const toPosix = (p) => p.split(path.sep).join("/");

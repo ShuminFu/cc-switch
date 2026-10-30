@@ -14,6 +14,7 @@ use crate::database::repo::usage::{self as usage_repo, SessionUsageRow, UsageCos
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::pricing::resolver::find_model_pricing;
+use crate::proxy::usage::anthropic_fields::AnthropicUsageFields;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::usage_stats::{should_skip_session_insert, DedupKey};
@@ -343,6 +344,7 @@ fn sync_single_file(
             None => continue,
         };
 
+        let counts = AnthropicUsageFields::read(usage).to_token_usage();
         let parsed = ParsedAssistantUsage {
             message_id: msg_id.clone(),
             model: message
@@ -350,22 +352,10 @@ fn sync_single_file(
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string(),
-            input_tokens: usage
-                .get("input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            output_tokens: usage
-                .get("output_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            cache_read_tokens: usage
-                .get("cache_read_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
-            cache_creation_tokens: usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32,
+            input_tokens: counts.input_tokens,
+            output_tokens: counts.output_tokens,
+            cache_read_tokens: counts.cache_read_tokens,
+            cache_creation_tokens: counts.cache_creation_tokens,
             stop_reason: message
                 .get("stop_reason")
                 .and_then(|v| v.as_str())
@@ -868,38 +858,32 @@ pub async fn rescan_all_session_usage_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::usage::test_data::claude_session_line;
 
     #[test]
     fn test_parse_usage_from_jsonl_line() {
-        let line = r#"{"type":"assistant","message":{"id":"msg_test123","model":"claude-opus-4-6","usage":{"input_tokens":3,"output_tokens":150,"cache_read_input_tokens":5000,"cache_creation_input_tokens":10000},"stop_reason":"end_turn"},"timestamp":"2026-04-05T12:00:00Z","sessionId":"session-abc"}"#;
+        let line = claude_session_line(
+            "msg_test123",
+            "claude-opus-4-6",
+            Some("end_turn"),
+            [3, 150, 5000, 10000],
+            "2026-04-05T12:00:00Z",
+            "session-abc",
+        );
 
-        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(
             value.get("type").and_then(|t| t.as_str()),
             Some("assistant")
         );
 
         let message = value.get("message").unwrap();
-        let usage = message.get("usage").unwrap();
+        let usage = AnthropicUsageFields::read(message.get("usage").unwrap()).to_token_usage();
 
-        assert_eq!(usage.get("input_tokens").unwrap().as_u64().unwrap(), 3);
-        assert_eq!(usage.get("output_tokens").unwrap().as_u64().unwrap(), 150);
-        assert_eq!(
-            usage
-                .get("cache_read_input_tokens")
-                .unwrap()
-                .as_u64()
-                .unwrap(),
-            5000
-        );
-        assert_eq!(
-            usage
-                .get("cache_creation_input_tokens")
-                .unwrap()
-                .as_u64()
-                .unwrap(),
-            10000
-        );
+        assert_eq!(usage.input_tokens, 3);
+        assert_eq!(usage.output_tokens, 150);
+        assert_eq!(usage.cache_read_tokens, 5000);
+        assert_eq!(usage.cache_creation_tokens, 10000);
         assert_eq!(
             message.get("stop_reason").unwrap().as_str().unwrap(),
             "end_turn"
@@ -1076,8 +1060,22 @@ mod tests {
 
         // 第一行：无 stop_reason、output=1，但 cache_read/cache_creation 很大 → 应导入
         // 第二行：全部 token 为 0 → 应跳过（无计费意义）
-        let billable = r#"{"type":"assistant","message":{"id":"msg_nostop","model":"claude-opus-4-8","usage":{"input_tokens":2,"output_tokens":1,"cache_read_input_tokens":48719,"cache_creation_input_tokens":2061}},"timestamp":"2026-06-07T13:01:23Z","sessionId":"session-wf"}"#;
-        let empty = r#"{"type":"assistant","message":{"id":"msg_empty","model":"claude-opus-4-8","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"timestamp":"2026-06-07T13:01:24Z","sessionId":"session-wf"}"#;
+        let billable = claude_session_line(
+            "msg_nostop",
+            "claude-opus-4-8",
+            None,
+            [2, 1, 48719, 2061],
+            "2026-06-07T13:01:23Z",
+            "session-wf",
+        );
+        let empty = claude_session_line(
+            "msg_empty",
+            "claude-opus-4-8",
+            None,
+            [0, 0, 0, 0],
+            "2026-06-07T13:01:24Z",
+            "session-wf",
+        );
         fs::write(&file, format!("{billable}\n{empty}\n")).unwrap();
 
         let (imported, _skipped) = sync_single_file(&db, &file, SyncMode::Incremental)?;
@@ -1147,8 +1145,22 @@ mod tests {
         let db = Database::memory()?;
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("streaming.jsonl");
-        let partial = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}},"timestamp":"2026-06-07T13:01:23Z","sessionId":"session-stream"}"#;
-        let final_entry = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":500,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}},"timestamp":"2026-06-07T13:01:25Z","sessionId":"session-stream"}"#;
+        let partial = claude_session_line(
+            "msg_1",
+            "claude-sonnet-4-5",
+            None,
+            [10, 1, 100, 50],
+            "2026-06-07T13:01:23Z",
+            "session-stream",
+        );
+        let final_entry = claude_session_line(
+            "msg_1",
+            "claude-sonnet-4-5",
+            Some("end_turn"),
+            [10, 500, 100, 50],
+            "2026-06-07T13:01:25Z",
+            "session-stream",
+        );
         let path_str = file.to_string_lossy().to_string();
 
         fs::write(&file, format!("{partial}\n")).unwrap();
@@ -1353,8 +1365,22 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("rescan.jsonl");
         let path_str = file.to_string_lossy().to_string();
-        let final_entry = r#"{"type":"assistant","message":{"id":"msg_under","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":500,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}},"timestamp":"2026-06-07T13:01:25Z","sessionId":"session-rescan"}"#;
-        let missed = r#"{"type":"assistant","message":{"id":"msg_missed","model":"claude-sonnet-4-5","usage":{"input_tokens":3,"output_tokens":1,"cache_read_input_tokens":4000,"cache_creation_input_tokens":20}},"timestamp":"2026-06-07T13:01:26Z","sessionId":"session-rescan"}"#;
+        let final_entry = claude_session_line(
+            "msg_under",
+            "claude-sonnet-4-5",
+            Some("end_turn"),
+            [10, 500, 100, 50],
+            "2026-06-07T13:01:25Z",
+            "session-rescan",
+        );
+        let missed = claude_session_line(
+            "msg_missed",
+            "claude-sonnet-4-5",
+            None,
+            [3, 1, 4000, 20],
+            "2026-06-07T13:01:26Z",
+            "session-rescan",
+        );
         fs::write(&file, format!("{final_entry}\n{missed}\n")).unwrap();
 
         let created_at = chrono::DateTime::parse_from_rfc3339("2026-06-07T13:01:25Z")

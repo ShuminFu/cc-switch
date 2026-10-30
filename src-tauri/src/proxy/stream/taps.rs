@@ -10,7 +10,9 @@ use std::time::Instant;
 
 use serde_json::Value;
 
-use crate::proxy::usage::{ir::UsageIR, parser::TokenUsage};
+use crate::proxy::usage::{
+    anthropic_fields::AnthropicUsageFields, ir::UsageIR, parser::TokenUsage,
+};
 
 /// 流式 usage 的事件格式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,38 +57,29 @@ impl AnthropicFold {
                     }
                 }
                 if let Some(msg_usage) = event.get("message").and_then(|m| m.get("usage")) {
+                    let fields = AnthropicUsageFields::read(msg_usage);
                     // 从 message_start 获取 input_tokens（原生 Claude API）
-                    if let Some(input) = msg_usage.get("input_tokens").and_then(|v| v.as_u64()) {
-                        usage.input_tokens = input as u32;
+                    if let Some(input) = fields.input_tokens {
+                        usage.input_tokens = input;
                     }
-                    usage.cache_read_tokens = msg_usage
-                        .get("cache_read_input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
-                    usage.cache_creation_tokens = msg_usage
-                        .get("cache_creation_input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
+                    usage.cache_read_tokens = fields.cache_read_tokens.unwrap_or(0);
+                    usage.cache_creation_tokens = fields.cache_creation_tokens.unwrap_or(0);
                 }
             }
             "message_delta" => {
                 let Some(delta_usage) = event.get("usage") else {
                     return;
                 };
+                let AnthropicUsageFields {
+                    input_tokens: delta_input,
+                    output_tokens: delta_output,
+                    cache_read_tokens: delta_cache_read,
+                    cache_creation_tokens: delta_cache_creation,
+                } = AnthropicUsageFields::read(delta_usage);
                 // 从 message_delta 获取 output_tokens
-                if let Some(output) = delta_usage.get("output_tokens").and_then(|v| v.as_u64()) {
-                    usage.output_tokens = output as u32;
+                if let Some(output) = delta_output {
+                    usage.output_tokens = output;
                 }
-
-                let field = |name: &str| {
-                    delta_usage
-                        .get(name)
-                        .and_then(|v| v.as_u64())
-                        .map(|v| v as u32)
-                };
-                let delta_input = field("input_tokens");
-                let delta_cache_read = field("cache_read_input_tokens");
-                let delta_cache_creation = field("cache_creation_input_tokens");
 
                 // 部分 Anthropic-compatible SSE provider 会在 message_start 上报完整上下文，
                 // 但在 message_delta 上报修正后的 fresh input。遇到更小的正数 delta input
@@ -109,14 +102,14 @@ impl AnthropicFold {
                         }
                     }
                 }
-                // 从 message_delta 中处理缓存命中(cache_read_input_tokens)
+                // 从 message_delta 中处理缓存命中
                 if usage.cache_read_tokens == 0 {
                     if let Some(cache_read) = delta_cache_read {
                         usage.cache_read_tokens = cache_read;
                     }
                 }
-                // 从 message_delta 中处理缓存创建(cache_creation_input_tokens)
-                // 注: 现在 zhipu 没有返回 cache_creation_input_tokens 字段
+                // 从 message_delta 中处理缓存创建
+                // 注: 现在 zhipu 的 message_delta 不返回缓存创建字段
                 if usage.cache_creation_tokens == 0 {
                     if let Some(cache_creation) = delta_cache_creation {
                         usage.cache_creation_tokens = cache_creation;

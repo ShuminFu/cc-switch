@@ -2670,6 +2670,7 @@ pub fn run_fixture_with(fixture: &Fixture, engine: CodecEngine) -> FixtureOutcom
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::usage::test_data::{chat_usage, responses_usage};
 
     fn token_usage(input: u32, output: u32, cache_read: u32, cache_creation: u32) -> TokenUsage {
         TokenUsage {
@@ -2685,10 +2686,7 @@ mod tests {
     #[test]
     fn usage_parity_case_accepts_consistent_usage() {
         // Chat upstream (input includes cache) -> Anthropic client (fresh input).
-        let raw = json!({
-            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
-            "prompt_tokens_details": {"cached_tokens": 40}
-        });
+        let raw = chat_usage(100, 20, 40);
         let recorded = token_usage(60, 20, 40, 0);
         assert_eq!(
             check_usage_parity_case(
@@ -2706,12 +2704,9 @@ mod tests {
 
     #[test]
     fn usage_parity_case_flags_cache_double_count() {
-        // cached_tokens exceeds prompt_tokens: the normalized total overshoots
+        // The cache read exceeds prompt_tokens: the normalized total overshoots
         // the upstream total.
-        let raw = json!({
-            "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
-            "prompt_tokens_details": {"cached_tokens": 150}
-        });
+        let raw = chat_usage(100, 20, 150);
         let recorded = token_usage(0, 20, 150, 0);
         let problems = check_usage_parity_case(
             Bridge::AnthropicOpenAiChat,
@@ -2756,10 +2751,7 @@ mod tests {
     fn usage_parity_case_flags_bucket_and_cost_drift() {
         // Totals agree, but the cache read was recorded as cache creation:
         // the bucket check and the client's cost row both catch it.
-        let raw = json!({
-            "input_tokens": 100, "output_tokens": 10,
-            "input_tokens_details": {"cached_tokens": 30}
-        });
+        let raw = responses_usage(100, 10, 30, None);
         let recorded = token_usage(70, 10, 0, 30);
         let problems = check_usage_parity_case(
             Bridge::AnthropicResponses,
@@ -2981,7 +2973,7 @@ mod tests {
             ),
             event(
                 "response.completed",
-                json!({"type":"response.completed","response":{"id":"r","status":"completed","output":[item],"usage":{"input_tokens":10,"output_tokens":1,"input_tokens_details":{"cached_tokens":4,"cache_write_tokens":2}}}}),
+                json!({"type":"response.completed","response":{"id":"r","status":"completed","output":[item],"usage":responses_usage(10, 1, 4, Some(2))}}),
             ),
         ]
     }
