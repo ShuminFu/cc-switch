@@ -5,11 +5,12 @@ import { DatabaseUpgrade } from "./components/DatabaseUpgrade";
 import { UpdateProvider } from "./contexts/UpdateContext";
 import "./index.css";
 // 导入国际化配置
-import i18n from "./i18n";
+import i18n, { i18nReady } from "./i18n";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "@/components/theme-provider";
 import { queryClient } from "@/lib/query";
 import { Toaster } from "@/components/ui/sonner";
+import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { message } from "@tauri-apps/plugin-dialog";
@@ -74,6 +75,9 @@ try {
 }
 
 async function bootstrap() {
+  // Load the active locale chunk before the first render (no English flash).
+  await i18nReady;
+
   // 启动早期主动查询后端初始化错误，避免事件竞态
   try {
     const initError = (await invoke(
@@ -105,10 +109,12 @@ async function bootstrap() {
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider defaultTheme="system" storageKey="cc-switch-theme">
-          <UpdateProvider>
-            <App />
-            <Toaster />
-          </UpdateProvider>
+          <ErrorBoundary>
+            <UpdateProvider>
+              <App />
+              <Toaster />
+            </UpdateProvider>
+          </ErrorBoundary>
         </ThemeProvider>
       </QueryClientProvider>
     </React.StrictMode>,

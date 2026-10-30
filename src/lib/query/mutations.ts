@@ -1,4 +1,9 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
+import { appHas } from "@/config/apps";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { providersApi, sessionsApi, settingsApi, type AppId } from "@/lib/api";
@@ -7,10 +12,61 @@ import type { SwitchResult } from "@/lib/api/providers";
 import type { Provider, SessionMeta, Settings } from "@/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { generateUUID } from "@/utils/uuid";
-import { openclawKeys } from "@/hooks/useOpenClaw";
 import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
-import { usageKeys } from "@/lib/query/usage";
+import { queryKeys } from "./keys";
 import { CODEX_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
+
+/**
+ * Which provider caches a provider mutation affects:
+ * - `membership`: a provider was added or deleted;
+ * - `update`: a provider's settings changed;
+ * - `switch`: the current provider changed.
+ */
+type ProviderChange = "membership" | "update" | "switch";
+
+/**
+ * Invalidate the provider list of `appId` plus the app-specific caches that
+ * derive from it, in parallel (FE-ARCH-05: no serial awaits).
+ */
+export async function invalidateProviderCaches(
+  queryClient: QueryClient,
+  appId: AppId,
+  change: ProviderChange,
+): Promise<void> {
+  const keys: (readonly unknown[])[] = [queryKeys.providers.byApp(appId)];
+
+  if (appId === "claude-desktop" && change === "switch") {
+    keys.push(queryKeys.proxy.status, queryKeys.providers.claudeDesktopStatus);
+  }
+  if (appHas(appId, "omo") && change !== "update") {
+    keys.push(
+      queryKeys.omo.currentProviderId,
+      queryKeys.omoSlim.currentProviderId,
+    );
+    if (change === "membership") {
+      keys.push(queryKeys.omo.providerCount, queryKeys.omoSlim.providerCount);
+    }
+  }
+  if (appId === "opencode" && change === "switch") {
+    keys.push(queryKeys.providers.opencodeLiveIds);
+  }
+  if (appId === "openclaw") {
+    if (change === "switch") {
+      keys.push(
+        queryKeys.openclaw.liveProviderIds,
+        queryKeys.openclaw.defaultModel,
+      );
+    }
+    keys.push(queryKeys.openclaw.health);
+  }
+
+  await Promise.all([
+    ...keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    appId === "hermes"
+      ? invalidateHermesProviderCaches(queryClient)
+      : undefined,
+  ]);
+}
 
 export const useAddProviderMutation = (appId: AppId) => {
   const queryClient = useQueryClient();
@@ -83,32 +139,7 @@ export const useAddProviderMutation = (appId: AppId) => {
       return newProvider;
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
-
-      if (appId === "opencode") {
-        await queryClient.invalidateQueries({
-          queryKey: ["omo", "current-provider-id"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["omo", "provider-count"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["omo-slim", "current-provider-id"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["omo-slim", "provider-count"],
-        });
-      }
-
-      if (appId === "openclaw") {
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.health,
-        });
-      }
-
-      if (appId === "hermes") {
-        await invalidateHermesProviderCaches(queryClient);
-      }
+      await invalidateProviderCaches(queryClient, appId, "membership");
 
       try {
         await providersApi.updateTrayMenu();
@@ -156,23 +187,20 @@ export const useUpdateProviderMutation = (appId: AppId) => {
       return provider;
     },
     onSuccess: async (provider, variables) => {
-      await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
-      await queryClient.invalidateQueries({
-        queryKey: usageKeys.script(provider.id, appId),
-      });
-      if (variables.originalId && variables.originalId !== provider.id) {
-        await queryClient.invalidateQueries({
-          queryKey: usageKeys.script(variables.originalId, appId),
-        });
-      }
-      if (appId === "openclaw") {
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.health,
-        });
-      }
-      if (appId === "hermes") {
-        await invalidateHermesProviderCaches(queryClient);
-      }
+      await Promise.all([
+        invalidateProviderCaches(queryClient, appId, "update"),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.usageScript.byProvider(provider.id, appId),
+        }),
+        variables.originalId && variables.originalId !== provider.id
+          ? queryClient.invalidateQueries({
+              queryKey: queryKeys.usageScript.byProvider(
+                variables.originalId,
+                appId,
+              ),
+            })
+          : undefined,
+      ]);
       toast.success(
         t("notifications.updateSuccess", {
           defaultValue: "供应商更新成功",
@@ -203,32 +231,7 @@ export const useDeleteProviderMutation = (appId: AppId) => {
       await providersApi.delete(providerId, appId);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
-
-      if (appId === "opencode") {
-        await queryClient.invalidateQueries({
-          queryKey: ["omo", "current-provider-id"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["omo", "provider-count"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["omo-slim", "current-provider-id"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["omo-slim", "provider-count"],
-        });
-      }
-
-      if (appId === "openclaw") {
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.health,
-        });
-      }
-
-      if (appId === "hermes") {
-        await invalidateHermesProviderCaches(queryClient);
-      }
+      await invalidateProviderCaches(queryClient, appId, "membership");
 
       try {
         await providersApi.updateTrayMenu();
@@ -269,40 +272,7 @@ export const useSwitchProviderMutation = (appId: AppId) => {
       return await providersApi.switch(providerId, appId);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
-      if (appId === "claude-desktop") {
-        await queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-        await queryClient.invalidateQueries({
-          queryKey: ["claudeDesktopStatus"],
-        });
-      }
-
-      // OpenCode/OpenClaw: also invalidate live provider IDs cache to update button state
-      if (appId === "opencode") {
-        await queryClient.invalidateQueries({
-          queryKey: ["opencodeLiveProviderIds"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["omo", "current-provider-id"],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["omo-slim", "current-provider-id"],
-        });
-      }
-      if (appId === "openclaw") {
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.liveProviderIds,
-        });
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.defaultModel,
-        });
-        await queryClient.invalidateQueries({
-          queryKey: openclawKeys.health,
-        });
-      }
-      if (appId === "hermes") {
-        await invalidateHermesProviderCaches(queryClient);
-      }
+      await invalidateProviderCaches(queryClient, appId, "switch");
 
       try {
         await providersApi.updateTrayMenu();
@@ -346,21 +316,28 @@ export const useDeleteSessionMutation = () => {
       return input;
     },
     onSuccess: async (input) => {
-      queryClient.setQueryData<SessionMeta[]>(["sessions"], (current) =>
-        (current ?? []).filter(
-          (session) =>
-            !(
-              session.providerId === input.providerId &&
-              session.sessionId === input.sessionId &&
-              session.sourcePath === input.sourcePath
-            ),
-        ),
+      queryClient.setQueryData<SessionMeta[]>(
+        queryKeys.sessions.all,
+        (current) =>
+          (current ?? []).filter(
+            (session) =>
+              !(
+                session.providerId === input.providerId &&
+                session.sessionId === input.sessionId &&
+                session.sourcePath === input.sourcePath
+              ),
+          ),
       );
       queryClient.removeQueries({
-        queryKey: ["sessionMessages", input.providerId, input.sourcePath],
+        queryKey: queryKeys.sessions.messages(
+          input.providerId,
+          input.sourcePath,
+        ),
       });
 
-      await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.sessions.all,
+      });
 
       toast.success(
         t("sessionManager.sessionDeleted", {
@@ -388,7 +365,9 @@ export const useSaveSettingsMutation = () => {
       await settingsApi.save(settings);
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.settings.all,
+      });
     },
   });
 };

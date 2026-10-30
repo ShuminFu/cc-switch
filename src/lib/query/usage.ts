@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usageApi } from "@/lib/api/usage";
 import { resolveUsageRange } from "@/lib/usageRange";
+import { usageKeys, type RequestLogsKey } from "./keys";
 import type {
   LogFilters,
   UsageRangeSelection,
@@ -22,132 +23,9 @@ type RequestLogsQueryArgs = {
   options?: UsageQueryOptions;
 };
 
-type RequestLogsKey = {
-  preset: UsageRangeSelection["preset"];
-  customStartDate?: number;
-  customEndDate?: number;
-  liveEndTime?: boolean;
-  appType?: string;
-  providerName?: string;
-  model?: string;
-  statusCode?: number;
-};
-
-// Query keys
-export const usageKeys = {
-  all: ["usage"] as const,
-  summary: (
-    preset: UsageRangeSelection["preset"],
-    customStartDate: number | undefined,
-    customEndDate: number | undefined,
-    filters?: UsageScopeFilters,
-    liveEndTime?: boolean,
-  ) =>
-    [
-      ...usageKeys.all,
-      "summary",
-      preset,
-      customStartDate ?? 0,
-      customEndDate ?? 0,
-      liveEndTime ?? false,
-      filters?.appType ?? null,
-      filters?.providerName ?? null,
-      filters?.model ?? null,
-    ] as const,
-  summaryByApp: (
-    preset: UsageRangeSelection["preset"],
-    customStartDate: number | undefined,
-    customEndDate: number | undefined,
-    filters?: Pick<UsageScopeFilters, "providerName" | "model">,
-    liveEndTime?: boolean,
-  ) =>
-    [
-      ...usageKeys.all,
-      "summary-by-app",
-      preset,
-      customStartDate ?? 0,
-      customEndDate ?? 0,
-      liveEndTime ?? false,
-      filters?.providerName ?? null,
-      filters?.model ?? null,
-    ] as const,
-  trends: (
-    preset: UsageRangeSelection["preset"],
-    customStartDate: number | undefined,
-    customEndDate: number | undefined,
-    filters?: UsageScopeFilters,
-    liveEndTime?: boolean,
-  ) =>
-    [
-      ...usageKeys.all,
-      "trends",
-      preset,
-      customStartDate ?? 0,
-      customEndDate ?? 0,
-      liveEndTime ?? false,
-      filters?.appType ?? null,
-      filters?.providerName ?? null,
-      filters?.model ?? null,
-    ] as const,
-  providerStats: (
-    preset: UsageRangeSelection["preset"],
-    customStartDate: number | undefined,
-    customEndDate: number | undefined,
-    filters?: UsageScopeFilters,
-    liveEndTime?: boolean,
-  ) =>
-    [
-      ...usageKeys.all,
-      "provider-stats",
-      preset,
-      customStartDate ?? 0,
-      customEndDate ?? 0,
-      liveEndTime ?? false,
-      filters?.appType ?? null,
-      filters?.providerName ?? null,
-      filters?.model ?? null,
-    ] as const,
-  modelStats: (
-    preset: UsageRangeSelection["preset"],
-    customStartDate: number | undefined,
-    customEndDate: number | undefined,
-    filters?: UsageScopeFilters,
-    liveEndTime?: boolean,
-  ) =>
-    [
-      ...usageKeys.all,
-      "model-stats",
-      preset,
-      customStartDate ?? 0,
-      customEndDate ?? 0,
-      liveEndTime ?? false,
-      filters?.appType ?? null,
-      filters?.providerName ?? null,
-      filters?.model ?? null,
-    ] as const,
-  logs: (key: RequestLogsKey, page: number, pageSize: number) =>
-    [
-      ...usageKeys.all,
-      "logs",
-      key.preset,
-      key.customStartDate ?? 0,
-      key.customEndDate ?? 0,
-      key.liveEndTime ?? false,
-      key.appType ?? "",
-      key.providerName ?? "",
-      key.model ?? "",
-      key.statusCode ?? -1,
-      page,
-      pageSize,
-    ] as const,
-  detail: (requestId: string) =>
-    [...usageKeys.all, "detail", requestId] as const,
-  pricing: () => [...usageKeys.all, "pricing"] as const,
-  limits: (providerId: string, appType: string) =>
-    [...usageKeys.all, "limits", providerId, appType] as const,
-  script: (providerId: string, appType: string) =>
-    [...usageKeys.all, providerId, appType] as const,
-};
+// Query keys live in the shared registry; re-exported for existing importers.
+export { usageKeys };
+export type { RequestLogsKey };
 
 /**
  * Second segment of the usage-dashboard query keys whose data depends on the

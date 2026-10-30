@@ -10,6 +10,8 @@ import {
   setProviders,
 } from "../msw/state";
 import { emitTauriEvent } from "../msw/tauriMocks";
+import { server } from "../msw/server";
+import { http, HttpResponse } from "msw";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -145,8 +147,35 @@ vi.mock("@/components/mcp/McpPanel", () => ({
     ),
 }));
 
-const renderApp = (AppComponent: ComponentType) => {
-  const client = new QueryClient();
+const mcpOpenAddMock = vi.fn();
+const mcpOpenImportMock = vi.fn();
+
+vi.mock("@/components/mcp/UnifiedMcpPanel", async () => {
+  const React = await import("react");
+  return {
+    default: React.forwardRef((_props: unknown, ref) => {
+      React.useImperativeHandle(ref, () => ({
+        openAdd: mcpOpenAddMock,
+        openImport: mcpOpenImportMock,
+      }));
+      return <div data-testid="mcp-page" />;
+    }),
+  };
+});
+
+vi.mock("@/components/settings/SettingsPage", () => ({
+  SettingsPage: ({ defaultTab, onOpenChange }: any) => (
+    <div data-testid="settings-page">
+      <span data-testid="settings-tab">{defaultTab}</span>
+      <button onClick={() => onOpenChange(false)}>close-settings</button>
+    </div>
+  ),
+}));
+
+const renderApp = (
+  AppComponent: ComponentType,
+  client: QueryClient = new QueryClient(),
+) => {
   return render(
     <QueryClientProvider client={client}>
       <Suspense fallback={<div data-testid="loading">loading</div>}>
@@ -158,6 +187,8 @@ const renderApp = (AppComponent: ComponentType) => {
 
 describe("App integration with MSW", () => {
   beforeEach(() => {
+    // The shell persists the active app / page; start every test fresh.
+    localStorage.clear();
     resetProviderState();
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
@@ -181,12 +212,14 @@ describe("App integration with MSW", () => {
     );
 
     fireEvent.click(screen.getByText("usage"));
-    expect(screen.getByTestId("usage-modal")).toBeInTheDocument();
+    expect(await screen.findByTestId("usage-modal")).toBeInTheDocument();
     fireEvent.click(screen.getByText("save-script"));
     fireEvent.click(screen.getByText("close-usage"));
 
     fireEvent.click(screen.getByText("create"));
-    expect(screen.getByTestId("add-provider-dialog")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("add-provider-dialog"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByText("confirm-add"));
     await waitFor(() =>
       expect(screen.getByTestId("provider-list").textContent).toMatch(
@@ -195,7 +228,9 @@ describe("App integration with MSW", () => {
     );
 
     fireEvent.click(screen.getByText("edit"));
-    expect(screen.getByTestId("edit-provider-dialog")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("edit-provider-dialog"),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByText("confirm-edit"));
     await waitFor(() =>
       expect(screen.getByTestId("provider-list").textContent).toMatch(
@@ -351,5 +386,96 @@ describe("App integration with MSW", () => {
     );
 
     liveIdsSpy.mockRestore();
+  });
+
+  it("shows an error state with retry, not the empty list, when get_providers fails", async () => {
+    let fail = true;
+    server.use(
+      http.post("http://tauri.local/get_providers", () =>
+        fail
+          ? HttpResponse.text("database is locked", { status: 500 })
+          : undefined,
+      ),
+    );
+
+    const { default: App } = await import("@/App");
+    renderApp(
+      App,
+      new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+    );
+
+    expect(await screen.findByTestId("providers-error")).toHaveTextContent(
+      "database is locked",
+    );
+    expect(screen.queryByTestId("provider-list")).not.toBeInTheDocument();
+
+    fail = false;
+    fireEvent.click(screen.getByText("Retry"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
+  });
+
+  it("navigates to pages that own their header actions, and back", async () => {
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
+
+    // Toolbar shortcut from the app registry opens the MCP page.
+    fireEvent.click(screen.getByTitle("mcp.title"));
+    expect(await screen.findByTestId("mcp-page")).toBeInTheDocument();
+    expect(screen.getByText("mcp.unifiedPanel.title").tagName).toBe("H1");
+    expect(localStorage.getItem("cc-switch-last-view")).toBe("mcp");
+
+    // Header actions are rendered by the page and reach its panel handle.
+    fireEvent.click(await screen.findByText("mcp.addMcp"));
+    expect(mcpOpenAddMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText("mcp.importExisting"));
+    expect(mcpOpenImportMock).toHaveBeenCalledTimes(1);
+
+    // Escape returns to the providers page.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(await screen.findByTestId("provider-list")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("mcp.addMcp")).not.toBeInTheDocument(),
+    );
+
+    // The update badge deep-links into the settings "about" tab.
+    fireEvent.click(screen.getByText("update-badge"));
+    expect(await screen.findByTestId("settings-tab")).toHaveTextContent(
+      "about",
+    );
+    fireEvent.click(screen.getByText("close-settings"));
+    expect(await screen.findByTestId("provider-list")).toBeInTheDocument();
+
+    // Cmd/Ctrl+, opens settings on the general tab.
+    fireEvent.keyDown(window, { key: ",", ctrlKey: true });
+    expect(await screen.findByTestId("settings-tab")).toHaveTextContent(
+      "general",
+    );
+  });
+
+  it("restores the last page and app from storage", async () => {
+    localStorage.setItem("cc-switch-last-app", "codex");
+    localStorage.setItem("cc-switch-last-view", "mcp");
+
+    const { default: App } = await import("@/App");
+    renderApp(App);
+
+    expect(await screen.findByTestId("mcp-page")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Back"));
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "codex-1",
+      ),
+    );
   });
 });
