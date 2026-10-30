@@ -35,7 +35,7 @@ pub async fn execute_usage_script(
     template_type: Option<&str>,
 ) -> Result<Value, AppError> {
     execute_usage_script_with_client(
-        crate::proxy::http_client::get(),
+        crate::proxy::http_client::get_no_redirect(),
         script_code,
         api_key,
         base_url,
@@ -492,34 +492,90 @@ async fn send_http_request(
         )
     })?;
 
-    let mut req = client
-        .request(method.clone(), &config.url)
-        .timeout(request_timeout);
+    // 客户端不自动跟随重定向（见 http_client::get_no_redirect）：每一跳的目标
+    // 都先做 HTTPS/同源校验再发送，避免脚本的自定义请求头（API Key 等）被
+    // 发往未经校验的重定向目标。
+    const MAX_REDIRECTS: usize = 5;
+    let deadline = std::time::Instant::now() + request_timeout;
+    let original_origin = Url::parse(&config.url).ok().map(|u| u.origin());
+    let mut url = config.url.clone();
+    let mut method = method;
+    let mut body = config.body.clone();
+    let mut redirects = 0usize;
 
-    // 添加请求头
-    for (k, v) in &config.headers {
-        req = req.header(k, v);
-    }
+    let resp = loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(AppError::localized(
+                "usage_script.request_failed",
+                "请求失败: 超时",
+                "Request failed: timed out",
+            ));
+        }
+        let mut req = client.request(method.clone(), &url).timeout(remaining);
 
-    // 添加请求体
-    if let Some(body) = &config.body {
-        req = req.body(body.clone());
-    }
+        // 添加请求头：仅发往与原始请求同源的地址
+        let same_origin = Url::parse(&url).ok().map(|u| u.origin()) == original_origin;
+        if same_origin {
+            for (k, v) in &config.headers {
+                req = req.header(k, v);
+            }
+        }
 
-    // 发送请求
-    let resp = req.send().await.map_err(|e| {
-        AppError::localized(
-            "usage_script.request_failed",
-            format!("请求失败: {e}"),
-            format!("Request failed: {e}"),
-        )
-    })?;
+        // 添加请求体
+        if let Some(body) = &body {
+            req = req.body(body.clone());
+        }
 
-    // 共享客户端会跟随重定向：对最终落点重新做 HTTPS/同源校验，
-    // 拒绝被重定向到其他主机后返回的数据
-    if resp.url().as_str() != config.url {
-        validate_request_url(resp.url().as_str(), base_url, is_custom_template)?;
-    }
+        // 发送请求
+        let resp = req.send().await.map_err(|e| {
+            AppError::localized(
+                "usage_script.request_failed",
+                format!("请求失败: {e}"),
+                format!("Request failed: {e}"),
+            )
+        })?;
+
+        let status = resp.status();
+        let location = resp
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok());
+        let Some(location) = location.filter(|_| status.is_redirection()) else {
+            break resp;
+        };
+
+        if redirects >= MAX_REDIRECTS {
+            return Err(AppError::localized(
+                "usage_script.too_many_redirects",
+                format!("重定向次数过多（超过 {MAX_REDIRECTS} 次）"),
+                format!("Too many redirects (more than {MAX_REDIRECTS})"),
+            ));
+        }
+        let next = resp.url().join(location).map_err(|e| {
+            AppError::localized(
+                "usage_script.request_url_invalid",
+                format!("无效的重定向地址: {e}"),
+                format!("Invalid redirect location: {e}"),
+            )
+        })?;
+        // 发送前校验重定向目标，拒绝跳转到其他主机
+        validate_request_url(next.as_str(), base_url, is_custom_template)?;
+
+        // 与浏览器/reqwest 一致：303 以及 POST 的 301/302 改为不带请求体的 GET
+        let to_get = status == reqwest::StatusCode::SEE_OTHER
+            || (method == reqwest::Method::POST
+                && matches!(
+                    status,
+                    reqwest::StatusCode::MOVED_PERMANENTLY | reqwest::StatusCode::FOUND
+                ));
+        if to_get && method != reqwest::Method::HEAD {
+            method = reqwest::Method::GET;
+            body = None;
+        }
+        url = next.to_string();
+        redirects += 1;
+    };
 
     let status = resp.status();
     let text = read_body_capped(resp, MAX_RESPONSE_BODY_BYTES).await?;
@@ -854,7 +910,12 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn test_client() -> reqwest::Client {
-        reqwest::Client::builder().no_proxy().build().unwrap()
+        // 与生产一致：不自动跟随重定向（http_client::get_no_redirect）
+        reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
     }
 
     fn error_key(err: &AppError) -> &'static str {
@@ -1063,6 +1124,98 @@ mod tests {
             error_key(&err),
             "usage_script.request_host_mismatch",
             "{err}"
+        );
+    }
+
+    /// 记录每个请求原始字节的 HTTP 服务，始终返回 `response`
+    async fn spawn_recording_server(
+        response: String,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 4096];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                record
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&buf[..n]).into_owned());
+                let _ = sock.write_all(response.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), seen)
+    }
+
+    fn redirect_to(location: &str) -> String {
+        format!(
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn same_origin_redirect_is_followed() {
+        let redirect = redirect_to("http://127.0.0.1:{port}/final");
+        let base = spawn_server(vec![redirect, json_response(r#"{"balance": 7}"#)]).await;
+        let script = r#"({
+            request: { url: "{{baseUrl}}/x", method: "GET" },
+            extractor: function (r) { return { remaining: r.balance }; }
+        })"#;
+        let value = run(script, "k", &base).await.expect("redirect followed");
+        assert_eq!(value["remaining"], 7, "{value}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cross_origin_redirect_target_never_receives_the_request() {
+        let (target, target_seen) =
+            spawn_recording_server(json_response(r#"{"balance": 1}"#)).await;
+        let base = spawn_server(vec![redirect_to(&format!("{target}/steal"))]).await;
+        let script = r#"({
+            request: { url: "{{baseUrl}}/x", method: "GET", headers: { "X-Api-Key": "{{apiKey}}" } },
+            extractor: function (r) { return { remaining: r.balance }; }
+        })"#;
+        let err = run(script, "sk-secret", &base).await.unwrap_err();
+        assert_eq!(
+            error_key(&err),
+            "usage_script.request_port_mismatch",
+            "{err}"
+        );
+        assert!(target_seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn custom_template_cross_origin_redirect_drops_script_headers() {
+        let (target, target_seen) =
+            spawn_recording_server(json_response(r#"{"balance": 3}"#)).await;
+        let base = spawn_server(vec![redirect_to(&format!("{target}/next"))]).await;
+        let script = format!(
+            r#"({{
+            request: {{ url: "{base}/x", method: "GET", headers: {{ "X-Custom-Key": "sk-secret" }} }},
+            extractor: function (r) {{ return {{ remaining: r.balance }}; }}
+        }})"#
+        );
+        let value = execute_usage_script_with_client(
+            test_client(),
+            &script,
+            "",
+            "",
+            2,
+            None,
+            None,
+            Some("custom"),
+        )
+        .await
+        .expect("custom template may follow cross-origin redirects");
+        assert_eq!(value["remaining"], 3, "{value}");
+        let seen = target_seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(
+            !seen[0].to_ascii_lowercase().contains("sk-secret"),
+            "script header leaked to redirect target: {}",
+            seen[0]
         );
     }
 

@@ -13,6 +13,13 @@ use std::time::Duration;
 /// 全局 HTTP 客户端实例
 static GLOBAL_CLIENT: OnceCell<RwLock<Client>> = OnceCell::new();
 
+/// 与 `GLOBAL_CLIENT` 代理配置相同、但不跟随重定向的客户端。
+///
+/// 用于会携带用户自定义请求头（API Key 等）的请求（如用量查询脚本）：
+/// reqwest 跟随跨域重定向时只剥离 Authorization/Cookie 等少数头，
+/// 自定义头会被原样发往重定向目标，因此由调用方自行校验后再决定是否跟随。
+static GLOBAL_NO_REDIRECT_CLIENT: OnceCell<RwLock<Client>> = OnceCell::new();
+
 /// 当前代理 URL（用于日志和状态查询）
 static CURRENT_PROXY_URL: OnceCell<RwLock<Option<String>>> = OnceCell::new();
 
@@ -53,6 +60,7 @@ fn get_proxy_port() -> u16 {
 pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     let client = build_client(effective_url)?;
+    let no_redirect = build_no_redirect_client(effective_url)?;
 
     // 尝试初始化全局客户端，如果已存在则记录警告并使用 apply_proxy 更新
     if GLOBAL_CLIENT.set(RwLock::new(client.clone())).is_err() {
@@ -65,6 +73,7 @@ pub fn init(proxy_url: Option<&str>) -> Result<(), String> {
         // 已初始化，改用 apply_proxy 更新
         return apply_proxy(proxy_url);
     }
+    store_no_redirect_client(no_redirect)?;
 
     // 初始化代理 URL 记录
     let _ = CURRENT_PROXY_URL.set(RwLock::new(effective_url.map(|s| s.to_string())));
@@ -106,6 +115,7 @@ pub fn validate_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     let new_client = build_client(effective_url)?;
+    let new_no_redirect = build_no_redirect_client(effective_url)?;
 
     // 更新客户端
     if let Some(lock) = GLOBAL_CLIENT.get() {
@@ -118,6 +128,7 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
         // 如果还没初始化，则初始化
         return init(proxy_url);
     }
+    store_no_redirect_client(new_no_redirect)?;
 
     // 更新代理 URL 记录
     if let Some(lock) = CURRENT_PROXY_URL.get() {
@@ -150,6 +161,7 @@ pub fn apply_proxy(proxy_url: Option<&str>) -> Result<(), String> {
 pub fn update_proxy(proxy_url: Option<&str>) -> Result<(), String> {
     let effective_url = proxy_url.filter(|s| !s.trim().is_empty());
     let new_client = build_client(effective_url)?;
+    let new_no_redirect = build_no_redirect_client(effective_url)?;
 
     // 更新客户端
     if let Some(lock) = GLOBAL_CLIENT.get() {
@@ -162,6 +174,7 @@ pub fn update_proxy(proxy_url: Option<&str>) -> Result<(), String> {
         // 如果还没初始化，则初始化
         return init(proxy_url);
     }
+    store_no_redirect_client(new_no_redirect)?;
 
     // 更新代理 URL 记录
     if let Some(lock) = CURRENT_PROXY_URL.get() {
@@ -196,6 +209,38 @@ pub fn get() -> Client {
         })
 }
 
+/// 获取不跟随重定向的全局 HTTP 客户端（代理配置与 [`get`] 相同）
+///
+/// 3xx 响应原样返回给调用方，调用方需自行校验 `Location` 后再决定是否跟随。
+pub fn get_no_redirect() -> Client {
+    GLOBAL_NO_REDIRECT_CLIENT
+        .get()
+        .and_then(|lock| lock.read().ok())
+        .map(|c| c.clone())
+        .unwrap_or_else(|| {
+            log::warn!("[GlobalProxy] [GP-004] No-redirect client not initialized, using fallback");
+            build_no_redirect_client(None).unwrap_or_else(|_| {
+                Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .unwrap_or_default()
+            })
+        })
+}
+
+fn store_no_redirect_client(client: Client) -> Result<(), String> {
+    if let Some(lock) = GLOBAL_NO_REDIRECT_CLIENT.get() {
+        let mut current = lock.write().map_err(|e| {
+            log::error!("[GlobalProxy] [GP-001] Failed to acquire write lock: {e}");
+            "Failed to update proxy: lock poisoned".to_string()
+        })?;
+        *current = client;
+    } else {
+        let _ = GLOBAL_NO_REDIRECT_CLIENT.set(RwLock::new(client));
+    }
+    Ok(())
+}
+
 /// 获取当前代理 URL
 ///
 /// 返回当前配置的代理 URL，None 表示直连。
@@ -214,7 +259,20 @@ pub fn is_proxy_enabled() -> bool {
 
 /// 构建 HTTP 客户端
 fn build_client(proxy_url: Option<&str>) -> Result<Client, String> {
+    build_client_with(proxy_url, reqwest::redirect::Policy::default())
+}
+
+/// 构建不跟随重定向的 HTTP 客户端
+fn build_no_redirect_client(proxy_url: Option<&str>) -> Result<Client, String> {
+    build_client_with(proxy_url, reqwest::redirect::Policy::none())
+}
+
+fn build_client_with(
+    proxy_url: Option<&str>,
+    redirect: reqwest::redirect::Policy,
+) -> Result<Client, String> {
     let mut builder = Client::builder()
+        .redirect(redirect)
         .timeout(Duration::from_secs(600))
         .connect_timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(10)
@@ -470,6 +528,39 @@ mod tests {
         let out = log_body_excerpt(&long);
         assert!(out.len() < LOG_BODY_EXCERPT_BYTES + 64, "{}", out.len());
         assert!(out.contains(&format!("{} bytes total", long.len())));
+    }
+
+    #[tokio::test]
+    async fn no_redirect_client_returns_3xx_without_following() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let resp = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/next\r\n\
+                     Content-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+
+        let client = build_no_redirect_client(None).unwrap();
+        let resp = client
+            .get(format!("http://127.0.0.1:{port}/start"))
+            .header("x-api-key", "secret")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::FOUND);
+        assert!(resp.url().path().ends_with("/start"));
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
