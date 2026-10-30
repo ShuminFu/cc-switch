@@ -119,21 +119,24 @@ pub fn legacy_seed(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
-/// v18 迁移：给已有行标注来源。价格仍等于目录当前价或某个旧价（`supersedes`）的内置行
-/// 视为未改过（`builtin`），其余行（自定义模型、改过价格的内置行）保持列默认值 `user`。
+/// v18 迁移：给已有行标注来源。价格与显示名都等于目录当前值、或价格仍等于某个旧价
+/// （`supersedes`）的内置行视为未改过（`builtin`），其余行（自定义模型、改过价格或
+/// 显示名的内置行）保持列默认值 `user`。
 ///
-/// 只比较四个价格、不比较显示名：目录没有记录历史显示名，按显示名判断会把未改过的
-/// 旧行误判为用户行，此后再也收不到调价。
+/// 当前价的行要求显示名也一致：启动同步会把 `builtin` 行的显示名改回目录值，
+/// 只改了显示名的行若标为 `builtin` 就会丢掉用户的改名。旧价行只比较价格：目录没有
+/// 记录历史显示名，它们与 v18 之前一样在启动时更新到当前价与显示名。
 pub fn classify_provenance(conn: &Connection) -> Result<(), AppError> {
     let catalog = catalog();
-    let mark = |model_id: &str, price: &CatalogPrice, version: Option<u32>| {
+    let mark = |model_id: &str, price: &CatalogPrice, name: Option<&str>, version: Option<u32>| {
         conn.execute(
             "UPDATE model_pricing SET source = ?2, catalog_version = ?3
              WHERE model_id = ?1
                AND input_cost_per_million = ?4
                AND output_cost_per_million = ?5
                AND cache_read_cost_per_million = ?6
-               AND cache_creation_cost_per_million = ?7",
+               AND cache_creation_cost_per_million = ?7
+               AND (?8 IS NULL OR display_name = ?8)",
             params![
                 model_id,
                 SOURCE_BUILTIN,
@@ -141,7 +144,8 @@ pub fn classify_provenance(conn: &Connection) -> Result<(), AppError> {
                 price.input,
                 price.output,
                 price.cache_read,
-                price.cache_creation
+                price.cache_creation,
+                name
             ],
         )
         .map_err(|e| AppError::Database(format!("标注模型 {model_id} 定价来源失败: {e}")))
@@ -149,10 +153,15 @@ pub fn classify_provenance(conn: &Connection) -> Result<(), AppError> {
 
     let mut builtin = 0usize;
     for model in &catalog.models {
-        builtin += mark(&model.id, &model.price, Some(catalog.version))?;
+        builtin += mark(
+            &model.id,
+            &model.price,
+            Some(&model.name),
+            Some(catalog.version),
+        )?;
         // 旧价行不记录目录版本（来自目录之前的 seed），启动同步时更新到当前价
         for old in &model.supersedes {
-            builtin += mark(&model.id, old, None)?;
+            builtin += mark(&model.id, old, None, None)?;
         }
     }
     log::info!("模型定价来源标注完成：{builtin} 条内置行，其余为用户行");

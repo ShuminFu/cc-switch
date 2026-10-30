@@ -476,7 +476,7 @@ fn migrate_v16_to_v17_backfill_tolerates_missing_legacy_columns() -> Result<(), 
     Ok(())
 }
 
-/// v18：未改过的内置行（当前价或旧价）标为 builtin，改过价格的内置行与自定义模型标为 user
+/// v18：未改过的内置行（当前价或旧价）标为 builtin，改过价格或显示名的内置行与自定义模型标为 user
 #[test]
 fn migrate_v17_to_v18_classifies_pricing_provenance() -> Result<(), AppError> {
     let conn = Connection::open_in_memory()?;
@@ -508,10 +508,10 @@ fn migrate_v17_to_v18_classifies_pricing_provenance() -> Result<(), AppError> {
         row("claude-opus-4-7")?,
         ("builtin".into(), Some(version), None, 0)
     );
-    // 只看价格：仅改了显示名的行仍跟随目录
+    // 仅改了显示名的行也是用户行：否则启动同步会把显示名改回目录值
     assert_eq!(
         row("claude-haiku-4-5-20251001")?,
-        ("builtin".into(), Some(version), None, 0)
+        ("user".into(), None, None, 0)
     );
     // 等于目录旧价：未改过，但不属于任何目录版本
     assert_eq!(row("gpt-5.6-sol")?, ("builtin".into(), None, None, 0));

@@ -808,6 +808,7 @@ fn pricing_provenance_survives_upgrade_from_v17() {
                 ('claude-opus-4-7', 'Claude Opus 4.7', '5', '25', '0.50', '6.25'),
                 ('gpt-5.6-sol', 'GPT-5.6 Sol', '5', '30', '0.50', '0'),
                 ('claude-opus-4-8', 'Claude Opus 4.8', '99', '25', '0.50', '6.25'),
+                ('claude-opus-4-6-20260206', 'My Opus', '5', '25', '0.50', '6.25'),
                 ('my-custom-model', 'Custom', '1', '2', '0', '0');",
         )
         .expect("seed v17 pricing rows");
@@ -855,6 +856,19 @@ fn pricing_provenance_survives_upgrade_from_v17() {
             pricing("my-custom-model"),
             row("user", 0, "1", "0"),
             "{label}: custom pricing is user-owned"
+        );
+        let renamed: (String, String) = open(&path)
+            .query_row(
+                "SELECT source, display_name FROM model_pricing
+                 WHERE model_id = 'claude-opus-4-6-20260206'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("renamed built-in row");
+        assert_eq!(
+            renamed,
+            ("user".to_string(), "My Opus".to_string()),
+            "{label}: a built-in renamed at the current price keeps its name"
         );
         let deleted = pricing("claude-sonnet-5").expect("tombstone row");
         assert_eq!(
