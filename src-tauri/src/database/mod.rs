@@ -175,8 +175,10 @@ impl Database {
 
         // 确保父目录存在
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            // SEC-05: ~/.cc-switch is 0700 and the DB 0600 on Unix.
+            crate::config::ensure_private_dir(parent)?;
         }
+        crate::config::prepare_private_file(&db_path)?;
 
         let conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
 

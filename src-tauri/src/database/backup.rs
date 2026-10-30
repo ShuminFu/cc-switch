@@ -305,7 +305,8 @@ impl Database {
             fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
         }
 
-        crate::config::atomic_write(target_path, dump.as_bytes())
+        // SEC-05: the export holds every provider key; new files are 0600.
+        crate::config::atomic_write_secret(target_path, dump.as_bytes())
     }
 
     /// 从 SQL 文件导入，返回生成的备份 ID（若无备份则为空字符串）
@@ -728,7 +729,7 @@ impl Database {
             .ok_or_else(|| AppError::Config("无效的数据库路径".to_string()))?
             .join("backups");
 
-        fs::create_dir_all(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))?;
+        crate::config::ensure_private_dir(&backup_dir)?;
 
         let base_id = format!("{}{}", kind.prefix(), Local::now().format("%Y%m%d_%H%M%S"));
         let mut backup_id = base_id.clone();
@@ -740,6 +741,8 @@ impl Database {
             counter += 1;
         }
 
+        // SEC-05: backups are full DB copies; create them owner-only.
+        crate::config::prepare_private_file(&backup_path)?;
         {
             let conn = lock_conn!(self.conn);
             let mut dest_conn =

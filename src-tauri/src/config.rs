@@ -311,6 +311,78 @@ pub fn write_text_file_secret(path: &Path, data: &str) -> Result<(), AppError> {
     atomic_write_secret(path, data.as_bytes())
 }
 
+// ─── Owner-only permissions for app data (SEC-05) ────────────
+//
+// `~/.cc-switch` holds the SQLite database (provider API keys), backups and
+// SQL exports. On Unix the directories are made 0700 and these files 0600 so
+// other local accounts cannot read them even with a permissive umask.
+//
+// Windows: nothing is changed. Files under `%USERPROFILE%\.cc-switch` inherit
+// the profile directory's ACL, which by default grants access only to the
+// user, SYSTEM and Administrators. Exports written elsewhere inherit the ACL
+// of the chosen folder. See docs/secrets-vault.md.
+
+/// Create `dir` (with parents) and restrict it to the owner (0700 on Unix).
+///
+/// Existing directories are tightened too, except the home directory itself
+/// (guarding against a misconfigured app-config-dir override).
+pub fn ensure_private_dir(dir: &Path) -> Result<(), AppError> {
+    fs::create_dir_all(dir).map_err(|e| AppError::io(dir, e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let is_home = dirs::home_dir().is_some_and(|home| home == dir);
+        if !is_home {
+            if let Ok(meta) = fs::metadata(dir) {
+                if meta.permissions().mode() & 0o077 != 0 {
+                    if let Err(e) = fs::set_permissions(dir, fs::Permissions::from_mode(0o700)) {
+                        log::warn!("无法将目录权限收紧为 0700: {} ({e})", dir.display());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Best-effort: restrict an existing file to the owner (0600 on Unix).
+pub fn restrict_file_to_owner(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::symlink_metadata(path) {
+            if meta.is_file() && meta.permissions().mode() & 0o077 != 0 {
+                if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o600)) {
+                    log::warn!("无法将文件权限收紧为 0600: {} ({e})", path.display());
+                }
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Create `path` as an empty owner-only file if it does not exist yet, so a
+/// file that is then opened by another library (e.g. SQLite) never exists
+/// with umask-derived permissions. Existing files are tightened to 0600.
+pub fn prepare_private_file(path: &Path) -> Result<(), AppError> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    match opts.open(path) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            restrict_file_to_owner(path);
+            Ok(())
+        }
+        Err(e) => Err(AppError::io(path, e)),
+    }
+}
+
 /// 目标文件不存在时新建文件的权限策略
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NewFileMode {
@@ -887,6 +959,47 @@ mod tests {
 
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_dir_and_files_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let root = tempfile::tempdir().unwrap();
+
+        // Fresh directory (with parents) is 0700; an existing 0755 one is tightened.
+        let dir = root.path().join(".cc-switch").join("backups");
+        ensure_private_dir(&dir).unwrap();
+        assert_eq!(mode(&dir), 0o700);
+        let loose = root.path().join("loose");
+        fs::create_dir(&loose).unwrap();
+        fs::set_permissions(&loose, fs::Permissions::from_mode(0o755)).unwrap();
+        ensure_private_dir(&loose).unwrap();
+        assert_eq!(mode(&loose), 0o700);
+
+        // New file is created 0600 and empty; an existing 0644 file is tightened
+        // without touching its content.
+        let db = dir.join("cc-switch.db");
+        prepare_private_file(&db).unwrap();
+        assert_eq!(mode(&db), 0o600);
+        assert_eq!(fs::metadata(&db).unwrap().len(), 0);
+        let old = dir.join("old.db");
+        fs::write(&old, b"data").unwrap();
+        fs::set_permissions(&old, fs::Permissions::from_mode(0o644)).unwrap();
+        prepare_private_file(&old).unwrap();
+        assert_eq!(mode(&old), 0o600);
+        assert_eq!(fs::read(&old).unwrap(), b"data");
+
+        // SQLite opened on the prepared file keeps 0600 (WAL/SHM inherit it).
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE t(x);")
+            .unwrap();
+        assert_eq!(mode(&db), 0o600);
+        let wal = dir.join("cc-switch.db-wal");
+        if wal.exists() {
+            assert_eq!(mode(&wal), 0o600);
+        }
     }
 
     #[cfg(unix)]
