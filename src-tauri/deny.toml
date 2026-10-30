@@ -1,0 +1,64 @@
+# cargo-deny configuration (CI-08).
+# Run locally with: cargo deny --manifest-path src-tauri/Cargo.toml check advisories licenses
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Only evaluate the platforms we ship for.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+]
+all-features = false
+
+[advisories]
+# Vulnerabilities are always errors. Unmaintained / unsound / yanked crates are
+# reported for the whole dependency graph; add an `ignore` entry (with a
+# reason) only after triage.
+unmaintained = "all"
+unsound = "all"
+yanked = "warn"
+ignore = []
+
+[licenses]
+# The app is MIT and ships a single binary: only permissive and weak
+# file-level copyleft (MPL-2.0) licenses are allowed. GPL/AGPL/LGPL are denied
+# implicitly by not being listed.
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "CC0-1.0",
+  "Unlicense",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "BSL-1.0",
+  "CDLA-Permissive-2.0",
+  # aws-lc-sys (rustls crypto backend) carries the permissive OpenSSL license.
+  "OpenSSL",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+# The cc-switch crate itself is not published.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
