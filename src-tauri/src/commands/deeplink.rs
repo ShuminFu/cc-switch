@@ -8,7 +8,7 @@ use tauri::State;
 /// Parse a deep link URL and return the parsed request for frontend confirmation
 #[tauri::command]
 pub fn parse_deeplink(url: String) -> Result<DeepLinkImportRequest, String> {
-    log::info!("Parsing deep link URL: {url}");
+    log::info!("Parsing deep link URL: {}", crate::redact_url_for_log(&url));
     parse_deeplink_url(&url).map_err(|e| e.to_string())
 }
 
@@ -85,5 +85,33 @@ pub async fn import_from_deeplink_unified(
             }))
         }
         _ => Err(format!("Unsupported resource type: {}", request.resource)),
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use crate::redact_url_for_log;
+
+    #[test]
+    fn redact_strips_secret_query_values() {
+        let url = "ccswitch://v1/import?resource=provider&app=claude&name=Test\
+                   &apiKey=SECRET123&usageApiKey=USAGESECRET&usageAccessToken=TOKENSECRET";
+        let redacted = redact_url_for_log(url);
+
+        for secret in ["SECRET123", "USAGESECRET", "TOKENSECRET", "Test"] {
+            assert!(
+                !redacted.contains(secret),
+                "redacted URL leaked {secret}: {redacted}"
+            );
+        }
+        assert!(redacted.starts_with("ccswitch://v1/import?[keys:"));
+        assert!(redacted.contains("apiKey"));
+    }
+
+    #[test]
+    fn redact_handles_unparseable_urls_without_leaking_query() {
+        let redacted = redact_url_for_log("not a url?apiKey=SECRET123#frag");
+        assert!(!redacted.contains("SECRET123"));
+        assert_eq!(redacted, "not a url?[redacted]");
     }
 }

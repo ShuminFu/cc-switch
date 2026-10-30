@@ -92,7 +92,9 @@ fn set_windows_app_user_model_id(app: &tauri::AppHandle) {
     }
 }
 
-fn redact_url_for_log(url_str: &str) -> String {
+/// 生成可安全写入日志/发送给前端的 URL：只保留 scheme、host、path 与查询参数名，
+/// 丢弃所有查询参数值（可能包含 apiKey / usageApiKey / usageAccessToken 等密钥）。
+pub(crate) fn redact_url_for_log(url_str: &str) -> String {
     match url::Url::parse(url_str) {
         Ok(url) => {
             let mut output = format!("{}://", url.scheme());
@@ -140,7 +142,6 @@ fn handle_deeplink_url(
 
     let redacted_url = redact_url_for_log(url_str);
     log::info!("✓ Deep link URL detected from {source}: {redacted_url}");
-    log::debug!("Deep link URL (raw) from {source}: {url_str}");
 
     match crate::deeplink::parse_deeplink_url(url_str) {
         Ok(request) => {
@@ -176,7 +177,7 @@ fn handle_deeplink_url(
             if let Err(emit_err) = app.emit(
                 "deeplink-error",
                 serde_json::json!({
-                    "url": url_str,
+                    "url": redacted_url,
                     "error": e.to_string()
                 }),
             ) {
@@ -349,6 +350,21 @@ pub fn run() {
                 // 启动时删除旧日志文件，实现单文件覆盖效果
                 let log_file_path = log_dir.join("cc-switch.log");
                 let _ = std::fs::remove_file(&log_file_path);
+
+                // 日志可能包含敏感上下文：限制目录为 0700、日志文件为 0600（仅 Unix）
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+                    let _ = std::fs::set_permissions(
+                        &log_dir,
+                        std::fs::Permissions::from_mode(0o700),
+                    );
+                    let _ = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .mode(0o600)
+                        .open(&log_file_path);
+                }
 
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -1609,7 +1625,10 @@ pub fn run() {
                 RunEvent::Opened { urls } => {
                     if let Some(url) = urls.first() {
                         let url_str = url.to_string();
-                        log::info!("RunEvent::Opened with URL: {url_str}");
+                        log::info!(
+                            "RunEvent::Opened with URL: {}",
+                            redact_url_for_log(&url_str)
+                        );
 
                         if url_str.starts_with("ccswitch://") {
                             if crate::lightweight::is_lightweight_mode() {
@@ -1644,7 +1663,7 @@ pub fn run() {
                                     if let Err(emit_err) = app_handle.emit(
                                         "deeplink-error",
                                         serde_json::json!({
-                                            "url": url_str,
+                                            "url": redact_url_for_log(&url_str),
                                             "error": e.to_string()
                                         }),
                                     ) {
