@@ -91,6 +91,31 @@ fn copilot_api_base(domain: &str) -> String {
 /// Token 刷新提前量（秒）
 const TOKEN_REFRESH_BUFFER_SECONDS: i64 = 60;
 
+/// How long a fetched Copilot `/models` list is reused before it is fetched
+/// again (PROV-41: it used to live for the whole process, although the
+/// forwarder documents a 5-minute cache).
+const COPILOT_MODELS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// A cached Copilot `/models` list and when it was fetched.
+#[derive(Debug, Clone)]
+struct CachedCopilotModels {
+    fetched_at: std::time::Instant,
+    models: Vec<CopilotModel>,
+}
+
+impl CachedCopilotModels {
+    fn new(models: Vec<CopilotModel>) -> Self {
+        Self {
+            fetched_at: std::time::Instant::now(),
+            models,
+        }
+    }
+
+    fn is_fresh(&self) -> bool {
+        self.fetched_at.elapsed() < COPILOT_MODELS_CACHE_TTL
+    }
+}
+
 /// 判断是否为 GitHub Enterprise Server（非 github.com）
 fn is_ghes(domain: &str) -> bool {
     domain != DEFAULT_GITHUB_DOMAIN
@@ -418,7 +443,7 @@ pub struct CopilotAuthManager {
     /// Copilot Token 缓存（key = GitHub user ID，内存缓存，自动刷新）
     copilot_tokens: Arc<RwLock<HashMap<String, CopilotToken>>>,
     /// Copilot Models 缓存（key = GitHub user ID，仅进程内复用）
-    copilot_models: Arc<RwLock<HashMap<String, Vec<CopilotModel>>>>,
+    copilot_models: Arc<RwLock<HashMap<String, CachedCopilotModels>>>,
     /// Copilot API 端点缓存（key = GitHub user ID，从 /copilot_internal/user 获取）
     api_endpoints: Arc<RwLock<HashMap<String, String>>>,
     /// 每个账号的端点拉取锁，避免并发拉取重复打 GitHub API
@@ -429,7 +454,13 @@ pub struct CopilotAuthManager {
     pending_migration: Arc<RwLock<Option<String>>>,
     /// 旧认证数据迁移失败时的状态消息
     migration_error: Arc<RwLock<Option<String>>>,
+    /// Negative cache of GitHub tokens rejected by the Copilot token exchange
+    /// (PROV-09): `account_id -> (github_token, rejected_at)`.
+    token_failures: Arc<RwLock<HashMap<String, (String, std::time::Instant)>>>,
 }
+
+/// How long a GitHub token rejected with 401/403 is not retried (PROV-09).
+const GITHUB_TOKEN_FAILURE_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 impl CopilotAuthManager {
     /// 创建新的认证管理器
@@ -447,6 +478,7 @@ impl CopilotAuthManager {
             storage_path,
             pending_migration: Arc::new(RwLock::new(None)),
             migration_error: Arc::new(RwLock::new(None)),
+            token_failures: Arc::new(RwLock::new(HashMap::new())),
         };
 
         // 尝试从磁盘加载（同步，不发起网络请求）
@@ -763,9 +795,33 @@ impl CopilotAuthManager {
             (account.github_token.clone(), account.github_domain.clone())
         };
 
+        if self
+            .github_token_recently_rejected(account_id, &github_token)
+            .await
+        {
+            log::warn!(
+                "[CopilotAuth] 账号 {account_id} 的 GitHub token 最近被拒绝，跳过刷新（需要重新登录）"
+            );
+            return Err(CopilotAuthError::GitHubTokenInvalid);
+        }
+
         // 刷新 Copilot token
-        self.fetch_copilot_token_with_github_token(&github_token, account_id, &domain)
-            .await?;
+        match self
+            .fetch_copilot_token_with_github_token(&github_token, account_id, &domain)
+            .await
+        {
+            Ok(_) => {
+                self.token_failures.write().await.remove(account_id);
+            }
+            Err(CopilotAuthError::GitHubTokenInvalid) => {
+                self.token_failures.write().await.insert(
+                    account_id.to_string(),
+                    (github_token.clone(), std::time::Instant::now()),
+                );
+                return Err(CopilotAuthError::GitHubTokenInvalid);
+            }
+            Err(error) => return Err(error),
+        }
 
         // 返回新 token
         let tokens = self.copilot_tokens.read().await;
@@ -794,19 +850,49 @@ impl CopilotAuthManager {
     ) -> Result<Vec<CopilotModel>, CopilotAuthError> {
         self.ensure_migration_complete().await?;
 
-        {
-            let models = self.copilot_models.read().await;
-            if let Some(cached) = models.get(account_id) {
-                return Ok(cached.clone());
-            }
+        if let Some(cached) = self.cached_models_for_account(account_id).await {
+            return Ok(cached);
         }
 
         let models = self.fetch_models_for_account_uncached(account_id).await?;
         {
             let mut cache = self.copilot_models.write().await;
-            cache.insert(account_id.to_string(), models.clone());
+            cache.insert(
+                account_id.to_string(),
+                CachedCopilotModels::new(models.clone()),
+            );
         }
         Ok(models)
+    }
+
+    /// Whether `github_token` was rejected for `account_id` within
+    /// [`GITHUB_TOKEN_FAILURE_BACKOFF`]. A new login (different token) is never
+    /// blocked by an old failure.
+    async fn github_token_recently_rejected(&self, account_id: &str, github_token: &str) -> bool {
+        self.token_failures
+            .read()
+            .await
+            .get(account_id)
+            .is_some_and(|(token, at)| {
+                token == github_token && at.elapsed() < GITHUB_TOKEN_FAILURE_BACKOFF
+            })
+    }
+
+    /// The cached `/models` list for an account, if it is still within
+    /// [`COPILOT_MODELS_CACHE_TTL`].
+    async fn cached_models_for_account(&self, account_id: &str) -> Option<Vec<CopilotModel>> {
+        let models = self.copilot_models.read().await;
+        models
+            .get(account_id)
+            .filter(|cached| cached.is_fresh())
+            .map(|cached| cached.models.clone())
+    }
+
+    /// Drop the cached `/models` list so the next lookup refetches it, e.g.
+    /// after an upstream `model_not_supported` error (PROV-41).
+    #[allow(dead_code)] // wired by the forwarder's error path
+    pub async fn invalidate_models_cache(&self, account_id: &str) {
+        self.copilot_models.write().await.remove(account_id);
     }
 
     async fn fetch_models_for_account_uncached(
@@ -1718,7 +1804,7 @@ mod tests {
             let mut models = manager.copilot_models.write().await;
             models.insert(
                 "12345".to_string(),
-                vec![
+                CachedCopilotModels::new(vec![
                     CopilotModel {
                         id: "gpt-5.4".to_string(),
                         name: "GPT-5.4".to_string(),
@@ -1731,7 +1817,7 @@ mod tests {
                         vendor: "Anthropic".to_string(),
                         model_picker_enabled: true,
                     },
-                ],
+                ]),
             );
         }
 
@@ -1743,6 +1829,63 @@ mod tests {
 
         let default_vendor = manager.get_model_vendor("claude-sonnet-4").await.unwrap();
         assert_eq!(default_vendor.as_deref(), Some("Anthropic"));
+    }
+
+    #[tokio::test]
+    async fn test_rejected_github_token_is_negatively_cached() {
+        let temp_dir = tempdir().unwrap();
+        let manager = CopilotAuthManager::new(temp_dir.path().to_path_buf());
+        manager.token_failures.write().await.insert(
+            "12345".to_string(),
+            ("gho_old".to_string(), std::time::Instant::now()),
+        );
+        assert!(
+            manager
+                .github_token_recently_rejected("12345", "gho_old")
+                .await
+        );
+        assert!(
+            !manager
+                .github_token_recently_rejected("12345", "gho_new")
+                .await
+        );
+        assert!(
+            !manager
+                .github_token_recently_rejected("other", "gho_old")
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn test_models_cache_expires_after_ttl() {
+        let temp_dir = tempdir().unwrap();
+        let manager = CopilotAuthManager::new(temp_dir.path().to_path_buf());
+        let model = CopilotModel {
+            id: "gpt-5.4".to_string(),
+            name: "GPT-5.4".to_string(),
+            vendor: "OpenAI".to_string(),
+            model_picker_enabled: true,
+        };
+        manager.copilot_models.write().await.insert(
+            "fresh".to_string(),
+            CachedCopilotModels::new(vec![model.clone()]),
+        );
+        let stale_at = std::time::Instant::now()
+            .checked_sub(COPILOT_MODELS_CACHE_TTL + std::time::Duration::from_secs(1))
+            .expect("monotonic clock far enough from boot");
+        manager.copilot_models.write().await.insert(
+            "stale".to_string(),
+            CachedCopilotModels {
+                fetched_at: stale_at,
+                models: vec![model],
+            },
+        );
+
+        assert!(manager.cached_models_for_account("fresh").await.is_some());
+        assert!(manager.cached_models_for_account("stale").await.is_none());
+
+        manager.invalidate_models_cache("fresh").await;
+        assert!(manager.cached_models_for_account("fresh").await.is_none());
     }
 
     #[tokio::test]
