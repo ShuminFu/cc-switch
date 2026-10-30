@@ -12,6 +12,7 @@ const STEP_NAME = "Validate Tauri signing key";
 
 interface Step {
   name?: string;
+  if?: unknown;
   shell?: string;
   run?: string;
 }
@@ -24,6 +25,8 @@ function validateScript(): string {
     (s) => s.name === STEP_NAME,
   );
   expect(steps).toHaveLength(1);
+  // 不能带步骤级 if:，否则某些平台会跳过校验而本测试仍然通过
+  expect(steps[0].if).toBeUndefined();
   expect(steps[0].shell).toBe("bash");
   expect(typeof steps[0].run).toBe("string");
   return steps[0].run!;
