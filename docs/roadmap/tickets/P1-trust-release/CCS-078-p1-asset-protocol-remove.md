@@ -1,6 +1,6 @@
 # CCS-078: [security] Remove the unused asset protocol and protocol-asset feature
 
-**Status:** Partial · **Kind:** security · **Labels:** `security`, `phase:P1`, `p3-low`, `area:security`
+**Status:** Done · **Kind:** security · **Labels:** `security`, `phase:P1`, `p3-low`, `area:security`
 
 > **Ticket key:** `p1-asset-protocol-remove` · **Phase:** P1 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -16,7 +16,7 @@ Remove both together, because tauri-build checks that they match.
 
 ## Acceptance criteria / verification
 - [x] `cargo check --manifest-path src-tauri/Cargo.toml` passes
-- [ ] `grep -rn 'convertFileSrc\|asset://' src` finds nothing; icons still render in `pnpm tauri dev`
+- [x] `grep -rn 'convertFileSrc\|asset://' src` finds nothing; icons still render in `pnpm tauri dev`
 
 ## Dependencies
 None.
@@ -38,3 +38,12 @@ None.
 
 - Blocked: nothing; every remaining item is codable.
 - Follow-up [CCS-226](../P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md): Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec.
+
+### Closed by CCS-226
+
+"Icons still render" is checked at runtime by `e2e/specs/csp.e2e.mjs` (commit
+`837cdc0`) in WebKitGTK as the substitute for `pnpm tauri dev`: every provider-card
+`<img>` (including a bundled `iconUrls` image) is loaded with `naturalWidth > 0` and none
+uses `asset:`, inline-SVG icons have a non-zero size, and the Settings > About app icon
+loads. `git grep -n 'convertFileSrc\|asset://' -- src` is still empty. Run details are in
+[CCS-226](CCS-226-p1-e2e-csp-icons-runtime.md).

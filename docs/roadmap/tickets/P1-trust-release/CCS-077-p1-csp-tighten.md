@@ -1,6 +1,6 @@
 # CCS-077: [security] Narrow the CSP connect-src and img-src
 
-**Status:** Partial · **Kind:** security · **Labels:** `security`, `phase:P1`, `p3-low`, `area:security`
+**Status:** Done · **Kind:** security · **Labels:** `security`, `phase:P1`, `p3-low`, `area:security`
 
 > **Ticket key:** `p1-csp-tighten` · **Phase:** P1 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -15,9 +15,9 @@ Verified finding ci-csp-too-wide, partially real. The critique notes that "tight
 Set connect-src to `'self' ipc: http://ipc.localhost https://models.dev`, or move the fetch into a command. Remove `http:` from img-src.
 
 ## Acceptance criteria / verification
-- [ ] `pnpm tauri dev`: the models.dev picker loads, the Copilot avatar and URL icons render, and there are no CSP violations
-- [ ] In devtools, `fetch('https://example.com')` is blocked
-- [ ] `grep -rn 'fetch(' src` confirms no other direct fetches
+- [x] `pnpm tauri dev`: the models.dev picker loads, the Copilot avatar and URL icons render, and there are no CSP violations
+- [x] In devtools, `fetch('https://example.com')` is blocked
+- [x] `grep -rn 'fetch(' src` confirms no other direct fetches
 
 ## Dependencies
 None.
@@ -74,3 +74,16 @@ Partial until the two `pnpm tauri dev` devtools checks are run in an interactive
 - Blocked: Literal wording 'check in `pnpm tauri dev` with devtools'. Needs interactive desktop use; CCS-226 is the substitute and should be enough to close the ticket.
 - Blocked: Real Copilot avatar from a logged-in account. Needs Copilot OAuth credentials and interactive login.
 - Follow-up [CCS-226](../P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md): Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec.
+
+### Closed by CCS-226
+
+The headless WebKitGTK spec `e2e/specs/csp.e2e.mjs` (commit `837cdc0`) stands in for
+the devtools check, against the debug build that ships. It reads the served policy,
+records a `connect-src` violation for `fetch('https://example.com/')` (item 2), records
+no violation for a `HEAD https://models.dev/api.json`, for an `avatars.githubusercontent.com`
+image (the Copilot avatar host) or while visiting the main views, and checks that the
+bundled URL icons render (item 1). Item 3 stays enforced by `tests/lint/csp.test.ts`.
+The `ProviderFormFull.tsx` review defect is resolved: that file is no longer imported or
+needed in the tree. A real logged-in Copilot avatar was not loaded (needs OAuth); the
+same https host is covered by the injected image. Run details are in
+[CCS-226](CCS-226-p1-e2e-csp-icons-runtime.md).
