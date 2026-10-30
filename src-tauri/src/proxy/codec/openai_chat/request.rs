@@ -4,6 +4,7 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::proxy::codec::json_number as number;
 use crate::proxy::protocol::ir::{
     ChatRequest, MediaSource, Message, Part, ReasoningConfig, Role, ToolChoice,
 };
@@ -77,16 +78,6 @@ pub(super) fn encode_request(request: &ChatRequest, preserve_reasoning_content: 
     }
 
     Value::Object(result)
-}
-
-/// JSON 数字：整数值的浮点按整数输出（客户端发 `1` 时上游收到 `1` 而不是 `1.0`）
-fn number(value: f64) -> Value {
-    const MAX_EXACT: f64 = 9_007_199_254_740_992.0; // 2^53
-    if value.fract() == 0.0 && value.abs() < MAX_EXACT {
-        json!(value as i64)
-    } else {
-        json!(value)
-    }
 }
 
 /// system 提示放在最前面，多个文本块合并为一条 system 消息

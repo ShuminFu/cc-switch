@@ -5,7 +5,7 @@
 //! responses for Claude-compatible clients.
 
 use super::gemini_schema::build_gemini_function_declaration;
-use super::gemini_shadow::{GeminiAssistantTurn, GeminiShadowStore, GeminiToolCallMeta};
+use super::gemini_shadow::{GeminiAssistantTurn, GeminiShadowStore};
 use crate::proxy::codec::side_store::{SessionSideStore, SideStoreScope};
 use crate::proxy::error::ProxyError;
 use crate::proxy::protocol::StopReason;
@@ -13,40 +13,20 @@ use crate::proxy::usage::ir::UsageIR;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AnthropicToolSchemaHint {
-    expected_keys: Vec<String>,
-    required_keys: Vec<String>,
-}
-
-pub type AnthropicToolSchemaHints = HashMap<String, AnthropicToolSchemaHint>;
-
-/// Prefix used for Anthropic-visible tool call ids that we synthesize when
-/// Gemini's `functionCall` omits the `id` field (Gemini 2.x parallel calls
-/// often do). The prefix is how downstream request-path code recognizes that
-/// the id is not a real Gemini id and must be stripped before forwarding back
-/// to Gemini as `functionResponse.id`.
-pub(crate) const SYNTHESIZED_ID_PREFIX: &str = "gemini_synth_";
-
-/// Generate a unique tool-call id that is safe to expose to Anthropic clients
-/// but must not be sent upstream to Gemini. Uses UUID v4 simple encoding
-/// (32 lowercase hex chars) so that any number of parallel calls in the same
-/// response remain distinguishable.
-pub(crate) fn synthesize_tool_call_id() -> String {
-    format!("{SYNTHESIZED_ID_PREFIX}{}", uuid::Uuid::new_v4().simple())
-}
-
-/// Returns true if `id` was produced by [`synthesize_tool_call_id`] and
-/// therefore must be stripped when building Gemini request bodies.
-pub(crate) fn is_synthesized_tool_call_id(id: &str) -> bool {
-    id.starts_with(SYNTHESIZED_ID_PREFIX)
-}
+// functionCall 的共用处理已移到 Gemini 编解码，这里重新导出以保持既有调用路径
+pub use crate::proxy::codec::gemini::tool_calls::{
+    extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints,
+};
+use crate::proxy::codec::gemini::tool_calls::{
+    extract_tool_call_meta, is_synthesized_tool_call_id, rectify_tool_call_parts, shadow_parts,
+    synthesize_tool_call_id,
+};
 
 /// Anthropic 请求 → Gemini 原生请求。
 ///
 /// 转换工具库 API：当前无生产调用方（连通性检查不再发真实请求，曾是其唯一 crate 内
 /// 消费者），但保留其转换逻辑与下方测试套件，供代理转换路径复用 / 未来接线。
-#[cfg(any(test, feature = "testkit"))]
+#[cfg(test)]
 pub fn anthropic_to_gemini(body: Value) -> Result<Value, ProxyError> {
     anthropic_to_gemini_with_shadow(body, None, None, None)
 }
@@ -733,209 +713,6 @@ fn normalize_tool_result_response(content: Option<&Value>) -> Value {
     }
 }
 
-fn shadow_parts(content: &Value) -> Option<Vec<Value>> {
-    let mut parts = content
-        .get("parts")
-        .and_then(|value| value.as_array())
-        .cloned()
-        .or_else(|| content.as_array().cloned())?;
-    // Strip synthesized ids before these parts are replayed into a Gemini
-    // request body. The shadow store records the Anthropic-facing id so that
-    // a tool_result round-trip can find the tool's name, but sending the
-    // synthetic value as `functionCall.id` upstream would leak an internal
-    // identifier.
-    for part in &mut parts {
-        let Some(function_call) = part.get_mut("functionCall").and_then(|v| v.as_object_mut())
-        else {
-            continue;
-        };
-        let drop_id = function_call
-            .get("id")
-            .and_then(|v| v.as_str())
-            .map(|id| id.is_empty() || is_synthesized_tool_call_id(id))
-            .unwrap_or(true);
-        if drop_id {
-            function_call.remove("id");
-        }
-    }
-    Some(parts)
-}
-
-pub fn extract_anthropic_tool_schema_hints(body: &Value) -> AnthropicToolSchemaHints {
-    body.get("tools")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|tool| {
-            let name = tool.get("name").and_then(|value| value.as_str())?;
-            let input_schema = tool
-                .get("input_schema")
-                .and_then(|value| value.as_object())?;
-            let properties = input_schema
-                .get("properties")
-                .and_then(|value| value.as_object())?;
-            if properties.is_empty() {
-                return None;
-            }
-
-            let expected_keys = properties.keys().cloned().collect::<Vec<_>>();
-            let required_keys = input_schema
-                .get("required")
-                .and_then(|value| value.as_array())
-                .map(|values| {
-                    values
-                        .iter()
-                        .filter_map(|value| value.as_str().map(ToString::to_string))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-
-            Some((
-                name.to_string(),
-                AnthropicToolSchemaHint {
-                    expected_keys,
-                    required_keys,
-                },
-            ))
-        })
-        .collect()
-}
-
-pub fn rectify_tool_call_parts(
-    parts: &mut [Value],
-    tool_schema_hints: Option<&AnthropicToolSchemaHints>,
-) {
-    for part in parts {
-        let Some(function_call) = part
-            .get_mut("functionCall")
-            .and_then(|value| value.as_object_mut())
-        else {
-            continue;
-        };
-        let Some(name) = function_call
-            .get("name")
-            .and_then(|value| value.as_str())
-            .map(ToString::to_string)
-        else {
-            continue;
-        };
-        let Some(args) = function_call.get_mut("args") else {
-            continue;
-        };
-
-        if rectify_tool_call_args(&name, args, tool_schema_hints) {
-            log::info!("[Claude/Gemini] Rectified tool args for `{name}`");
-        }
-    }
-}
-
-pub fn rectify_tool_call_args(
-    tool_name: &str,
-    args: &mut Value,
-    tool_schema_hints: Option<&AnthropicToolSchemaHints>,
-) -> bool {
-    let Some(tool_schema_hints) = tool_schema_hints else {
-        return false;
-    };
-    let Some(hint) = tool_schema_hints.get(tool_name) else {
-        return false;
-    };
-    let Some(args_object) = args.as_object_mut() else {
-        return false;
-    };
-    if args_object.is_empty() || hint.expected_keys.is_empty() {
-        return false;
-    }
-    let mut changed = false;
-
-    if hint.expected_keys.iter().any(|key| key == "skill") && !args_object.contains_key("skill") {
-        if let Some(value) = args_object.remove("name") {
-            args_object.insert("skill".to_string(), value);
-            changed = true;
-        }
-    }
-
-    let expects_parameters_key = hint.expected_keys.iter().any(|key| key == "parameters");
-    if !expects_parameters_key {
-        let extracted_parameters = args_object
-            .get("parameters")
-            .and_then(|value| value.as_object())
-            .map(|parameters_object| {
-                hint.expected_keys
-                    .iter()
-                    .filter_map(|expected_key| {
-                        if args_object.contains_key(expected_key) {
-                            return None;
-                        }
-                        let value = parameters_object.get(expected_key)?;
-                        let normalized_value = match value {
-                            Value::Array(values) if values.len() == 1 => values[0].clone(),
-                            _ => value.clone(),
-                        };
-                        Some((expected_key.clone(), normalized_value))
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        if !extracted_parameters.is_empty() {
-            for (expected_key, normalized_value) in extracted_parameters {
-                args_object.insert(expected_key, normalized_value);
-            }
-            args_object.remove("parameters");
-            changed = true;
-        }
-    }
-
-    if hint
-        .required_keys
-        .iter()
-        .all(|key| args_object.contains_key(key.as_str()))
-    {
-        return changed;
-    }
-
-    let expected_key_set = hint
-        .expected_keys
-        .iter()
-        .map(String::as_str)
-        .collect::<HashSet<_>>();
-    let unexpected_keys = args_object
-        .keys()
-        .filter(|key| !expected_key_set.contains(key.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    if unexpected_keys.len() != 1 {
-        return false;
-    }
-
-    let target_key = hint
-        .required_keys
-        .iter()
-        .find(|key| !args_object.contains_key(key.as_str()))
-        .cloned()
-        .or_else(|| {
-            if hint.expected_keys.len() == 1 && args_object.len() == 1 {
-                hint.expected_keys.first().cloned()
-            } else {
-                None
-            }
-        });
-    let Some(target_key) = target_key else {
-        return false;
-    };
-    if args_object.contains_key(&target_key) {
-        return false;
-    }
-
-    let source_key = &unexpected_keys[0];
-    let Some(value) = args_object.remove(source_key) else {
-        return false;
-    };
-    args_object.insert(target_key, value);
-    true
-}
-
 fn merge_tool_names_from_shadow(
     turn: &GeminiAssistantTurn,
     tool_name_by_id: &mut HashMap<String, String>,
@@ -997,39 +774,6 @@ fn merge_tool_names_from_parts(parts: &[Value], tool_name_by_id: &mut HashMap<St
             tool_name_by_id.insert(id.to_string(), name.to_string());
         }
     }
-}
-
-fn extract_tool_call_meta(parts: &[Value]) -> Vec<GeminiToolCallMeta> {
-    parts
-        .iter()
-        .filter_map(|part| {
-            let function_call = part.get("functionCall")?;
-            // Ensure every surfaced tool call carries a distinguishing id.
-            // Gemini 2.x may omit `id` on parallel calls; synthesizing a
-            // unique replacement prevents downstream merge/replay logic from
-            // collapsing distinct calls onto a single empty-string key.
-            let id = function_call
-                .get("id")
-                .and_then(|value| value.as_str())
-                .filter(|s| !s.is_empty())
-                .map(ToString::to_string)
-                .unwrap_or_else(synthesize_tool_call_id);
-            Some(GeminiToolCallMeta::new(
-                Some(id),
-                function_call
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or(""),
-                function_call
-                    .get("args")
-                    .cloned()
-                    .unwrap_or_else(|| json!({})),
-                part.get("thoughtSignature")
-                    .or_else(|| part.get("thought_signature"))
-                    .and_then(|value| value.as_str()),
-            ))
-        })
-        .collect()
 }
 
 fn map_tool_choice(tool_choice: Option<&Value>) -> Result<Option<Value>, ProxyError> {
@@ -1102,6 +846,7 @@ pub(crate) fn build_anthropic_usage(usage: Option<&Value>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::providers::gemini_shadow::GeminiToolCallMeta;
 
     #[test]
     fn anthropic_to_gemini_maps_system_and_messages() {

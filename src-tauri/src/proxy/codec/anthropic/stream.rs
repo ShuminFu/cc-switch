@@ -3,6 +3,8 @@
 //! 事件与 SSE 帧一一对应，块序号直接沿用 IR 的 `index`（解码端负责按
 //! Anthropic 的要求从 0 开始依次分配）。`message_delta` 携带最后一次
 //! [`StreamEvent::Usage`]；收到 `MessageStop` 或 `Error` 后不再输出任何帧。
+//! `message_start` 默认只报告输入侧 usage（输出 token 置 0）；
+//! [`AnthropicEventEncoder::with_start_output_tokens`] 原样报告开始时的完整 usage。
 
 use bytes::Bytes;
 use serde_json::{json, Value};
@@ -17,6 +19,8 @@ pub struct AnthropicEventEncoder {
     started: bool,
     finished: bool,
     usage: Option<UsageIR>,
+    /// `message_start` 保留开始时 usage 的输出 token（旧 Gemini 转换器的形状）
+    start_output_tokens: bool,
 }
 
 fn sse(event: &str, payload: &Value) -> Bytes {
@@ -35,12 +39,23 @@ impl AnthropicEventEncoder {
         Self::default()
     }
 
+    /// `message_start` 原样报告 [`StreamEvent::MessageStart`] 携带的 usage（含输出 token）
+    pub fn with_start_output_tokens() -> Self {
+        Self {
+            start_output_tokens: true,
+            ..Self::default()
+        }
+    }
+
     fn message_start(&mut self, id: &str, model: &str, usage: Option<UsageIR>) -> Bytes {
         self.started = true;
         // 开始时只报告输入侧 usage，输出 token 由 message_delta 给出
+        let keep_output = self.start_output_tokens;
         let usage = usage.map_or_else(zero_usage, |usage| {
             let mut usage = usage.to_anthropic();
-            usage["output_tokens"] = json!(0);
+            if !keep_output {
+                usage["output_tokens"] = json!(0);
+            }
             usage
         });
         sse(

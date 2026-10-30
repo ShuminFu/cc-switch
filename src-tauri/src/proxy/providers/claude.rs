@@ -403,11 +403,12 @@ pub fn transform_claude_request_for_api_format(
             super::transform::inject_openai_stream_include_usage(&mut result);
             Ok(result)
         }
-        ClaudeApiFormat::GeminiNative => super::transform_gemini::anthropic_to_gemini_with_shadow(
+        ClaudeApiFormat::GeminiNative => crate::proxy::codec::bridge::anthropic_to_gemini_request(
             body,
             shadow_store,
             Some(&provider.id),
             session_id,
+            crate::settings::codec_engine(),
         ),
         ClaudeApiFormat::Anthropic => Ok(body),
     }

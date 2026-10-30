@@ -491,12 +491,15 @@ async fn handle_claude_transform(
     let transform_result = if api_format == ClaudeApiFormat::OpenAiResponses {
         transform_responses::responses_to_anthropic(upstream_response)
     } else if api_format == ClaudeApiFormat::GeminiNative {
-        transform_gemini::gemini_to_anthropic_with_shadow_and_hints(
+        crate::proxy::codec::bridge::gemini_to_anthropic_response(
             upstream_response,
-            Some(state.gemini_shadow.as_ref()),
-            Some(&ctx.provider.id),
-            Some(&ctx.session_id),
+            crate::proxy::codec::gemini::GeminiShadowSink::new(
+                Some(state.gemini_shadow.clone()),
+                Some(ctx.provider.id.clone()),
+                Some(ctx.session_id.clone()),
+            ),
             tool_schema_hints.as_ref(),
+            crate::settings::codec_engine(),
         )
     } else {
         crate::proxy::codec::bridge::openai_chat_to_anthropic_response(

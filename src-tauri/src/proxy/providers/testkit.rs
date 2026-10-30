@@ -36,14 +36,9 @@ use super::transform_codex_chat::{
     build_codex_tool_context_from_request, chat_completion_to_response_with_context,
     responses_to_chat_completions_with_reasoning, CodexToolContext,
 };
-use super::transform_gemini::{
-    anthropic_to_gemini, extract_anthropic_tool_schema_hints,
-    gemini_to_anthropic_with_shadow_and_hints, AnthropicToolSchemaHints,
-};
+use super::transform_gemini::{extract_anthropic_tool_schema_hints, AnthropicToolSchemaHints};
 use super::transform_responses::{anthropic_to_responses, responses_to_anthropic};
-use super::{
-    streaming_codex_anthropic, streaming_codex_chat, streaming_gemini, streaming_responses,
-};
+use super::{streaming_codex_anthropic, streaming_codex_chat, streaming_responses};
 use crate::proxy::codec::bridge;
 pub use crate::proxy::codec::CodecEngine;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
@@ -472,7 +467,10 @@ pub fn convert_request_with(
             inject_openai_stream_include_usage(&mut converted);
             converted
         }),
-        Bridge::AnthropicGemini => anthropic_to_gemini(body),
+        // No shadow store: fixtures carry their full history.
+        Bridge::AnthropicGemini => {
+            bridge::anthropic_to_gemini_request(body, None, None, None, engine)
+        }
         // No prompt_cache_key and no fast mode: both depend on provider config.
         Bridge::AnthropicResponses => {
             anthropic_to_responses(body, None, fixture.meta.options.codex_oauth, false)
@@ -506,12 +504,11 @@ pub fn convert_non_stream_with(
     let body = fixture.upstream_json.clone()?;
     let result = match fixture.bridge {
         Bridge::AnthropicOpenAiChat => bridge::openai_chat_to_anthropic_response(body, engine),
-        Bridge::AnthropicGemini => gemini_to_anthropic_with_shadow_and_hints(
+        Bridge::AnthropicGemini => bridge::gemini_to_anthropic_response(
             body,
             None,
-            None,
-            None,
             fixture.tool_schema_hints().as_ref(),
+            engine,
         ),
         Bridge::AnthropicResponses => responses_to_anthropic(body),
         Bridge::ResponsesChat => {
@@ -558,14 +555,8 @@ pub fn stream_output_with(
             bridge::openai_chat_to_anthropic_sse(upstream, engine).collect(),
         ),
         Bridge::AnthropicGemini => futures::executor::block_on(
-            streaming_gemini::create_anthropic_sse_stream_from_gemini(
-                upstream,
-                None,
-                None,
-                None,
-                fixture.tool_schema_hints(),
-            )
-            .collect(),
+            bridge::gemini_to_anthropic_sse(upstream, None, fixture.tool_schema_hints(), engine)
+                .collect(),
         ),
         Bridge::AnthropicResponses => futures::executor::block_on(
             streaming_responses::create_anthropic_sse_stream_from_responses(upstream).collect(),

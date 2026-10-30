@@ -99,13 +99,53 @@ fn golden_anthropic_openai_chat_ir() {
     run_bridge_with(Bridge::AnthropicOpenAiChat, CodecEngine::Ir);
 }
 
-/// Raw client SSE output (bytes, or the error text of an `Err` item).
+/// Prefix of the random tool-call ids the Gemini bridge synthesizes.
+const SYNTHESIZED_ID_PREFIX: &[u8] = b"gemini_synth_";
+/// Length of the UUID (simple encoding) after the prefix.
+const SYNTHESIZED_ID_HEX_LEN: usize = 32;
+
+/// Replace each distinct synthesized tool-call id with `gemini_synth_<n>`
+/// (numbered by first appearance), so two runs compare byte for byte.
+fn normalize_synthesized_ids(bytes: &[u8], seen: &mut Vec<Vec<u8>>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut rest = bytes;
+    while let Some(at) = rest
+        .windows(SYNTHESIZED_ID_PREFIX.len())
+        .position(|window| window == SYNTHESIZED_ID_PREFIX)
+    {
+        let id_end = at + SYNTHESIZED_ID_PREFIX.len() + SYNTHESIZED_ID_HEX_LEN;
+        out.extend_from_slice(&rest[..at]);
+        if rest.len() < id_end {
+            out.extend_from_slice(&rest[at..]);
+            return out;
+        }
+        let id = rest[at..id_end].to_vec();
+        let number = match seen.iter().position(|known| *known == id) {
+            Some(number) => number,
+            None => {
+                seen.push(id);
+                seen.len() - 1
+            }
+        };
+        out.extend_from_slice(format!("gemini_synth_{number}").as_bytes());
+        rest = &rest[id_end..];
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// Raw client SSE output (bytes, or the error text of an `Err` item), with
+/// synthesized tool-call ids normalized.
 fn raw_stream(fixture: &Fixture, engine: CodecEngine) -> Option<Vec<Result<Vec<u8>, String>>> {
     let input = fixture.upstream_sse.as_deref()?;
+    let mut seen = Vec::new();
     Some(
         testkit::stream_output_with(fixture, &[input], engine)
             .into_iter()
-            .map(|item| item.map(|bytes| bytes.to_vec()).map_err(|e| e.to_string()))
+            .map(|item| {
+                item.map(|bytes| normalize_synthesized_ids(&bytes, &mut seen))
+                    .map_err(|e| e.to_string())
+            })
             .collect(),
     )
 }
@@ -171,6 +211,16 @@ fn codec_parity_anthropic_openai_chat() {
 #[test]
 fn golden_anthropic_gemini() {
     run_bridge(Bridge::AnthropicGemini);
+}
+
+#[test]
+fn golden_anthropic_gemini_ir() {
+    run_bridge_with(Bridge::AnthropicGemini, CodecEngine::Ir);
+}
+
+#[test]
+fn codec_parity_anthropic_gemini() {
+    assert_codec_parity(Bridge::AnthropicGemini);
 }
 
 #[test]

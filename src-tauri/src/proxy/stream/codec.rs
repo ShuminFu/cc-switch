@@ -13,7 +13,8 @@ use bytes::Bytes;
 use futures::Stream;
 use serde_json::Value;
 
-use crate::proxy::codec::bridge::openai_chat_to_anthropic_sse;
+use crate::proxy::codec::bridge::{gemini_to_anthropic_sse, openai_chat_to_anthropic_sse};
+use crate::proxy::codec::gemini::GeminiShadowSink;
 use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
 use crate::proxy::providers::{
     codex_chat_history::{record_responses_sse_stream, CodexChatHistoryStore},
@@ -23,7 +24,6 @@ use crate::proxy::providers::{
         responses_sse_events_from_anthropic_message,
     },
     streaming_codex_chat::create_responses_sse_stream_from_chat_with_context,
-    streaming_gemini::create_anthropic_sse_stream_from_gemini,
     streaming_responses::create_anthropic_sse_stream_from_responses,
     transform_codex_chat::CodexToolContext,
     transform_gemini::AnthropicToolSchemaHints,
@@ -105,13 +105,12 @@ impl StreamDecoder for GeminiToAnthropic {
     }
     fn decode(self: Box<Self>, upstream: ByteStream) -> ByteStream {
         let this = *self;
-        Box::pin(create_anthropic_sse_stream_from_gemini(
+        gemini_to_anthropic_sse(
             upstream,
-            this.shadow_store,
-            this.provider_id,
-            this.session_id,
+            GeminiShadowSink::new(this.shadow_store, this.provider_id, this.session_id),
             this.tool_schema_hints,
-        ))
+            crate::settings::codec_engine(),
+        )
     }
 }
 

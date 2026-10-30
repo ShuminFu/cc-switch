@@ -12,7 +12,8 @@
 //!
 //! 迁移期间由 [`CodecEngine`]（设置项 `codecEngine`）决定桥接走旧转换器还是编解码；
 //! 各桥接按 anthropic←openai_chat、gemini、responses 的顺序逐个迁移，入口见 [`bridge`]。
-//! 已迁移：anthropic←openai_chat（[`anthropic`] + [`openai_chat`]，CCS-176）。
+//! 已迁移：anthropic←openai_chat（[`anthropic`] + [`openai_chat`]，CCS-176）、
+//! anthropic←gemini（[`anthropic`] + [`gemini`]，CCS-177）。
 
 // 桥接逐个迁移到编解码；尚未迁移的桥接对应的部分 IR 与编解码项暂无调用方。
 #![allow(dead_code)]
@@ -28,6 +29,7 @@ use crate::proxy::protocol::WireFormat;
 
 pub mod anthropic;
 pub mod bridge;
+pub mod gemini;
 pub mod openai_chat;
 pub mod side_store;
 pub mod transcode;
@@ -93,6 +95,16 @@ impl<'de> Deserialize<'de> for CodecEngine {
                 Ok(Self::Legacy)
             }
         }
+    }
+}
+
+/// JSON 数字：整数值的浮点按整数输出（客户端发 `1` 时上游收到 `1` 而不是 `1.0`）
+pub(crate) fn json_number(value: f64) -> Value {
+    const MAX_EXACT: f64 = 9_007_199_254_740_992.0; // 2^53
+    if value.fract() == 0.0 && value.abs() < MAX_EXACT {
+        serde_json::json!(value as i64)
+    } else {
+        serde_json::json!(value)
     }
 }
 
