@@ -1,4 +1,5 @@
 import { invoke } from "./ipc";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Settings,
   WebDavSyncSettings,
@@ -11,6 +12,22 @@ import type {
   MaintenanceReport,
   StartupReport,
 } from "@/shared/bindings";
+
+/** 后端安装 / 更新工具时逐行推送输出的事件（`services/cli_tools/lifecycle_run.rs`） */
+export const TOOL_LIFECYCLE_OUTPUT_EVENT = "tool-lifecycle-output";
+
+export interface ToolLifecycleOutputLine {
+  runId: string;
+  stream: "stdout" | "stderr";
+  line: string;
+}
+
+export interface ToolLifecycleRunOptions {
+  /** 用于关联输出事件与取消；缺省时后端自动生成（此时只能"全部取消"） */
+  runId?: string;
+  /** 超时秒数；缺省为后端默认（20 分钟） */
+  timeoutSecs?: number;
+}
 
 export interface ConfigTransferResult {
   success: boolean;
@@ -319,12 +336,32 @@ export const settingsApi = {
       string,
       { wslShell?: string | null; wslShellFlag?: string | null }
     >,
+    options?: ToolLifecycleRunOptions,
   ): Promise<void> {
     await invoke("run_tool_lifecycle_action", {
       tools,
       action,
       wslShellByTool,
+      runId: options?.runId,
+      timeoutSecs: options?.timeoutSecs,
     });
+  },
+
+  /** 取消进行中的安装 / 更新（杀掉整个进程树）；`runId` 缺省时取消全部。
+   *  返回是否命中了进行中的运行。 */
+  async cancelToolLifecycleAction(runId?: string): Promise<boolean> {
+    return await invoke("cancel_tool_lifecycle_action", { runId });
+  },
+
+  async onToolLifecycleOutput(
+    handler: (line: ToolLifecycleOutputLine) => void,
+  ): Promise<UnlistenFn> {
+    return await listen<ToolLifecycleOutputLine>(
+      TOOL_LIFECYCLE_OUTPUT_EVENT,
+      (event) => {
+        handler(event.payload);
+      },
+    );
   },
 
   /** 探测各工具安装分布：枚举所有安装、标记冲突、生成锚定升级命令。

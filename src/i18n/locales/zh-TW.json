@@ -891,6 +891,8 @@
     "toolInstall": "安裝",
     "toolUpdate": "升級",
     "toolReady": "已就緒",
+    "toolCancel": "取消",
+    "toolActionCancelled": "已取消安裝/升級",
     "toolActionDone": "{{count}} 個工具{{action}}完成",
     "toolActionPartial": "{{succeeded}} 個{{action}}成功，{{failed}} 個失敗",
     "toolActionFailed": "安裝/升級命令執行失敗",

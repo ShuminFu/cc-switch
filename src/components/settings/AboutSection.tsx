@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
   Copy,
@@ -14,6 +14,7 @@ import {
   ArrowUpCircle,
   ChevronDown,
   Stethoscope,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -238,6 +239,15 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
     null,
   );
   const [showInstallCommands, setShowInstallCommands] = useState(false);
+  // 安装/升级进行中时各工具最近一行输出（后端 `tool-lifecycle-output` 事件逐行推送）。
+  const [toolOutputLines, setToolOutputLines] = useState<
+    Partial<Record<ToolName, string>>
+  >({});
+  // runId ↔ 工具：输出事件按 runId 归属到卡片，取消按钮按工具找 runId。
+  const runIdToToolRef = useRef(new Map<string, ToolName>());
+  const toolRunIdRef = useRef<Partial<Record<ToolName, string>>>({});
+  // 用户主动取消的 runId：对应的失败按"已取消"处理，不报错。
+  const cancelledRunIdsRef = useRef(new Set<string>());
 
   const { hasUpdate, updateInfo, checkUpdate, resetDismiss, isChecking } =
     useUpdate();
@@ -564,6 +574,37 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
     }
   }, [t]);
 
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    settingsApi
+      .onToolLifecycleOutput(({ runId, line }) => {
+        const toolName = runIdToToolRef.current.get(runId);
+        if (!toolName || !line.trim()) return;
+        setToolOutputLines((prev) => ({ ...prev, [toolName]: line }));
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((error) => {
+        console.warn("[AboutSection] Failed to listen tool output", error);
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const handleCancelToolAction = useCallback((toolName: ToolName) => {
+    const runId = toolRunIdRef.current[toolName];
+    if (!runId) return;
+    cancelledRunIdsRef.current.add(runId);
+    void settingsApi.cancelToolLifecycleAction(runId).catch((error) => {
+      console.error("[AboutSection] Failed to cancel tool action", error);
+    });
+  }, []);
+
   // 实际执行安装/升级的串行循环（已通过任何必要的确认后才调用）。
   const executeRun = useCallback(
     async (toolNames: ToolName[], action: ToolLifecycleAction) => {
@@ -583,9 +624,15 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
         kind?: "notRunnable" | "versionUnchanged";
       }[] = [];
       let succeeded = 0;
+      let cancelled = false;
 
       for (const toolName of toolNames) {
         setToolActions((prev) => ({ ...prev, [toolName]: action }));
+        const runId = `${toolName}-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2)}`;
+        runIdToToolRef.current.set(runId, toolName);
+        toolRunIdRef.current[toolName] = runId;
         try {
           const previousTool = toolVersionByName.get(toolName);
           const previousVersion = previousTool?.version ?? null;
@@ -595,6 +642,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             [toolName],
             action,
             wslShellByTool,
+            { runId },
           );
           // 静默执行真正结束后刷新该工具版本，卡片立即反映结果。
           const refreshed = await refreshToolVersions(
@@ -646,23 +694,53 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
             void diagnoseToolSilently(toolName);
           }
         } catch (error) {
-          console.error(
-            `[AboutSection] Failed to run tool action for ${toolName}`,
-            error,
-          );
-          const detail = extractErrorMessage(error) || String(error);
-          failures.push({ toolName, detail, soft: false });
+          if (cancelledRunIdsRef.current.has(runId)) {
+            // 用户主动取消：后端已杀掉进程树，不算失败，并停止批量中剩余的工具。
+            cancelled = true;
+          } else {
+            console.error(
+              `[AboutSection] Failed to run tool action for ${toolName}`,
+              error,
+            );
+            const detail = extractErrorMessage(error) || String(error);
+            failures.push({ toolName, detail, soft: false });
+          }
         } finally {
+          runIdToToolRef.current.delete(runId);
+          cancelledRunIdsRef.current.delete(runId);
+          if (toolRunIdRef.current[toolName] === runId) {
+            delete toolRunIdRef.current[toolName];
+          }
+          setToolOutputLines((prev) => {
+            const next = { ...prev };
+            delete next[toolName];
+            return next;
+          });
           setToolActions((prev) => {
             const next = { ...prev };
             delete next[toolName];
             return next;
           });
         }
+        if (cancelled) break;
       }
 
       if (isBatch) {
         setBatchAction(null);
+      }
+
+      if (cancelled) {
+        // 被取消前已完成的工具照常计数；失败详情（若有）一并附上。
+        toast.info(t("settings.toolActionCancelled"), {
+          description:
+            failures.length > 0
+              ? failures
+                  .map((f) => `${TOOL_DISPLAY_NAMES[f.toolName]}: ${f.detail}`)
+                  .join("\n")
+              : undefined,
+          closeButton: true,
+        });
+        return;
       }
 
       const actionLabel =
@@ -1036,6 +1114,9 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
                     ? "update"
                     : null;
             const runningAction = toolActions[toolName];
+            const outputLine = runningAction
+              ? toolOutputLines[toolName]
+              : undefined;
             const title = tool?.version || tool?.error || t("common.unknown");
             const conflicts = toolDiagnostics[toolName];
 
@@ -1176,7 +1257,28 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
                   </div>
                 )}
 
-                <div className="mt-auto flex items-center justify-end">
+                {outputLine && (
+                  <div
+                    className="truncate rounded-md bg-muted/50 px-2 py-1 font-mono text-[10px] text-muted-foreground"
+                    title={outputLine}
+                    aria-live="polite"
+                  >
+                    {outputLine}
+                  </div>
+                )}
+
+                <div className="mt-auto flex items-center justify-end gap-2">
+                  {runningAction && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 gap-1.5 text-xs"
+                      onClick={() => handleCancelToolAction(toolName)}
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      {t("settings.toolCancel")}
+                    </Button>
+                  )}
                   {isToolVersionLoading ? (
                     <span className="text-xs text-muted-foreground">
                       {t("common.loading")}

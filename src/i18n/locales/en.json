@@ -891,6 +891,8 @@
     "toolInstall": "Install",
     "toolUpdate": "Update",
     "toolReady": "Ready",
+    "toolCancel": "Cancel",
+    "toolActionCancelled": "Install/update cancelled",
     "toolActionDone": "{{action}} completed for {{count}} tool(s)",
     "toolActionPartial": "{{action}} succeeded for {{succeeded}}, failed for {{failed}}",
     "toolActionFailed": "Install/update command failed",

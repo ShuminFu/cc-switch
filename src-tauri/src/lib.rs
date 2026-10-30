@@ -434,6 +434,7 @@ fn invoke_handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'stat
         commands::launch_session_terminal,
         commands::get_tool_versions,
         commands::run_tool_lifecycle_action,
+        commands::cancel_tool_lifecycle_action,
         commands::probe_tool_installations,
         // Provider terminal
         commands::open_provider_terminal,

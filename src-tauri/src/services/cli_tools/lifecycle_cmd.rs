@@ -1,15 +1,12 @@
-//! 工具安装 / 更新命令的生成与静默执行：静态命令表、按安装来源锚定的升级命令、
-//! WSL 包装，以及把整段脚本交给 `bash -c` / `cmd /C` 执行。
+//! 工具安装 / 更新命令的生成与执行方式：静态命令表、按安装来源锚定的升级命令、
+//! WSL 包装，以及把整段脚本交给 `bash -c` / `cmd /C` 执行（流式运行见 `lifecycle_run`）。
 
 use super::installations::{
     default_install, enumerate_tool_installations, infer_install_source, ToolInstallation,
 };
 #[cfg(target_os = "windows")]
 use super::wsl_distro_for_tool;
-use super::{last_lines, ToolLifecycleAction, WslShellPreferenceInput};
-use crate::platform::process::decode_command_output;
-#[cfg(target_os = "windows")]
-use crate::platform::process::CREATE_NO_WINDOW;
+use super::{ToolLifecycleAction, WslShellPreferenceInput};
 #[cfg(not(target_os = "windows"))]
 use crate::platform::shell::shell_single_quote;
 #[cfg(target_os = "windows")]
@@ -19,63 +16,54 @@ use crate::platform::shell::{
 use std::collections::HashMap;
 use std::path::Path;
 
-/// 静默执行工具安装/更新脚本：直接捕获子进程输出并阻塞到命令真正结束，
-/// 不再弹出可见终端窗口（与 `launch_terminal_running` 的"开窗即返回"形成对比，
-/// 后者仍保留给 provider 切换等需要交互式终端的场景）。
-/// 失败时回传 stderr/stdout 末尾若干行，供前端 toast 提示。
-#[cfg(not(target_os = "windows"))]
-pub(super) fn run_tool_lifecycle_silently(command_line: &str, _label: &str) -> Result<(), String> {
-    use std::process::Command;
-    // command_line 是 bash 风格脚本（含 `set -e` 与多行命令）；强制用 bash 执行，
-    // 避免用户默认 shell 为 fish/zsh 时 `set -e` 等语义不一致。
-    let output = Command::new("bash")
-        .arg("-c")
-        .arg(command_line)
-        .output()
-        .map_err(|e| format!("启动安装进程失败: {e}"))?;
-    finish_lifecycle_output(&output)
+/// 交给 [`super::lifecycle_run::run_streaming`] 执行的进程与参数；Windows 下附带
+/// 需要在执行结束后删除的临时 .bat。
+pub(super) struct LifecycleInvocation {
+    pub program: &'static str,
+    pub args: Vec<std::ffi::OsString>,
+    pub temp_file: Option<std::path::PathBuf>,
 }
 
-/// Windows 静默执行：command_line 是 .bat 内容（@echo off + call/wsl 行，CRLF 分隔），
-/// 写临时 .bat 后用 `cmd /C` 执行，`CREATE_NO_WINDOW` 抑制 console 窗口。
-#[cfg(target_os = "windows")]
-pub(super) fn run_tool_lifecycle_silently(command_line: &str, label: &str) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
+impl Drop for LifecycleInvocation {
+    fn drop(&mut self) {
+        if let Some(path) = self.temp_file.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
 
+/// 工具安装/更新脚本的执行方式：输出由调用方逐行转发给前端，不再弹出可见终端窗口
+/// （与 `launch_terminal_running` 的"开窗即返回"形成对比，后者仍保留给 provider
+/// 切换等需要交互式终端的场景）。
+#[cfg(not(target_os = "windows"))]
+pub(super) fn lifecycle_invocation(
+    command_line: &str,
+    _label: &str,
+) -> Result<LifecycleInvocation, String> {
+    // command_line 是 bash 风格脚本（含 `set -e` 与多行命令）；强制用 bash 执行，
+    // 避免用户默认 shell 为 fish/zsh 时 `set -e` 等语义不一致。
+    Ok(LifecycleInvocation {
+        program: "bash",
+        args: vec!["-c".into(), command_line.into()],
+        temp_file: None,
+    })
+}
+
+/// Windows：command_line 是 .bat 内容（@echo off + call/wsl 行，CRLF 分隔），
+/// 写临时 .bat 后用 `cmd /C` 执行（执行端以 `CREATE_NO_WINDOW` 抑制 console 窗口）。
+#[cfg(target_os = "windows")]
+pub(super) fn lifecycle_invocation(
+    command_line: &str,
+    label: &str,
+) -> Result<LifecycleInvocation, String> {
     let bat_file =
         std::env::temp_dir().join(format!("cc_switch_{}_{}.bat", label, std::process::id()));
     crate::config::atomic_write(&bat_file, command_line.as_bytes())
         .map_err(|e| format!("写入批处理文件失败: {e}"))?;
-
-    let output = Command::new("cmd")
-        .arg("/C")
-        .arg(&bat_file)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    let _ = std::fs::remove_file(&bat_file);
-
-    finish_lifecycle_output(&output.map_err(|e| format!("启动安装进程失败: {e}"))?)
-}
-
-/// 把子进程退出结果转成 `Result`：成功返回 `Ok`；失败提取 stderr（空则回退 stdout）
-/// 的末尾若干行作为错误详情，避免把整段安装日志塞进 toast。
-pub(super) fn finish_lifecycle_output(output: &std::process::Output) -> Result<(), String> {
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = decode_command_output(&output.stderr);
-    let stdout = decode_command_output(&output.stdout);
-    let raw = if stderr.trim().is_empty() {
-        stdout.trim()
-    } else {
-        stderr.trim()
-    };
-    let detail = last_lines(raw, 8);
-    Err(if detail.is_empty() {
-        format!("命令执行失败 (exit code: {:?})", output.status.code())
-    } else {
-        detail
+    Ok(LifecycleInvocation {
+        program: "cmd",
+        args: vec!["/C".into(), bat_file.clone().into_os_string()],
+        temp_file: Some(bat_file),
     })
 }
 
@@ -723,7 +711,7 @@ pub(super) fn package_manager_anchored_command_from_paths(
 /// 是刻意保留的平台差异(详见 Windows 版本 doc)。
 ///
 /// **关键不变量：返回的命令必须用绝对路径调用执行体，不依赖 PATH**。
-/// 这条命令最终在 `run_tool_lifecycle_silently` 的非登录 `bash -c` 里执行——
+/// 这条命令最终在 `lifecycle_invocation` 的非登录 `bash -c` 里执行——
 /// GUI App 启动的进程 PATH 由 launchd / Windows Service / systemd 给,通常**不含**
 /// `~/.local/bin` / `/opt/homebrew/bin` / `~/.volta/bin` 等用户级 bin 目录;而探测
 /// 阶段 `try_get_version` 用的是 `$SHELL -lic`(登录+交互式,会读 .zshrc/.zprofile),

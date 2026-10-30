@@ -3,19 +3,25 @@
 
 mod installations;
 mod lifecycle_cmd;
+mod lifecycle_run;
 mod remote_versions;
 mod search_paths;
 mod version_probe;
 
 pub use installations::ToolInstallationReport;
+pub use lifecycle_run::{
+    cancel_run as cancel_tool_lifecycle_action, ToolLifecycleOutputLine,
+    DEFAULT_TOOL_LIFECYCLE_TIMEOUT, TOOL_LIFECYCLE_OUTPUT_EVENT,
+};
 pub use version_probe::ToolVersion;
 
 use installations::{enumerate_tool_installations, is_conflicting};
-use lifecycle_cmd::{build_tool_lifecycle_command, plan_command_for, run_tool_lifecycle_silently};
+use lifecycle_cmd::{build_tool_lifecycle_command, lifecycle_invocation, plan_command_for};
 use std::collections::HashMap;
 #[cfg(target_os = "windows")]
 use std::path::Path;
 use std::str::FromStr;
+use std::time::Duration;
 use version_probe::get_single_tool_version_impl;
 
 const VALID_TOOLS: [&str; 7] = [
@@ -59,12 +65,20 @@ pub async fn get_tool_versions(
     results
 }
 
-/// 静默安装 / 更新所选工具；任一工具失败即返回其输出末尾若干行。
-pub async fn run_tool_lifecycle_action(
+/// 安装 / 更新所选工具：输出逐行交给 `on_line`，可经 [`cancel_tool_lifecycle_action`]
+/// 按 `run_id` 取消，超过 `timeout`（默认 [`DEFAULT_TOOL_LIFECYCLE_TIMEOUT`]）即终止。
+/// 任一工具失败即返回其输出末尾若干行。
+pub async fn run_tool_lifecycle_action<F>(
     tools: Vec<String>,
     action: &str,
     wsl_shell_by_tool: Option<HashMap<String, WslShellPreferenceInput>>,
-) -> Result<(), String> {
+    run_id: String,
+    timeout: Option<Duration>,
+    mut on_line: F,
+) -> Result<(), String>
+where
+    F: FnMut(ToolLifecycleOutputLine) + Send,
+{
     let action = ToolLifecycleAction::from_str(action)?;
     let requested = normalize_requested_tools(&tools);
     if requested.is_empty() {
@@ -76,15 +90,33 @@ pub async fn run_tool_lifecycle_action(
         ToolLifecycleAction::Update => "tool_update",
     };
 
+    // 先登记再做 build：锚定探测期间点取消也能生效（spawn 前会检查取消信号）。
+    let (_guard, cancel) = lifecycle_run::register_run(&run_id);
+
     // build 阶段含锚定探测（对每个工具跑 `--version` 定位命令行实际命中那处），
-    // 与执行一并放进 blocking 线程，避免阻塞 async runtime。
-    tokio::task::spawn_blocking(move || {
+    // 放进 blocking 线程，避免阻塞 async runtime。
+    let invocation = tokio::task::spawn_blocking(move || {
         let command_line =
             build_tool_lifecycle_command(&requested, action, wsl_shell_by_tool.as_ref())?;
-        run_tool_lifecycle_silently(&command_line, label)
+        lifecycle_invocation(&command_line, label)
     })
     .await
-    .map_err(|e| format!("tool lifecycle task join error: {e}"))?
+    .map_err(|e| format!("tool lifecycle task join error: {e}"))??;
+
+    lifecycle_run::run_streaming(
+        invocation.program,
+        &invocation.args,
+        timeout.unwrap_or(DEFAULT_TOOL_LIFECYCLE_TIMEOUT),
+        cancel,
+        |stream, line| {
+            on_line(ToolLifecycleOutputLine {
+                run_id: run_id.clone(),
+                stream,
+                line,
+            })
+        },
+    )
+    .await
 }
 
 /// 取文本末尾最多 `n` 行（npm / pip 的关键错误通常出现在输出尾部）。
