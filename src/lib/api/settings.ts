@@ -17,6 +17,8 @@ export interface ConfigTransferResult {
 export interface WebDavTestResult {
   success: boolean;
   message?: string;
+  /** The endpoint is plain HTTP (credentials and data are not encrypted). */
+  insecureTransport?: boolean;
 }
 
 export interface CodexUnifyHistoryRestoreResult {
@@ -28,6 +30,28 @@ export interface CodexUnifyHistoryRestoreResult {
 
 export interface WebDavSyncResult {
   status: string;
+  insecureTransport?: boolean;
+  /** Best-effort post-download warning (live config rewrite failed). */
+  warning?: string;
+}
+
+/** Remote snapshot preview returned by `*_sync_fetch_remote_info`. */
+export type CloudRemoteSnapshotInfo = RemoteSnapshotInfo & {
+  /** The remote changed since this device last synced (another device uploaded). */
+  remoteChangedSinceLastSync?: boolean;
+  insecureTransport?: boolean;
+};
+
+export type CloudRemoteInfoResult = CloudRemoteSnapshotInfo | { empty: true };
+
+/**
+ * Manual upload/download options. `force` defaults to `true` on the backend
+ * for compatibility; pass `false` to get a `sync.conflict.*` error when the
+ * other side changed since the last sync, then retry with `true` once the
+ * user explicitly chose to overwrite.
+ */
+export interface CloudSyncTransferOptions {
+  force?: boolean;
 }
 
 export const settingsApi = {
@@ -144,12 +168,16 @@ export const settingsApi = {
     });
   },
 
-  async webdavSyncUpload(): Promise<WebDavSyncResult> {
-    return await invoke("webdav_sync_upload");
+  async webdavSyncUpload(
+    options: CloudSyncTransferOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await invoke("webdav_sync_upload", { force: options.force });
   },
 
-  async webdavSyncDownload(): Promise<WebDavSyncResult> {
-    return await invoke("webdav_sync_download");
+  async webdavSyncDownload(
+    options: CloudSyncTransferOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await invoke("webdav_sync_download", { force: options.force });
   },
 
   async webdavSyncSaveSettings(
@@ -162,9 +190,7 @@ export const settingsApi = {
     });
   },
 
-  async webdavSyncFetchRemoteInfo(): Promise<
-    RemoteSnapshotInfo | { empty: true }
-  > {
+  async webdavSyncFetchRemoteInfo(): Promise<CloudRemoteInfoResult> {
     return await invoke("webdav_sync_fetch_remote_info");
   },
 
@@ -180,12 +206,16 @@ export const settingsApi = {
     });
   },
 
-  async s3SyncUpload(): Promise<WebDavSyncResult> {
-    return await invoke("s3_sync_upload");
+  async s3SyncUpload(
+    options: CloudSyncTransferOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await invoke("s3_sync_upload", { force: options.force });
   },
 
-  async s3SyncDownload(): Promise<WebDavSyncResult> {
-    return await invoke("s3_sync_download");
+  async s3SyncDownload(
+    options: CloudSyncTransferOptions = {},
+  ): Promise<WebDavSyncResult> {
+    return await invoke("s3_sync_download", { force: options.force });
   },
 
   async s3SyncSaveSettings(
@@ -198,7 +228,7 @@ export const settingsApi = {
     });
   },
 
-  async s3SyncFetchRemoteInfo(): Promise<RemoteSnapshotInfo | { empty: true }> {
+  async s3SyncFetchRemoteInfo(): Promise<CloudRemoteInfoResult> {
     return await invoke("s3_sync_fetch_remote_info");
   },
 
