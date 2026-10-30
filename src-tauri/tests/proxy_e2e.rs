@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use cc_switch_lib::proxy_harness::{
-    db_read_statement_count, db_statement_count, HarnessCircuit, HarnessHealth, MockReply,
-    MockUpstream, ProxyHarness, RawMockUpstream,
+    db_read_statement_count, db_statement_count, CircuitState, HarnessCircuit, HarnessHealth,
+    MockReply, MockUpstream, ProxyHarness, RawMockUpstream,
 };
 use serde_json::{json, Value};
 
@@ -460,6 +460,91 @@ async fn client_abort_during_half_open_probe_releases_the_probe_slot() {
 
     let body = json_body(harness.messages(&simple_request()).await).await;
     assert_eq!(first_text(&body), "from a", "closed breaker serves a again");
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn probe_now_closes_an_open_breaker_against_a_healthy_upstream() {
+    let _env = TestEnv::new();
+    // a: fails once (→ Open), healthy from then on.
+    let a = MockUpstream::sequence(vec![
+        MockReply::error(500, "boom"),
+        MockReply::message("from a", 10, 5),
+    ])
+    .await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            failure_threshold: 1,
+            // A manual probe closes the breaker without waiting for the
+            // success threshold or the open timeout.
+            success_threshold: 3,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await;
+
+    // 1. Force Open: a fails once, b serves.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    let stats = harness.circuit_stats("a").await.expect("a has a breaker");
+    assert_eq!(stats.state, CircuitState::Open);
+    assert!(stats.open_remaining_secs.unwrap() > 500, "{stats:?}");
+
+    // 2. Probe now: one minimal request to a through the half-open path.
+    let probe = harness.probe_now("a").await;
+    assert!(probe.probed && probe.success, "{probe:?}");
+    assert_eq!(probe.stats.state, CircuitState::Closed);
+    assert_eq!(probe.stats.open_remaining_secs, None);
+    assert_eq!(a.hits(), 2, "the probe reached a");
+    assert_eq!(a.requests()[1].method, "GET");
+    assert_eq!(harness.health("a").await, healthy());
+
+    // 3. Closed: a serves real traffic again, well before the open timeout.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from a");
+
+    // 4. A closed breaker is not probed again.
+    let probe = harness.probe_now("a").await;
+    assert!(!probe.probed, "{probe:?}");
+    assert_eq!(a.hits(), 3);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn probe_now_against_a_failing_upstream_keeps_the_breaker_open() {
+    let _env = TestEnv::new();
+    let a = MockUpstream::always(MockReply::error(503, "still down")).await;
+    let b = MockUpstream::always(MockReply::message("from b", 10, 5)).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .circuit(HarnessCircuit {
+            failure_threshold: 1,
+            success_threshold: 1,
+            timeout_seconds: 600,
+        })
+        .spawn()
+        .await;
+
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+
+    let probe = harness.probe_now("a").await;
+    assert!(probe.probed && !probe.success, "{probe:?}");
+    assert_eq!(probe.stats.state, CircuitState::Open);
+    assert_eq!(a.hits(), 2);
+
+    // Still open: real traffic keeps skipping a.
+    let body = json_body(harness.messages(&simple_request()).await).await;
+    assert_eq!(first_text(&body), "from b");
+    assert_eq!(a.hits(), 2);
 
     harness.shutdown().await;
 }

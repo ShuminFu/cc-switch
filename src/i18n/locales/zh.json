@@ -2617,7 +2617,17 @@
     "degraded": "降级",
     "failed": "失败",
     "circuitOpen": "熔断",
-    "consecutiveFailures": "连续失败 {{count}} 次"
+    "consecutiveFailures": "连续失败 {{count}} 次",
+    "circuitClosed": "熔断器关闭",
+    "circuitHalfOpen": "半开",
+    "circuitOpenRemaining": "熔断 · {{seconds}} 秒",
+    "circuitStateTitle": "熔断器：{{state}}",
+    "probeNow": "立即探测",
+    "probing": "探测中…",
+    "probeSucceeded": "探测成功，熔断器已关闭",
+    "probeFailed": "探测失败：{{detail}}",
+    "probeSkipped": "未探测：{{detail}}",
+    "probeProxyStopped": "代理未运行"
   },
   "failover": {
     "enabled": "{{app}} 故障转移已启用",

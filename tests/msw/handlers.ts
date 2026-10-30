@@ -335,4 +335,5 @@ export const handlers = [
   })),
   command("reset_circuit_breaker", () => true),
   command("get_circuit_breaker_stats", () => null),
+  command("probe_circuit_breaker", () => null),
 ];

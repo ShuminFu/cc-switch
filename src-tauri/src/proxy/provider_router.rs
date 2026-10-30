@@ -7,11 +7,13 @@ use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 use crate::proxy::circuit_breaker::{
-    AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
+    AllowResult, CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitProbeResult,
+    CircuitState, HalfOpenPermit,
 };
 use crate::proxy::protocol::{AppRef, BreakerKey};
 use crate::proxy::runtime_config::RuntimeConfigStore;
 use std::collections::HashMap;
+use std::future::Future;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -139,14 +141,7 @@ impl ProviderRouter {
 
         // 1. 按应用独立获取熔断器配置；读取失败时回退到熔断器自身的阈值，
         //    保证数据库健康状态与熔断器使用同一个阈值
-        let failure_threshold = match self.runtime_config.app_proxy_config(app_type).await {
-            Ok(app_config) => app_config.circuit_failure_threshold,
-            Err(e) => {
-                let fallback = breaker.failure_threshold().await;
-                log::warn!("[{app_type}] 读取 proxy_config 失败: {e}，使用熔断器阈值 {fallback}");
-                fallback
-            }
-        };
+        let failure_threshold = self.failure_threshold_for(app_type, &breaker).await;
 
         // 2. 更新熔断器状态
 
@@ -168,6 +163,84 @@ impl ProviderRouter {
             .await?;
 
         Ok(())
+    }
+
+    /// 手动探测（"立即探测"）：经 HalfOpen 路径发送一次探测请求并记录结果
+    ///
+    /// - Closed：不发请求，直接返回当前状态（`probed = false`）
+    /// - Open：不等待超时，立即切到 HalfOpen 并占用探测名额
+    /// - HalfOpen：已有探测在途时不发请求（`probed = false`）
+    ///
+    /// `probe` 发出实际请求，`Ok(())` 表示供应商已恢复。成功后熔断器直接 Closed，
+    /// 失败则重新 Open；结果同步写入数据库健康状态。
+    pub async fn probe_provider<F, Fut>(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        probe: F,
+    ) -> Result<CircuitProbeResult, AppError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<(), String>>,
+    {
+        let circuit_key = BreakerKey::new(app_type, provider_id);
+        let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
+
+        let allow = breaker.begin_manual_probe().await;
+        if !allow.allowed {
+            let stats = breaker.get_stats().await;
+            let reason = match stats.state {
+                CircuitState::Closed => "circuit breaker is closed",
+                _ => "a half-open probe is already in flight",
+            };
+            return Ok(CircuitProbeResult {
+                probed: false,
+                success: false,
+                message: Some(reason.to_string()),
+                stats,
+            });
+        }
+
+        let failure_threshold = self.failure_threshold_for(app_type, &breaker).await;
+        let outcome = probe().await;
+        let success = outcome.is_ok();
+        let error_msg = outcome.err();
+        log::info!(
+            "[{app_type}] 手动探测 provider_id={provider_id}: {}",
+            if success { "成功" } else { "失败" }
+        );
+
+        breaker
+            .record_manual_probe_result(allow.permit.as_ref(), success)
+            .await;
+        self.db
+            .update_provider_health_with_threshold(
+                provider_id,
+                app_type,
+                success,
+                error_msg.clone(),
+                failure_threshold,
+            )
+            .await?;
+
+        Ok(CircuitProbeResult {
+            probed: true,
+            success,
+            message: error_msg,
+            stats: breaker.get_stats().await,
+        })
+    }
+
+    /// 健康状态使用的失败阈值：按应用读取配置，失败时回退到熔断器自身的阈值
+    async fn failure_threshold_for(&self, app_type: &str, breaker: &CircuitBreaker) -> u32 {
+        match self.runtime_config.app_proxy_config(app_type).await {
+            Ok(app_config) => app_config.circuit_failure_threshold,
+            Err(e) => {
+                let fallback = breaker.failure_threshold().await;
+                log::warn!("[{app_type}] 读取 proxy_config 失败: {e}，使用熔断器阈值 {fallback}");
+                fallback
+            }
+        }
     }
 
     /// 重置熔断器（手动恢复）
@@ -219,13 +292,12 @@ impl ProviderRouter {
         }
     }
 
-    /// 获取熔断器状态
-    #[allow(dead_code)] // reserved for the breaker UI probe (p3-breaker-ui-probe)
+    /// 获取熔断器状态（该供应商尚无熔断器实例时返回 `None`）
     pub async fn get_circuit_breaker_stats(
         &self,
         provider_id: &str,
         app_type: &str,
-    ) -> Option<crate::proxy::circuit_breaker::CircuitBreakerStats> {
+    ) -> Option<CircuitBreakerStats> {
         let circuit_key = BreakerKey::new(app_type, provider_id);
         let breakers = self.circuit_breakers.read().await;
 

@@ -59,6 +59,17 @@ export interface CircuitBreakerStats {
   consecutiveSuccesses: number;
   totalRequests: number;
   failedRequests: number;
+  /** Open 状态下距离允许 HalfOpen 探测的剩余秒数；其余状态为 null */
+  openRemainingSecs: number | null;
+}
+
+/** "立即探测" 结果 */
+export interface CircuitProbeResult {
+  /** 是否真正发出了探测请求（熔断器为 Closed 或已有探测在途时为 false） */
+  probed: boolean;
+  success: boolean;
+  message: string | null;
+  stats: CircuitBreakerStats;
 }
 
 // 供应商健康状态枚举

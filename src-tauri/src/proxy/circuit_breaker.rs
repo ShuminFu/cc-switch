@@ -419,7 +419,6 @@ impl CircuitBreaker {
     }
 
     /// 获取当前状态
-    #[allow(dead_code)] // reserved for the breaker UI probe (p3-breaker-ui-probe)
     pub async fn get_state(&self) -> CircuitState {
         *self.state.read().await
     }
@@ -432,12 +431,71 @@ impl CircuitBreaker {
             let outcomes = lock_outcomes(&self.outcomes);
             (outcomes.len() as u32, outcomes.failures as u32)
         };
+        let state = *self.state.read().await;
+        let open_remaining_secs = if state == CircuitState::Open {
+            let timeout_seconds = self.config.read().await.timeout_seconds;
+            let elapsed = self
+                .last_opened_at
+                .read()
+                .await
+                .map_or(0, |opened_at| opened_at.elapsed().as_secs());
+            Some(timeout_seconds.saturating_sub(elapsed))
+        } else {
+            None
+        };
         CircuitBreakerStats {
-            state: *self.state.read().await,
+            state,
             consecutive_failures: self.consecutive_failures.load(Ordering::SeqCst),
             consecutive_successes: self.consecutive_successes.load(Ordering::SeqCst),
             total_requests,
             failed_requests,
+            open_remaining_secs,
+        }
+    }
+
+    /// 手动探测（"立即探测"）：获取 HalfOpen 探测名额
+    ///
+    /// 与 `allow_request` 的区别：Open 状态下不等待超时，直接切到 HalfOpen 并占用探测名额。
+    /// - Closed：无需探测，返回不放行
+    /// - Open / HalfOpen：按 HalfOpen 限流规则占用名额（已有探测在途时不放行）
+    ///
+    /// 放行时调用方必须把返回的名额传给 `record_manual_probe_result`。
+    pub async fn begin_manual_probe(&self) -> AllowResult {
+        let state = self.get_state().await;
+        if state == CircuitState::Closed {
+            return AllowResult::denied();
+        }
+        if state == CircuitState::Open {
+            log::info!(
+                "[{}] 熔断器 Open → HalfOpen (手动探测)",
+                log_cb::OPEN_TO_HALF_OPEN
+            );
+            self.transition_to_half_open().await;
+        }
+
+        match self.get_state().await {
+            CircuitState::HalfOpen => self.allow_half_open_probe(),
+            CircuitState::Closed | CircuitState::Open => AllowResult::denied(),
+        }
+    }
+
+    /// 记录手动探测结果
+    ///
+    /// 成功：用户主动验证供应商已恢复，直接 HalfOpen → Closed（不再等待 `success_threshold`）；
+    /// 失败：与 HalfOpen 探测失败一致，重新 Open 并重新计时。
+    pub async fn record_manual_probe_result(&self, permit: Option<&HalfOpenPermit>, success: bool) {
+        if !success {
+            self.record_failure(permit).await;
+            return;
+        }
+
+        self.record_success(permit).await;
+        if self.get_state().await == CircuitState::HalfOpen {
+            log::info!(
+                "[{}] 熔断器 HalfOpen → Closed (手动探测成功)",
+                log_cb::HALF_OPEN_TO_CLOSED
+            );
+            self.transition_to_closed().await;
         }
     }
 
@@ -525,6 +583,22 @@ pub struct CircuitBreakerStats {
     pub consecutive_successes: u32,
     pub total_requests: u32,
     pub failed_requests: u32,
+    /// Open 状态下距离允许 HalfOpen 探测的剩余秒数（0 表示下一个请求即会探测）；其余状态为 `None`
+    pub open_remaining_secs: Option<u64>,
+}
+
+/// 手动探测（"立即探测"）结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CircuitProbeResult {
+    /// 是否真正发出了探测请求（熔断器为 Closed、或已有探测在途时为 `false`）
+    pub probed: bool,
+    /// 探测请求是否成功
+    pub success: bool,
+    /// 探测失败原因或未探测原因
+    pub message: Option<String>,
+    /// 探测后的熔断器状态
+    pub stats: CircuitBreakerStats,
 }
 
 #[cfg(test)]
@@ -817,5 +891,92 @@ mod tests {
         breaker.reset().await;
         assert_eq!(breaker.get_state().await, CircuitState::Closed);
         assert!(breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_stats_report_open_remaining_secs() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 600,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+
+        assert_eq!(breaker.get_stats().await.open_remaining_secs, None);
+
+        breaker.record_failure(None).await;
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.state, CircuitState::Open);
+        let remaining = stats
+            .open_remaining_secs
+            .expect("open breaker reports time left");
+        assert!((599..=600).contains(&remaining), "remaining={remaining}");
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_manual_probe_success_closes_without_waiting() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            success_threshold: 3,
+            timeout_seconds: 600,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+        breaker.record_failure(None).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+        assert!(
+            !breaker.allow_request().await.allowed,
+            "timeout not reached"
+        );
+
+        let probe = breaker.begin_manual_probe().await;
+        assert!(probe.allowed);
+        assert!(probe.used_half_open_permit());
+        assert_eq!(breaker.get_state().await, CircuitState::HalfOpen);
+
+        // 探测在途时，第二次手动探测与普通请求都不放行
+        assert!(!breaker.begin_manual_probe().await.allowed);
+        assert!(!breaker.allow_request().await.allowed);
+
+        breaker
+            .record_manual_probe_result(probe.permit.as_ref(), true)
+            .await;
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.state, CircuitState::Closed);
+        assert_eq!(stats.open_remaining_secs, None);
+        assert!(breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_manual_probe_failure_reopens_and_restarts_timer() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 600,
+            ..Default::default()
+        };
+        let breaker = CircuitBreaker::new(config);
+        breaker.record_failure(None).await;
+
+        let probe = breaker.begin_manual_probe().await;
+        assert!(probe.allowed);
+        breaker
+            .record_manual_probe_result(probe.permit.as_ref(), false)
+            .await;
+
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.state, CircuitState::Open);
+        assert!(stats.open_remaining_secs.unwrap() >= 599);
+        // 名额已释放：可再次手动探测
+        let again = breaker.begin_manual_probe().await;
+        assert!(again.allowed);
+    }
+
+    #[tokio::test]
+    async fn test_circuit_breaker_manual_probe_is_noop_when_closed() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig::default());
+        let probe = breaker.begin_manual_probe().await;
+        assert!(!probe.allowed);
+        assert!(probe.permit.is_none());
+        assert_eq!(breaker.get_state().await, CircuitState::Closed);
     }
 }

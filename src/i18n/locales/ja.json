@@ -2617,7 +2617,17 @@
     "degraded": "低下",
     "failed": "失敗",
     "circuitOpen": "サーキットオープン",
-    "consecutiveFailures": "{{count}} 回連続失敗"
+    "consecutiveFailures": "{{count}} 回連続失敗",
+    "circuitClosed": "サーキットクローズ",
+    "circuitHalfOpen": "ハーフオープン",
+    "circuitOpenRemaining": "サーキットオープン · {{seconds}} 秒",
+    "circuitStateTitle": "サーキットブレーカー: {{state}}",
+    "probeNow": "今すぐプローブ",
+    "probing": "プローブ中…",
+    "probeSucceeded": "プローブ成功、サーキットをクローズしました",
+    "probeFailed": "プローブ失敗: {{detail}}",
+    "probeSkipped": "プローブをスキップ: {{detail}}",
+    "probeProxyStopped": "プロキシが起動していません"
   },
   "failover": {
     "enabled": "{{app}} フェイルオーバーが有効になりました",

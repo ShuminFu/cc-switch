@@ -110,6 +110,43 @@ export function useCircuitBreakerStats(providerId: string, appType: string) {
   });
 }
 
+/**
+ * 立即探测熔断器
+ *
+ * 经 HalfOpen 路径发送一次最小探测请求；完成后刷新熔断器状态与健康状态。
+ */
+export function useProbeCircuitBreaker() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      providerId,
+      appType,
+    }: {
+      providerId: string;
+      appType: string;
+    }) => failoverApi.probeCircuitBreaker(providerId, appType),
+    onSuccess: (result, variables) => {
+      if (result) {
+        queryClient.setQueryData(
+          ["circuitBreakerStats", variables.providerId, variables.appType],
+          result.stats,
+        );
+      }
+      queryClient.invalidateQueries({
+        queryKey: [
+          "circuitBreakerStats",
+          variables.providerId,
+          variables.appType,
+        ],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["providerHealth", variables.providerId, variables.appType],
+      });
+    },
+  });
+}
+
 // ========== 故障转移队列 Hooks（新） ==========
 
 /**

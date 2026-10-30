@@ -8,7 +8,7 @@ use crate::proxy::capture::{
 };
 use crate::proxy::trace::{RequestTrace, TraceStore};
 use crate::proxy::types::*;
-use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
+use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats, CircuitProbeResult};
 use crate::store::AppState;
 use std::str::FromStr;
 
@@ -473,10 +473,46 @@ pub async fn get_circuit_breaker_stats(
     provider_id: String,
     app_type: String,
 ) -> Result<Option<CircuitBreakerStats>, IpcError> {
-    // 这个功能需要访问运行中的代理服务器的内存状态
-    // 目前先返回 None，后续可以通过 ProxyService 暴露接口来实现
-    let _ = (state, provider_id, app_type);
-    Ok(None)
+    // 熔断器只存在于运行中代理的内存里；代理未运行或尚无实例时返回 None
+    Ok(state
+        .proxy_service
+        .get_provider_circuit_breaker_stats(&provider_id, &app_type)
+        .await)
+}
+
+/// 立即探测熔断器（"probe now"）
+///
+/// 经 HalfOpen 路径发送一次最小探测请求（见 `StreamCheckService::probe_circuit_target`）：
+/// Open 状态下不等待超时；探测成功则熔断器直接 Closed，失败则重新 Open。
+/// 代理未运行时返回 None，不发请求。
+#[tauri::command]
+pub async fn probe_circuit_breaker(
+    state: tauri::State<'_, AppState>,
+    copilot_state: tauri::State<'_, crate::commands::copilot::CopilotAuthState>,
+    provider_id: String,
+    app_type: String,
+) -> Result<Option<CircuitProbeResult>, IpcError> {
+    let app = crate::app_config::AppType::from_str(&app_type).map_err(IpcError::from)?;
+    let providers = state.db.get_all_providers(&app_type)?;
+    let provider = providers
+        .get(&provider_id)
+        .ok_or_else(|| AppError::Message(format!("供应商 {provider_id} 不存在")))?;
+    let config = state.db.get_stream_check_config()?;
+    let base_url_override =
+        super::stream_check::resolve_copilot_base_url_override(provider, &copilot_state).await?;
+
+    let result = state
+        .proxy_service
+        .probe_provider_circuit_breaker(&provider_id, &app_type, || {
+            crate::services::stream_check::StreamCheckService::probe_circuit_target(
+                &app,
+                provider,
+                &config,
+                base_url_override,
+            )
+        })
+        .await?;
+    Ok(result)
 }
 
 // ==================== Bug Report Capture ====================

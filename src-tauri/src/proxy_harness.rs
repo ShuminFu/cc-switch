@@ -28,12 +28,15 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::app_config::AppType;
 use crate::database::Database;
 use crate::provider::Provider;
 use crate::proxy::capture::CaptureStore;
 use crate::proxy::server::ProxyServer;
 use crate::proxy::trace::TraceStore;
 use crate::proxy::types::{AppProxyConfig, ProxyConfig};
+pub use crate::proxy::{CircuitBreakerStats, CircuitProbeResult, CircuitState};
+use crate::services::stream_check::{StreamCheckConfig, StreamCheckService};
 
 /// App type every harness provider is registered under.
 pub const HARNESS_APP_TYPE: &str = "claude";
@@ -816,6 +819,34 @@ impl ProxyHarness {
             failed_requests: status.failed_requests,
             failover_count: status.failover_count,
         }
+    }
+
+    /// In-memory breaker state of a provider (`None` before its first request).
+    pub async fn circuit_stats(&self, provider_id: &str) -> Option<CircuitBreakerStats> {
+        self.server
+            .provider_router()
+            .get_circuit_breaker_stats(provider_id, HARNESS_APP_TYPE)
+            .await
+    }
+
+    /// "Probe now": the same minimal request the `probe_circuit_breaker`
+    /// command sends, recorded through the breaker's half-open path.
+    pub async fn probe_now(&self, provider_id: &str) -> CircuitProbeResult {
+        let provider = self
+            .db
+            .get_all_providers(HARNESS_APP_TYPE)
+            .expect("read harness providers")
+            .get(provider_id)
+            .cloned()
+            .expect("harness provider exists");
+        let config = StreamCheckConfig::default();
+        self.server
+            .provider_router()
+            .probe_provider(provider_id, HARNESS_APP_TYPE, || {
+                StreamCheckService::probe_circuit_target(&AppType::Claude, &provider, &config, None)
+            })
+            .await
+            .expect("probe provider")
     }
 
     pub async fn shutdown(self) {

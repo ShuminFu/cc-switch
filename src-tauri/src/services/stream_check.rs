@@ -130,6 +130,41 @@ impl StreamCheckService {
         }))
     }
 
+    /// 熔断器手动探测（"立即探测"）使用的最小请求。
+    ///
+    /// 与连通性检查共用同一个轻量 GET（不发真实大模型请求、不消耗 token），但判定更严格：
+    /// 网络级错误、5xx 与 429 视为供应商仍不可用；其余响应（含 base_url 常见的 401/404）
+    /// 说明网关存活，视为已恢复。该函数本身不碰熔断器——由调用方经 HalfOpen 路径记录结果
+    /// （见 `ProviderRouter::probe_provider`）。
+    pub async fn probe_circuit_target(
+        app_type: &AppType,
+        provider: &Provider,
+        config: &StreamCheckConfig,
+        base_url_override: Option<String>,
+    ) -> Result<(), String> {
+        let base_url = match base_url_override {
+            Some(b) => b,
+            None => Self::resolve_base_url(app_type, provider).map_err(|e| e.to_string())?,
+        };
+        let client = crate::proxy::http_client::get();
+        let timeout = std::time::Duration::from_secs(config.timeout_secs);
+        let ua = Self::custom_user_agent(provider);
+
+        let status = Self::probe_reachability(&client, &base_url, timeout, ua)
+            .await
+            .map_err(|e| e.to_string())?;
+        Self::probe_status_outcome(status)
+    }
+
+    /// 探测响应状态码 → 熔断器探测结果
+    fn probe_status_outcome(status: u16) -> Result<(), String> {
+        if status >= 500 || status == 429 {
+            Err(format!("Upstream HTTP {status}"))
+        } else {
+            Ok(())
+        }
+    }
+
     /// 单次连通性探测。
     async fn check_once(
         app_type: &AppType,
@@ -391,6 +426,22 @@ mod tests {
         assert_eq!(config.max_retries, 1);
         // 降级阈值沿用旧尺度，避免把 1 秒多的正常延迟误判为"较慢"
         assert_eq!(config.degraded_threshold_ms, 6000);
+    }
+
+    #[test]
+    fn test_circuit_probe_treats_5xx_and_429_as_unavailable() {
+        for status in [200, 204, 301, 401, 403, 404, 405] {
+            assert!(
+                StreamCheckService::probe_status_outcome(status).is_ok(),
+                "HTTP {status} means the gateway is alive"
+            );
+        }
+        for status in [429, 500, 502, 503, 504] {
+            assert!(
+                StreamCheckService::probe_status_outcome(status).is_err(),
+                "HTTP {status} keeps the breaker open"
+            );
+        }
     }
 
     #[test]

@@ -1403,6 +1403,7 @@ pub fn run() {
             commands::get_circuit_breaker_config,
             commands::update_circuit_breaker_config,
             commands::get_circuit_breaker_stats,
+            commands::probe_circuit_breaker,
             // Failover queue management
             commands::get_failover_queue,
             commands::get_available_providers_for_failover,

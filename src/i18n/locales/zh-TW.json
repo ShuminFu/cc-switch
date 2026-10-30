@@ -2617,7 +2617,17 @@
     "degraded": "降級",
     "failed": "失敗",
     "circuitOpen": "斷路",
-    "consecutiveFailures": "連續失敗 {{count}} 次"
+    "consecutiveFailures": "連續失敗 {{count}} 次",
+    "circuitClosed": "斷路器關閉",
+    "circuitHalfOpen": "半開",
+    "circuitOpenRemaining": "斷路 · {{seconds}} 秒",
+    "circuitStateTitle": "斷路器：{{state}}",
+    "probeNow": "立即探測",
+    "probing": "探測中…",
+    "probeSucceeded": "探測成功，斷路器已關閉",
+    "probeFailed": "探測失敗：{{detail}}",
+    "probeSkipped": "未探測：{{detail}}",
+    "probeProxyStopped": "代理未執行"
   },
   "failover": {
     "enabled": "{{app}} 故障轉移已啟用",

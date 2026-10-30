@@ -3,6 +3,7 @@ import type {
   ProviderHealth,
   CircuitBreakerConfig,
   CircuitBreakerStats,
+  CircuitProbeResult,
   FailoverQueueItem,
 } from "@/types/proxy";
 
@@ -57,6 +58,14 @@ export const failoverApi = {
     appType: string,
   ): Promise<CircuitBreakerStats | null> {
     return invoke("get_circuit_breaker_stats", { providerId, appType });
+  },
+
+  // 立即探测熔断器（代理未运行时返回 null）
+  async probeCircuitBreaker(
+    providerId: string,
+    appType: string,
+  ): Promise<CircuitProbeResult | null> {
+    return invoke("probe_circuit_breaker", { providerId, appType });
   },
 
   // ========== 故障转移队列 API（新） ==========

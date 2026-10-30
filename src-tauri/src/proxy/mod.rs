@@ -48,7 +48,7 @@ pub mod usage;
 // 公开导出给外部使用（commands, services等模块需要）
 #[allow(unused_imports)]
 pub use circuit_breaker::{
-    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
+    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitProbeResult, CircuitState,
 };
 #[allow(unused_imports)]
 pub use error::ProxyError;

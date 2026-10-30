@@ -2617,7 +2617,17 @@
     "degraded": "Degraded",
     "failed": "Failed",
     "circuitOpen": "Circuit Open",
-    "consecutiveFailures": "{{count}} consecutive failures"
+    "consecutiveFailures": "{{count}} consecutive failures",
+    "circuitClosed": "Circuit Closed",
+    "circuitHalfOpen": "Half-Open",
+    "circuitOpenRemaining": "Circuit Open · {{seconds}}s",
+    "circuitStateTitle": "Circuit breaker: {{state}}",
+    "probeNow": "Probe now",
+    "probing": "Probing…",
+    "probeSucceeded": "Probe succeeded, circuit closed",
+    "probeFailed": "Probe failed: {{detail}}",
+    "probeSkipped": "Probe skipped: {{detail}}",
+    "probeProxyStopped": "The proxy is not running"
   },
   "failover": {
     "enabled": "{{app}} failover enabled",

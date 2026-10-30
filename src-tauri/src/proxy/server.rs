@@ -477,4 +477,12 @@ impl ProxyServer {
             .reset_provider_breaker(provider_id, app_type)
             .await;
     }
+
+    /// 共享的 ProviderRouter（持有熔断器状态）
+    ///
+    /// 供熔断器状态查询与手动探测使用：调用方克隆 `Arc` 后即可释放对服务器的借用，
+    /// 避免探测请求期间一直占用 `ProxyService` 的服务器锁。
+    pub fn provider_router(&self) -> Arc<ProviderRouter> {
+        self.state.provider_router.clone()
+    }
 }
