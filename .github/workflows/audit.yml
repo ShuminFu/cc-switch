@@ -52,7 +52,8 @@ jobs:
           version: 10.12.3
           run_install: false
 
-      # Reads pnpm-lock.yaml; accepted advisories live in
-      # pnpm-workspace.yaml under auditConfig.ignoreGhsas.
+      # Reads pnpm-lock.yaml. No advisories are ignored; if one ever has to be
+      # accepted, list it with a reason in pnpm-workspace.yaml under
+      # auditConfig.ignoreGhsas.
       - name: pnpm audit
         run: pnpm audit --audit-level=high
