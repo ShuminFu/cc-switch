@@ -1,6 +1,6 @@
 # CCS-119: [apps-ui] Add the frontend app registry and replace VALID_APPS and the capability chains
 
-**Status:** Partial · **Kind:** refactor · **Labels:** `refactor`, `phase:P2`, `p2-medium`, `area:frontend`
+**Status:** Done · **Kind:** refactor · **Labels:** `refactor`, `phase:P2`, `p2-medium`, `area:frontend`
 
 > **Ticket key:** `p2-fe-app-registry` · **Phase:** P2 · **Priority:** p2-medium · **Effort:** M · **Depends on:** `p2-app-registry-ipc`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -46,3 +46,4 @@ p2-app-registry-ipc
 
 - Blocked: nothing; every remaining item is codable.
 - Follow-up [CCS-229](../P2-typed-vocabulary/CCS-229-p2-fe-app-registry-from-backend.md): Feed useAppRegistry() from the backend get_app_registry command.
+- Closed by [CCS-229](../P2-typed-vocabulary/CCS-229-p2-fe-app-registry-from-backend.md) (`4ab404b`): `useAppRegistry()` now reads `get_app_registry` and merges it into the static table, falling back to the static table while loading or on error.
