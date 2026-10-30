@@ -10,6 +10,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::error::AppError;
 use crate::services::s3_sync;
+use crate::services::sync_protocol::is_sync_conflict;
 use crate::settings::{self, S3SyncSettings};
 
 const AUTO_SYNC_DEBOUNCE_MS: u64 = 1000;
@@ -85,12 +86,13 @@ fn persist_auto_sync_error(settings: &mut S3SyncSettings, error: &AppError) {
     let _ = settings::update_s3_sync_status(settings.status.clone());
 }
 
-fn emit_auto_sync_status_updated(app: &AppHandle, status: &str, error: Option<&str>) {
+fn emit_auto_sync_status_updated(app: &AppHandle, status: &str, error: Option<&AppError>) {
     let payload = match error {
-        Some(message) => json!({
+        Some(err) => json!({
             "source": "auto",
             "status": status,
-            "error": message,
+            "error": err.to_string(),
+            "conflict": is_sync_conflict(err),
         }),
         None => json!({
             "source": "auto",
@@ -117,7 +119,9 @@ async fn run_auto_sync_upload(
         None => return Ok(()),
     };
 
-    let result = s3_sync::run_with_sync_lock(s3_sync::upload(db, &mut sync_settings)).await;
+    // Auto-sync never forces: if another device uploaded since our last sync,
+    // the upload is refused with a conflict instead of overwriting its data.
+    let result = s3_sync::run_with_sync_lock(s3_sync::upload(db, &mut sync_settings, false)).await;
     match result {
         Ok(_) => {
             emit_auto_sync_status_updated(app, "success", None);
@@ -125,7 +129,7 @@ async fn run_auto_sync_upload(
         }
         Err(err) => {
             persist_auto_sync_error(&mut sync_settings, &err);
-            emit_auto_sync_status_updated(app, "error", Some(&err.to_string()));
+            emit_auto_sync_status_updated(app, "error", Some(&err));
             Err(err)
         }
     }

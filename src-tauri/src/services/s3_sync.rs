@@ -7,18 +7,20 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::OnceLock;
 
-use chrono::Utc;
 use serde_json::Value;
 
 use crate::error::AppError;
 use crate::services::s3::{self, S3Credentials};
-use crate::settings::{update_s3_sync_status, S3SyncSettings, WebDavSyncStatus};
+use crate::settings::{update_s3_sync_status, S3SyncSettings};
 
 use super::sync_protocol::{
-    apply_snapshot, build_local_snapshot, localized, persist_sync_success_best_effort, sha256_hex,
-    validate_artifact_size_limit, validate_manifest_compat, verify_artifact, ArtifactMeta,
-    RemoteLayout, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES,
-    PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
+    apply_snapshot, build_local_snapshot, capture_local_fingerprint, ensure_local_unchanged,
+    evaluate_upload_precondition, is_insecure_remote_url, local_content_fingerprint, localized,
+    persist_sync_success_best_effort, remote_changed_error, sha256_hex, sync_status_from_baseline,
+    validate_artifact_size_limit, validate_manifest_compat, verify_artifact, warn_if_insecure,
+    ArtifactMeta, RemoteLayout, RemoteManifestView, SyncBaseline, SyncManifest, DB_COMPAT_VERSION,
+    MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST,
+    REMOTE_SKILLS_ZIP,
 };
 
 // ─── Sync lock ───────────────────────────────────────────────
@@ -46,14 +48,37 @@ pub async fn check_connection(settings: &S3SyncSettings) -> Result<(), AppError>
 }
 
 /// Upload local snapshot (db + skills) to remote S3.
+///
+/// Unless `force`, the upload is refused with a distinct "remote changed"
+/// conflict error when the remote manifest differs from the one seen at the
+/// last successful sync. On AWS the manifest PUT also carries `If-Match`.
 pub async fn upload(
     db: &crate::database::Database,
     settings: &mut S3SyncSettings,
+    force: bool,
 ) -> Result<Value, AppError> {
     settings.validate()?;
+    let insecure = warn_if_insecure("S3", &settings.endpoint);
     let creds = creds_for(settings);
 
     let snapshot = build_local_snapshot(db)?;
+    let local_fingerprint = local_content_fingerprint(&snapshot.db_sql, &snapshot.skills_zip);
+
+    // Precondition: the remote must still be what this device last synced.
+    let manifest_key = s3_key(settings, REMOTE_MANIFEST);
+    let remote = s3::get_object(&creds, &manifest_key, MAX_MANIFEST_BYTES).await?;
+    let if_match = {
+        let parsed = remote
+            .as_ref()
+            .and_then(|(bytes, _)| serde_json::from_slice::<SyncManifest>(bytes).ok());
+        let view = remote.as_ref().map(|(bytes, etag)| RemoteManifestView {
+            bytes,
+            etag: etag.as_deref(),
+            manifest: parsed.as_ref(),
+        });
+        evaluate_upload_precondition(&settings.status, view.as_ref(), force)?
+    };
+    let if_match = if_match.filter(|_| s3::supports_conditional_put(&creds));
 
     // Upload order: artifacts first, manifest last (best-effort consistency)
     let db_key = s3_key(settings, REMOTE_DB_SQL);
@@ -62,14 +87,18 @@ pub async fn upload(
     let skills_key = s3_key(settings, REMOTE_SKILLS_ZIP);
     s3::put_object(&creds, &skills_key, snapshot.skills_zip, "application/zip").await?;
 
-    let manifest_key = s3_key(settings, REMOTE_MANIFEST);
-    s3::put_object(
+    let outcome = s3::put_object_if_match(
         &creds,
         &manifest_key,
         snapshot.manifest_bytes,
         "application/json",
+        if_match.as_deref(),
     )
     .await?;
+    if outcome == s3::PutOutcome::PreconditionFailed {
+        log::warn!("[S3] Manifest changed during upload (412); refusing to overwrite");
+        return Err(remote_changed_error(None));
+    }
 
     // Fetch etag (best-effort, don't fail the upload)
     let etag = match s3::head_object(&creds, &manifest_key).await {
@@ -82,19 +111,28 @@ pub async fn upload(
 
     let _persisted = persist_sync_success_best_effort(
         settings,
-        snapshot.manifest_hash,
-        etag,
+        SyncBaseline {
+            manifest_hash: snapshot.manifest_hash,
+            etag,
+            local_fingerprint: Some(local_fingerprint),
+        },
         persist_sync_success,
     );
-    Ok(serde_json::json!({ "status": "uploaded" }))
+    Ok(serde_json::json!({ "status": "uploaded", "insecureTransport": insecure }))
 }
 
 /// Download remote snapshot and apply to local database + skills.
+///
+/// Unless `force`, the download is refused with a distinct "local changed"
+/// conflict error when local data changed since the last successful sync.
 pub async fn download(
     db: &crate::database::Database,
     settings: &mut S3SyncSettings,
+    force: bool,
 ) -> Result<Value, AppError> {
     settings.validate()?;
+    let insecure = warn_if_insecure("S3", &settings.endpoint);
+    ensure_local_unchanged(db, &settings.status, force)?;
     let creds = creds_for(settings);
 
     let manifest_key = s3_key(settings, REMOTE_MANIFEST);
@@ -125,9 +163,16 @@ pub async fn download(
     apply_snapshot(db, &db_sql, &skills_zip)?;
 
     let manifest_hash = sha256_hex(&manifest_bytes);
-    let _persisted =
-        persist_sync_success_best_effort(settings, manifest_hash, etag, persist_sync_success);
-    Ok(serde_json::json!({ "status": "downloaded" }))
+    let _persisted = persist_sync_success_best_effort(
+        settings,
+        SyncBaseline {
+            manifest_hash,
+            etag,
+            local_fingerprint: capture_local_fingerprint(db),
+        },
+        persist_sync_success,
+    );
+    Ok(serde_json::json!({ "status": "downloaded", "insecureTransport": insecure }))
 }
 
 /// Fetch remote manifest info without downloading artifacts.
@@ -136,7 +181,8 @@ pub async fn fetch_remote_info(settings: &S3SyncSettings) -> Result<Option<Value
     let creds = creds_for(settings);
     let manifest_key = s3_key(settings, REMOTE_MANIFEST);
 
-    let Some((bytes, _)) = s3::get_object(&creds, &manifest_key, MAX_MANIFEST_BYTES).await? else {
+    let Some((bytes, etag)) = s3::get_object(&creds, &manifest_key, MAX_MANIFEST_BYTES).await?
+    else {
         return Ok(None);
     };
 
@@ -146,8 +192,20 @@ pub async fn fetch_remote_info(settings: &S3SyncSettings) -> Result<Option<Value
     })?;
 
     let compatible = validate_manifest_compat(&manifest, RemoteLayout::Current).is_ok();
+    let remote_changed = evaluate_upload_precondition(
+        &settings.status,
+        Some(&RemoteManifestView {
+            bytes: &bytes,
+            etag: etag.as_deref(),
+            manifest: None,
+        }),
+        false,
+    )
+    .is_err();
 
     let payload = serde_json::json!({
+        "remoteChangedSinceLastSync": remote_changed,
+        "insecureTransport": is_insecure_remote_url(&settings.endpoint),
         "deviceName": manifest.device_name,
         "createdAt": manifest.created_at,
         "snapshotId": manifest.snapshot_id,
@@ -167,17 +225,9 @@ pub async fn fetch_remote_info(settings: &S3SyncSettings) -> Result<Option<Value
 
 fn persist_sync_success(
     settings: &mut S3SyncSettings,
-    manifest_hash: String,
-    etag: Option<String>,
+    baseline: SyncBaseline,
 ) -> Result<(), AppError> {
-    let status = WebDavSyncStatus {
-        last_sync_at: Some(Utc::now().timestamp()),
-        last_error: None,
-        last_error_source: None,
-        last_local_manifest_hash: Some(manifest_hash.clone()),
-        last_remote_manifest_hash: Some(manifest_hash),
-        last_remote_etag: etag,
-    };
+    let status = sync_status_from_baseline(baseline);
     settings.status = status.clone();
     update_s3_sync_status(status)
 }

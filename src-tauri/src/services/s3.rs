@@ -358,6 +358,24 @@ pub(crate) async fn test_connection(creds: &S3Credentials) -> Result<(), AppErro
     Err(s3_status_error("HEAD bucket", resp.status(), &url_str))
 }
 
+/// Result of a conditional PUT.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PutOutcome {
+    Stored,
+    /// `412 Precondition Failed` / `409 ConditionalRequestConflict`: the
+    /// object changed since the ETag passed as `If-Match` was observed.
+    PreconditionFailed,
+}
+
+/// Whether the endpoint is known to honour `If-Match` on PutObject.
+///
+/// AWS S3 supports conditional writes; S3-compatible services vary (some
+/// ignore the header, some reject it), so they rely on the manifest-hash
+/// comparison done before the upload instead.
+pub(crate) fn supports_conditional_put(creds: &S3Credentials) -> bool {
+    is_aws_endpoint(&creds.endpoint)
+}
+
 /// Upload bytes to an S3 object.
 pub(crate) async fn put_object(
     creds: &S3Credentials,
@@ -365,6 +383,25 @@ pub(crate) async fn put_object(
     bytes: Vec<u8>,
     content_type: &str,
 ) -> Result<(), AppError> {
+    match put_object_if_match(creds, key, bytes, content_type, None).await? {
+        PutOutcome::Stored => Ok(()),
+        PutOutcome::PreconditionFailed => Err(s3_status_error(
+            "PUT",
+            StatusCode::PRECONDITION_FAILED,
+            &build_object_url(creds, key),
+        )),
+    }
+}
+
+/// Upload bytes to an S3 object, sending `If-Match: <etag>` when set so the
+/// write only succeeds if the object is still the one that was checked.
+pub(crate) async fn put_object_if_match(
+    creds: &S3Credentials,
+    key: &str,
+    bytes: Vec<u8>,
+    content_type: &str,
+    if_match: Option<&str>,
+) -> Result<PutOutcome, AppError> {
     let url_str = build_object_url(creds, key);
     let url = Url::parse(&url_str).map_err(|e| {
         AppError::localized(
@@ -378,6 +415,17 @@ pub(crate) async fn put_object(
     let body_hash = sha256_hex(&bytes);
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert("content-type", content_type.parse().unwrap());
+    if let Some(etag) = if_match {
+        let value = reqwest::header::HeaderValue::from_str(etag).map_err(|_| {
+            AppError::localized(
+                "s3.etag.invalid",
+                "S3 ETag 无效",
+                "Invalid S3 ETag for conditional upload.",
+            )
+        })?;
+        // Inserted before signing so it is covered by the SigV4 signature.
+        headers.insert(reqwest::header::IF_MATCH, value);
+    }
     sign_request(
         "PUT",
         &url,
@@ -396,10 +444,16 @@ pub(crate) async fn put_object(
         .await
         .map_err(|e| s3_transport_error("s3.put_failed", "PUT 请求", "PUT request", &e))?;
 
-    if resp.status().is_success() {
-        return Ok(());
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(PutOutcome::Stored);
     }
-    Err(s3_status_error("PUT", resp.status(), &url_str))
+    if if_match.is_some()
+        && (status == StatusCode::PRECONDITION_FAILED || status == StatusCode::CONFLICT)
+    {
+        return Ok(PutOutcome::PreconditionFailed);
+    }
+    Err(s3_status_error("PUT", status, &url_str))
 }
 
 /// Download an S3 object. Returns `None` if the object does not exist (404).
