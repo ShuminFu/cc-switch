@@ -1,5 +1,5 @@
 import type { ProxyTakeoverStatus } from "@/types/proxy";
-import { APP_ICON_MAP } from "./appConfig";
+import { APP_REGISTRY, appsWith } from "./apps";
 
 /**
  * Apps the local proxy can take over (and therefore configure failover for).
@@ -21,8 +21,20 @@ export const isProxyCapableApp = (appId: string): appId is ProxyCapableApp =>
 
 /** Display name for an app id, falling back to the raw id for unknown apps. */
 export const getAppLabel = (appId: string): string =>
-  (APP_ICON_MAP as Record<string, { label: string } | undefined>)[appId]
+  (APP_REGISTRY as Record<string, { label: string } | undefined>)[appId]
     ?.label ?? appId;
+
+/**
+ * Registry-derived check that `PROXY_CAPABLE_APPS` (kept as a literal tuple
+ * for its narrow type) agrees with the `proxy` capability in `APP_REGISTRY`.
+ */
+export const proxyCapableAppsMatchRegistry = (): boolean => {
+  const fromRegistry = appsWith("proxy");
+  return (
+    fromRegistry.length === PROXY_CAPABLE_APPS.length &&
+    fromRegistry.every((app, i) => app === PROXY_CAPABLE_APPS[i])
+  );
+};
 
 /** True when the proxy has taken over any proxy-capable app. */
 export const isAnyTakeoverActive = (
