@@ -149,6 +149,30 @@ export const usageKeys = {
     [...usageKeys.all, providerId, appType] as const,
 };
 
+/**
+ * Second segment of the usage-dashboard query keys whose data depends on the
+ * request log (summary / trends / stats / log table). Script usage, pricing,
+ * limits and request detail keys are deliberately excluded.
+ */
+const USAGE_DASHBOARD_SEGMENTS: ReadonlySet<unknown> = new Set([
+  "summary",
+  "summary-by-app",
+  "trends",
+  "provider-stats",
+  "model-stats",
+  "logs",
+]);
+
+/** True for the dashboard aggregate/log queries refreshed on new usage logs. */
+export function isUsageDashboardQueryKey(
+  queryKey: readonly unknown[],
+): boolean {
+  return (
+    queryKey[0] === usageKeys.all[0] &&
+    USAGE_DASHBOARD_SEGMENTS.has(queryKey[1])
+  );
+}
+
 /** 把 UI 侧的 "all" 哨兵归一成 undefined（后端语义：不过滤）。 */
 function normalizeScopeFilters(filters?: UsageScopeFilters): UsageScopeFilters {
   return {
