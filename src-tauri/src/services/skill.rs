@@ -784,6 +784,7 @@ impl SkillService {
         let skill = db
             .get_installed_skill(id)?
             .ok_or_else(|| anyhow!("Skill not found: {id}"))?;
+        Self::validate_installed_directory(&skill.directory)?;
 
         let backup_path =
             Self::create_uninstall_backup(&skill)?.map(|path| path.to_string_lossy().to_string());
@@ -951,7 +952,9 @@ impl SkillService {
                     Some(h) => Some(h.clone()),
                     None => {
                         let local_dir = ssot_dir.join(&skill.directory);
-                        if local_dir.exists() {
+                        if Self::validate_installed_directory(&skill.directory).is_ok()
+                            && local_dir.exists()
+                        {
                             match Self::compute_dir_hash(&local_dir) {
                                 Ok(h) => {
                                     let _ = db.update_skill_hash(&skill.id, &h, 0);
@@ -986,6 +989,7 @@ impl SkillService {
         let skill = db
             .get_installed_skill(skill_id)?
             .ok_or_else(|| anyhow!("Skill not found: {skill_id}"))?;
+        Self::validate_installed_directory(&skill.directory)?;
 
         let (owner, name, branch) = match (&skill.repo_owner, &skill.repo_name) {
             (Some(o), Some(n)) => (
@@ -1119,6 +1123,10 @@ impl SkillService {
             if skill.content_hash.is_some() {
                 continue;
             }
+            if let Err(e) = Self::validate_installed_directory(&skill.directory) {
+                log::warn!("跳过目录名非法的 Skill {}: {e}", skill.id);
+                continue;
+            }
             let skill_dir = ssot_dir.join(&skill.directory);
             if !skill_dir.exists() {
                 continue;
@@ -1175,6 +1183,10 @@ impl SkillService {
         };
 
         for skill in skills.values() {
+            if let Err(e) = Self::validate_installed_directory(&skill.directory) {
+                result.errors.push(format!("{}: {e}", skill.directory));
+                continue;
+            }
             let src = old_dir.join(&skill.directory);
             let dst = new_dir.join(&skill.directory);
 
@@ -1280,6 +1292,7 @@ impl SkillService {
     ) -> Result<InstalledSkill> {
         let backup_path = Self::backup_path_for_id(backup_id)?;
         let metadata = Self::read_backup_metadata(&backup_path)?;
+        Self::validate_installed_directory(&metadata.skill.directory)?;
         let backup_skill_dir = backup_path.join("skill");
         if !backup_skill_dir.join("SKILL.md").exists() {
             return Err(anyhow!(
@@ -1466,6 +1479,10 @@ impl SkillService {
 
         for selection in imports {
             let dir_name = selection.directory;
+            if let Err(e) = Self::validate_installed_directory(&dir_name) {
+                log::warn!("Skip importing invalid skill directory '{dir_name}': {e}");
+                continue;
+            }
             // 在所有候选目录中查找
             let mut source_path: Option<PathBuf> = None;
 
@@ -1580,6 +1597,7 @@ impl SkillService {
         if matches!(app, AppType::ClaudeDesktop) {
             return Ok(());
         }
+        Self::validate_installed_directory(directory)?;
 
         let ssot_dir = Self::get_ssot_dir()?;
         let source = ssot_dir.join(directory);
@@ -1752,6 +1770,7 @@ impl SkillService {
         if matches!(app, AppType::ClaudeDesktop) {
             return Ok(());
         }
+        Self::validate_installed_directory(directory)?;
 
         let app_dir = Self::get_app_skills_dir(app)?;
         let skill_path = app_dir.join(directory);
@@ -1804,6 +1823,10 @@ impl SkillService {
 
         for skill in skills.values() {
             if skill.apps.is_enabled_for(app) {
+                if let Err(e) = Self::validate_installed_directory(&skill.directory) {
+                    log::warn!("跳过目录名非法的 Skill {}: {e}", skill.id);
+                    continue;
+                }
                 Self::sync_to_app_dir(&skill.directory, app)?;
             }
         }
@@ -2114,6 +2137,42 @@ impl SkillService {
         }
     }
 
+    /// Validate an installed skill `directory` value before it is joined onto a
+    /// skills root (SSOT or an app skills dir) and used for deletes or copies.
+    ///
+    /// Rows can reach the database through sync downloads, SQL imports or
+    /// backup metadata, bypassing the install-time sanitisation, so every
+    /// filesystem sink re-checks that the value is exactly one normal path
+    /// component (no separators, no `.`/`..`, not absolute).
+    pub(crate) fn validate_installed_directory(directory: &str) -> Result<&str> {
+        let invalid = || {
+            anyhow!(format_skill_error(
+                "INVALID_SKILL_DIRECTORY",
+                &[("directory", directory)],
+                None,
+            ))
+        };
+
+        if directory.is_empty()
+            || directory.trim() != directory
+            || directory.contains('/')
+            || directory.contains('\\')
+            || directory.contains('\0')
+            || directory == "."
+            || directory == ".."
+        {
+            return Err(invalid());
+        }
+
+        let mut components = Path::new(directory).components();
+        match (components.next(), components.next()) {
+            (Some(Component::Normal(name)), None) if name == std::ffi::OsStr::new(directory) => {
+                Ok(directory)
+            }
+            _ => Err(invalid()),
+        }
+    }
+
     /// 在目录树中查找名称匹配且包含 SKILL.md 的子目录
     ///
     /// 用于 skills.sh 安装回退：API 只返回 skillId（如 "find-skills"），
@@ -2330,6 +2389,7 @@ impl SkillService {
     }
 
     fn resolve_uninstall_backup_source(skill: &InstalledSkill) -> Result<Option<PathBuf>> {
+        Self::validate_installed_directory(&skill.directory)?;
         let ssot_path = Self::get_ssot_dir()?.join(&skill.directory);
         if ssot_path.is_dir() {
             return Ok(Some(ssot_path));
