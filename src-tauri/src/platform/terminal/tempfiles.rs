@@ -103,6 +103,7 @@ pub(super) fn write_private_temp_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::platform::shell::shell_single_quote;
     use crate::platform::terminal::posix::build_provider_launcher_script;
 
