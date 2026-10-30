@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { parseBackupName } from "./backupNames";
 import { useBackupManager } from "@/hooks/useBackupManager";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
@@ -47,18 +48,8 @@ function formatBackupDate(isoString: string): string {
   }
 }
 
-/** Parse display name from backup filename */
 function getDisplayName(filename: string): string {
-  // Try to parse db_backup_YYYYMMDD_HHMMSS format
-  const match = filename.match(
-    /^db_backup_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})(?:_\d+)?\.db$/,
-  );
-  if (match) {
-    const [, y, m, d, hh, mm, ss] = match;
-    return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
-  }
-  // Otherwise show filename without .db suffix
-  return filename.replace(/\.db$/, "");
+  return parseBackupName(filename).displayName;
 }
 
 export function BackupListSection({
@@ -346,8 +337,11 @@ export function BackupListSection({
                     </div>
                   ) : (
                     <>
-                      <div className="font-mono text-xs truncate">
-                        {getDisplayName(backup.filename)}
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-mono text-xs truncate">
+                          {getDisplayName(backup.filename)}
+                        </span>
+                        <BackupKindBadge filename={backup.filename} />
                       </div>
                       <div className="text-xs text-muted-foreground">
                         {formatBackupDate(backup.createdAt)} &middot;{" "}
@@ -490,5 +484,52 @@ export function BackupListSection({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** Labels the backups the app takes on its own besides the periodic ones. */
+function BackupKindBadge({ filename }: { filename: string }) {
+  const { t } = useTranslation();
+  const { kind } = parseBackupName(filename);
+  if (!kind || kind === "auto") return null;
+
+  const labels = {
+    manual: {
+      label: t("settings.backupManager.kind.manual", {
+        defaultValue: "Manual",
+      }),
+      title: t("settings.backupManager.kind.manualHint", {
+        defaultValue: "Created from Backup Now; never rotated automatically",
+      }),
+    },
+    safety: {
+      label: t("settings.backupManager.kind.safety", {
+        defaultValue: "Safety",
+      }),
+      title: t("settings.backupManager.kind.safetyHint", {
+        defaultValue:
+          "Taken automatically before an import, restore or sync download replaced the database",
+      }),
+    },
+    premigration: {
+      label: t("settings.backupManager.kind.premigration", {
+        defaultValue: "Pre-migration",
+      }),
+      title: t("settings.backupManager.kind.premigrationHint", {
+        defaultValue:
+          "Taken automatically before a database upgrade or rebuild",
+      }),
+    },
+  } as const;
+  const { label, title } = labels[kind];
+
+  return (
+    <span
+      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none bg-muted text-muted-foreground border border-border/60"
+      title={title}
+      data-backup-kind={kind}
+    >
+      {label}
+    </span>
   );
 }
