@@ -7,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FailoverQueueManager } from "@/components/proxy/FailoverQueueManager";
 import PromptPanel from "@/components/prompts/PromptPanel";
@@ -392,6 +393,62 @@ describe("HermesMemoryPanel", () => {
       expect(screen.getByTestId("editor")).toHaveValue("123456"),
     );
     expect(screen.getByText(/hermes\.memory\.overLimit/)).toBeInTheDocument();
+  });
+
+  it("disables Save while the content is over the limit (FE-UI-50)", async () => {
+    mockInvoke({
+      get_hermes_memory_limits: {
+        memory: 5,
+        user: 10,
+        memoryEnabled: true,
+        userEnabled: true,
+      },
+      get_hermes_memory: "123456",
+    });
+    renderWithQuery(<HermesMemoryPanel />);
+    await waitFor(() =>
+      expect(screen.getByTestId("editor")).toHaveValue("123456"),
+    );
+    expect(screen.getByRole("button", { name: "common.save" })).toBeDisabled();
+  });
+
+  it("keeps unsaved edits across Agent/User tab switches (FE-UI-50)", async () => {
+    const user = userEvent.setup();
+    mockInvoke({
+      get_hermes_memory_limits: {
+        memory: 50,
+        user: 50,
+        memoryEnabled: true,
+        userEnabled: true,
+      },
+      get_hermes_memory: ({ kind }: Record<string, unknown>) =>
+        kind === "memory" ? "agent" : "user",
+    });
+    renderWithQuery(<HermesMemoryPanel />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("editor")).toHaveValue("agent"),
+    );
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "agent edited" },
+    });
+
+    await user.click(
+      screen.getByRole("tab", { name: /hermes.memory.userTab/ }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("editor")).toHaveValue("user"),
+    );
+    await user.click(
+      screen.getByRole("tab", { name: /hermes.memory.agentTab/ }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("editor")).toHaveValue("agent edited"),
+    );
+    // The dirty tab is marked.
+    expect(
+      screen.getByRole("tab", { name: /hermes.memory.agentTab/ }),
+    ).toHaveTextContent("•");
   });
 
   it("shows the disabled hint and toggles memory on", async () => {
