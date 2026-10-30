@@ -6,7 +6,8 @@
 
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Composite key for a Gemini shadow session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -70,33 +71,37 @@ impl GeminiAssistantTurn {
 pub struct GeminiShadowSessionSnapshot {
     pub provider_id: String,
     pub session_id: String,
-    pub turns: Vec<GeminiAssistantTurn>,
+    /// Shared, immutable turns: a snapshot clones `Arc`s, not turn bodies
+    /// (PROV-30).
+    pub turns: Vec<Arc<GeminiAssistantTurn>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct GeminiShadowSession {
-    turns: VecDeque<GeminiAssistantTurn>,
+    turns: VecDeque<Arc<GeminiAssistantTurn>>,
+    /// LRU stamp from [`GeminiShadowStore::clock`]; updated through a shared
+    /// reference so reads only need the read lock (PROV-30).
+    last_used: AtomicU64,
 }
 
 impl GeminiShadowSession {
-    fn new() -> Self {
+    fn new(stamp: u64) -> Self {
         Self {
             turns: VecDeque::new(),
+            last_used: AtomicU64::new(stamp),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct GeminiShadowInner {
     sessions: HashMap<GeminiShadowKey, GeminiShadowSession>,
-    session_order: VecDeque<GeminiShadowKey>,
 }
 
 impl GeminiShadowInner {
     fn new() -> Self {
         Self {
             sessions: HashMap::new(),
-            session_order: VecDeque::new(),
         }
     }
 }
@@ -112,6 +117,8 @@ pub struct GeminiShadowStore {
     max_sessions: usize,
     max_turns_per_session: usize,
     inner: RwLock<GeminiShadowInner>,
+    /// Monotonic LRU clock.
+    clock: AtomicU64,
 }
 
 impl Default for GeminiShadowStore {
@@ -131,7 +138,12 @@ impl GeminiShadowStore {
             max_sessions: max_sessions.max(1),
             max_turns_per_session: max_turns_per_session.max(1),
             inner: RwLock::new(GeminiShadowInner::new()),
+            clock: AtomicU64::new(0),
         }
+    }
+
+    fn tick(&self) -> u64 {
+        self.clock.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// Record a Gemini assistant turn for later replay.
@@ -143,16 +155,17 @@ impl GeminiShadowStore {
         tool_calls: Vec<GeminiToolCallMeta>,
     ) -> GeminiShadowSessionSnapshot {
         let key = GeminiShadowKey::new(provider_id, session_id);
-        let turn = GeminiAssistantTurn::new(assistant_content, tool_calls);
+        let turn = Arc::new(GeminiAssistantTurn::new(assistant_content, tool_calls));
+        let stamp = self.tick();
 
         let mut inner = self.write_inner();
-        Self::touch_session_order(&mut inner.session_order, &key);
 
         let snapshot = {
             let session = inner
                 .sessions
                 .entry(key.clone())
-                .or_insert_with(GeminiShadowSession::new);
+                .or_insert_with(|| GeminiShadowSession::new(stamp));
+            session.last_used.store(stamp, Ordering::Relaxed);
             session.turns.push_back(turn);
             while session.turns.len() > self.max_turns_per_session {
                 session.turns.pop_front();
@@ -193,15 +206,13 @@ impl GeminiShadowStore {
         session_id: &str,
     ) -> Option<GeminiShadowSessionSnapshot> {
         let key = GeminiShadowKey::new(provider_id, session_id);
-        let mut inner = self.write_inner();
-        let snapshot = inner
-            .sessions
-            .get(&key)
-            .map(|session| Self::snapshot_session(&key, session));
-        if snapshot.is_some() {
-            Self::touch_session_order(&mut inner.session_order, &key);
-        }
-        snapshot
+        let stamp = self.tick();
+        // PROV-30: a read only takes the read lock; the LRU touch is atomic.
+        let inner = self.read_inner();
+        inner.sessions.get(&key).map(|session| {
+            session.last_used.store(stamp, Ordering::Relaxed);
+            Self::snapshot_session(&key, session)
+        })
     }
 
     /// Remove a single session from the store.
@@ -209,11 +220,7 @@ impl GeminiShadowStore {
     pub fn clear_session(&self, provider_id: &str, session_id: &str) -> bool {
         let key = GeminiShadowKey::new(provider_id, session_id);
         let mut inner = self.write_inner();
-        let removed = inner.sessions.remove(&key).is_some();
-        if removed {
-            Self::remove_key_from_order(&mut inner.session_order, &key);
-        }
-        removed
+        inner.sessions.remove(&key).is_some()
     }
 
     /// Remove all sessions for a provider.
@@ -228,7 +235,6 @@ impl GeminiShadowStore {
             .collect();
         for key in &keys {
             inner.sessions.remove(key);
-            Self::remove_key_from_order(&mut inner.session_order, key);
         }
         keys.len()
     }
@@ -264,23 +270,16 @@ impl GeminiShadowStore {
         }
     }
 
-    fn touch_session_order(order: &mut VecDeque<GeminiShadowKey>, key: &GeminiShadowKey) {
-        if let Some(pos) = order.iter().position(|existing| existing == key) {
-            order.remove(pos);
-        }
-        order.push_back(key.clone());
-    }
-
-    #[allow(dead_code)]
-    fn remove_key_from_order(order: &mut VecDeque<GeminiShadowKey>, key: &GeminiShadowKey) {
-        if let Some(pos) = order.iter().position(|existing| existing == key) {
-            order.remove(pos);
-        }
-    }
-
     fn prune_sessions(inner: &mut GeminiShadowInner, max_sessions: usize) {
+        // Evict least-recently-used sessions. This only runs on a write and
+        // only once the store is over capacity (one O(sessions) scan).
         while inner.sessions.len() > max_sessions {
-            let Some(evicted_key) = inner.session_order.pop_front() else {
+            let Some(evicted_key) = inner
+                .sessions
+                .iter()
+                .min_by_key(|(_, session)| session.last_used.load(Ordering::Relaxed))
+                .map(|(key, _)| key.clone())
+            else {
                 break;
             };
             inner.sessions.remove(&evicted_key);

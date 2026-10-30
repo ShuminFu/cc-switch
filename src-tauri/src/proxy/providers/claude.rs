@@ -30,6 +30,39 @@ const REASONING_VENDOR_HINTS: &[&str] = &["moonshot", "kimi", "deepseek", "mimo"
 // catalog 的 minimal_client_version（luna=0.144.0），新模型抬门槛时同步 bump。
 const CODEX_OAUTH_ORIGINATOR: &str = "codex_cli_rs";
 const CODEX_OAUTH_CLIENT_VERSION: &str = "0.144.1";
+/// Escape hatch for a raised `minimal_client_version` (PROV-43): set this
+/// environment variable (e.g. `0.150.0`) to override the `version` header
+/// without waiting for a CC Switch release. Release checklist: bump
+/// [`CODEX_OAUTH_CLIENT_VERSION`] when OpenAI raises the minimum.
+pub(crate) const CODEX_CLIENT_VERSION_ENV: &str = "CC_SWITCH_CODEX_CLIENT_VERSION";
+
+/// Pick the Codex OAuth `version` header: a well-formed override
+/// (`digits(.digits)*`, optional `-suffix`) or the built-in default.
+fn codex_oauth_client_version_from(override_value: Option<&str>) -> String {
+    let Some(value) = override_value.map(str::trim).filter(|v| !v.is_empty()) else {
+        return CODEX_OAUTH_CLIENT_VERSION.to_string();
+    };
+    let core = value.split('-').next().unwrap_or_default();
+    let well_formed = !core.is_empty()
+        && core
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'));
+    if well_formed {
+        value.to_string()
+    } else {
+        log::warn!(
+            "[CodexOAuth] ignoring malformed {CODEX_CLIENT_VERSION_ENV}=`{value}`; using {CODEX_OAUTH_CLIENT_VERSION}"
+        );
+        CODEX_OAUTH_CLIENT_VERSION.to_string()
+    }
+}
+
+fn codex_oauth_client_version() -> String {
+    codex_oauth_client_version_from(std::env::var(CODEX_CLIENT_VERSION_ENV).ok().as_deref())
+}
 
 /// 获取 Claude 供应商的 API 格式
 ///
@@ -334,6 +367,63 @@ fn should_preserve_reasoning_content_for_openai_chat(provider: &Provider, body: 
         .any(is_reasoning_vendor_identifier)
 }
 
+/// Optional `settings_config.responsesReasoningSummary` override for
+/// Responses gateways that reject (or want a different) `reasoning.summary`
+/// (PROV-12): `"none"` / `"off"` / `false` removes it, any other string
+/// (`"concise"`, `"detailed"`, `"auto"`) replaces the default `"auto"`.
+pub(crate) const RESPONSES_REASONING_SUMMARY_KEY: &str = "responsesReasoningSummary";
+
+fn apply_responses_reasoning_summary_override(result: &mut Value, provider: &Provider) {
+    let Some(setting) = provider
+        .settings_config
+        .get(RESPONSES_REASONING_SUMMARY_KEY)
+    else {
+        return;
+    };
+    let Some(reasoning) = result.get_mut("reasoning").and_then(|r| r.as_object_mut()) else {
+        return;
+    };
+    match setting {
+        Value::Bool(false) => {
+            reasoning.remove("summary");
+        }
+        Value::String(s)
+            if matches!(
+                s.trim().to_ascii_lowercase().as_str(),
+                "none" | "off" | "disabled" | ""
+            ) =>
+        {
+            reasoning.remove("summary");
+        }
+        Value::String(s) => {
+            reasoning.insert("summary".to_string(), json!(s.trim()));
+        }
+        _ => {}
+    }
+}
+
+/// Express the Anthropic `thinking` / `output_config.effort` request in the
+/// Responses `reasoning.effort` shape consumed by
+/// `transform_codex_chat::apply_reasoning_options`.
+///
+/// Returns `None` when the request carries no reasoning intent at all, so a
+/// provider's default behaviour is left untouched.
+fn anthropic_reasoning_as_responses_request(body: &Value) -> Option<Value> {
+    let thinking_type = body
+        .get("thinking")
+        .and_then(|t| t.get("type"))
+        .and_then(|t| t.as_str());
+    if thinking_type == Some("disabled") {
+        return Some(json!({ "reasoning": { "effort": "none" } }));
+    }
+    let explicit_effort = body.pointer("/output_config/effort").is_some();
+    if !matches!(thinking_type, Some("enabled") | Some("adaptive")) && !explicit_effort {
+        return None;
+    }
+    let effort = super::transform::resolve_reasoning_effort(body).unwrap_or("high");
+    Some(json!({ "reasoning": { "effort": effort } }))
+}
+
 pub fn transform_claude_request_for_api_format(
     body: serde_json::Value,
     provider: &Provider,
@@ -346,16 +436,9 @@ pub fn transform_claude_request_for_api_format(
     // Copilot 场景：优先从 metadata.user_id 提取 session ID 作为 cache key
     // 格式: "uuid_sessionId" → 提取 "_" 后面的部分作为 session 标识
     // 同一会话的请求共享 cache key，提升 Copilot 缓存命中率
-    let is_copilot = provider
-        .meta
-        .as_ref()
-        .and_then(|m| m.provider_type.as_deref())
-        == Some("github_copilot")
-        || provider
-            .settings_config
-            .get("baseUrl")
-            .and_then(|v| v.as_str())
-            .is_some_and(|u| u.contains("githubcopilot.com"));
+    // PROV-42: share the adapter's detection (meta.providerType, then the
+    // real base-URL keys) instead of a `baseUrl` key nothing else writes.
+    let is_copilot = ClaudeAdapter::new().is_github_copilot(provider);
     let session_cache_key: Option<String> = if is_copilot {
         let metadata = body.get("metadata");
         // Session 提取优先级（与 forwarder 和 session.rs 统一）：
@@ -400,20 +483,49 @@ pub fn transform_claude_request_for_api_format(
             // Codex OAuth (ChatGPT Plus/Pro 反代) 需要在请求体里强制 store: false
             // + include: ["reasoning.encrypted_content"]，由 transform 层统一处理。
             let codex_fast_mode = provider.codex_fast_mode_enabled();
-            super::transform_responses::anthropic_to_responses(
+            let mut result = super::transform_responses::anthropic_to_responses(
                 body,
                 cache_key,
                 is_codex_oauth,
                 codex_fast_mode,
-            )
+            )?;
+            apply_responses_reasoning_summary_override(&mut result, provider);
+            Ok(result)
         }
         "openai_chat" => {
             let preserve_reasoning_content =
                 should_preserve_reasoning_content_for_openai_chat(provider, &body);
+            // PROV-04: reuse the per-vendor Chat reasoning capability model that the
+            // Codex→Chat path already applies, so Claude Code's thinking toggle and
+            // effort reach DeepSeek/Qwen/GLM/Kimi/OpenRouter-style providers.
+            let reasoning_config =
+                super::codex::resolve_codex_chat_reasoning_config(provider, &body);
+            let reasoning_request = anthropic_reasoning_as_responses_request(&body);
+            let model = body
+                .get("model")
+                .and_then(|m| m.as_str())
+                .unwrap_or_default()
+                .to_string();
             let mut result = super::transform::anthropic_to_openai_with_reasoning_content(
                 body,
                 preserve_reasoning_content,
             )?;
+            if let (Some(config), Some(request)) =
+                (reasoning_config.as_ref(), reasoning_request.as_ref())
+            {
+                // The provider-declared config is authoritative: drop the generic
+                // OpenAI `reasoning_effort` so it never coexists with a vendor form
+                // such as OpenRouter's `reasoning.effort` (which would 400).
+                if let Some(obj) = result.as_object_mut() {
+                    obj.remove("reasoning_effort");
+                }
+                super::transform_codex_chat::apply_reasoning_options(
+                    &mut result,
+                    request,
+                    &model,
+                    Some(config),
+                );
+            }
             // Inject prompt_cache_key only if explicitly configured in meta
             if let Some(key) = provider
                 .meta
@@ -499,7 +611,7 @@ impl ClaudeAdapter {
     }
 
     /// 检测是否为 GitHub Copilot 供应商
-    fn is_github_copilot(&self, provider: &Provider) -> bool {
+    pub(crate) fn is_github_copilot(&self, provider: &Provider) -> bool {
         // 方式1: 检查 meta.provider_type
         if let Some(meta) = provider.meta.as_ref() {
             if meta.provider_type.as_deref() == Some("github_copilot") {
@@ -751,21 +863,7 @@ impl ProviderAdapter for ClaudeAdapter {
                 // plain GoogleOAuth strategy (which still sends the raw key
                 // as a fallback) and log loudly so users know to refresh
                 // their `~/.gemini/oauth_creds.json`.
-                match super::gemini::GeminiAdapter::new().parse_oauth_credentials(&key) {
-                    Some(creds) if !creds.access_token.is_empty() => {
-                        Some(AuthInfo::with_access_token(key, creds.access_token))
-                    }
-                    Some(_) => {
-                        log::warn!(
-                            "[Gemini OAuth] access_token missing or empty for provider `{}`; \
-                             bearer auth will likely fail with 401. Refresh \
-                             ~/.gemini/oauth_creds.json via the gemini CLI to obtain a new token.",
-                            provider.id
-                        );
-                        Some(AuthInfo::new(key, AuthStrategy::GoogleOAuth))
-                    }
-                    None => Some(AuthInfo::new(key, AuthStrategy::GoogleOAuth)),
-                }
+                Some(super::gemini::gemini_oauth_auth_info(key, &provider.id))
             }
             ProviderType::Gemini => Some(AuthInfo::new(key, AuthStrategy::Google)),
             ProviderType::OpenRouter => Some(AuthInfo::new(key, AuthStrategy::Bearer)),
@@ -831,7 +929,7 @@ impl ProviderAdapter for ClaudeAdapter {
                 hv(&auth.api_key)?,
             )],
             AuthStrategy::GoogleOAuth => {
-                let token = auth.access_token.as_ref().unwrap_or(&auth.api_key);
+                let token = super::gemini::google_oauth_bearer_token(auth)?;
                 vec![
                     (
                         HeaderName::from_static("authorization"),
@@ -854,7 +952,7 @@ impl ProviderAdapter for ClaudeAdapter {
                     ),
                     (
                         HeaderName::from_static("version"),
-                        HeaderValue::from_static(CODEX_OAUTH_CLIENT_VERSION),
+                        hv(&codex_oauth_client_version())?,
                     ),
                 ]
             }
@@ -2558,5 +2656,224 @@ mod tests {
         assert!(changed);
         assert_eq!(body["thinking"]["type"], "disabled");
         assert!(body.get("output_config").is_none());
+    }
+
+    // ==================== PROV-04: Claude→openai_chat reasoning params ====================
+
+    fn chat_provider(base_url: &str) -> Provider {
+        create_provider(json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_API_KEY": "k"
+            }
+        }))
+    }
+
+    fn chat_body(model: &str, thinking: Value) -> Value {
+        json!({
+            "model": model,
+            "max_tokens": 1024,
+            "thinking": thinking,
+            "messages": [{ "role": "user", "content": "hi" }]
+        })
+    }
+
+    #[test]
+    fn test_openai_chat_deepseek_thinking_enabled_emits_vendor_fields() {
+        let provider = chat_provider("https://api.deepseek.com/v1");
+        let body = chat_body(
+            "deepseek-v4-pro",
+            json!({ "type": "enabled", "budget_tokens": 20000 }),
+        );
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["thinking"]["type"], "enabled");
+        assert_eq!(out["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn test_openai_chat_deepseek_thinking_disabled_emits_off_form() {
+        let provider = chat_provider("https://api.deepseek.com/v1");
+        let body = chat_body("deepseek-v4-pro", json!({ "type": "disabled" }));
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["thinking"]["type"], "disabled");
+        assert!(out.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn test_openai_chat_qwen_thinking_enabled_emits_enable_thinking() {
+        let provider = chat_provider("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        let body = chat_body("qwen3-coder-plus", json!({ "type": "enabled" }));
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["enable_thinking"], true);
+        assert!(out.get("thinking").is_none());
+
+        let body = chat_body("qwen3-coder-plus", json!({ "type": "disabled" }));
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["enable_thinking"], false);
+    }
+
+    #[test]
+    fn test_openai_chat_openrouter_emits_reasoning_object_without_reasoning_effort() {
+        let provider = chat_provider("https://openrouter.ai/api/v1");
+        let body = json!({
+            "model": "openai/gpt-5.4",
+            "max_tokens": 1024,
+            "thinking": { "type": "adaptive" },
+            "output_config": { "effort": "max" },
+            "messages": [{ "role": "user", "content": "hi" }]
+        });
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["reasoning"]["effort"], "xhigh");
+        assert!(out.get("reasoning_effort").is_none());
+        assert!(out.get("thinking").is_none());
+    }
+
+    #[test]
+    fn test_openai_chat_generic_provider_without_thinking_is_unchanged() {
+        let provider = chat_provider("https://api.deepseek.com/v1");
+        let body = json!({
+            "model": "deepseek-v4-pro",
+            "max_tokens": 1024,
+            "messages": [{ "role": "user", "content": "hi" }]
+        });
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert!(out.get("thinking").is_none());
+        assert!(out.get("reasoning_effort").is_none());
+
+        // Unknown vendor: still uses the generic o-series/gpt-5 reasoning_effort rule.
+        let provider = chat_provider("https://example.com/v1");
+        let body = chat_body(
+            "gpt-5.4",
+            json!({ "type": "enabled", "budget_tokens": 2000 }),
+        );
+        let out =
+            transform_claude_request_for_api_format(body, &provider, "openai_chat", None, None)
+                .unwrap();
+        assert_eq!(out["reasoning_effort"], "low");
+        assert!(out.get("thinking").is_none());
+    }
+
+    // ==================== PROV-12: reasoning summary override ====================
+
+    #[test]
+    fn test_responses_reasoning_summary_default_and_override() {
+        let body = json!({
+            "model": "gpt-5.4",
+            "max_tokens": 1024,
+            "thinking": { "type": "enabled", "budget_tokens": 10000 },
+            "messages": [{ "role": "user", "content": "hi" }]
+        });
+        let provider = create_provider(json!({ "env": { "ANTHROPIC_BASE_URL": "https://x/v1" } }));
+        let out = transform_claude_request_for_api_format(
+            body.clone(),
+            &provider,
+            "openai_responses",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(out["reasoning"]["summary"], "auto");
+
+        let provider = create_provider(json!({ "responsesReasoningSummary": "none" }));
+        let out = transform_claude_request_for_api_format(
+            body.clone(),
+            &provider,
+            "openai_responses",
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(out["reasoning"].get("summary").is_none());
+        assert_eq!(out["reasoning"]["effort"], "medium");
+
+        let provider = create_provider(json!({ "responsesReasoningSummary": "detailed" }));
+        let out = transform_claude_request_for_api_format(
+            body,
+            &provider,
+            "openai_responses",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(out["reasoning"]["summary"], "detailed");
+    }
+
+    // ==================== PROV-42: Copilot detection by URL ====================
+
+    #[test]
+    fn test_url_detected_copilot_uses_session_cache_key_like_meta_detected() {
+        let body = json!({
+            "model": "gpt-4o",
+            "max_tokens": 100,
+            "metadata": { "session_id": "sess-123" },
+            "messages": [{ "role": "user", "content": "hi" }]
+        });
+        let by_url = create_provider(json!({
+            "env": { "ANTHROPIC_BASE_URL": "https://api.githubcopilot.com" }
+        }));
+        let by_meta = create_provider_with_meta(
+            json!({ "env": { "ANTHROPIC_BASE_URL": "https://example.com" } }),
+            ProviderMeta {
+                provider_type: Some("github_copilot".to_string()),
+                ..Default::default()
+            },
+        );
+        let a = transform_claude_request_for_api_format(
+            body.clone(),
+            &by_url,
+            "openai_responses",
+            Some("other"),
+            None,
+        )
+        .unwrap();
+        let b = transform_claude_request_for_api_format(
+            body,
+            &by_meta,
+            "openai_responses",
+            Some("other"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(a["prompt_cache_key"], "sess-123");
+        assert_eq!(a["prompt_cache_key"], b["prompt_cache_key"]);
+    }
+
+    // ==================== PROV-43: Codex client version override ====================
+
+    #[test]
+    fn test_codex_client_version_override() {
+        assert_eq!(
+            codex_oauth_client_version_from(None),
+            CODEX_OAUTH_CLIENT_VERSION
+        );
+        assert_eq!(
+            codex_oauth_client_version_from(Some("  ")),
+            CODEX_OAUTH_CLIENT_VERSION
+        );
+        assert_eq!(codex_oauth_client_version_from(Some("0.150.2")), "0.150.2");
+        assert_eq!(
+            codex_oauth_client_version_from(Some("0.150.0-alpha.1")),
+            "0.150.0-alpha.1"
+        );
+        assert_eq!(
+            codex_oauth_client_version_from(Some("bad version\n")),
+            CODEX_OAUTH_CLIENT_VERSION
+        );
+        assert_eq!(
+            codex_oauth_client_version_from(Some("1..2")),
+            CODEX_OAUTH_CLIENT_VERSION
+        );
     }
 }

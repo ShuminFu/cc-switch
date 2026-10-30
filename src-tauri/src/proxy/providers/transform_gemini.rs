@@ -145,7 +145,7 @@ pub fn gemini_to_anthropic_with_shadow_and_hints(
     {
         let text = format!("Request blocked by Gemini safety filters: {block_reason}");
         return Ok(json!({
-            "id": body.get("responseId").and_then(|value| value.as_str()).unwrap_or(""),
+            "id": super::transform::anthropic_message_id(body.get("responseId").and_then(|value| value.as_str())),
             "type": "message",
             "role": "assistant",
             "content": [{ "type": "text", "text": text }],
@@ -207,6 +207,17 @@ pub fn gemini_to_anthropic_with_shadow_and_hints(
 
     for part in &rectified_parts {
         if part.get("thought").and_then(|value| value.as_bool()) == Some(true) {
+            // PROV-06: surface Gemini thought summaries as Anthropic thinking
+            // blocks (unsigned; they are dropped again on replay and the
+            // Gemini thoughtSignature keeps travelling via the shadow store).
+            if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
+                if !text.is_empty() {
+                    content.push(json!({
+                        "type": "thinking",
+                        "thinking": text
+                    }));
+                }
+            }
             continue;
         }
 
@@ -245,7 +256,7 @@ pub fn gemini_to_anthropic_with_shadow_and_hints(
     );
 
     let anthropic_response = json!({
-        "id": body.get("responseId").and_then(|value| value.as_str()).unwrap_or(""),
+        "id": super::transform::anthropic_message_id(body.get("responseId").and_then(|value| value.as_str())),
         "type": "message",
         "role": "assistant",
         "content": content,
@@ -335,6 +346,61 @@ fn collect_system_texts(value: &Value, texts: &mut Vec<String>) -> Result<(), Pr
     Ok(())
 }
 
+/// Map Anthropic `thinking` / `output_config.effort` onto Gemini
+/// `generationConfig.thinkingConfig` (PROV-06).
+///
+/// - `enabled` + `budget_tokens` → `thinkingBudget` (Gemini 2.5) or
+///   `thinkingLevel` (Gemini 3), always with `includeThoughts: true` so the
+///   reasoning can be surfaced as Anthropic `thinking` blocks.
+/// - `adaptive` → dynamic budget (`-1`) / level from `output_config.effort`.
+/// - `disabled` → `thinkingBudget: 0` only for models that can turn thinking
+///   off (2.5 Flash family); Pro / Gemini 3 cannot, so nothing is sent.
+fn build_thinking_config(body: &Value) -> Option<Value> {
+    let model = body
+        .get("model")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let is_gemini_3 = model.contains("gemini-3");
+    let thinking = body.get("thinking");
+    let thinking_type = thinking
+        .and_then(|value| value.get("type"))
+        .and_then(|value| value.as_str());
+    let effort = body
+        .pointer("/output_config/effort")
+        .and_then(|value| value.as_str());
+
+    if thinking_type == Some("disabled") {
+        let can_disable = !is_gemini_3 && model.contains("flash");
+        return can_disable.then(|| json!({ "thinkingBudget": 0 }));
+    }
+    if !matches!(thinking_type, Some("enabled") | Some("adaptive")) && effort.is_none() {
+        return None;
+    }
+
+    let budget = thinking
+        .and_then(|value| value.get("budget_tokens"))
+        .and_then(|value| value.as_i64());
+
+    if is_gemini_3 {
+        let level = match effort {
+            Some("low") => "low",
+            Some(_) => "high",
+            None => match budget {
+                Some(b) if b < 4_000 => "low",
+                _ => "high",
+            },
+        };
+        return Some(json!({ "thinkingLevel": level, "includeThoughts": true }));
+    }
+
+    let budget = match (thinking_type, budget) {
+        (Some("enabled"), Some(b)) => b,
+        _ => -1,
+    };
+    Some(json!({ "thinkingBudget": budget, "includeThoughts": true }))
+}
+
 fn build_generation_config(body: &Value) -> Option<Value> {
     let mut config = Map::new();
 
@@ -350,6 +416,12 @@ fn build_generation_config(body: &Value) -> Option<Value> {
     if let Some(value) = body.get("stop_sequences") {
         config.insert("stopSequences".to_string(), value.clone());
     }
+    if let Some(value) = body.get("top_k") {
+        config.insert("topK".to_string(), value.clone());
+    }
+    if let Some(thinking_config) = build_thinking_config(body) {
+        config.insert("thinkingConfig".to_string(), thinking_config);
+    }
 
     if config.is_empty() {
         None
@@ -360,7 +432,7 @@ fn build_generation_config(body: &Value) -> Option<Value> {
 
 fn convert_messages_to_contents(
     messages: &[Value],
-    shadow_turns: &[GeminiAssistantTurn],
+    shadow_turns: &[std::sync::Arc<GeminiAssistantTurn>],
 ) -> Result<Vec<Value>, ProxyError> {
     let mut contents = Vec::new();
     let mut used_shadow_indices = HashSet::new();
@@ -480,7 +552,7 @@ fn convert_messages_to_contents(
 
 fn find_matching_shadow_turn_for_assistant_message(
     content: Option<&Value>,
-    shadow_turns: &[GeminiAssistantTurn],
+    shadow_turns: &[std::sync::Arc<GeminiAssistantTurn>],
 ) -> Option<usize> {
     let (tool_use_ids, tool_use_names) = extract_assistant_tool_use_keys(content);
     if tool_use_ids.is_empty() && tool_use_names.is_empty() {
@@ -706,9 +778,19 @@ fn convert_message_content_to_parts(
                     })?;
 
                 // See `tool_use` above: synthesized ids must not leak upstream.
+                let mut response = normalize_tool_result_response(block.get("content"));
+                // PROV-15: keep the error signal. Gemini's convention is an
+                // `error` key in `functionResponse.response`.
+                if block.get("is_error").and_then(|value| value.as_bool()) == Some(true) {
+                    if let Some(obj) = response.as_object_mut() {
+                        if let Some(content) = obj.remove("content") {
+                            obj.insert("error".to_string(), content);
+                        }
+                    }
+                }
                 let mut function_response = json!({
                     "name": name,
-                    "response": normalize_tool_result_response(block.get("content"))
+                    "response": response
                 });
                 if !tool_use_id.is_empty() && !is_synthesized_tool_call_id(tool_use_id) {
                     function_response["id"] = json!(tool_use_id);
@@ -964,7 +1046,7 @@ fn merge_tool_names_from_shadow(
 }
 
 fn build_tool_name_map_from_shadow_turns(
-    shadow_turns: &[GeminiAssistantTurn],
+    shadow_turns: &[std::sync::Arc<GeminiAssistantTurn>],
 ) -> HashMap<String, String> {
     let mut tool_name_by_id = HashMap::new();
     for turn in shadow_turns {
@@ -974,7 +1056,7 @@ fn build_tool_name_map_from_shadow_turns(
 }
 
 fn build_thought_signature_map_from_shadow_turns(
-    shadow_turns: &[GeminiAssistantTurn],
+    shadow_turns: &[std::sync::Arc<GeminiAssistantTurn>],
 ) -> HashMap<String, String> {
     let mut thought_signature_by_id = HashMap::new();
     for turn in shadow_turns {
@@ -1056,6 +1138,10 @@ fn map_tool_choice(tool_choice: Option<&Value>) -> Result<Option<Value>, ProxyEr
             })),
             "none" => Some(json!({
                 "functionCallingConfig": { "mode": "NONE" }
+            })),
+            // PROV-26: string "any" behaves like the object form `{type:"any"}`.
+            "any" => Some(json!({
+                "functionCallingConfig": { "mode": "ANY" }
             })),
             other => {
                 return Err(ProxyError::TransformError(format!(
@@ -1169,6 +1255,126 @@ fn map_finish_reason(reason: Option<&str>, has_tool_use: bool) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn thinking_body(model: &str, extra: Value) -> Value {
+        let mut body = json!({
+            "model": model,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            body[k] = v.clone();
+        }
+        body
+    }
+
+    #[test]
+    fn test_thinking_enabled_maps_to_thinking_budget() {
+        let body = thinking_body(
+            "gemini-2.5-pro",
+            json!({"thinking": {"type": "enabled", "budget_tokens": 8000}, "top_k": 40}),
+        );
+        let result = anthropic_to_gemini_with_shadow(body, None, None, None).unwrap();
+        let cfg = &result["generationConfig"];
+        assert_eq!(cfg["thinkingConfig"]["thinkingBudget"], 8000);
+        assert_eq!(cfg["thinkingConfig"]["includeThoughts"], true);
+        assert_eq!(cfg["topK"], 40);
+    }
+
+    #[test]
+    fn test_thinking_adaptive_and_gemini_3_levels() {
+        let body = thinking_body(
+            "gemini-2.5-flash",
+            json!({"thinking": {"type": "adaptive"}}),
+        );
+        let result = anthropic_to_gemini_with_shadow(body, None, None, None).unwrap();
+        assert_eq!(
+            result["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            -1
+        );
+
+        let body = thinking_body(
+            "gemini-3-pro-preview",
+            json!({"thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}}),
+        );
+        let result = anthropic_to_gemini_with_shadow(body, None, None, None).unwrap();
+        let tc = &result["generationConfig"]["thinkingConfig"];
+        assert_eq!(tc["thinkingLevel"], "low");
+        assert!(tc.get("thinkingBudget").is_none());
+        assert_eq!(tc["includeThoughts"], true);
+    }
+
+    #[test]
+    fn test_thinking_disabled_only_turns_off_where_supported() {
+        let body = thinking_body(
+            "gemini-2.5-flash",
+            json!({"thinking": {"type": "disabled"}}),
+        );
+        let result = anthropic_to_gemini_with_shadow(body, None, None, None).unwrap();
+        assert_eq!(
+            result["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            0
+        );
+
+        let body = thinking_body("gemini-2.5-pro", json!({"thinking": {"type": "disabled"}}));
+        let result = anthropic_to_gemini_with_shadow(body, None, None, None).unwrap();
+        assert!(result["generationConfig"].get("thinkingConfig").is_none());
+
+        let body = thinking_body("gemini-2.5-pro", json!({}));
+        let result = anthropic_to_gemini_with_shadow(body, None, None, None).unwrap();
+        assert!(result["generationConfig"].get("thinkingConfig").is_none());
+    }
+
+    #[test]
+    fn test_gemini_to_anthropic_thought_part_becomes_thinking_block() {
+        let body = json!({
+            "responseId": "r1",
+            "modelVersion": "gemini-2.5-pro",
+            "candidates": [{
+                "content": {"parts": [
+                    {"text": "reasoning here", "thought": true},
+                    {"text": "Answer"}
+                ]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {"promptTokenCount": 4, "candidatesTokenCount": 2, "thoughtsTokenCount": 6, "totalTokenCount": 12}
+        });
+        let result = gemini_to_anthropic(body).unwrap();
+        assert_eq!(result["content"][0]["type"], "thinking");
+        assert_eq!(result["content"][0]["thinking"], "reasoning here");
+        assert_eq!(result["content"][1]["type"], "text");
+        assert_eq!(result["content"][1]["text"], "Answer");
+        assert_eq!(result["usage"]["output_tokens"], 8);
+    }
+
+    #[test]
+    fn test_error_tool_result_maps_to_function_response_error() {
+        let body = json!({
+            "model": "gemini-2.5-pro",
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "call_1", "name": "read", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_1", "is_error": true, "content": "boom"}
+                ]}
+            ]
+        });
+        let result = anthropic_to_gemini_with_shadow(body, None, None, None).unwrap();
+        let response = &result["contents"][1]["parts"][0]["functionResponse"]["response"];
+        assert_eq!(response["error"], "boom");
+        assert!(response.get("content").is_none());
+    }
+
+    #[test]
+    fn test_map_tool_choice_string_any_maps_to_any_mode() {
+        let config = map_tool_choice(Some(&json!("any"))).unwrap().unwrap();
+        assert_eq!(config["functionCallingConfig"]["mode"], "ANY");
+        let config = map_tool_choice(Some(&json!({"type": "any"})))
+            .unwrap()
+            .unwrap();
+        assert_eq!(config["functionCallingConfig"]["mode"], "ANY");
+    }
 
     #[test]
     fn anthropic_to_gemini_maps_system_and_messages() {

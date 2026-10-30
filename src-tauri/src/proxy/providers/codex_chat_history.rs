@@ -235,8 +235,11 @@ impl CodexChatHistoryInner {
             let Some(response_id) = self.response_order.pop_front() else {
                 break;
             };
-            self.responses.remove(&response_id);
-            self.remove_response_from_call_index(&response_id);
+            // PROV-30: only touch the index entries of the evicted response's
+            // own calls instead of scanning the whole call index.
+            if let Some(evicted) = self.responses.remove(&response_id) {
+                self.remove_response_from_call_index(&response_id, &evicted.call_order);
+            }
         }
     }
 
@@ -250,12 +253,19 @@ impl CodexChatHistoryInner {
         }
     }
 
-    fn remove_response_from_call_index(&mut self, response_id: &str) {
-        for response_ids in self.call_index.values_mut() {
-            response_ids.retain(|cached_id| cached_id != response_id);
+    fn remove_response_from_call_index(&mut self, response_id: &str, call_ids: &[String]) {
+        for call_id in call_ids {
+            let now_empty = match self.call_index.get_mut(call_id) {
+                Some(response_ids) => {
+                    response_ids.retain(|cached_id| cached_id != response_id);
+                    response_ids.is_empty()
+                }
+                None => false,
+            };
+            if now_empty {
+                self.call_index.remove(call_id);
+            }
         }
-        self.call_index
-            .retain(|_, response_ids| !response_ids.is_empty());
     }
 
     fn unique_fallback_calls(
@@ -495,6 +505,24 @@ fn enrich_call_item_from_cache(item: &mut Value, cached: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prune_drops_only_evicted_call_index_entries() {
+        let mut inner = CodexChatHistoryInner::default();
+        let total = MAX_CACHED_RESPONSES + 88;
+        for n in 0..total {
+            inner.insert_calls(
+                &format!("resp_{n}"),
+                vec![(format!("call_{n}"), serde_json::json!({"n": n}))],
+            );
+        }
+        assert_eq!(inner.responses.len(), MAX_CACHED_RESPONSES);
+        assert_eq!(inner.call_index.len(), MAX_CACHED_RESPONSES);
+        assert!(!inner.call_index.contains_key("call_0"));
+        assert!(inner
+            .call_index
+            .contains_key(&format!("call_{}", total - 1)));
+    }
     use futures::StreamExt;
     use serde_json::json;
 

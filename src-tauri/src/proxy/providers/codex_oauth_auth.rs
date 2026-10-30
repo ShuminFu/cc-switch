@@ -219,6 +219,17 @@ struct CodexOAuthStore {
     default_account_id: Option<String>,
 }
 
+/// How long a refresh token rejected by `auth.openai.com` (401/403) is not
+/// retried, so parallel requests do not stampede the auth server (PROV-09).
+const REFRESH_FAILURE_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// A refresh token that was rejected, and when.
+#[derive(Debug, Clone)]
+struct RefreshFailure {
+    refresh_token: String,
+    at: std::time::Instant,
+}
+
 /// Codex OAuth 认证管理器（多账号）
 pub struct CodexOAuthManager {
     accounts: Arc<RwLock<HashMap<String, CodexAccountData>>>,
@@ -230,6 +241,9 @@ pub struct CodexOAuthManager {
     /// 进行中的 Device Code 流程：device_auth_id -> {user_code, expires_at_ms}
     /// 过期条目会在 start_device_flow 时被清理，防止放弃的登录流程导致无界增长
     pending_device_codes: Arc<RwLock<HashMap<String, PendingDeviceCode>>>,
+    /// Negative cache of rejected refresh tokens per account (PROV-09). Keyed
+    /// by the token value so a fresh login is never blocked by an old failure.
+    refresh_failures: Arc<RwLock<HashMap<String, RefreshFailure>>>,
     storage_path: PathBuf,
 }
 
@@ -243,6 +257,7 @@ impl CodexOAuthManager {
             access_tokens: Arc::new(RwLock::new(HashMap::new())),
             refresh_locks: Arc::new(RwLock::new(HashMap::new())),
             pending_device_codes: Arc::new(RwLock::new(HashMap::new())),
+            refresh_failures: Arc::new(RwLock::new(HashMap::new())),
             storage_path,
         };
 
@@ -531,20 +546,34 @@ impl CodexOAuthManager {
                 .ok_or_else(|| CodexOAuthError::AccountNotFound(account_id.to_string()))?
         };
 
-        let new_tokens = self.refresh_with_token(&refresh_token).await?;
-
-        // 如果服务端返回了新的 refresh_token，更新存储
-        if let Some(new_refresh) = new_tokens.refresh_token.clone() {
-            if new_refresh != refresh_token {
-                let mut accounts = self.accounts.write().await;
-                if let Some(account) = accounts.get_mut(account_id) {
-                    account.refresh_token = new_refresh;
-                }
-                drop(accounts);
-                self.save_to_disk().await?;
-            }
+        if self
+            .refresh_recently_rejected(account_id, &refresh_token)
+            .await
+        {
+            log::warn!(
+                "[CodexOAuth] 账号 {account_id} 的 refresh_token 最近被拒绝，跳过刷新（需要重新登录）"
+            );
+            return Err(CodexOAuthError::RefreshTokenInvalid);
         }
 
+        let new_tokens = match self.refresh_with_token(&refresh_token).await {
+            Ok(tokens) => tokens,
+            Err(CodexOAuthError::RefreshTokenInvalid) => {
+                self.refresh_failures.write().await.insert(
+                    account_id.to_string(),
+                    RefreshFailure {
+                        refresh_token: refresh_token.clone(),
+                        at: std::time::Instant::now(),
+                    },
+                );
+                return Err(CodexOAuthError::RefreshTokenInvalid);
+            }
+            Err(error) => return Err(error),
+        };
+        self.refresh_failures.write().await.remove(account_id);
+
+        // PROV-09: cache the freshly minted access token *before* persisting, so
+        // a disk error never throws away a valid token.
         let access_token = new_tokens.access_token.clone();
         let expires_at_ms = compute_expires_at_ms(new_tokens.expires_in);
 
@@ -559,7 +588,38 @@ impl CodexOAuthManager {
             );
         }
 
+        // 如果服务端返回了新的 refresh_token，更新存储
+        if let Some(new_refresh) = new_tokens.refresh_token.clone() {
+            if new_refresh != refresh_token {
+                let mut accounts = self.accounts.write().await;
+                if let Some(account) = accounts.get_mut(account_id) {
+                    account.refresh_token = new_refresh;
+                }
+                drop(accounts);
+                if let Err(error) = self.save_to_disk().await {
+                    // The rotated token stays in memory and is written by the
+                    // next successful save; the request itself still succeeds.
+                    log::error!(
+                        "[CodexOAuth] 保存轮换后的 refresh_token 失败（将在下次保存时重试）: {error}"
+                    );
+                }
+            }
+        }
+
         Ok(access_token)
+    }
+
+    /// Whether `refresh_token` was rejected for `account_id` within
+    /// [`REFRESH_FAILURE_BACKOFF`].
+    async fn refresh_recently_rejected(&self, account_id: &str, refresh_token: &str) -> bool {
+        self.refresh_failures
+            .read()
+            .await
+            .get(account_id)
+            .is_some_and(|failure| {
+                failure.refresh_token == refresh_token
+                    && failure.at.elapsed() < REFRESH_FAILURE_BACKOFF
+            })
     }
 
     /// 获取默认账号的有效 token
@@ -969,6 +1029,34 @@ fn extract_identity_from_tokens(tokens: &OAuthTokenResponse) -> (Option<String>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_rejected_refresh_token_fails_fast_without_network() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = CodexOAuthManager::new(temp_dir.path().to_path_buf());
+        manager.accounts.write().await.insert(
+            "acct".to_string(),
+            CodexAccountData {
+                account_id: "acct".to_string(),
+                email: None,
+                refresh_token: "rt-old".to_string(),
+                authenticated_at: 0,
+            },
+        );
+        manager.refresh_failures.write().await.insert(
+            "acct".to_string(),
+            RefreshFailure {
+                refresh_token: "rt-old".to_string(),
+                at: std::time::Instant::now(),
+            },
+        );
+
+        let result = manager.get_valid_token_for_account("acct").await;
+        assert!(matches!(result, Err(CodexOAuthError::RefreshTokenInvalid)));
+        assert!(manager.refresh_recently_rejected("acct", "rt-old").await);
+        // A new login (different refresh token) is not blocked by the old failure.
+        assert!(!manager.refresh_recently_rejected("acct", "rt-new").await);
+    }
 
     #[test]
     fn test_parse_interval_number() {

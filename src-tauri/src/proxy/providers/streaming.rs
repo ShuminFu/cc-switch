@@ -476,7 +476,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             let event = json!({
                                                 "type": "message_start",
                                                 "message": {
-                                                    "id": message_id.clone().unwrap_or_default(),
+                                                    "id": super::transform::ensure_message_id(&mut message_id),
                                                     "type": "message",
                                                     "role": "assistant",
                                                     "model": current_model.clone().unwrap_or_default(),
@@ -489,8 +489,36 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                             has_sent_message_start = true;
                                         }
 
-                                        // 处理 reasoning（thinking）
-                                        if let Some(reasoning) = &choice.delta.reasoning {
+                                        // PROV-16: every block was closed when the first
+                                        // finish_reason arrived; trailing deltas would target
+                                        // closed indices (rejected by Anthropic clients), so drop
+                                        // them. Usage on such chunks was already captured above.
+                                        if has_emitted_message_delta {
+                                            let has_payload = choice
+                                                .delta
+                                                .content
+                                                .as_deref()
+                                                .is_some_and(|c| !c.is_empty())
+                                                || choice
+                                                    .delta
+                                                    .reasoning
+                                                    .as_deref()
+                                                    .is_some_and(|r| !r.is_empty())
+                                                || choice
+                                                    .delta
+                                                    .tool_calls
+                                                    .as_ref()
+                                                    .is_some_and(|t| !t.is_empty());
+                                            if has_payload {
+                                                log::warn!("[Claude/OpenRouter] dropping delta received after finish_reason");
+                                            }
+                                            continue;
+                                        }
+
+                                        // 处理 reasoning（thinking）；空 reasoning_content 不开 thinking 块 (PROV-16)
+                                        if let Some(reasoning) =
+                                            choice.delta.reasoning.as_ref().filter(|r| !r.is_empty())
+                                        {
                                             if current_non_tool_block_type != Some("thinking") {
                                                 if let Some(index) = current_non_tool_block_index.take() {
                                                     let event = json!({
@@ -854,7 +882,8 @@ fn map_stop_reason(finish_reason: Option<&str>) -> Option<String> {
             "tool_calls" | "function_call" => "tool_use",
             "stop" => "end_turn",
             "length" => "max_tokens",
-            "content_filter" => "end_turn",
+            // PROV-24: surface filtered output as a refusal, not a normal end.
+            "content_filter" => "refusal",
             other => {
                 log::warn!("[Claude/OpenRouter] Unknown finish_reason in streaming: {other}");
                 "end_turn"
@@ -898,6 +927,75 @@ mod tests {
         event.get("type").and_then(|v| v.as_str())
     }
 
+    #[tokio::test]
+    async fn test_streaming_empty_reasoning_content_opens_no_thinking_block() {
+        let input = concat!(
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"reasoning_content\":\"\",\"content\":\"Hel\"}}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"reasoning_content\":\"\",\"content\":\"lo\"}}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let events = collect_anthropic_events(input).await;
+        let starts: Vec<_> = events
+            .iter()
+            .filter(|e| event_type(e) == Some("content_block_start"))
+            .collect();
+        assert_eq!(starts.len(), 1);
+        assert_eq!(starts[0]["content_block"]["type"], "text");
+    }
+
+    #[tokio::test]
+    async fn test_streaming_tool_delta_after_finish_reason_is_dropped() {
+        let input = concat!(
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"t\",\"arguments\":\"{}\"}}]}}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\" \"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: {\"id\":\"c1\",\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"late\"}}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let events = collect_anthropic_events(input).await;
+        let stop_pos = events
+            .iter()
+            .position(|e| event_type(e) == Some("content_block_stop"))
+            .expect("tool block closed");
+        assert!(events[stop_pos..]
+            .iter()
+            .all(|e| event_type(e) != Some("content_block_delta")
+                && event_type(e) != Some("content_block_start")));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| event_type(e) == Some("message_delta"))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_streaming_missing_upstream_id_synthesizes_message_id() {
+        let input = concat!(
+            "data: {\"model\":\"m\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+            "data: {\"model\":\"m\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let events = collect_anthropic_events(input).await;
+        let start = events
+            .iter()
+            .find(|e| event_type(e) == Some("message_start"))
+            .expect("message_start");
+        let id = start
+            .pointer("/message/id")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert!(id.starts_with("msg_") && id.len() > 4, "id = {id}");
+        let usage = crate::proxy::usage::parser::TokenUsage::from_claude_stream_events(&events)
+            .expect("usage");
+        assert_ne!(
+            usage.dedup_request_id(),
+            crate::proxy::usage::parser::SESSION_REQUEST_ID_PREFIX
+        );
+    }
+
     #[test]
     fn test_map_stop_reason_legacy_and_filtered_values() {
         assert_eq!(
@@ -906,7 +1004,7 @@ mod tests {
         );
         assert_eq!(
             map_stop_reason(Some("content_filter")),
-            Some("end_turn".to_string())
+            Some("refusal".to_string())
         );
     }
 

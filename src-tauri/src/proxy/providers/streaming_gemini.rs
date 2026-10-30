@@ -32,6 +32,14 @@ fn map_finish_reason(reason: Option<&str>, has_tool_use: bool, blocked: bool) ->
     }
 }
 
+fn extract_thought_text(parts: &[Value]) -> String {
+    parts
+        .iter()
+        .filter(|part| part.get("thought").and_then(|value| value.as_bool()) == Some(true))
+        .filter_map(|part| part.get("text").and_then(|value| value.as_str()))
+        .collect::<String>()
+}
+
 fn extract_visible_text(parts: &[Value]) -> String {
     parts
         .iter()
@@ -302,6 +310,49 @@ pub enum GeminiTextStreamMode {
     Cumulative,
 }
 
+/// Optional per-provider override for the Gemini text chunking mode.
+///
+/// `ProviderMeta` has no field for this, so it is read from the optional
+/// `settings_config.geminiTextStreamMode` key (`"auto"` | `"incremental"` |
+/// `"cumulative"`, case-insensitive). Missing or unknown values keep `Auto`.
+///
+/// The streaming handler (handlers.rs, owned by the proxy-core cluster) still
+/// has to pass `GeminiTextStreamMode::for_provider(&ctx.provider)` to
+/// [`create_anthropic_sse_stream_from_gemini_with_text_mode`].
+#[allow(dead_code)] // wired by the gemini_native streaming handler
+pub const GEMINI_TEXT_STREAM_MODE_KEY: &str = "geminiTextStreamMode";
+
+#[allow(dead_code)] // wired by the gemini_native streaming handler
+impl GeminiTextStreamMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "incremental" | "delta" => Some(Self::Incremental),
+            "cumulative" | "snapshot" => Some(Self::Cumulative),
+            _ => None,
+        }
+    }
+
+    /// Resolve the mode configured on a provider (see
+    /// [`GEMINI_TEXT_STREAM_MODE_KEY`]).
+    pub fn for_provider(provider: &crate::provider::Provider) -> Self {
+        let Some(raw) = provider
+            .settings_config
+            .get(GEMINI_TEXT_STREAM_MODE_KEY)
+            .and_then(|value| value.as_str())
+        else {
+            return Self::Auto;
+        };
+        Self::parse(raw).unwrap_or_else(|| {
+            log::warn!(
+                "[Gemini] ignoring unknown {GEMINI_TEXT_STREAM_MODE_KEY} value `{raw}` on provider {}",
+                provider.id
+            );
+            Self::Auto
+        })
+    }
+}
+
 /// Number of consecutive strict-prefix extensions required before `Auto`
 /// commits to cumulative mode. An incremental stream would need each of
 /// three consecutive chunks to start with the whole previous chunk.
@@ -399,6 +450,81 @@ impl GeminiTextAccumulator {
     }
 }
 
+/// Emit a thinking delta into the (single) thinking block, opening it on
+/// first use (PROV-06).
+fn thinking_delta_events(
+    delta: &str,
+    thinking_block_index: &mut Option<u32>,
+    next_content_index: &mut u32,
+    open_indices: &mut HashSet<u32>,
+) -> Vec<Bytes> {
+    let mut events = Vec::new();
+    if delta.is_empty() {
+        return events;
+    }
+    let index = *thinking_block_index.get_or_insert_with(|| {
+        let assigned = *next_content_index;
+        *next_content_index += 1;
+        assigned
+    });
+    if open_indices.insert(index) {
+        events.push(encode_sse(
+            "content_block_start",
+            &json!({
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {
+                    "type": "thinking",
+                    "thinking": ""
+                }
+            }),
+        ));
+    }
+    events.push(encode_sse(
+        "content_block_delta",
+        &json!({
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {
+                "type": "thinking_delta",
+                "thinking": delta
+            }
+        }),
+    ));
+    events
+}
+
+/// Flush held-back thought text and close the thinking block so the text /
+/// tool blocks that follow never interleave with it.
+fn close_thinking_block(
+    thought_acc: &mut GeminiTextAccumulator,
+    thinking_block_index: &mut Option<u32>,
+    thinking_closed: &mut bool,
+    next_content_index: &mut u32,
+    open_indices: &mut HashSet<u32>,
+) -> Vec<Bytes> {
+    if *thinking_closed {
+        return Vec::new();
+    }
+    *thinking_closed = true;
+    let tail = thought_acc.finish();
+    let mut events = thinking_delta_events(
+        &tail,
+        thinking_block_index,
+        next_content_index,
+        open_indices,
+    );
+    if let Some(index) = *thinking_block_index {
+        if open_indices.remove(&index) {
+            events.push(encode_sse(
+                "content_block_stop",
+                &json!({ "type": "content_block_stop", "index": index }),
+            ));
+        }
+    }
+    events
+}
+
 /// Emit a text delta into the (single) text block, opening it on first use.
 fn text_delta_events(
     delta: &str,
@@ -478,6 +604,9 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
         let mut current_model: Option<String> = None;
         let mut has_sent_message_start = false;
         let mut text_acc = GeminiTextAccumulator::new(text_mode);
+        let mut thought_acc = GeminiTextAccumulator::new(text_mode);
+        let mut thinking_block_index: Option<u32> = None;
+        let mut thinking_closed = false;
         let mut text_block_index: Option<u32> = None;
         let mut next_content_index: u32 = 0;
         let mut open_indices: HashSet<u32> = HashSet::new();
@@ -550,7 +679,7 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
                             let event = json!({
                                 "type": "message_start",
                                 "message": {
-                                    "id": message_id.clone().unwrap_or_default(),
+                                    "id": super::transform::ensure_message_id(&mut message_id),
                                     "type": "message",
                                     "role": "assistant",
                                     "model": current_model.clone().unwrap_or_default(),
@@ -594,8 +723,29 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
                                     &mut tool_call_snapshots,
                                     extract_tool_calls(&rectified_parts, tool_schema_hints.as_ref()),
                                 );
+                                let thought_text = extract_thought_text(&rectified_parts);
+                                if !thought_text.is_empty() && !thinking_closed {
+                                    let delta = thought_acc.push(thought_text);
+                                    for event in thinking_delta_events(
+                                        &delta,
+                                        &mut thinking_block_index,
+                                        &mut next_content_index,
+                                        &mut open_indices,
+                                    ) {
+                                        yield Ok(event);
+                                    }
+                                }
                                 let visible_text = extract_visible_text(&rectified_parts);
                                 if !visible_text.is_empty() {
+                                    for event in close_thinking_block(
+                                        &mut thought_acc,
+                                        &mut thinking_block_index,
+                                        &mut thinking_closed,
+                                        &mut next_content_index,
+                                        &mut open_indices,
+                                    ) {
+                                        yield Ok(event);
+                                    }
                                     let delta = text_acc.push(visible_text);
                                     for event in text_delta_events(
                                         &delta,
@@ -616,6 +766,16 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
                     return;
                 }
             }
+        }
+
+        for event in close_thinking_block(
+            &mut thought_acc,
+            &mut thinking_block_index,
+            &mut thinking_closed,
+            &mut next_content_index,
+            &mut open_indices,
+        ) {
+            yield Ok(event);
         }
 
         let tail = text_acc.finish();
@@ -647,7 +807,7 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
             let event = json!({
                 "type": "message_start",
                 "message": {
-                    "id": message_id.clone().unwrap_or_default(),
+                    "id": super::transform::ensure_message_id(&mut message_id),
                     "type": "message",
                     "role": "assistant",
                     "model": current_model.clone().unwrap_or_default(),
@@ -841,6 +1001,75 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("")
         })
+    }
+
+    fn provider_with_settings(settings: Value) -> crate::provider::Provider {
+        crate::provider::Provider {
+            id: "p".to_string(),
+            name: "Gemini".to_string(),
+            settings_config: settings,
+            website_url: None,
+            category: None,
+            created_at: None,
+            sort_index: None,
+            notes: None,
+            meta: None,
+            icon: None,
+            icon_color: None,
+            in_failover_queue: false,
+        }
+    }
+
+    #[test]
+    fn text_stream_mode_is_read_from_provider_settings() {
+        assert_eq!(
+            GeminiTextStreamMode::for_provider(&provider_with_settings(json!({}))),
+            GeminiTextStreamMode::Auto
+        );
+        assert_eq!(
+            GeminiTextStreamMode::for_provider(&provider_with_settings(
+                json!({ "geminiTextStreamMode": "Cumulative" })
+            )),
+            GeminiTextStreamMode::Cumulative
+        );
+        assert_eq!(
+            GeminiTextStreamMode::for_provider(&provider_with_settings(
+                json!({ "geminiTextStreamMode": "incremental" })
+            )),
+            GeminiTextStreamMode::Incremental
+        );
+        assert_eq!(
+            GeminiTextStreamMode::for_provider(&provider_with_settings(
+                json!({ "geminiTextStreamMode": "bogus" })
+            )),
+            GeminiTextStreamMode::Auto
+        );
+    }
+
+    #[test]
+    fn thought_parts_stream_as_thinking_block_before_text() {
+        let output = collect_stream_output(vec![
+            "data: {\"responseId\":\"r1\",\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Let me think. \",\"thought\":true}]}}]}\n\n",
+            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Done thinking.\",\"thought\":true}]}}]}\n\n",
+            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Answer\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":7,\"totalTokenCount\":14}}\n\n",
+        ]);
+        let thinking_start = output
+            .find("\"type\":\"thinking\"")
+            .expect("thinking block start");
+        let text_start = output.find("\"type\":\"text\"").expect("text block");
+        assert!(thinking_start < text_start);
+        assert!(output.contains("Let me think. "));
+        assert!(output.contains("Done thinking."));
+        assert!(output.contains("\"text\":\"Answer\""));
+        // Thinking block (index 0) is closed before the text block (index 1) opens.
+        let stop0 = output
+            .find("{\"index\":0,\"type\":\"content_block_stop\"}")
+            .or_else(|| output.find("\"type\":\"content_block_stop\",\"index\":0"))
+            .expect("thinking block closed");
+        assert!(stop0 < text_start);
+        assert!(!output.contains("Let me think. Answer"));
+        // thoughtsTokenCount stays in output tokens (total - prompt).
+        assert!(output.contains("\"output_tokens\":9"));
     }
 
     fn collect_stream_output_with_shadow(

@@ -23,6 +23,47 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 
 pub(crate) const ANTHROPIC_THINKING_ENCRYPTED_PREFIX: &str = "ccswitch-anthropic-thinking-v1:";
+/// Envelope for *unsigned* `thinking` blocks (DeepSeek / Kimi / GLM / MiniMax
+/// Anthropic-compatible endpoints never sign them). Kept separate from the
+/// signed envelope so it is only ever replayed to vendors that accept
+/// unsigned thinking history (PROV-36).
+pub(crate) const ANTHROPIC_UNSIGNED_THINKING_PREFIX: &str =
+    "ccswitch-anthropic-thinking-unsigned-v1:";
+
+/// Model-name hints for Anthropic-compatible vendors that emit, and expect to
+/// get back, unsigned thinking blocks.
+const UNSIGNED_THINKING_VENDOR_HINTS: &[&str] =
+    &["deepseek", "kimi", "moonshot", "mimo", "glm", "minimax"];
+
+fn model_accepts_unsigned_thinking(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    UNSIGNED_THINKING_VENDOR_HINTS
+        .iter()
+        .any(|hint| model.contains(hint))
+}
+
+fn encode_unsigned_thinking_block(block: &Value) -> Option<String> {
+    if block.get("type").and_then(Value::as_str) != Some("thinking") {
+        return None;
+    }
+    let text = block
+        .get("thinking")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())?;
+    let bytes = serde_json::to_vec(&json!({ "type": "thinking", "thinking": text })).ok()?;
+    Some(format!(
+        "{ANTHROPIC_UNSIGNED_THINKING_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(bytes)
+    ))
+}
+
+pub(crate) fn decode_unsigned_thinking_block(encrypted_content: &str) -> Option<Value> {
+    let encoded = encrypted_content.strip_prefix(ANTHROPIC_UNSIGNED_THINKING_PREFIX)?;
+    let bytes = URL_SAFE_NO_PAD.decode(encoded).ok()?;
+    let block: Value = serde_json::from_slice(&bytes).ok()?;
+    encode_unsigned_thinking_block(&block)
+        .map(|_| json!({ "type": "thinking", "thinking": block["thinking"].clone() }))
+}
 const TOOL_SEARCH_PROXY_NAME: &str = "tool_search";
 
 /// Maps Codex's reasoning.effort to the token budget for Anthropic thinking.
@@ -97,7 +138,8 @@ pub(crate) fn responses_reasoning_item_from_anthropic_block(
     item_id: &str,
     block: &Value,
 ) -> Option<Value> {
-    let encrypted_content = encode_anthropic_thinking_block(block)?;
+    let encrypted_content =
+        encode_anthropic_thinking_block(block).or_else(|| encode_unsigned_thinking_block(block))?;
     let summary = block
         .get("thinking")
         .and_then(|value| value.as_str())
@@ -261,7 +303,9 @@ pub fn responses_request_to_anthropic(
 
     // input → messages
     let mut messages = match body.get("input") {
-        Some(Value::Array(items)) => convert_input_to_messages(items, &tool_context)?,
+        Some(Value::Array(items)) => {
+            convert_input_to_messages(items, &tool_context, model_accepts_unsigned_thinking(model))?
+        }
         Some(Value::String(text)) if is_meaningful_text(text) => vec![json!({
             "role": "user",
             "content": [{ "type": "text", "text": text }]
@@ -499,6 +543,7 @@ fn map_tool_choice_to_anthropic(tool_choice: &Value, tool_context: &CodexToolCon
 fn convert_input_to_messages(
     items: &[Value],
     tool_context: &CodexToolContext,
+    accept_unsigned_thinking: bool,
 ) -> Result<Vec<Value>, ProxyError> {
     let mut messages: Vec<Value> = Vec::new();
 
@@ -633,11 +678,18 @@ fn convert_input_to_messages(
                 }
             }
             Some("reasoning") => {
-                if let Some(block) = item
+                let encrypted = item
                     .get("encrypted_content")
-                    .and_then(|value| value.as_str())
-                    .and_then(decode_anthropic_thinking_block)
+                    .and_then(|value| value.as_str());
+                if let Some(block) = encrypted.and_then(decode_anthropic_thinking_block) {
+                    push_assistant_thinking_block(&mut messages, block);
+                } else if let Some(block) = encrypted
+                    .filter(|_| accept_unsigned_thinking)
+                    .and_then(decode_unsigned_thinking_block)
                 {
+                    // PROV-36: replay unsigned thinking to vendors that require
+                    // their reasoning history, keeping thinking enabled on
+                    // tool-continuation turns.
                     push_assistant_thinking_block(&mut messages, block);
                 }
             }
@@ -2285,8 +2337,61 @@ mod tests {
         });
 
         let result = anthropic_response_to_responses(input).unwrap();
-        assert_eq!(result["output"].as_array().unwrap().len(), 1);
-        assert_eq!(result["output"][0]["type"], "message");
+        // PROV-36: unsigned thinking now yields a reasoning item, but never in
+        // the *signed* envelope that is replayed to Anthropic itself.
+        let output = result["output"].as_array().unwrap();
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0]["type"], "reasoning");
+        let encrypted = output[0]["encrypted_content"].as_str().unwrap();
+        assert!(encrypted.starts_with(ANTHROPIC_UNSIGNED_THINKING_PREFIX));
+        assert!(decode_anthropic_thinking_block(encrypted).is_none());
+        assert_eq!(output[1]["type"], "message");
+    }
+
+    #[test]
+    fn test_unsigned_thinking_replays_only_for_unsigned_vendors() {
+        let reasoning = responses_reasoning_item_from_anthropic_block(
+            "rs_1",
+            &json!({"type": "thinking", "thinking": "check the file"}),
+        )
+        .unwrap();
+        let input = |model: &str| {
+            json!({
+                "model": model,
+                "reasoning": {"effort": "high"},
+                "input": [
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "go"}]},
+                    reasoning.clone(),
+                    {"type": "function_call", "call_id": "call_1", "name": "read", "arguments": "{}"},
+                    {"type": "function_call_output", "call_id": "call_1", "output": "ok"}
+                ]
+            })
+        };
+
+        let result = responses_request_to_anthropic(input("deepseek-v4-pro"), 1024).unwrap();
+        let assistant = result["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "assistant")
+            .unwrap();
+        assert_eq!(assistant["content"][0]["type"], "thinking");
+        assert_eq!(assistant["content"][0]["thinking"], "check the file");
+        assert!(assistant["content"][0].get("signature").is_none());
+        assert_eq!(assistant["content"][1]["type"], "tool_use");
+
+        let result = responses_request_to_anthropic(input("claude-sonnet-4-6"), 1024).unwrap();
+        let assistant = result["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["role"] == "assistant")
+            .unwrap();
+        assert!(assistant["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|b| b["type"] != "thinking"));
     }
 
     #[test]
