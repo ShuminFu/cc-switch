@@ -5,7 +5,10 @@
 use super::{
     content_encoding::{decompress_body, get_content_encoding},
     forwarder::ActiveConnectionGuard,
-    handler_config::{StreamEventRetention, StreamUsageEventFilter, UsageParserConfig},
+    handler_config::{
+        ResponseUsageParser, StreamEventRetention, StreamUsageEventFilter, StreamUsageParser,
+        UsageParserConfig,
+    },
     handler_context::{RequestContext, StreamingTimeoutConfig},
     hyper_client::ProxyResponse,
     server::ProxyState,
@@ -231,71 +234,23 @@ pub async fn handle_non_streaming(
 
     // 解析并记录使用量。关闭 usage logging 时直接跳过，避免非流式响应整包 JSON parse。
     if usage_logging_enabled(state) {
-        if let Ok(json_value) = serde_json::from_slice::<Value>(&body_bytes) {
-            // 解析使用量
-            if let Some(usage) = (parser_config.response_parser)(&json_value) {
-                // 归因优先级：usage 解析出的模型 → 响应 model 字段 → 映射后的出站
-                // 模型（路由接管真值）→ 客户端请求模型。空字符串视为缺失。
-                let model = usage
-                    .model
-                    .clone()
-                    .filter(|m| !m.is_empty())
-                    .or_else(|| {
-                        json_value
-                            .get("model")
-                            .and_then(|m| m.as_str())
-                            .filter(|m| !m.is_empty())
-                            .map(str::to_string)
-                    })
-                    .or_else(|| ctx.outbound_model.clone())
-                    .unwrap_or_else(|| ctx.request_model.clone());
-
-                spawn_log_usage(
-                    state,
-                    ctx,
-                    usage,
-                    &model,
-                    &ctx.request_model,
-                    status.as_u16(),
-                    false,
-                );
-            } else {
-                let model = json_value
-                    .get("model")
-                    .and_then(|m| m.as_str())
-                    .filter(|m| !m.is_empty())
-                    .map(str::to_string)
-                    .or_else(|| ctx.outbound_model.clone())
-                    .unwrap_or_else(|| ctx.request_model.clone());
-                spawn_log_usage(
-                    state,
-                    ctx,
-                    TokenUsage::default(),
-                    &model,
-                    &ctx.request_model,
-                    status.as_u16(),
-                    false,
-                );
-                log::debug!(
-                    "[{}] 未能解析 usage 信息，跳过记录",
-                    parser_config.app_type_str
-                );
+        let target = UsageLogTarget::from_ctx(state, ctx, UsageSource::Passthrough);
+        let record = match serde_json::from_slice::<Value>(&body_bytes) {
+            Ok(json_value) => {
+                target.usage_from_response(parser_config.response_parser, &json_value)
             }
-        } else {
-            log::debug!(
-                "[{}] <<< 响应 (非 JSON): {} bytes",
-                ctx.tag,
-                body_bytes.len()
-            );
-            spawn_log_usage(
-                state,
-                ctx,
-                TokenUsage::default(),
-                ctx.outbound_model.as_deref().unwrap_or(&ctx.request_model),
-                &ctx.request_model,
-                status.as_u16(),
-                false,
-            );
+            Err(_) => {
+                log::debug!(
+                    "[{}] <<< 响应 (非 JSON, parser={}): {} bytes",
+                    ctx.tag,
+                    parser_config.app_type_str,
+                    body_bytes.len()
+                );
+                Some((TokenUsage::default(), target.attribute_model([])))
+            }
+        };
+        if let Some((usage, model)) = record {
+            target.spawn(usage, model, None, false, status.as_u16());
         }
     } else {
         log::debug!("[{}] usage logging 已关闭，跳过非流式 usage 解析", ctx.tag);
@@ -525,152 +480,231 @@ impl Drop for SseUsageFinishGuard {
 // 内部辅助函数
 // ============================================================================
 
-/// 创建使用量收集器
+/// 创建使用量收集器（透传流）
 fn create_usage_collector(
     ctx: &RequestContext,
     state: &ProxyState,
     status_code: u16,
     parser_config: &UsageParserConfig,
 ) -> Option<SseUsageCollector> {
-    let logging_enabled = state
-        .config
-        .try_read()
-        .map(|c| c.enable_logging)
-        .unwrap_or(true);
-    if !logging_enabled {
+    if !usage_logging_enabled(state) {
         return None;
     }
 
-    let state = state.clone();
-    let provider_id = ctx.provider.id.clone();
-    let request_model = ctx.request_model.clone();
-    // 流式事件缺失模型名时的归因兜底：映射后的出站模型（路由接管真值）优先，
-    // 其次才是客户端请求别名
-    let fallback_model = ctx
-        .outbound_model
-        .clone()
-        .unwrap_or_else(|| ctx.request_model.clone());
     // 用 ctx 的 app_type 而不是 parser_config 的：Claude Desktop 流式透传复用
     // CLAUDE_PARSER_CONFIG（app_type_str="claude"），按 parser_config 记账会把
     // claude-desktop 的行错记到 claude 名下，导致供应商计价覆盖解析不到。
-    let app_type_str = ctx.app_type_str;
+    let target = UsageLogTarget::from_ctx(state, ctx, UsageSource::Passthrough);
     let tag = ctx.tag;
-    let start_time = ctx.start_time;
     let stream_parser = parser_config.stream_parser;
     let model_extractor = parser_config.model_extractor;
-    let session_id = ctx.session_id.clone();
 
     Some(SseUsageCollector::with_retention(
-        start_time,
+        ctx.start_time,
         parser_config.stream_event_filter,
         parser_config.stream_event_retention,
         move |events, first_token_ms| {
-            if let Some(usage) = stream_parser(&events) {
-                let model = model_extractor(&events, &fallback_model);
-                let latency_ms = start_time.elapsed().as_millis() as u64;
-
-                let state = state.clone();
-                let provider_id = provider_id.clone();
-                let session_id = session_id.clone();
-                let request_model = request_model.clone();
-                let outbound_model = fallback_model.clone();
-
-                tokio::spawn(async move {
-                    log_usage_internal(
-                        &state,
-                        &provider_id,
-                        app_type_str,
-                        &model,
-                        &request_model,
-                        &outbound_model,
-                        usage,
-                        latency_ms,
-                        first_token_ms,
-                        true, // is_streaming
-                        status_code,
-                        Some(session_id),
-                    )
-                    .await;
-                });
-            } else {
-                let model = model_extractor(&events, &fallback_model);
-                let latency_ms = start_time.elapsed().as_millis() as u64;
-                let state = state.clone();
-                let provider_id = provider_id.clone();
-                let session_id = session_id.clone();
-                let request_model = request_model.clone();
-                let outbound_model = fallback_model.clone();
-
-                tokio::spawn(async move {
-                    log_usage_internal(
-                        &state,
-                        &provider_id,
-                        app_type_str,
-                        &model,
-                        &request_model,
-                        &outbound_model,
-                        TokenUsage::default(),
-                        latency_ms,
-                        first_token_ms,
-                        true, // is_streaming
-                        status_code,
-                        Some(session_id),
-                    )
-                    .await;
-                });
-                log::debug!("[{tag}] 流式响应缺少 usage 统计，跳过消费记录");
-            }
+            // 流式事件缺失模型名时的归因兜底：映射后的出站模型（路由接管真值）优先，
+            // 其次才是客户端请求别名
+            let model = model_extractor(&events, target.fallback_model());
+            let usage = stream_parser(&events).unwrap_or_else(|| {
+                log::debug!("[{tag}] 流式响应缺少 usage 统计，记录零用量行");
+                TokenUsage::default()
+            });
+            target.spawn(usage, model, first_token_ms, true, status_code);
         },
     ))
 }
 
-/// 异步记录使用量
-fn spawn_log_usage(
-    state: &ProxyState,
-    ctx: &RequestContext,
-    usage: TokenUsage,
-    model: &str,
-    request_model: &str,
-    status_code: u16,
-    is_streaming: bool,
-) {
-    // Check enable_logging before spawning the log task
-    if let Ok(config) = state.config.try_read() {
-        if !config.enable_logging {
-            return;
+/// 使用量来源：决定唯一的「零用量是否落账」规则（PROXY-18）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UsageSource {
+    /// 上游响应原样透传：即使没有计费 token 也写一行，让请求与其状态码在日志中可见。
+    Passthrough,
+    /// 响应经过格式转换重建：上游省略 usage 时转换器会合成全 0 usage，且没有可去重的
+    /// message id（dedup id 退化为随机 UUID），写入只会产生空行、虚增请求数，故跳过。
+    Converted,
+}
+
+/// 零用量落账规则的唯一实现。
+pub(crate) fn should_record_usage(usage: &TokenUsage, source: UsageSource) -> bool {
+    source == UsageSource::Passthrough || usage.has_billable_tokens()
+}
+
+/// 使用量记录的唯一入口（PROXY-18）。
+///
+/// 持有记账所需请求字段的快照（`Send + 'static`，可 move 进流结束回调），统一
+/// 模型归因顺序（响应/usage 回显 → 映射后的出站模型 → 客户端请求模型）、
+/// 零用量规则与「按请求计价」锚点（出站模型）。
+#[derive(Clone)]
+pub(crate) struct UsageLogTarget {
+    state: ProxyState,
+    provider_id: String,
+    app_type: &'static str,
+    request_model: String,
+    /// 「按请求计价」锚点与归因兜底：映射后的出站模型，无映射时等于 request_model
+    outbound_model: String,
+    session_id: String,
+    start_time: std::time::Instant,
+    source: UsageSource,
+}
+
+impl UsageLogTarget {
+    pub(crate) fn from_ctx(state: &ProxyState, ctx: &RequestContext, source: UsageSource) -> Self {
+        Self {
+            state: state.clone(),
+            provider_id: ctx.provider.id.clone(),
+            app_type: ctx.app_type_str,
+            request_model: ctx.request_model.clone(),
+            outbound_model: ctx
+                .outbound_model
+                .clone()
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| ctx.request_model.clone()),
+            session_id: ctx.session_id.clone(),
+            start_time: ctx.start_time,
+            source,
         }
     }
 
-    let state = state.clone();
-    let provider_id = ctx.provider.id.clone();
-    let app_type_str = ctx.app_type_str.to_string();
-    let model = model.to_string();
-    let request_model = request_model.to_string();
-    // 「按请求计价」模式的锚点：映射后的出站模型，无映射时等于 request_model
-    let outbound_model = ctx
-        .outbound_model
-        .clone()
-        .unwrap_or_else(|| ctx.request_model.clone());
-    let latency_ms = ctx.latency_ms();
-    let session_id = ctx.session_id.clone();
+    /// 上游未回显模型时的归因兜底。
+    pub(crate) fn fallback_model(&self) -> &str {
+        &self.outbound_model
+    }
 
-    tokio::spawn(async move {
+    /// 取第一个非空候选模型名，否则落到兜底模型。空字符串视为缺失
+    /// （转换层对无回显上游会合成 `model: ""`）。
+    pub(crate) fn attribute_model<'a>(
+        &self,
+        candidates: impl IntoIterator<Item = Option<&'a str>>,
+    ) -> String {
+        candidates
+            .into_iter()
+            .flatten()
+            .find(|m| !m.is_empty())
+            .unwrap_or(&self.outbound_model)
+            .to_string()
+    }
+
+    /// 从完整响应体解析 usage 与归因模型，并应用零用量规则。
+    ///
+    /// 透传来源在解析不到 usage 时仍返回零用量行（保留请求可见性）。
+    pub(crate) fn usage_from_response(
+        &self,
+        parser: ResponseUsageParser,
+        response: &Value,
+    ) -> Option<(TokenUsage, String)> {
+        let response_model = response.get("model").and_then(Value::as_str);
+        match parser(response) {
+            Some(usage) => {
+                if !should_record_usage(&usage, self.source) {
+                    log::debug!("[{}] usage 全 0，跳过消费记录", self.app_type);
+                    return None;
+                }
+                let model = self.attribute_model([usage.model.as_deref(), response_model]);
+                Some((usage, model))
+            }
+            None if self.source == UsageSource::Passthrough => {
+                log::debug!("[{}] 未能解析 usage 信息，记录零用量行", self.app_type);
+                Some((
+                    TokenUsage::default(),
+                    self.attribute_model([response_model]),
+                ))
+            }
+            None => None,
+        }
+    }
+
+    /// 从收集到的流式事件解析 usage 与归因模型，并应用零用量规则。
+    pub(crate) fn usage_from_stream(
+        &self,
+        parser: StreamUsageParser,
+        events: &[Value],
+    ) -> Option<(TokenUsage, String)> {
+        let usage = parser(events).unwrap_or_default();
+        if !should_record_usage(&usage, self.source) {
+            log::debug!(
+                "[{}] 流式响应 usage 全 0 或缺失，跳过消费记录",
+                self.app_type
+            );
+            return None;
+        }
+        let model = self.attribute_model([usage.model.as_deref()]);
+        Some((usage, model))
+    }
+
+    /// 异步写入一行使用量（不阻塞响应）。
+    pub(crate) fn spawn(
+        &self,
+        usage: TokenUsage,
+        model: String,
+        first_token_ms: Option<u64>,
+        is_streaming: bool,
+        status_code: u16,
+    ) {
+        if !usage_logging_enabled(&self.state) {
+            return;
+        }
+        let target = self.clone();
+        tokio::spawn(async move {
+            target
+                .write(usage, model, first_token_ms, is_streaming, status_code)
+                .await;
+        });
+    }
+
+    /// 同步等待写入一行使用量（用于随后立即返回错误的路径）。
+    pub(crate) async fn write(
+        &self,
+        usage: TokenUsage,
+        model: String,
+        first_token_ms: Option<u64>,
+        is_streaming: bool,
+        status_code: u16,
+    ) {
+        if !usage_logging_enabled(&self.state) {
+            return;
+        }
+        let latency_ms = self.start_time.elapsed().as_millis() as u64;
         log_usage_internal(
-            &state,
-            &provider_id,
-            &app_type_str,
+            &self.state,
+            &self.provider_id,
+            self.app_type,
             &model,
-            &request_model,
-            &outbound_model,
+            &self.request_model,
+            &self.outbound_model,
             usage,
             latency_ms,
-            None,
+            first_token_ms,
             is_streaming,
             status_code,
-            Some(session_id),
+            Some(self.session_id.clone()),
         )
         .await;
-    });
+    }
+}
+
+/// 转换后流式响应的使用量收集器（Converted 来源，零用量不落账）。
+pub(crate) fn converted_stream_usage_collector(
+    state: &ProxyState,
+    ctx: &RequestContext,
+    status_code: u16,
+    filter: StreamUsageEventFilter,
+    parser: StreamUsageParser,
+) -> Option<SseUsageCollector> {
+    if !usage_logging_enabled(state) {
+        return None;
+    }
+    let target = UsageLogTarget::from_ctx(state, ctx, UsageSource::Converted);
+    Some(SseUsageCollector::new(
+        ctx.start_time,
+        Some(filter),
+        move |events, first_token_ms| {
+            if let Some((usage, model)) = target.usage_from_stream(parser, &events) {
+                target.spawn(usage, model, first_token_ms, true, status_code);
+            }
+        },
+    ))
 }
 
 pub(crate) fn usage_logging_enabled(state: &ProxyState) -> bool {
@@ -1359,5 +1393,82 @@ pub(crate) mod tests {
         assert_eq!(retained.len(), 2);
         let usage = (CLAUDE_PARSER_CONFIG.stream_parser)(&retained).unwrap();
         assert_eq!((usage.input_tokens, usage.output_tokens), (3, 4));
+    }
+
+    #[test]
+    fn zero_usage_rule_is_source_dependent() {
+        let zero = TokenUsage::default();
+        let cached = TokenUsage {
+            cache_read_tokens: 5,
+            ..TokenUsage::default()
+        };
+        assert!(should_record_usage(&zero, UsageSource::Passthrough));
+        assert!(!should_record_usage(&zero, UsageSource::Converted));
+        assert!(should_record_usage(&cached, UsageSource::Converted));
+    }
+
+    fn usage_target(outbound: Option<&str>, source: UsageSource) -> UsageLogTarget {
+        let db = Arc::new(Database::memory().expect("db"));
+        UsageLogTarget {
+            state: build_state(db),
+            provider_id: "p".to_string(),
+            app_type: "claude",
+            request_model: "client-alias".to_string(),
+            outbound_model: outbound.unwrap_or("client-alias").to_string(),
+            session_id: "s".to_string(),
+            start_time: std::time::Instant::now(),
+            source,
+        }
+    }
+
+    #[test]
+    fn model_attribution_prefers_echo_then_outbound_then_request() {
+        let target = usage_target(Some("mapped-upstream"), UsageSource::Converted);
+        assert_eq!(target.attribute_model([Some(""), Some("echoed")]), "echoed");
+        assert_eq!(target.attribute_model([None, Some("")]), "mapped-upstream");
+        let target = usage_target(None, UsageSource::Converted);
+        assert_eq!(target.attribute_model([]), "client-alias");
+    }
+
+    #[test]
+    fn usage_from_response_applies_one_rule_for_all_paths() {
+        let body = serde_json::json!({
+            "model": "",
+            "usage": {"input_tokens": 0, "output_tokens": 0}
+        });
+        // Converted: synthesised all-zero usage is skipped.
+        let converted = usage_target(Some("mapped"), UsageSource::Converted);
+        assert!(converted
+            .usage_from_response(TokenUsage::from_claude_response, &body)
+            .is_none());
+        // Passthrough: the row is kept so the request stays visible.
+        let passthrough = usage_target(Some("mapped"), UsageSource::Passthrough);
+        let (usage, model) = passthrough
+            .usage_from_response(TokenUsage::from_claude_response, &body)
+            .expect("row");
+        assert!(!usage.has_billable_tokens());
+        assert_eq!(model, "mapped");
+        // Unparseable usage: passthrough still writes a zero row, converted does not.
+        let no_usage = serde_json::json!({"model": "echo"});
+        assert_eq!(
+            passthrough
+                .usage_from_response(TokenUsage::from_claude_response, &no_usage)
+                .map(|(_, m)| m),
+            Some("echo".to_string())
+        );
+        assert!(converted
+            .usage_from_response(TokenUsage::from_claude_response, &no_usage)
+            .is_none());
+
+        let billable = serde_json::json!({
+            "id": "msg_1",
+            "model": "echo",
+            "usage": {"input_tokens": 3, "output_tokens": 4}
+        });
+        let (usage, model) = converted
+            .usage_from_response(TokenUsage::from_claude_response, &billable)
+            .expect("row");
+        assert_eq!((usage.input_tokens, usage.output_tokens), (3, 4));
+        assert_eq!(model, "echo");
     }
 }
