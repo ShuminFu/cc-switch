@@ -8,6 +8,8 @@
 //! the hyper-based HTTP client, producing wire-level header casing identical to
 //! a direct (non-proxied) CLI request.
 
+mod access_guard;
+
 use super::{
     failover_switch::FailoverSwitchManager,
     handlers,
@@ -18,16 +20,25 @@ use super::{
     ProxyError,
 };
 use crate::database::Database;
+use access_guard::{AccessContext, AccessGuard, PeerInfo, MAX_REQUEST_BODY_BYTES};
 use axum::{
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, State},
+    response::IntoResponse,
     routing::{any, get, post},
-    Router,
+    Extension, Json, Router,
 };
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::{oneshot, RwLock};
+use std::time::Duration;
+use tokio::sync::{oneshot, RwLock, Semaphore};
 use tokio::task::JoinHandle;
+
+/// Maximum time a client may take to send a complete request head (also closes
+/// idle keep-alive connections). SEC-14.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// Maximum number of simultaneously open client connections. SEC-14.
+const MAX_CONCURRENT_CONNECTIONS: usize = 1024;
 
 /// 代理服务器状态（共享）
 #[derive(Clone)]
@@ -105,8 +116,21 @@ impl ProxyServer {
         // 创建关闭通道
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
+        // 访问控制：非本机请求需要访问令牌（SEC-01 / PROXY-03）
+        let access_token = self
+            .state
+            .db
+            .get_or_create_proxy_access_token()
+            .map_err(|e| ProxyError::BindFailed(format!("无法加载访问令牌: {e}")))?;
+        if !addr.ip().is_loopback() {
+            log::warn!(
+                "[{}] 代理监听非回环地址 {addr}，来自其他主机的请求需要访问令牌",
+                log_srv::STARTED
+            );
+        }
+
         // 构建路由
-        let app = self.build_router();
+        let app = self.build_router(AccessGuard::new(access_token));
 
         // 绑定监听器
         let listener = tokio::net::TcpListener::bind(&addr)
@@ -138,12 +162,13 @@ impl ProxyServer {
         // 启动服务器 — 使用手动 hyper HTTP/1.1 accept loop
         // 开启 preserve_header_case 以捕获客户端请求头的原始大小写
         let state = self.state.clone();
+        let connection_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
         let handle = tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
             loop {
                 tokio::select! {
                     result = listener.accept() => {
-                        let (stream, _remote_addr) = match result {
+                        let (stream, remote_addr) = match result {
                             Ok(v) => v,
                             Err(e) => {
                                 log::error!("[{SRV}] accept 失败: {e}", SRV = log_srv::ACCEPT_ERR);
@@ -152,14 +177,35 @@ impl ProxyServer {
                             }
                         };
 
+                        // SEC-14: bound concurrently open connections.
+                        let Ok(permit) = connection_slots.clone().try_acquire_owned() else {
+                            log::warn!(
+                                "[{SRV}] 连接数已达上限 {MAX_CONCURRENT_CONNECTIONS}，拒绝 {remote_addr}",
+                                SRV = log_srv::CONN_ERR
+                            );
+                            drop(stream);
+                            continue;
+                        };
+                        let peer_info = PeerInfo {
+                            remote: remote_addr,
+                            local: stream.local_addr().unwrap_or(local_addr),
+                        };
+
                         let app = app.clone();
                         tokio::spawn(async move {
+                            let _permit = permit;
                             // Peek raw TCP bytes to capture original header casing
                             // before hyper parses (and lowercases) the header names.
+                            // Bounded by the header timeout so silent connections
+                            // cannot park here forever.
                             let original_cases = {
                                 let mut peek_buf = vec![0u8; 8192];
-                                match stream.peek(&mut peek_buf).await {
-                                    Ok(n) => {
+                                match tokio::time::timeout(HEADER_READ_TIMEOUT, stream.peek(&mut peek_buf)).await {
+                                    Err(_) => {
+                                        log::debug!("[ProxyServer] connection from {remote_addr} sent nothing before timeout");
+                                        return;
+                                    }
+                                    Ok(Ok(n)) => {
                                         let cases = super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..n]);
                                         log::debug!(
                                             "[ProxyServer] Peeked {} bytes, captured {} header casings",
@@ -167,7 +213,7 @@ impl ProxyServer {
                                         );
                                         cases
                                     }
-                                    Err(e) => {
+                                    Ok(Err(e)) => {
                                         log::debug!("[ProxyServer] peek failed (non-fatal): {e}");
                                         super::hyper_client::OriginalHeaderCases::default()
                                     }
@@ -184,6 +230,8 @@ impl ProxyServer {
 
                                     // Insert our own header case map alongside hyper's internal one
                                     parts.extensions.insert(cases);
+                                    // Connection endpoints for the access guard
+                                    parts.extensions.insert(peer_info);
 
                                     let body = axum::body::Body::new(body);
                                     let axum_req = http::Request::from_parts(parts, body);
@@ -193,6 +241,8 @@ impl ProxyServer {
 
                             if let Err(e) = hyper::server::conn::http1::Builder::new()
                                 .preserve_header_case(true)
+                                .timer(TokioTimer::new())
+                                .header_read_timeout(HEADER_READ_TIMEOUT)
                                 .serve_connection(TokioIo::new(stream), service)
                                 .await
                             {
@@ -288,11 +338,11 @@ impl ProxyServer {
         );
     }
 
-    fn build_router(&self) -> Router {
+    fn build_router(&self, guard: AccessGuard) -> Router {
         Router::new()
             // 健康检查
             .route("/health", get(handlers::health_check))
-            .route("/status", get(handlers::get_status))
+            .route("/status", get(status_endpoint))
             // Claude API (支持带前缀和不带前缀两种格式)
             .route("/v1/messages", post(handlers::handle_messages))
             .route("/claude/v1/messages", post(handlers::handle_messages))
@@ -364,8 +414,13 @@ impl ProxyServer {
             .route("/gemini/v1beta/*path", any(handlers::handle_gemini))
             // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
-            // 提高默认请求体大小限制（避免 413 Payload Too Large）
-            .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
+            // 请求体大小限制（SEC-14）；access guard 还会对原始 body 施加同样的上限
+            .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
+            // 访问控制：Origin/Host 校验 + 非本机请求的访问令牌（在读取 body 之前执行）
+            .layer(axum::middleware::from_fn_with_state(
+                guard,
+                access_guard::enforce,
+            ))
             .with_state(self.state.clone())
     }
 
@@ -401,5 +456,54 @@ impl ProxyServer {
             .provider_router
             .reset_provider_breaker(provider_id, app_type)
             .await;
+    }
+}
+
+/// `/status`: full details (provider names/ids, last error) only for requests that
+/// presented the access token; everyone else gets liveness information only. SEC-15.
+async fn status_endpoint(
+    State(state): State<ProxyState>,
+    ctx: Option<Extension<AccessContext>>,
+) -> axum::response::Response {
+    let authenticated = ctx.is_some_and(|Extension(ctx)| ctx.token_authenticated);
+    if authenticated {
+        return match handlers::get_status(State(state)).await {
+            Ok(json) => json.into_response(),
+            Err(e) => e.into_response(),
+        };
+    }
+    let status = state.status.read().await;
+    Json(public_status(&status)).into_response()
+}
+
+fn public_status(status: &ProxyStatus) -> serde_json::Value {
+    serde_json::json!({
+        "running": status.running,
+        "port": status.port,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_status_hides_provider_details() {
+        let status = ProxyStatus {
+            running: true,
+            port: 15721,
+            current_provider: Some("My Relay".into()),
+            current_provider_id: Some("p1".into()),
+            last_error: Some("Provider My Relay 失败: secret body".into()),
+            active_targets: vec![ActiveTarget {
+                app_type: "claude".into(),
+                provider_name: "My Relay".into(),
+                provider_id: "p1".into(),
+            }],
+            ..Default::default()
+        };
+        let value = public_status(&status);
+        assert_eq!(value, serde_json::json!({"running": true, "port": 15721}));
+        assert!(!value.to_string().contains("My Relay"));
     }
 }

@@ -163,6 +163,10 @@ pub struct GlobalProxyConfig {
     pub listen_port: u16,
     /// 是否启用日志
     pub enable_logging: bool,
+    /// Access token the listener requires from non-local clients (read-only;
+    /// ignored on update). Generated and persisted on first read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
 }
 
 /// 应用级代理配置（每个 app 独立）
