@@ -52,7 +52,7 @@ impl InputTokenSemantics {
         }
     }
 
-    #[allow(dead_code)] // for UsageLogger's input_token_semantics column
+    #[cfg(test)]
     pub fn input_includes_cache(self) -> bool {
         self == Self::Total
     }
@@ -146,16 +146,6 @@ impl CostCalculator {
             cache_creation_cost,
             total_cost,
         }
-    }
-
-    /// 尝试计算成本，如果模型未知则返回 None
-    #[allow(dead_code)]
-    pub fn try_calculate(
-        usage: &TokenUsage,
-        pricing: Option<&ModelPricing>,
-        cost_multiplier: Decimal,
-    ) -> Option<CostBreakdown> {
-        pricing.map(|p| Self::calculate(usage, p, cost_multiplier))
     }
 
     pub fn try_calculate_for_app(
@@ -356,7 +346,7 @@ mod tests {
         };
 
         let multiplier = Decimal::from_str("1.0").unwrap();
-        let cost = CostCalculator::try_calculate(&usage, None, multiplier);
+        let cost = CostCalculator::try_calculate_for_app("claude", &usage, None, multiplier);
 
         assert!(cost.is_none());
     }
