@@ -126,6 +126,8 @@ Differential tests on hand-written inputs beyond the corpus:
 
    Both are usage accounting, not protocol conversion.
 
+   `proxy/providers/testkit.rs` also matches, in a hand-written Responses `usage` fixture (`input_tokens_details.cached_tokens`) for the golden checks. It is test data, not conversion code, but it stays after the deletion unless the grep is limited to non-test code.
+
 **Files:**
 - Codec, new:
   - `src-tauri/src/proxy/codec/responses/{mod,request,response,stream,client_request,client_response,client_stream,reasoning,tools,errors,usage,tests,client_anthropic_tests,client_chat_tests}.rs`
@@ -161,3 +163,16 @@ Differential tests on hand-written inputs beyond the corpus:
 - `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast`: 2855 passed, 0 failed
 - No frontend changes.
 
+**Review.** I went through the five commits independently and checked:
+- **Wiring.** Every production call of the legacy request, response and SSE converters now goes through `codec::bridge` with `settings::codec_engine()`. The remaining direct uses of `providers::transform*` are only the re-exported helpers and legacy unit tests.
+- **Error kinds.** Codex request errors still map to `InvalidRequest`, and response errors to `TransformError`, as before.
+- **Probe beyond the corpus.** A throwaway differential probe (not committed) fed realistic payloads through both engines and got byte-identical output:
+  - Codex requests with developer, image and file inputs, reasoning, `function_call`, `custom_tool_call`, `local_shell_call` and `web_search_call` items, a string `input`, a forced tool and several efforts, through both Codex bridges
+  - Claude Code requests with a billing header, `cache_control`, thinking, adaptive thinking or `output_config`, and tool results that carry images and errors
+  - streams and non-stream bodies for all three bridges, including redacted thinking, server tools, an error envelope, `max_tokens` / `refusal` stops, `<think>` splitting and incomplete Responses bodies
+
+  No defects found. Verification results:
+  - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean.
+  - `cargo test --no-fail-fast` passes everything: lib 2632, `proxy_golden` 16, `proxy_e2e` 27, 0 failed.
+
+  The only change is the `testkit.rs` grep note above. The status stays **Partial**: deleting the legacy files and the 8k-line net reduction are still gated on the one-release soak.
