@@ -7,6 +7,7 @@ import "./index.css";
 // 导入国际化配置
 import i18n, { i18nReady } from "./i18n";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { MotionConfig } from "framer-motion";
 import { ThemeProvider } from "@/components/theme-provider";
 import { queryClient } from "@/lib/query";
 import { Toaster } from "@/components/ui/sonner";
@@ -111,7 +112,10 @@ async function bootstrap() {
         <ThemeProvider defaultTheme="system" storageKey="cc-switch-theme">
           <ErrorBoundary>
             <UpdateProvider>
-              <App />
+              {/* Honour prefers-reduced-motion for every framer-motion animation (FE-UI-13). */}
+              <MotionConfig reducedMotion="user">
+                <App />
+              </MotionConfig>
               <Toaster />
             </UpdateProvider>
           </ErrorBoundary>
