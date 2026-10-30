@@ -1,6 +1,6 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import type { AppId } from "@/lib/api";
-import { useProvidersQuery } from "@/lib/query/queries";
+import { HERMES_DEFAULT_CONFIG } from "@/lib/providerCodecs";
 import {
   HERMES_DEFAULT_API_MODE,
   type HermesApiMode,
@@ -24,11 +24,7 @@ const HERMES_DEFAULT_CONFIG_OBJ = {
   api_key: "",
 } as const;
 
-export const HERMES_DEFAULT_CONFIG = JSON.stringify(
-  HERMES_DEFAULT_CONFIG_OBJ,
-  null,
-  2,
-);
+export { HERMES_DEFAULT_CONFIG };
 
 export interface HermesFormState {
   hermesProviderKey: string;
@@ -38,7 +34,6 @@ export interface HermesFormState {
   hermesApiMode: HermesApiMode;
   hermesModels: HermesModel[];
   hermesRateLimitDelay: number | undefined;
-  existingHermesKeys: string[];
   handleHermesBaseUrlChange: (baseUrl: string) => void;
   handleHermesApiKeyChange: (apiKey: string) => void;
   handleHermesApiModeChange: (mode: HermesApiMode) => void;
@@ -78,14 +73,6 @@ export function useHermesFormState({
   onSettingsConfigChange,
   getSettingsConfig,
 }: UseHermesFormStateParams): HermesFormState {
-  const { data: hermesProvidersData } = useProvidersQuery("hermes");
-  const existingHermesKeys = useMemo(() => {
-    if (!hermesProvidersData?.providers) return [];
-    return Object.keys(hermesProvidersData.providers).filter(
-      (k) => k !== providerId,
-    );
-  }, [hermesProvidersData?.providers, providerId]);
-
   const [hermesProviderKey, setHermesProviderKey] = useState<string>(() => {
     if (appId !== "hermes") return "";
     return providerId || "";
@@ -214,7 +201,6 @@ export function useHermesFormState({
     hermesApiMode,
     hermesModels,
     hermesRateLimitDelay,
-    existingHermesKeys,
     handleHermesBaseUrlChange,
     handleHermesApiKeyChange,
     handleHermesApiModeChange,

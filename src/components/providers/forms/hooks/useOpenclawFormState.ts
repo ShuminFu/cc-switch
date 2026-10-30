@@ -1,7 +1,6 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import type { OpenClawModel, OpenClawProviderConfig } from "@/types";
 import type { AppId } from "@/lib/api";
-import { useProvidersQuery } from "@/lib/query/queries";
 import { OPENCLAW_DEFAULT_CONFIG } from "../helpers/opencodeFormUtils";
 
 interface UseOpenclawFormStateParams {
@@ -25,7 +24,6 @@ export interface OpenclawFormState {
   openclawApi: string;
   openclawModels: OpenClawModel[];
   openclawUserAgent: boolean;
-  existingOpenclawKeys: string[];
   handleOpenclawBaseUrlChange: (baseUrl: string) => void;
   handleOpenclawApiKeyChange: (apiKey: string) => void;
   handleOpenclawApiChange: (api: string) => void;
@@ -58,15 +56,6 @@ export function useOpenclawFormState({
   onSettingsConfigChange,
   getSettingsConfig,
 }: UseOpenclawFormStateParams): OpenclawFormState {
-  // Query existing providers for duplicate key checking
-  const { data: openclawProvidersData } = useProvidersQuery("openclaw");
-  const existingOpenclawKeys = useMemo(() => {
-    if (!openclawProvidersData?.providers) return [];
-    return Object.keys(openclawProvidersData.providers).filter(
-      (k) => k !== providerId,
-    );
-  }, [openclawProvidersData?.providers, providerId]);
-
   const [openclawProviderKey, setOpenclawProviderKey] = useState<string>(() => {
     if (appId !== "openclaw") return "";
     return providerId || "";
@@ -189,7 +178,6 @@ export function useOpenclawFormState({
     openclawApi,
     openclawModels,
     openclawUserAgent,
-    existingOpenclawKeys,
     handleOpenclawBaseUrlChange,
     handleOpenclawApiKeyChange,
     handleOpenclawApiChange,

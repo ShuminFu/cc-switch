@@ -28,7 +28,7 @@ import type {
   ProviderCategory,
   ProviderMeta,
 } from "@/types";
-import type { ProviderFormProps, ProviderFormValues } from "./ProviderForm";
+import type { ProviderFormProps, ProviderFormValues } from "./adapters/types";
 import { BasicFormFields } from "./BasicFormFields";
 import { CodexFormFields } from "./CodexFormFields";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
