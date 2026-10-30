@@ -201,8 +201,9 @@ mod tests {
     ///
     /// CCS-149 前为 56 处（同一统计口径），之后的上限见 [`MATCH_APP_SITE_BUDGET`]，只允许下降。
     /// P4 退出目标是 15 处以内。CCS-153/154/155 收敛接管引擎与按应用状态后实测 28 处
-    ///（CCS-232 起不再把 `#[cfg(test)] mod foo;` 声明的测试文件计入）。
-    const MATCH_APP_SITE_BUDGET: usize = 28;
+    ///（CCS-232 起不再把 `#[cfg(test)] mod foo;` 声明的测试文件计入）；CCS-233 把 paths 与
+    /// 深链接预览改走注册表 / 适配器后为 25 处。
+    const MATCH_APP_SITE_BUDGET: usize = 25;
 
     #[test]
     fn match_app_sites_outside_apps_stay_within_budget() {

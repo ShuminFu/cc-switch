@@ -37,6 +37,10 @@ impl AppAdapter for GrokAdapter {
         )
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![crate::grok_config::get_grok_config_path()]
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         read_grok_live_settings()
     }
@@ -106,6 +110,10 @@ impl AppAdapter for GrokAdapter {
 }
 
 impl McpProjector for GrokAdapter {
+    fn live_file(&self) -> PathBuf {
+        crate::grok_config::get_grok_config_path()
+    }
+
     fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
         crate::mcp::read_servers_from_grokbuild()
     }

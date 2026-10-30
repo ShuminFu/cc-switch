@@ -35,6 +35,10 @@ impl AppAdapter for HermesAdapter {
         Some(get_hermes_dir().join("skills"))
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![get_hermes_config_path()]
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         if !get_hermes_config_path().exists() {
             return Err(AppError::localized(
@@ -200,6 +204,10 @@ impl EntryTakeover for HermesAdapter {
 }
 
 impl McpProjector for HermesAdapter {
+    fn live_file(&self) -> PathBuf {
+        get_hermes_config_path()
+    }
+
     fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
         crate::mcp::read_servers_from_hermes()
     }

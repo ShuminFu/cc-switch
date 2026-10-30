@@ -230,6 +230,10 @@ impl AppAdapter for DummyAdapter {
         Some(self.dir().join("skills"))
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![self.config_path()]
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         let text = fs::read_to_string(self.config_path())
             .map_err(|e| dummy_error(&format!("read config: {e}")))?;
@@ -365,7 +369,7 @@ fn describe_diff(
 // Contract
 // ============================================================================
 
-fn assert_credentials_round_trip(case: &Case<'_>) {
+fn assert_credentials_round_trip(case: &Case<'_>, home: &Path) {
     let slug = case.slug;
     let adapter = case.adapter;
     let provider = provider(case.fixture.settings.clone());
@@ -399,9 +403,29 @@ fn assert_credentials_round_trip(case: &Case<'_>) {
     let Some(live_entry) = case.fixture.live_entry else {
         return;
     };
+    let before = snapshot(home);
     adapter
         .write_provider(&provider)
         .unwrap_or_else(|e| panic!("{slug}: write_provider: {e}"));
+    let written = snapshot(home);
+    let live_files: BTreeSet<PathBuf> = adapter
+        .live_files()
+        .iter()
+        .map(|path| {
+            path.strip_prefix(home)
+                .expect("live file under HOME")
+                .to_path_buf()
+        })
+        .collect();
+    let changed: BTreeSet<PathBuf> = written
+        .iter()
+        .filter(|(path, bytes)| before.get(*path) != Some(*bytes))
+        .map(|(path, _)| path.clone())
+        .collect();
+    assert!(
+        !changed.is_empty() && changed.is_subset(&live_files),
+        "{slug}: write_provider must only touch live_files() {live_files:?}, changed {changed:?}"
+    );
     let live = adapter
         .read_live()
         .unwrap_or_else(|e| panic!("{slug}: read_live after write: {e}"));
@@ -466,6 +490,14 @@ fn assert_mcp_upsert_and_remove(case: &Case<'_>, home: &Path) {
         !holders.is_empty(),
         "{slug}: mcp upsert wrote nothing:\n{}",
         describe_diff(&before, &inserted)
+    );
+    assert_eq!(
+        holders,
+        [mcp.live_file()
+            .strip_prefix(home)
+            .expect("mcp live file under HOME")
+            .to_path_buf()],
+        "{slug}: mcp upsert writes McpProjector::live_file()"
     );
 
     let updated_spec = json!({ "type": "stdio", "command": "conformance-mcp", "args": ["--v2"] });
@@ -607,8 +639,8 @@ fn every_registered_app_has_a_fixture() {
 #[test]
 fn credentials_round_trip_for_every_app() {
     for case in registry_cases() {
-        let _env = TestEnv::new();
-        assert_credentials_round_trip(&case);
+        let env = TestEnv::new();
+        assert_credentials_round_trip(&case, env.home());
     }
 }
 
@@ -804,7 +836,7 @@ fn dummy_ninth_app_passes_the_adapter_contract() {
 
     assert_caps_match_traits(&case);
     assert_paths(&case, env.home());
-    assert_credentials_round_trip(&case);
+    assert_credentials_round_trip(&case, env.home());
     assert_mcp_upsert_and_remove(&case, env.home());
     assert!(dummy.mcp().is_none() && dummy.takeover().is_none());
 }
@@ -862,12 +894,11 @@ const NEW_APP_FIXED_FILES: [&str; 3] = ["app_config.rs", "apps/registry.rs", "ap
 
 /// 新增一个应用需要改动的后端文件数上限（含新建的 `apps/<app>/mod.rs`），只允许下降。
 ///
-/// P4 目标是 6 个以内。当前的 9 个与一次实测一致：给 `AppType` 加一个变体并在
+/// P4 目标是 6 个以内。当前的 5 个与一次实测一致：给 `AppType` 加一个变体并在
 /// 注册表 / `apps::adapter()` 接入后，编译器只在 [`exhaustive_app_match_files`]
-/// 列出的文件里报不穷尽 match。CCS-155 之后 settings.rs 已不在其中；剩余文件随
-/// app_config.rs 以及 deeplink / paths / services/config.rs / proxy/providers 的
-/// 分派收敛下降。
-const NEW_APP_BACKEND_FILE_BUDGET: usize = 9;
+/// 列出的文件里报不穷尽 match。CCS-233 之后 deeplink / paths / services/config.rs
+/// 改走注册表描述符与适配器钩子，剩余的是 app_config.rs 与 proxy/providers。
+const NEW_APP_BACKEND_FILE_BUDGET: usize = 5;
 
 /// 去掉顶层的 `#[cfg(test)]` 条目：带花括号的块跳到列 0 的 `}`，单行声明
 ///（`mod foo;`）只跳过该行

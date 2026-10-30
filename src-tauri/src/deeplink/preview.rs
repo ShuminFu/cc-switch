@@ -17,7 +17,6 @@ use crate::store::AppState;
 use crate::AppType;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
 use std::str::FromStr;
 
 /// An item the user must explicitly acknowledge before importing.
@@ -189,7 +188,8 @@ fn fill_provider_preview(
     preview.writes_live_on_import = app_type.is_additive_mode()
         || (preview.unlisted_env_keys.is_empty()
             && (current.is_none() || request.enabled.unwrap_or(false)));
-    preview.live_files = provider_live_files(&app_type)
+    preview.live_files = crate::apps::adapter(&app_type)
+        .live_files()
         .into_iter()
         .map(|p| p.display().to_string())
         .collect();
@@ -272,7 +272,7 @@ fn fill_mcp_preview(
         preview.live_files = apps
             .enabled_apps()
             .iter()
-            .filter_map(mcp_live_file)
+            .filter_map(|app| crate::apps::adapter(app).mcp().map(|mcp| mcp.live_file()))
             .map(|p| p.display().to_string())
             .collect();
     }
@@ -335,39 +335,6 @@ fn url_host(raw: &str) -> Option<String> {
         Some(port) => format!("{host}:{port}"),
         None => host.to_string(),
     })
-}
-
-/// Live config files a provider of `app_type` is written to.
-fn provider_live_files(app_type: &AppType) -> Vec<PathBuf> {
-    match app_type {
-        AppType::Claude => vec![crate::config::get_claude_settings_path()],
-        AppType::ClaudeDesktop => Vec::new(),
-        AppType::Codex => vec![
-            crate::codex_config::get_codex_auth_path(),
-            crate::codex_config::get_codex_config_path(),
-        ],
-        AppType::Gemini => vec![
-            crate::gemini_config::get_gemini_env_path(),
-            crate::gemini_config::get_gemini_settings_path(),
-        ],
-        AppType::GrokBuild => vec![crate::grok_config::get_grok_config_path()],
-        AppType::OpenCode => vec![crate::opencode_config::get_opencode_config_path()],
-        AppType::OpenClaw => vec![crate::openclaw_config::get_openclaw_config_path()],
-        AppType::Hermes => vec![crate::hermes_config::get_hermes_config_path()],
-    }
-}
-
-/// Live config file MCP servers of `app_type` are synced to.
-fn mcp_live_file(app_type: &AppType) -> Option<PathBuf> {
-    match app_type {
-        AppType::Claude => Some(crate::config::get_claude_mcp_path()),
-        AppType::Codex => Some(crate::codex_config::get_codex_config_path()),
-        AppType::Gemini => Some(crate::gemini_config::get_gemini_settings_path()),
-        AppType::GrokBuild => Some(crate::grok_config::get_grok_config_path()),
-        AppType::OpenCode => Some(crate::opencode_config::get_opencode_config_path()),
-        AppType::Hermes => Some(crate::hermes_config::get_hermes_config_path()),
-        AppType::ClaudeDesktop | AppType::OpenClaw => None,
-    }
 }
 
 /// Field-level differences between the existing provider and the one the

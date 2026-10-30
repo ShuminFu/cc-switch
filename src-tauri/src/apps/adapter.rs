@@ -60,6 +60,10 @@ pub trait AppAdapter: Debug + Sync {
     /// Skills 目录；没有 skills 目录的应用返回 `None`
     fn skills_dir(&self) -> Option<PathBuf>;
 
+    /// 写入供应商会改写的 live 文件（深链接导入预览据此提示）；
+    /// 不经 [`AppAdapter::write_provider`] 直接写 live 的应用返回空列表
+    fn live_files(&self) -> Vec<PathBuf>;
+
     /// 读取当前 live 配置，转换为供应商 `settings_config` 结构
     fn read_live(&self) -> Result<Value, AppError>;
 
@@ -221,6 +225,9 @@ impl CommonSnippet for ExtractOnlySnippet {
 
 /// 把 CC Switch 的 MCP 服务器写入 / 移出应用自己的配置，并从中读回
 pub trait McpProjector {
+    /// MCP 服务器写入的 live 配置文件
+    fn live_file(&self) -> PathBuf;
+
     /// 读取应用 live 配置中的 MCP 服务器，已转换为统一 JSON 规范（尚未校验）。
     /// 配置文件缺失时返回空列表；文件损坏时报错。
     fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError>;

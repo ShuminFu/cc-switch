@@ -29,6 +29,10 @@ impl AppAdapter for ClaudeDesktopAdapter {
         None
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         Err(AppError::localized(
             "claude_desktop.live.read_unsupported",

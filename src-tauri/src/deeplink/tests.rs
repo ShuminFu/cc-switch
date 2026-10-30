@@ -1339,3 +1339,41 @@ fn test_preview_mcp_lists_commands_and_marks_existing_servers() {
     assert_eq!(remote.url.as_deref(), Some("https://mcp.example.com/mcp"));
     assert!(remote.command.is_none());
 }
+
+#[test]
+#[serial_test::serial]
+fn test_preview_mcp_lists_the_live_file_of_every_mcp_app() {
+    use super::preview::preview_deeplink_import;
+
+    let _test_home = TestHomeGuard::new();
+    let state = preview_state();
+    let config = serde_json::json!({
+        "mcpServers": { "runner": { "command": "npx", "args": ["-y", "some-pkg"] } }
+    });
+    let request = DeepLinkImportRequest {
+        version: "v1".to_string(),
+        resource: "mcp".to_string(),
+        apps: Some("claude,openclaw".to_string()),
+        config: Some(BASE64_STANDARD.encode(config.to_string())),
+        ..Default::default()
+    };
+
+    let preview = preview_deeplink_import(&state, &request).expect("preview");
+    let expected: Vec<String> = [AppType::Claude, AppType::OpenClaw]
+        .iter()
+        .map(|app| {
+            crate::apps::adapter(app)
+                .mcp()
+                .expect("mcp app")
+                .live_file()
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(preview.live_files, expected);
+    assert!(
+        preview.live_files[1].ends_with("openclaw.json"),
+        "OpenClaw MCP servers are written to openclaw.json: {:?}",
+        preview.live_files
+    );
+}

@@ -50,6 +50,10 @@ impl AppAdapter for ClaudeAdapter {
         )
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![crate::config::get_claude_settings_path()]
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         read_settings()
     }
@@ -189,6 +193,10 @@ impl CommonSnippet for ClaudeAdapter {
 }
 
 impl McpProjector for ClaudeAdapter {
+    fn live_file(&self) -> PathBuf {
+        crate::config::get_claude_mcp_path()
+    }
+
     fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
         crate::mcp::read_servers_from_claude()
     }

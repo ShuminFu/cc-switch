@@ -44,6 +44,10 @@ impl AppAdapter for OpenCodeAdapter {
         )
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![get_opencode_config_path()]
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         if !get_opencode_config_path().exists() {
             return Err(AppError::localized(
@@ -277,6 +281,10 @@ pub(crate) fn model_ref_provider(model: Option<&Value>) -> Option<String> {
 }
 
 impl McpProjector for OpenCodeAdapter {
+    fn live_file(&self) -> PathBuf {
+        get_opencode_config_path()
+    }
+
     fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
         crate::mcp::read_servers_from_opencode()
     }

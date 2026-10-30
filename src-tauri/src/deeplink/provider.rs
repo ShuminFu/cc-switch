@@ -175,8 +175,9 @@ pub(crate) fn build_provider_from_request(
         AppType::Gemini => build_gemini_settings(request),
         AppType::GrokBuild => build_grokbuild_settings(request),
         AppType::OpenCode => build_opencode_settings(request),
-        AppType::OpenClaw => build_additive_app_settings(request),
         AppType::Hermes => build_hermes_settings(request),
+        // OpenClaw and apps without a dedicated format use the generic additive shape
+        _ => build_additive_app_settings(request),
     };
 
     // Build usage script configuration if provided

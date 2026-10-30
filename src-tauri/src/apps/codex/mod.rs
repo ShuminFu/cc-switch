@@ -54,6 +54,13 @@ impl AppAdapter for CodexAdapter {
         )
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![
+            crate::codex_config::get_codex_auth_path(),
+            crate::codex_config::get_codex_config_path(),
+        ]
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         let mut result = read_codex_live_settings()?;
         // `modelCatalog` is a cc-switch private field that lives only in
@@ -319,6 +326,10 @@ impl CommonSnippet for CodexAdapter {
 }
 
 impl McpProjector for CodexAdapter {
+    fn live_file(&self) -> PathBuf {
+        crate::codex_config::get_codex_config_path()
+    }
+
     fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
         crate::mcp::read_servers_from_codex()
     }

@@ -43,6 +43,10 @@ impl AppAdapter for OpenClawAdapter {
         )
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![crate::openclaw_config::get_openclaw_config_path()]
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         if !get_openclaw_config_path().exists() {
             return Err(AppError::localized(
@@ -212,6 +216,10 @@ impl EntryTakeover for OpenClawAdapter {
 
 /// MCP 服务器投影到 openclaw.json 的 `mcp.servers` 段（Issue #4834）
 impl McpProjector for OpenClawAdapter {
+    fn live_file(&self) -> PathBuf {
+        crate::openclaw_config::get_openclaw_config_path()
+    }
+
     fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
         crate::mcp::read_servers_from_openclaw()
     }

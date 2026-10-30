@@ -46,6 +46,13 @@ impl AppAdapter for GeminiAdapter {
         )
     }
 
+    fn live_files(&self) -> Vec<PathBuf> {
+        vec![
+            crate::gemini_config::get_gemini_env_path(),
+            crate::gemini_config::get_gemini_settings_path(),
+        ]
+    }
+
     fn read_live(&self) -> Result<Value, AppError> {
         read_env_and_settings(|| {
             AppError::localized(
@@ -188,6 +195,10 @@ impl CommonSnippet for GeminiAdapter {
 }
 
 impl McpProjector for GeminiAdapter {
+    fn live_file(&self) -> PathBuf {
+        crate::gemini_config::get_gemini_settings_path()
+    }
+
     fn read_servers(&self) -> Result<Vec<(String, Value)>, AppError> {
         crate::mcp::read_servers_from_gemini()
     }

@@ -85,22 +85,12 @@ impl Paths {
     /// Windows 上的 Claude Desktop 实际目录还会在 `%LOCALAPPDATA%` 下按前缀匹配，
     /// 这里只给出精确名称对应的默认值。
     pub fn default_app_dir(&self, app: &AppType) -> Option<PathBuf> {
-        let home = self.home();
-        match app {
-            AppType::Claude => Some(home.join(".claude")),
-            AppType::ClaudeDesktop => claude_desktop_default_dir(&home),
-            AppType::Codex => Some(home.join(".codex")),
-            AppType::Gemini => Some(home.join(".gemini")),
-            AppType::GrokBuild => Some(home.join(".grok")),
-            AppType::OpenCode => Some(home.join(".config").join("opencode")),
-            AppType::OpenClaw => Some(home.join(".openclaw")),
-            AppType::Hermes => Some(hermes_default_dir(&home)),
-        }
+        (app.descriptor().default_dir)(&self.home())
     }
 }
 
 #[cfg(target_os = "macos")]
-fn claude_desktop_default_dir(home: &Path) -> Option<PathBuf> {
+pub(crate) fn claude_desktop_default_dir(home: &Path) -> Option<PathBuf> {
     Some(
         home.join("Library")
             .join("Application Support")
@@ -109,7 +99,7 @@ fn claude_desktop_default_dir(home: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn claude_desktop_default_dir(home: &Path) -> Option<PathBuf> {
+pub(crate) fn claude_desktop_default_dir(home: &Path) -> Option<PathBuf> {
     let local_app_data = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join("AppData").join("Local"));
@@ -117,12 +107,12 @@ fn claude_desktop_default_dir(home: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
-fn claude_desktop_default_dir(_home: &Path) -> Option<PathBuf> {
+pub(crate) fn claude_desktop_default_dir(_home: &Path) -> Option<PathBuf> {
     None
 }
 
 #[cfg(target_os = "windows")]
-fn hermes_default_dir(home: &Path) -> PathBuf {
+pub(crate) fn hermes_default_dir(home: &Path) -> PathBuf {
     crate::hermes_config::windows_local_hermes_dir(
         std::env::var_os("LOCALAPPDATA").as_deref(),
         home,
@@ -130,7 +120,7 @@ fn hermes_default_dir(home: &Path) -> PathBuf {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn hermes_default_dir(home: &Path) -> PathBuf {
+pub(crate) fn hermes_default_dir(home: &Path) -> PathBuf {
     home.join(".hermes")
 }
 

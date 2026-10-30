@@ -122,22 +122,12 @@ impl ConfigService {
         match app_type {
             AppType::Codex => Self::sync_codex_live(config, &current_id, &provider)?,
             AppType::Claude => Self::sync_claude_live(config, &current_id, &provider)?,
-            AppType::ClaudeDesktop => {
-                // Claude Desktop 3P profiles are managed by claude_desktop_config.
-            }
             AppType::Gemini => Self::sync_gemini_live(config, &current_id, &provider)?,
-            AppType::GrokBuild => crate::grok_config::write_grok_provider_live(&provider)?,
-            AppType::OpenCode => {
-                // OpenCode uses additive mode, no live sync needed
-                // OpenCode providers are managed directly in the config file
-            }
-            AppType::OpenClaw => {
-                // OpenClaw uses additive mode, no live sync needed
-                // OpenClaw providers are managed directly in the config file
-            }
-            AppType::Hermes => {
-                // Hermes uses additive mode, no live sync needed
-            }
+            // Claude Desktop 3P profiles are managed by claude_desktop_config.
+            AppType::ClaudeDesktop => {}
+            // Additive apps manage providers directly in their config file, no live sync needed
+            _ if app_type.is_additive_mode() => {}
+            _ => crate::apps::adapter(app_type).write_provider(&provider)?,
         }
 
         Ok(())
