@@ -55,7 +55,7 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e`. Commands run (re
 | [CCS-031](CCS-031-p0-ci-release-concurrency.md) | `p0-ci-release-concurrency` | Partial | fork test of publish concurrency when a tag is re-pushed |
 | [CCS-032](CCS-032-p0-ci-prerelease-promotion.md) | `p0-ci-prerelease-promotion` | Partial | real promotion on a fork plus a `curl -sIL` check of the redirect |
 | [CCS-033](CCS-033-p0-ci-release-hygiene.md) | `p0-ci-release-hygiene` | Partial | real tag run: SHA256SUMS present and `gh attestation verify` passes |
-| [CCS-034](CCS-034-p0-dev-acceptance-process.md) | `p0-dev-acceptance-process` | Partial | make "Proxy fixture" a required check and create the `no-fixture-needed` label (GitHub settings); run actionlint |
+| [CCS-034](CCS-034-p0-dev-acceptance-process.md) | `p0-dev-acceptance-process` | Partial | make "Proxy fixture" a required check and create the `no-fixture-needed` label (GitHub settings) |
 | [CCS-035](CCS-035-p0-hotfix-deeplink-redaction.md) | `p0-hotfix-deeplink-redaction` | Done |  |
 | [CCS-036](CCS-036-p0-hotfix-terminal-tempfiles.md) | `p0-hotfix-terminal-tempfiles` | Partial | manual desktop terminal check; compile the macOS/Windows cfg branches in CI |
 | [CCS-037](CCS-037-p0-hotfix-sync-skip-session-log.md) | `p0-hotfix-sync-skip-session-log` | Done |  |
@@ -99,7 +99,7 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e`. Commands run (re
 - Follow-up [CCS-213](../P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md): Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix.
 - Follow-up [CCS-214](../P0-safety-net/CCS-214-p0-deps-cargo-update-deny-baseline.md): Refresh Cargo.lock and prune the cargo-deny advisory baseline.
 - Follow-up [CCS-215](../P0-safety-net/CCS-215-p0-deps-zip-upgrade.md): Upgrade the direct zip dependency to a release that fixes RUSTSEC-2026-0367/0368/0369.
-- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.
 - Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
 - Follow-up [CCS-223](../P0-safety-net/CCS-223-p0-terminal-tempfile-headless-e2e.md): Headless Linux end-to-end check of private terminal temp files, plus temp-dir selection tests.
 - Follow-up [CCS-224](../P0-safety-net/CCS-224-p0-usage-session-sync-responsiveness.md): Prove the UI stays responsive during a large session-log sync with a headless e2e spec.

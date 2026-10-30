@@ -67,6 +67,9 @@ separate commit.
   `pnpm format:check` clean; `bash -n scripts/generate-sha256sums.sh` ok.
 - YAML: `python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))"` passes
   for ci.yml and release.yml. actionlint and shellcheck are not installed here.
+- actionlint v1.7.12 with shellcheck 0.11.0 on PATH (CCS-217): `actionlint .github/workflows/*.yml` → exit 0 with the committed `.github/actionlint.yaml`
+  (after quoting `$GITHUB_OUTPUT` in the pnpm-store steps, SC2086);
+  `shellcheck scripts/generate-sha256sums.sh` → exit 0, no findings.
 
 **Remaining (Partial).**
 - "Release assets include SHA256SUMS; `gh attestation verify` passes on a
@@ -85,6 +88,6 @@ separate commit.
 ### Remaining after triage
 
 - Blocked: AC2: SHA256SUMS in the release assets and `gh attestation verify` passing. Needs a signed tag run on a public fork (OIDC provenance cannot be produced locally).
-- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.
 - Follow-up [CCS-218](../P0-safety-net/CCS-218-p0-ci-release-regression-tests.md): Add executable regression tests for the release gate, signing-key validation and SHA256SUMS.
 - Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.

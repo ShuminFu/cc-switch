@@ -15,7 +15,7 @@ Verified finding ci-release-not-gated-on-ci. release.yml runs on a v* tag push w
 Add `workflow_call:` to ci.yml. In release.yml, add a `ci` job (`uses: ./.github/workflows/ci.yml`) and set `needs: ci` on `release`. Add required reviewers on the `release` environment.
 
 ## Acceptance criteria / verification
-- [ ] `actionlint` passes
+- [x] `actionlint` passes
 - [ ] On a fork, a test tag on a commit with a failing test skips release and publish-release
 
 ## Dependencies
@@ -30,6 +30,7 @@ None.
 
 **Verification.**
 - `actionlint` v1.7.7 (built locally with `go install`): run as `actionlint -config-file <cfg> -shellcheck= .github/workflows/ci.yml .github/workflows/release.yml` → no findings, exit 0. `<cfg>` only lists `windows-11-arm` as a known runner label, because v1.7.7 predates that GitHub-hosted label. shellcheck is not installed, so the shell-script checks were off.
+- actionlint v1.7.12 with shellcheck 0.11.0 on PATH (CCS-217): `actionlint .github/workflows/*.yml` → exit 0 with the committed `.github/actionlint.yaml`; the only shellcheck findings (SC2086, unquoted `$GITHUB_OUTPUT` in the pnpm-store steps of ci.yml and release.yml) were fixed there.
 - `python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))"` parses both files. A structural check confirms that the ci triggers are `pull_request, push, workflow_call` and that the needs chain is `ci -> release -> publish-release -> assemble-latest-json`.
 
 **Remaining (cannot be done from this environment).**
@@ -40,5 +41,5 @@ None.
 
 - Blocked: Fork test: a v* tag on a red commit skips release, publish-release and assemble-latest-json. Needs a real Actions run on a fork (act does not emulate reusable workflows or needs-skip).
 - Blocked: Required reviewers on the `release` environment. Needs a maintainer to change GitHub environment settings.
-- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.
 - Follow-up [CCS-218](../P0-safety-net/CCS-218-p0-ci-release-regression-tests.md): Add executable regression tests for the release gate, signing-key validation and SHA256SUMS.
