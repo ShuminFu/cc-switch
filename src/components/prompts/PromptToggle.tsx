@@ -4,6 +4,8 @@ interface PromptToggleProps {
   enabled: boolean;
   onChange: (enabled: boolean) => void;
   disabled?: boolean;
+  /** Accessible name, e.g. the prompt name. */
+  label?: string;
 }
 
 /**
@@ -14,12 +16,14 @@ const PromptToggle: React.FC<PromptToggleProps> = ({
   enabled,
   onChange,
   disabled = false,
+  label,
 }) => {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={enabled}
+      aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!enabled)}
       className={`

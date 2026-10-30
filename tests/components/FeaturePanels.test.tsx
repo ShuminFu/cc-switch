@@ -1,5 +1,11 @@
 import type { ReactElement } from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FailoverQueueManager } from "@/components/proxy/FailoverQueueManager";
@@ -170,7 +176,7 @@ describe("PromptPanel", () => {
       get_prompts: prompts,
       get_current_prompt_file_content: "A",
     });
-    render(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
+    renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
 
     expect(await screen.findByText("Alpha")).toBeInTheDocument();
     expect(screen.getByText("Beta")).toBeInTheDocument();
@@ -182,25 +188,35 @@ describe("PromptPanel", () => {
 
   it("shows the empty state when there are no prompts", async () => {
     mockInvoke({ get_prompts: {}, get_current_prompt_file_content: null });
-    render(<PromptPanel open onOpenChange={vi.fn()} appId="codex" />);
+    renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="codex" />);
     expect(await screen.findByText("prompts.empty")).toBeInTheDocument();
   });
 
   it("enabling a prompt is exclusive and calls enable_prompt", async () => {
+    let current = prompts;
     const api = mockInvoke({
-      get_prompts: prompts,
-      get_current_prompt_file_content: "A",
-      enable_prompt: null,
+      // Stateful backend: the post-toggle refetch sees the new state.
+      get_prompts: () => current,
+      enable_prompt: ({ id }: Record<string, unknown>) => {
+        current = Object.fromEntries(
+          Object.entries(current).map(([key, p]) => [
+            key,
+            { ...p, enabled: key === id },
+          ]),
+        ) as typeof prompts;
+      },
     });
-    render(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
+    renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
 
     await screen.findByText("Beta");
     fireEvent.click(screen.getAllByRole("switch")[1]);
 
     // Optimistic: Beta on, Alpha off.
-    const [alpha, beta] = screen.getAllByRole("switch");
-    expect(beta).toHaveAttribute("aria-checked", "true");
-    expect(alpha).toHaveAttribute("aria-checked", "false");
+    await waitFor(() => {
+      const [alpha, beta] = screen.getAllByRole("switch");
+      expect(beta).toHaveAttribute("aria-checked", "true");
+      expect(alpha).toHaveAttribute("aria-checked", "false");
+    });
     await waitFor(() => expect(api.callsTo("enable_prompt")).toHaveLength(1));
     expect(api.callsTo("enable_prompt")[0].args).toEqual({
       app: "claude",
@@ -214,7 +230,7 @@ describe("PromptPanel", () => {
       get_current_prompt_file_content: "A",
       delete_prompt: null,
     });
-    render(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
+    renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
 
     await screen.findByText("Beta");
     fireEvent.click(screen.getAllByTitle("common.delete")[1]);
@@ -230,13 +246,95 @@ describe("PromptPanel", () => {
     });
   });
 
+  it("keeps in-progress edits when the prompt list refetches (FE-UI-51)", async () => {
+    let version = 0;
+    const api = mockInvoke({
+      get_prompts: () => {
+        version += 1;
+        return {
+          a: { ...prompts.a, description: `v${version}` },
+          b: prompts.b,
+        };
+      },
+      upsert_prompt: null,
+    });
+    const client = createTestQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <PromptPanel open onOpenChange={vi.fn()} appId="claude" />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Alpha");
+    fireEvent.click(screen.getAllByTitle("common.edit")[0]);
+    const editor = await screen.findByTestId("editor");
+    fireEvent.change(editor, { target: { value: "# A\n" } });
+
+    // A refetch (e.g. `profile-applied`) delivers new object identities.
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["prompts"] });
+    });
+    await waitFor(() => expect(version).toBeGreaterThan(1));
+    expect(screen.getByTestId("editor")).toHaveValue("# A\n");
+
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(api.callsTo("upsert_prompt")).toHaveLength(1));
+    const saved = api.callsTo("upsert_prompt")[0].args.prompt as {
+      content: string;
+    };
+    // Content is stored untrimmed.
+    expect(saved.content).toBe("# A\n");
+  });
+
+  it("rolls back a failed toggle without an unhandled rejection and disables toggles while pending (FE-UI-52)", async () => {
+    let rejectEnable: (error: Error) => void = () => undefined;
+    mockInvoke({
+      get_prompts: prompts,
+      enable_prompt: () =>
+        new Promise((_, reject) => {
+          rejectEnable = reject;
+        }),
+    });
+    const unhandled = vi.fn();
+    window.addEventListener("unhandledrejection", unhandled);
+    renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
+
+    await screen.findByText("Beta");
+    fireEvent.click(screen.getAllByRole("switch")[1]);
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("switch")[1]).toHaveAttribute(
+        "aria-checked",
+        "true",
+      ),
+    );
+    for (const toggle of screen.getAllByRole("switch")) {
+      expect(toggle).toBeDisabled();
+    }
+
+    await act(async () => {
+      rejectEnable(new Error("nope"));
+    });
+
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith("prompts.enableFailed"),
+    );
+    const [alpha, beta] = screen.getAllByRole("switch");
+    expect(alpha).toHaveAttribute("aria-checked", "true");
+    expect(beta).toHaveAttribute("aria-checked", "false");
+    // The list never fell back to the first-load placeholder.
+    expect(screen.queryByText("prompts.loading")).not.toBeInTheDocument();
+    window.removeEventListener("unhandledrejection", unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+
   it("shows a load error toast when prompts cannot be read", async () => {
     mockInvoke({
       get_prompts: () => {
         throw new Error("boom");
       },
     });
-    render(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
+    renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
     await waitFor(() =>
       expect(toastMock.error).toHaveBeenCalledWith("prompts.loadFailed"),
     );

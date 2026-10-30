@@ -214,12 +214,11 @@ export function DeepLinkImportDialog() {
             closeButton: true,
           });
         } else if (result.type === "prompt") {
-          // Prompts don't use React Query, trigger a custom event for refresh
-          window.dispatchEvent(
-            new CustomEvent("prompt-imported", {
-              detail: { app: request.app },
-            }),
-          );
+          await queryClient.invalidateQueries({
+            queryKey: request.app
+              ? queryKeys.prompts.byApp(request.app)
+              : queryKeys.prompts.all,
+          });
           toast.success(t("deeplink.promptImportSuccess"), {
             description: t("deeplink.promptImportSuccessDescription", {
               name: request.name,

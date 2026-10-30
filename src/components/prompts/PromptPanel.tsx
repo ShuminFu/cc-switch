@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText } from "lucide-react";
-import { type AppId } from "@/lib/api";
+import { Edit3, FileText, Trash2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { type AppId, type Prompt } from "@/lib/api";
 import { usePromptActions } from "@/hooks/usePromptActions";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
-import PromptListItem from "./PromptListItem";
+import { queryKeys } from "@/lib/query/keys";
+import { ManagedItemsPanel } from "@/components/common/ManagedItemsPanel";
+import { useConfirm } from "@/components/common/useConfirm";
 import PromptFormPanel from "./PromptFormPanel";
-import { ConfirmDialog } from "../ConfirmDialog";
+import PromptToggle from "./PromptToggle";
 
 interface PromptPanelProps {
   open: boolean;
@@ -18,50 +21,30 @@ export interface PromptPanelHandle {
   openAdd: () => void;
 }
 
+type PromptEntry = [string, Prompt];
+const getEntryId = ([id]: PromptEntry) => id;
+
 const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
-  ({ open, appId }, ref) => {
+  ({ appId }, ref) => {
     const { t } = useTranslation();
+    const queryClient = useQueryClient();
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [confirmDialog, setConfirmDialog] = useState<{
-      isOpen: boolean;
-      titleKey: string;
-      messageKey: string;
-      messageParams?: Record<string, unknown>;
-      onConfirm: () => void;
-    } | null>(null);
+    const confirm = useConfirm();
 
     const {
       prompts,
       loading,
-      reload,
       savePrompt,
       deletePrompt,
       toggleEnabled,
+      isToggling,
     } = usePromptActions(appId);
 
-    useEffect(() => {
-      if (open) reload();
-    }, [open, reload]);
-
-    // Listen for prompt import events from deep link
-    useEffect(() => {
-      const handlePromptImported = (event: Event) => {
-        const customEvent = event as CustomEvent;
-        // Reload if the import is for this app
-        if (customEvent.detail?.app === appId) {
-          reload();
-        }
-      };
-
-      window.addEventListener("prompt-imported", handlePromptImported);
-      return () => {
-        window.removeEventListener("prompt-imported", handlePromptImported);
-      };
-    }, [appId, reload]);
-
-    // 应用项目 Profile 会切换激活的 prompt（prompts 非 react-query，需主动 reload）
-    useTauriEvent("profile-applied", reload);
+    // Applying a project profile switches the enabled prompt.
+    useTauriEvent("profile-applied", () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.prompts.all });
+    });
 
     const handleAdd = () => {
       setEditingId(null);
@@ -79,72 +62,82 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
 
     const handleDelete = (id: string) => {
       const prompt = prompts[id];
-      setConfirmDialog({
-        isOpen: true,
-        titleKey: "prompts.confirm.deleteTitle",
-        messageKey: "prompts.confirm.deleteMessage",
-        messageParams: { name: prompt?.name },
-        onConfirm: async () => {
-          try {
-            await deletePrompt(id);
-            setConfirmDialog(null);
-          } catch (e) {
-            // Error handled by hook
-          }
-        },
+      confirm.confirm({
+        title: t("prompts.confirm.deleteTitle"),
+        message: t("prompts.confirm.deleteMessage", { name: prompt?.name }),
+        // The hook already toasts on failure; a rejection keeps the dialog open.
+        onConfirm: () => deletePrompt(id),
       });
     };
 
     const promptEntries = useMemo(() => Object.entries(prompts), [prompts]);
-
-    const enabledPrompt = promptEntries.find(([_, p]) => p.enabled);
+    const enabledPrompt = promptEntries.find(([, p]) => p.enabled);
 
     return (
-      <div className="flex flex-col flex-1 min-h-0 px-6">
-        <div className="flex-shrink-0 py-4 glass rounded-xl border border-white/10 mb-4 px-6">
-          <div className="text-sm text-muted-foreground">
+      <ManagedItemsPanel
+        items={promptEntries}
+        isLoading={loading}
+        getId={getEntryId}
+        totalLabel={t("prompts.count", { count: promptEntries.length })}
+        summary={
+          <>
             {t("prompts.count", { count: promptEntries.length })} ·{" "}
             {enabledPrompt
               ? t("prompts.enabledName", { name: enabledPrompt[1].name })
               : t("prompts.noneEnabled")}
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto pb-16">
-          {loading ? (
-            <div className="text-center py-12 text-muted-foreground">
-              {t("prompts.loading")}
-            </div>
-          ) : promptEntries.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
-                <FileText size={24} className="text-muted-foreground" />
-              </div>
-              <h3 className="text-lg font-medium text-foreground mb-2">
-                {t("prompts.empty")}
-              </h3>
-              <p className="text-muted-foreground text-sm">
-                {t("prompts.emptyDescription")}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {promptEntries.map(([id, prompt]) => (
-                <PromptListItem
-                  key={id}
-                  id={id}
-                  prompt={prompt}
-                  onToggle={toggleEnabled}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
+          </>
+        }
+        renderLeading={([id, prompt]) => (
+          <PromptToggle
+            enabled={prompt.enabled === true}
+            disabled={isToggling}
+            label={prompt.name}
+            onChange={(next) => toggleEnabled(id, next)}
+          />
+        )}
+        renderPrimary={([, prompt]) => (
+          <span className="block font-medium text-sm text-foreground truncate">
+            {prompt.name}
+          </span>
+        )}
+        renderSecondary={([, prompt]) =>
+          prompt.description ? (
+            <p
+              className="text-xs text-muted-foreground truncate"
+              title={prompt.description}
+            >
+              {prompt.description}
+            </p>
+          ) : null
+        }
+        getActions={([id]) => [
+          {
+            key: "edit",
+            label: t("common.edit"),
+            icon: <Edit3 size={14} />,
+            onClick: () => handleEdit(id),
+          },
+          {
+            key: "delete",
+            label: t("common.delete"),
+            icon: <Trash2 size={14} />,
+            tone: "danger",
+            onClick: () => handleDelete(id),
+          },
+        ]}
+        loadingLabel={t("prompts.loading")}
+        empty={{
+          icon: <FileText size={24} className="text-muted-foreground" />,
+          title: t("prompts.empty"),
+          description: t("prompts.emptyDescription"),
+        }}
+        confirm={confirm}
+      >
         {isFormOpen && (
           <PromptFormPanel
+            // Remount per prompt so the form hydrates once per edit session
+            // and list refetches never overwrite in-progress edits (FE-UI-51).
+            key={editingId ?? "new"}
             appId={appId}
             editingId={editingId || undefined}
             initialData={editingId ? prompts[editingId] : undefined}
@@ -152,17 +145,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
             onClose={() => setIsFormOpen(false)}
           />
         )}
-
-        {confirmDialog && (
-          <ConfirmDialog
-            isOpen={confirmDialog.isOpen}
-            title={t(confirmDialog.titleKey)}
-            message={t(confirmDialog.messageKey, confirmDialog.messageParams)}
-            onConfirm={confirmDialog.onConfirm}
-            onCancel={() => setConfirmDialog(null)}
-          />
-        )}
-      </div>
+      </ManagedItemsPanel>
     );
   },
 );
