@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import type { ProviderFormValues } from "@/components/providers/forms/ProviderForm";
@@ -25,25 +27,42 @@ vi.mock("@/components/ui/dialog", () => ({
 }));
 
 let mockFormValues: ProviderFormValues;
+const formMountCount = vi.hoisted(() => ({ value: 0 }));
 
-vi.mock("@/components/providers/forms/ProviderForm", () => ({
-  ProviderForm: ({
-    onSubmit,
-  }: {
-    onSubmit: (values: ProviderFormValues) => void;
-  }) => (
+vi.mock("@/components/universal", () => ({
+  UniversalProviderPanel: () => <div data-testid="universal-panel" />,
+}));
+
+function MockProviderForm({
+  onSubmit,
+}: {
+  onSubmit: (values: ProviderFormValues) => void;
+}) {
+  useEffect(() => {
+    formMountCount.value += 1;
+  }, []);
+  return (
     <form
       id="provider-form"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit(mockFormValues);
       }}
-    />
+    >
+      <input aria-label="mock-provider-name" defaultValue="" />
+    </form>
+  );
+}
+
+vi.mock("@/components/providers/forms/ProviderForm", () => ({
+  ProviderForm: (props: { onSubmit: (values: ProviderFormValues) => void }) => (
+    <MockProviderForm {...props} />
   ),
 }));
 
 describe("AddProviderDialog", () => {
   beforeEach(() => {
+    formMountCount.value = 0;
     mockFormValues = {
       name: "Test Provider",
       websiteUrl: "https://provider.example.com",
@@ -165,5 +184,34 @@ context_window = 500000
     const submitted = handleSubmit.mock.calls[0][0];
     expect(submitted.icon).toBeUndefined();
     expect(submitted.iconColor).toBeUndefined();
+  });
+
+  it("keeps the app-specific form mounted across a Universal tab switch (FE-PROV-04)", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AddProviderDialog
+        open
+        onOpenChange={vi.fn()}
+        appId="claude"
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const nameInput = screen.getByLabelText("mock-provider-name");
+    await user.type(nameInput, "My provider");
+    expect(formMountCount.value).toBe(1);
+
+    await user.click(
+      screen.getByRole("tab", { name: /provider.tabUniversal/ }),
+    );
+    expect(await screen.findByTestId("universal-panel")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /provider.tabProvider/ }));
+
+    expect(screen.getByLabelText("mock-provider-name")).toHaveValue(
+      "My provider",
+    );
+    expect(formMountCount.value).toBe(1);
   });
 });
