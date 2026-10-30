@@ -310,6 +310,40 @@ fn session_import_killed_between_files_does_not_double_count() -> Result<(), App
     Ok(())
 }
 
+#[test]
+fn ingest_file_does_not_advance_cursor_after_sqlite_rolled_back_the_transaction(
+) -> Result<(), AppError> {
+    use crate::services::session_usage::{ingest_file, IngestBatch};
+
+    let db = Database::memory()?;
+    // 模拟 SQLITE_FULL / IOERR 之类让 SQLite 自动回滚整个事务的错误
+    let result = ingest_file(&db, "/x/a.jsonl", |conn| {
+        insert_session_row(
+            conn,
+            &session_row("codex_session:t:1", UsageSource::CodexSession, 1_000),
+        )?;
+        conn.execute_batch("ROLLBACK")?;
+        Ok(IngestBatch {
+            value: (),
+            wrote_rows: true,
+            cursor: Some(session_cursor::SessionCursor {
+                last_modified: 9,
+                last_offset: 3,
+            }),
+        })
+    });
+    assert!(result.is_err());
+
+    let conn = db.conn.lock().expect("lock conn");
+    assert_eq!(
+        session_cursor::get(&conn, "/x/a.jsonl")?,
+        session_cursor::SessionCursor::default(),
+        "游标不能在自动提交模式下单独落库"
+    );
+    assert_eq!(UsageQuery::new().count(&conn)?, 0);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // 守卫：database/ 之外不写本应用数据库的 SQL
 // ---------------------------------------------------------------------------

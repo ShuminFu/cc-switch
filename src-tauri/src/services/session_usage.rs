@@ -392,6 +392,13 @@ pub(crate) fn ingest_file<T>(
         .transaction()
         .map_err(|e| AppError::Database(format!("开启导入事务失败: {e}")))?;
     let batch = write(&tx)?;
+    // 某些错误（磁盘满、IO 错误等）会让 SQLite 自动回滚整个事务；此时再写游标会在
+    // 自动提交模式下单独落库，出现「行已回滚、游标已推进」而永久漏导入。
+    if tx.is_autocommit() {
+        return Err(AppError::Database(
+            "导入事务已被 SQLite 回滚，本文件稍后重试".to_string(),
+        ));
+    }
     if let Some(cursor) = batch.cursor {
         session_cursor::put(&tx, key, cursor)?;
     }

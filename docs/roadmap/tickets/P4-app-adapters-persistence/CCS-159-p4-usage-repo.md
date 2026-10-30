@@ -76,3 +76,19 @@ p4-migration-framework, p1-session-sync-final-entry
 - `cargo fmt --check`: clean. `cargo clippy --all-targets -- -D warnings`: clean.
 - `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast`: lib 2397 passed,
   0 failed, 2 ignored. All integration test binaries passed.
+
+**Review.** Checked every acceptance criterion against cb171bc. The moved SQL
+(session inserts, upsert and upgrade, proxy logger, pricing, cursor, request-log
+filters) matches the old statements. The no-SQL guard reports nothing that a manual
+grep does not explain: every remaining hit outside `database/` is in a comment, a
+test module, or an allowlisted reader of another app's database. One gap was
+fixed: errors such as a full disk or an IO error make SQLite roll back the whole
+transaction on its own. `ingest_file` used to log and skip the failed row, then
+write the cursor anyway. With no transaction open, that cursor write committed by
+itself, so the file's rows were lost and its cursor still moved forward.
+`ingest_file` now checks `is_autocommit()` before the cursor write and returns an
+error instead, so the file is retried on the next sync. New test:
+`ingest_file_does_not_advance_cursor_after_sqlite_rolled_back_the_transaction`.
+Re-verified: `repo::` 12 passed, clippy `--all-targets -D warnings` clean,
+fmt clean, full `cargo test --no-fail-fast`: lib 2398 passed, 0 failed, and
+every integration binary passed.
