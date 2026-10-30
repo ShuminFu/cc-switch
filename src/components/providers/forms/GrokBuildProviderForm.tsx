@@ -43,7 +43,7 @@ import { getPresetEntries } from "@/config/presetRegistry";
 import {
   buildGrokBuildConfig,
   parseGrokBuildConfig,
-  updateGrokBuildConfig,
+  updateGrokBuildConfigPreservingFormat,
   validateGrokBuildConfig,
 } from "@/utils/grokBuildConfig";
 import { resolveProviderIcon } from "@/utils/providerIcon";
@@ -216,7 +216,9 @@ export function GrokBuildProviderForm({
       contextWindow: Number.parseInt(contextWindow, 10),
       ...overrides,
     };
-    setRawConfig((current) => updateGrokBuildConfig(current, next));
+    setRawConfig((current) =>
+      updateGrokBuildConfigPreservingFormat(current, next),
+    );
   };
 
   const handlePresetChange = (presetId: string) => {
@@ -313,7 +315,7 @@ export function GrokBuildProviderForm({
       return;
     }
 
-    const finalConfig = updateGrokBuildConfig(rawConfig, {
+    const finalConfig = updateGrokBuildConfigPreservingFormat(rawConfig, {
       model: profile,
       upstreamModel,
       baseUrl,
@@ -387,7 +389,11 @@ export function GrokBuildProviderForm({
     await onSubmit(payload);
   };
 
-  const rawConfigError = validateGrokBuildConfig(rawConfig);
+  // Validate once per config change, not on every render (FE-PROV-31).
+  const rawConfigError = useMemo(
+    () => validateGrokBuildConfig(rawConfig),
+    [rawConfig],
+  );
 
   return (
     <Form {...form}>

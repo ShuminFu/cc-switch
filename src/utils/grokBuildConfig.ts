@@ -130,6 +130,133 @@ export function updateGrokBuildConfig(
   return `${stringifyToml(config).trim()}\n`;
 }
 
+const SELECTED_MODEL_FIELDS = [
+  "model",
+  "base_url",
+  "name",
+  "api_backend",
+  "context_window",
+  "api_key",
+  "env_key",
+] as const;
+
+const tomlScalar = (value: unknown): string =>
+  typeof value === "number" ? String(value) : JSON.stringify(String(value));
+
+/** Structural equality that ignores object key order. */
+const deepEqual = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => deepEqual(item, b[index]))
+    );
+  }
+  const ra = asRecord(a);
+  const rb = asRecord(b);
+  if (!ra || !rb) return false;
+  const keys = Object.keys(ra);
+  return (
+    keys.length === Object.keys(rb).length &&
+    keys.every((key) => key in rb && deepEqual(ra[key], rb[key]))
+  );
+};
+
+const sectionHeaderName = (line: string): string | null => {
+  const match = line.trim().match(/^\[\s*([^\[\]]+?)\s*\](?:\s*#.*)?$/);
+  if (!match) return null;
+  // Quote-aware split: [model."grok-4.5"] has a dot inside the quoted key.
+  const parts: string[] = [];
+  const segment = /\s*(?:"([^"]*)"|'([^']*)'|([^.\s"']+))\s*(\.|$)/y;
+  let rest = match[1];
+  while (rest.length > 0) {
+    segment.lastIndex = 0;
+    const part = segment.exec(rest);
+    if (!part) return null;
+    parts.push(part[1] ?? part[2] ?? part[3]);
+    rest = rest.slice(part[0].length);
+    if (part[4] === "") break;
+  }
+  return parts.join(".");
+};
+
+/**
+ * Like {@link updateGrokBuildConfig}, but patches the existing lines of the
+ * selected `[model.<profile>]` table in place so comments, ordering and
+ * unrelated formatting in a hand-edited config.toml survive structured
+ * field edits (FE-PROV-31). Falls back to the full rewrite when the profile
+ * changes or the patched document would not match the full rewrite.
+ */
+export function updateGrokBuildConfigPreservingFormat(
+  configToml: string | undefined,
+  values: GrokBuildConfigValues,
+): string {
+  const rewritten = updateGrokBuildConfig(configToml, values);
+  if (!configToml?.trim()) return rewritten;
+
+  let current: Record<string, unknown> | undefined;
+  let target: Record<string, unknown> | undefined;
+  try {
+    current = asRecord(parseToml(configToml));
+    target = asRecord(parseToml(rewritten));
+  } catch {
+    return rewritten;
+  }
+  const profile = asString(asRecord(target?.models)?.default);
+  if (asString(asRecord(current?.models)?.default) !== profile) {
+    return rewritten;
+  }
+  const wanted = asRecord(asRecord(target?.model)?.[profile]);
+  if (!wanted) return rewritten;
+
+  const lines = configToml.replace(/\r\n/g, "\n").split("\n");
+  const start = lines.findIndex(
+    (line) => sectionHeaderName(line) === `model.${profile}`,
+  );
+  if (start === -1) return rewritten;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (sectionHeaderName(lines[i]) !== null) {
+      end = i;
+      break;
+    }
+  }
+
+  const body = lines.slice(start + 1, end);
+  for (const field of SELECTED_MODEL_FIELDS) {
+    const pattern = new RegExp(`^(\\s*)${field}\\s*=`);
+    const index = body.findIndex((line) => pattern.test(line));
+    const value = wanted[field];
+    if (value === undefined) {
+      if (index !== -1) body.splice(index, 1);
+      continue;
+    }
+    const assignment = `${field} = ${tomlScalar(value)}`;
+    if (index !== -1) {
+      const indent = body[index].match(pattern)?.[1] ?? "";
+      body[index] = `${indent}${assignment}`;
+    } else {
+      // Insert after the last non-blank line of the table.
+      let insertAt = body.length;
+      while (insertAt > 0 && body[insertAt - 1].trim() === "") insertAt -= 1;
+      body.splice(insertAt, 0, assignment);
+    }
+  }
+
+  const patched = [
+    ...lines.slice(0, start + 1),
+    ...body,
+    ...lines.slice(end),
+  ].join("\n");
+  try {
+    return deepEqual(parseToml(patched), target) ? patched : rewritten;
+  } catch {
+    return rewritten;
+  }
+}
+
 export function validateGrokBuildConfig(configToml: string): string | null {
   if (!configToml.trim()) return "config.toml must not be empty";
   try {
