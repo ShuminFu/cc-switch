@@ -2950,3 +2950,134 @@ fn recover_from_crash_without_backup_cleans_placeholder_instead_of_writing_it_ba
         "recovery must drop the local proxy base URL"
     );
 }
+
+/// Replace the Claude live settings file with a directory so both reading and
+/// writing it fail (file modes are not enough: tests may run as root).
+fn make_claude_live_unwritable() {
+    let settings_path = get_claude_settings_path();
+    if settings_path.is_file() {
+        std::fs::remove_file(&settings_path).expect("remove claude settings file");
+    }
+    std::fs::create_dir_all(&settings_path).expect("turn claude settings path into directory");
+}
+
+fn restore_claude_live_file(content: &serde_json::Value) {
+    let settings_path = get_claude_settings_path();
+    if settings_path.is_dir() {
+        std::fs::remove_dir_all(&settings_path).expect("remove claude settings directory");
+    }
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent).expect("create claude settings dir");
+    }
+    std::fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(content).expect("serialize live"),
+    )
+    .expect("restore claude live file");
+}
+
+/// SVC-01: a failed live write during switch(A -> B) must leave the "current"
+/// pointers on A, so a later switch(B -> C) cannot backfill A's live
+/// credentials into B's record.
+#[test]
+fn switch_claude_failed_live_write_keeps_pointers_and_does_not_poison_backfill() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let _home = ensure_test_home();
+
+    let settings_a = json!({ "env": { "ANTHROPIC_API_KEY": "key-a" } });
+    let settings_b = json!({ "env": { "ANTHROPIC_API_KEY": "key-b" } });
+    let settings_c = json!({ "env": { "ANTHROPIC_API_KEY": "key-c" } });
+
+    let mut config = MultiAppConfig::default();
+    {
+        let manager = config
+            .get_manager_mut(&AppType::Claude)
+            .expect("claude manager");
+        manager.current = "a".to_string();
+        for (id, settings) in [("a", &settings_a), ("b", &settings_b), ("c", &settings_c)] {
+            manager.providers.insert(
+                id.to_string(),
+                Provider::with_id(id.to_string(), id.to_uppercase(), settings.clone(), None),
+            );
+        }
+    }
+    let state = create_test_state_with_config(&config).expect("create test state");
+    restore_claude_live_file(&settings_a);
+
+    make_claude_live_unwritable();
+    ProviderService::switch(&state, AppType::Claude, "b")
+        .expect_err("switch must fail when the live file cannot be written");
+
+    assert_eq!(
+        state
+            .db
+            .get_current_provider(AppType::Claude.as_str())
+            .expect("read db current")
+            .as_deref(),
+        Some("a"),
+        "DB current pointer must stay on the provider that is still in live"
+    );
+    assert_eq!(
+        ProviderService::current(&state, AppType::Claude).expect("read effective current"),
+        "a",
+        "effective (local settings) current pointer must stay on a"
+    );
+
+    // Live recovers (still holding A's config), then the user switches to C.
+    restore_claude_live_file(&settings_a);
+    ProviderService::switch(&state, AppType::Claude, "c").expect("switch to c");
+
+    let providers = state
+        .db
+        .get_all_providers(AppType::Claude.as_str())
+        .expect("get providers");
+    assert_eq!(
+        providers.get("b").expect("provider b").settings_config,
+        settings_b,
+        "provider b must not receive provider a's live credentials"
+    );
+    assert_eq!(
+        providers.get("a").expect("provider a").settings_config,
+        settings_a,
+        "the backfill must target a, the provider actually in live"
+    );
+}
+
+/// SVC-01 (add path): when the first provider of an app cannot be written to
+/// live, the row is kept but must not become current.
+#[test]
+fn add_first_claude_provider_with_failing_live_write_is_not_current() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let _home = ensure_test_home();
+
+    let state = create_test_state().expect("create test state");
+    make_claude_live_unwritable();
+
+    let provider = Provider::with_id(
+        "first".to_string(),
+        "First".to_string(),
+        json!({ "env": { "ANTHROPIC_API_KEY": "first-key" } }),
+        None,
+    );
+    ProviderService::add(&state, AppType::Claude, provider, true)
+        .expect_err("add must report the live write failure");
+
+    let providers = state
+        .db
+        .get_all_providers(AppType::Claude.as_str())
+        .expect("get providers");
+    assert!(
+        providers.contains_key("first"),
+        "the just-entered provider row should be kept"
+    );
+    assert_eq!(
+        state
+            .db
+            .get_current_provider(AppType::Claude.as_str())
+            .expect("read db current"),
+        None,
+        "a provider that never reached live must not be marked current"
+    );
+}
