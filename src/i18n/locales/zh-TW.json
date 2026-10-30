@@ -1611,7 +1611,20 @@
       "resync": "同步",
       "imported": "從工作階段日誌匯入了 {{count}} 筆紀錄",
       "upToDate": "工作階段日誌已是最新",
-      "failed": "工作階段同步失敗"
+      "failed": "工作階段同步失敗",
+      "rescan": "重新掃描",
+      "rescanTitle": "從頭重新掃描全部工作階段日誌，修復被低估的紀錄",
+      "rescanProgress": "重新掃描中：{{source}} 已完成（{{completed}}/{{total}}）",
+      "rescanDone": "重新掃描完成：匯入或修復了 {{count}} 筆紀錄",
+      "rescanFailed": "工作階段日誌重新掃描失敗"
+    },
+    "dataQuality": {
+      "title": "資料品質",
+      "duplicates": "與代理日誌重複（已排除）：{{count}}",
+      "unpriced": "未計價紀錄：{{count}}",
+      "missingSession": "缺少工作階段 ID 的紀錄：{{count}}",
+      "zeroOutput": "輸出為 0 的紀錄：{{count}}",
+      "range": "時間範圍：{{from}} – {{to}}"
     },
     "totalRecords": "共 {{total}} 筆紀錄",
     "goToPage": "跳轉",

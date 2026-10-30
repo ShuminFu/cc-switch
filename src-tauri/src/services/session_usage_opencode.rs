@@ -20,8 +20,8 @@ use crate::pricing::resolver::find_model_pricing;
 use crate::proxy::usage::calculator::CostCalculator;
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    get_sync_state, ingest_file, metadata_modified_nanos, update_sync_state, IngestBatch,
-    SessionSyncResult,
+    ingest_file, metadata_modified_nanos, update_sync_state, IngestBatch, SessionSyncResult,
+    SyncMode,
 };
 use crate::services::usage_stats::{should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
@@ -47,6 +47,13 @@ struct OpenCodeMessageQueryResult {
 
 /// 同步 OpenCode 使用数据
 pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
+    sync_opencode_usage_with_mode(db, SyncMode::Incremental)
+}
+
+pub(crate) fn sync_opencode_usage_with_mode(
+    db: &Database,
+    mode: SyncMode,
+) -> Result<SessionSyncResult, AppError> {
     let db_path = get_opencode_db_path();
 
     if !db_path.exists() {
@@ -73,7 +80,8 @@ pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError>
         file_modified = file_modified.max(metadata_modified_nanos(&wal_meta));
     }
 
-    let (last_modified, _last_offset) = get_sync_state(db, &db_path_str)?;
+    // 重扫模式视为从未同步
+    let (last_modified, _last_offset) = mode.sync_state(db, &db_path_str)?;
 
     // 文件未变化则跳过
     if file_modified <= last_modified {
@@ -104,7 +112,7 @@ pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError>
     for (session_id, time_updated) in &sessions {
         // 检查会话是否需要重新同步
         let sync_key = format!("{db_path_str}:{session_id}");
-        let (sess_last_modified, _) = get_sync_state(db, &sync_key)?;
+        let (sess_last_modified, _) = mode.sync_state(db, &sync_key)?;
         if *time_updated <= sess_last_modified {
             continue; // 会话未更新，跳过
         }
@@ -130,7 +138,7 @@ pub fn sync_opencode_usage(db: &Database) -> Result<SessionSyncResult, AppError>
             for (message_id, msg_data) in &query_result.messages {
                 let request_id = format!("opencode_session:{session_id}:{message_id}");
 
-                match insert_opencode_message(conn, &request_id, msg_data, session_id) {
+                match insert_opencode_message(conn, &request_id, msg_data, session_id, mode) {
                     Ok(true) => imported += 1,
                     Ok(false) => skipped += 1,
                     Err(e) => {
@@ -331,6 +339,7 @@ fn insert_opencode_message(
     request_id: &str,
     msg: &OpenCodeMessageData,
     session_id: &str,
+    mode: SyncMode,
 ) -> Result<bool, AppError> {
     let created_at = if msg.timestamp_ms > 0 {
         msg.timestamp_ms / 1000
@@ -344,19 +353,6 @@ fn insert_opencode_message(
     // OpenCode 使用 Anthropic 风格：input 是新鲜输入，cache 单独计
     // output 包含 reasoning tokens（按输出计费）
     let output_with_reasoning = msg.output_tokens + msg.reasoning_tokens;
-
-    let dedup_key = DedupKey {
-        app_type: "opencode",
-        model: &msg.model_id,
-        input_tokens: msg.input_tokens,
-        output_tokens: output_with_reasoning,
-        cache_read_tokens: msg.cache_read_tokens,
-        cache_creation_tokens: msg.cache_write_tokens,
-        created_at,
-    };
-    if should_skip_session_insert(conn, request_id, &dedup_key)? {
-        return Ok(false);
-    }
 
     // 如果 opencode 已经提供了费用，直接使用；否则从模型定价计算
     let costs = if msg.cost > 0.0 {
@@ -388,22 +384,37 @@ fn insert_opencode_message(
         }
     };
 
-    usage_repo::insert_session_row(
-        conn,
-        &SessionUsageRow {
-            request_id,
-            source: UsageSource::OpenCodeSession,
-            model: &msg.model_id,
-            pricing_model: &msg.model_id,
-            session_id: Some(session_id),
-            input_tokens: msg.input_tokens,
-            output_tokens: output_with_reasoning,
-            cache_read_tokens: msg.cache_read_tokens,
-            cache_creation_tokens: msg.cache_write_tokens,
-            costs,
-            created_at,
-        },
-    )
+    let row = SessionUsageRow {
+        request_id,
+        source: UsageSource::OpenCodeSession,
+        model: &msg.model_id,
+        pricing_model: &msg.model_id,
+        session_id: Some(session_id),
+        input_tokens: msg.input_tokens,
+        output_tokens: output_with_reasoning,
+        cache_read_tokens: msg.cache_read_tokens,
+        cache_creation_tokens: msg.cache_write_tokens,
+        costs,
+        created_at,
+    };
+    if let Some(wrote) = mode.rescan_write(conn, &row)? {
+        return Ok(wrote);
+    }
+
+    let dedup_key = DedupKey {
+        app_type: "opencode",
+        model: &msg.model_id,
+        input_tokens: msg.input_tokens,
+        output_tokens: output_with_reasoning,
+        cache_read_tokens: msg.cache_read_tokens,
+        cache_creation_tokens: msg.cache_write_tokens,
+        created_at,
+    };
+    if should_skip_session_insert(conn, request_id, &dedup_key)? {
+        return Ok(false);
+    }
+
+    usage_repo::insert_session_row(conn, &row)
 }
 
 #[cfg(test)]
@@ -564,7 +575,8 @@ mod tests {
             &db.conn.lock().unwrap(),
             "opencode-sem",
             &msg,
-            "s1"
+            "s1",
+            SyncMode::Incremental
         )?);
 
         let conn = lock_conn!(db.conn);

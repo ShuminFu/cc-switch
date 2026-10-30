@@ -1611,7 +1611,20 @@
       "resync": "同步",
       "imported": "从会话日志导入了 {{count}} 条记录",
       "upToDate": "会话日志已是最新",
-      "failed": "会话同步失败"
+      "failed": "会话同步失败",
+      "rescan": "重扫",
+      "rescanTitle": "从头重新扫描全部会话日志，修复被低估的记录",
+      "rescanProgress": "重扫中：{{source}} 已完成（{{completed}}/{{total}}）",
+      "rescanDone": "重扫完成：导入或修复了 {{count}} 条记录",
+      "rescanFailed": "会话日志重扫失败"
+    },
+    "dataQuality": {
+      "title": "数据质量",
+      "duplicates": "与代理日志重复（已排除）：{{count}}",
+      "unpriced": "未计价记录：{{count}}",
+      "missingSession": "缺少会话 ID 的记录：{{count}}",
+      "zeroOutput": "输出为 0 的记录：{{count}}",
+      "range": "时间范围：{{from}} – {{to}}"
     },
     "totalRecords": "共 {{total}} 条记录",
     "goToPage": "跳转",

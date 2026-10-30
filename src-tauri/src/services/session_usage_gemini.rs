@@ -22,7 +22,7 @@ use crate::pricing::resolver::find_model_pricing;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    get_sync_state, ingest_file, metadata_modified_nanos, IngestBatch, SessionSyncResult,
+    ingest_file, metadata_modified_nanos, IngestBatch, SessionSyncResult, SyncMode,
 };
 use crate::services::usage_stats::{has_matching_proxy_usage_log, DedupKey};
 use rust_decimal::Decimal;
@@ -41,6 +41,13 @@ struct GeminiTokens {
 
 /// 同步 Gemini 使用数据（从 JSON 会话日志）
 pub fn sync_gemini_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
+    sync_gemini_usage_with_mode(db, SyncMode::Incremental)
+}
+
+pub(crate) fn sync_gemini_usage_with_mode(
+    db: &Database,
+    mode: SyncMode,
+) -> Result<SessionSyncResult, AppError> {
     let gemini_dir = get_gemini_dir();
 
     let files = collect_gemini_session_files(&gemini_dir);
@@ -57,7 +64,7 @@ pub fn sync_gemini_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
     }
 
     for file_path in &files {
-        match sync_single_gemini_file(db, file_path) {
+        match sync_single_gemini_file(db, file_path, mode) {
             Ok((imported, skipped)) => {
                 result.imported += imported;
                 result.skipped += skipped;
@@ -125,7 +132,11 @@ fn collect_gemini_session_files(gemini_dir: &Path) -> Vec<PathBuf> {
 }
 
 /// 同步单个 Gemini 会话 JSON 文件，返回 (imported, skipped)
-fn sync_single_gemini_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
+fn sync_single_gemini_file(
+    db: &Database,
+    file_path: &Path,
+    mode: SyncMode,
+) -> Result<(u32, u32), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
 
     // 获取文件元数据
@@ -133,8 +144,8 @@ fn sync_single_gemini_file(db: &Database, file_path: &Path) -> Result<(u32, u32)
         .map_err(|e| AppError::Config(format!("无法读取文件元数据: {e}")))?;
     let file_modified = metadata_modified_nanos(&metadata);
 
-    // 检查同步状态
-    let (last_modified, _last_offset) = get_sync_state(db, &file_path_str)?;
+    // 检查同步状态（重扫模式视为从未同步）
+    let (last_modified, _last_offset) = mode.sync_state(db, &file_path_str)?;
 
     // 文件未变化则跳过
     if file_modified <= last_modified {
@@ -217,6 +228,7 @@ fn sync_single_gemini_file(db: &Database, file_path: &Path) -> Result<(u32, u32)
                 entry.model,
                 session_id.as_deref(),
                 entry.timestamp,
+                mode,
             ) {
                 Ok(true) => imported += 1,
                 Ok(false) => skipped += 1,
@@ -260,6 +272,7 @@ fn insert_gemini_session_entry(
     model: &str,
     session_id: Option<&str>,
     timestamp: Option<&str>,
+    mode: SyncMode,
 ) -> Result<bool, AppError> {
     let created_at = timestamp
         .and_then(|ts| {
@@ -276,22 +289,6 @@ fn insert_gemini_session_entry(
 
     // 合并 thoughts 到 output（思考 token 按输出计费）
     let output_tokens = tokens.output + tokens.thoughts;
-
-    let dedup_key = DedupKey {
-        app_type: "gemini",
-        model,
-        input_tokens: tokens.input,
-        output_tokens,
-        cache_read_tokens: tokens.cached,
-        cache_creation_tokens: 0,
-        created_at,
-    };
-    // 只按代理日志去重，不能用 should_skip_session_insert：它在 request_id 已存在时
-    // 直接跳过，导致下方 UPSERT 的 DO UPDATE 分支永远走不到，重读文件拿到的新值被丢弃。
-    // 自身的会话行由 ON CONFLICT(request_id) 处理（值相同则不变，值变化则更新）。
-    if has_matching_proxy_usage_log(conn, &dedup_key)? {
-        return Ok(false);
-    }
 
     // 计算费用
     let usage = TokenUsage {
@@ -312,24 +309,42 @@ fn insert_gemini_session_entry(
         None => UsageCosts::zero(),
     };
 
+    let row = SessionUsageRow {
+        request_id,
+        source: UsageSource::GeminiSession,
+        model,
+        pricing_model: model,
+        session_id,
+        input_tokens: tokens.input,
+        output_tokens,
+        cache_read_tokens: tokens.cached,
+        cache_creation_tokens: 0,
+        costs,
+        created_at,
+    };
+    if let Some(wrote) = mode.rescan_write(conn, &row)? {
+        return Ok(wrote);
+    }
+
+    let dedup_key = DedupKey {
+        app_type: "gemini",
+        model,
+        input_tokens: tokens.input,
+        output_tokens,
+        cache_read_tokens: tokens.cached,
+        cache_creation_tokens: 0,
+        created_at,
+    };
+    // 只按代理日志去重，不能用 should_skip_session_insert：它在 request_id 已存在时
+    // 直接跳过，导致下方 UPSERT 的 DO UPDATE 分支永远走不到，重读文件拿到的新值被丢弃。
+    // 自身的会话行由 ON CONFLICT(request_id) 处理（值相同则不变，值变化则更新）。
+    if has_matching_proxy_usage_log(conn, &dedup_key)? {
+        return Ok(false);
+    }
+
     // 使用 UPSERT：新记录插入，已存在记录更新 token 和费用（Gemini 全量重读可能携带更新值）。
     // 返回 true 表示新插入或已更新，false 表示值完全相同（无实际变更）
-    usage_repo::upsert_session_row(
-        conn,
-        &SessionUsageRow {
-            request_id,
-            source: UsageSource::GeminiSession,
-            model,
-            pricing_model: model,
-            session_id,
-            input_tokens: tokens.input,
-            output_tokens,
-            cache_read_tokens: tokens.cached,
-            cache_creation_tokens: 0,
-            costs,
-            created_at,
-        },
-    )
+    usage_repo::upsert_session_row(conn, &row)
 }
 
 /// 查找 Gemini 模型定价
@@ -391,6 +406,7 @@ mod tests {
             "gemini-2.5-pro",
             Some("session-1"),
             Some("1970-01-01T00:16:45Z"),
+            SyncMode::Incremental,
         )?;
         assert!(!inserted);
 
@@ -488,6 +504,7 @@ mod tests {
             "gemini-2.5-pro",
             Some("s1"),
             Some("1970-01-01T00:16:45Z"),
+            SyncMode::Incremental,
         )?);
 
         let conn = lock_conn!(db.conn);
@@ -522,6 +539,7 @@ mod tests {
             "gemini-2.5-pro",
             Some("s1"),
             Some("1970-01-01T00:16:45Z"),
+            SyncMode::Incremental,
         )?);
 
         // 相同值重读：不产生变更
@@ -532,6 +550,7 @@ mod tests {
             "gemini-2.5-pro",
             Some("s1"),
             Some("1970-01-01T00:16:45Z"),
+            SyncMode::Incremental,
         )?);
 
         // 文件重写后同一消息携带更新后的 token：必须原地更新
@@ -548,6 +567,7 @@ mod tests {
             "gemini-2.5-pro",
             Some("s1"),
             Some("1970-01-01T00:16:45Z"),
+            SyncMode::Incremental,
         )?);
 
         let conn = lock_conn!(db.conn);
@@ -597,6 +617,7 @@ mod tests {
             "gemini-2.5-pro",
             Some("s1"),
             Some("1970-01-01T00:16:45Z"),
+            SyncMode::Incremental,
         )?);
 
         let conn = lock_conn!(db.conn);

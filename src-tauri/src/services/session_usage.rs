@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -37,7 +38,7 @@ pub struct SessionSyncResult {
     pub errors: Vec<String>,
 }
 
-/// 数据来源分布
+/// 数据来源分布与数据质量报告
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +46,79 @@ pub struct DataSourceSummary {
     pub data_source: String,
     pub request_count: u32,
     pub total_cost_usd: String,
+    /// 被代理日志覆盖、不计入统计的重复会话行
+    pub duplicate_count: u32,
+    /// 有 token 但成本为 0 的行（缺定价）
+    pub unpriced_count: u32,
+    /// 没有 session_id 的行
+    pub missing_session_count: u32,
+    /// output_tokens 为 0 的行（可能只记录了流式开头快照，可通过重扫修复）
+    pub zero_output_count: u32,
+    /// 最早 / 最晚一条记录的时间（Unix 秒）
+    pub first_created_at: Option<i64>,
+    pub last_created_at: Option<i64>,
+}
+
+/// 会话导入模式
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum SyncMode {
+    /// 常规增量同步：从游标处继续，已导入的行只按各来源既有规则更新
+    #[default]
+    Incremental,
+    /// 重扫：忽略游标从 offset 0 重新导入，修复 token 偏少的已有行（只升不降）
+    Rescan {
+        /// 已归档时段的边界（见 [`usage_repo::rollup_horizon`]），早于它的新行不再插入
+        rollup_horizon: Option<i64>,
+    },
+}
+
+impl SyncMode {
+    /// 读取 `key` 的同步进度；重扫模式视为从未同步 `(0, 0)`。
+    pub(crate) fn sync_state(self, db: &Database, key: &str) -> Result<(i64, i64), AppError> {
+        match self {
+            SyncMode::Incremental => get_sync_state(db, key),
+            SyncMode::Rescan { .. } => Ok((0, 0)),
+        }
+    }
+
+    pub(crate) fn is_rescan(self) -> bool {
+        matches!(self, SyncMode::Rescan { .. })
+    }
+
+    /// 重扫模式下先处理已存在的同来源行与已归档时段的行。
+    ///
+    /// 返回 `Some(wrote)` 表示该行已处理完毕（修复或跳过），`None` 表示继续常规
+    /// 插入路径。增量模式总是返回 `None`。
+    pub(crate) fn rescan_write(
+        self,
+        conn: &rusqlite::Connection,
+        row: &SessionUsageRow<'_>,
+    ) -> Result<Option<bool>, AppError> {
+        let SyncMode::Rescan { rollup_horizon } = self else {
+            return Ok(None);
+        };
+        if let Some(repaired) = usage_repo::repair_session_row(conn, row)? {
+            return Ok(Some(repaired));
+        }
+        if rollup_horizon.is_some_and(|horizon| row.created_at < horizon) {
+            return Ok(Some(false));
+        }
+        Ok(None)
+    }
+}
+
+/// 重扫进度（每个来源完成后推送一次）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRescanProgress {
+    /// 刚完成的来源名（Claude / Codex / Gemini / OpenCode）
+    pub source: String,
+    pub completed: u32,
+    pub total: u32,
+    /// 截至目前累计的新导入 + 修复行数
+    pub imported: u32,
+    pub done: bool,
 }
 
 /// 从 JSONL 中解析出的 assistant 消息使用数据
@@ -63,6 +137,13 @@ struct ParsedAssistantUsage {
 
 /// 同步 Claude Code 会话日志到使用统计数据库
 pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppError> {
+    sync_claude_session_logs_with_mode(db, SyncMode::Incremental)
+}
+
+pub(crate) fn sync_claude_session_logs_with_mode(
+    db: &Database,
+    mode: SyncMode,
+) -> Result<SessionSyncResult, AppError> {
     let projects_dir = get_claude_config_dir().join("projects");
     if !projects_dir.exists() {
         return Ok(SessionSyncResult {
@@ -86,7 +167,7 @@ pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppE
     for file_path in &jsonl_files {
         result.files_scanned += 1;
 
-        match sync_single_file(db, file_path) {
+        match sync_single_file(db, file_path, mode) {
             Ok((imported, skipped)) => {
                 result.imported += imported;
                 result.skipped += skipped;
@@ -183,7 +264,11 @@ fn push_jsonl_children(dir: &Path, files: &mut Vec<PathBuf>) {
 }
 
 /// 同步单个 JSONL 文件，返回 (imported, skipped)
-fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
+fn sync_single_file(
+    db: &Database,
+    file_path: &Path,
+    mode: SyncMode,
+) -> Result<(u32, u32), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
 
     // 获取文件元数据
@@ -191,8 +276,8 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
         .map_err(|e| AppError::Config(format!("无法读取文件元数据: {e}")))?;
     let file_modified = metadata_modified_nanos(&metadata);
 
-    // 检查同步状态
-    let (last_modified, last_offset) = get_sync_state(db, &file_path_str)?;
+    // 检查同步状态（重扫模式从 offset 0 开始）
+    let (last_modified, last_offset) = mode.sync_state(db, &file_path_str)?;
 
     // 文件未变化则跳过
     if file_modified <= last_modified {
@@ -350,7 +435,7 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
                 msg.message_id
             );
 
-            match insert_session_log_entry(conn, &request_id, msg) {
+            match insert_session_log_entry(conn, &request_id, msg, mode) {
                 Ok(true) => imported += 1,
                 Ok(false) => skipped += 1,
                 Err(e) => {
@@ -503,10 +588,13 @@ pub(crate) fn update_sync_state(
 /// 不能被 `should_skip_session_insert` / `INSERT OR IGNORE` 丢弃，否则 output
 /// 与费用会被永久低估。表中没有保存 stop_reason 的列，因此按 output_tokens
 /// 更大来判定是否为更新的快照，并重写 token 与费用列。
+///
+/// 重扫模式下由 [`SyncMode::rescan_write`] 先按 token 总量修复已有行。
 fn insert_session_log_entry(
     conn: &rusqlite::Connection,
     request_id: &str,
     msg: &ParsedAssistantUsage,
+    mode: SyncMode,
 ) -> Result<bool, AppError> {
     let created_at = msg
         .timestamp
@@ -522,28 +610,6 @@ fn insert_session_log_entry(
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0)
         });
-
-    let dedup_key = DedupKey {
-        app_type: "claude",
-        model: &msg.model,
-        input_tokens: msg.input_tokens,
-        output_tokens: msg.output_tokens,
-        cache_read_tokens: msg.cache_read_tokens,
-        cache_creation_tokens: msg.cache_creation_tokens,
-        created_at,
-    };
-    // 已有同 message 的会话日志行：仅当新条目 output 更大时升级（见函数注释）
-    let existing_output =
-        usage_repo::session_row_output_tokens(conn, request_id, UsageSource::ClaudeSession)?;
-    let upgrade_existing = match existing_output {
-        Some(old_output) if i64::from(msg.output_tokens) > old_output => true,
-        Some(_) => return Ok(false),
-        None => false,
-    };
-
-    if !upgrade_existing && should_skip_session_insert(conn, request_id, &dedup_key)? {
-        return Ok(false);
-    }
 
     // 计算费用
     let usage = TokenUsage {
@@ -576,6 +642,32 @@ fn insert_session_log_entry(
         created_at,
     };
 
+    if let Some(wrote) = mode.rescan_write(conn, &row)? {
+        return Ok(wrote);
+    }
+
+    let dedup_key = DedupKey {
+        app_type: "claude",
+        model: &msg.model,
+        input_tokens: msg.input_tokens,
+        output_tokens: msg.output_tokens,
+        cache_read_tokens: msg.cache_read_tokens,
+        cache_creation_tokens: msg.cache_creation_tokens,
+        created_at,
+    };
+    // 已有同 message 的会话日志行：仅当新条目 output 更大时升级（见函数注释）
+    let existing_output =
+        usage_repo::session_row_output_tokens(conn, request_id, UsageSource::ClaudeSession)?;
+    let upgrade_existing = match existing_output {
+        Some(old_output) if i64::from(msg.output_tokens) > old_output => true,
+        Some(_) => return Ok(false),
+        None => false,
+    };
+
+    if !upgrade_existing && should_skip_session_insert(conn, request_id, &dedup_key)? {
+        return Ok(false);
+    }
+
     if upgrade_existing {
         return usage_repo::upgrade_session_row(conn, &row);
     }
@@ -592,21 +684,51 @@ fn find_model_pricing_for_session(
     find_model_pricing(conn, model_id)
 }
 
-/// 查询数据来源分布统计
+/// 查询数据来源分布与数据质量统计
 pub fn get_data_source_breakdown(db: &Database) -> Result<Vec<DataSourceSummary>, AppError> {
     let conn = lock_conn!(db.conn);
+    let to_u32 = |v: i64| v.clamp(0, i64::from(u32::MAX)) as u32;
     Ok(usage_repo::data_source_breakdown(&conn)?
         .into_iter()
-        .map(|(data_source, count, cost)| DataSourceSummary {
-            data_source,
-            request_count: count as u32,
-            total_cost_usd: format!("{cost:.6}"),
+        .map(|stats| DataSourceSummary {
+            data_source: stats.data_source,
+            request_count: to_u32(stats.request_count),
+            total_cost_usd: format!("{:.6}", stats.total_cost_usd),
+            duplicate_count: to_u32(stats.duplicate_count),
+            unpriced_count: to_u32(stats.unpriced_count),
+            missing_session_count: to_u32(stats.missing_session_count),
+            zero_output_count: to_u32(stats.zero_output_count),
+            first_created_at: stats.first_created_at,
+            last_created_at: stats.last_created_at,
         })
         .collect())
 }
 
 /// 会话数据同步函数签名
-type SessionSyncFn = fn(&Database) -> Result<SessionSyncResult, AppError>;
+type SessionSyncFn = fn(&Database, SyncMode) -> Result<SessionSyncResult, AppError>;
+
+/// Claude 之外的会话来源，按同步顺序排列
+const OTHER_SESSION_SOURCES: [(&str, SessionSyncFn); 3] = [
+    (
+        "Codex",
+        crate::services::session_usage_codex::sync_codex_usage_with_mode,
+    ),
+    (
+        "Gemini",
+        crate::services::session_usage_gemini::sync_gemini_usage_with_mode,
+    ),
+    (
+        "OpenCode",
+        crate::services::session_usage_opencode::sync_opencode_usage_with_mode,
+    ),
+];
+
+fn merge_sync_result(into: &mut SessionSyncResult, other: SessionSyncResult) {
+    into.imported += other.imported;
+    into.skipped += other.skipped;
+    into.files_scanned += other.files_scanned;
+    into.errors.extend(other.errors);
+}
 
 /// 依次同步 Claude / Codex / Gemini / OpenCode 的会话数据并合并结果。
 ///
@@ -618,34 +740,93 @@ pub fn sync_all_session_usage(db: &Database) -> Result<SessionSyncResult, AppErr
     let mut result = sync_claude_session_logs(db)?;
 
     // 同步 Codex / Gemini / OpenCode 使用数据
-    let others: [(&str, SessionSyncFn); 3] = [
-        (
-            "Codex",
-            crate::services::session_usage_codex::sync_codex_usage,
-        ),
-        (
-            "Gemini",
-            crate::services::session_usage_gemini::sync_gemini_usage,
-        ),
-        (
-            "OpenCode",
-            crate::services::session_usage_opencode::sync_opencode_usage,
-        ),
-    ];
-    for (name, sync) in others {
-        match sync(db) {
-            Ok(other) => {
-                result.imported += other.imported;
-                result.skipped += other.skipped;
-                result.files_scanned += other.files_scanned;
-                result.errors.extend(other.errors);
-            }
+    for (name, sync) in OTHER_SESSION_SOURCES {
+        match sync(db, SyncMode::Incremental) {
+            Ok(other) => merge_sync_result(&mut result, other),
             Err(e) => {
                 result.errors.push(format!("{name} 同步失败: {e}"));
             }
         }
     }
 
+    Ok(result)
+}
+
+/// 正在进行的重扫（同一时间只允许一个）
+static RESCAN_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// 重扫全部会话来源：忽略游标、从 offset 0 重新导入，修复 P1 修复前被低估的
+/// 已有行（按 request_id upsert，只升不降，不会产生重复行）。
+///
+/// 每个来源完成后调用一次 `on_progress`。早于日汇总边界的时段只修复仍在明细表
+/// 里的行，不再插入新行（见 [`usage_repo::rollup_horizon`]）。各来源的游标在
+/// 各自的文件事务里重写为本次扫描到的位置。已有重扫在进行时返回错误。
+pub fn rescan_all_session_usage(
+    db: &Database,
+    on_progress: impl FnMut(SessionRescanProgress),
+) -> Result<SessionSyncResult, AppError> {
+    let sources = std::iter::once((
+        "Claude",
+        sync_claude_session_logs_with_mode as SessionSyncFn,
+    ))
+    .chain(OTHER_SESSION_SOURCES)
+    .collect::<Vec<_>>();
+    rescan_sources(db, &sources, on_progress)
+}
+
+/// [`rescan_all_session_usage`] 的实现：按顺序以重扫模式同步 `sources`。
+fn rescan_sources(
+    db: &Database,
+    sources: &[(&str, SessionSyncFn)],
+    mut on_progress: impl FnMut(SessionRescanProgress),
+) -> Result<SessionSyncResult, AppError> {
+    if RESCAN_RUNNING.swap(true, Ordering::AcqRel) {
+        return Err(AppError::Message("会话日志重扫正在进行中".to_string()));
+    }
+    struct RunningGuard;
+    impl Drop for RunningGuard {
+        fn drop(&mut self) {
+            RESCAN_RUNNING.store(false, Ordering::Release);
+        }
+    }
+    let _guard = RunningGuard;
+
+    let rollup_horizon = {
+        let conn = lock_conn!(db.conn);
+        usage_repo::rollup_horizon(&conn)?
+    };
+    let mode = SyncMode::Rescan { rollup_horizon };
+    log::info!("[SESSION-SYNC] 开始重扫会话日志 (归档边界: {rollup_horizon:?})");
+
+    let total = sources.len() as u32;
+    let mut result = SessionSyncResult {
+        imported: 0,
+        skipped: 0,
+        files_scanned: 0,
+        errors: vec![],
+    };
+    for (index, (name, sync)) in sources.iter().enumerate() {
+        match sync(db, mode) {
+            Ok(other) => merge_sync_result(&mut result, other),
+            Err(e) => result.errors.push(format!("{name} 重扫失败: {e}")),
+        }
+        let completed = index as u32 + 1;
+        on_progress(SessionRescanProgress {
+            source: name.to_string(),
+            completed,
+            total,
+            imported: result.imported,
+            done: completed == total,
+        });
+    }
+
+    log::info!(
+        "[SESSION-SYNC] 重扫完成: 导入/修复 {} 条, 跳过 {} 条, 扫描 {} 个来源文件, 错误 {} 个",
+        result.imported,
+        result.skipped,
+        result.files_scanned,
+        result.errors.len()
+    );
     Ok(result)
 }
 
@@ -671,6 +852,17 @@ pub async fn sync_all_session_usage_blocking(
     db: Arc<Database>,
 ) -> Result<SessionSyncResult, AppError> {
     run_sync_blocking("Session usage sync", move || sync_all_session_usage(&db)).await
+}
+
+/// [`rescan_all_session_usage`] 的异步版本：在阻塞线程池中运行，进度通过
+/// [`crate::usage_events::notify_rescan_progress`] 推送给前端。
+pub async fn rescan_all_session_usage_blocking(
+    db: Arc<Database>,
+) -> Result<SessionSyncResult, AppError> {
+    run_sync_blocking("Session usage rescan", move || {
+        rescan_all_session_usage(&db, crate::usage_events::notify_rescan_progress)
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -797,7 +989,12 @@ mod tests {
             session_id: Some("session-1".to_string()),
         };
 
-        let inserted = insert_session_log_entry(&db.conn.lock().unwrap(), "session:msg_1", &msg)?;
+        let inserted = insert_session_log_entry(
+            &db.conn.lock().unwrap(),
+            "session:msg_1",
+            &msg,
+            SyncMode::Incremental,
+        )?;
         assert!(!inserted);
 
         let conn = lock_conn!(db.conn);
@@ -883,7 +1080,7 @@ mod tests {
         let empty = r#"{"type":"assistant","message":{"id":"msg_empty","model":"claude-opus-4-8","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"timestamp":"2026-06-07T13:01:24Z","sessionId":"session-wf"}"#;
         fs::write(&file, format!("{billable}\n{empty}\n")).unwrap();
 
-        let (imported, _skipped) = sync_single_file(&db, &file)?;
+        let (imported, _skipped) = sync_single_file(&db, &file, SyncMode::Incremental)?;
         assert_eq!(
             imported, 1,
             "有 cache 成本但无 stop_reason 的 message 必须被导入"
@@ -919,7 +1116,7 @@ mod tests {
         let (head, tail) = second.split_at(second.len() / 2);
         fs::write(&file, format!("{first}\n{head}")).unwrap();
 
-        let (imported, _) = sync_single_file(&db, &file)?;
+        let (imported, _) = sync_single_file(&db, &file, SyncMode::Incremental)?;
         assert_eq!(imported, 1, "只有完整的第一行应被导入");
         let (first_mtime, offset) = get_sync_state(&db, &file.to_string_lossy())?;
         assert_eq!(offset, 1, "未写完的半行不能计入 offset");
@@ -928,7 +1125,7 @@ mod tests {
         fs::write(&file, format!("{first}\n{head}{tail}\n")).unwrap();
         update_sync_state(&db, &file.to_string_lossy(), first_mtime - 1, offset)?;
 
-        let (imported, _) = sync_single_file(&db, &file)?;
+        let (imported, _) = sync_single_file(&db, &file, SyncMode::Incremental)?;
         assert_eq!(imported, 1, "补全后的第二行应被导入");
         assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 2);
 
@@ -955,7 +1152,7 @@ mod tests {
         let path_str = file.to_string_lossy().to_string();
 
         fs::write(&file, format!("{partial}\n")).unwrap();
-        let (imported, _) = sync_single_file(&db, &file)?;
+        let (imported, _) = sync_single_file(&db, &file, SyncMode::Incremental)?;
         assert_eq!(imported, 1);
         let read_row = |db: &Database| -> Result<(i64, String, String, i64), AppError> {
             let conn = lock_conn!(db.conn);
@@ -974,7 +1171,7 @@ mod tests {
         fs::write(&file, format!("{partial}\n{final_entry}\n")).unwrap();
         let (mtime, offset) = get_sync_state(&db, &path_str)?;
         update_sync_state(&db, &path_str, mtime - 1, offset)?;
-        let (imported, _) = sync_single_file(&db, &file)?;
+        let (imported, _) = sync_single_file(&db, &file, SyncMode::Incremental)?;
         assert_eq!(imported, 1, "最终条目应升级已有快照行");
 
         let (output, output_cost, total_cost, count) = read_row(&db)?;
@@ -1014,7 +1211,8 @@ mod tests {
         assert!(!insert_session_log_entry(
             &db.conn.lock().unwrap(),
             "session:msg_1",
-            &stale
+            &stale,
+            SyncMode::Incremental
         )?);
         assert_eq!(read_row(&db)?.0, 500);
         Ok(())
@@ -1099,7 +1297,8 @@ mod tests {
         assert!(insert_session_log_entry(
             &db.conn.lock().unwrap(),
             "session:msg_sem",
-            &msg
+            &msg,
+            SyncMode::Incremental
         )?);
 
         let conn = lock_conn!(db.conn);
@@ -1114,6 +1313,263 @@ mod tests {
             semantics,
             crate::services::sql_helpers::INPUT_TOKEN_SEMANTICS_FRESH
         );
+        Ok(())
+    }
+
+    /// 重扫测试用：往 proxy_request_logs 写一条 token 偏少的旧会话行
+    fn insert_undercounted_claude_row(
+        db: &Database,
+        request_id: &str,
+        output_tokens: u32,
+        cache_creation_tokens: u32,
+        created_at: i64,
+    ) -> Result<(), AppError> {
+        let conn = lock_conn!(db.conn);
+        usage_repo::insert_session_row(
+            &conn,
+            &SessionUsageRow {
+                request_id,
+                source: UsageSource::ClaudeSession,
+                model: "claude-sonnet-4-5",
+                pricing_model: "claude-sonnet-4-5",
+                session_id: Some("session-rescan"),
+                input_tokens: 10,
+                output_tokens,
+                cache_read_tokens: 100,
+                cache_creation_tokens,
+                costs: UsageCosts::zero(),
+                created_at,
+            },
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rescan_repairs_undercounted_row_without_duplicates() -> Result<(), AppError> {
+        // 回归：P1 修复前导入的行 token 偏少（这里漏记了 cache_creation），游标已推进
+        // 到文件末尾，增量同步无法修复；即使把游标清零，增量路径也只在 output 变大时
+        // 升级旧行。重扫必须按 request_id 修正该行、补上漏导入的 message，且不产生重复行。
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("rescan.jsonl");
+        let path_str = file.to_string_lossy().to_string();
+        let final_entry = r#"{"type":"assistant","message":{"id":"msg_under","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":500,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}},"timestamp":"2026-06-07T13:01:25Z","sessionId":"session-rescan"}"#;
+        let missed = r#"{"type":"assistant","message":{"id":"msg_missed","model":"claude-sonnet-4-5","usage":{"input_tokens":3,"output_tokens":1,"cache_read_input_tokens":4000,"cache_creation_input_tokens":20}},"timestamp":"2026-06-07T13:01:26Z","sessionId":"session-rescan"}"#;
+        fs::write(&file, format!("{final_entry}\n{missed}\n")).unwrap();
+
+        let created_at = chrono::DateTime::parse_from_rfc3339("2026-06-07T13:01:25Z")
+            .unwrap()
+            .timestamp();
+        insert_undercounted_claude_row(&db, "session:msg_under", 500, 0, created_at)?;
+        let mtime = metadata_modified_nanos(&fs::metadata(&file).unwrap());
+        update_sync_state(&db, &path_str, mtime, 2)?;
+
+        // 增量同步：游标已在末尾，什么都不做
+        assert_eq!(sync_single_file(&db, &file, SyncMode::Incremental)?, (0, 0));
+
+        let read_row = |db: &Database| -> Result<(i64, i64, String, i64), AppError> {
+            let conn = lock_conn!(db.conn);
+            Ok(conn.query_row(
+                "SELECT output_tokens, cache_creation_tokens, total_cost_usd,
+                        (SELECT COUNT(*) FROM proxy_request_logs WHERE request_id = 'session:msg_under')
+                 FROM proxy_request_logs WHERE request_id = 'session:msg_under'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?)
+        };
+        assert_eq!(read_row(&db)?.1, 0, "增量同步不应改动旧行");
+
+        // 仅清零游标的增量重导：补上漏导入的 message，但 output 未变的旧行保持低估
+        update_sync_state(&db, &path_str, 0, 0)?;
+        assert_eq!(sync_single_file(&db, &file, SyncMode::Incremental)?, (1, 1));
+        assert_eq!(read_row(&db)?.1, 0, "增量路径无法修复 cache 低估");
+
+        let rescan = SyncMode::Rescan {
+            rollup_horizon: None,
+        };
+        let (imported, _) = sync_single_file(&db, &file, rescan)?;
+        assert_eq!(imported, 1, "只修复低估的那一行");
+
+        let (output, cache_creation, total_cost, count) = read_row(&db)?;
+        assert_eq!(output, 500);
+        assert_eq!(cache_creation, 50);
+        assert_eq!(count, 1, "重扫不能产生重复行");
+        let expected = {
+            let conn = lock_conn!(db.conn);
+            let pricing = find_model_pricing_for_session(&conn, "claude-sonnet-4-5")
+                .expect("seeded pricing for claude-sonnet-4-5");
+            let usage = TokenUsage {
+                input_tokens: 10,
+                output_tokens: 500,
+                cache_read_tokens: 100,
+                cache_creation_tokens: 50,
+                model: Some("claude-sonnet-4-5".to_string()),
+                message_id: None,
+            };
+            CostCalculator::calculate(&usage, &pricing, Decimal::from(1))
+        };
+        assert_eq!(
+            total_cost,
+            expected.total_cost.to_string(),
+            "费用按修复后的 token 重算"
+        );
+
+        let total_rows = |db: &Database| -> Result<i64, AppError> {
+            let conn = lock_conn!(db.conn);
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'session_log'",
+                [],
+                |row| row.get(0),
+            )?)
+        };
+        assert_eq!(total_rows(&db)?, 2);
+        assert_eq!(
+            get_sync_state(&db, &path_str)?.1,
+            2,
+            "游标重写为本次扫描位置"
+        );
+
+        // 再次重扫是幂等的：没有新写入，也没有重复行
+        assert_eq!(sync_single_file(&db, &file, rescan)?.0, 0);
+        assert_eq!(total_rows(&db)?, 2);
+        assert_eq!(read_row(&db)?.0, 500);
+        Ok(())
+    }
+
+    #[test]
+    fn test_rescan_never_downgrades_and_skips_rolled_up_period() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("rolled.jsonl");
+        // msg_old 早于日汇总边界、明细已被裁剪；msg_big 已有的行比文件里的值更大
+        let old = r#"{"type":"assistant","message":{"id":"msg_old","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}},"timestamp":"2026-01-01T12:00:00Z","sessionId":"s"}"#;
+        let big = r#"{"type":"assistant","message":{"id":"msg_big","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100}},"timestamp":"2026-06-07T12:00:00Z","sessionId":"s"}"#;
+        fs::write(&file, format!("{old}\n{big}\n")).unwrap();
+        let big_at = chrono::DateTime::parse_from_rfc3339("2026-06-07T12:00:00Z")
+            .unwrap()
+            .timestamp();
+        insert_undercounted_claude_row(&db, "session:msg_big", 900, 0, big_at)?;
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO usage_daily_rollups (date, app_type, provider_id, model, request_count)
+                 VALUES ('2026-03-01', 'claude', '_session', 'claude-sonnet-4-5', 1)",
+                [],
+            )?;
+        }
+        let horizon = {
+            let conn = lock_conn!(db.conn);
+            usage_repo::rollup_horizon(&conn)?
+        };
+        let expected_horizon = crate::database::local_midnight_timestamp(
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 2).unwrap(),
+        )?;
+        assert_eq!(horizon, Some(expected_horizon));
+
+        let (imported, _) = sync_single_file(
+            &db,
+            &file,
+            SyncMode::Rescan {
+                rollup_horizon: horizon,
+            },
+        )?;
+        assert_eq!(imported, 0);
+
+        let conn = lock_conn!(db.conn);
+        let old_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM proxy_request_logs WHERE request_id = 'session:msg_old')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(!old_exists, "已归档时段不能重新插入明细，否则会重复计数");
+        let big_output: i64 = conn.query_row(
+            "SELECT output_tokens FROM proxy_request_logs WHERE request_id = 'session:msg_big'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(big_output, 900, "重扫只升不降");
+        Ok(())
+    }
+
+    #[test]
+    fn test_rescan_sources_reports_progress_and_rejects_concurrent_runs() -> Result<(), AppError> {
+        fn ok_source(_db: &Database, mode: SyncMode) -> Result<SessionSyncResult, AppError> {
+            assert!(mode.is_rescan());
+            Ok(SessionSyncResult {
+                imported: 2,
+                skipped: 1,
+                files_scanned: 3,
+                errors: vec![],
+            })
+        }
+        fn nested_source(db: &Database, _mode: SyncMode) -> Result<SessionSyncResult, AppError> {
+            // 重扫进行中再次发起应被拒绝
+            let err =
+                rescan_sources(db, &[("Nested", ok_source as SessionSyncFn)], |_| {}).unwrap_err();
+            Err(err)
+        }
+
+        let db = Database::memory()?;
+        let mut progress = Vec::new();
+        let result = rescan_sources(
+            &db,
+            &[
+                ("A", ok_source as SessionSyncFn),
+                ("B", nested_source as SessionSyncFn),
+                ("C", ok_source as SessionSyncFn),
+            ],
+            |p| progress.push(p),
+        )?;
+        assert_eq!(result.imported, 4);
+        assert_eq!(result.files_scanned, 6);
+        assert_eq!(result.errors.len(), 1, "单个来源失败只记录错误");
+        assert!(result.errors[0].contains("正在进行中"));
+
+        let summary: Vec<_> = progress
+            .iter()
+            .map(|p| (p.source.as_str(), p.completed, p.total, p.imported, p.done))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("A", 1, 3, 2, false),
+                ("B", 2, 3, 2, false),
+                ("C", 3, 3, 4, true)
+            ]
+        );
+
+        // 完成后可以再次重扫
+        rescan_sources(&db, &[("A", ok_source as SessionSyncFn)], |_| {})?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_data_source_breakdown_reports_quality() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        insert_undercounted_claude_row(&db, "session:q1", 0, 0, 1_000)?;
+        insert_undercounted_claude_row(&db, "session:q2", 20, 0, 2_000)?;
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "UPDATE proxy_request_logs SET total_cost_usd = '0.5', session_id = NULL
+                 WHERE request_id = 'session:q2'",
+                [],
+            )?;
+        }
+
+        let breakdown = get_data_source_breakdown(&db)?;
+        let claude = breakdown
+            .iter()
+            .find(|s| s.data_source == "session_log")
+            .expect("session_log source");
+        assert_eq!(claude.request_count, 2);
+        assert_eq!(claude.total_cost_usd, "0.500000");
+        assert_eq!(claude.duplicate_count, 0);
+        assert_eq!(claude.unpriced_count, 1);
+        assert_eq!(claude.missing_session_count, 1);
+        assert_eq!(claude.zero_output_count, 1);
+        assert_eq!(claude.first_created_at, Some(1_000));
+        assert_eq!(claude.last_created_at, Some(2_000));
         Ok(())
     }
 }

@@ -21,6 +21,7 @@ export type {
   LogFilters,
   ModelStats,
   ProviderStats,
+  SessionRescanProgress,
   SessionSyncResult,
   UnpricedModelStats,
   UsageSummary,

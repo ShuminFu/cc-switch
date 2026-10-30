@@ -49,6 +49,7 @@ fn builder() -> Builder<tauri::Wry> {
             check_provider_limits,
             delete_model_pricing,
             sync_session_usage,
+            rescan_session_usage,
             get_usage_data_sources,
         ])
         // 尚未接入 specta::specta 的命令所用的核心 DTO
@@ -61,6 +62,7 @@ fn builder() -> Builder<tauri::Wry> {
         .typ::<crate::services::drift::DriftResolution>()
         .typ::<crate::database::DbStorageStats>()
         .typ::<crate::database::MaintenanceReport>()
+        .typ::<crate::services::session_usage::SessionRescanProgress>()
         .typ::<crate::error::IpcError>()
         .constant("COMMANDS", registered_commands())
         // 现有前端 `invoke` 封装在失败时抛出归一化的 IpcError

@@ -1446,6 +1446,7 @@ pub fn run() {
             commands::check_provider_limits,
             // Session usage sync
             commands::sync_session_usage,
+            commands::rescan_session_usage,
             commands::get_usage_data_sources,
             // Stream health check
             commands::stream_check_provider,

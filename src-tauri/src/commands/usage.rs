@@ -299,7 +299,21 @@ pub async fn sync_session_usage(
         .map_err(IpcError::from)
 }
 
-/// 获取数据来源分布
+/// 重扫全部会话日志：忽略游标从头重新导入，修复 token 偏少的已有行（不产生重复行）。
+///
+/// 在阻塞线程池中运行，每个来源完成后推送 `session-usage-rescan-progress` 事件；
+/// 已有重扫在进行时返回错误。
+#[tauri::command]
+#[cfg_attr(test, specta::specta)]
+pub async fn rescan_session_usage(
+    state: State<'_, AppState>,
+) -> Result<crate::services::session_usage::SessionSyncResult, IpcError> {
+    crate::services::session_usage::rescan_all_session_usage_blocking(state.db.clone())
+        .await
+        .map_err(IpcError::from)
+}
+
+/// 获取数据来源分布与数据质量报告
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub fn get_usage_data_sources(

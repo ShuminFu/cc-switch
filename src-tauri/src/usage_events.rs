@@ -22,6 +22,9 @@ pub const EVENT_USAGE_LOG_RECORDED: &str = "usage-log-recorded";
 /// `superseded_by` 后台回填进度事件名（载荷见 `SupersededBackfillProgress`）
 pub const EVENT_USAGE_BACKFILL_PROGRESS: &str = "usage-backfill-progress";
 
+/// 会话日志重扫进度事件名（载荷见 `SessionRescanProgress`）
+pub const EVENT_SESSION_RESCAN_PROGRESS: &str = "session-usage-rescan-progress";
+
 /// 防抖窗口：合并 200ms 内的多次通知。
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(200);
 
@@ -82,5 +85,15 @@ pub fn notify_backfill_progress(
     };
     if let Err(e) = handle.emit(EVENT_USAGE_BACKFILL_PROGRESS, progress) {
         log::warn!("emit {EVENT_USAGE_BACKFILL_PROGRESS} 失败: {e}");
+    }
+}
+
+/// 推送会话日志重扫进度（每个来源一次，不防抖；AppHandle 未注入时忽略）。
+pub fn notify_rescan_progress(progress: crate::services::session_usage::SessionRescanProgress) {
+    let Some(handle) = APP_HANDLE.get() else {
+        return;
+    };
+    if let Err(e) = handle.emit(EVENT_SESSION_RESCAN_PROGRESS, progress) {
+        log::warn!("emit {EVENT_SESSION_RESCAN_PROGRESS} 失败: {e}");
     }
 }

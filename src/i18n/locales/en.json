@@ -1611,7 +1611,20 @@
       "resync": "Sync",
       "imported": "Imported {{count}} records from session logs",
       "upToDate": "Session logs are up to date",
-      "failed": "Session sync failed"
+      "failed": "Session sync failed",
+      "rescan": "Re-scan",
+      "rescanTitle": "Re-scan all session logs from the beginning and repair undercounted records",
+      "rescanProgress": "Re-scan: {{source}} done ({{completed}}/{{total}})",
+      "rescanDone": "Re-scan finished: {{count}} records imported or repaired",
+      "rescanFailed": "Session re-scan failed"
+    },
+    "dataQuality": {
+      "title": "Data quality",
+      "duplicates": "Duplicates of proxy logs (excluded): {{count}}",
+      "unpriced": "Unpriced records: {{count}}",
+      "missingSession": "Records without session ID: {{count}}",
+      "zeroOutput": "Records with zero output: {{count}}",
+      "range": "Time range: {{from}} – {{to}}"
     },
     "totalRecords": "{{total}} records total",
     "goToPage": "Go",

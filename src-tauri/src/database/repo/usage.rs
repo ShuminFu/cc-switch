@@ -2504,21 +2504,144 @@ pub(crate) fn upgrade_session_row(
     Ok(updated > 0)
 }
 
-/// 数据来源分布：(data_source, 行数, 总成本)，按行数降序。
-pub(crate) fn data_source_breakdown(
+/// 重扫修复：同来源的已有会话行 token 总量（input + output + cache_read +
+/// cache_creation）小于重新解析的值时，重写 token、成本与计价模型列。
+///
+/// 返回 `None` 表示该来源没有这一行（调用方按常规插入路径处理），
+/// `Some(updated)` 表示行已存在、是否被修复。只升不降：重扫读到的值更小
+/// （例如同一 message 出现在多个文件里、其中一份是早期快照）时保持原值。
+pub(crate) fn repair_session_row(
     conn: &Connection,
-) -> Result<Vec<(String, i64, f64)>, AppError> {
+    row: &SessionUsageRow<'_>,
+) -> Result<Option<bool>, AppError> {
+    let new_total = i64::from(row.input_tokens)
+        + i64::from(row.output_tokens)
+        + i64::from(row.cache_read_tokens)
+        + i64::from(row.cache_creation_tokens);
+    let existing_total: Option<i64> = conn
+        .query_row(
+            "SELECT input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens
+             FROM proxy_request_logs
+             WHERE request_id = ?1 AND data_source = ?2",
+            params![row.request_id, row.source.as_str()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| AppError::Database(format!("查询会话日志失败: {e}")))?;
+    let Some(existing_total) = existing_total else {
+        return Ok(None);
+    };
+    if existing_total >= new_total {
+        return Ok(Some(false));
+    }
+
+    let updated = conn
+        .execute(
+            "UPDATE proxy_request_logs SET
+                input_tokens = ?2, output_tokens = ?3, cache_read_tokens = ?4, cache_creation_tokens = ?5,
+                input_cost_usd = ?6, output_cost_usd = ?7, cache_read_cost_usd = ?8,
+                cache_creation_cost_usd = ?9, total_cost_usd = ?10, pricing_model = ?11
+             WHERE request_id = ?1 AND data_source = ?12",
+            params![
+                row.request_id,
+                row.input_tokens,
+                row.output_tokens,
+                row.cache_read_tokens,
+                row.cache_creation_tokens,
+                row.costs.input,
+                row.costs.output,
+                row.costs.cache_read,
+                row.costs.cache_creation,
+                row.costs.total,
+                row.pricing_model,
+                row.source.as_str(),
+            ],
+        )
+        .map_err(|e| AppError::Database(format!("修复会话日志失败: {e}")))?;
+    Ok(Some(updated > 0))
+}
+
+/// 已归档时段的边界：`usage_daily_rollups` 最晚一天的次日本地零点。
+///
+/// 早于该时刻的明细已被汇总进日汇总表并删除；重扫时不能再插入这一时段的
+/// 新行，否则下次归档会把它们再并入汇总，造成重复计数。没有汇总时返回 `None`。
+pub(crate) fn rollup_horizon(conn: &Connection) -> Result<Option<i64>, AppError> {
+    if !Database::table_exists(conn, "usage_daily_rollups")? {
+        return Ok(None);
+    }
+    let max_date: Option<String> = conn
+        .query_row("SELECT MAX(date) FROM usage_daily_rollups", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| AppError::Database(format!("查询日汇总边界失败: {e}")))?;
+    let Some(day) = max_date.and_then(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok()) else {
+        return Ok(None);
+    };
+    let next_day = day
+        .succ_opt()
+        .ok_or_else(|| AppError::Database("日汇总边界溢出".to_string()))?;
+    local_midnight_timestamp(next_day).map(Some)
+}
+
+/// 一个数据来源的分布与数据质量统计（见 [`data_source_breakdown`]）。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DataSourceStats {
+    pub data_source: String,
+    /// 计入统计的有效行数（不含被代理日志覆盖的重复会话行）
+    pub request_count: i64,
+    pub total_cost_usd: f64,
+    /// 被代理日志覆盖、不计入统计的重复会话行
+    pub duplicate_count: i64,
+    /// 有 token 但成本为 0 的有效行（缺定价）
+    pub unpriced_count: i64,
+    /// 没有 session_id 的有效行
+    pub missing_session_count: i64,
+    /// 有效行中 output_tokens 为 0 的行（可能是只写了开头快照的低估行）
+    pub zero_output_count: i64,
+    pub first_created_at: Option<i64>,
+    pub last_created_at: Option<i64>,
+}
+
+/// 数据来源分布与数据质量统计，按有效行数降序；只有重复行的来源不列出。
+pub(crate) fn data_source_breakdown(conn: &Connection) -> Result<Vec<DataSourceStats>, AppError> {
     let effective_filter = effective_usage_log_filter(conn, "l")?;
+    let unpriced_filter = unpriced_log_filter("l");
     let sql = format!(
-        "SELECT COALESCE(l.data_source, 'proxy') as ds, COUNT(*) as cnt,
-                COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as cost
-         FROM proxy_request_logs l
-         WHERE {effective_filter}
+        "SELECT ds, SUM(eff) as cnt,
+                COALESCE(SUM(CASE WHEN eff = 1 THEN row_cost END), 0),
+                COUNT(*) - SUM(eff),
+                SUM(eff * unpriced), SUM(eff * no_session), SUM(eff * zero_output),
+                MIN(CASE WHEN eff = 1 THEN created_at END),
+                MAX(CASE WHEN eff = 1 THEN created_at END)
+         FROM (
+             SELECT COALESCE(l.data_source, 'proxy') as ds,
+                    CASE WHEN {effective_filter} THEN 1 ELSE 0 END as eff,
+                    CASE WHEN {unpriced_filter} THEN 1 ELSE 0 END as unpriced,
+                    CASE WHEN l.session_id IS NULL OR l.session_id = '' THEN 1 ELSE 0 END
+                        as no_session,
+                    CASE WHEN l.output_tokens = 0 THEN 1 ELSE 0 END as zero_output,
+                    CAST(l.total_cost_usd AS REAL) as row_cost,
+                    l.created_at
+             FROM proxy_request_logs l
+         ) per_row
          GROUP BY ds
+         HAVING SUM(eff) > 0
          ORDER BY cnt DESC"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(DataSourceStats {
+            data_source: row.get(0)?,
+            request_count: row.get(1)?,
+            total_cost_usd: row.get(2)?,
+            duplicate_count: row.get(3)?,
+            unpriced_count: row.get(4)?,
+            missing_session_count: row.get(5)?,
+            zero_output_count: row.get(6)?,
+            first_created_at: row.get(7)?,
+            last_created_at: row.get(8)?,
+        })
+    })?;
     let mut summaries = Vec::new();
     for row in rows {
         summaries.push(row.map_err(|e| AppError::Database(e.to_string()))?);

@@ -197,6 +197,11 @@ export const usageApi = {
     return invoke("sync_session_usage");
   },
 
+  /** 重扫全部会话日志（从头重新导入并修复低估行）；进度见 `session-usage-rescan-progress` 事件 */
+  rescanSessionUsage: async (): Promise<SessionSyncResult> => {
+    return invoke("rescan_session_usage");
+  },
+
   getDataSourceBreakdown: async (): Promise<DataSourceSummary[]> => {
     return invoke("get_usage_data_sources");
   },

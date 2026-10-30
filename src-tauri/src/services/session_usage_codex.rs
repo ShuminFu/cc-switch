@@ -23,7 +23,7 @@ use crate::proxy::usage::calculator::CostCalculator;
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
     get_sync_state, ingest_file, metadata_modified_nanos, update_sync_state, CompleteLines,
-    IngestBatch, SessionSyncResult,
+    IngestBatch, SessionSyncResult, SyncMode,
 };
 use crate::services::usage_stats::{should_skip_session_insert, DedupKey};
 use rust_decimal::Decimal;
@@ -172,8 +172,16 @@ fn is_history_snapshot_event(state: &FileParseState, line_offset: i64) -> bool {
         .is_some_and(|boundary| line_offset < boundary)
 }
 
-fn get_codex_sync_state(db: &Database, file_path: &Path) -> Result<(i64, i64), AppError> {
+fn get_codex_sync_state(
+    db: &Database,
+    file_path: &Path,
+    mode: SyncMode,
+) -> Result<(i64, i64), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
+    // 重扫模式从 offset 0 开始，也不继承归档前路径上的游标
+    if mode.is_rescan() {
+        return mode.sync_state(db, &file_path_str);
+    }
     let state = get_sync_state(db, &file_path_str)?;
     if state != (0, 0)
         || file_path
@@ -292,6 +300,13 @@ fn parse_cumulative_tokens(total_usage: &serde_json::Value) -> Option<Cumulative
 
 /// 同步 Codex 使用数据（从 JSONL 会话日志）
 pub fn sync_codex_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
+    sync_codex_usage_with_mode(db, SyncMode::Incremental)
+}
+
+pub(crate) fn sync_codex_usage_with_mode(
+    db: &Database,
+    mode: SyncMode,
+) -> Result<SessionSyncResult, AppError> {
     let codex_dir = get_codex_config_dir();
 
     let files = collect_codex_session_files(&codex_dir);
@@ -308,7 +323,7 @@ pub fn sync_codex_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
     }
 
     for file_path in &files {
-        match sync_single_codex_file(db, file_path) {
+        match sync_single_codex_file(db, file_path, mode) {
             Ok((imported, skipped)) => {
                 result.imported += imported;
                 result.skipped += skipped;
@@ -377,7 +392,11 @@ fn collect_jsonl_recursive(dir: &Path, files: &mut Vec<PathBuf>, depth: u32, max
 }
 
 /// 同步单个 Codex JSONL 文件，返回 (imported, skipped)
-fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
+fn sync_single_codex_file(
+    db: &Database,
+    file_path: &Path,
+    mode: SyncMode,
+) -> Result<(u32, u32), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
 
     // 获取文件元数据
@@ -386,7 +405,7 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
     let file_modified = metadata_modified_nanos(&metadata);
 
     // 检查同步状态
-    let (last_modified, last_offset) = get_codex_sync_state(db, file_path)?;
+    let (last_modified, last_offset) = get_codex_sync_state(db, file_path, mode)?;
 
     // 文件未变化则跳过
     if file_modified <= last_modified {
@@ -588,6 +607,7 @@ fn sync_single_codex_file(db: &Database, file_path: &Path) -> Result<(u32, u32),
                 &entry.model,
                 entry.thread_id.as_deref(),
                 entry.timestamp.as_deref(),
+                mode,
             ) {
                 Ok(true) => {
                     imported += 1;
@@ -625,6 +645,7 @@ fn insert_codex_session_entry(
     model: &str,
     session_id: Option<&str>,
     timestamp: Option<&str>,
+    mode: SyncMode,
 ) -> Result<bool, AppError> {
     let created_at = timestamp
         .and_then(|ts| {
@@ -638,19 +659,6 @@ fn insert_codex_session_entry(
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0)
         });
-
-    let dedup_key = DedupKey {
-        app_type: "codex",
-        model,
-        input_tokens: delta.input,
-        output_tokens: delta.output,
-        cache_read_tokens: delta.cached_input,
-        cache_creation_tokens: 0,
-        created_at,
-    };
-    if should_skip_session_insert(conn, request_id, &dedup_key)? {
-        return Ok(false);
-    }
 
     // 计算费用
     let usage = TokenUsage {
@@ -673,22 +681,37 @@ fn insert_codex_session_entry(
         None => UsageCosts::zero(),
     };
 
-    usage_repo::insert_session_row(
-        conn,
-        &SessionUsageRow {
-            request_id,
-            source: UsageSource::CodexSession,
-            model,
-            pricing_model: &pricing_model,
-            session_id,
-            input_tokens: delta.input,
-            output_tokens: delta.output,
-            cache_read_tokens: delta.cached_input,
-            cache_creation_tokens: 0, // Codex 日志无此数据
-            costs,
-            created_at,
-        },
-    )?;
+    let row = SessionUsageRow {
+        request_id,
+        source: UsageSource::CodexSession,
+        model,
+        pricing_model: &pricing_model,
+        session_id,
+        input_tokens: delta.input,
+        output_tokens: delta.output,
+        cache_read_tokens: delta.cached_input,
+        cache_creation_tokens: 0, // Codex 日志无此数据
+        costs,
+        created_at,
+    };
+    if let Some(wrote) = mode.rescan_write(conn, &row)? {
+        return Ok(wrote);
+    }
+
+    let dedup_key = DedupKey {
+        app_type: "codex",
+        model,
+        input_tokens: delta.input,
+        output_tokens: delta.output,
+        cache_read_tokens: delta.cached_input,
+        cache_creation_tokens: 0,
+        created_at,
+    };
+    if should_skip_session_insert(conn, request_id, &dedup_key)? {
+        return Ok(false);
+    }
+
+    usage_repo::insert_session_row(conn, &row)?;
 
     Ok(true)
 }
@@ -887,7 +910,10 @@ mod tests {
             ],
         );
 
-        assert_eq!(sync_single_codex_file(&db, &child)?, (1, 2));
+        assert_eq!(
+            sync_single_codex_file(&db, &child, SyncMode::Incremental)?,
+            (1, 2)
+        );
 
         let conn = lock_conn!(db.conn);
         let usage: (i64, i64, i64) = conn.query_row(
@@ -925,8 +951,14 @@ mod tests {
             ],
         );
 
-        assert_eq!(sync_single_codex_file(&db, &child_a)?, (1, 0));
-        assert_eq!(sync_single_codex_file(&db, &child_b)?, (1, 0));
+        assert_eq!(
+            sync_single_codex_file(&db, &child_a, SyncMode::Incremental)?,
+            (1, 0)
+        );
+        assert_eq!(
+            sync_single_codex_file(&db, &child_b, SyncMode::Incremental)?,
+            (1, 0)
+        );
 
         let conn = lock_conn!(db.conn);
         let request_ids = conn
@@ -984,8 +1016,14 @@ mod tests {
         let source_path = source.to_string_lossy().to_string();
         update_sync_state(&db, &source_path, 1, 3)?;
 
-        assert_eq!(sync_single_codex_file(&db, &archived_file)?, (1, 0));
-        assert_eq!(sync_single_codex_file(&db, &archived_file)?, (0, 0));
+        assert_eq!(
+            sync_single_codex_file(&db, &archived_file, SyncMode::Incremental)?,
+            (1, 0)
+        );
+        assert_eq!(
+            sync_single_codex_file(&db, &archived_file, SyncMode::Incremental)?,
+            (0, 0)
+        );
 
         let conn = lock_conn!(db.conn);
         let old_row_count: i64 = conn.query_row(
@@ -1010,6 +1048,52 @@ mod tests {
     }
 
     #[test]
+    fn test_rescan_repairs_undercounted_codex_row() -> Result<(), AppError> {
+        // 重扫忽略游标从头解析，按 request_id 修复 token 偏少的旧行，不产生重复行
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = temp.path().join("rollout-rescan.jsonl");
+        write_jsonl(
+            &file,
+            &[
+                session_meta("rescan", "rescan"),
+                turn_context(),
+                token_count(100, 50, 10),
+            ],
+        );
+        assert_eq!(
+            sync_single_codex_file(&db, &file, SyncMode::Incremental)?,
+            (1, 0)
+        );
+        let request_id = "codex_session:thread-v1:rescan:1";
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "UPDATE proxy_request_logs SET cache_read_tokens = 0, output_tokens = 1
+                 WHERE request_id = ?1",
+                [request_id],
+            )?;
+        }
+
+        let rescan = SyncMode::Rescan {
+            rollup_horizon: None,
+        };
+        assert_eq!(sync_single_codex_file(&db, &file, rescan)?, (1, 0));
+        assert_eq!(sync_single_codex_file(&db, &file, rescan)?, (0, 1));
+
+        let conn = lock_conn!(db.conn);
+        let (input, cache_read, output, count): (i64, i64, i64, i64) = conn.query_row(
+            "SELECT input_tokens, cache_read_tokens, output_tokens,
+                    (SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'codex_session')
+             FROM proxy_request_logs WHERE request_id = ?1",
+            [request_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        assert_eq!((input, cache_read, output, count), (100, 50, 10, 1));
+        Ok(())
+    }
+
+    #[test]
     fn test_codex_defers_partial_trailing_line_until_complete() -> Result<(), AppError> {
         // 回归：末尾半行不计入 offset，补全并更新 mtime 后应被导入。
         let db = Database::memory()?;
@@ -1028,7 +1112,10 @@ mod tests {
         let (head, tail) = second.split_at(second.len() / 2);
         fs::write(&file, format!("{complete}{head}")).unwrap();
 
-        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        assert_eq!(
+            sync_single_codex_file(&db, &file, SyncMode::Incremental)?,
+            (1, 0)
+        );
         let (first_mtime, offset) = get_sync_state(&db, &file.to_string_lossy())?;
         assert_eq!(offset, 3, "未写完的半行不能计入 offset");
 
@@ -1036,7 +1123,10 @@ mod tests {
         fs::write(&file, format!("{complete}{head}{tail}\n")).unwrap();
         update_sync_state(&db, &file.to_string_lossy(), first_mtime - 1, offset)?;
 
-        assert_eq!(sync_single_codex_file(&db, &file)?, (1, 0));
+        assert_eq!(
+            sync_single_codex_file(&db, &file, SyncMode::Incremental)?,
+            (1, 0)
+        );
         assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 4);
 
         let conn = lock_conn!(db.conn);
@@ -1093,6 +1183,7 @@ mod tests {
             "gpt-5.4",
             Some("session-1"),
             Some("1970-01-01T00:16:45Z"),
+            SyncMode::Incremental,
         )?;
         assert!(!inserted);
 
@@ -1198,6 +1289,7 @@ mod tests {
             "openai/GPT-5.4",
             Some("session-1"),
             Some("1970-01-01T00:16:45Z"),
+            SyncMode::Incremental,
         )?);
 
         let conn = lock_conn!(db.conn);

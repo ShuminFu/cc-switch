@@ -56,10 +56,11 @@ describe("generated usage bindings (CCS-116)", () => {
       () => usageApi.deleteModelPricing("m"),
       () => usageApi.checkProviderLimits("p", "claude"),
       () => usageApi.syncSessionUsage(),
+      () => usageApi.rescanSessionUsage(),
       () => usageApi.getDataSourceBreakdown(),
     ]);
 
     expect(handWritten).toEqual(generated);
-    expect(generated).toHaveLength(14);
+    expect(generated).toHaveLength(15);
   });
 });

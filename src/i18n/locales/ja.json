@@ -1611,7 +1611,20 @@
       "resync": "同期",
       "imported": "セッションログから {{count}} 件のレコードをインポートしました",
       "upToDate": "セッションログは最新です",
-      "failed": "セッション同期に失敗しました"
+      "failed": "セッション同期に失敗しました",
+      "rescan": "再スキャン",
+      "rescanTitle": "すべてのセッションログを最初から再スキャンし、過少計上されたレコードを修復します",
+      "rescanProgress": "再スキャン中：{{source}} 完了（{{completed}}/{{total}}）",
+      "rescanDone": "再スキャン完了：{{count}} 件のレコードをインポートまたは修復しました",
+      "rescanFailed": "セッションログの再スキャンに失敗しました"
+    },
+    "dataQuality": {
+      "title": "データ品質",
+      "duplicates": "プロキシログとの重複（除外済み）：{{count}}",
+      "unpriced": "未価格設定のレコード：{{count}}",
+      "missingSession": "セッション ID のないレコード：{{count}}",
+      "zeroOutput": "出力が 0 のレコード：{{count}}",
+      "range": "期間：{{from}} – {{to}}"
     },
     "totalRecords": "全 {{total}} 件",
     "goToPage": "移動",

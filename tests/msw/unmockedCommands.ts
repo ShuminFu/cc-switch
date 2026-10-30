@@ -161,6 +161,7 @@ export const UNMOCKED_COMMANDS = [
   "delete_model_pricing",
   "check_provider_limits",
   "sync_session_usage",
+  "rescan_session_usage",
   "get_usage_data_sources",
   "stream_check_provider",
   "stream_check_all_providers",
