@@ -24,6 +24,7 @@ import { parseSmartMcpJson } from "@/utils/formatters";
 import { useMcpValidation } from "./useMcpValidation";
 import { useUpsertMcpServer } from "@/hooks/useMcp";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
+import { MCP_APP_IDS } from "@/config/appConfig";
 import { useDarkMode } from "@/hooks/useDarkMode";
 
 interface McpFormModalProps {
@@ -101,12 +102,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
     isEditing ? hasAdditionalInfo : false,
   );
 
-  const useTomlFormat = useMemo(() => {
-    if (initialData?.server) {
-      return defaultFormat === "toml";
-    }
-    return defaultFormat === "toml";
-  }, [defaultFormat, initialData]);
+  const useTomlFormat = defaultFormat === "toml";
 
   const [formConfig, setFormConfig] = useState(() => {
     const spec = initialData?.server;
@@ -513,102 +509,28 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
               <label className="block text-sm font-medium text-foreground mb-3">
                 {t("mcp.form.enabledApps")}
               </label>
+              {/* One checkbox per MCP-capable app, from the app registry, so
+                  OpenClaw (and future apps) can be enabled here too (FE-UI-32). */}
               <div className="flex flex-wrap gap-4">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-claude"
-                    checked={enabledApps.claude}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, claude: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-claude"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.claude")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-codex"
-                    checked={enabledApps.codex}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, codex: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-codex"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.codex")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-gemini"
-                    checked={enabledApps.gemini}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, gemini: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-gemini"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.gemini")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-grokbuild"
-                    checked={enabledApps.grokbuild}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, grokbuild: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-grokbuild"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.grokbuild")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-opencode"
-                    checked={enabledApps.opencode}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, opencode: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-opencode"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.opencode")}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="enable-hermes"
-                    checked={enabledApps.hermes}
-                    onCheckedChange={(checked: boolean) =>
-                      setEnabledApps({ ...enabledApps, hermes: checked })
-                    }
-                  />
-                  <label
-                    htmlFor="enable-hermes"
-                    className="text-sm text-foreground cursor-pointer select-none"
-                  >
-                    {t("mcp.unifiedPanel.apps.hermes")}
-                  </label>
-                </div>
+                {MCP_APP_IDS.filter(
+                  (app): app is keyof typeof enabledApps => app in enabledApps,
+                ).map((app) => (
+                  <div key={app} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`enable-${app}`}
+                      checked={enabledApps[app]}
+                      onCheckedChange={(checked: boolean) =>
+                        setEnabledApps({ ...enabledApps, [app]: checked })
+                      }
+                    />
+                    <label
+                      htmlFor={`enable-${app}`}
+                      className="text-sm text-foreground cursor-pointer select-none"
+                    >
+                      {t(`mcp.unifiedPanel.apps.${app}`)}
+                    </label>
+                  </div>
+                ))}
               </div>
             </div>
 
