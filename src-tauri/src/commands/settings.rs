@@ -48,6 +48,22 @@ fn merge_settings_for_save(
     // 开关）后、前端 query 缓存刷新前的一次全量保存会把旧 marker 重放回来，
     // 重新开启时被"复活"的标记挡住而漏迁。
     incoming.local_migrations = existing.local_migrations.clone();
+    // 当前供应商指针同样是后端状态：只由 set_current_provider（切换、托盘、
+    // 故障转移）写入。前端保存设置时会把缓存里的整份结构（含旧指针）发回来，
+    // 若按 incoming 透传，设置页打开期间发生的切换会在点击保存时被回滚。
+    incoming.current_provider_claude = existing.current_provider_claude.clone();
+    incoming.current_provider_claude_desktop = existing.current_provider_claude_desktop.clone();
+    incoming.current_provider_codex = existing.current_provider_codex.clone();
+    incoming.current_provider_gemini = existing.current_provider_gemini.clone();
+    incoming.current_provider_grokbuild = existing.current_provider_grokbuild.clone();
+    incoming.current_provider_opencode = existing.current_provider_opencode.clone();
+    incoming.current_provider_openclaw = existing.current_provider_openclaw.clone();
+    incoming.current_provider_hermes = existing.current_provider_hermes.clone();
+    // 旧版 webdav_backup 不会下发给前端（get_settings_for_frontend 置空），
+    // 前端回传的 None 不代表用户清除，保留现有值。
+    if incoming.webdav_backup.is_none() {
+        incoming.webdav_backup = existing.webdav_backup.clone();
+    }
     incoming
 }
 
@@ -63,12 +79,16 @@ pub async fn save_settings(
     state: tauri::State<'_, crate::store::AppState>,
     settings: crate::settings::AppSettings,
 ) -> Result<bool, String> {
-    let existing = crate::settings::get_settings();
-    let merged = merge_settings_for_save(settings, &existing);
-    let unify_codex_changed =
-        merged.unify_codex_session_history != existing.unify_codex_session_history;
-    let unify_codex_enabled = merged.unify_codex_session_history;
-    crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
+    // 读取-合并-写入在同一把写锁内完成，避免与并发的 set_current_provider /
+    // 同步状态更新交错导致丢失更新。
+    let mut unify_codex_enabled = false;
+    let existing = crate::settings::update_settings_with(|existing| {
+        let merged = merge_settings_for_save(settings, existing);
+        unify_codex_enabled = merged.unify_codex_session_history;
+        merged
+    })
+    .map_err(|e| e.to_string())?;
+    let unify_codex_changed = unify_codex_enabled != existing.unify_codex_session_history;
 
     // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，
     // 不必等下一次切换才生效。
@@ -82,7 +102,11 @@ pub async fn save_settings(
             crate::services::provider::reapply_current_codex_official_live(state.inner())
         {
             log::warn!("统一 Codex 会话历史开关变更后重写 live 配置失败，回滚设置: {err}");
-            if let Err(rollback_err) = crate::settings::update_settings(existing) {
+            // 回滚同样走合并：恢复用户可编辑字段，但保留期间由后端写入的
+            // 当前供应商指针与迁移标记。
+            if let Err(rollback_err) = crate::settings::update_settings_with(|current| {
+                merge_settings_for_save(existing.clone(), current)
+            }) {
                 log::error!("回滚统一会话开关设置失败: {rollback_err}");
             }
             return Err(format!(
@@ -617,6 +641,110 @@ mod tests {
         let merged = merge_settings_for_save(incoming, &existing);
 
         assert!(merged.local_migrations.is_none());
+    }
+
+    /// 前端回传的整份设置里的当前供应商指针是缓存旧值，不能回滚后端切换。
+    #[test]
+    fn save_settings_should_keep_backend_current_provider_pointers() {
+        let existing = AppSettings {
+            current_provider_claude: Some("new-claude".to_string()),
+            current_provider_codex: Some("new-codex".to_string()),
+            ..AppSettings::default()
+        };
+        let incoming = AppSettings {
+            current_provider_claude: Some("stale-claude".to_string()),
+            current_provider_gemini: Some("stale-gemini".to_string()),
+            language: Some("ja".to_string()),
+            ..AppSettings::default()
+        };
+        let merged = merge_settings_for_save(incoming, &existing);
+
+        assert_eq!(
+            merged.current_provider_claude.as_deref(),
+            Some("new-claude")
+        );
+        assert_eq!(merged.current_provider_codex.as_deref(), Some("new-codex"));
+        assert_eq!(merged.current_provider_gemini, None);
+        assert_eq!(merged.language.as_deref(), Some("ja"));
+    }
+
+    #[test]
+    fn save_settings_should_persist_auto_sync_confirmed() {
+        let incoming: AppSettings = serde_json::from_value(serde_json::json!({
+            "autoSyncConfirmed": true
+        }))
+        .expect("parse frontend payload");
+        let merged = merge_settings_for_save(incoming, &AppSettings::default());
+        assert_eq!(merged.auto_sync_confirmed, Some(true));
+    }
+
+    #[test]
+    fn save_settings_should_preserve_legacy_webdav_backup() {
+        let existing = AppSettings {
+            webdav_backup: Some(serde_json::json!({ "url": "https://dav.example.com" })),
+            ..AppSettings::default()
+        };
+        let merged = merge_settings_for_save(AppSettings::default(), &existing);
+        assert_eq!(merged.webdav_backup, existing.webdav_backup);
+    }
+
+    /// 并发的 save_settings（读取-合并-写入）与 set_current_provider 结束后两者的
+    /// 修改都必须存在（CMD-06）。
+    #[test]
+    #[serial_test::serial]
+    fn concurrent_save_and_provider_switch_keep_both_changes() {
+        use crate::app_config::AppType;
+        use std::sync::{Arc, Barrier};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let original_test_home = std::env::var("CC_SWITCH_TEST_HOME").ok();
+        std::env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+        crate::settings::reload_settings().expect("reload settings");
+
+        // 前端缓存的旧快照：没有任何当前供应商指针
+        let stale_snapshot = crate::settings::get_settings();
+        let barrier = Arc::new(Barrier::new(2));
+
+        let save_barrier = barrier.clone();
+        let saver = std::thread::spawn(move || {
+            save_barrier.wait();
+            for i in 0..50 {
+                let incoming = AppSettings {
+                    backup_retain_count: Some(i + 1),
+                    ..stale_snapshot.clone()
+                };
+                crate::settings::update_settings_with(|existing| {
+                    merge_settings_for_save(incoming, existing)
+                })
+                .expect("save settings");
+            }
+        });
+        let switch_barrier = barrier.clone();
+        let switcher = std::thread::spawn(move || {
+            switch_barrier.wait();
+            for i in 0..50 {
+                crate::settings::set_current_provider(&AppType::Claude, Some(&format!("p{i}")))
+                    .expect("switch provider");
+            }
+        });
+        saver.join().unwrap();
+        switcher.join().unwrap();
+
+        let in_memory = crate::settings::get_settings();
+        assert_eq!(in_memory.backup_retain_count, Some(50));
+        assert_eq!(in_memory.current_provider_claude.as_deref(), Some("p49"));
+
+        // 磁盘上的文件与内存一致
+        crate::settings::reload_settings().expect("reload settings");
+        let on_disk = crate::settings::get_settings();
+        assert_eq!(on_disk.backup_retain_count, Some(50));
+        assert_eq!(on_disk.current_provider_claude.as_deref(), Some("p49"));
+
+        match original_test_home {
+            Some(v) => std::env::set_var("CC_SWITCH_TEST_HOME", v),
+            None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
+        }
+        crate::settings::reload_settings().expect("reload settings");
     }
 }
 
