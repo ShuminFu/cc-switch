@@ -2,10 +2,46 @@ import { FolderSearch, Undo2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
-import type { AppId } from "@/lib/api";
 import type { ResolvedDirectories } from "@/hooks/useSettings";
+import {
+  DIRECTORY_APP_IDS,
+  type DirectoryAppId,
+} from "@/hooks/settingsDirectoryFields";
 
-type DirectoryAppId = Exclude<AppId, "claude-desktop">;
+// i18n keys per app (kept literal so the key-usage check can see them).
+const DIRECTORY_LABELS: Record<
+  DirectoryAppId,
+  { label: string; placeholder: string }
+> = {
+  claude: {
+    label: "settings.claudeConfigDir",
+    placeholder: "settings.browsePlaceholderClaude",
+  },
+  codex: {
+    label: "settings.codexConfigDir",
+    placeholder: "settings.browsePlaceholderCodex",
+  },
+  gemini: {
+    label: "settings.geminiConfigDir",
+    placeholder: "settings.browsePlaceholderGemini",
+  },
+  grokbuild: {
+    label: "settings.grokConfigDir",
+    placeholder: "settings.browsePlaceholderGrok",
+  },
+  opencode: {
+    label: "settings.opencodeConfigDir",
+    placeholder: "settings.browsePlaceholderOpencode",
+  },
+  openclaw: {
+    label: "settings.openclawConfigDir",
+    placeholder: "settings.browsePlaceholderOpenclaw",
+  },
+  hermes: {
+    label: "settings.hermesConfigDir",
+    placeholder: "settings.browsePlaceholderHermes",
+  },
+};
 
 // Directory inputs keep the raw text while typing (so paths containing spaces
 // can be typed) and are only trimmed when the field loses focus. An empty
@@ -26,13 +62,8 @@ interface DirectorySettingsProps {
   onAppConfigChange: (value?: string) => void;
   onBrowseAppConfig: () => Promise<void>;
   onResetAppConfig: () => Promise<void>;
-  claudeDir?: string;
-  codexDir?: string;
-  geminiDir?: string;
-  grokDir?: string;
-  opencodeDir?: string;
-  openclawDir?: string;
-  hermesDir?: string;
+  /** Per-app override drafts (raw text), e.g. from `directoryValuesByApp`. */
+  directories: Partial<Record<DirectoryAppId, string | undefined>>;
   onDirectoryChange: (app: DirectoryAppId, value?: string) => void;
   onBrowseDirectory: (app: DirectoryAppId) => Promise<void>;
   onResetDirectory: (app: DirectoryAppId) => Promise<void>;
@@ -44,13 +75,7 @@ export function DirectorySettings({
   onAppConfigChange,
   onBrowseAppConfig,
   onResetAppConfig,
-  claudeDir,
-  codexDir,
-  geminiDir,
-  grokDir,
-  opencodeDir,
-  openclawDir,
-  hermesDir,
+  directories,
   onDirectoryChange,
   onBrowseDirectory,
   onResetDirectory,
@@ -113,82 +138,18 @@ export function DirectorySettings({
           </p>
         </header>
 
-        <DirectoryInput
-          label={t("settings.claudeConfigDir")}
-          description={undefined}
-          value={claudeDir}
-          resolvedValue={resolvedDirs.claude}
-          placeholder={t("settings.browsePlaceholderClaude")}
-          onChange={(val) => onDirectoryChange("claude", val)}
-          onBrowse={() => onBrowseDirectory("claude")}
-          onReset={() => onResetDirectory("claude")}
-        />
-
-        <DirectoryInput
-          label={t("settings.codexConfigDir")}
-          description={undefined}
-          value={codexDir}
-          resolvedValue={resolvedDirs.codex}
-          placeholder={t("settings.browsePlaceholderCodex")}
-          onChange={(val) => onDirectoryChange("codex", val)}
-          onBrowse={() => onBrowseDirectory("codex")}
-          onReset={() => onResetDirectory("codex")}
-        />
-
-        <DirectoryInput
-          label={t("settings.geminiConfigDir")}
-          description={undefined}
-          value={geminiDir}
-          resolvedValue={resolvedDirs.gemini}
-          placeholder={t("settings.browsePlaceholderGemini")}
-          onChange={(val) => onDirectoryChange("gemini", val)}
-          onBrowse={() => onBrowseDirectory("gemini")}
-          onReset={() => onResetDirectory("gemini")}
-        />
-
-        <DirectoryInput
-          label={t("settings.grokConfigDir")}
-          description={undefined}
-          value={grokDir}
-          resolvedValue={resolvedDirs.grokbuild}
-          placeholder={t("settings.browsePlaceholderGrok")}
-          onChange={(val) => onDirectoryChange("grokbuild", val)}
-          onBrowse={() => onBrowseDirectory("grokbuild")}
-          onReset={() => onResetDirectory("grokbuild")}
-        />
-
-        <DirectoryInput
-          label={t("settings.opencodeConfigDir")}
-          description={undefined}
-          value={opencodeDir}
-          resolvedValue={resolvedDirs.opencode}
-          placeholder={t("settings.browsePlaceholderOpencode")}
-          onChange={(val) => onDirectoryChange("opencode", val)}
-          onBrowse={() => onBrowseDirectory("opencode")}
-          onReset={() => onResetDirectory("opencode")}
-        />
-
-        <DirectoryInput
-          label={t("settings.openclawConfigDir")}
-          description={undefined}
-          value={openclawDir}
-          resolvedValue={resolvedDirs.openclaw}
-          placeholder={t("settings.browsePlaceholderOpenclaw")}
-          onChange={(val) => onDirectoryChange("openclaw", val)}
-          onBrowse={() => onBrowseDirectory("openclaw")}
-          onReset={() => onResetDirectory("openclaw")}
-        />
-
-        <DirectoryInput
-          label={t("settings.hermesConfigDir")}
-          description={undefined}
-          value={hermesDir}
-          resolvedValue={resolvedDirs.hermes}
-          placeholder={t("settings.browsePlaceholderHermes")}
-          onChange={(val) => onDirectoryChange("hermes", val)}
-          onBrowse={() => onBrowseDirectory("hermes")}
-          onReset={() => onResetDirectory("hermes")}
-        />
+        {DIRECTORY_APP_IDS.map((app) => (
+          <DirectoryInput
+            key={app}
+            label={t(DIRECTORY_LABELS[app].label)}
+            value={directories[app]}
+            resolvedValue={resolvedDirs[app]}
+            placeholder={t(DIRECTORY_LABELS[app].placeholder)}
+            onChange={(val) => onDirectoryChange(app, val)}
+            onBrowse={() => onBrowseDirectory(app)}
+            onReset={() => onResetDirectory(app)}
+          />
+        ))}
       </section>
     </div>
   );
