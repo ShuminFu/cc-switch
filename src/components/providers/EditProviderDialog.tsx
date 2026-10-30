@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
+import { parseSettingsConfig } from "@/lib/providerCodecs";
+import { appHas } from "@/config/apps";
 import type { Provider } from "@/types";
 import {
   ProviderForm,
@@ -158,13 +161,20 @@ export function EditProviderDialog({
 
       // 注意：values.settingsConfig 已经是最终的配置字符串
       // ProviderForm 已经为不同的 app 类型（Claude/Codex/Gemini）正确组装了配置
-      const parsedConfig = JSON.parse(values.settingsConfig) as Record<
-        string,
-        unknown
-      >;
+      const parsedConfig = parseSettingsConfig(values.settingsConfig);
+      if (!parsedConfig) {
+        // The form is expected to emit a JSON object; never let a malformed
+        // string throw inside RHF's submit handler (FE-PROV-26).
+        toast.error(
+          t("providerForm.settingsConfigInvalid", {
+            defaultValue:
+              "The provider configuration is not a valid JSON object.",
+          }),
+        );
+        return;
+      }
       const nextProviderId =
-        (appId === "opencode" || appId === "openclaw" || appId === "hermes") &&
-        values.providerKey?.trim()
+        appHas(appId, "additiveLiveConfig") && values.providerKey?.trim()
           ? values.providerKey.trim()
           : provider.id;
 
@@ -188,7 +198,7 @@ export function EditProviderDialog({
       });
       onOpenChange(false);
     },
-    [appId, onSubmit, onOpenChange, provider],
+    [appId, onSubmit, onOpenChange, provider, t],
   );
 
   if (!provider || !initialData) {

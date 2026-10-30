@@ -15,7 +15,8 @@ import {
 import { UniversalProviderFormModal } from "@/components/universal/UniversalProviderFormModal";
 import { UniversalProviderPanel } from "@/components/universal";
 import { findPresetEntry } from "@/config/presetRegistry";
-import { getProviderCodec } from "@/lib/providerCodecs";
+import { getProviderCodec, parseSettingsConfig } from "@/lib/providerCodecs";
+import { appHas } from "@/config/apps";
 import type { OpenClawSuggestedDefaults } from "@/config/openclawProviderPresets";
 import type { UniversalProviderPreset } from "@/config/universalProviderPresets";
 
@@ -41,12 +42,7 @@ export function AddProviderDialog({
 }: AddProviderDialogProps) {
   const { t } = useTranslation();
   // OpenCode and OpenClaw don't support universal providers
-  const showUniversalTab =
-    appId !== "opencode" &&
-    appId !== "openclaw" &&
-    appId !== "hermes" &&
-    appId !== "grokbuild" &&
-    appId !== "claude-desktop";
+  const showUniversalTab = appHas(appId, "universal");
   const [activeTab, setActiveTab] = useState<"app-specific" | "universal">(
     "app-specific",
   );
@@ -105,10 +101,18 @@ export function AddProviderDialog({
 
   const handleSubmit = useCallback(
     async (values: ProviderFormValues) => {
-      const parsedConfig = JSON.parse(values.settingsConfig) as Record<
-        string,
-        unknown
-      >;
+      const parsedConfig = parseSettingsConfig(values.settingsConfig);
+      if (!parsedConfig) {
+        // The form is expected to emit a JSON object; never let a malformed
+        // string throw inside RHF's submit handler (FE-PROV-26).
+        toast.error(
+          t("providerForm.settingsConfigInvalid", {
+            defaultValue:
+              "The provider configuration is not a valid JSON object.",
+          }),
+        );
+        return;
+      }
 
       // 构造基础提交数据
       const providerData: Omit<Provider, "id"> & {
@@ -139,10 +143,7 @@ export function AddProviderDialog({
       }
 
       // OpenCode/OpenClaw: pass providerKey for ID generation
-      if (
-        (appId === "opencode" || appId === "openclaw" || appId === "hermes") &&
-        values.providerKey
-      ) {
+      if (appHas(appId, "additiveLiveConfig") && values.providerKey) {
         providerData.providerKey = values.providerKey;
       }
 
@@ -207,7 +208,7 @@ export function AddProviderDialog({
       await onSubmit(providerData);
       onOpenChange(false);
     },
-    [appId, onSubmit, onOpenChange],
+    [appId, onSubmit, onOpenChange, t],
   );
 
   const footer =
