@@ -100,6 +100,7 @@ pub async fn test_proxy_url(url: String) -> Result<ProxyTestResult, IpcError> {
     // 构建带代理的临时客户端
     let proxy = reqwest::Proxy::all(&url).map_err(|e| format!("Invalid proxy URL: {e}"))?;
 
+    crate::proxy::http_client::ensure_tls_provider();
     let client = reqwest::Client::builder()
         .proxy(proxy)
         .timeout(std::time::Duration::from_secs(10))
