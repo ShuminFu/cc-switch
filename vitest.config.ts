@@ -14,7 +14,12 @@ export default defineConfig({
     setupFiles: ["./tests/setupGlobals.ts", "./tests/setupTests.ts"],
     globals: true,
     coverage: {
-      reporter: ["text", "lcov"],
+      // `pnpm test:coverage`; reporting only for now (no thresholds yet).
+      provider: "v8",
+      reporter: ["text-summary", "lcov"],
+      reportsDirectory: "./coverage",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/components/ui/**", "src/i18n/**", "**/*.d.ts"],
     },
   },
 });
