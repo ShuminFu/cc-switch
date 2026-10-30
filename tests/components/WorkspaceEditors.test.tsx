@@ -36,9 +36,12 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/components/common/FullScreenPanel", () => ({
-  FullScreenPanel: ({ isOpen, children, footer }: any) =>
+  FullScreenPanel: ({ isOpen, children, footer, onClose }: any) =>
     isOpen ? (
       <div>
+        <button type="button" onClick={onClose}>
+          panel-back
+        </button>
         {children}
         <div>{footer}</div>
       </div>
@@ -229,5 +232,41 @@ describe("DailyMemoryPanel search", () => {
     ).toBeInTheDocument();
     // Opening the delete confirm did not open the file.
     expect(api.readDailyMemoryFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkspaceFileEditor unsaved-changes guard (FE-UI-34)", () => {
+  beforeEach(() => {
+    Object.values(api).forEach((fn) => fn.mockReset());
+  });
+
+  it("asks before discarding edits and closes directly when clean", async () => {
+    api.readFile.mockResolvedValue("hello");
+    const onClose = vi.fn();
+    render(
+      <WorkspaceFileEditor filename="AGENTS.md" isOpen onClose={onClose} />,
+    );
+
+    const editor = await screen.findByTestId("editor");
+    await waitFor(() => expect(editor).toHaveValue("hello"));
+    fireEvent.change(editor, { target: { value: "hello!" } });
+
+    fireEvent.click(screen.getByText("panel-back"));
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes without asking when nothing changed", async () => {
+    api.readFile.mockResolvedValue("hello");
+    const onClose = vi.fn();
+    render(
+      <WorkspaceFileEditor filename="AGENTS.md" isOpen onClose={onClose} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("editor")).toHaveValue("hello"),
+    );
+    fireEvent.click(screen.getByText("panel-back"));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

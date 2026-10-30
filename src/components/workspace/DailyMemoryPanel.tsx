@@ -58,6 +58,9 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
 
   // Delete state
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
+  // Content as last read from / written to disk (FE-UI-34).
+  const [savedContent, setSavedContent] = useState("");
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   // Search state
   const [searchTerm, setSearchTerm] = useState("");
@@ -201,6 +204,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
       try {
         const data = await workspaceApi.readDailyMemoryFile(filename);
         setContent(data ?? "");
+        setSavedContent(data ?? "");
       } catch (err) {
         console.error("Failed to read daily memory file:", err);
         toast.error(t("workspace.dailyMemory.loadFailed"));
@@ -227,6 +231,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
     setSaving(true);
     try {
       await workspaceApi.writeDailyMemoryFile(editingFile, content);
+      setSavedContent(content);
       toast.success(t("workspace.saveSuccess"));
     } catch (err) {
       console.error("Failed to save daily memory file:", err);
@@ -289,6 +294,12 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
     onClose();
   }, [onClose]);
 
+  const dirty = !!editingFile && !loadingContent && content !== savedContent;
+  const requestBackToList = () => {
+    if (dirty) setConfirmDiscard(true);
+    else handleBackToList();
+  };
+
   // --- Edit mode ---
   if (editingFile) {
     return (
@@ -296,7 +307,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
         <FullScreenPanel
           isOpen={isOpen}
           title={t("workspace.editing", { filename: editingFile })}
-          onClose={handleBackToList}
+          onClose={requestBackToList}
           footer={
             <Button onClick={handleSave} disabled={saving || loadingContent}>
               {saving ? t("common.saving") : t("common.save")}
@@ -326,6 +337,22 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
           })}
           onConfirm={handleDelete}
           onCancel={() => setDeletingFile(null)}
+        />
+
+        <ConfirmDialog
+          isOpen={confirmDiscard}
+          title={t("common.unsavedChangesTitle", {
+            defaultValue: "Discard unsaved changes?",
+          })}
+          message={t("common.unsavedChangesMessage", {
+            defaultValue: "Your edits have not been saved and will be lost.",
+          })}
+          confirmText={t("common.discard", { defaultValue: "Discard" })}
+          onConfirm={() => {
+            setConfirmDiscard(false);
+            handleBackToList();
+          }}
+          onCancel={() => setConfirmDiscard(false)}
         />
       </>
     );
