@@ -29,7 +29,7 @@ CCS-218 (`p0-ci-release-regression-tests`).
 
 **Files.** `docs/roadmap/tickets/P0-safety-net/CCS-029-p0-ci-release-secrets-env.md` (results; the blocked item now points to the Linux evidence) and this ticket.
 
-**Commits.** See `git log --grep CCS-220` (one docs commit).
+**Commits.** `21d3a0c` (results and these notes); this SHA was filled in by a follow-up docs commit.
 
 **Verification.**
 - Steps were extracted with `python3 -I extract_step.py .github/workflows/release.yml "<step name>"` (`yaml.safe_load`, then the step's `run:`) and run with `bash`. Environment: `CI=true`, tauri-cli 2.8.1 (`pnpm tauri`), `tauri` crate 2.10.3, release profile. The first build compiled from cold in 16m07s; the second rebuilt only `cc-switch`, in 9m43s.
