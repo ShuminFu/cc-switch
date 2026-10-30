@@ -60,3 +60,17 @@ p4-usage-repo, p3-runtime-config-snapshot
 - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` and `--all-targets -- -D warnings`: clean
 - `cargo test --manifest-path src-tauri/Cargo.toml --test proxy_e2e`: 37 passed (including the perf-baseline scenarios)
 - `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast` (full suite): all binaries ok, 0 failed (lib: 2800 passed, 3 ignored)
+
+**Review.** An independent review checked both acceptance criteria against commits 79725fe and 0134c8c, and both hold.
+- The tracker's seeding uses the same windows and SQL as `check_provider_limits`, and both treat usage ≥ limit as over the cap.
+- Lock order is safe: seeding takes the totals lock and then the DB lock, while the logger releases the DB lock before it records.
+- The cost recorded in memory is the same `total_cost` that is written to the log row.
+- The E2E tests would fail on the old code, because there the capped P1 is still called.
+
+One gap was fixed. `handle_claude_desktop_models` also calls `select_providers`, and it mapped every router error to `DatabaseError`. So a Claude Desktop current provider at its cap made the model list fail with a misleading 500 "数据库错误". It now returns `ProxyError::SpendCapExceeded` (429).
+
+Re-verified after the fix:
+- fmt and clippy `--all-targets -D warnings`: clean
+- `--test proxy_e2e`: 37 passed
+- `--lib`: 2800 passed
+- full `--no-fail-fast`: 0 failed
