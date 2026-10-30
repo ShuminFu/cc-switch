@@ -179,7 +179,10 @@ impl Database {
     }
 
     /// 获取默认成本倍率
-    pub async fn get_default_cost_multiplier(&self, app_type: &str) -> Result<String, AppError> {
+    pub(crate) fn get_default_cost_multiplier_blocking(
+        &self,
+        app_type: &str,
+    ) -> Result<String, AppError> {
         let result = {
             let conn = lock_conn!(self.conn);
             conn.query_row(
@@ -192,11 +195,16 @@ impl Database {
         match result {
             Ok(value) => Ok(value),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
-                self.init_proxy_config_rows().await?;
+                self.init_proxy_config_rows_blocking()?;
                 Ok("1".to_string())
             }
             Err(e) => Err(AppError::Database(e.to_string())),
         }
+    }
+
+    /// 获取默认成本倍率
+    pub async fn get_default_cost_multiplier(&self, app_type: &str) -> Result<String, AppError> {
+        self.get_default_cost_multiplier_blocking(app_type)
     }
 
     /// 设置默认成本倍率
@@ -225,7 +233,10 @@ impl Database {
     }
 
     /// 获取计费模式来源
-    pub async fn get_pricing_model_source(&self, app_type: &str) -> Result<String, AppError> {
+    pub(crate) fn get_pricing_model_source_blocking(
+        &self,
+        app_type: &str,
+    ) -> Result<String, AppError> {
         let result = {
             let conn = lock_conn!(self.conn);
             conn.query_row(
@@ -238,11 +249,16 @@ impl Database {
         match result {
             Ok(value) => Ok(value),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
-                self.init_proxy_config_rows().await?;
+                self.init_proxy_config_rows_blocking()?;
                 Ok(PRICING_SOURCE_RESPONSE.to_string())
             }
             Err(e) => Err(AppError::Database(e.to_string())),
         }
+    }
+
+    /// 获取计费模式来源
+    pub async fn get_pricing_model_source(&self, app_type: &str) -> Result<String, AppError> {
+        self.get_pricing_model_source_blocking(app_type)
     }
 
     /// 设置计费模式来源
@@ -270,7 +286,7 @@ impl Database {
     }
 
     /// 获取应用级代理配置
-    pub async fn get_proxy_config_for_app(
+    pub(crate) fn get_proxy_config_for_app_blocking(
         &self,
         app_type: &str,
     ) -> Result<AppProxyConfig, AppError> {
@@ -309,7 +325,7 @@ impl Database {
             Ok(config) => Ok(config),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
                 // 如果不存在，创建默认配置
-                self.init_proxy_config_rows().await?;
+                self.init_proxy_config_rows_blocking()?;
                 Ok(AppProxyConfig {
                     app_type: app_type_owned,
                     enabled: false,
@@ -327,6 +343,14 @@ impl Database {
             }
             Err(e) => Err(AppError::Database(e.to_string())),
         }
+    }
+
+    /// 获取应用级代理配置
+    pub async fn get_proxy_config_for_app(
+        &self,
+        app_type: &str,
+    ) -> Result<AppProxyConfig, AppError> {
+        self.get_proxy_config_for_app_blocking(app_type)
     }
 
     /// 更新应用级代理配置
@@ -417,7 +441,7 @@ impl Database {
     /// 初始化 proxy_config 表的三行数据
     ///
     /// 使用与 schema.rs seed 相同的 per-app 默认值
-    async fn init_proxy_config_rows(&self) -> Result<(), AppError> {
+    fn init_proxy_config_rows_blocking(&self) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
 
         // 使用与 schema.rs seed 相同的 per-app 默认值
@@ -470,6 +494,10 @@ impl Database {
         .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(())
+    }
+
+    async fn init_proxy_config_rows(&self) -> Result<(), AppError> {
+        self.init_proxy_config_rows_blocking()
     }
 
     // ==================== Legacy Proxy Config (兼容旧代码) ====================
@@ -651,6 +679,24 @@ impl Database {
     /// # Arguments
     /// * `failure_threshold` - 连续失败多少次后标记为不健康
     pub async fn update_provider_health_with_threshold(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        success: bool,
+        error_msg: Option<String>,
+        failure_threshold: u32,
+    ) -> Result<(), AppError> {
+        self.update_provider_health_with_threshold_blocking(
+            provider_id,
+            app_type,
+            success,
+            error_msg,
+            failure_threshold,
+        )
+    }
+
+    /// 同步版本：供 `spawn_blocking` 调用，避免在 Tokio worker 上持有 std 互斥锁。
+    pub(crate) fn update_provider_health_with_threshold_blocking(
         &self,
         provider_id: &str,
         app_type: &str,
