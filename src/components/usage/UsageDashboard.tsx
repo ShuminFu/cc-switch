@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Coins,
   LayoutGrid,
+  Wallet,
 } from "lucide-react";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import {
@@ -39,6 +40,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { PricingConfigPanel } from "@/components/usage/PricingConfigPanel";
+import { BudgetLimitsPanel } from "@/components/usage/BudgetLimitsPanel";
 import { cn } from "@/lib/utils";
 import { getLocaleFromLanguage } from "./format";
 import { getUsageRangePresetLabel, resolveUsageRange } from "@/lib/usageRange";
@@ -410,6 +412,30 @@ export function UsageDashboard({
       </div>
 
       <Accordion type="multiple" defaultValue={[]} className="w-full space-y-4">
+        <AccordionItem
+          value="budget"
+          className="rounded-xl glass-card overflow-hidden"
+        >
+          <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/50">
+            <div className="flex items-center gap-3">
+              <Wallet className="h-5 w-5 text-emerald-500" />
+              <div className="text-left">
+                <h3 className="text-base font-semibold">
+                  {t("usage.budget.title", { defaultValue: "Budget limits" })}
+                </h3>
+                <p className="text-sm text-muted-foreground font-normal">
+                  {t("usage.budget.description", {
+                    defaultValue:
+                      "Set daily and monthly spending limits per provider and optionally block requests once a limit is reached.",
+                  })}
+                </p>
+              </div>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50">
+            <BudgetLimitsPanel />
+          </AccordionContent>
+        </AccordionItem>
         <AccordionItem
           value="pricing"
           className="rounded-xl glass-card overflow-hidden"

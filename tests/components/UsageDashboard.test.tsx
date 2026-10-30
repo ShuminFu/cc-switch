@@ -15,7 +15,8 @@ const useModelStatsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    t: (key: string, fallback?: string | { defaultValue?: string }) =>
+      typeof fallback === "string" ? fallback : (fallback?.defaultValue ?? key),
     i18n: {
       resolvedLanguage: "en",
       language: "en",
@@ -67,6 +68,10 @@ vi.mock("@/components/usage/ModelStatsTable", () => ({
 
 vi.mock("@/components/usage/PricingConfigPanel", () => ({
   PricingConfigPanel: () => <div data-testid="pricing-config-panel" />,
+}));
+
+vi.mock("@/components/usage/BudgetLimitsPanel", () => ({
+  BudgetLimitsPanel: () => <div data-testid="budget-limits-panel" />,
 }));
 
 vi.mock("@/components/usage/UsageDateRangePicker", () => ({

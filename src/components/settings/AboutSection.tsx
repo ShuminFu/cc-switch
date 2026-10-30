@@ -26,6 +26,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { getVersion } from "@tauri-apps/api/app";
+import { ReopenFirstRunButton } from "@/components/onboarding";
 import { settingsApi } from "@/lib/api";
 import type {
   ToolInstallation,
@@ -897,6 +898,7 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
               <ExternalLink className="h-3.5 w-3.5" />
               {t("settings.releaseNotes")}
             </Button>
+            <ReopenFirstRunButton />
             <Button
               type="button"
               size="sm"
