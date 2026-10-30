@@ -100,9 +100,13 @@ impl<'a> UsageLogger<'a> {
             } else {
                 INPUT_TOKEN_SEMANTICS_FRESH
             };
+        // 非流式响应完全没有 usage 块时不是生成类响应（如 Gemini countTokens、
+        // GET models），不做 parity 检查；流缺 usage 仍按全 0 打标。
         let error_message = match &self.parity_raw_usage {
             Some(raw_usage)
-                if log.error_message.is_none() && (200..300).contains(&log.status_code) =>
+                if log.error_message.is_none()
+                    && (200..300).contains(&log.status_code)
+                    && (raw_usage.is_some() || log.is_streaming) =>
             {
                 check_usage_parity(
                     &log.usage,
@@ -632,9 +636,30 @@ mod tests {
             TokenUsage::default(),
         ))?;
         // 代理路径上成功但 usage 全 0 的流
+        let mut zero_stream = parity_log("parity-zero", "claude", TokenUsage::default());
+        zero_stream.is_streaming = true;
         UsageLogger::new(&db)
             .with_usage_parity(None)
-            .log_request(&parity_log("parity-zero", "claude", TokenUsage::default()))?;
+            .log_request(&zero_stream)?;
+        // 非流式且无 usage 块（如 Gemini countTokens / GET models）不打标
+        UsageLogger::new(&db)
+            .with_usage_parity(None)
+            .log_request(&parity_log(
+                "parity-no-usage-block",
+                "gemini",
+                TokenUsage::default(),
+            ))?;
+        // 非流式但 usage 块全 0 仍打标
+        UsageLogger::new(&db)
+            .with_usage_parity(Some(serde_json::json!({
+                "promptTokenCount": 0,
+                "totalTokenCount": 0
+            })))
+            .log_request(&parity_log(
+                "parity-zero-block",
+                "gemini",
+                TokenUsage::default(),
+            ))?;
 
         let bad = logged_row(&db, "parity-bad")?;
         let parity = bad
@@ -649,6 +674,13 @@ mod tests {
         assert_eq!(logged_row(&db, "parity-off")?.usage_parity, None);
         assert_eq!(
             logged_row(&db, "parity-zero")?
+                .usage_parity
+                .map(|p| p.issue),
+            Some(UsageParityIssue::ZeroUsage)
+        );
+        assert_eq!(logged_row(&db, "parity-no-usage-block")?.usage_parity, None);
+        assert_eq!(
+            logged_row(&db, "parity-zero-block")?
                 .usage_parity
                 .map(|p| p.issue),
             Some(UsageParityIssue::ZeroUsage)
