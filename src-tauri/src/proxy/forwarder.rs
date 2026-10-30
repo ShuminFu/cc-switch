@@ -34,6 +34,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use http::Extensions;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::RwLock;
@@ -349,7 +350,7 @@ impl RequestForwarder {
         app_type: &AppType,
         method: http::Method,
         endpoint: &str,
-        body: Value,
+        body: &Value,
         headers: axum::http::HeaderMap,
         extensions: Extensions,
         providers: Vec<Provider>,
@@ -389,7 +390,7 @@ impl RequestForwarder {
         app_type: &AppType,
         method: http::Method,
         endpoint: &str,
-        body: Value,
+        body: &Value,
         headers: axum::http::HeaderMap,
         extensions: Extensions,
         providers: Vec<Provider>,
@@ -411,6 +412,11 @@ impl RequestForwarder {
 
         // 单 Provider 场景下跳过熔断器检查（故障转移关闭时）
         let bypass_circuit_breaker = providers.len() == 1;
+
+        // 跨 provider 携带的请求体：初始为客户端原始 body（借用，不 clone），
+        // thinking 签名 / budget 整流生效后替换为整流后的 body，让下一家 provider
+        // 首次请求就用整流后的内容，而不是重复一次必然被拒的原始请求（PROXY-24）。
+        let mut carried_body: Option<Value> = None;
 
         // 依次尝试每个供应商
         for provider in providers.iter() {
@@ -451,20 +457,23 @@ impl RequestForwarder {
             }
 
             // PRE-SEND 优化器：每个 provider 独立决定是否优化
-            // clone body 以避免 Bedrock 优化字段泄漏到非 Bedrock provider（failover 场景）
-            let mut provider_body =
-                if self.optimizer_config.enabled && is_bedrock_provider(provider) {
-                    let mut b = body.clone();
-                    if self.optimizer_config.thinking_optimizer {
-                        super::thinking_optimizer::optimize(&mut b, &self.optimizer_config);
-                    }
-                    if self.optimizer_config.cache_injection {
-                        super::cache_injector::inject(&mut b, &self.optimizer_config);
-                    }
-                    b
-                } else {
-                    body.clone()
-                };
+            // 仅 Bedrock 优化时 clone（避免优化字段泄漏到非 Bedrock provider）；
+            // 其余情况借用，只有整流真正改写时才写时复制（PERF-04）。
+            let base_body: &Value = carried_body.as_ref().unwrap_or(body);
+            let provider_specific_body =
+                self.optimizer_config.enabled && is_bedrock_provider(provider);
+            let mut provider_body: Cow<'_, Value> = if provider_specific_body {
+                let mut b = base_body.clone();
+                if self.optimizer_config.thinking_optimizer {
+                    super::thinking_optimizer::optimize(&mut b, &self.optimizer_config);
+                }
+                if self.optimizer_config.cache_injection {
+                    super::cache_injector::inject(&mut b, &self.optimizer_config);
+                }
+                Cow::Owned(b)
+            } else {
+                Cow::Borrowed(base_body)
+            };
 
             attempted_providers += 1;
 
@@ -560,7 +569,7 @@ impl RequestForwarder {
                         &provider_body,
                         &e,
                     ) {
-                        let mut media_body = provider_body.clone();
+                        let mut media_body: Value = provider_body.as_ref().clone();
                         let replaced_images =
                             super::media_sanitizer::replace_image_blocks_with_marker(
                                 &mut media_body,
@@ -704,7 +713,7 @@ impl RequestForwarder {
                             }
 
                             // 首次触发：整流请求体
-                            let rectified = rectify_anthropic_request(&mut provider_body);
+                            let rectified = rectify_anthropic_request(provider_body.to_mut());
 
                             // 整流未生效：继续尝试 budget 整流路径，避免误判后短路
                             if !rectified.applied {
@@ -815,6 +824,15 @@ impl RequestForwarder {
                                         {
                                             return Err(err);
                                         }
+                                        let next_body = carry_rectified_body(
+                                            base_body,
+                                            provider_body,
+                                            provider_specific_body,
+                                            |b| {
+                                                rectify_anthropic_request(b);
+                                            },
+                                        );
+                                        carried_body = Some(next_body);
                                         continue;
                                     }
                                 }
@@ -855,7 +873,7 @@ impl RequestForwarder {
                                 });
                             }
 
-                            let budget_rectified = rectify_thinking_budget(&mut provider_body);
+                            let budget_rectified = rectify_thinking_budget(provider_body.to_mut());
                             if !budget_rectified.applied {
                                 log::warn!(
                                     "[{app_type_str}] [RECT-014] budget 整流器触发但无可整流内容，不做无意义重试"
@@ -975,6 +993,15 @@ impl RequestForwarder {
                                     {
                                         return Err(err);
                                     }
+                                    let next_body = carry_rectified_body(
+                                        base_body,
+                                        provider_body,
+                                        provider_specific_body,
+                                        |b| {
+                                            rectify_thinking_budget(b);
+                                        },
+                                    );
+                                    carried_body = Some(next_body);
                                     continue;
                                 }
                             }
@@ -1161,6 +1188,7 @@ impl RequestForwarder {
         // Claude Desktop proxy 模式必须先把 Desktop 可见的 claude-* route
         // 映射成真实上游模型名，并且未知 route 要直接报错，不能使用默认模型兜底。
         let mapped_body = if matches!(app_type, AppType::ClaudeDesktop) {
+            // 每次尝试唯一一次 clone：映射/改写都在这份拥有所有权的 body 上进行
             crate::claude_desktop_config::map_proxy_request_model(body.clone(), provider)
                 .map_err(|e| ProxyError::InvalidRequest(e.to_string()))?
         } else {
@@ -1528,18 +1556,18 @@ impl RequestForwarder {
 
         // 过滤私有参数（以 `_` 开头的字段），防止内部信息泄露到上游
         // 默认使用空白名单，过滤所有 _ 前缀字段
-        let mut filtered_body = prepare_upstream_request_body(request_body);
+        // 本地 body 覆写先合并再统一过滤+规范化一次：过滤只删 `_` 前缀字段，与
+        // 深合并可交换，因此结果与「过滤→合并→再过滤」一致，但只重建一次树（PERF-04）。
         if !is_copilot {
             if let Some(overrides) = provider
                 .meta
                 .as_ref()
                 .and_then(|meta| meta.local_proxy_request_overrides.as_ref())
             {
-                if apply_local_proxy_body_overrides(&mut filtered_body, overrides) {
-                    filtered_body = prepare_upstream_request_body(filtered_body);
-                }
+                apply_local_proxy_body_overrides(&mut request_body, overrides);
             }
         }
+        let filtered_body = prepare_upstream_request_body(request_body);
         // 出站 body 定稿后刷新真值（覆盖 Codex chat 上游模型覆写、转换层模型改写）
         if let Some(m) = filtered_body
             .get("model")
@@ -1820,9 +1848,17 @@ impl RequestForwarder {
         let mut saw_user_agent = false;
         let mut saw_anthropic_beta = false;
         let mut saw_anthropic_version = false;
+        // RFC 7230 §6.1: hop-by-hop headers describe the client↔proxy connection
+        // and must not be forwarded, together with any header the client lists in
+        // `Connection`.
+        let connection_listed_headers = connection_listed_request_headers(headers);
 
         for (key, value) in headers {
             let key_str = key.as_str();
+
+            if is_hop_by_hop_request_header(key_str, &connection_listed_headers) {
+                continue;
+            }
 
             // --- host — 原位替换为上游 host（保持客户端原始位置） ---
             if key_str.eq_ignore_ascii_case("host") {
@@ -2807,6 +2843,47 @@ fn base_url_is_full_endpoint(base_url: &str, endpoint_suffix: &str) -> bool {
         .ends_with(endpoint_suffix)
 }
 
+/// Request-side hop-by-hop headers (RFC 7230 §6.1 plus `expect`, which the raw
+/// writer cannot honour because it sends the body immediately).
+const HOP_BY_HOP_REQUEST_HEADERS: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-connection",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "upgrade",
+    "expect",
+];
+
+/// Header names the client listed in `Connection` (lowercased). Names the proxy
+/// rewrites itself (host and credentials) are never dropped this way.
+fn connection_listed_request_headers(headers: &http::HeaderMap) -> Vec<String> {
+    headers
+        .get_all(http::header::CONNECTION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(|name| name.trim().to_ascii_lowercase())
+        .filter(|name| {
+            !name.is_empty()
+                && !matches!(
+                    name.as_str(),
+                    "host" | "authorization" | "x-api-key" | "x-goog-api-key"
+                )
+        })
+        .collect()
+}
+
+fn is_hop_by_hop_request_header(key_str: &str, connection_listed: &[String]) -> bool {
+    HOP_BY_HOP_REQUEST_HEADERS
+        .iter()
+        .any(|name| key_str.eq_ignore_ascii_case(name))
+        || connection_listed
+            .iter()
+            .any(|name| key_str.eq_ignore_ascii_case(name))
+}
+
 fn is_codex_client_fingerprint_header(key_str: &str) -> bool {
     matches!(
         key_str,
@@ -3359,6 +3436,26 @@ fn is_protected_local_proxy_override_header(name: &http::HeaderName) -> bool {
     )
 }
 
+/// 计算故障转移时下一家 provider 的起始请求体（PROXY-24）。
+///
+/// 整流（thinking 签名 / budget）与 provider 无关：非 provider 专属 body 时直接
+/// 复用已整流的 `provider_body`（零额外 clone）；Bedrock 优化过的 body 含专属字段，
+/// 此时在 `base_body` 副本上重放同一整流。
+fn carry_rectified_body(
+    base_body: &Value,
+    provider_body: Cow<'_, Value>,
+    provider_specific_body: bool,
+    rectify: impl FnOnce(&mut Value),
+) -> Value {
+    if provider_specific_body {
+        let mut next = base_body.clone();
+        rectify(&mut next);
+        next
+    } else {
+        provider_body.into_owned()
+    }
+}
+
 fn prepare_upstream_request_body(request_body: Value) -> Value {
     canonicalize_value(filter_private_params_with_whitelist(request_body, &[]))
 }
@@ -3774,6 +3871,148 @@ mod tests {
         );
     }
 
+    /// Mock Anthropic upstream: answers each POST with the next scripted
+    /// `(status, body)` (the last entry repeats) and records every request body.
+    async fn spawn_scripted_upstream(
+        script: Vec<(u16, Value)>,
+    ) -> (String, Arc<std::sync::Mutex<Vec<Value>>>) {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let script = Arc::new(script);
+        let app = {
+            let seen = seen.clone();
+            axum::Router::new().fallback(move |body: axum::body::Bytes| {
+                let seen = seen.clone();
+                let script = script.clone();
+                async move {
+                    let mut guard = seen.lock().unwrap();
+                    guard.push(serde_json::from_slice(&body).unwrap_or(Value::Null));
+                    let idx = (guard.len() - 1).min(script.len() - 1);
+                    let (status, body) = script[idx].clone();
+                    (
+                        StatusCode::from_u16(status).unwrap(),
+                        [(http::header::CONTENT_TYPE, "application/json")],
+                        serde_json::to_string(&body).unwrap(),
+                    )
+                }
+            })
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}"), seen)
+    }
+
+    fn claude_provider(id: &str, base_url: &str) -> Provider {
+        let mut provider = test_provider_with_type(None);
+        provider.id = id.to_string();
+        provider.name = id.to_string();
+        provider.settings_config = json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_AUTH_TOKEN": "sk-test"
+            }
+        });
+        provider
+    }
+
+    fn contains_thinking_block(body: &Value) -> bool {
+        body["messages"].as_array().is_some_and(|messages| {
+            messages.iter().any(|message| {
+                message["content"].as_array().is_some_and(|blocks| {
+                    blocks.iter().any(|block| {
+                        block["type"] == "thinking" || block.get("signature").is_some()
+                    })
+                })
+            })
+        })
+    }
+
+    #[tokio::test]
+    async fn rectified_body_is_carried_to_the_next_provider() {
+        // The pooled HTTP client builds a rustls config; the app installs this at startup.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let signature_error = json!({
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "message": "messages.1.content.0: Invalid `signature` in `thinking` block"
+            }
+        });
+        let (p1_url, p1_seen) = spawn_scripted_upstream(vec![
+            (400, signature_error),
+            (500, json!({"error": {"message": "overloaded"}})),
+        ])
+        .await;
+        let (p2_url, p2_seen) = spawn_scripted_upstream(vec![(
+            200,
+            json!({
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-test",
+                "content": [{"type": "text", "text": "ok"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1}
+            }),
+        )])
+        .await;
+
+        let mut forwarder = test_forwarder(Duration::from_secs(5), Duration::from_secs(5));
+        forwarder.max_attempts = 2;
+        let body = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": [
+                    {"type": "thinking", "thinking": "hmm", "signature": "sig-from-elsewhere"},
+                    {"type": "text", "text": "hello"}
+                ]},
+                {"role": "user", "content": "again"}
+            ]
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static("application/json"),
+        );
+
+        let result = forwarder
+            .forward_with_retry_inner(
+                &AppType::Claude,
+                http::Method::POST,
+                "/v1/messages",
+                &body,
+                headers,
+                Extensions::new(),
+                vec![
+                    claude_provider("p1", &p1_url),
+                    claude_provider("p2", &p2_url),
+                ],
+            )
+            .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(err) => panic!("expected failover success, got {}", err.error),
+        };
+        assert_eq!(result.provider.id, "p2");
+
+        let p1_seen = p1_seen.lock().unwrap().clone();
+        assert_eq!(p1_seen.len(), 2, "P1: original + rectified retry");
+        assert!(contains_thinking_block(&p1_seen[0]));
+        assert!(!contains_thinking_block(&p1_seen[1]));
+
+        let p2_seen = p2_seen.lock().unwrap().clone();
+        assert_eq!(p2_seen.len(), 1, "P2 must succeed on its first call");
+        assert!(
+            !contains_thinking_block(&p2_seen[0]),
+            "P2 must receive the rectified body"
+        );
+        // The client's own body is never mutated.
+        assert!(contains_thinking_block(&body));
+    }
+
     #[tokio::test]
     async fn non_streaming_success_is_buffered_before_marking_provider_successful() {
         let forwarder = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
@@ -4113,6 +4352,38 @@ mod tests {
             "https://host.example/v1/chat/completions?api-version=2024",
             "/chat/completions"
         ));
+    }
+
+    #[test]
+    fn hop_by_hop_request_headers_are_not_forwarded() {
+        let mut headers = http::HeaderMap::new();
+        headers.append(
+            http::header::CONNECTION,
+            http::HeaderValue::from_static("close, x-hop-custom, Authorization"),
+        );
+        headers.insert("keep-alive", http::HeaderValue::from_static("timeout=5"));
+        headers.insert("expect", http::HeaderValue::from_static("100-continue"));
+        headers.insert("te", http::HeaderValue::from_static("trailers"));
+        headers.insert("upgrade", http::HeaderValue::from_static("h2c"));
+        headers.insert("x-hop-custom", http::HeaderValue::from_static("1"));
+        headers.insert("authorization", http::HeaderValue::from_static("Bearer x"));
+        headers.insert(
+            "anthropic-version",
+            http::HeaderValue::from_static("2023-06-01"),
+        );
+
+        let listed = connection_listed_request_headers(&headers);
+        assert_eq!(
+            listed,
+            vec!["close".to_string(), "x-hop-custom".to_string()]
+        );
+
+        let forwarded: Vec<&str> = headers
+            .keys()
+            .map(|k| k.as_str())
+            .filter(|k| !is_hop_by_hop_request_header(k, &listed))
+            .collect();
+        assert_eq!(forwarded, vec!["authorization", "anthropic-version"]);
     }
 
     #[test]
