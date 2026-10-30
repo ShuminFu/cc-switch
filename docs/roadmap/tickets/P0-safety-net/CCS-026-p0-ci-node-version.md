@@ -35,3 +35,8 @@ None.
 - Every workflow YAML parses with `yaml.safe_load`. actionlint is not installed here, so it was not run.
 
 **Remaining (Partial):** The criterion "the CI log prints v22.12.0" can only be checked on a real GitHub Actions run. Look at the "Setup Node.js" step output on the next CI run.
+
+### Remaining after triage
+
+- Blocked: The CI log prints v22.12.0. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history).
+- Follow-up [CCS-219](../P0-safety-net/CCS-219-p0-ci-node-version-assert.md): Assert the resolved Node version after every setup-node step.

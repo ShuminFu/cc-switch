@@ -49,6 +49,18 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-046](P0-safety-net/CCS-046-p0-docs-readme-release-sync.md) | chore | p3 | S | [docs] Update the README release sections: release-notes links and Linux asset names |  | Done |
 | [CCS-047](P0-safety-net/CCS-047-p0-docs-package-description.md) | chore | p3 | S | [docs] Update the package description to cover all supported tools |  | Done |
 | [CCS-048](P0-safety-net/CCS-048-p0-docs-root-clutter.md) | chore | p3 | S | [docs] Move the session-manager PRD into docs/ and leave the Pages-served deplink.html alone |  | Done |
+| [CCS-213](P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md) | chore | p3 | S | [ci] Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix |  | Open |
+| [CCS-214](P0-safety-net/CCS-214-p0-deps-cargo-update-deny-baseline.md) | security | p2 | M | [deps] Refresh Cargo.lock and prune the cargo-deny advisory baseline |  | Open |
+| [CCS-215](P0-safety-net/CCS-215-p0-deps-zip-upgrade.md) | security | p2 | M | [deps] Upgrade the direct zip dependency to a release that fixes RUSTSEC-2026-0367/0368/0369 | CCS-214 | Open |
+| [CCS-216](P0-safety-net/CCS-216-p0-deps-vitest-upgrade.md) | security | p2 | M | [deps] Upgrade vitest 2.x to >=3.2.6 and drop the 4 ignored GHSAs from pnpm audit |  | Open |
+| [CCS-217](P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md) | chore | p3 | S | [ci] Run actionlint with shellcheck on every workflow and release script, and commit its config |  | Open |
+| [CCS-218](P0-safety-net/CCS-218-p0-ci-release-regression-tests.md) | chore | p2 | M | [ci-tests] Add executable regression tests for the release gate, signing-key validation and SHA256SUMS |  | Open |
+| [CCS-219](P0-safety-net/CCS-219-p0-ci-node-version-assert.md) | chore | p3 | S | [ci] Assert the resolved Node version after every setup-node step |  | Open |
+| [CCS-220](P0-safety-net/CCS-220-p0-release-linux-sig-local.md) | chore | p3 | M | [release] Verify locally that a signed Linux build still produces a valid updater .sig | CCS-218 | Open |
+| [CCS-221](P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md) | chore | p3 | S | [docs] Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets |  | Open |
+| [CCS-222](P0-safety-net/CCS-222-p0-coverage-remeasure-baseline.md) | chore | p3 | M | [coverage] Re-measure the coverage baseline on a clean tree and record proxy/ and database/ numbers |  | Open |
+| [CCS-223](P0-safety-net/CCS-223-p0-terminal-tempfile-headless-e2e.md) | security | p2 | M | [terminal] Headless Linux end-to-end check of private terminal temp files, plus temp-dir selection tests |  | Open |
+| [CCS-224](P0-safety-net/CCS-224-p0-usage-session-sync-responsiveness.md) | chore | p3 | M | [usage] Prove the UI stays responsive during a large session-log sync with a headless e2e spec |  | Open |
 
 ## P1: [P1 (v3.19): Trust release with security and correctness fixes, no structural change](P1-trust-release/CCS-002-epic-p1.md)
 
@@ -115,6 +127,10 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-107](P1-trust-release/CCS-107-p1-fe-edit-dialog-reset.md) | bug | p3 | S | [provider-form] Do not reset typed input when live settings finish loading in the edit dialog |  | Done |
 | [CCS-108](P1-trust-release/CCS-108-p1-fe-mcp-stdio-validation.md) | bug | p3 | S | [mcp] Treat a missing type as stdio when validating MCP server specs, in the UI and the backend |  | Done |
 | [CCS-109](P1-trust-release/CCS-109-p1-fe-skills-cache-dedupe.md) | bug | p3 | S | [skills] Dedupe the installed-skills cache by id and skip same-name folders in one ZIP |  | Done |
+| [CCS-225](P1-trust-release/CCS-225-p1-settings-load-failure-notice.md) | bug | p2 | M | [settings-ui] Show a startup notice and confirm flow when settings.json failed to load |  | Open |
+| [CCS-226](P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md) | security | p2 | M | [e2e] Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec |  | Open |
+| [CCS-227](P1-trust-release/CCS-227-p1-proxy-require-ipv6-guard.md) | chore | p3 | S | [proxy-tests] Fail the [::1] proxy tests instead of skipping when CCS_REQUIRE_IPV6 is set |  | Open |
+| [CCS-228](P1-trust-release/CCS-228-p1-config-atomic-write-wine.md) | chore | p3 | S | [config] Run the Windows rename_replace / atomic_write path under Wine as interim evidence |  | Open |
 
 ## P2: [P2 (v3.20): Typed vocabulary, app registry, IPC contract and generated bindings](P2-typed-vocabulary/CCS-003-epic-p2.md)
 
@@ -133,6 +149,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-120](P2-typed-vocabulary/CCS-120-p2-eslint-ratchets.md) | chore | p2 | S | [lint] Ban raw invoke outside the bindings layer and ratchet app-literal comparisons | CCS-117, CCS-119, CCS-017 | Done |
 | [CCS-121](P2-typed-vocabulary/CCS-121-p2-deps-modernize.md) | chore | p3 | M | [deps] Replace serde_yaml, consolidate the JSON5 crates and drop once_cell | CCS-012 | Done |
 | [CCS-122](P2-typed-vocabulary/CCS-122-p2-feature-actionable-errors.md) | feature | p3 | M | [errors] Add actions to error toasts based on IpcError codes | CCS-115 | Done |
+| [CCS-229](P2-typed-vocabulary/CCS-229-p2-fe-app-registry-from-backend.md) | refactor | p2 | M | [frontend] Feed useAppRegistry() from the backend get_app_registry command |  | Open |
 
 ## P3: [P3 (v3.21): Proxy request path with endpoint table, RoutePlan, attempt pipeline, canonical usage and stream taps](P3-proxy-request-path/CCS-004-epic-p3.md)
 
@@ -160,6 +177,8 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-142](P3-proxy-request-path/CCS-142-p3-retry-after-cooldown.md) | feature | p3 | S | [proxy] Honour Retry-After on 429 and 529 with a per-provider cooldown | CCS-127 | Done |
 | [CCS-143](P3-proxy-request-path/CCS-143-p3-session-sticky-routing.md) | feature | p3 | S | [proxy] Optionally keep each session_id on one provider so prompt caches survive | CCS-128 | Done |
 | [CCS-144](P3-proxy-request-path/CCS-144-p3-deps-dedupe-http.md) | chore | p3 | M | [deps] Dedupe tower, tower-http, webpki-roots and reqwest versions | CCS-041, CCS-014 | Done |
+| [CCS-230](P3-proxy-request-path/CCS-230-p3-proxy-forwarder-under-600.md) | refactor | p3 | S | [proxy] Shrink proxy/forwarder.rs to 600 lines or fewer |  | Open |
+| [CCS-231](P3-proxy-request-path/CCS-231-p3-proxy-p50-remeasure.md) | chore | p3 | M | [proxy-perf] Re-measure p50 proxy overhead against the P0 baseline and trim hot-path allocations if it regressed | CCS-230 | Open |
 
 ## P4: [P4 (v3.22): Per-app adapters, takeover engine, persistence and migration framework](P4-app-adapters-persistence/CCS-005-epic-p4.md)
 
@@ -195,6 +214,15 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-172](P4-app-adapters-persistence/CCS-172-p4-keychain-secrets.md) | feature | p2 | L | [security] Store secrets in the OS keychain or credential manager | CCS-083, CCS-155 | Partial |
 | [CCS-173](P4-app-adapters-persistence/CCS-173-p4-sync-snapshot-auth.md) | feature | p2 | M | [sync] Authenticate WebDAV/S3 snapshots with an HMAC and refuse unsigned remote imports | CCS-086, CCS-172 | Partial |
 | [CCS-212](P4-app-adapters-persistence/CCS-212-p4-hot-switch-rollback-snapshot.md) | bug | p3 | S | [takeover] Keep the raw byte snapshot when a failed hot switch rolls back the live backup | CCS-152 | Done |
+| [CCS-232](P4-app-adapters-persistence/CCS-232-p4-apps-budget-ratchet.md) | chore | p2 | S | [apps-tests] Make the match-app counter skip test-only modules and ratchet both app budgets to today's counts |  | Open |
+| [CCS-233](P4-app-adapters-persistence/CCS-233-p4-apps-ninth-app-six-files.md) | refactor | p2 | M | [apps] Make a 9th app touch 6 or fewer backend files | CCS-232 | Open |
+| [CCS-234](P4-app-adapters-persistence/CCS-234-p4-takeover-dispatch-via-adapter.md) | refactor | p2 | L | [takeover] Route takeover per-app dispatch through ProxyTakeover instead of AppType matches | CCS-232 | Open |
+| [CCS-235](P4-app-adapters-persistence/CCS-235-p4-apps-config-profile-keyed-access.md) | refactor | p3 | M | [apps] Replace per-app field matches in app_config.rs and services/profile.rs with keyed access | CCS-232 | Open |
+| [CCS-236](P4-app-adapters-persistence/CCS-236-p4-apps-match-sites-under-15.md) | refactor | p3 | M | [apps] Move the remaining stream-check, terminal and proxy-provider dispatch into adapters and set the match-app budget to 15 or fewer | CCS-233, CCS-234, CCS-235 | Open |
+| [CCS-237](P4-app-adapters-persistence/CCS-237-p4-sync-key-field-api.md) | feature | p2 | M | [sync] Add the sync-key field to sync settings and expose signature/allowUnsigned in the API layer |  | Open |
+| [CCS-238](P4-app-adapters-persistence/CCS-238-p4-sync-unsigned-migration-prompt.md) | feature | p2 | M | [sync] Prompt before applying unsigned snapshots and block tampered ones, with i18n for sync.* errors | CCS-237 | Open |
+| [CCS-239](P4-app-adapters-persistence/CCS-239-p4-sync-manifest-rollback-protection.md) | security | p3 | M | [sync] Reject signed sync manifests older than the last applied one |  | Open |
+| [CCS-240](P4-app-adapters-persistence/CCS-240-p4-secrets-linux-secret-service-check.md) | chore | p3 | M | [secrets] Exercise KeyringSecretStore against a headless gnome-keyring and the no-D-Bus fallback |  | Open |
 
 ## P5: [P5 (v4.0): Canonical protocol IR and codecs, plus command-layer cleanup](P5-protocol-ir-commands/CCS-006-epic-p5.md)
 
@@ -215,6 +243,15 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-186](P5-protocol-ir-commands/CCS-186-p5-usage-parity-ci.md) | chore | p3 | S | [usage] Run a usage parity checker over the fixture corpus in CI | CCS-140, CCS-178 | Done |
 | [CCS-187](P5-protocol-ir-commands/CCS-187-p5-gemini-cli-anthropic.md) | feature | p3 | M | [proxy] Add the first new client/upstream combination: Gemini CLI to an Anthropic upstream | CCS-177 | Done |
 | [CCS-188](P5-protocol-ir-commands/CCS-188-p5-tool-lifecycle-streaming.md) | feature | p3 | M | [cli-tools] Stream installer output and support cancel and timeout for tool lifecycle actions | CCS-179 | Done |
+| [CCS-241](P5-protocol-ir-commands/CCS-241-p5-commands-settings-test-split.md) | refactor | p3 | S | [commands] Move the commands/settings.rs test module into its own file |  | Open |
+| [CCS-242](P5-protocol-ir-commands/CCS-242-p5-coverage-min-threshold.md) | chore | p3 | S | [coverage] Add a ratcheting --min threshold to coverage-summary.mjs and gate coverage-rust on it | CCS-222 | Open |
+| [CCS-243](P5-protocol-ir-commands/CCS-243-p5-usage-token-name-check.md) | chore | p3 | S | [usage] Add a check script that keeps cache-token field names inside codec/ and usage/ |  | Open |
+| [CCS-244](P5-protocol-ir-commands/CCS-244-p5-usage-token-names-out-of-taps.md) | refactor | p3 | M | [usage] Move cache-token field parsing out of stream taps, session_usage and the provider testkit | CCS-243 | Open |
+| [CCS-245](P5-protocol-ir-commands/CCS-245-p5-proxy-repoint-legacy-reexports.md) | refactor | p3 | S | [proxy] Repoint non-legacy callers from legacy transform re-exports to codec::* |  | Open |
+| [CCS-246](P5-protocol-ir-commands/CCS-246-p5-codec-engine-ir-default.md) | chore | p2 | S | [settings] Prepare the default flip to codecEngine = ir (merge needs a maintainer release decision) |  | Open |
+| [CCS-247](P5-protocol-ir-commands/CCS-247-p5-terminal-applescript-builders-neutral.md) | refactor | p3 | S | [terminal] Move the macOS AppleScript builders into an OS-neutral module so their tests run on Linux |  | Open |
+| [CCS-248](P5-protocol-ir-commands/CCS-248-p5-e2e-session-resume-linux.md) | chore | p3 | M | [e2e] Automate the Linux session-resume check under xvfb with a fake claude |  | Open |
+| [CCS-249](P5-protocol-ir-commands/CCS-249-p5-terminal-resume-bat-wine.md) | chore | p3 | S | [terminal] Run the generated Windows resume .bat under Wine cmd |  | Open |
 
 ## F: [Track F: Frontend decomposition (runs in parallel from P2 bindings, lands by v4.0)](F-frontend/CCS-007-epic-f.md)
 
@@ -243,3 +280,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-209](F-frontend/CCS-209-f-unpriced-requests-export.md) | feature | p3 | S | [usage] Filter and export unpriced requests, with a shortcut to add model pricing | CCS-159, CCS-021 | Done |
 | [CCS-210](F-frontend/CCS-210-f-markdowneditor-stale-onchange.md) | bug | p3 | S | [editor] Stop MarkdownEditor capturing a stale onChange |  | Done |
 | [CCS-211](F-frontend/CCS-211-f-lint-green.md) | chore | p1 | S | [lint] Make pnpm lint green again after the P1/P2 merges |  | Done |
+| [CCS-250](F-frontend/CCS-250-f-app-shell-under-300.md) | refactor | p2 | M | [app-shell] Shrink src/App.tsx to 300 lines or fewer by extracting the command palette wiring |  | Open |
+| [CCS-251](F-frontend/CCS-251-f-lint-app-literals-batch1.md) | refactor | p2 | M | [lint] Replace app-literal comparisons in the five largest offenders with registry capabilities |  | Open |
+| [CCS-252](F-frontend/CCS-252-f-lint-app-literals-batch2.md) | refactor | p2 | M | [lint] Bring the app-literal suppression count to 40 or fewer | CCS-251 | Open |
+| [CCS-253](F-frontend/CCS-253-f-i18n-usage-cjk-matchers.md) | bug | p3 | S | [i18n] Remove the dead Chinese usage-script matchers from queries.ts and close CCS-193 |  | Open |

@@ -92,3 +92,17 @@ Audited 2026-10-30 on branch `claude/funny-carson-9c7j3e` against the current co
    - CCS-152 needs a green 3-OS CI run of `takeover_crash` (ubuntu, windows and macos in `ci.yml`).
    - CCS-172 needs the manual keychain check on real macOS, Windows and Linux desktops (`docs/dev/SECRET_STORAGE.md`).
    - CCS-173 needs the frontend sync-key field and migration prompt, plus manifest rollback protection.
+
+### Remaining after triage
+
+- Blocked: CCS-152: takeover_crash green on 3 OSes. Needs a windows-latest/macos-latest run of the ci.yml backend matrix, or real machines (cross-compiling to windows-gnu/apple fails on aws-lc-sys).
+- Blocked: CCS-172: manual keychain checks on macOS and Windows. Need real machines with interactive use.
+- Follow-up [CCS-232](../P4-app-adapters-persistence/CCS-232-p4-apps-budget-ratchet.md): Make the match-app counter skip test-only modules and ratchet both app budgets to today's counts.
+- Follow-up [CCS-233](../P4-app-adapters-persistence/CCS-233-p4-apps-ninth-app-six-files.md): Make a 9th app touch 6 or fewer backend files.
+- Follow-up [CCS-234](../P4-app-adapters-persistence/CCS-234-p4-takeover-dispatch-via-adapter.md): Route takeover per-app dispatch through ProxyTakeover instead of AppType matches.
+- Follow-up [CCS-235](../P4-app-adapters-persistence/CCS-235-p4-apps-config-profile-keyed-access.md): Replace per-app field matches in app_config.rs and services/profile.rs with keyed access.
+- Follow-up [CCS-236](../P4-app-adapters-persistence/CCS-236-p4-apps-match-sites-under-15.md): Move the remaining stream-check, terminal and proxy-provider dispatch into adapters and set the match-app budget to 15 or fewer.
+- Follow-up [CCS-237](../P4-app-adapters-persistence/CCS-237-p4-sync-key-field-api.md): Add the sync-key field to sync settings and expose signature/allowUnsigned in the API layer.
+- Follow-up [CCS-238](../P4-app-adapters-persistence/CCS-238-p4-sync-unsigned-migration-prompt.md): Prompt before applying unsigned snapshots and block tampered ones, with i18n for sync.* errors.
+- Follow-up [CCS-239](../P4-app-adapters-persistence/CCS-239-p4-sync-manifest-rollback-protection.md): Reject signed sync manifests older than the last applied one.
+- Follow-up [CCS-240](../P4-app-adapters-persistence/CCS-240-p4-secrets-linux-secret-service-check.md): Exercise KeyringSecretStore against a headless gnome-keyring and the no-D-Bus fallback.

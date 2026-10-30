@@ -77,3 +77,8 @@ server name" and passes here. Verified: fmt and clippy clean,
 `proxy::hyper_client` 15 passed, full `cargo test --no-fail-fast` 2288 passed
 and 0 failed. Status stays Partial until the two `[::1]`-listener tests run
 on a host with IPv6 loopback.
+
+### Remaining after triage
+
+- Blocked: AC1-AC3: the [::1] tests actually running and passing. Need one run on a host with IPv6 loopback (GitHub-hosted runner or dev machine); this kernel has no IPv6.
+- Follow-up [CCS-227](../P1-trust-release/CCS-227-p1-proxy-require-ipv6-guard.md): Fail the [::1] proxy tests instead of skipping when CCS_REQUIRE_IPV6 is set.

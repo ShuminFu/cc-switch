@@ -100,3 +100,10 @@ expanded inside quotes. The resume and shell test expectations were updated to m
 (`-D warnings`, lib and tests), `cargo test --lib` (2799 passed), `cargo test terminal`,
 `pnpm typecheck`, `pnpm test:unit` (1570 passed) and `pnpm format:check`, all clean. Status
 stays Partial until the manual resume runs on real Windows and Linux desktops.
+
+### Remaining after triage
+
+- Blocked: Manual resume on a real Windows desktop (cmd /K, PowerShell -NoExit, Windows Terminal, real npm claude.cmd shim). Needs a Windows machine; Wine cannot stand in for start/wt/PowerShell.
+- Blocked: Manual resume on real gnome-terminal/konsole. Needs an interactive Linux desktop; CCS-248 covers most of it.
+- Follow-up [CCS-248](../P5-protocol-ir-commands/CCS-248-p5-e2e-session-resume-linux.md): Automate the Linux session-resume check under xvfb with a fake claude.
+- Follow-up [CCS-249](../P5-protocol-ir-commands/CCS-249-p5-terminal-resume-bat-wine.md): Run the generated Windows resume .bat under Wine cmd.

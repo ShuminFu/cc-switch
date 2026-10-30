@@ -39,3 +39,8 @@ None.
 - `pnpm test:unit`: 644 passed, 2 failed, both in `tests/integration/App.test.tsx` ("covers basic provider flows via real hooks", a 5s timeout). That file fails the same way when run alone, and this change does not touch it (workflow YAML and a new isolated test only).
 
 **Remaining (cannot be done locally).** The second half of the acceptance criterion needs a real GitHub run: trigger `Close Stale Issues` with `workflow_dispatch` and `debug-only: true`, then confirm the log has no `Unexpected input(s)` warning and that issues labelled `popular`/`security`/`performance` are reported as skipped. This session has no GitHub API access to the repository.
+
+### Remaining after triage
+
+- Blocked: workflow_dispatch run of 'Close Stale Issues' with debug-only: true, checking for no 'Unexpected input(s)' warning and that popular/security/performance issues are skipped. Needs a real Actions run with issues:write; nothing more is codable.
+- Follow-ups: none; nothing left here can be coded or verified locally.

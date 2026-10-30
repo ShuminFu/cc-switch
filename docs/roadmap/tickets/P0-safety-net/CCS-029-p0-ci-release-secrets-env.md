@@ -48,3 +48,10 @@ p0-ci-pin-actions (same file; land in sequence).
 - Acceptance item "A fork test tag still produces .sig files on all 3 OSes" needs real macOS/Windows/Linux runners and the signing secrets; run a test tag on a fork before the next release.
 - Human action: confirm the repository's `TAURI_SIGNING_PRIVATE_KEY` secret holds the canonical `.key` file contents (single-line base64, as written by `tauri signer generate`). If it is currently stored as the raw two-line text or the bare second line, re-save it in canonical form — the validate step will now fail fast with a clear message instead of converting it.
 - Dependency `p0-ci-pin-actions` (CCS-028) has not landed yet; this change does not touch `uses:` lines, so the two should merge without conflict.
+
+### Remaining after triage
+
+- Blocked: A fork test tag produces .sig files on all 3 OSes. Needs a release.yml run with macOS/Windows runners and the signing secrets.
+- Blocked: Confirm the TAURI_SIGNING_PRIVATE_KEY secret is in canonical single-line base64 .key form. Needs a human with repo secrets access.
+- Follow-up [CCS-218](../P0-safety-net/CCS-218-p0-ci-release-regression-tests.md): Add executable regression tests for the release gate, signing-key validation and SHA256SUMS.
+- Follow-up [CCS-220](../P0-safety-net/CCS-220-p0-release-linux-sig-local.md): Verify locally that a signed Linux build still produces a valid updater .sig.

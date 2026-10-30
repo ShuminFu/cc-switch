@@ -76,3 +76,8 @@ Re-running the smoke surfaced a flake that would block releases at random: 4 fai
 After the fix: 30 of 30 runs pass on the debug binary and 5 of 5 on the AppImage. `pnpm typecheck`, `pnpm format:check` and `pnpm test:unit` (108 files, 1153 tests) all pass. The Status stays Partial until a GitHub Actions run is green.
 - `e2e/pnpm-lock.yaml` is not covered by `audit.yml`. It is dev-only test tooling that never ships, and its install scripts stay blocked by pnpm's default.
 
+### Remaining after triage
+
+- Blocked: AC1: the E2E smoke job green in CI (tauri-build-smoke on ubuntu-22.04; AppImage smoke on ubuntu-22.04 and ubuntu-22.04-arm). Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history), then a maintainer to add it as a required check.
+- Blocked: AC2: a failing smoke blocks the release.yml upload, end to end. Needs a tag-triggered release.yml run; the static guard in tests/ci/e2eSmoke.test.ts is the best local check.
+- Follow-ups: none; nothing left here can be coded or verified locally.

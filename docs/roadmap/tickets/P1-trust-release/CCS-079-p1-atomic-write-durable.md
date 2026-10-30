@@ -62,3 +62,8 @@ p0-config-writer-snapshots
 - Fixed one gap: for a relative target such as `foo.json`, `path.parent()` is an empty path. `File::open("")` fails, so the directory fsync was always skipped and a warning was logged on every write. `sync_dir` now treats an empty parent as `.` and returns `io::Result`, and `atomic_write` still only logs on failure. New test: `sync_dir_treats_empty_parent_as_current_dir`.
 - Left out of scope: `proxy/providers/copilot_auth.rs` and `codex_oauth_auth.rs` have their own temp-file-and-rename writers, and those still have no fsync.
 - Re-verified: `cargo test --lib` 2219 passed, 0 failed; `--test config_writers` 16 passed; fmt and clippy `-D warnings` clean. Status stays Partial until the Windows CI run.
+
+### Remaining after triage
+
+- Blocked: On Windows CI, overwrite works without remove_file. Needs a windows-latest Actions run; CCS-228 adds Wine evidence only.
+- Follow-up [CCS-228](../P1-trust-release/CCS-228-p1-config-atomic-write-wine.md): Run the Windows rename_replace / atomic_write path under Wine as interim evidence.

@@ -66,3 +66,10 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e` (HEAD `c0c770a`).
 3. **tauri-driver smoke in CI (CCS-201).** This needs a green GitHub Actions run of `tauri-build-smoke` and of the Linux release legs (`ubuntu-22.04`, `ubuntu-22.04-arm`). It can't be verified from this environment. After that, a maintainer has to add the job as a required check in GitHub branch protection.
 4. **CCS-193 (outside the epic criteria).** The Chinese matchers for backend and usage-script error text stay until the backend returns structured error codes (`IpcError`).
 
+### Remaining after triage
+
+- Blocked: tauri-driver smoke green on the Linux AppImage and blocking release (CCS-201). Needs a green tauri-build-smoke job and Linux release.yml legs on GitHub Actions, then a maintainer to make it a required check.
+- Follow-up [CCS-250](../F-frontend/CCS-250-f-app-shell-under-300.md): Shrink src/App.tsx to 300 lines or fewer by extracting the command palette wiring.
+- Follow-up [CCS-251](../F-frontend/CCS-251-f-lint-app-literals-batch1.md): Replace app-literal comparisons in the five largest offenders with registry capabilities.
+- Follow-up [CCS-252](../F-frontend/CCS-252-f-lint-app-literals-batch2.md): Bring the app-literal suppression count to 40 or fewer.
+- Follow-up [CCS-253](../F-frontend/CCS-253-f-i18n-usage-cjk-matchers.md): Remove the dead Chinese usage-script matchers from queries.ts and close CCS-193.

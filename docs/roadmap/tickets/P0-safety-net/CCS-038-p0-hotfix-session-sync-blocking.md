@@ -70,3 +70,9 @@ and has not been run here.
   is emitted at debug level. The first test checks the same thing.
 - Not run: the manual UI responsiveness check with many large `.jsonl` files
   (needs a desktop session).
+
+### Remaining after triage
+
+- Blocked: nothing; every remaining item is codable.
+- Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
+- Follow-up [CCS-224](../P0-safety-net/CCS-224-p0-usage-session-sync-responsiveness.md): Prove the UI stays responsive during a large session-log sync with a headless e2e spec.

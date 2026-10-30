@@ -59,3 +59,8 @@ unscoped job would still pass. Now a workflow without top-level permissions
 must declare them on every job. Checked that it fails when an extra
 job without permissions is added to claude.yml, and fails on the old ci.yml.
 Status stays Partial: the job-log token check needs a real GitHub Actions run.
+
+### Remaining after triage
+
+- Blocked: The 'Set up job' log lists only Contents: read and Metadata: read. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history); no local tool reproduces GitHub's token scopes.
+- Follow-ups: none; nothing left here can be coded or verified locally.

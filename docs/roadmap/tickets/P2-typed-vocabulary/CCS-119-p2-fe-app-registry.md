@@ -42,3 +42,7 @@ p2-app-registry-ipc
 
 **Remaining (why Partial).** The dependency `p2-app-registry-ipc` (backend `get_app_registry`) has not landed. For now the registry is static TS data. `useAppRegistry()` is the one place to switch to the backend query once that command exists; `useAppCaps`, `appLabel` and `isAppId` callers will not change. The plan's ESLint ratchet on app-id literal comparisons is not in this ticket's acceptance list and was not done.
 
+### Remaining after triage
+
+- Blocked: nothing; every remaining item is codable.
+- Follow-up [CCS-229](../P2-typed-vocabulary/CCS-229-p2-fe-app-registry-from-backend.md): Feed useAppRegistry() from the backend get_app_registry command.

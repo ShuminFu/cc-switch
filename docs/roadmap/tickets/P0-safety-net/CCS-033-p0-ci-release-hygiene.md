@@ -81,3 +81,10 @@ separate commit.
   like the rest of the workflows; CCS-028 should pin them to SHAs with the
   others. The action major versions could not be checked against GitHub from
   this environment.
+
+### Remaining after triage
+
+- Blocked: AC2: SHA256SUMS in the release assets and `gh attestation verify` passing. Needs a signed tag run on a public fork (OIDC provenance cannot be produced locally).
+- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Follow-up [CCS-218](../P0-safety-net/CCS-218-p0-ci-release-regression-tests.md): Add executable regression tests for the release gate, signing-key validation and SHA256SUMS.
+- Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.

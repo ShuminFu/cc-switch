@@ -69,3 +69,8 @@ did not build. The review follow-up puts the file back in the tree (index only).
 away when the provider-form change that stops importing it is committed. Status stays
 Partial until the two `pnpm tauri dev` devtools checks are run in an interactive session.
 
+### Remaining after triage
+
+- Blocked: Literal wording 'check in `pnpm tauri dev` with devtools'. Needs interactive desktop use; CCS-226 is the substitute and should be enough to close the ticket.
+- Blocked: Real Copilot avatar from a logged-in account. Needs Copilot OAuth credentials and interactive login.
+- Follow-up [CCS-226](../P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md): Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec.

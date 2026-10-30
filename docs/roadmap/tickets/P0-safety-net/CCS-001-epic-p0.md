@@ -88,3 +88,18 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e`. Commands run (re
    - **Cross-OS CI:** CCS-014 and CCS-036.
    - **Housekeeping:** a `cargo update` to clear the baselined RUSTSEC ignores (CCS-018).
 3. The ticked criteria 6 and 7 still need these live checks before anyone relies on them in a real release: the CCS-023 fork-tag skip test and the CCS-029 three-OS `.sig` run. They are ticked because the gating is structurally in place and covered by the `tests/ci/*` regression tests.
+
+### Remaining after triage
+
+- Blocked: Exit criterion 5 / CCS-014: proxy_e2e and the full suite green on macOS and Windows. Needs a windows-latest/macos-latest run of the ci.yml backend matrix, or real machines (cross-compiling to windows-gnu/apple fails on aws-lc-sys).
+- Blocked: CCS-036 cfg-gated macOS/Windows branches; CCS-036 and CCS-038 interactive desktop checks. Need a CI matrix run or desktop GUI use (Linux substitutes are CCS-223 and CCS-224).
+- Blocked: CCS-019, CCS-026, CCS-027, CCS-043 runtime checks (coverage artifacts, Node v22.12.0 in the log, GITHUB_TOKEN scopes, stale workflow dispatch). Need a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history).
+- Blocked: CCS-023, CCS-029, CCS-031, CCS-032, CCS-033 release checks (red-tag skip, .sig on 3 OSes, publish concurrency, prerelease promotion, SHA256SUMS + attestation). Need a tag/release run on a fork with secrets.
+- Blocked: CCS-018/CCS-034 required checks (cargo-deny, pnpm audit, Proxy fixture) and the `no-fixture-needed`/`fixtures` labels. Need a maintainer to change GitHub repo settings.
+- Follow-up [CCS-213](../P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md): Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix.
+- Follow-up [CCS-214](../P0-safety-net/CCS-214-p0-deps-cargo-update-deny-baseline.md): Refresh Cargo.lock and prune the cargo-deny advisory baseline.
+- Follow-up [CCS-215](../P0-safety-net/CCS-215-p0-deps-zip-upgrade.md): Upgrade the direct zip dependency to a release that fixes RUSTSEC-2026-0367/0368/0369.
+- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
+- Follow-up [CCS-223](../P0-safety-net/CCS-223-p0-terminal-tempfile-headless-e2e.md): Headless Linux end-to-end check of private terminal temp files, plus temp-dir selection tests.
+- Follow-up [CCS-224](../P0-safety-net/CCS-224-p0-usage-session-sync-responsiveness.md): Prove the UI stays responsive during a large session-log sync with a headless e2e spec.

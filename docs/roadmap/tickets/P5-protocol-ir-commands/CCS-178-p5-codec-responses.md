@@ -176,3 +176,14 @@ Differential tests on hand-written inputs beyond the corpus:
   - `cargo test --no-fail-fast` passes everything: lib 2632, `proxy_golden` 16, `proxy_e2e` 27, 0 failed.
 
   The only change is the `testkit.rs` grep note above. The status stays **Partial**: deleting the legacy files and the 8k-line net reduction are still gated on the one-release soak.
+
+### Remaining after triage
+
+- Blocked: Delete the 10 legacy files (18,397 lines), the CodecEngine flag and the codec_parity tests. Time-gated: one shipped release with codecEngine = ir and no regressions.
+- Blocked: Confirm the ≥ 8k net reduction. Needs a maintainer decision; it measures about -2.8k.
+- Blocked: Grep criterion fully met. Needs the gated deletion, plus a maintainer decision on whether taps.rs, session_usage.rs and testkit.rs count as usage/test modules (or CCS-244).
+- Blocked: Shipping codecEngine = ir as the default. Needs a maintainer release decision (code in CCS-246).
+- Follow-up [CCS-243](../P5-protocol-ir-commands/CCS-243-p5-usage-token-name-check.md): Add a check script that keeps cache-token field names inside codec/ and usage/.
+- Follow-up [CCS-244](../P5-protocol-ir-commands/CCS-244-p5-usage-token-names-out-of-taps.md): Move cache-token field parsing out of stream taps, session_usage and the provider testkit.
+- Follow-up [CCS-245](../P5-protocol-ir-commands/CCS-245-p5-proxy-repoint-legacy-reexports.md): Repoint non-legacy callers from legacy transform re-exports to codec::*.
+- Follow-up [CCS-246](../P5-protocol-ir-commands/CCS-246-p5-codec-engine-ir-default.md): Prepare the default flip to codecEngine = ir (merge needs a maintainer release decision).

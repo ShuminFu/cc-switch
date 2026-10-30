@@ -33,3 +33,8 @@ None.
   - `git grep -n 'convertFileSrc\|asset://' -- src`: no matches.
 - **Remaining:** The "icons still render in `pnpm tauri dev`" check needs someone to look at the app on a desktop session, which this headless environment can't do. The risk is low: icons come from bundled imports or `data:`/`https:` URLs, and none use `asset://`.
 - **Review:** Confirmed both config and feature are removed together, no Rust code touches the asset scope, `tauri.windows.conf.json` has no override, and no file under `src/` references `convertFileSrc` or `asset://` (the only other hit is an ESLint fixture string in `tests/lint/eslintConfig.test.ts`). Follow-up: the `src/` scan in `tests/lint/assetProtocol.test.ts` only looked at `.ts`/`.tsx`, while the acceptance grep covers every file; it now also scans `.js`/`.jsx`/`.css`/`.html`/`.json`/`.svg`. Re-verified: full `cargo test --no-fail-fast` 2373 passed / 0 failed, `pnpm test:unit` 1387 passed, `pnpm typecheck` OK, Prettier OK. Status stays Partial until the icon check in `pnpm tauri dev` is done by hand.
+
+### Remaining after triage
+
+- Blocked: nothing; every remaining item is codable.
+- Follow-up [CCS-226](../P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md): Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec.

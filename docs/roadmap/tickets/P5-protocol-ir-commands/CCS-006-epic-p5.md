@@ -103,3 +103,20 @@ Audited 2026-10-30 on `claude/funny-carson-9c7j3e` (c0c770a, after the lane-2 P5
 5. **Partial child tickets that need CI or manual checks.** These do not block a specific exit criterion, but they keep their tickets open:
    - CCS-179: the macOS terminal tests need a macOS CI run. Windows already ran under Wine.
    - CCS-184: resume needs a manual check on real Windows and Linux desktops.
+
+### Remaining after triage
+
+- Blocked: Make codecEngine=ir the default in a release and delete the 10 legacy transform/streaming files and the flag. Time-gated: one release with ir and no regressions (CCS-246 prepares the flip).
+- Blocked: Net line reduction ≥ 8k. Needs a human decision: the deletion nets about -2.8k, so the target must be revised or duplicated codec tests trimmed.
+- Blocked: Grep criterion for taps.rs/session_usage.rs/testkit.rs. Needs a human decision to allow them, unless CCS-244 moves them.
+- Blocked: Run the ratcheted coverage-rust gate. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history).
+- Blocked: Proxy fix commits per release below the P0 baseline. Needs v4.0 shipped with release tags.
+- Blocked: CCS-179 macOS terminal tests and CCS-184 manual resume on real Windows/Linux desktops. Need a Mac or macOS CI, and interactive desktop use.
+- Follow-up [CCS-222](../P0-safety-net/CCS-222-p0-coverage-remeasure-baseline.md): Re-measure the coverage baseline on a clean tree and record proxy/ and database/ numbers.
+- Follow-up [CCS-241](../P5-protocol-ir-commands/CCS-241-p5-commands-settings-test-split.md): Move the commands/settings.rs test module into its own file.
+- Follow-up [CCS-242](../P5-protocol-ir-commands/CCS-242-p5-coverage-min-threshold.md): Add a ratcheting --min threshold to coverage-summary.mjs and gate coverage-rust on it.
+- Follow-up [CCS-243](../P5-protocol-ir-commands/CCS-243-p5-usage-token-name-check.md): Add a check script that keeps cache-token field names inside codec/ and usage/.
+- Follow-up [CCS-244](../P5-protocol-ir-commands/CCS-244-p5-usage-token-names-out-of-taps.md): Move cache-token field parsing out of stream taps, session_usage and the provider testkit.
+- Follow-up [CCS-246](../P5-protocol-ir-commands/CCS-246-p5-codec-engine-ir-default.md): Prepare the default flip to codecEngine = ir (merge needs a maintainer release decision).
+- Follow-up [CCS-247](../P5-protocol-ir-commands/CCS-247-p5-terminal-applescript-builders-neutral.md): Move the macOS AppleScript builders into an OS-neutral module so their tests run on Linux.
+- Follow-up [CCS-248](../P5-protocol-ir-commands/CCS-248-p5-e2e-session-resume-linux.md): Automate the Linux session-resume check under xvfb with a fake claude.

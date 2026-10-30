@@ -84,3 +84,7 @@ p1-powershell-quote, p0-hotfix-terminal-tempfiles
 - **macOS** (`x86_64-apple-darwin`): with C build scripts stubbed out, which is enough for a check-only build, `cargo clippy --lib --tests` is clean for `platform/terminal/macos.rs` and the macOS branches. The macOS tests were not run, so the 3-OS item stays open until a macOS CI run.
 - **Linux**: `cargo test --no-fail-fast` gave 3003 passed, 0 failed. `--lib` gave 2771 passed. fmt and clippy are clean.
 
+### Remaining after triage
+
+- Blocked: 'Terminal unit tests pass on 3 OSes' still needs a native macOS run. Needs the macos-latest CI leg or a Mac.
+- Follow-up [CCS-247](../P5-protocol-ir-commands/CCS-247-p5-terminal-applescript-builders-neutral.md): Move the macOS AppleScript builders into an OS-neutral module so their tests run on Linux.

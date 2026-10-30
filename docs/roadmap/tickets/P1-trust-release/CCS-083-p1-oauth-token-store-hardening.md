@@ -85,3 +85,8 @@ Keychain migration stays in p4-keychain-secrets.
 **Remaining.** The Windows ACL test has not been executed: it runs in the
 existing `windows-latest` job of `.github/workflows/ci.yml` (`cargo test`).
 Mark the "Windows CI test" item done once that job passes.
+
+### Remaining after triage
+
+- Blocked: Windows CI test `config::tests::atomic_write_secret_sets_owner_only_acl`. Needs a Windows machine or the windows-latest backend matrix job.
+- Follow-ups: none; nothing left here can be coded or verified locally.

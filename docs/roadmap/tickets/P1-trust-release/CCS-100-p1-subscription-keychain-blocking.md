@@ -49,3 +49,9 @@ None.
 **Remaining (needs macOS):** run `cargo clippy` on the macOS CI runner, and manually confirm other commands keep responding while a keychain prompt is open (and that the quota falls back to the file after 20 s if the prompt is ignored).
 
 **Review.** Independent review confirmed the acceptance items that can be checked on Linux: the grep finds no matches, every keychain reader goes through the async helper with `kill_on_drop` and a 20 s timeout and falls back to the file, and the `current_thread` slow-reader tests check the fix. One defect was fixed. `run_secret_command` and the `Duration` import were gated `any(target_os = "macos", test)`, but every test that calls the helper is `#[cfg(unix)]`. The Windows CI job (`cargo clippy --all-targets -- -D warnings`) would therefore have failed with "function `run_secret_command` is never used". The gate is now `any(target_os = "macos", all(test, unix))`. Checked on Linux by temporarily switching the test gates to `windows`: the old gate reproduces the error and the new one is clean. Re-verified: `cargo fmt --check` is clean, `cargo clippy --all-targets -- -D warnings` is clean, `cargo test --lib subscription` gives 8 passed, and `cargo test --lib` gives 2276 passed / 0 failed. Status stays Partial because the macOS-only checks above are still outstanding.
+
+### Remaining after triage
+
+- Blocked: AC2a: `cargo clippy` on the macOS runner. Needs a macos-latest Actions run or a Mac.
+- Blocked: AC2b: other commands respond while a real keychain prompt is open, and the 20 s fallback. Needs interactive use on a Mac with a real Keychain entry.
+- Follow-ups: none; nothing left here can be coded or verified locally.

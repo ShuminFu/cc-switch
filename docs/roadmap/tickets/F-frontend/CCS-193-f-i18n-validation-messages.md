@@ -56,3 +56,8 @@ f-providerform-shell, p0-ci-i18n-parity
 - `tomlToMcpServer` errors now follow the UI language. The Chinese matchers for these strings in `translateMcpBackendError` are not affected, because `tomlToMcpServer` errors never reach that function (only backend save errors do).
 - Follow-up: translated the Chinese test titles in `src/lib/version.test.ts` to English, so the only non-comment grep matches left are the backend/usage-script message matchers in `src/utils/errorUtils.ts` and `src/lib/query/queries.ts:161,163`. Status stays Partial until the backend returns structured error codes.
 - Re-verified: `pnpm typecheck` pass; `pnpm test:unit` 141 files / 1393 tests pass; `pnpm format:check` clean.
+
+### Remaining after triage
+
+- Blocked: nothing; every remaining item is codable.
+- Follow-up [CCS-253](../F-frontend/CCS-253-f-i18n-usage-cjk-matchers.md): Remove the dead Chinese usage-script matchers from queries.ts and close CCS-193.

@@ -118,3 +118,11 @@ Partial: making the checks required in branch protection still needs a human.
   protection for `main`.
 - Refresh `src-tauri/Cargo.lock` with `cargo update` and prune the baseline.
   Upgrade zip; upgrade vitest to ≥3.2.6 or 4 and drop the 4 ignored GHSAs.
+
+### Remaining after triage
+
+- Blocked: Make the cargo-deny and pnpm audit checks required on main. Needs a repo admin to change branch protection, after at least one Actions run.
+- Blocked: zstd 0.13 / zstd-safe 7 advisories (RUSTSEC-2026-0391/0398/0403). Need an upstream fixed release; re-check during CCS-214.
+- Follow-up [CCS-214](../P0-safety-net/CCS-214-p0-deps-cargo-update-deny-baseline.md): Refresh Cargo.lock and prune the cargo-deny advisory baseline.
+- Follow-up [CCS-215](../P0-safety-net/CCS-215-p0-deps-zip-upgrade.md): Upgrade the direct zip dependency to a release that fixes RUSTSEC-2026-0367/0368/0369.
+- Follow-up [CCS-216](../P0-safety-net/CCS-216-p0-deps-vitest-upgrade.md): Upgrade vitest 2.x to >=3.2.6 and drop the 4 ignored GHSAs from pnpm audit.

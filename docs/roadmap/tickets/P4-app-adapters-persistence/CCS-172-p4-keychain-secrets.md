@@ -116,3 +116,10 @@ startup. Re-verified with `cargo test secret_store` (17 passed), the full
 `cargo test --no-fail-fast` (2684 passed, 0 failed), `cargo clippy --all-targets -- -D warnings`
 and `cargo fmt --check`. Status stays **Partial** until the manual check runs on macOS, Windows
 and Linux.
+
+### Remaining after triage
+
+- Blocked: Manual check on macOS (Keychain Access entries and prompts, downgrade path). Needs a Mac and a human tester.
+- Blocked: Manual check on Windows (Credential Manager, owner-only ACL on the fallback, PowerShell downgrade). Needs a Windows machine and a human tester.
+- Blocked: KWallet path and real interactive unlock prompts on a Linux desktop. Needs an interactive desktop session; CCS-240 covers the Secret Service API.
+- Follow-up [CCS-240](../P4-app-adapters-persistence/CCS-240-p4-secrets-linux-secret-service-check.md): Exercise KeyringSecretStore against a headless gnome-keyring and the no-D-Bus fallback.

@@ -59,3 +59,9 @@ Baseline recorded (linux-x86_64, debug): p50 2.87 ms, p95 3.18 ms, 17 SQL statem
 - The macOS and Windows results need the CI `backend` matrix. It already runs `cargo test` on ubuntu-22.04, windows-latest and macos-latest, so `proxy_e2e` runs there with no workflow change. Platform risks to watch: the allocation count per request (gated at 3x for this reason) and the 1.1 s half-open wait.
 - Uploading `src-tauri/target/tmp/proxy-e2e-perf.json` as a CI artifact (an `actions/upload-artifact` step after "Run tests") was left to the CI lane, because `.github/workflows/ci.yml` belongs to the concurrent CI/docs lane.
 - `src-tauri/src/proxy/**` was not changed, so the proxy-fixture rule (CCS-034) does not apply.
+
+### Remaining after triage
+
+- Blocked: proxy_e2e green on macOS and Windows in the backend matrix. Needs a windows-latest/macos-latest run of the ci.yml backend matrix, or real machines (cross-compiling to windows-gnu/apple fails on aws-lc-sys).
+- Blocked: Confirming the perf artifact actually uploads. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history).
+- Follow-up [CCS-213](../P0-safety-net/CCS-213-p0-ci-proxy-perf-artifact.md): Upload the proxy_e2e perf JSON as a CI artifact from the backend matrix.

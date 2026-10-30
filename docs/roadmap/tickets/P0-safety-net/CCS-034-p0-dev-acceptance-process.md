@@ -92,3 +92,10 @@ separate commit.
 - actionlint was not run. It is not installed, and installing it from the
   network was not permitted in this session. The workflow was only
   validated as YAML and by the text checks in the test.
+
+### Remaining after triage
+
+- Blocked: Make 'Proxy fixture required' a required check on main. Needs a repo admin (branch protection).
+- Blocked: Create the `no-fixture-needed` and `fixtures` labels. Needs repo write access and a human decision.
+- Blocked: See the proxy-fixture workflow pass/fail on a real PR. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history) (the 13-case local test stands in).
+- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.

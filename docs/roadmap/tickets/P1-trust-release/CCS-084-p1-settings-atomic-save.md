@@ -52,3 +52,8 @@ p1-atomic-write-perms
 **Remaining (why Partial)**
 - Showing the failure in the UI is frontend-lane work and is not done here: on startup the frontend should call `get_settings_load_failure`. If `backupPath` is set, it should show a notice with that path. If it is null, it should explain that saving is blocked and offer a confirm action that calls `acknowledge_settings_load_failure`. The backend commands are in place; there is no TS wrapper or i18n strings yet.
 - The Windows owner-only ACL path relies on `atomic_write_secret` (CCS-083) and was not exercised on a Windows runner here.
+
+### Remaining after triage
+
+- Blocked: Windows owner-only DACL path of atomic_write_secret. Needs a Windows machine or Windows CI run.
+- Follow-up [CCS-225](../P1-trust-release/CCS-225-p1-settings-load-failure-notice.md): Show a startup notice and confirm flow when settings.json failed to load.

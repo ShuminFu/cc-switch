@@ -96,3 +96,8 @@ the wiring test were updated. Status stays Partial (fork check still manual).
   `curl -sIL https://github.com/<fork>/releases/latest/download/latest.json`
   redirects to the new tag (the workflow's "Verify updater endpoint" step does
   this automatically).
+
+### Remaining after triage
+
+- Blocked: AC2: after promotion, `curl -sIL .../releases/latest/download/latest.json` redirects to the new tag. Needs a fork with a published release and a manual promote-release.yml run.
+- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.

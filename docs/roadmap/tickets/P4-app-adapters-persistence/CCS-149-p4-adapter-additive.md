@@ -81,3 +81,13 @@ The budget constant should be lowered as each of those tickets lands.
 
 **Follow-ups for other lanes.**
 - `src/config/hermesProviderSource.ts` has a doc comment that still says `hermes_config.rs::get_providers`; it should now be `apps/hermes/config.rs`. That file is in the frontend lane, so I did not edit it.
+
+### Remaining after triage
+
+- Blocked: Removing the 2 sites in takeover/legacy.rs. Time-gated by CCS-154 (legacy engine deleted one release after it ships); not needed to reach ≤ 15.
+- Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
+- Follow-up [CCS-232](../P4-app-adapters-persistence/CCS-232-p4-apps-budget-ratchet.md): Make the match-app counter skip test-only modules and ratchet both app budgets to today's counts.
+- Follow-up [CCS-233](../P4-app-adapters-persistence/CCS-233-p4-apps-ninth-app-six-files.md): Make a 9th app touch 6 or fewer backend files.
+- Follow-up [CCS-234](../P4-app-adapters-persistence/CCS-234-p4-takeover-dispatch-via-adapter.md): Route takeover per-app dispatch through ProxyTakeover instead of AppType matches.
+- Follow-up [CCS-235](../P4-app-adapters-persistence/CCS-235-p4-apps-config-profile-keyed-access.md): Replace per-app field matches in app_config.rs and services/profile.rs with keyed access.
+- Follow-up [CCS-236](../P4-app-adapters-persistence/CCS-236-p4-apps-match-sites-under-15.md): Move the remaining stream-check, terminal and proxy-provider dispatch into adapters and set the match-app budget to 15 or fewer.

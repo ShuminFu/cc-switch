@@ -108,3 +108,13 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e` (HEAD `c0c770a`, 
 - **CCS-100 (keychain off main thread).** Needs `cargo clippy` on the macOS CI runner, plus a manual check on macOS that other commands keep responding while a keychain prompt is open and that the quota falls back to the credentials file after 20 s.
 
 Once the Windows CI run passes, tick criterion 5 and set this epic to Done. The other items are child-ticket closures and do not block any exit criterion.
+
+### Remaining after triage
+
+- Blocked: Exit criterion 5 / CCS-079 / CCS-083 / CCS-084 Windows parts (rename_replace without pre-delete, owner-only DACL test). Need a Windows machine or a green windows-latest CI job.
+- Blocked: CCS-061 [::1]-listener tests. Need a host or CI runner with IPv6 loopback (this container has none).
+- Blocked: CCS-100 macOS clippy and keychain-prompt responsiveness check. Need a macOS machine or the macos-latest CI job.
+- Blocked: CCS-077 real Copilot avatar / models.dev data load. Need outbound access and a signed-in Copilot account (CCS-226 checks the CSP side).
+- Follow-up [CCS-225](../P1-trust-release/CCS-225-p1-settings-load-failure-notice.md): Show a startup notice and confirm flow when settings.json failed to load.
+- Follow-up [CCS-226](../P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md): Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec.
+- Follow-up [CCS-228](../P1-trust-release/CCS-228-p1-config-atomic-write-wine.md): Run the Windows rename_replace / atomic_write path under Wine as interim evidence.

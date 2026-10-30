@@ -112,3 +112,11 @@ docs/dev/SECRET_STORAGE.md.
   - make the key mandatory once the UI ships;
   - add rollback protection: a re-uploaded older signed manifest still verifies, so reject
     `createdAt` older than the last applied one.
+
+### Remaining after triage
+
+- Blocked: Make the sync key mandatory (refuse unsigned uploads/imports with no key). Needs a product decision after the key UI ships in a release.
+- Blocked: Bind the signature to the remote location/profile. Needs a protocol decision and a manifest version bump.
+- Follow-up [CCS-237](../P4-app-adapters-persistence/CCS-237-p4-sync-key-field-api.md): Add the sync-key field to sync settings and expose signature/allowUnsigned in the API layer.
+- Follow-up [CCS-238](../P4-app-adapters-persistence/CCS-238-p4-sync-unsigned-migration-prompt.md): Prompt before applying unsigned snapshots and block tampered ones, with i18n for sync.* errors.
+- Follow-up [CCS-239](../P4-app-adapters-persistence/CCS-239-p4-sync-manifest-rollback-protection.md): Reject signed sync manifests older than the last applied one.

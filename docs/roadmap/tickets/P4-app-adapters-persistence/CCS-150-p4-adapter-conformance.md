@@ -78,3 +78,10 @@ All of that is outside this ticket's scope.
 - The lib-side `match_app_sites()` counter (CCS-149) counts the test-only `proxy/usage/cost_golden.rs`. Its `production_source` also treats `#[cfg(test)] mod foo;` as the start of a block. The counter here handles both cases. Fixing the lib counter would lower its count by 1.
 
 **Review.** I checked every acceptance criterion against commits `6d1baa0` and `8063438`, and re-ran the suite (13 passed), the counter (10 files, list as above), clippy `--all-targets`, and the full `cargo test --no-fail-fast` (lib 2357 passed, all integration binaries green). Partial remains the correct status: only the 6-file target is unmet. One gap fixed: `prompt_and_skills_paths_for_every_app` failed on any machine with `XDG_DATA_HOME` set. OpenCode deliberately puts its session root under that directory, so the root lands outside the test HOME. The check now accepts a root under a non-empty `XDG_DATA_HOME` and still requires the test HOME otherwise, so the `get_home_dir()` regression is still caught when the variable is unset. Verified with and without `XDG_DATA_HOME=/tmp/...`: 13 passed both ways.
+
+### Remaining after triage
+
+- Blocked: nothing; every remaining item is codable.
+- Follow-up [CCS-232](../P4-app-adapters-persistence/CCS-232-p4-apps-budget-ratchet.md): Make the match-app counter skip test-only modules and ratchet both app budgets to today's counts.
+- Follow-up [CCS-233](../P4-app-adapters-persistence/CCS-233-p4-apps-ninth-app-six-files.md): Make a 9th app touch 6 or fewer backend files.
+- Follow-up [CCS-236](../P4-app-adapters-persistence/CCS-236-p4-apps-match-sites-under-15.md): Move the remaining stream-check, terminal and proxy-provider dispatch into adapters and set the match-app budget to 15 or fewer.

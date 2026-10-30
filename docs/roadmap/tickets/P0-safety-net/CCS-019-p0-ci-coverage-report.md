@@ -56,3 +56,8 @@ None.
 **Review** (fix(ci): review follow-up for CCS-019): (1) `coverage.exclude: ["src/**/*.d.ts"]` replaced vitest's default excludes, so colocated `src/**/*.test.ts` files were counted as covered source; it now spreads `coverageConfigDefaults.exclude`. (2) vitest skips writing the report when any test fails (`reportOnFailure` defaults to false), so one flaky test would leave the report-only job with no artifact; set `reportOnFailure: true`. (3) Under v8 instrumentation `tests/integration/App.test.tsx` reproducibly exceeded the 5s default test timeout (5.1s), so `test:coverage` now passes `--testTimeout=20000`. Frontend baseline refreshed (52.68% -> 52.47% lines, `src/lib` 34.23% -> 33.51%); the Rust baseline is unchanged but flagged in perf-baseline.json as measured with the parallel lane's uncommitted proxy test changes in the tree. Re-verified: `pnpm test:coverage` 79 files / 530 tests green with report written, `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test:unit`, `npx vitest run tests/scripts` pass. Status stays Partial (PR-run artifact check still needs GitHub Actions).
 
 **Remaining:** confirm on the first PR run that both artifacts upload and the job summaries render (needs GitHub Actions).
+
+### Remaining after triage
+
+- Blocked: AC1: coverage-frontend/coverage-rust artifacts and per-directory summaries on a PR run. Needs a real GitHub Actions PR run.
+- Follow-up [CCS-222](../P0-safety-net/CCS-222-p0-coverage-remeasure-baseline.md): Re-measure the coverage baseline on a clean tree and record proxy/ and database/ numbers.

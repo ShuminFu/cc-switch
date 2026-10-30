@@ -35,3 +35,10 @@ None.
 **Remaining (cannot be done from this environment).**
 - Fork test: push a `v*` tag on a commit with a failing test and confirm that `release` and `publish-release` are skipped. This needs a GitHub fork with Actions enabled.
 - Required reviewers on the `release` environment: a repository setting (Settings → Environments → `release` → Required reviewers). A maintainer has to set it.
+
+### Remaining after triage
+
+- Blocked: Fork test: a v* tag on a red commit skips release, publish-release and assemble-latest-json. Needs a real Actions run on a fork (act does not emulate reusable workflows or needs-skip).
+- Blocked: Required reviewers on the `release` environment. Needs a maintainer to change GitHub environment settings.
+- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Follow-up [CCS-218](../P0-safety-net/CCS-218-p0-ci-release-regression-tests.md): Add executable regression tests for the release gate, signing-key validation and SHA256SUMS.

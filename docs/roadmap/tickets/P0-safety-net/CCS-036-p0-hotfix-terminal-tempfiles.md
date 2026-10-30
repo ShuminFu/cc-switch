@@ -73,3 +73,10 @@ mode 0600, or 0700 for scripts, then `keep()`).
   - launching A and then B quickly shows each one its own config path
 - The cfg-gated macOS and Windows branches were reviewed but not compiled. Only the
   `x86_64-unknown-linux-gnu` target is installed here, so a macOS/Windows CI build should confirm them.
+
+### Remaining after triage
+
+- Blocked: Compile and run the cfg-gated macOS/Windows branches (platform/terminal/macos.rs, windows.rs). Needs a windows-latest/macos-latest run of the ci.yml backend matrix, or real machines (cross-compiling to windows-gnu/apple fails on aws-lc-sys).
+- Blocked: Confirmation on a real desktop terminal (gnome-terminal/konsole with the real claude CLI). Needs interactive desktop use; CCS-223 covers the Linux behaviour.
+- Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
+- Follow-up [CCS-223](../P0-safety-net/CCS-223-p0-terminal-tempfile-headless-e2e.md): Headless Linux end-to-end check of private terminal temp files, plus temp-dir selection tests.
