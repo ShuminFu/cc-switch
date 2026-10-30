@@ -1907,6 +1907,72 @@ requires_openai_auth = true
 
     #[test]
     #[serial]
+    fn import_additive_providers_from_live_skips_entries_taken_over_by_the_proxy() {
+        with_test_home(|state, _| {
+            let proxy_url = "http://127.0.0.1:15721/opencode/v1";
+            let token = crate::proxy::inbound_auth::LEGACY_PROXY_TOKEN;
+
+            let opencode = opencode_provider("taken-over-opencode");
+            let mut opencode_live = opencode.settings_config.clone();
+            opencode_live["options"]["baseURL"] = json!(proxy_url);
+            opencode_live["options"]["apiKey"] = json!(token);
+            let openclaw = openclaw_provider("taken-over-openclaw");
+            let mut openclaw_live = openclaw.settings_config.clone();
+            openclaw_live["baseUrl"] = json!(proxy_url);
+            openclaw_live["apiKey"] = json!(token);
+            openclaw_live["models"] = json!([{ "id": "m", "name": "M" }]);
+            let hermes = hermes_provider("taken-over-hermes");
+            let mut hermes_live = hermes.settings_config.clone();
+            hermes_live["base_url"] = json!(proxy_url);
+            hermes_live["api_key"] = json!(token);
+
+            for (app, provider) in [
+                (AppType::OpenCode, &opencode),
+                (AppType::OpenClaw, &openclaw),
+                (AppType::Hermes, &hermes),
+            ] {
+                state
+                    .db
+                    .save_provider(app.as_str(), provider)
+                    .expect("seed provider");
+            }
+            crate::opencode_config::set_provider(&opencode.id, opencode_live.clone())
+                .expect("seed opencode live");
+            crate::opencode_config::set_provider("new-opencode", opencode_live)
+                .expect("seed unknown opencode live entry");
+            crate::openclaw_config::set_provider(&openclaw.id, openclaw_live)
+                .expect("seed openclaw live");
+            crate::hermes_config::set_provider(&hermes.id, hermes_live).expect("seed hermes live");
+
+            assert_eq!(import_opencode_providers_from_live(state).unwrap(), 0);
+            assert_eq!(import_openclaw_providers_from_live(state).unwrap(), 0);
+            assert_eq!(import_hermes_providers_from_live(state).unwrap(), 0);
+
+            for (app, provider) in [
+                (AppType::OpenCode, &opencode),
+                (AppType::OpenClaw, &openclaw),
+                (AppType::Hermes, &hermes),
+            ] {
+                let saved = state
+                    .db
+                    .get_provider_by_id(&provider.id, app.as_str())
+                    .unwrap()
+                    .expect("provider kept");
+                assert_eq!(
+                    saved.settings_config, provider.settings_config,
+                    "{app:?}: the proxy endpoint must not replace the provider's real one"
+                );
+            }
+            assert!(state
+                .db
+                .get_provider_by_id("new-opencode", AppType::OpenCode.as_str())
+                .unwrap()
+                .is_none());
+        });
+    }
+
+    #[test]
+    #[serial]
     fn legacy_additive_provider_still_errors_on_live_config_parse_failure() {
         with_test_home(|state, home| {
             let provider = openclaw_provider("legacy-provider");

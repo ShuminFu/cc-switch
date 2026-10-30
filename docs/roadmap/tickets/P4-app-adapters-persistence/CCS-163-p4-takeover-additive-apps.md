@@ -12,9 +12,9 @@ Wire routing already exists for these apps, but takeover is hard-coded false for
 Implement ProxyTakeover for the additive adapters, rewriting only the selected entry's baseUrl, and include them in failover and usage.
 
 ## Acceptance criteria / verification
-- [ ] Crash/restore E2E is green for opencode, openclaw and hermes
-- [ ] Conformance takeover checks pass
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml takeover` and `pnpm test:unit`
+- [x] Crash/restore E2E is green for opencode, openclaw and hermes
+- [x] Conformance takeover checks pass
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml takeover` and `pnpm test:unit`
 
 ## Dependencies
 p4-takeover-engine
@@ -83,3 +83,13 @@ p4-takeover-engine
 **Remaining / limitations.**
 - Only verified on Linux. The CI matrix runs the same suites on Windows and macOS.
 - Taking over Anthropic-protocol entries would need `/<app>/v1/messages` routes and Anthropic upstream auth for these apps. That is out of scope here.
+
+**Review.** I checked the commits against each acceptance criterion and followed the call sites that read or write these apps' live files during takeover: provider save and sync (`write_live_with_common_config`, `sync_all_providers_to_live`), hot switch, the restore and no-backup fallbacks, `proxy_config` updates, startup restore and exit cleanup. These hold up. I found one defect and fixed it.
+- **Defect.** The additive importers (`import_{opencode,openclaw,hermes}_providers_from_live`) copied live entries into the database. At startup they run (step 1.6) before crash recovery, and they also run from the manual import button.
+  - **Effect.** After a crash or forced quit during takeover, the taken-over entry's proxy URL and token were saved into its CC Switch provider (the SSOT). The real endpoint survived only in the backup, so the next takeover proxied to itself.
+- **Fix.** `live_entry_taken_over` in `services/provider/live.rs` makes these importers skip any entry that carries the proxy token.
+- **Regression test.** `import_additive_providers_from_live_skips_entries_taken_over_by_the_proxy` covers all three apps. It fails without the fix.
+- **Re-verified on Linux.**
+  - fmt and clippy (`-D warnings`) are clean.
+  - `cargo test takeover` passes, and so does the full `cargo test --no-fail-fast`.
+  - `pnpm typecheck` and `pnpm test:unit` pass.

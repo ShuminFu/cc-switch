@@ -435,6 +435,25 @@ pub fn should_import_default_config_on_startup(
     Ok(!state.db.has_any_provider_for_app(app_type.as_str())?)
 }
 
+/// 被代理接管的 live 条目（带代理 token）不是用户的真实配置。
+///
+/// 启动时的自动导入早于崩溃恢复运行；若此时把这类条目导入（或用它更新已有
+/// 供应商），供应商（SSOT）会记下本地代理地址与 token，恢复后代理把请求
+/// 转发给自己。跳过这些条目，接管备份负责恢复它们。
+fn live_entry_taken_over(app: &str, entry: &Value) -> bool {
+    let taken_over = app.parse::<AppType>().is_ok_and(|app_type| {
+        crate::apps::adapter(&app_type)
+            .takeover()
+            .is_some_and(|takeover| takeover.has_placeholder(entry))
+    });
+    if taken_over {
+        log::info!(
+            "Skipping {app} provider entry taken over by the proxy while importing live config"
+        );
+    }
+    taken_over
+}
+
 /// Import all providers from OpenCode live config to database
 ///
 /// This imports existing providers from ~/.config/opencode/opencode.json
@@ -461,6 +480,9 @@ pub fn import_opencode_providers_from_live(state: &AppState) -> Result<usize, Ap
                 continue;
             }
         };
+        if live_entry_taken_over("opencode", &settings_config) {
+            continue;
+        }
 
         if existing_ids.contains(&id) {
             match state.db.get_provider_by_id(&id, "opencode") {
@@ -546,6 +568,9 @@ pub fn import_openclaw_providers_from_live(state: &AppState) -> Result<usize, Ap
                 continue;
             }
         };
+        if live_entry_taken_over("openclaw", &settings_config) {
+            continue;
+        }
 
         if existing_ids.contains(&id) {
             match state.db.get_provider_by_id(&id, "openclaw") {
@@ -619,6 +644,9 @@ pub fn import_hermes_providers_from_live(state: &AppState) -> Result<usize, AppE
         // Validate: skip entries with empty name
         if name.trim().is_empty() {
             log::warn!("Skipping Hermes provider with empty name");
+            continue;
+        }
+        if live_entry_taken_over("hermes", &config) {
             continue;
         }
 
