@@ -2721,10 +2721,13 @@ fn launch_terminal_with_env(
     provider_id: &str,
     cwd: Option<&Path>,
 ) -> Result<(), String> {
-    let temp_dir = std::env::temp_dir();
-    let config_file = temp_dir.join(format!(
+    // The config holds the provider API key: keep it in a private (0700)
+    // directory, readable only by the current user (0600). The launcher
+    // deletes it when the terminal session ends.
+    let private_dir = private_launch_dir()?;
+    let config_file = private_dir.join(format!(
         "claude_{}_{}.json",
-        provider_id,
+        sanitize_file_component(provider_id),
         std::process::id()
     ));
 
@@ -2732,25 +2735,25 @@ fn launch_terminal_with_env(
     write_claude_config(&config_file, &env_vars)?;
 
     #[cfg(target_os = "macos")]
-    {
-        launch_macos_terminal(&config_file, cwd)?;
-        Ok(())
-    }
+    let result = launch_macos_terminal(&config_file, cwd);
 
     #[cfg(target_os = "linux")]
-    {
-        launch_linux_terminal(&config_file, cwd)?;
-        Ok(())
-    }
+    let result = launch_linux_terminal(&config_file, cwd);
 
     #[cfg(target_os = "windows")]
-    {
-        launch_windows_terminal(&temp_dir, &config_file, cwd)?;
-        Ok(())
-    }
+    let result = launch_windows_terminal(&std::env::temp_dir(), &config_file, cwd);
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    Err("不支持的操作系统".to_string())
+    let result: Result<(), String> = {
+        let _ = cwd;
+        Err("不支持的操作系统".to_string())
+    };
+
+    // Never leave the API key on disk when no terminal took ownership of it.
+    if result.is_err() {
+        let _ = std::fs::remove_file(&config_file);
+    }
+    result
 }
 
 /// 写入 claude 配置文件
@@ -2770,7 +2773,75 @@ fn write_claude_config(
     let config_json =
         serde_json::to_string_pretty(&config_obj).map_err(|e| format!("序列化配置失败: {e}"))?;
 
-    std::fs::write(config_file, config_json).map_err(|e| format!("写入配置文件失败: {e}"))
+    write_private_file(config_file, config_json.as_bytes())
+        .map_err(|e| format!("写入配置文件失败: {e}"))
+}
+
+/// Private directory for launcher files that contain secrets
+/// (`~/.cc-switch/tmp`, mode 0700 on Unix).
+fn private_launch_dir() -> Result<std::path::PathBuf, String> {
+    let dir = crate::config::get_app_config_dir().join("tmp");
+    ensure_private_dir(&dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
+    Ok(dir)
+}
+
+fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        // Tighten a directory that already existed with looser permissions.
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)?;
+    }
+    Ok(())
+}
+
+/// Write `contents` to `path` so that only the current user can read it
+/// (mode 0600 on Unix, also when the file already existed).
+fn write_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents)?;
+    file.flush()
+}
+
+/// Restrict a value used in a file name to `[A-Za-z0-9._-]`.
+fn sanitize_file_component(value: &str) -> String {
+    let cleaned: String = value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim_start_matches('.').to_string();
+    if cleaned.is_empty() {
+        "provider".to_string()
+    } else {
+        cleaned
+    }
 }
 
 /// macOS: 根据用户首选终端启动
@@ -2785,8 +2856,8 @@ fn launch_macos_terminal(config_file: &std::path::Path, cwd: Option<&Path>) -> R
     let exec_line = build_exec_line(&shell, cwd);
     let final_cd_command = build_final_shell_cd_command(&shell, cwd);
 
-    let temp_dir = std::env::temp_dir();
-    let script_file = temp_dir.join(format!("cc_switch_launcher_{}.sh", std::process::id()));
+    let script_file =
+        private_launch_dir()?.join(format!("cc_switch_launcher_{}.sh", std::process::id()));
     let config_path = config_file.to_string_lossy();
     let provider_command = build_provider_command_line(&shell, &config_path, cwd);
 
@@ -2808,10 +2879,11 @@ echo "{config_path}"
         exec_line = exec_line,
     );
 
-    std::fs::write(&script_file, &script_content).map_err(|e| format!("写入启动脚本失败: {e}"))?;
+    write_private_file(&script_file, script_content.as_bytes())
+        .map_err(|e| format!("写入启动脚本失败: {e}"))?;
 
-    // Make script executable
-    std::fs::set_permissions(&script_file, std::fs::Permissions::from_mode(0o755))
+    // Make script executable for the current user only
+    std::fs::set_permissions(&script_file, std::fs::Permissions::from_mode(0o700))
         .map_err(|e| format!("设置脚本权限失败: {e}"))?;
 
     // Try the preferred terminal first, fall back to Terminal.app if it fails
@@ -3057,7 +3129,7 @@ fn launch_macos_warp(script_file: &std::path::Path) -> Result<(), String> {
     // 2. script_file has no execution permission, so we need to add one more indirection
     let mut second_script_file = tempfile::Builder::new()
         .disable_cleanup(true)
-        .permissions(std::fs::Permissions::from_mode(0o755))
+        .permissions(std::fs::Permissions::from_mode(0o700))
         .tempfile()
         .map_err(|e| format!("Failed to create temporary script file: {e}"))?;
 
@@ -3117,9 +3189,9 @@ fn launch_linux_terminal(config_file: &std::path::Path, cwd: Option<&Path>) -> R
         ("ghostty", vec!["-e"]),
     ];
 
-    // Create temp script file
-    let temp_dir = std::env::temp_dir();
-    let script_file = temp_dir.join(format!("cc_switch_launcher_{}.sh", std::process::id()));
+    // Create launcher script in the private (0700) directory
+    let script_file =
+        private_launch_dir()?.join(format!("cc_switch_launcher_{}.sh", std::process::id()));
     let config_path = config_file.to_string_lossy();
     let provider_command = build_provider_command_line(&shell, &config_path, cwd);
 
@@ -3139,9 +3211,10 @@ echo "{config_path}"
         exec_line = exec_line,
     );
 
-    std::fs::write(&script_file, &script_content).map_err(|e| format!("写入启动脚本失败: {e}"))?;
+    write_private_file(&script_file, script_content.as_bytes())
+        .map_err(|e| format!("写入启动脚本失败: {e}"))?;
 
-    std::fs::set_permissions(&script_file, std::fs::Permissions::from_mode(0o755))
+    std::fs::set_permissions(&script_file, std::fs::Permissions::from_mode(0o700))
         .map_err(|e| format!("设置脚本权限失败: {e}"))?;
 
     // Build terminal list: preferred terminal first (if specified), then defaults
@@ -3546,6 +3619,48 @@ mod tests {
         let mode = if executable { 0o755 } else { 0o644 };
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
             .expect("fixture permissions should be set");
+    }
+
+    #[test]
+    fn sanitize_file_component_strips_path_and_shell_characters() {
+        assert_eq!(sanitize_file_component("abc-123_x.y"), "abc-123_x.y");
+        assert_eq!(
+            sanitize_file_component("../../etc/passwd"),
+            "_.._etc_passwd"
+        );
+        assert_eq!(sanitize_file_component("a b;$(x)"), "a_b___x_");
+        assert_eq!(sanitize_file_component(""), "provider");
+        assert_eq!(sanitize_file_component("..."), "provider");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_config_is_written_owner_only_in_private_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dir = temp.path().join("tmp");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ensure_private_dir(&dir).expect("private dir");
+        let dir_mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dir_mode, 0o700);
+
+        let file = dir.join("claude_p_1.json");
+        // A pre-existing world-readable file must be tightened as well.
+        std::fs::write(&file, "old").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_claude_config(
+            &file,
+            &[("ANTHROPIC_AUTH_TOKEN".to_string(), "sk-secret".to_string())],
+        )
+        .expect("write config");
+
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert!(content.contains("sk-secret"));
+        assert!(!content.contains("old"));
     }
 
     #[test]
