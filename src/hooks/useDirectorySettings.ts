@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { settingsApi, type AppId } from "@/lib/api";
 import type { SettingsFormState } from "./useSettingsForm";
+import { sanitizeDir } from "./settingsDirectoryFields";
 
 export type DirectoryAppId = Exclude<AppId, "claude-desktop">;
 type AppDirectoryKey =
@@ -52,12 +53,6 @@ const DIRECTORY_KEY_TO_SETTINGS_FIELD: Record<
   opencode: "opencodeConfigDir",
   openclaw: "openclawConfigDir",
   hermes: "hermesConfigDir",
-};
-
-const sanitizeDir = (value?: string | null): string | undefined => {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
 };
 
 const computeDefaultAppConfigDir = async (): Promise<string | undefined> => {
@@ -245,11 +240,15 @@ export function useDirectorySettings({
   const updateDirectoryState = useCallback(
     (key: DirectoryKey, value?: string) => {
       const sanitized = sanitizeDir(value);
+      // Keep the raw text while the user is typing (trimming per keystroke
+      // eats the space in "John Doe"); a blank value clears the override.
+      // Trimming happens on blur and when the settings are saved.
+      const stored = sanitized === undefined ? undefined : value;
       if (key === "appConfig") {
-        setAppConfigDir(sanitized);
+        setAppConfigDir(stored);
       } else {
         onUpdateSettings({
-          [DIRECTORY_KEY_TO_SETTINGS_FIELD[key]]: sanitized,
+          [DIRECTORY_KEY_TO_SETTINGS_FIELD[key]]: stored,
         });
       }
 
