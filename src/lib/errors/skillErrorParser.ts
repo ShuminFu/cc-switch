@@ -39,9 +39,54 @@ function getErrorI18nKey(code: string): string {
     EMPTY_ARCHIVE: "skills.error.emptyArchive",
     GET_HOME_DIR_FAILED: "skills.error.getHomeDirFailed",
     NO_SKILLS_IN_ZIP: "skills.error.noSkillsInZip",
+    ARCHIVE_UNSAFE_ENTRY: "skills.error.archiveUnsafeEntry",
+    ARCHIVE_TOO_MANY_ENTRIES: "skills.error.archiveTooManyEntries",
+    ARCHIVE_TOO_LARGE: "skills.error.archiveTooLarge",
+    INVALID_SKILL_DIRECTORY: "skills.error.invalidSkillDirectory",
   };
 
   return mapping[code] || "skills.error.unknownError";
+}
+
+/**
+ * English fallbacks for error codes whose locale keys are newer than the
+ * locale files. Returned text may use the (augmented) context variables.
+ */
+function getErrorDefaultValue(
+  code: string,
+  context: Record<string, string>,
+): string | undefined {
+  switch (code) {
+    case "ARCHIVE_UNSAFE_ENTRY":
+      return "The archive contains an unsafe entry and was rejected: {{entry}}";
+    case "ARCHIVE_TOO_MANY_ENTRIES":
+      return "The archive has too many entries ({{entries}}, limit {{limit}}).";
+    case "ARCHIVE_TOO_LARGE":
+      return "The archive is too large (limit {{limit_mb}} MB).";
+    case "INVALID_SKILL_DIRECTORY":
+      return context.directory
+        ? "Invalid or unsafe skill directory: {{directory}}"
+        : "The archive does not contain a valid skill directory.";
+    default:
+      return undefined;
+  }
+}
+
+function withDerivedContext(
+  code: string,
+  context: Record<string, string>,
+): Record<string, string> {
+  if (code === "ARCHIVE_TOO_LARGE" && context.limit_bytes) {
+    const bytes = Number(context.limit_bytes);
+    if (Number.isFinite(bytes)) {
+      const mb = bytes / (1024 * 1024);
+      return {
+        ...context,
+        limit_mb: Number.isInteger(mb) ? String(mb) : mb.toFixed(1),
+      };
+    }
+  }
+  return context;
 }
 
 /**
@@ -92,7 +137,11 @@ export function formatSkillError(
   const errorKey = getErrorI18nKey(code);
 
   // 构建描述（错误消息 + 建议）
-  let description = t(errorKey, context);
+  const interpolation = withDerivedContext(code, context ?? {});
+  const defaultValue = getErrorDefaultValue(code, interpolation);
+  let description = defaultValue
+    ? t(errorKey, { ...interpolation, defaultValue })
+    : t(errorKey, interpolation);
 
   // 如果有建议，追加到描述中
   if (suggestion) {

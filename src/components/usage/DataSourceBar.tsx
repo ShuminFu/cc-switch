@@ -70,7 +70,7 @@ export function DataSourceBar({ refreshIntervalMs }: DataSourceBarProps) {
   const hasNonProxy = sources.some((s) => s.dataSource !== "proxy");
 
   return (
-    <div className="flex items-center gap-3 text-xs text-muted-foreground bg-muted/30 rounded-lg px-4 py-2">
+    <div className="mb-4 flex items-center gap-3 text-xs text-muted-foreground bg-muted/30 rounded-lg px-4 py-2">
       <span className="font-medium text-foreground/70">
         {t("usage.dataSources", { defaultValue: "Data Sources" })}:
       </span>

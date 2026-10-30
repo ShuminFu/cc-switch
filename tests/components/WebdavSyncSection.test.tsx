@@ -555,4 +555,28 @@ describe("WebdavSyncSection", () => {
       );
     });
   });
+
+  it("disables WebDAV after confirming a switch to S3", async () => {
+    renderSection(baseConfig);
+
+    const [typeSelect] = screen.getAllByTestId("webdav-preset-select");
+    fireEvent.change(typeSelect, { target: { value: "s3" } });
+    expect(
+      screen.getByText("settings.s3Sync.mutualExclusionMessage"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "common.confirm" }));
+
+    await waitFor(() => {
+      expect(settingsApiMock.webdavSyncSaveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ enabled: false, autoSync: false }),
+        false,
+      );
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText("settings.s3Sync.bucketPlaceholder"),
+      ).toBeInTheDocument();
+    });
+  });
 });

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DirectorySettings } from "@/components/settings/DirectorySettings";
 import { useDirectorySettings } from "@/hooks/useDirectorySettings";
+import { directoryValuesByApp } from "@/hooks/settingsDirectoryFields";
 import type { SettingsFormState } from "@/hooks/useSettingsForm";
 
 vi.mock("@/lib/api", () => ({
@@ -46,13 +47,7 @@ function Harness() {
       onAppConfigChange={dirs.updateAppConfigDir}
       onBrowseAppConfig={dirs.browseAppConfigDir}
       onResetAppConfig={dirs.resetAppConfigDir}
-      claudeDir={settings.claudeConfigDir}
-      codexDir={settings.codexConfigDir}
-      geminiDir={settings.geminiConfigDir}
-      grokDir={settings.grokConfigDir}
-      opencodeDir={settings.opencodeConfigDir}
-      openclawDir={settings.openclawConfigDir}
-      hermesDir={settings.hermesConfigDir}
+      directories={directoryValuesByApp(settings)}
       onDirectoryChange={dirs.updateDirectory}
       onBrowseDirectory={dirs.browseDirectory}
       onResetDirectory={dirs.resetDirectory}
