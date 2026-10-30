@@ -194,6 +194,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-171](P4-app-adapters-persistence/CCS-171-p4-usage-rescan.md) | feature | p3 | M | [usage] Add a usage re-scan action and a per-source data-quality report | CCS-159 | Done |
 | [CCS-172](P4-app-adapters-persistence/CCS-172-p4-keychain-secrets.md) | feature | p2 | L | [security] Store secrets in the OS keychain or credential manager | CCS-083, CCS-155 | Partial |
 | [CCS-173](P4-app-adapters-persistence/CCS-173-p4-sync-snapshot-auth.md) | feature | p2 | M | [sync] Authenticate WebDAV/S3 snapshots with an HMAC and refuse unsigned remote imports | CCS-086, CCS-172 | Partial |
+| [CCS-212](P4-app-adapters-persistence/CCS-212-p4-hot-switch-rollback-snapshot.md) | bug | p3 | S | [takeover] Keep the raw byte snapshot when a failed hot switch rolls back the live backup | CCS-152 | Open |
 
 ## P5: [P5 (v4.0): Canonical protocol IR and codecs, plus command-layer cleanup](P5-protocol-ir-commands/CCS-006-epic-p5.md)
 
