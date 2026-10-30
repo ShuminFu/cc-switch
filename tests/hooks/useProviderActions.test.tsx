@@ -60,6 +60,7 @@ const settingsApiApplyMock = vi.fn();
 const openclawApiGetModelCatalogMock = vi.fn();
 const openclawApiGetDefaultModelMock = vi.fn();
 const openclawApiSetDefaultModelMock = vi.fn();
+const openclawApiSetModelCatalogMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   providersApi: {
@@ -79,6 +80,8 @@ vi.mock("@/lib/api", () => ({
       openclawApiGetDefaultModelMock(...args),
     setDefaultModel: (...args: unknown[]) =>
       openclawApiSetDefaultModelMock(...args),
+    setModelCatalog: (...args: unknown[]) =>
+      openclawApiSetModelCatalogMock(...args),
   },
 }));
 
@@ -118,6 +121,7 @@ beforeEach(() => {
   openclawApiGetModelCatalogMock.mockReset();
   openclawApiGetDefaultModelMock.mockReset();
   openclawApiSetDefaultModelMock.mockReset();
+  openclawApiSetModelCatalogMock.mockReset();
   toastSuccessMock.mockReset();
   toastErrorMock.mockReset();
   toastInfoMock.mockReset();
@@ -681,4 +685,43 @@ it("clears loading flag when all mutations idle", () => {
   });
 
   expect(result.current.isLoading).toBe(false);
+});
+
+it("warns with a retry when OpenClaw model registration fails (FE-PROV-50)", async () => {
+  addProviderMutateAsync.mockResolvedValue(undefined);
+  openclawApiGetModelCatalogMock.mockResolvedValue({});
+  openclawApiSetModelCatalogMock
+    .mockRejectedValueOnce(new Error("catalog locked"))
+    .mockResolvedValueOnce(undefined);
+  openclawApiGetDefaultModelMock.mockResolvedValue({ primary: "x/y" });
+  const { wrapper } = createWrapper();
+  const { result } = renderHook(() => useProviderActions("openclaw"), {
+    wrapper,
+  });
+
+  await act(async () => {
+    await result.current.addProvider({
+      name: "Relay",
+      settingsConfig: {},
+      suggestedDefaults: {
+        model: { primary: "relay/m1" },
+        modelCatalog: { "relay/m1": { alias: "m1" } },
+      },
+    } as never);
+  });
+
+  expect(addProviderMutateAsync).toHaveBeenCalledTimes(1);
+  expect(toastWarningMock).toHaveBeenCalledTimes(1);
+  const [message, options] = toastWarningMock.mock.calls[0] as [
+    string,
+    { action: { onClick: () => void } },
+  ];
+  expect(message).toContain("catalog locked");
+
+  await act(async () => {
+    options.action.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(openclawApiSetModelCatalogMock).toHaveBeenCalledTimes(2);
+  expect(toastSuccessMock).toHaveBeenCalled();
 });
