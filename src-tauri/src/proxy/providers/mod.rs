@@ -13,6 +13,7 @@
 
 mod adapter;
 mod auth;
+pub(crate) mod bridge;
 pub(crate) mod chat_tool_call_slots;
 mod claude;
 mod codex;
@@ -25,6 +26,7 @@ pub mod copilot_model_map;
 mod gemini;
 pub(crate) mod gemini_schema;
 pub mod gemini_shadow;
+pub(crate) mod ir;
 pub mod models;
 pub(crate) mod reasoning_bridge;
 pub mod streaming;

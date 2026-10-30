@@ -11,9 +11,7 @@
 use crate::proxy::{error::ProxyError, json_canonical::canonical_json_string};
 use serde_json::{json, Value};
 
-use super::reasoning_bridge::{
-    anthropic_block_from_openai_reasoning_item, openai_reasoning_item_from_anthropic_block,
-};
+use super::reasoning_bridge::openai_reasoning_item_from_anthropic_block;
 
 pub(crate) const TOOL_RESULT_ERROR_MARKER: &str = "[cc-switch:tool-result-error]";
 
@@ -365,202 +363,29 @@ fn map_tool_choice_to_responses(tool_choice: &Value) -> Value {
     }
 }
 
+/// Responses `status` → Anthropic `stop_reason` (facade over
+/// [`super::ir::responses::decode_status`]).
 pub(crate) fn map_responses_stop_reason(
     status: Option<&str>,
     has_tool_use: bool,
     incomplete_reason: Option<&str>,
 ) -> Option<&'static str> {
-    status.map(|s| match s {
-        "completed" if has_tool_use => "tool_use",
-        "incomplete"
-            if matches!(
-                incomplete_reason,
-                Some("max_output_tokens") | Some("max_tokens")
-            ) || incomplete_reason.is_none() =>
-        {
-            "max_tokens"
+    use super::ir::StopReason;
+    super::ir::responses::decode_status(status, has_tool_use, incomplete_reason).map(|stop| {
+        match stop {
+            StopReason::ToolUse => "tool_use",
+            StopReason::MaxTokens => "max_tokens",
+            StopReason::Refusal => "refusal",
+            _ => "end_turn",
         }
-        // PROV-24: content filtering is a refusal, not a normal end of turn.
-        "incomplete" if incomplete_reason == Some("content_filter") => "refusal",
-        "incomplete" => "end_turn",
-        _ => "end_turn",
     })
 }
 
-fn responses_error_message(body: &Value, fallback: &str) -> String {
-    body.pointer("/error/message")
-        .and_then(Value::as_str)
-        .or_else(|| body.get("message").and_then(Value::as_str))
-        .or_else(|| body.get("error").and_then(Value::as_str))
-        .filter(|message| !message.trim().is_empty())
-        .unwrap_or(fallback)
-        .to_string()
-}
-
-fn validate_responses_terminal_status(body: &Value) -> Result<(), ProxyError> {
-    let status = body.get("status").and_then(Value::as_str);
-    let has_error = body.get("error").is_some_and(|error| !error.is_null());
-
-    match status {
-        Some("failed") => Err(ProxyError::TransformError(format!(
-            "Responses upstream failed: {}",
-            responses_error_message(body, "response generation failed")
-        ))),
-        Some("cancelled") => Err(ProxyError::TransformError(format!(
-            "Responses upstream cancelled the response: {}",
-            responses_error_message(body, "response generation was cancelled")
-        ))),
-        _ if has_error => Err(ProxyError::TransformError(format!(
-            "Responses upstream returned an error envelope: {}",
-            responses_error_message(body, "unknown upstream error")
-        ))),
-        _ => Ok(()),
-    }
-}
-
-/// Build Anthropic-style usage JSON from Responses API usage, including cache tokens.
-///
-/// **Robustness Features**:
-/// - Handles null, missing, empty objects, and partial objects gracefully
-/// - Supports OpenAI field name variants (prompt_tokens/completion_tokens) as fallbacks
-/// - Always returns valid structure: {"input_tokens": N, "output_tokens": N}
-/// - Preserves cache token fields even when input/output tokens are missing
-///
-/// **Field Name Resolution Priority**:
-/// 1. input_tokens: Anthropic `input_tokens` → OpenAI `prompt_tokens` → default 0
-/// 2. output_tokens: Anthropic `output_tokens` → OpenAI `completion_tokens` → default 0
-/// 3. cache_read_input_tokens: Direct field → nested input_tokens_details.cached_tokens → prompt_tokens_details.cached_tokens
-/// 4. cache_creation_input_tokens: Direct field → nested
-///    input_tokens_details.cache_write_tokens → prompt_tokens_details.cache_write_tokens
-///
-/// **Cache Token Priority Order**:
-/// 1. OpenAI nested details (`cached_tokens`, `cache_write_tokens`) as initial values
-/// 2. Direct Anthropic-style fields (`cache_read_input_tokens`, `cache_creation_input_tokens`) override if present
-///
-/// **Logging**:
-/// - Warns on empty objects {} or partial objects (only one field present)
-/// - Debug logs when using OpenAI field name fallbacks
+/// Build Anthropic-style usage JSON from Responses API usage, including cache
+/// tokens: `responses::decode_usage` → `anthropic::encode_usage` (PROV-17/19).
+/// See [`super::ir::responses::decode_usage`] for the field resolution order.
 pub(crate) fn build_anthropic_usage_from_responses(usage: Option<&Value>) -> Value {
-    let u = match usage {
-        Some(v) if !v.is_null() && v.is_object() => v,
-        _ => {
-            return json!({
-                "input_tokens": 0,
-                "output_tokens": 0
-            })
-        }
-    };
-
-    // Detect empty object {} and log warning
-    if u.as_object().map(|obj| obj.is_empty()).unwrap_or(false) {
-        log::warn!("[Responses] Empty usage object received, using defaults");
-        return json!({
-            "input_tokens": 0,
-            "output_tokens": 0
-        });
-    }
-
-    // Extract input_tokens with OpenAI field name fallback
-    // Priority: input_tokens (Anthropic) → prompt_tokens (OpenAI) → 0
-    let input = u
-        .get("input_tokens")
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            let prompt_tokens = u.get("prompt_tokens").and_then(|v| v.as_u64());
-            if prompt_tokens.is_some() {
-                log::debug!(
-                    "[Responses] Using OpenAI field name fallback 'prompt_tokens' for input_tokens"
-                );
-            }
-            prompt_tokens
-        })
-        .unwrap_or(0);
-
-    // Extract output_tokens with OpenAI field name fallback
-    // Priority: output_tokens (Anthropic) → completion_tokens (OpenAI) → 0
-    let output = u.get("output_tokens")
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            let completion_tokens = u.get("completion_tokens").and_then(|v| v.as_u64());
-            if completion_tokens.is_some() {
-                log::debug!("[Responses] Using OpenAI field name fallback 'completion_tokens' for output_tokens");
-            }
-            completion_tokens
-        })
-        .unwrap_or(0);
-
-    // Log if only one field present (partial object). Streaming chunks legitimately
-    // arrive with partial usage, so this stays at debug level to avoid noise.
-    if (input == 0 && output > 0) || (input > 0 && output == 0) {
-        log::debug!("[Responses] Partial usage object: {:?}", u);
-    }
-
-    let mut result = json!({
-        "input_tokens": input,
-        "output_tokens": output
-    });
-
-    // Step 1: OpenAI nested details as fallback for cache tokens
-    // OpenAI Responses API: input_tokens_details.cached_tokens
-    if let Some(cached) = u
-        .pointer("/input_tokens_details/cached_tokens")
-        .and_then(|v| v.as_u64())
-    {
-        result["cache_read_input_tokens"] = json!(cached);
-    }
-    // OpenAI standard: prompt_tokens_details.cached_tokens
-    if let Some(cached) = u
-        .pointer("/prompt_tokens_details/cached_tokens")
-        .and_then(|v| v.as_u64())
-    {
-        if result.get("cache_read_input_tokens").is_none() {
-            result["cache_read_input_tokens"] = json!(cached);
-        }
-    }
-    // GPT-5.6+ reports cache writes in the nested OpenAI token-details object.
-    // Treat writes as Anthropic cache creation so the downstream client and
-    // billing layer can distinguish them from fresh input.
-    let nested_cache_write = u
-        .pointer("/input_tokens_details/cache_write_tokens")
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            u.pointer("/prompt_tokens_details/cache_write_tokens")
-                .and_then(|v| v.as_u64())
-        });
-    if let Some(cache_write) = nested_cache_write {
-        result["cache_creation_input_tokens"] = json!(cache_write);
-    }
-
-    // Step 2: Direct Anthropic-style fields override (authoritative if present)
-    // These preserve cache tokens even if input/output_tokens are missing
-    if let Some(v) = u.get("cache_read_input_tokens") {
-        result["cache_read_input_tokens"] = v.clone();
-    }
-    if let Some(v) = u.get("cache_creation_input_tokens") {
-        result["cache_creation_input_tokens"] = v.clone();
-    }
-    if let Some(v) = u.get("cache_creation") {
-        result["cache_creation"] = v.clone();
-    }
-
-    // OpenAI/Responses 的 input(prompt_tokens/input_tokens)含缓存命中，Anthropic input_tokens 不含
-    // → 减去 cache_read 与 cache_creation，使其成为 fresh input。本函数在计量意义上是 claude 专属
-    // （Codex Responses 透传走 from_codex_response_*，不调用本函数），故可安全在此扣减。三桶互斥，
-    // 恒等：input + cache_read + cache_creation == 上游 input(inclusive)。与 build_anthropic_usage_json
-    // (#2774) 及 transform_gemini 的 saturating_sub 对称；一处同时覆盖非流式与流式(streaming_responses)。
-    let cached = result
-        .get("cache_read_input_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_creation = result
-        .get("cache_creation_input_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    if cached > 0 || cache_creation > 0 {
-        result["input_tokens"] = json!(input.saturating_sub(cached).saturating_sub(cache_creation));
-    }
-
-    result
+    super::ir::anthropic::encode_usage(&super::ir::responses::decode_usage(usage))
 }
 
 /// 将 Anthropic messages 数组转换为 Responses API input 数组
@@ -740,132 +565,16 @@ fn convert_messages_to_input(messages: &[Value]) -> Result<Vec<Value>, ProxyErro
 }
 
 /// OpenAI Responses 响应 → Anthropic 响应
+///
+/// Thin facade over the bridge registry (PROV-19/21):
+/// `ir::responses::decode_response` → `ir::anthropic::encode_response`.
 pub fn responses_to_anthropic(body: Value) -> Result<Value, ProxyError> {
-    // A Responses failure can arrive inside an HTTP 2xx response object. Reject it
-    // before looking at `output`; otherwise `{status:"failed", output:[]}` becomes
-    // a successful empty Anthropic `end_turn` and hides the upstream error.
-    validate_responses_terminal_status(&body)?;
-
-    let output = body
-        .get("output")
-        .and_then(|o| o.as_array())
-        .ok_or_else(|| ProxyError::TransformError("No output in response".to_string()))?;
-
-    let mut content = Vec::new();
-    let response_completed = body.get("status").and_then(Value::as_str) == Some("completed");
-
-    let mut has_tool_use = false;
-    for item in output {
-        let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
-        match item_type {
-            "message" => {
-                if let Some(msg_content) = item.get("content").and_then(|c| c.as_array()) {
-                    for block in msg_content {
-                        let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                        if block_type == "output_text" {
-                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                                if !text.is_empty() {
-                                    content.push(json!({"type": "text", "text": text}));
-                                }
-                            }
-                        } else if block_type == "refusal" {
-                            if let Some(refusal) = block.get("refusal").and_then(|t| t.as_str()) {
-                                if !refusal.is_empty() {
-                                    content.push(json!({"type": "text", "text": refusal}));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            "function_call" => {
-                let call_id = item.get("call_id").and_then(|i| i.as_str()).unwrap_or("");
-                let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                let args_str = item
-                    .get("arguments")
-                    .and_then(|a| a.as_str())
-                    .unwrap_or("{}");
-                let input: Value = if args_str.trim().is_empty() {
-                    json!({})
-                } else {
-                    match serde_json::from_str(args_str) {
-                        Ok(value) => value,
-                        Err(error) if !response_completed => {
-                            log::warn!(
-                                "[Responses] Replacing incomplete function_call '{name}' arguments with an empty object: {error}"
-                            );
-                            json!({})
-                        }
-                        Err(error) => {
-                            return Err(ProxyError::TransformError(format!(
-                                "Invalid function_call arguments for '{name}': {error}"
-                            )))
-                        }
-                    }
-                };
-                if !input.is_object() {
-                    if !response_completed {
-                        log::warn!(
-                            "[Responses] Replacing incomplete function_call '{name}' non-object arguments with an empty object"
-                        );
-                        content.push(json!({
-                            "type": "tool_use",
-                            "id": call_id,
-                            "name": name,
-                            "input": {}
-                        }));
-                        has_tool_use = true;
-                        continue;
-                    }
-                    return Err(ProxyError::TransformError(format!(
-                        "Function call arguments for '{name}' must be a JSON object"
-                    )));
-                }
-                let input = sanitize_anthropic_tool_use_input(name, input);
-
-                content.push(json!({
-                    "type": "tool_use",
-                    "id": call_id,
-                    "name": name,
-                    "input": input
-                }));
-                has_tool_use = true;
-            }
-
-            "reasoning" => {
-                if let Some(block) = anthropic_block_from_openai_reasoning_item(item) {
-                    content.push(block);
-                }
-            }
-
-            _ => {}
-        }
-    }
-
-    // status → stop_reason
-    let stop_reason = map_responses_stop_reason(
-        body.get("status").and_then(|s| s.as_str()),
-        has_tool_use,
-        body.pointer("/incomplete_details/reason")
-            .and_then(|r| r.as_str()),
-    );
-
-    let usage_json = build_anthropic_usage_from_responses(body.get("usage"));
-
-    let result = json!({
-        "id": super::transform::anthropic_message_id(body.get("id").and_then(|i| i.as_str())),
-        "type": "message",
-        "role": "assistant",
-        "content": content,
-        "model": body.get("model").and_then(|m| m.as_str()).unwrap_or(""),
-        "stop_reason": stop_reason,
-        "stop_sequence": null,
-        "usage": usage_json
-    });
-
-    Ok(result)
+    use super::bridge::{Bridge, BridgePolicy, WireProtocol};
+    Bridge::new(
+        WireProtocol::AnthropicMessages,
+        WireProtocol::OpenAiResponses,
+    )
+    .response_to_client(body, BridgePolicy::default())
 }
 
 #[cfg(test)]
@@ -1522,7 +1231,9 @@ mod tests {
             "summary": [],
             "encrypted_content": "opaque"
         });
-        let block = anthropic_block_from_openai_reasoning_item(&item).unwrap();
+        let block =
+            super::super::reasoning_bridge::anthropic_block_from_openai_reasoning_item(&item)
+                .unwrap();
         let replay = anthropic_to_responses(
             json!({
                 "model": "gpt-5.6",

@@ -138,22 +138,10 @@ pub fn gemini_to_anthropic_with_shadow_and_hints(
     session_id: Option<&str>,
     tool_schema_hints: Option<&AnthropicToolSchemaHints>,
 ) -> Result<Value, ProxyError> {
-    if let Some(block_reason) = body
-        .get("promptFeedback")
-        .and_then(|value| value.get("blockReason"))
-        .and_then(|value| value.as_str())
-    {
-        let text = format!("Request blocked by Gemini safety filters: {block_reason}");
-        return Ok(json!({
-            "id": super::transform::anthropic_message_id(body.get("responseId").and_then(|value| value.as_str())),
-            "type": "message",
-            "role": "assistant",
-            "content": [{ "type": "text", "text": text }],
-            "model": body.get("modelVersion").and_then(|value| value.as_str()).unwrap_or(""),
-            "stop_reason": "refusal",
-            "stop_sequence": Value::Null,
-            "usage": build_anthropic_usage(body.get("usageMetadata"))
-        }));
+    if body.pointer("/promptFeedback/blockReason").is_some() {
+        return super::ir::anthropic::encode_response(&super::ir::gemini::decode_response(
+            &body, None,
+        ));
     }
 
     let candidate = body
@@ -202,69 +190,10 @@ pub fn gemini_to_anthropic_with_shadow_and_hints(
         }
     }
 
-    let mut content = Vec::new();
-    let mut has_tool_use = false;
-
-    for part in &rectified_parts {
-        if part.get("thought").and_then(|value| value.as_bool()) == Some(true) {
-            // PROV-06: surface Gemini thought summaries as Anthropic thinking
-            // blocks (unsigned; they are dropped again on replay and the
-            // Gemini thoughtSignature keeps travelling via the shadow store).
-            if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
-                if !text.is_empty() {
-                    content.push(json!({
-                        "type": "thinking",
-                        "thinking": text
-                    }));
-                }
-            }
-            continue;
-        }
-
-        if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
-            if !text.is_empty() {
-                content.push(json!({
-                    "type": "text",
-                    "text": text
-                }));
-            }
-            continue;
-        }
-
-        if let Some(function_call) = part.get("functionCall") {
-            has_tool_use = true;
-            let id = function_call
-                .get("id")
-                .and_then(|value| value.as_str())
-                .filter(|s| !s.is_empty())
-                .map(ToString::to_string)
-                .unwrap_or_else(synthesize_tool_call_id);
-            content.push(json!({
-                "type": "tool_use",
-                "id": id,
-                "name": function_call.get("name").and_then(|value| value.as_str()).unwrap_or(""),
-                "input": function_call.get("args").cloned().unwrap_or_else(|| json!({}))
-            }));
-        }
-    }
-
-    let stop_reason = map_finish_reason(
-        candidate
-            .get("finishReason")
-            .and_then(|value| value.as_str()),
-        has_tool_use,
-    );
-
-    let anthropic_response = json!({
-        "id": super::transform::anthropic_message_id(body.get("responseId").and_then(|value| value.as_str())),
-        "type": "message",
-        "role": "assistant",
-        "content": content,
-        "model": body.get("modelVersion").and_then(|value| value.as_str()).unwrap_or(""),
-        "stop_reason": stop_reason,
-        "stop_sequence": Value::Null,
-        "usage": build_anthropic_usage(body.get("usageMetadata"))
-    });
+    // PROV-19: candidate parts → IR → Anthropic message.
+    let anthropic_response = super::ir::anthropic::encode_response(
+        &super::ir::gemini::decode_response(&body, Some(&rectified_parts)),
+    )?;
 
     if let (Some(store), Some(provider_id), Some(session_id), Some(content)) = (
         shadow_store,
@@ -1182,74 +1111,11 @@ fn map_tool_choice(tool_choice: Option<&Value>) -> Result<Option<Value>, ProxyEr
 }
 
 /// Convert a Gemini `usageMetadata` object into an Anthropic-style `usage`
-/// object. Used by both the streaming SSE converter and the non-streaming
-/// transform path so the two emit identical shapes.
+/// object: `ir::gemini::decode_usage` → `ir::anthropic::encode_usage`. Used by
+/// both the streaming SSE converter and the non-streaming transform path so the
+/// two emit identical shapes.
 pub(crate) fn build_anthropic_usage(usage: Option<&Value>) -> Value {
-    let Some(usage) = usage else {
-        return json!({
-            "input_tokens": 0,
-            "output_tokens": 0
-        });
-    };
-
-    let prompt_tokens = usage
-        .get("promptTokenCount")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let total_tokens = usage
-        .get("totalTokenCount")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let cached_tokens = usage
-        .get("cachedContentTokenCount")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    // Gemini 的 promptTokenCount 含缓存命中（cachedContentTokenCount）；而 Anthropic
-    // 语义下 input_tokens 必须是不含 cache 的 fresh input、cache_read 单列。本路径转成
-    // Anthropic 后以 app_type=claude 记账，calculator 对 claude 设 input_includes_cache_read
-    // =false 不再从 input 扣 cache，因此这里必须先扣减，否则缓存 token 会被双重计费
-    // （一次按完整 input 价、一次按 cache_read 价）。output 仍按 total-prompt 计算
-    // （prompt 是总输入，扣减只作用于 input/cache 的拆分，不影响 output）。
-    let input_tokens = prompt_tokens.saturating_sub(cached_tokens);
-    let output_tokens = total_tokens.saturating_sub(prompt_tokens);
-
-    let mut result = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens
-    });
-
-    if cached_tokens > 0 {
-        result["cache_read_input_tokens"] = json!(cached_tokens);
-    }
-
-    result
-}
-
-fn map_finish_reason(reason: Option<&str>, has_tool_use: bool) -> Value {
-    let mapped = match reason {
-        Some("MAX_TOKENS") => Some("max_tokens"),
-        Some("STOP") | Some("FINISH_REASON_UNSPECIFIED") | None => {
-            if has_tool_use {
-                Some("tool_use")
-            } else {
-                Some("end_turn")
-            }
-        }
-        Some("SAFETY")
-        | Some("RECITATION")
-        | Some("SPII")
-        | Some("BLOCKLIST")
-        | Some("PROHIBITED_CONTENT") => Some("refusal"),
-        Some(other) => {
-            log::warn!("[Claude/Gemini] Unknown Gemini finishReason `{other}`, using end_turn");
-            Some("end_turn")
-        }
-    };
-
-    match mapped {
-        Some(value) => json!(value),
-        None => Value::Null,
-    }
+    super::ir::anthropic::encode_usage(&super::ir::gemini::decode_usage(usage))
 }
 
 #[cfg(test)]

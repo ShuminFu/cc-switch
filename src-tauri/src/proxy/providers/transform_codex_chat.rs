@@ -7,7 +7,6 @@
 use super::codex_chat_common::{
     append_reasoning_content, extract_reasoning_field_text, extract_reasoning_summary_text,
     response_function_call_item, response_function_call_item_with_namespace,
-    split_leading_think_block,
 };
 use crate::provider::CodexChatReasoningConfig;
 use crate::proxy::{
@@ -1307,257 +1306,21 @@ pub fn chat_completion_to_response(body: Value) -> Result<Value, ProxyError> {
 
 /// Convert a non-streaming Chat Completions response into a Responses response,
 /// restoring Codex-specific tool names using the original Responses request.
+///
+/// Thin facade over the bridge registry (PROV-19/21): `ir::chat::decode_response`
+/// (with `<think>` splitting) → `ir::responses::encode_response` in the
+/// Chat-compatible item layout.
 pub(crate) fn chat_completion_to_response_with_context(
     body: Value,
     tool_context: &CodexToolContext,
 ) -> Result<Value, ProxyError> {
-    let choices = body
-        .get("choices")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| ProxyError::TransformError("No choices in chat response".to_string()))?;
-    let choice = choices
-        .first()
-        .ok_or_else(|| ProxyError::TransformError("Empty choices in chat response".to_string()))?;
-    let message = choice
-        .get("message")
-        .ok_or_else(|| ProxyError::TransformError("No message in chat choice".to_string()))?;
-
-    let response_id = response_id_from_chat_id(body.get("id").and_then(|v| v.as_str()));
-    let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("");
-    let created_at = body.get("created").and_then(|v| v.as_u64()).unwrap_or(0);
-    let finish_reason = choice.get("finish_reason").and_then(|v| v.as_str());
-
-    let reasoning = chat_reasoning_text(message);
-    let mut output = Vec::new();
-    if let Some(reasoning_item) =
-        chat_reasoning_to_response_output_item(reasoning.as_deref(), &response_id)
-    {
-        output.push(reasoning_item);
-    }
-    if let Some(message_item) = chat_message_to_response_output_item(message, &response_id) {
-        output.push(message_item);
-    }
-    output.extend(chat_tool_calls_to_response_output_items(
-        message,
-        reasoning.as_deref(),
-        tool_context,
-    ));
-
-    let mut response = json!({
-        "id": response_id,
-        "object": "response",
-        "created_at": created_at,
-        "status": response_status_from_finish_reason(finish_reason),
-        "model": model,
-        "output": output,
-        "usage": chat_usage_to_responses_usage(body.get("usage"))
-    });
-
-    if let Some(reason) = incomplete_reason_from_finish_reason(finish_reason) {
-        response["incomplete_details"] = json!({ "reason": reason });
-    }
-
-    Ok(response)
-}
-
-fn chat_reasoning_to_response_output_item(
-    reasoning: Option<&str>,
-    response_id: &str,
-) -> Option<Value> {
-    let reasoning = reasoning?;
-    if reasoning.is_empty() {
-        return None;
-    }
-
-    Some(json!({
-        "id": format!("rs_{response_id}"),
-        "type": "reasoning",
-        "summary": [{
-            "type": "summary_text",
-            "text": reasoning
-        }]
-    }))
-}
-
-fn chat_reasoning_text(message: &Value) -> Option<String> {
-    if let Some(reasoning) = extract_reasoning_field_text(message) {
-        return Some(reasoning);
-    }
-
-    if let Some(content) = message.get("content").and_then(|v| v.as_str()) {
-        if let Some((reasoning, _answer)) = split_leading_think_block(content) {
-            if !reasoning.is_empty() {
-                return Some(reasoning);
-            }
-        }
-    }
-
-    None
-}
-
-fn chat_message_to_response_output_item(message: &Value, response_id: &str) -> Option<Value> {
-    let mut content = Vec::new();
-
-    if let Some(text) = message.get("content").and_then(|v| v.as_str()) {
-        let text = split_leading_think_block(text)
-            .map(|(_reasoning, answer)| answer)
-            .unwrap_or_else(|| text.to_string());
-        if !text.is_empty() {
-            content.push(json!({
-                "type": "output_text",
-                "text": text,
-                "annotations": []
-            }));
-        }
-    } else if let Some(parts) = message.get("content").and_then(|v| v.as_array()) {
-        for part in parts {
-            let part_type = part.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            match part_type {
-                "text" | "output_text" => {
-                    if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
-                        if !text.is_empty() {
-                            content.push(json!({
-                                "type": "output_text",
-                                "text": text,
-                                "annotations": []
-                            }));
-                        }
-                    }
-                }
-                "refusal" => {
-                    if let Some(text) = part.get("refusal").and_then(|v| v.as_str()) {
-                        if !text.is_empty() {
-                            content.push(json!({
-                                "type": "refusal",
-                                "refusal": text
-                            }));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    if let Some(refusal) = message.get("refusal").and_then(|v| v.as_str()) {
-        if !refusal.is_empty() {
-            content.push(json!({
-                "type": "refusal",
-                "refusal": refusal
-            }));
-        }
-    }
-
-    if content.is_empty() {
-        return None;
-    }
-
-    Some(json!({
-        "id": format!("{response_id}_msg"),
-        "type": "message",
-        "status": "completed",
-        "role": "assistant",
-        "content": content
-    }))
-}
-
-fn chat_tool_calls_to_response_output_items(
-    message: &Value,
-    reasoning: Option<&str>,
-    tool_context: &CodexToolContext,
-) -> Vec<Value> {
-    let mut output = Vec::new();
-
-    if let Some(tool_calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
-        for (index, tool_call) in tool_calls.iter().enumerate() {
-            // Skip tool calls with missing function names (defensive: some models
-            // may generate tool calls without providing a valid name)
-            let function = tool_call.get("function").unwrap_or(&Value::Null);
-            let name = function.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if name.is_empty() {
-                log::warn!("[Codex] Skipping tool call with missing name");
-                continue;
-            }
-            output.push(chat_tool_call_to_response_item(
-                tool_call,
-                index,
-                reasoning,
-                tool_context,
-            ));
-        }
-    } else if let Some(function_call) = message.get("function_call") {
-        if let Some(item) =
-            chat_legacy_function_call_to_response_item(function_call, reasoning, tool_context)
-        {
-            output.push(item);
-        }
-    }
-
-    output
-}
-
-fn chat_tool_call_to_response_item(
-    tool_call: &Value,
-    index: usize,
-    reasoning: Option<&str>,
-    tool_context: &CodexToolContext,
-) -> Value {
-    let call_id = tool_call
-        .get("id")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| format!("call_{index}"));
-    let function = tool_call.get("function").unwrap_or(&Value::Null);
-    let name = function.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let arguments = canonicalize_tool_arguments(function.get("arguments"));
-
-    let item_id = response_tool_call_item_id_from_chat_name(&call_id, name, tool_context);
-    response_tool_call_item_from_chat_name(
-        &item_id,
-        "completed",
-        &call_id,
-        name,
-        &arguments,
-        reasoning,
-        tool_context,
+    use super::bridge::{Bridge, BridgePolicy, WireProtocol};
+    Bridge::new(WireProtocol::OpenAiResponses, WireProtocol::OpenAiChat).response_to_client(
+        body,
+        BridgePolicy {
+            tool_context: Some(tool_context),
+        },
     )
-}
-
-fn chat_legacy_function_call_to_response_item(
-    function_call: &Value,
-    reasoning: Option<&str>,
-    tool_context: &CodexToolContext,
-) -> Option<Value> {
-    let call_id = function_call
-        .get("id")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.is_empty())
-        .unwrap_or("call_0");
-    let name = function_call
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    // Skip legacy function calls with missing names (defensive: some models
-    // may generate function_call without providing a valid name)
-    if name.is_empty() {
-        log::warn!("[Codex] Skipping legacy function_call with missing name");
-        return None;
-    }
-
-    let arguments = canonicalize_tool_arguments(function_call.get("arguments"));
-
-    let item_id = response_tool_call_item_id_from_chat_name(call_id, name, tool_context);
-    Some(response_tool_call_item_from_chat_name(
-        &item_id,
-        "completed",
-        call_id,
-        name,
-        &arguments,
-        reasoning,
-        tool_context,
-    ))
 }
 
 pub(crate) fn response_tool_call_item_id_from_chat_name(
@@ -1666,96 +1429,26 @@ pub(crate) fn custom_tool_input_from_chat_arguments(arguments: &str) -> String {
     }
 }
 
+/// Chat `usage` → Responses `usage` (`ir::chat::decode_usage` →
+/// `ir::responses::encode_usage`; both protocols count cache inside input).
 pub(crate) fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Value {
-    let Some(usage) = usage.filter(|value| value.is_object() && !value.is_null()) else {
-        return json!({
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "output_tokens_details": { "reasoning_tokens": 0 }
-        });
-    };
-
-    let input_tokens = usage
-        .get("prompt_tokens")
-        .or_else(|| usage.get("input_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("completion_tokens")
-        .or_else(|| usage.get("output_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let total_tokens = usage
-        .get("total_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(input_tokens + output_tokens);
-
-    let mut result = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens
-    });
-
-    let cached = usage
-        .pointer("/prompt_tokens_details/cached_tokens")
-        .or_else(|| usage.pointer("/input_tokens_details/cached_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_write = usage
-        .pointer("/prompt_tokens_details/cache_write_tokens")
-        .or_else(|| usage.pointer("/input_tokens_details/cache_write_tokens"))
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_u64())
-        })
-        .unwrap_or(0);
-    if cached > 0 || cache_write > 0 {
-        result["input_tokens_details"] = json!({
-            "cached_tokens": cached,
-            "cache_write_tokens": cache_write
-        });
-    }
-
-    if let Some(details) = usage
-        .get("completion_tokens_details")
-        .filter(|v| v.is_object())
-    {
-        let mut details = details.clone();
-        if details.get("reasoning_tokens").is_none() {
-            details["reasoning_tokens"] = json!(0);
-        }
-        result["output_tokens_details"] = details;
-    } else {
-        result["output_tokens_details"] = json!({ "reasoning_tokens": 0 });
-    }
-
-    if let Some(cache_read) = usage.get("cache_read_input_tokens") {
-        result["cache_read_input_tokens"] = cache_read.clone();
-    }
-    if cache_write > 0 {
-        result["cache_creation_input_tokens"] = json!(cache_write);
-    }
-
-    result
+    super::ir::responses::encode_usage(&super::ir::chat::decode_usage(usage))
 }
 
 pub(crate) fn response_id_from_chat_id(id: Option<&str>) -> String {
-    let id = id.unwrap_or("ccswitch");
-    if id.starts_with("resp_") {
-        id.to_string()
-    } else {
-        format!("resp_{id}")
-    }
+    super::ir::responses::response_id(id)
+}
+
+fn chat_finish_to_responses_stop(
+    finish_reason: Option<&str>,
+) -> (&'static str, Option<&'static str>) {
+    super::ir::responses::encode_stop(
+        super::ir::chat::decode_finish_reason(finish_reason, false).as_ref(),
+    )
 }
 
 pub(crate) fn response_status_from_finish_reason(finish_reason: Option<&str>) -> &'static str {
-    match finish_reason {
-        Some("length") | Some("content_filter") => "incomplete",
-        _ => "completed",
-    }
+    chat_finish_to_responses_stop(finish_reason).0
 }
 
 /// `incomplete_details.reason` for a Chat `finish_reason` that maps to an
@@ -1764,11 +1457,7 @@ pub(crate) fn response_status_from_finish_reason(finish_reason: Option<&str>) ->
 pub(crate) fn incomplete_reason_from_finish_reason(
     finish_reason: Option<&str>,
 ) -> Option<&'static str> {
-    match finish_reason {
-        Some("length") => Some("max_output_tokens"),
-        Some("content_filter") => Some("content_filter"),
-        _ => None,
-    }
+    chat_finish_to_responses_stop(finish_reason).1
 }
 
 /// 把 Chat Completions 上游的错误体规整成 OpenAI Responses API 风格的错误对象。

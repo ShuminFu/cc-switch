@@ -28,8 +28,9 @@ struct OpenAIStreamChunk {
     model: String,
     #[serde(default, deserialize_with = "null_as_default")]
     choices: Vec<StreamChoice>,
+    /// Raw Chat `usage`; decoded by the shared IR codec (`ir::chat::decode_usage`).
     #[serde(default)]
-    usage: Option<Usage>,
+    usage: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,31 +74,6 @@ struct DeltaFunction {
     arguments: Option<String>,
 }
 
-/// OpenAI 流式响应的 usage 信息（完整版）
-#[derive(Debug, Deserialize)]
-struct Usage {
-    #[serde(default, deserialize_with = "null_as_default")]
-    prompt_tokens: u32,
-    #[serde(default, deserialize_with = "null_as_default")]
-    completion_tokens: u32,
-    #[serde(default)]
-    prompt_tokens_details: Option<PromptTokensDetails>,
-    /// Some compatible servers return Anthropic-style cache fields directly
-    #[serde(default)]
-    cache_read_input_tokens: Option<u32>,
-    #[serde(default)]
-    cache_creation_input_tokens: Option<u32>,
-}
-
-/// Nested token details from OpenAI format
-#[derive(Debug, Deserialize)]
-struct PromptTokensDetails {
-    #[serde(default, deserialize_with = "null_as_default")]
-    cached_tokens: u32,
-    #[serde(default, deserialize_with = "null_as_default")]
-    cache_write_tokens: u32,
-}
-
 #[derive(Debug, Clone)]
 struct ToolBlockState {
     anthropic_index: u32,
@@ -115,26 +91,10 @@ struct ToolBlockState {
 /// 无限空白 bug 的连续空白字符阈值
 const INFINITE_WHITESPACE_THRESHOLD: usize = 500;
 
-fn build_anthropic_usage_json(usage: &Usage) -> Value {
-    // OpenAI prompt_tokens 含缓存，Anthropic input_tokens 不含，需减去 cache_read 与 cache_creation
-    // （三桶互斥，恒等 input + cache_read + cache_creation == prompt_tokens）。
-    let cached = extract_cache_read_tokens(usage).unwrap_or(0);
-    let cache_creation = extract_cache_write_tokens(usage).unwrap_or(0);
-    let input_tokens = usage
-        .prompt_tokens
-        .saturating_sub(cached)
-        .saturating_sub(cache_creation);
-    let mut usage_json = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": usage.completion_tokens
-    });
-    if cached > 0 {
-        usage_json["cache_read_input_tokens"] = json!(cached);
-    }
-    if cache_creation > 0 {
-        usage_json["cache_creation_input_tokens"] = json!(cache_creation);
-    }
-    usage_json
+/// Chat `usage` → Anthropic `usage` through the shared IR codec (fresh input =
+/// `prompt_tokens - cache_read - cache_write`, PROV-17).
+fn build_anthropic_usage_json(usage: &Value) -> Value {
+    super::ir::anthropic::encode_usage(&super::ir::chat::decode_usage(Some(usage)))
 }
 
 fn default_anthropic_usage_json() -> Value {
@@ -456,21 +416,8 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                 "output_tokens": 0
                                             });
                                             if let Some(u) = &chunk.usage {
-                                                let cached = extract_cache_read_tokens(u).unwrap_or(0);
-                                                let cache_creation =
-                                                    extract_cache_write_tokens(u).unwrap_or(0);
-                                                let input = u
-                                                    .prompt_tokens
-                                                    .saturating_sub(cached)
-                                                    .saturating_sub(cache_creation);
-                                                start_usage["input_tokens"] = json!(input);
-                                                if cached > 0 {
-                                                    start_usage["cache_read_input_tokens"] = json!(cached);
-                                                }
-                                                if cache_creation > 0 {
-                                                    start_usage["cache_creation_input_tokens"] =
-                                                        json!(cache_creation);
-                                                }
+                                                start_usage = build_anthropic_usage_json(u);
+                                                start_usage["output_tokens"] = json!(0);
                                             }
 
                                             let event = json!({
@@ -849,48 +796,11 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
     }
 }
 
-/// Extract cache_read tokens from Usage, checking both direct field and nested details
-fn extract_cache_read_tokens(usage: &Usage) -> Option<u32> {
-    // Direct field takes priority (compatible servers)
-    if let Some(v) = usage.cache_read_input_tokens {
-        return Some(v);
-    }
-    // OpenAI standard: prompt_tokens_details.cached_tokens
-    usage
-        .prompt_tokens_details
-        .as_ref()
-        .map(|d| d.cached_tokens)
-        .filter(|&v| v > 0)
-}
-
-/// Extract cache-write tokens from direct compatibility fields or OpenAI details.
-fn extract_cache_write_tokens(usage: &Usage) -> Option<u32> {
-    if let Some(value) = usage.cache_creation_input_tokens {
-        return Some(value);
-    }
-    usage
-        .prompt_tokens_details
-        .as_ref()
-        .map(|details| details.cache_write_tokens)
-        .filter(|value| *value > 0)
-}
-
-/// 映射停止原因
+/// 映射停止原因 (Chat `finish_reason` → Anthropic `stop_reason`, via the
+/// shared IR codec so streaming and non-streaming agree, PROV-19).
 fn map_stop_reason(finish_reason: Option<&str>) -> Option<String> {
-    finish_reason.map(|r| {
-        match r {
-            "tool_calls" | "function_call" => "tool_use",
-            "stop" => "end_turn",
-            "length" => "max_tokens",
-            // PROV-24: surface filtered output as a refusal, not a normal end.
-            "content_filter" => "refusal",
-            other => {
-                log::warn!("[Claude/OpenRouter] Unknown finish_reason in streaming: {other}");
-                "end_turn"
-            }
-        }
-        .to_string()
-    })
+    super::ir::chat::decode_finish_reason(finish_reason, false)
+        .map(|stop| super::ir::anthropic::encode_stop(&stop).to_string())
 }
 
 #[cfg(test)]

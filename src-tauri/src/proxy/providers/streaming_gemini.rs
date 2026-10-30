@@ -15,19 +15,14 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// Gemini `finishReason` → Anthropic `stop_reason` via the shared IR codec
+/// (one mapping for streaming and non-streaming, PROV-19/PROV-24).
 fn map_finish_reason(reason: Option<&str>, has_tool_use: bool, blocked: bool) -> &'static str {
-    if blocked {
-        return "refusal";
-    }
-
-    match reason {
-        Some("MAX_TOKENS") => "max_tokens",
-        Some("SAFETY")
-        | Some("RECITATION")
-        | Some("SPII")
-        | Some("BLOCKLIST")
-        | Some("PROHIBITED_CONTENT") => "refusal",
-        _ if has_tool_use => "tool_use",
+    use super::ir::StopReason;
+    match super::ir::gemini::decode_finish_reason(reason, has_tool_use, blocked) {
+        StopReason::MaxTokens => "max_tokens",
+        StopReason::Refusal => "refusal",
+        StopReason::ToolUse => "tool_use",
         _ => "end_turn",
     }
 }
