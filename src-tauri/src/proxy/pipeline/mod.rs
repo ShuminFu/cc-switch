@@ -10,6 +10,7 @@
 //! - [`headers`]：声明式出站头策略 [`headers::HeaderPolicy`]；
 //! - [`transport`]：reqwest / raw hyper 发送；
 //! - [`validate`]：2xx 语义校验、流式首包预读与错误体读取；
+//! - [`stream_start`]：流式首个内容前的错误事件闸门（内容前报错可故障转移）；
 //! - [`classify`]：失败分类与日志；
 //! - [`rate_limit`]：429 / 529 的 `Retry-After` 解析（provider 冷却）；
 //! - [`recovery`]：同一 provider 上的恢复策略；
@@ -24,5 +25,6 @@ pub(crate) mod headers;
 pub(crate) mod rate_limit;
 pub(crate) mod recovery;
 pub(crate) mod request_builder;
+pub(crate) mod stream_start;
 pub(crate) mod transport;
 pub(crate) mod validate;

@@ -1018,6 +1018,106 @@ async fn sse_stream_passes_through_unchanged_and_logs_usage() {
     harness.shutdown().await;
 }
 
+fn sse_frame(event: &str, data: Value) -> String {
+    format!("event: {event}\ndata: {data}\n\n")
+}
+
+fn anthropic_overloaded_event() -> String {
+    sse_frame(
+        "error",
+        json!({ "type": "error",
+                "error": { "type": "overloaded_error", "message": "gateway overloaded" } }),
+    )
+}
+
+#[tokio::test]
+async fn stream_error_before_content_fails_over_to_the_next_provider() {
+    let _env = TestEnv::new();
+    // P1 answers 200 + SSE headers, then reports an error before any content.
+    let early_error = vec![
+        anthropic_sse_chunks()[0].clone(),
+        sse_frame(
+            "content_block_start",
+            json!({ "type": "content_block_start", "index": 0,
+                    "content_block": { "type": "text", "text": "" } }),
+        ),
+        anthropic_overloaded_event(),
+    ];
+    let a = MockUpstream::always(MockReply::sse(early_error)).await;
+    let chunks = anthropic_sse_chunks();
+    let b = MockUpstream::always(MockReply::sse(chunks.clone())).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let mut request = simple_request();
+    request["stream"] = json!(true);
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.expect("read stream");
+    assert_eq!(
+        body,
+        chunks.concat(),
+        "the client receives P2's stream only"
+    );
+    assert!(!body.contains("overloaded_error"), "{body}");
+
+    assert_eq!(a.hits(), 1);
+    assert_eq!(b.hits(), 1);
+    harness
+        .wait_for_health(
+            "a",
+            &HarnessHealth {
+                is_healthy: true,
+                consecutive_failures: 1,
+            },
+        )
+        .await;
+    let status = harness.status().await;
+    assert_eq!(status.success_requests, 1);
+    assert_eq!(status.failover_count, 1);
+
+    let logs = harness.wait_for_request_logs(1).await;
+    assert_eq!(logs[0].provider_id, "b");
+    assert_eq!(logs[0].status_code, 200);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn stream_error_after_content_is_passed_through() {
+    let _env = TestEnv::new();
+    let mut chunks = anthropic_sse_chunks()[..3].to_vec();
+    chunks.push(anthropic_overloaded_event());
+    let a = MockUpstream::always(MockReply::sse(chunks.clone())).await;
+    let b = MockUpstream::always(MockReply::sse(anthropic_sse_chunks())).await;
+    let harness = ProxyHarness::builder()
+        .provider("a", &a)
+        .provider("b", &b)
+        .failover(true)
+        .spawn()
+        .await;
+
+    let mut request = simple_request();
+    request["stream"] = json!(true);
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.expect("read stream");
+    assert_eq!(
+        body,
+        chunks.concat(),
+        "content was already streamed, so the error reaches the client"
+    );
+
+    assert_eq!(a.hits(), 1);
+    assert_eq!(b.hits(), 0, "no failover once content has been streamed");
+
+    harness.shutdown().await;
+}
+
 #[tokio::test]
 async fn request_logs_record_success_and_failure_rows() {
     let _env = TestEnv::new();

@@ -573,7 +573,7 @@ impl RequestForwarder {
             SuccessCheck::for_route(flags.codex_responses_to_anthropic, plan.claude_api_format);
         let response = self
             .validator()
-            .validate(response, is_streaming, check)
+            .validate(response, is_streaming, check, plan.upstream)
             .await?;
         Ok((response, plan, built.outbound_model))
     }

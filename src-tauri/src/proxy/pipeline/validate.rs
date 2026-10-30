@@ -3,12 +3,13 @@
 //! 成功不能只看上游响应头：2xx 的语义失败（Anthropic error envelope、Responses
 //! `status: failed`）与流式首包都要在 retry loop 内确认，才能把失败的尝试交给下一家
 //! provider；非 2xx 响应在这里读出（解压后的）错误体并转成 [`ProxyError::UpstreamError`]。
+//! 其余流式响应经 [`stream_start`](super::stream_start) 闸门确认首个内容前没有错误事件。
 
 use crate::proxy::content_encoding::{decompress_body, get_content_encoding};
 use crate::proxy::error::ProxyError;
 use crate::proxy::handler_context::DEFAULT_NON_STREAMING_BODY_TIMEOUT;
 use crate::proxy::hyper_client::ProxyResponse;
-use crate::proxy::protocol::ClaudeApiFormat;
+use crate::proxy::protocol::{ClaudeApiFormat, WireFormat};
 use crate::proxy::stream::{SseDecoder, SseEvent};
 use bytes::Bytes;
 use futures::StreamExt;
@@ -52,11 +53,14 @@ impl SuccessCheck {
 
 impl ResponseValidator {
     /// 校验上游响应：2xx 返回可交给 handler 的响应，否则返回可分类的错误
+    ///
+    /// `upstream` 是本次尝试的上游线协议，流式闸门按它解码 SSE。
     pub(crate) async fn validate(
         &self,
         response: ProxyResponse,
         request_is_streaming: bool,
         check: SuccessCheck,
+        upstream: WireFormat,
     ) -> Result<ProxyResponse, ProxyError> {
         let status = response.status();
         if !status.is_success() {
@@ -88,6 +92,10 @@ impl ResponseValidator {
                     // A response.failed/error before output remains failover-safe.
                     response = self.validate_responses_stream_start(response).await?;
                 }
+            }
+            // 其余 SSE：缓冲到首个内容，内容前的错误事件（200 后立即报错）同样可以故障转移
+            _ if request_is_streaming && !response.is_json() => {
+                response = self.gate_stream_start(response, upstream).await?;
             }
             _ => {}
         }
