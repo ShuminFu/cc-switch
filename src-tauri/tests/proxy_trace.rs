@@ -137,3 +137,63 @@ async fn trace_of_a_request_where_every_provider_fails_is_linked_to_the_error_ro
 
     harness.shutdown().await;
 }
+
+fn anthropic_sse_chunks() -> Vec<String> {
+    let events = [
+        (
+            "message_start",
+            json!({ "type": "message_start", "message": {
+                "id": "msg_1", "type": "message", "role": "assistant",
+                "model": "claude-sonnet-4-5", "content": [],
+                "usage": { "input_tokens": 21, "output_tokens": 0 } } }),
+        ),
+        (
+            "content_block_start",
+            json!({ "type": "content_block_start", "index": 0,
+                    "content_block": { "type": "text", "text": "" } }),
+        ),
+        (
+            "content_block_delta",
+            json!({ "type": "content_block_delta", "index": 0,
+                    "delta": { "type": "text_delta", "text": "hi" } }),
+        ),
+        (
+            "content_block_stop",
+            json!({ "type": "content_block_stop", "index": 0 }),
+        ),
+        (
+            "message_delta",
+            json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" },
+                    "usage": { "output_tokens": 9 } }),
+        ),
+        ("message_stop", json!({ "type": "message_stop" })),
+    ];
+    events
+        .iter()
+        .map(|(event, data)| format!("event: {event}\ndata: {data}\n\n"))
+        .collect()
+}
+
+#[tokio::test]
+async fn trace_of_a_streaming_request_is_linked_with_stream_usage() {
+    let _env = TestEnv::new();
+    let upstream = MockUpstream::always(MockReply::sse(anthropic_sse_chunks())).await;
+    let harness = ProxyHarness::spawn(&upstream).await;
+
+    let mut request = simple_request();
+    request["stream"] = json!(true);
+    let response = harness.messages(&request).await;
+    assert_eq!(response.status(), 200);
+    let _ = response.text().await;
+
+    let logs = harness.wait_for_request_logs(1).await;
+    let trace = trace_when_linked(&harness, &logs[0].request_id).await;
+    assert_eq!(trace["isStream"], true);
+    assert_eq!(trace["usageSource"], "stream_events", "{trace:#}");
+    assert!(trace["firstTokenMs"].is_u64(), "{trace:#}");
+    let attempts = trace["attempts"].as_array().expect("attempts");
+    assert_eq!(attempts.len(), 1, "{trace:#}");
+    assert_eq!(attempts[0]["status"], "succeeded");
+
+    harness.shutdown().await;
+}
