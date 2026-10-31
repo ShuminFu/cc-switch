@@ -106,6 +106,10 @@ pub struct LogFilters {
     pub provider_name: Option<String>,
     pub model: Option<String>,
     pub status_code: Option<u16>,
+    /// Inclusive lower bound on the status code (FE-UI-59), e.g. 400 for "errors".
+    pub status_min: Option<u16>,
+    /// Inclusive upper bound on the status code (FE-UI-59), e.g. 499 for "4xx".
+    pub status_max: Option<u16>,
     pub start_date: Option<i64>,
     pub end_date: Option<i64>,
 }
@@ -1554,6 +1558,14 @@ impl Database {
             conditions.push("l.status_code = ?".to_string());
             params.push(Box::new(status as i64));
         }
+        if let Some(min) = filters.status_min {
+            conditions.push("l.status_code >= ?".to_string());
+            params.push(Box::new(min as i64));
+        }
+        if let Some(max) = filters.status_max {
+            conditions.push("l.status_code <= ?".to_string());
+            params.push(Box::new(max as i64));
+        }
         if let Some(start) = filters.start_date {
             conditions.push("l.created_at >= ?".to_string());
             params.push(Box::new(start));
@@ -2908,6 +2920,57 @@ mod tests {
         assert_eq!(input_cost, "5.000000");
         assert_eq!(total_cost, "7.500000");
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_request_logs_status_range_filter() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            for (i, status) in [200, 401, 404, 429, 502, 529].iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO proxy_request_logs (
+                        request_id, provider_id, app_type, model,
+                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                        input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd,
+                        total_cost_usd, latency_ms, status_code, created_at
+                    ) VALUES (?1, 'p', 'claude', 'm', 1, 1, 0, 0, '0', '0', '0', '0', '0', 10, ?2, ?3)",
+                    rusqlite::params![format!("status-{i}"), status, 1000 + i as i64],
+                )?;
+            }
+        }
+
+        let codes = |filters: LogFilters| -> Result<Vec<u16>, AppError> {
+            let mut codes: Vec<u16> = db
+                .get_request_logs(&filters, 0, 50)?
+                .data
+                .into_iter()
+                .map(|r| r.status_code)
+                .collect();
+            codes.sort_unstable();
+            Ok(codes)
+        };
+
+        let errors = codes(LogFilters {
+            status_min: Some(400),
+            ..Default::default()
+        })?;
+        assert_eq!(errors, vec![401, 404, 429, 502, 529]);
+
+        let client = codes(LogFilters {
+            status_min: Some(400),
+            status_max: Some(499),
+            ..Default::default()
+        })?;
+        assert_eq!(client, vec![401, 404, 429]);
+
+        let server = codes(LogFilters {
+            status_min: Some(500),
+            status_max: Some(599),
+            ..Default::default()
+        })?;
+        assert_eq!(server, vec![502, 529]);
         Ok(())
     }
 

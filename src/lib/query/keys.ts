@@ -27,6 +27,8 @@ export type RequestLogsKey = {
   providerName?: string;
   model?: string;
   statusCode?: number;
+  statusMin?: number;
+  statusMax?: number;
 };
 
 // Query keys
@@ -133,6 +135,8 @@ export const usageKeys = {
       key.providerName ?? "",
       key.model ?? "",
       key.statusCode ?? -1,
+      key.statusMin ?? -1,
+      key.statusMax ?? -1,
       page,
       pageSize,
     ] as const,
