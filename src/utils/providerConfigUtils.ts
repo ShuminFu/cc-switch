@@ -3,6 +3,7 @@
 import type { TFunction } from "i18next";
 import type { TemplateValueConfig } from "../config/claudeProviderPresets";
 import type { CodexApiFormat } from "@/types";
+import type { AppId } from "@/lib/api/types";
 import { deepClone } from "@/utils/deepClone";
 import { normalizeTomlText } from "@/utils/textNormalization";
 import { parse as parseToml } from "smol-toml";
@@ -173,6 +174,16 @@ export const hasCommonConfigSnippet = (
   }
 };
 
+// settingsConfig.env 中只有一个 API Key 变量的应用；其余应用按 Claude 处理
+// （ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY）
+const ENV_API_KEY_FIELDS: ReadonlyMap<string, string> = new Map<AppId, string>([
+  ["gemini", "GEMINI_API_KEY"],
+  ["codex", "CODEX_API_KEY"],
+]);
+
+const envApiKeyField = (appType?: string) =>
+  appType ? ENV_API_KEY_FIELDS.get(appType) : undefined;
+
 // 读取配置中的 API Key（支持 Claude, Codex, Gemini）
 export const getApiKeyFromConfig = (
   jsonString: string,
@@ -194,16 +205,11 @@ export const getApiKeyFromConfig = (
 
     if (!env) return "";
 
-    // Gemini API Key
-    if (appType === "gemini") {
-      const geminiKey = env.GEMINI_API_KEY;
-      return typeof geminiKey === "string" ? geminiKey : "";
-    }
-
-    // Codex API Key
-    if (appType === "codex") {
-      const codexKey = env.CODEX_API_KEY;
-      return typeof codexKey === "string" ? codexKey : "";
+    // Gemini / Codex API Key
+    const keyField = envApiKeyField(appType);
+    if (keyField) {
+      const key = env[keyField];
+      return typeof key === "string" ? key : "";
     }
 
     // Claude API Key (优先 ANTHROPIC_AUTH_TOKEN，其次 ANTHROPIC_API_KEY)
@@ -281,12 +287,9 @@ export const hasApiKeyField = (
 
     const env = config?.env ?? {};
 
-    if (appType === "gemini") {
-      return Object.prototype.hasOwnProperty.call(env, "GEMINI_API_KEY");
-    }
-
-    if (appType === "codex") {
-      return Object.prototype.hasOwnProperty.call(env, "CODEX_API_KEY");
+    const keyField = envApiKeyField(appType);
+    if (keyField) {
+      return Object.prototype.hasOwnProperty.call(env, keyField);
     }
 
     return (
@@ -324,24 +327,11 @@ export const setApiKeyInConfig = (
     }
     const env = config.env as Record<string, any>;
 
-    // Gemini API Key
-    if (appType === "gemini") {
-      if ("GEMINI_API_KEY" in env) {
-        env.GEMINI_API_KEY = apiKey;
-      } else if (createIfMissing) {
-        env.GEMINI_API_KEY = apiKey;
-      } else {
-        return jsonString;
-      }
-      return JSON.stringify(config, null, 2);
-    }
-
-    // Codex API Key
-    if (appType === "codex") {
-      if ("CODEX_API_KEY" in env) {
-        env.CODEX_API_KEY = apiKey;
-      } else if (createIfMissing) {
-        env.CODEX_API_KEY = apiKey;
+    // Gemini / Codex API Key
+    const keyField = envApiKeyField(appType);
+    if (keyField) {
+      if (keyField in env || createIfMissing) {
+        env[keyField] = apiKey;
       } else {
         return jsonString;
       }

@@ -173,6 +173,8 @@ describe("app feature nav", () => {
           omo: false,
           configStatus: false,
           pluginSync: false,
+          providerTerminal: false,
+          commonConfigSnippet: false,
         }}
         onNavigate={onNavigate}
       />,

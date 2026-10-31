@@ -160,6 +160,8 @@ describe("app registry", () => {
     ["omo", ["opencode"]],
     ["configStatus", ["claude-desktop"]],
     ["pluginSync", ["claude"]],
+    ["providerTerminal", ["claude"]],
+    ["commonConfigSnippet", ["claude", "codex", "gemini"]],
     ["setDefault", ["openclaw", "hermes"]],
     ["defaultIsSwitch", ["hermes"]],
   ] as const)("only %s apps have that capability", (cap, apps) => {
@@ -181,6 +183,8 @@ describe("app registry", () => {
       omo: false,
       configStatus: false,
       pluginSync: false,
+      providerTerminal: false,
+      commonConfigSnippet: false,
     });
   });
 

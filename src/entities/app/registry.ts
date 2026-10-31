@@ -43,6 +43,10 @@ export interface AppCaps {
   configStatus: boolean;
   /** 切换供应商后按设置同步 Claude 插件配置 */
   pluginSync: boolean;
+  /** 供应商卡片可用该供应商配置打开终端 */
+  providerTerminal: boolean;
+  /** API Key 与端点以外的设置保存到通用配置片段，在供应商之间共享 */
+  commonConfigSnippet: boolean;
 }
 
 export interface AppDescriptor {
@@ -69,6 +73,8 @@ const caps = (overrides: Partial<AppCaps> = {}): AppCaps => ({
   omo: false,
   configStatus: false,
   pluginSync: false,
+  providerTerminal: false,
+  commonConfigSnippet: false,
   ...overrides,
 });
 
@@ -77,7 +83,12 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
   {
     id: "claude",
     label: "Claude",
-    caps: caps({ universalProviders: true, pluginSync: true }),
+    caps: caps({
+      universalProviders: true,
+      pluginSync: true,
+      providerTerminal: true,
+      commonConfigSnippet: true,
+    }),
   },
   {
     id: "claude-desktop",
@@ -92,8 +103,16 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
     featureHost: "claude",
     aliases: ["claude_desktop", "claudedesktop"],
   },
-  { id: "codex", label: "Codex", caps: caps({ universalProviders: true }) },
-  { id: "gemini", label: "Gemini", caps: caps({ universalProviders: true }) },
+  {
+    id: "codex",
+    label: "Codex",
+    caps: caps({ universalProviders: true, commonConfigSnippet: true }),
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    caps: caps({ universalProviders: true, commonConfigSnippet: true }),
+  },
   {
     id: "grokbuild",
     label: "Grok Build",
@@ -146,6 +165,8 @@ const NO_CAPS: AppCaps = {
   omo: false,
   configStatus: false,
   pluginSync: false,
+  providerTerminal: false,
+  commonConfigSnippet: false,
 };
 
 /** 全部应用 ID（按注册表顺序） */

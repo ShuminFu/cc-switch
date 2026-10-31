@@ -10,6 +10,16 @@ type PresetEntry = {
   preset: ProviderPreset | CodexProviderPreset;
 };
 
+/**
+ * 各应用测速候选端点的来源：settingsConfig.env 中的 Base URL（Claude / Gemini），
+ * 或 Codex config.toml 的 base_url；未列出的应用不收集候选端点
+ */
+const ENDPOINT_SOURCE: Partial<Record<AppId, "env" | "codexToml">> = {
+  claude: "env",
+  gemini: "env",
+  codex: "codexToml",
+};
+
 interface UseSpeedTestEndpointsProps {
   appId: AppId;
   selectedPresetId: string | null;
@@ -41,9 +51,11 @@ export function useSpeedTestEndpoints({
   codexBaseUrl,
   initialData,
 }: UseSpeedTestEndpointsProps) {
+  const endpointSource = ENDPOINT_SOURCE[appId];
+
   const claudeEndpoints = useMemo<EndpointCandidate[]>(() => {
     // Reuse this branch for Claude and Gemini (non-Codex)
-    if (appId !== "claude" && appId !== "gemini") return [];
+    if (endpointSource !== "env") return [];
 
     const map = new Map<string, EndpointCandidate>();
     // 候选端点标记为 isCustom: false，表示来自预设或配置
@@ -102,10 +114,10 @@ export function useSpeedTestEndpoints({
     }
 
     return Array.from(map.values());
-  }, [appId, baseUrl, initialData, selectedPresetId, presetEntries]);
+  }, [endpointSource, baseUrl, initialData, selectedPresetId, presetEntries]);
 
   const codexEndpoints = useMemo<EndpointCandidate[]>(() => {
-    if (appId !== "codex") return [];
+    if (endpointSource !== "codexToml") return [];
 
     const map = new Map<string, EndpointCandidate>();
     // 候选端点标记为 isCustom: false，表示来自预设或配置
@@ -153,7 +165,13 @@ export function useSpeedTestEndpoints({
     }
 
     return Array.from(map.values());
-  }, [appId, codexBaseUrl, initialData, selectedPresetId, presetEntries]);
+  }, [
+    endpointSource,
+    codexBaseUrl,
+    initialData,
+    selectedPresetId,
+    presetEntries,
+  ]);
 
-  return appId === "codex" ? codexEndpoints : claudeEndpoints;
+  return endpointSource === "codexToml" ? codexEndpoints : claudeEndpoints;
 }

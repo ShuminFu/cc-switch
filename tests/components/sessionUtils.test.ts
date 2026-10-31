@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractCodexPromptPreview,
   formatSessionMessagePreview,
+  getProviderIconName,
   groupSessionsByProviderAndDirectory,
   shouldHideCodexMessageFromToc,
 } from "@/components/sessions/utils";
@@ -220,5 +221,20 @@ describe("session utils", () => {
     expect(
       groups[0].directories[0].sessions.map((session) => session.sessionId),
     ).toEqual(["newest", "oldest"]);
+  });
+
+  it.each([
+    ["codex", "openai"],
+    ["grokbuild", "grok"],
+    ["claude", "claude"],
+    ["claude-desktop", "claude-desktop"],
+    ["gemini", "gemini"],
+    ["opencode", "opencode"],
+    ["openclaw", "openclaw"],
+    ["hermes", "hermes"],
+    ["some-other-tool", "some-other-tool"],
+    ["toString", "toString"],
+  ])("maps session provider %s to the %s icon", (providerId, icon) => {
+    expect(getProviderIconName(providerId)).toBe(icon);
   });
 });

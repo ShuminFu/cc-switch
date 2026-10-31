@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Provider } from "@/types";
+import type { AppId } from "@/lib/api";
 
 const apiMocks = vi.hoisted(() => ({
   getCurrent: vi.fn(),
@@ -17,6 +18,10 @@ const apiMocks = vi.hoisted(() => ({
 
 // 记录 ProviderForm 每次挂载时拿到的 initialData，用于断言表单只以最终配置挂载一次
 const formMounts = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+// 表单提交时附带的 providerKey（OpenCode / OpenClaw 表单中的供应商标识）
+const formSubmitExtras = vi.hoisted(() => ({
+  providerKey: undefined as string | undefined,
+}));
 
 vi.mock("@/lib/api", () => ({
   providersApi: {
@@ -74,6 +79,7 @@ vi.mock("@/components/providers/forms/ProviderForm", async () => {
         meta?: Record<string, unknown>;
         icon?: string;
         iconColor?: string;
+        providerKey?: string;
       }) => void;
       isProxyTakeover?: boolean;
     }) => {
@@ -94,6 +100,7 @@ vi.mock("@/components/providers/forms/ProviderForm", async () => {
               meta: initialData.meta,
               icon: initialData.icon,
               iconColor: initialData.iconColor,
+              providerKey: formSubmitExtras.providerKey,
             });
           }}
         >
@@ -124,6 +131,7 @@ describe("EditProviderDialog", () => {
     apiMocks.getLiveProviderSettings.mockReset();
     apiMocks.getOpenClawLiveProvider.mockReset();
     formMounts.length = 0;
+    formSubmitExtras.providerKey = undefined;
   });
 
   it("保留 Codex 数据库中的 modelCatalog，避免 live 配置缺字段时清空模型映射", async () => {
@@ -522,5 +530,68 @@ describe("EditProviderDialog", () => {
       expect(screen.queryByTestId("live-diff-file")).not.toBeInTheDocument();
       warn.mockRestore();
     });
+  });
+
+  // 每个应用的 live 读取方式与保存时是否按 providerKey 改 ID（取代组件中的 app-id 判断）
+  describe("per-app edit behaviour", () => {
+    const provider: Provider = {
+      id: "old-id",
+      name: "Provider",
+      settingsConfig: { model: "db" },
+    };
+
+    it.each<[AppId, "none" | "entry" | "current", boolean]>([
+      ["claude", "current", false],
+      ["claude-desktop", "current", false],
+      ["codex", "current", false],
+      ["gemini", "current", false],
+      ["grokbuild", "current", false],
+      ["opencode", "none", true],
+      ["openclaw", "entry", true],
+      ["hermes", "current", false],
+    ])(
+      "%s reads live via %s, renames by key: %s",
+      async (appId, live, rename) => {
+        apiMocks.getCurrent.mockResolvedValue(provider.id);
+        apiMocks.getLiveProviderSettings.mockResolvedValue({ model: "live" });
+        apiMocks.getOpenClawLiveProvider.mockResolvedValue({ model: "entry" });
+        formSubmitExtras.providerKey = " new-key ";
+        const handleSubmit = vi.fn().mockResolvedValue(undefined);
+
+        render(
+          <EditProviderDialog
+            open
+            provider={provider}
+            onOpenChange={vi.fn()}
+            onSubmit={handleSubmit}
+            appId={appId}
+          />,
+        );
+
+        const expectedModel = { none: "db", entry: "entry", current: "live" }[
+          live
+        ];
+        await waitFor(() =>
+          expect(
+            JSON.parse(
+              screen.getByTestId("settings-config").textContent ?? "{}",
+            ),
+          ).toEqual({ model: expectedModel }),
+        );
+        expect(apiMocks.getOpenClawLiveProvider).toHaveBeenCalledTimes(
+          live === "entry" ? 1 : 0,
+        );
+        expect(apiMocks.getLiveProviderSettings).toHaveBeenCalledTimes(
+          live === "current" ? 1 : 0,
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+        await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
+        expect(handleSubmit.mock.calls[0][0]).toMatchObject({
+          provider: { id: rename ? "new-key" : "old-id" },
+          originalId: "old-id",
+        });
+      },
+    );
   });
 });

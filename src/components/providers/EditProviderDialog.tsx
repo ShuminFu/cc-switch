@@ -12,6 +12,63 @@ import { openclawApi, providersApi, vscodeApi, type AppId } from "@/lib/api";
 import { useUnsavedChangesGuard } from "@/features/providers/forms/useUnsavedChangesGuard";
 import { useLiveDiffPreview } from "@/features/providers/forms/LiveDiffPreviewDialog";
 
+/**
+ * 各应用编辑时的配置来源与保存规则：
+ * - liveSource：初始值从 live 读取的方式。"none" 不读取（OpenCode 为累加模式，live 是整份
+ *   opencode.json 而非供应商片段，读取后保存会写出错误的嵌套结构）；"entry" 读取该供应商在
+ *   live 中的条目；"current" 仅在编辑当前供应商时读取整份 live 配置
+ * - renameByKey：保存时以表单中的 providerKey 作为新的供应商 ID
+ * - keepDbModelCatalog：modelCatalog 以数据库为准（Codex，见 initialSettingsConfig）
+ */
+interface EditBehavior {
+  liveSource: "none" | "entry" | "current";
+  renameByKey: boolean;
+  keepDbModelCatalog: boolean;
+}
+
+const EDIT_BEHAVIOR: Record<AppId, EditBehavior> = {
+  claude: {
+    liveSource: "current",
+    renameByKey: false,
+    keepDbModelCatalog: false,
+  },
+  "claude-desktop": {
+    liveSource: "current",
+    renameByKey: false,
+    keepDbModelCatalog: false,
+  },
+  codex: {
+    liveSource: "current",
+    renameByKey: false,
+    keepDbModelCatalog: true,
+  },
+  gemini: {
+    liveSource: "current",
+    renameByKey: false,
+    keepDbModelCatalog: false,
+  },
+  grokbuild: {
+    liveSource: "current",
+    renameByKey: false,
+    keepDbModelCatalog: false,
+  },
+  opencode: {
+    liveSource: "none",
+    renameByKey: true,
+    keepDbModelCatalog: false,
+  },
+  openclaw: {
+    liveSource: "entry",
+    renameByKey: true,
+    keepDbModelCatalog: false,
+  },
+  hermes: {
+    liveSource: "current",
+    renameByKey: false,
+    keepDbModelCatalog: false,
+  },
+};
+
 interface EditProviderDialogProps {
   open: boolean;
   provider: Provider | null;
@@ -53,9 +110,10 @@ export function EditProviderDialog({
   const [loadedLiveKey, setLoadedLiveKey] = useState<string | null>(null);
 
   const liveKey = open && provider ? `${appId}:${provider.id}` : null;
+  const { liveSource, renameByKey, keepDbModelCatalog } = EDIT_BEHAVIOR[appId];
 
   // 代理接管模式 / OpenCode 不读取 live，无需等待，表单可立即渲染
-  const skipLiveRead = isProxyTakeover || appId === "opencode";
+  const skipLiveRead = isProxyTakeover || liveSource === "none";
 
   // 表单只在实时配置读取完成后才渲染：ProviderForm 及 Codex/Gemini 配置 hooks
   // 只在挂载时消费 initialData，若先用数据库配置渲染、待 live 返回后再 reset，
@@ -92,7 +150,7 @@ export function EditProviderDialog({
         return;
       }
 
-      if (appId === "openclaw") {
+      if (liveSource === "entry") {
         try {
           const live = await openclawApi.getLiveProvider(provider.id);
           finish(live && typeof live === "object" ? live : null);
@@ -121,7 +179,15 @@ export function EditProviderDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, provider?.id, appId, liveKey, loadedLiveKey, skipLiveRead]); // 只依赖 provider.id，不依赖整个 provider 对象
+  }, [
+    open,
+    provider?.id,
+    appId,
+    liveKey,
+    loadedLiveKey,
+    skipLiveRead,
+    liveSource,
+  ]); // 只依赖 provider.id，不依赖整个 provider 对象
 
   // 仅使用属于当前 key 的实时配置，避免切换 provider 时短暂套用上一个的 live 值
   const effectiveLiveSettings =
@@ -138,7 +204,7 @@ export function EditProviderDialog({
     // 若放任 Live 覆盖，编辑界面会显示空映射表，保存后连同数据库里的映射一起清空（数据丢失）。
     // 因此始终以数据库 SSOT 的 modelCatalog 为准，仅在数据库确实没有时才回退到 Live 反解结果。
     if (
-      appId === "codex" &&
+      keepDbModelCatalog &&
       effectiveLiveSettings &&
       provider?.settingsConfig &&
       typeof provider.settingsConfig === "object"
@@ -151,7 +217,7 @@ export function EditProviderDialog({
     }
 
     return base;
-  }, [effectiveLiveSettings, provider?.settingsConfig, appId]); // 只依赖 settingsConfig，不依赖整个 provider
+  }, [effectiveLiveSettings, provider?.settingsConfig, keepDbModelCatalog]); // 只依赖 settingsConfig，不依赖整个 provider
 
   // 固定 initialData，防止 provider 对象更新时重置表单
   const initialData = useMemo(() => {
@@ -184,8 +250,7 @@ export function EditProviderDialog({
         unknown
       >;
       const nextProviderId =
-        (appId === "opencode" || appId === "openclaw") &&
-        values.providerKey?.trim()
+        renameByKey && values.providerKey?.trim()
           ? values.providerKey.trim()
           : provider.id;
 
@@ -214,7 +279,7 @@ export function EditProviderDialog({
       });
       onOpenChange(false);
     },
-    [appId, confirmBeforeSave, onSubmit, onOpenChange, provider],
+    [renameByKey, confirmBeforeSave, onSubmit, onOpenChange, provider],
   );
 
   if (!provider || !initialData) {
