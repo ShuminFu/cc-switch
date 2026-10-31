@@ -8,7 +8,7 @@ release/
 *.tsbuildinfo
 .npmrc
 CLAUDE.md
-AGENTS.md
+# AGENTS.md is committed (the public contributor/agent rulebook, CI-27).
 GEMINI.md
 /.claude
 /.codex
