@@ -302,6 +302,43 @@ pub struct PromptRoot {
     pub hermes: PromptConfig,
 }
 
+/// 旧分应用槽位的键控访问器：字段名与 AppType 一一对应，映射只在此处维护一份，
+/// 供 `McpRoot` / `PromptRoot` 共用（不改变 JSON 结构与别名反序列化）。
+macro_rules! impl_app_slots {
+    ($root:ty, $slot:ty, { $($app:ident => $field:ident),+ $(,)? }) => {
+        impl $root {
+            /// 按应用取对应槽位（不可变引用）
+            pub fn for_app(&self, app: &AppType) -> &$slot {
+                match app {
+                    $(AppType::$app => &self.$field,)+
+                }
+            }
+
+            /// 按应用取对应槽位（可变引用）
+            pub fn for_app_mut(&mut self, app: &AppType) -> &mut $slot {
+                match app {
+                    $(AppType::$app => &mut self.$field,)+
+                }
+            }
+        }
+    };
+    ($root:ty, $slot:ty) => {
+        impl_app_slots!($root, $slot, {
+            Claude => claude,
+            ClaudeDesktop => claude_desktop,
+            Codex => codex,
+            Gemini => gemini,
+            GrokBuild => grokbuild,
+            OpenCode => opencode,
+            OpenClaw => openclaw,
+            Hermes => hermes,
+        });
+    };
+}
+
+impl_app_slots!(McpRoot, McpConfig);
+impl_app_slots!(PromptRoot, PromptConfig);
+
 use crate::apps::{AppDescriptor, InputTokenSemantics, SyncMode, APPS};
 use crate::config::{copy_file, get_app_config_dir, get_app_config_path, write_json_file_sorted};
 use crate::error::AppError;
@@ -653,30 +690,12 @@ impl MultiAppConfig {
 
     /// 获取指定客户端的 MCP 配置（不可变引用）
     pub fn mcp_for(&self, app: &AppType) -> &McpConfig {
-        match app {
-            AppType::Claude => &self.mcp.claude,
-            AppType::ClaudeDesktop => &self.mcp.claude_desktop,
-            AppType::Codex => &self.mcp.codex,
-            AppType::Gemini => &self.mcp.gemini,
-            AppType::GrokBuild => &self.mcp.grokbuild,
-            AppType::OpenCode => &self.mcp.opencode,
-            AppType::OpenClaw => &self.mcp.openclaw,
-            AppType::Hermes => &self.mcp.hermes,
-        }
+        self.mcp.for_app(app)
     }
 
     /// 获取指定客户端的 MCP 配置（可变引用）
     pub fn mcp_for_mut(&mut self, app: &AppType) -> &mut McpConfig {
-        match app {
-            AppType::Claude => &mut self.mcp.claude,
-            AppType::ClaudeDesktop => &mut self.mcp.claude_desktop,
-            AppType::Codex => &mut self.mcp.codex,
-            AppType::Gemini => &mut self.mcp.gemini,
-            AppType::GrokBuild => &mut self.mcp.grokbuild,
-            AppType::OpenCode => &mut self.mcp.opencode,
-            AppType::OpenClaw => &mut self.mcp.openclaw,
-            AppType::Hermes => &mut self.mcp.hermes,
-        }
+        self.mcp.for_app_mut(app)
     }
 
     /// 创建默认配置并自动导入已存在的提示词文件
@@ -791,16 +810,7 @@ impl MultiAppConfig {
         };
 
         // 插入到对应的应用配置中
-        let prompts = match app {
-            AppType::Claude => &mut config.prompts.claude.prompts,
-            AppType::ClaudeDesktop => &mut config.prompts.claude_desktop.prompts,
-            AppType::Codex => &mut config.prompts.codex.prompts,
-            AppType::Gemini => &mut config.prompts.gemini.prompts,
-            AppType::GrokBuild => &mut config.prompts.grokbuild.prompts,
-            AppType::OpenCode => &mut config.prompts.opencode.prompts,
-            AppType::OpenClaw => &mut config.prompts.openclaw.prompts,
-            AppType::Hermes => &mut config.prompts.hermes.prompts,
-        };
+        let prompts = &mut config.prompts.for_app_mut(&app).prompts;
 
         prompts.insert(id, prompt);
 
@@ -827,24 +837,14 @@ impl MultiAppConfig {
         let mut unified_servers: HashMap<String, McpServer> = HashMap::new();
         let mut conflicts = Vec::new();
 
-        // 收集所有应用的 MCP
-        for app in [
-            AppType::Claude,
-            AppType::Codex,
-            AppType::Gemini,
-            AppType::OpenCode,
+        // 收集 v3.6.x 已有分应用 MCP 的 4 个应用（Claude Desktop / Grok Build /
+        // OpenClaw / Hermes 当时不存在或不在此存 MCP，跳过）
+        for (app, old_servers) in [
+            (AppType::Claude, &self.mcp.claude.servers),
+            (AppType::Codex, &self.mcp.codex.servers),
+            (AppType::Gemini, &self.mcp.gemini.servers),
+            (AppType::OpenCode, &self.mcp.opencode.servers),
         ] {
-            let old_servers = match app {
-                AppType::Claude => &self.mcp.claude.servers,
-                AppType::ClaudeDesktop => continue, // Claude Desktop 3P profiles don't use MCP here
-                AppType::Codex => &self.mcp.codex.servers,
-                AppType::Gemini => &self.mcp.gemini.servers,
-                AppType::GrokBuild => continue,
-                AppType::OpenCode => &self.mcp.opencode.servers,
-                AppType::OpenClaw => continue, // OpenClaw MCP didn't exist in v3.6.x, skip
-                AppType::Hermes => continue,   // Hermes didn't exist in v3.6.x, skip
-            };
-
             for (id, entry) in old_servers {
                 let enabled = entry
                     .get("enabled")
@@ -957,6 +957,57 @@ mod tests {
     use std::env;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn legacy_app_slots_are_keyed_by_app_id() {
+        // 键控访问写入的槽位，其 JSON 键必须是该应用的规范 id，且能原样读回
+        for app in APPS.iter().map(|descriptor| descriptor.app.clone()) {
+            let mut config = MultiAppConfig::default();
+            config
+                .mcp_for_mut(&app)
+                .servers
+                .insert("m".to_string(), serde_json::json!({ "id": "m" }));
+            config.prompts.for_app_mut(&app).prompts.insert(
+                "p".to_string(),
+                crate::prompt::Prompt {
+                    id: "p".to_string(),
+                    name: "p".to_string(),
+                    content: "c".to_string(),
+                    description: None,
+                    enabled: true,
+                    created_at: None,
+                    updated_at: None,
+                },
+            );
+
+            let json = serde_json::to_value(&config).unwrap();
+            let mcp_keys: Vec<&String> = json["mcp"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .filter(|key| *key != "servers")
+                .collect();
+            assert_eq!(mcp_keys, vec![app.as_str()], "mcp slot for {app:?}");
+            let prompt_keys: Vec<&String> = json["prompts"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter(|(_, slot)| !slot["prompts"].as_object().unwrap().is_empty())
+                .map(|(key, _)| key)
+                .collect();
+            assert_eq!(prompt_keys, vec![app.as_str()], "prompt slot for {app:?}");
+
+            let back: MultiAppConfig = serde_json::from_value(json).unwrap();
+            assert!(back.mcp_for(&app).servers.contains_key("m"));
+            assert!(back.prompts.for_app(&app).prompts.contains_key("p"));
+            for other in APPS.iter().map(|descriptor| &descriptor.app) {
+                if *other != app {
+                    assert!(back.mcp_for(other).is_empty());
+                    assert!(back.prompts.for_app(other).prompts.is_empty());
+                }
+            }
+        }
+    }
 
     #[test]
     fn app_set_keeps_flat_json_shape_and_reads_old_keys() {

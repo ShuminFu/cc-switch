@@ -204,8 +204,9 @@ mod tests {
     ///（CCS-232 起不再把 `#[cfg(test)] mod foo;` 声明的测试文件计入）；CCS-233 把 paths 与
     /// 深链接预览改走注册表 / 适配器后为 25 处；CCS-234 把接管的按应用分派（读写 / 清理 live、
     /// 凭据回写、当前供应商依赖、代理地址比对、热切换刷新、备份投影、快照文件）收进
-    /// `ProxyTakeover` 后为 15 处，达到 P4 目标。
-    const MATCH_APP_SITE_BUDGET: usize = 15;
+    /// `ProxyTakeover` 后为 15 处，达到 P4 目标；CCS-235 把 app_config.rs 的旧分应用槽位访问
+    /// （MCP / Prompt / v3.6 迁移）与 services/profile.rs 的分组映射改为键控访问后为 8 处。
+    const MATCH_APP_SITE_BUDGET: usize = 8;
 
     #[test]
     fn match_app_sites_outside_apps_stay_within_budget() {

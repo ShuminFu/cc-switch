@@ -75,14 +75,19 @@ impl ProfileScope {
 
     /// 应用页 → 所属分组（Profile 不支持的应用返回 None）
     pub fn for_app(app: &AppType) -> Option<Self> {
-        match app {
-            AppType::Claude => Some(ProfileScope::Claude),
-            AppType::ClaudeDesktop => Some(ProfileScope::ClaudeDesktop),
-            AppType::Codex => Some(ProfileScope::Codex),
-            _ => None,
-        }
+        SCOPE_BY_APP
+            .iter()
+            .find(|(scope_app, _)| scope_app == app)
+            .map(|(_, scope)| *scope)
     }
 }
+
+/// 受 Profile 管理的应用及其分组（扩展时与 `ProfileScope::apps` / `PerApp` 字段同步）
+const SCOPE_BY_APP: [(AppType, ProfileScope); 3] = [
+    (AppType::Claude, ProfileScope::Claude),
+    (AppType::ClaudeDesktop, ProfileScope::ClaudeDesktop),
+    (AppType::Codex, ProfileScope::Codex),
+];
 
 /// 按 app 分槽的载荷容器；字段名与 AppType 的 serde 形式一致。
 /// 读取时键经注册表别名归一（如 `claude_desktop` → `claude-desktop`），
@@ -97,20 +102,27 @@ pub struct PerApp<T> {
 
 impl<T> PerApp<T> {
     pub fn get(&self, app: &AppType) -> Option<&T> {
-        match app {
-            AppType::Claude => Some(&self.claude),
-            AppType::ClaudeDesktop => Some(&self.claude_desktop),
-            AppType::Codex => Some(&self.codex),
-            _ => None,
-        }
+        ProfileScope::for_app(app).map(|scope| self.slot(scope))
     }
 
     pub fn get_mut(&mut self, app: &AppType) -> Option<&mut T> {
-        match app {
-            AppType::Claude => Some(&mut self.claude),
-            AppType::ClaudeDesktop => Some(&mut self.claude_desktop),
-            AppType::Codex => Some(&mut self.codex),
-            _ => None,
+        ProfileScope::for_app(app).map(|scope| self.slot_mut(scope))
+    }
+
+    /// 分组 → 槽位（每个分组恰好一个受管应用，对应一个字段）
+    fn slot(&self, scope: ProfileScope) -> &T {
+        match scope {
+            ProfileScope::Claude => &self.claude,
+            ProfileScope::ClaudeDesktop => &self.claude_desktop,
+            ProfileScope::Codex => &self.codex,
+        }
+    }
+
+    fn slot_mut(&mut self, scope: ProfileScope) -> &mut T {
+        match scope {
+            ProfileScope::Claude => &mut self.claude,
+            ProfileScope::ClaudeDesktop => &mut self.claude_desktop,
+            ProfileScope::Codex => &mut self.codex,
         }
     }
 }
@@ -670,6 +682,29 @@ mod tests {
         assert!(per.get(&AppType::ClaudeDesktop).is_some());
         assert!(per.get(&AppType::Codex).is_some());
         assert!(per.get(&AppType::Gemini).is_none());
+    }
+
+    #[test]
+    fn test_per_app_keyed_access_hits_serde_slot() {
+        // 键控访问写入的槽位，其 JSON 键必须就是该应用的规范 id
+        for scope in ProfileScope::ALL {
+            for app in scope.apps() {
+                let mut per: PerApp<Option<String>> = PerApp::default();
+                *per.get_mut(app).expect("profile app") = Some("x".into());
+                assert_eq!(per.get(app), Some(&Some("x".to_string())));
+                let json = serde_json::to_value(&per).unwrap();
+                for (key, value) in json.as_object().unwrap() {
+                    assert_eq!(
+                        value.is_string(),
+                        key == app.as_str(),
+                        "{key} vs {}",
+                        app.as_str()
+                    );
+                }
+                let back: PerApp<Option<String>> = serde_json::from_value(json).unwrap();
+                assert_eq!(back, per);
+            }
+        }
     }
 
     #[test]
