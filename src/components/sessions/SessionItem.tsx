@@ -1,4 +1,10 @@
-import { ChevronRight, Clock } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  ChevronRight,
+  Clock,
+  Pin,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -9,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import type { SessionMeta } from "@/types";
+import type { SessionAnnotation } from "@/lib/api/sessionAnnotations";
 import {
   formatRelativeTime,
   formatSessionTitle,
@@ -29,6 +36,9 @@ interface SessionItemProps {
   snippet?: string;
   onSelect: (key: string) => void;
   onToggleChecked: (checked: boolean) => void;
+  /** Pin / archive / tags (SESS-18); omitted = no annotation controls. */
+  annotation?: SessionAnnotation;
+  onAnnotate?: (patch: Partial<SessionAnnotation>) => void;
 }
 
 export function SessionItem({
@@ -41,6 +51,8 @@ export function SessionItem({
   snippet,
   onSelect,
   onToggleChecked,
+  annotation,
+  onAnnotate,
 }: SessionItemProps) {
   const { t } = useTranslation();
   const title = formatSessionTitle(session);
@@ -88,6 +100,14 @@ export function SessionItem({
               {getProviderLabel(session.providerId, t)}
             </TooltipContent>
           </Tooltip>
+          {annotation?.pinned ? (
+            <Pin
+              className="size-3.5 shrink-0 text-primary"
+              aria-label={t("sessionManager.annotations.pinned", {
+                defaultValue: "Pinned",
+              })}
+            />
+          ) : null}
           <span className="text-sm font-medium line-clamp-2 flex-1">
             {searchQuery ? highlightText(title, searchQuery) : title}
           </span>
@@ -111,8 +131,64 @@ export function SessionItem({
               ? formatRelativeTime(lastActive, t)
               : t("common.unknown")}
           </span>
+          {annotation?.archived ? (
+            <span className="ml-1 rounded border px-1 text-[10px]">
+              {t("sessionManager.annotations.archivedBadge", {
+                defaultValue: "Archived",
+              })}
+            </span>
+          ) : null}
+          {annotation?.tags.map((tag) => (
+            <span key={tag} className="ml-1 rounded bg-muted px-1 text-[10px]">
+              #{tag}
+            </span>
+          ))}
         </div>
       </button>
+      {onAnnotate && !selectionMode ? (
+        <div className="flex shrink-0 flex-col gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <button
+            type="button"
+            className={cn(
+              "rounded p-0.5 text-muted-foreground hover:text-foreground",
+              annotation?.pinned && "text-primary opacity-100",
+            )}
+            aria-pressed={annotation?.pinned ?? false}
+            aria-label={
+              annotation?.pinned
+                ? t("sessionManager.annotations.unpin", {
+                    defaultValue: "Unpin session",
+                  })
+                : t("sessionManager.annotations.pin", {
+                    defaultValue: "Pin session",
+                  })
+            }
+            onClick={() => onAnnotate({ pinned: !annotation?.pinned })}
+          >
+            <Pin className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+            aria-label={
+              annotation?.archived
+                ? t("sessionManager.annotations.unarchive", {
+                    defaultValue: "Unarchive session",
+                  })
+                : t("sessionManager.annotations.archive", {
+                    defaultValue: "Archive session",
+                  })
+            }
+            onClick={() => onAnnotate({ archived: !annotation?.archived })}
+          >
+            {annotation?.archived ? (
+              <ArchiveRestore className="size-3.5" />
+            ) : (
+              <Archive className="size-3.5" />
+            )}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

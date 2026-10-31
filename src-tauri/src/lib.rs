@@ -1099,6 +1099,8 @@ pub fn run() {
             commands::delete_session,
             commands::delete_sessions,
             commands::list_session_trash,
+            commands::get_session_annotations,
+            commands::set_session_annotation,
             commands::restore_session_from_trash,
             commands::launch_session_terminal,
             commands::get_tool_versions,

@@ -255,6 +255,15 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/list_session_trash`, () => success([])),
 
+  // Session pin / archive / tags (SESS-18).
+  http.post(`${TAURI_ENDPOINT}/get_session_annotations`, () => success({})),
+  http.post(`${TAURI_ENDPOINT}/set_session_annotation`, async ({ request }) => {
+    const { annotation } = await withJson<{
+      annotation: { pinned: boolean; archived: boolean; tags: string[] };
+    }>(request);
+    return success(annotation);
+  }),
+
   http.post(`${TAURI_ENDPOINT}/restore_session_from_trash`, () =>
     HttpResponse.json("Trash entry not found", { status: 400 }),
   ),

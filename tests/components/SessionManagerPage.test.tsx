@@ -13,6 +13,8 @@ import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
 import { sessionsApi } from "@/lib/api/sessions";
 import type { SessionMessage, SessionMeta } from "@/types";
 import { setSessionFixtures } from "../msw/state";
+import { http, HttpResponse } from "msw";
+import { server } from "../msw/server";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -219,6 +221,42 @@ describe("SessionManagerPage", () => {
     };
 
     setSessionFixtures(sessions, messages);
+  });
+
+  it("hides archived sessions until shown and lists pinned ones first (SESS-18)", async () => {
+    server.use(
+      http.post("http://tauri.local/get_session_annotations", () =>
+        HttpResponse.json({
+          "codex:codex-session-2:/mock/codex/session-2.jsonl": {
+            pinned: false,
+            archived: true,
+            tags: [],
+          },
+          "codex:codex-session-3:/mock/codex/session-3.jsonl": {
+            pinned: true,
+            archived: false,
+            tags: ["keep"],
+          },
+        }),
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByText("#keep")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("Beta Session")).not.toBeInTheDocument(),
+    );
+    const titles = screen
+      .getAllByText(/^(Alpha|Gamma) Session$/)
+      .filter((el) => el.tagName !== "H2" && el.tagName !== "H3")
+      .map((el) => el.textContent);
+    expect(titles[0]).toBe("Gamma Session");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Show archived \(1\)/ }),
+    );
+    expect(await screen.findByText("Beta Session")).toBeInTheDocument();
+    expect(screen.getByText("Archived")).toBeInTheDocument();
   });
 
   it("mounts a large session list incrementally (PERF-46)", async () => {
