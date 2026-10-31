@@ -681,6 +681,9 @@ export const handlers = [
     success({ CNY: "7.2", USD: "1" }),
   ),
   http.post(`${TAURI_ENDPOINT}/set_pricing_fx_rates`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/preview_sync_download`, () =>
+    success({ empty: true }),
+  ),
   http.post(`${TAURI_ENDPOINT}/check_provider_limits`, async ({ request }) => {
     const { providerId } = await withJson<{ providerId: string }>(request);
     return success({

@@ -30,7 +30,7 @@ fn s3_sync_disabled_error() -> AppError {
     AppError::localized("s3.sync.disabled", "S3 同步未启用", "S3 sync is disabled.")
 }
 
-fn require_enabled_s3_settings() -> Result<S3SyncSettings, AppError> {
+pub(super) fn require_enabled_s3_settings() -> Result<S3SyncSettings, AppError> {
     let settings = settings::get_s3_sync_settings().ok_or_else(s3_not_configured_error)?;
     if !settings.enabled {
         return Err(s3_sync_disabled_error());

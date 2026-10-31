@@ -39,6 +39,7 @@ mod settings;
 pub mod skill;
 mod stream_check;
 mod subscription;
+mod sync_preview;
 mod sync_support;
 mod validation;
 
@@ -91,6 +92,7 @@ pub use subscription::*;
 pub use lightweight::*;
 pub use s3_sync::*;
 pub use sync_encryption::*;
+pub use sync_preview::*;
 pub use usage::*;
 pub use usage_export::*;
 pub use webdav_sync::*;

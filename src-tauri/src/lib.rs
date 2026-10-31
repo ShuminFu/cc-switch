@@ -1114,6 +1114,7 @@ pub fn run() {
             commands::set_model_pricing_metadata,
             commands::get_pricing_fx_rates,
             commands::set_pricing_fx_rates,
+            commands::preview_sync_download,
             commands::check_provider_limits,
             commands::get_budget_enforcement,
             commands::set_budget_enforcement,
