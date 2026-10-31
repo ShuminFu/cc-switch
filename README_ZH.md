@@ -33,6 +33,7 @@ Kimi K2.7 Code 是 Moonshot AI 开发的编程专用开源智能体模型。它�
 
 ---
 
+<!-- SPONSORS:START -->
 <table>
 <tr>
 <td width="180"><a href="https://www.packyapi.com/register?aff=cc-switch"><img src="assets/partners/logos/packycode.png" alt="PackyCode" width="150"></a></td>
@@ -191,6 +192,7 @@ TeamoRouter 还提供企业级功能，包括集中账单、团队管理、BYOK�
 </tr>
 
 </table>
+<!-- SPONSORS:END -->
 
 </details>
 

@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DATA_FILE, outOfSync } from "./sync-readme.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -291,6 +292,15 @@ function checkLargeImages(files, errors) {
   }
 }
 
+// CI-33: the sponsor tables are generated from assets/partners/sponsors.json.
+function checkSponsorTables(errors) {
+  for (const file of outOfSync(ROOT)) {
+    errors.push(
+      `sponsors: the sponsor table in ${file} differs from ${DATA_FILE}; edit the JSON and run \`pnpm docs:sync\` instead of editing the README`,
+    );
+  }
+}
+
 function main() {
   const files = trackedFiles();
   const errors = [];
@@ -300,13 +310,14 @@ function main() {
   checkStalePaths(files, errors);
   checkToolList(errors);
   checkLargeImages(files, errors);
+  checkSponsorTables(errors);
   if (errors.length) {
     for (const e of errors) console.error(`✗ ${e}`);
     console.error(`\n${errors.length} repository check(s) failed.`);
     process.exit(1);
   }
   console.log(
-    "✓ repository checks passed (labeler globs, asset names, README parity, stale paths, tool list, image sizes)",
+    "✓ repository checks passed (labeler globs, asset names, README parity, stale paths, tool list, image sizes, sponsor tables)",
   );
 }
 

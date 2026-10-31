@@ -33,6 +33,7 @@ Kimi K2.7 Code は Moonshot AI が開発した、コーディングに特化し�
 
 ---
 
+<!-- SPONSORS:START -->
 <table>
 <tr>
 <td width="180"><a href="https://www.packyapi.com/register?aff=cc-switch"><img src="assets/partners/logos/packycode.png" alt="PackyCode" width="150"></a></td>
@@ -190,6 +191,7 @@ TeamoRouter は、集中請求、チーム管理、BYOK、スマートルーテ�
 </tr>
 
 </table>
+<!-- SPONSORS:END -->
 
 </details>
 
