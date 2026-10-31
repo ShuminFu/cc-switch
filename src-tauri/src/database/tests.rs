@@ -966,6 +966,8 @@ fn user_edited_pricing_survives_seed_bumps() {
         output_cost_per_million: "7".to_string(),
         cache_read_cost_per_million: "0".to_string(),
         cache_creation_cost_per_million: "0".to_string(),
+        currency: "USD".to_string(),
+        input_modalities: None,
     })
     .expect("user edit");
     {
@@ -1805,6 +1807,8 @@ fn drop_columns(conn: &Connection, table: &str, columns: &[&str]) {
 /// `create_tables` stay in place, as they did in real installations).
 fn undo_migration(conn: &Connection, version: i32) {
     match version {
+        25 => drop_columns(conn, "model_pricing", &["currency"]),
+        24 => drop_columns(conn, "model_pricing", &["input_modalities"]),
         23 => conn
             .execute_batch(
                 "CREATE INDEX idx_request_logs_status ON proxy_request_logs(status_code);",
@@ -2212,7 +2216,8 @@ fn baseline_schema_checksum_is_pinned() {
     // migration instead. The hash covers the fresh schema, i.e. the baseline plus
     // later migrations (v18 added session_log_sync.byte_offset / prefix_hash; v19-v22
     // added the endpoint unique index, pricing source, CHECK-free proxy_config and row versions;
-    // v23 dropped the unused status_code request-log index).
+    // v23 dropped the unused status_code request-log index; v24/v25 added the
+    // model_pricing catalog columns).
     let conn = Connection::open_in_memory().expect("open memory db");
     Database::create_tables_on_conn(&conn).expect("create fresh schema");
     let objects = query_strings(
@@ -2228,7 +2233,7 @@ fn baseline_schema_checksum_is_pinned() {
     let checksum = format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         checksum,
-        "00d405dac6681ad836a35c733186815358a34bb1067411b4f428bf444a958dbd",
+        "a78d0ed82f3811c668eee740a0871a940f222279817c0c36bd25e7fb9329463e",
         "baseline schema changed; it is frozen at v{}:\n{text}",
         schema::BASELINE_SCHEMA_VERSION
     );

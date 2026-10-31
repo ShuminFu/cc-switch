@@ -225,6 +225,20 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         breaks_sync: false,
         up: Database::migrate_v22_to_v23,
     },
+    Migration {
+        version: 24,
+        name: "model_pricing_input_modalities",
+        checksum: "d7581a47baeeedc3c6cf9e4f1888cfd6de68bead790fb9ac76a206e57baa8969",
+        breaks_sync: false,
+        up: Database::migrate_v23_to_v24,
+    },
+    Migration {
+        version: 25,
+        name: "model_pricing_currency",
+        checksum: "3542f0b8f71c3b15372995f1d3ec030d839445eddedd3512f8ecb75f5c3d4ed6",
+        breaks_sync: false,
+        up: Database::migrate_v24_to_v25,
+    },
 ];
 
 /// 注册表中最新的 schema 版本（即 `SCHEMA_VERSION`）。
@@ -2015,6 +2029,40 @@ impl Database {
         Ok(())
     }
 
+    /// v23 → v24 (PROV-33): `model_pricing.input_modalities`, a JSON array of
+    /// input modalities (`NULL` = unknown), seeded `["text"]` for the
+    /// confirmed text-only built-in models. The media sanitizer reads it, so
+    /// a capability change is a data edit instead of a release. An additive
+    /// nullable column: older clients import it as an unknown column and
+    /// snapshots without it import as `NULL`, so sync stays compatible.
+    fn migrate_v23_to_v24(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "model_pricing")? {
+            return Ok(());
+        }
+        Self::add_column_if_missing(conn, "model_pricing", "input_modalities", "TEXT")?;
+        if Self::has_column(conn, "model_pricing", "source")? {
+            super::model_catalog::seed_text_only_modalities(conn)?;
+        }
+        Ok(())
+    }
+
+    /// v24 → v25 (PRODUCT-40): `model_pricing.currency` (ISO code the row's
+    /// prices are quoted in, default `USD`). Costs stay USD; non-USD rows are
+    /// converted with the `pricing_fx_rates` setting at lookup. Additive with
+    /// a default, so sync stays compatible in both directions.
+    fn migrate_v24_to_v25(conn: &Connection) -> Result<(), AppError> {
+        if !Self::table_exists(conn, "model_pricing")? {
+            return Ok(());
+        }
+        Self::add_column_if_missing(
+            conn,
+            "model_pricing",
+            "currency",
+            "TEXT NOT NULL DEFAULT 'USD'",
+        )?;
+        Ok(())
+    }
+
     /// v21 → v22 (DB-20, first increment): per-row `sync_rev` /
     /// `sync_updated_at` (Unix ms) on the synced entity tables and a local
     /// `sync_tombstones` table recording deletions, maintained by the app's
@@ -2099,8 +2147,31 @@ impl Database {
 
     /// 确保模型定价表具备默认数据
     pub fn ensure_model_pricing_seeded(&self) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        Self::ensure_model_pricing_seeded_on_conn(&conn)
+        {
+            let conn = lock_conn!(self.conn);
+            Self::ensure_model_pricing_seeded_on_conn(&conn)?;
+        }
+        // PROV-33: seeding and imports end here, so the published catalog
+        // snapshot follows every bulk change to `model_pricing`.
+        self.refresh_model_catalog();
+        Ok(())
+    }
+
+    /// Republish the declared input modalities of this database's
+    /// `model_pricing` rows (PROV-33). Only the app database publishes;
+    /// scratch/test databases leave the process-wide snapshot alone.
+    pub(crate) fn refresh_model_catalog(&self) {
+        if !self.publishes_model_catalog {
+            return;
+        }
+        let loaded = match self.conn.lock() {
+            Ok(conn) => super::model_catalog::load_declared_modalities(&conn),
+            Err(e) => Err(AppError::Database(format!("Mutex lock failed: {e}"))),
+        };
+        match loaded {
+            Ok(map) => super::model_catalog::publish_declared_modalities(map),
+            Err(e) => log::warn!("刷新模型能力目录失败: {e}"),
+        }
     }
 
     fn ensure_model_pricing_seeded_on_conn(conn: &Connection) -> Result<(), AppError> {
@@ -2484,7 +2555,7 @@ mod tests {
                 SCHEMA_VERSION,
                 crate::services::sync_protocol::DB_COMPAT_VERSION
             ),
-            (23, 6),
+            (25, 6),
             "SCHEMA_VERSION changed without reviewing DB_COMPAT_VERSION (or vice versa)"
         );
         assert_eq!(

@@ -175,6 +175,16 @@ pub(crate) fn needs_seeding(conn: &Connection) -> Result<bool, AppError> {
 /// - `builtin` rows older than N are refreshed (name and prices).
 /// - `user` rows are never touched.
 pub(crate) fn seed_builtin_pricing(conn: &Connection) -> Result<usize, AppError> {
+    let changed = seed_builtin_pricing_rows(conn)?;
+    // PROV-33: freshly inserted built-in rows get their confirmed modalities
+    // (existing databases got them from the v23→v24 migration).
+    if super::schema_has_input_modalities(conn)? {
+        super::model_catalog::seed_text_only_modalities(conn)?;
+    }
+    Ok(changed)
+}
+
+fn seed_builtin_pricing_rows(conn: &Connection) -> Result<usize, AppError> {
     let pricing = builtin_pricing();
     let version = pricing.seed_version;
     let first_time_for_version = applied_seed_version(conn)? < version;

@@ -184,6 +184,28 @@ export const usageApi = {
     return call(commands.deleteModelPricing(modelId));
   },
 
+  /** Currency and declared input modalities of a pricing row (null = unknown). */
+  setModelPricingMetadata: async (
+    modelId: string,
+    currency: string,
+    inputModalities: string[] | null,
+  ): Promise<void> => {
+    return invoke("set_model_pricing_metadata", {
+      modelId,
+      currency,
+      inputModalities,
+    });
+  },
+
+  /** FX rates as units of each currency per 1 USD. */
+  getPricingFxRates: async (): Promise<Record<string, string>> => {
+    return invoke("get_pricing_fx_rates");
+  },
+
+  setPricingFxRates: async (rates: Record<string, string>): Promise<void> => {
+    return invoke("set_pricing_fx_rates", { rates });
+  },
+
   checkProviderLimits: async (
     providerId: string,
     appType: string,

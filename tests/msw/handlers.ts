@@ -674,6 +674,13 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/get_current_prompt_file_content`, () =>
     success(null),
   ),
+  http.post(`${TAURI_ENDPOINT}/set_model_pricing_metadata`, () =>
+    success(null),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_pricing_fx_rates`, () =>
+    success({ CNY: "7.2", USD: "1" }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/set_pricing_fx_rates`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/check_provider_limits`, async ({ request }) => {
     const { providerId } = await withJson<{ providerId: string }>(request);
     return success({

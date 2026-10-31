@@ -34,6 +34,7 @@
 pub(crate) mod backup;
 mod dao;
 mod migration;
+pub(crate) mod model_catalog;
 mod pricing_seed;
 mod read_pool;
 mod request_cache;
@@ -184,6 +185,19 @@ pub struct Database {
     request_cache: request_cache::RequestCache,
     /// Serialises read-modify-write of the universal-provider map (DB-16).
     universal_providers_lock: Mutex<()>,
+    /// Whether this database feeds the process-wide model capability snapshot
+    /// (PROV-33). Only the app database (`Database::init`) does.
+    publishes_model_catalog: bool,
+}
+
+/// Whether `model_pricing.input_modalities` exists (v24+).
+pub(crate) fn schema_has_input_modalities(conn: &Connection) -> Result<bool, AppError> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('model_pricing') WHERE name = 'input_modalities')",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| AppError::Database(e.to_string()))
 }
 
 fn register_db_change_hook(conn: &Connection, config_generation: Arc<AtomicU64>) {
@@ -258,6 +272,7 @@ impl Database {
         if let Err(e) = db.ensure_incremental_auto_vacuum() {
             log::warn!("Failed to ensure incremental auto-vacuum: {e}");
         }
+        db.publishes_model_catalog = true;
         db.ensure_model_pricing_seeded()?;
 
         // 迁移完成后再打开只读连接，避免它们缓存迁移前的 schema。
@@ -357,6 +372,7 @@ impl Database {
             read_pool: None,
             request_cache,
             universal_providers_lock: Mutex::new(()),
+            publishes_model_catalog: false,
         }
     }
 

@@ -61,47 +61,24 @@ pub(crate) fn image_input_capability_from_modalities(
 
 /// Models that CC Switch is willing to advertise to clients as text-only.
 ///
-/// This registry is deliberately exact and fail-open. A new suffix is not
-/// inherited automatically: it remains image-capable until its capability is
-/// confirmed, preventing a future `-vision`/`-vl` variant from being blocked by
-/// the Codex client before a request can reach the proxy.
+/// PROV-33: the model catalog (`model_pricing.input_modalities`, editable in
+/// the pricing table) is consulted first: a declared list without `image`
+/// means text-only, one with `image` means not text-only. Models the catalog
+/// does not describe fall back to the confirmed seed list
+/// ([`CONFIRMED_TEXT_ONLY_TAILS`]), which is deliberately exact and fail-open:
+/// a new suffix is not inherited automatically, so a future `-vision`/`-vl`
+/// variant is not blocked by the Codex client before a request can reach the
+/// proxy.
+///
+/// [`CONFIRMED_TEXT_ONLY_TAILS`]: crate::database::model_catalog::CONFIRMED_TEXT_ONLY_TAILS
 pub(crate) fn is_confirmed_text_only_model(model: &str) -> bool {
     let normalized = normalize_model_id(model);
+    if let Some(modalities) = crate::database::model_catalog::declared_input_modalities(&normalized)
+    {
+        return !modalities.iter().any(|item| item == "image");
+    }
     let tail = normalized.rsplit('/').next().unwrap_or(normalized.as_str());
-
-    const CONFIRMED_TAILS: &[&str] = &[
-        "ark-code-latest",
-        "deepseek-chat",
-        "deepseek-reasoner",
-        "deepseek-v4-flash",
-        "deepseek-v4-pro",
-        "glm-5.1",
-        // Exact rather than prefix matching: GLM visual models use a `v`
-        // suffix (for example glm-5.2v), which must remain image-capable.
-        "glm-5.2",
-        "kat-coder",
-        "kat-coder-pro",
-        "kat-coder-pro v1",
-        "kat-coder-pro v2",
-        "kat-coder-pro-v1",
-        "kat-coder-pro-v2",
-        "ling-2.5-1t",
-        "longcat-2.0",
-        "longcat-flash-chat",
-        "minimax-m2.7",
-        "minimax-m2.7-highspeed",
-        "mimo-v2.5-pro",
-        "qwen3-coder-480b",
-        "qwen3-coder-480b-a35b-instruct",
-        "qwen3-coder-flash",
-        "qwen3-coder-next",
-        "qwen3-coder-plus",
-        "step-3.5-flash",
-        "step-3.5-flash-2603",
-        "us.deepseek.r1-v1",
-    ];
-
-    CONFIRMED_TAILS.contains(&tail)
+    crate::database::model_catalog::CONFIRMED_TEXT_ONLY_TAILS.contains(&tail)
 }
 
 fn declared_model_image_support(settings: &Value, model: &str) -> Option<bool> {
