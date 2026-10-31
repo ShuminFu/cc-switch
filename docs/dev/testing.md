@@ -25,6 +25,9 @@ pnpm check:rust     # creates dist/ if missing, cargo fmt --check, clippy (all t
   `pnpm test:unit:watch`, `pnpm test:unit -- <pattern>`.
 - Tauri IPC is mocked with MSW (`tests/msw/`). An `invoke` without a handler fails the test, so
   add a default handler in `tests/msw/handlers.ts` for every new command.
+- i18n: `tests/setupTests.ts` loads the real `en.json`, so assert the English text users see
+  (`getByRole("button", { name: "Save" })`), not keys. Do not `vi.mock("react-i18next")`; for a
+  key built at runtime use `i18n.t(key)` from `i18next` (TEST-13).
 - Coverage: `pnpm test:coverage` writes `coverage/lcov.info` (V8). CI uploads it to Codecov
   (non-blocking) and publishes a JUnit summary.
 - `tests/contracts/` checks the IPC contract (every generated binding is registered in `lib.rs`).
@@ -56,10 +59,20 @@ pnpm check:rust     # creates dist/ if missing, cargo fmt --check, clippy (all t
 - Do not skip or delete an existing test to make a change pass; if it encodes the old behaviour,
   update it and explain why in the PR.
 
+## End-to-end
+
+- `pnpm test:e2e`: Playwright journeys against the real renderer with a mocked Tauri IPC backed
+  by the MSW handlers (`e2e/`). Needs a global Playwright install:
+  `NODE_PATH="$(npm root -g)" pnpm test:e2e`.
+- `src-tauri/tests/scenario_takeover_failover.rs`: switch → takeover → failover → restore on a
+  temporary HOME, asserting the live file byte for byte.
+- Nightly: `scripts/tauri-smoke.mjs` drives the real debug binary through `tauri-driver`.
+- The release-checklist item each journey covers: [release-checklist-e2e.md](release-checklist-e2e.md).
+
 ## Not covered yet
 
-- No end-to-end UI tests (tauri-driver/Playwright) and no scripted multi-step scenario suite for
-  switch → takeover → failover → restore (PRODUCT-45).
+- Scenario coverage for Codex/Gemini takeover and for the tray (the nightly smoke only checks
+  startup).
 - No benchmarks (criterion) or proxy load harness (PERF-30); only the renderer bundle has a budget.
 - `cargo-nextest` is not used: some `#[serial]` tests share fixed temp paths and would race under
   nextest's process-per-test model.

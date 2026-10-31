@@ -31,6 +31,9 @@ Pushing a `vX.Y.Z` tag runs, in order:
 
 - [ ] `main` is green (CI, including the ARM64 jobs).
 - [ ] No open issue labelled `release-blocker`.
+- [ ] The manual items in [docs/dev/release-checklist-e2e.md](docs/dev/release-checklist-e2e.md)
+      are done (the rest is covered by `pnpm test:e2e`, the backend scenario tests and the
+      nightly `tauri-smoke` job).
 - [ ] Toolchain pins reviewed (monthly at most): `rust-toolchain.toml`, `.node-version`,
       `packageManager` in `package.json`, and the runner images in the workflows. Dependabot does
       not update these.
