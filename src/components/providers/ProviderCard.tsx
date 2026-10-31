@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { memo, useMemo, useState, useEffect } from "react";
 import { GripVertical, ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -31,7 +31,7 @@ import {
 } from "@/utils/providerConfigUtils";
 import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
 import { useProviderHealth } from "@/lib/query/failover";
-import { useUsageQuery } from "@/lib/query/queries";
+import { useProviderUsage } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
 
 interface DragHandleProps {
@@ -97,7 +97,7 @@ export const getProviderCardUrl = (
   getProviderEndpoint(appId, provider) ||
   undefined;
 
-export function ProviderCard({
+function ProviderCardImpl({
   provider,
   isCurrent,
   appId,
@@ -215,20 +215,13 @@ export function ProviderCard({
     provider.meta?.apiFormat,
     (provider.settingsConfig as Record<string, any>)?.config,
   ]);
-  // 获取用量数据以判断是否有多套餐
-  // 累加模式应用（OpenCode/OpenClaw/Hermes）：使用 isInConfig 代替 isCurrent
-  const shouldAutoQuery =
-    appId === "opencode" || appId === "openclaw" || appId === "hermes"
-      ? isInConfig
-      : isCurrent;
-  const autoQueryInterval = shouldAutoQuery
-    ? provider.meta?.usage_script?.autoQueryInterval || 0
-    : 0;
-
-  const { data: usage } = useUsageQuery(provider.id, appId, {
+  // One usage observer per card, shared with UsageFooter (PERF-47).
+  const usageQuery = useProviderUsage(provider, appId, {
+    isCurrent,
+    isInConfig,
     enabled: usageEnabled && !isOfficial && !isOfficialSubscriptionUsage,
-    autoQueryInterval,
   });
+  const usage = usageQuery.data;
 
   const isTokenPlan =
     provider.meta?.usage_script?.templateType === "token_plan";
@@ -524,11 +517,8 @@ export function ProviderCard({
               ) : (
                 <UsageFooter
                   provider={provider}
-                  providerId={provider.id}
-                  appId={appId}
                   usageEnabled={usageEnabled}
-                  isCurrent={isCurrent}
-                  isInConfig={isInConfig}
+                  usageQuery={usageQuery}
                   inline={true}
                 />
               )}
@@ -612,11 +602,8 @@ export function ProviderCard({
         <div className="mt-4 pt-4 border-t border-border-default">
           <UsageFooter
             provider={provider}
-            providerId={provider.id}
-            appId={appId}
             usageEnabled={usageEnabled}
-            isCurrent={isCurrent}
-            isInConfig={isInConfig}
+            usageQuery={usageQuery}
             inline={false}
           />
         </div>
@@ -624,3 +611,6 @@ export function ProviderCard({
     </div>
   );
 }
+
+/** Memoised: re-renders only when its own props change (PERF-20). */
+export const ProviderCard = memo(ProviderCardImpl);

@@ -1,19 +1,16 @@
 import React from "react";
 import { RefreshCw, AlertCircle, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { type AppId } from "@/lib/api";
-import { useUsageQuery } from "@/lib/query/queries";
+import type { UsageQueryResult } from "@/lib/query/queries";
 import { UsageData, Provider } from "@/types";
 import { TierBadge } from "@/components/SubscriptionQuotaFooter";
 import type { QuotaTier } from "@/types/subscription";
 
 interface UsageFooterProps {
   provider: Provider;
-  providerId: string;
-  appId: AppId;
   usageEnabled: boolean; // 是否启用了用量查询
-  isCurrent: boolean; // 是否为当前激活的供应商
-  isInConfig?: boolean; // OpenCode: 是否已添加到配置
+  /** The card's usage query (one observer per card, PERF-47). */
+  usageQuery: UsageQueryResult;
   inline?: boolean; // 是否内联显示（在按钮左侧）
 }
 
@@ -44,23 +41,13 @@ function toQuotaTier(data: UsageData): QuotaTier {
 
 const UsageFooter: React.FC<UsageFooterProps> = ({
   provider,
-  providerId,
-  appId,
   usageEnabled,
-  isCurrent,
-  isInConfig = false,
+  usageQuery,
   inline = false,
 }) => {
   const { t } = useTranslation();
   const isTokenPlan =
     provider.meta?.usage_script?.templateType === "token_plan";
-
-  // 统一的用量查询（自动查询仅对当前激活的供应商启用）
-  // OpenCode（累加模式）：使用 isInConfig 代替 isCurrent
-  const shouldAutoQuery = appId === "opencode" ? isInConfig : isCurrent;
-  const autoQueryInterval = shouldAutoQuery
-    ? provider.meta?.usage_script?.autoQueryInterval || 0
-    : 0;
 
   const {
     data: usage,
@@ -68,10 +55,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
     isError,
     lastQueriedAt,
     refetch,
-  } = useUsageQuery(providerId, appId, {
-    enabled: usageEnabled,
-    autoQueryInterval,
-  });
+  } = usageQuery;
 
   // 🆕 定期更新当前时间，用于刷新相对时间显示
   const [now, setNow] = React.useState(Date.now());

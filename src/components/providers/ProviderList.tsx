@@ -7,6 +7,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import {
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -31,6 +32,7 @@ import {
   useHermesModelConfig,
 } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
+import { useStableCallback } from "@/hooks/useStableCallback";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
@@ -47,6 +49,7 @@ import { useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
+import { extractErrorMessage } from "@/utils/errorUtils";
 import { getProviderEndpoint, getProviderModels } from "@/lib/providerCodecs";
 
 interface ProviderListProps {
@@ -97,6 +100,20 @@ export function ProviderList({
   onSetAsDefault,
 }: ProviderListProps) {
   const { t } = useTranslation();
+  // Stable identities for every handler handed to the memoised cards, so a
+  // parent re-render (proxy-status polls, query refetches) does not re-render
+  // every card (PERF-20, FE-ARCH-09).
+  const stableOnSwitch = useStableCallback(onSwitch);
+  const stableOnEdit = useStableCallback(onEdit);
+  const stableOnDelete = useStableCallback(onDelete);
+  const stableOnRemoveFromConfig = useStableCallback(onRemoveFromConfig);
+  const stableOnDisableOmo = useStableCallback(onDisableOmo);
+  const stableOnDisableOmoSlim = useStableCallback(onDisableOmoSlim);
+  const stableOnDuplicate = useStableCallback(onDuplicate);
+  const stableOnConfigureUsage = useStableCallback(onConfigureUsage);
+  const stableOnOpenWebsite = useStableCallback(onOpenWebsite);
+  const stableOnOpenTerminal = useStableCallback(onOpenTerminal);
+  const stableOnSetAsDefault = useStableCallback(onSetAsDefault);
   const { checkProvider, isChecking } = useStreamCheck(appId);
   const { sortedProviders, sensors, handleDragEnd } = useDragSort(
     providers,
@@ -195,7 +212,7 @@ export function ProviderList({
     addToQueue.isPending || removeFromQueue.isPending;
   const isAnyActionPending = isActionPending || isFailoverMutationPending;
 
-  const handleToggleFailover = useCallback(
+  const handleToggleFailover = useStableCallback(
     (providerId: string, enabled: boolean) => {
       // Ignore repeated clicks while a queue mutation is still running.
       if (addToQueue.isPending || removeFromQueue.isPending) return;
@@ -205,7 +222,6 @@ export function ProviderList({
         removeFromQueue.mutate({ appType: appId, providerId });
       }
     },
-    [appId, addToQueue, removeFromQueue],
   );
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -219,12 +235,9 @@ export function ProviderList({
   });
 
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
-  const handleTest = useCallback(
-    (provider: Provider) => {
-      checkProvider(provider.id, provider.name);
-    },
-    [checkProvider],
-  );
+  const handleTest = useStableCallback((provider: Provider) => {
+    checkProvider(provider.id, provider.name);
+  });
 
   // Import current live config as default provider
   const queryClient = useQueryClient();
@@ -263,8 +276,8 @@ export function ProviderList({
         toast.info(t("provider.noProviders"));
       }
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
+    onError: (error: unknown) => {
+      toast.error(extractErrorMessage(error) || t("common.unknown"));
     },
   });
 
@@ -318,6 +331,11 @@ export function ProviderList({
       );
     });
   }, [appId, searchTerm, sortedProviders]);
+
+  const sortableItems = useMemo(
+    () => filteredProviders.map((provider) => provider.id),
+    [filteredProviders],
+  );
 
   const claudeDesktopStatusMessages = useMemo(() => {
     if (appId !== "claude-desktop" || !claudeDesktopStatus) return [];
@@ -406,7 +424,7 @@ export function ProviderList({
       onDragEnd={handleDragEnd}
     >
       <SortableContext
-        items={filteredProviders.map((provider) => provider.id)}
+        items={sortableItems}
         strategy={verticalListSortingStrategy}
       >
         <div className="space-y-3">
@@ -436,16 +454,16 @@ export function ProviderList({
                 isConfigStatusLoading={isConfigStatusLoading}
                 isOmo={isOmo}
                 isOmoSlim={isOmoSlim}
-                onSwitch={onSwitch}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                onRemoveFromConfig={onRemoveFromConfig}
-                onDisableOmo={onDisableOmo}
-                onDisableOmoSlim={onDisableOmoSlim}
-                onDuplicate={onDuplicate}
-                onConfigureUsage={onConfigureUsage}
-                onOpenWebsite={onOpenWebsite}
-                onOpenTerminal={onOpenTerminal}
+                onSwitch={stableOnSwitch}
+                onEdit={stableOnEdit}
+                onDelete={stableOnDelete}
+                onRemoveFromConfig={stableOnRemoveFromConfig}
+                onDisableOmo={stableOnDisableOmo}
+                onDisableOmoSlim={stableOnDisableOmoSlim}
+                onDuplicate={stableOnDuplicate}
+                onConfigureUsage={stableOnConfigureUsage}
+                onOpenWebsite={stableOnOpenWebsite}
+                onOpenTerminal={stableOnOpenTerminal}
                 onTest={handleTest}
                 isTesting={isChecking(provider.id)}
                 isActionPending={isAnyActionPending}
@@ -454,9 +472,7 @@ export function ProviderList({
                 isAutoFailoverEnabled={isFailoverModeActive}
                 failoverPriority={getFailoverPriority(provider.id)}
                 isInFailoverQueue={isInFailoverQueue(provider.id)}
-                onToggleFailover={(enabled) =>
-                  handleToggleFailover(provider.id, enabled)
-                }
+                onToggleFailover={handleToggleFailover}
                 activeProviderId={activeProviderId}
                 // OpenClaw: default model / Hermes: model.provider === provider.id
                 isDefaultModel={
@@ -464,9 +480,7 @@ export function ProviderList({
                     ? isHermesCurrent
                     : isProviderDefaultModel(provider.id)
                 }
-                onSetAsDefault={
-                  onSetAsDefault ? () => onSetAsDefault(provider) : undefined
-                }
+                onSetAsDefault={stableOnSetAsDefault}
               />
             );
           })}
@@ -595,14 +609,16 @@ interface SortableProviderCardProps {
   isAutoFailoverEnabled: boolean;
   failoverPriority?: number;
   isInFailoverQueue: boolean;
-  onToggleFailover: (enabled: boolean) => void;
+  onToggleFailover: (providerId: string, enabled: boolean) => void;
   activeProviderId?: string;
   // OpenClaw: default model
   isDefaultModel?: boolean;
-  onSetAsDefault?: () => void;
+  onSetAsDefault?: (provider: Provider) => void;
 }
 
-function SortableProviderCard({
+const noopConfigureUsage = () => undefined;
+
+const SortableProviderCard = memo(function SortableProviderCard({
   provider,
   isCurrent,
   appId,
@@ -647,6 +663,19 @@ function SortableProviderCard({
     transition,
   };
 
+  const dragHandleProps = useMemo(
+    () => ({ attributes, listeners, isDragging }),
+    [attributes, listeners, isDragging],
+  );
+  const handleToggleFailover = useCallback(
+    (enabled: boolean) => onToggleFailover(provider.id, enabled),
+    [onToggleFailover, provider.id],
+  );
+  const handleSetAsDefault = useMemo(
+    () => (onSetAsDefault ? () => onSetAsDefault(provider) : undefined),
+    [onSetAsDefault, provider],
+  );
+
   return (
     <div ref={setNodeRef} style={style}>
       <ProviderCard
@@ -664,9 +693,7 @@ function SortableProviderCard({
         onDisableOmo={onDisableOmo}
         onDisableOmoSlim={onDisableOmoSlim}
         onDuplicate={onDuplicate}
-        onConfigureUsage={
-          onConfigureUsage ? (item) => onConfigureUsage(item) : () => undefined
-        }
+        onConfigureUsage={onConfigureUsage ?? noopConfigureUsage}
         onOpenWebsite={onOpenWebsite}
         onOpenTerminal={onOpenTerminal}
         onTest={onTest}
@@ -674,20 +701,16 @@ function SortableProviderCard({
         isActionPending={isActionPending}
         isProxyRunning={isProxyRunning}
         isProxyTakeover={isProxyTakeover}
-        dragHandleProps={{
-          attributes,
-          listeners,
-          isDragging,
-        }}
+        dragHandleProps={dragHandleProps}
         isAutoFailoverEnabled={isAutoFailoverEnabled}
         failoverPriority={failoverPriority}
         isInFailoverQueue={isInFailoverQueue}
-        onToggleFailover={onToggleFailover}
+        onToggleFailover={handleToggleFailover}
         activeProviderId={activeProviderId}
         // OpenClaw: default model
         isDefaultModel={isDefaultModel}
-        onSetAsDefault={onSetAsDefault}
+        onSetAsDefault={handleSetAsDefault}
       />
     </div>
   );
-}
+});

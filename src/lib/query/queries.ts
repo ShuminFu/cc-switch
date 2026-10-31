@@ -21,6 +21,7 @@ import type {
 import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { queryKeys } from "./keys";
+import { appHas } from "@/config/apps";
 import { providerSortLocale, sortProviders } from "@/utils/providerSort";
 import i18n from "i18next";
 
@@ -253,7 +254,9 @@ export const useUsageQuery = (
       autoQueryInterval > 0
         ? Math.max(autoQueryInterval, 1) * 60 * 1000 // 最小1分钟
         : false,
-    refetchIntervalInBackground: true, // 后台也继续定时查询
+    // Hidden window (tray): stop polling usage scripts; the backend tray
+    // refresh covers that case with its own throttle (PERF-47).
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     // 用量查询面向跨境/第三方端点，单次网络抖动或瞬时 5xx 不应直接判失败。
     // 后端已把瞬时传输失败（网络/超时/读体中断）转成 Err → invoke reject，
@@ -310,5 +313,31 @@ export const useSessionMessagesQuery = (
     queryFn: async () => sessionsApi.getMessages(providerId!, sourcePath!),
     enabled: Boolean(providerId && sourcePath),
     staleTime: 30 * 1000,
+  });
+};
+
+export type UsageQueryResult = ReturnType<typeof useUsageQuery>;
+
+/**
+ * The single usage-script query of a provider card (PERF-47). The card owns
+ * it and passes the result to `UsageFooter`, so there is one observer per
+ * card with one auto-refresh rule: additive apps (OpenCode / OpenClaw /
+ * Hermes) refresh providers that are in the live config, the others only
+ * the current provider.
+ */
+export const useProviderUsage = (
+  provider: Provider,
+  appId: AppId,
+  options: { isCurrent: boolean; isInConfig: boolean; enabled: boolean },
+): UsageQueryResult => {
+  const shouldAutoQuery = appHas(appId, "additiveLiveConfig")
+    ? options.isInConfig
+    : options.isCurrent;
+  const autoQueryInterval = shouldAutoQuery
+    ? provider.meta?.usage_script?.autoQueryInterval || 0
+    : 0;
+  return useUsageQuery(provider.id, appId, {
+    enabled: options.enabled,
+    autoQueryInterval,
   });
 };
