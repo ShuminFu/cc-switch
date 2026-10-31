@@ -33,6 +33,9 @@ app. Installers do not ship `ccs` yet; copy the binary onto your `PATH`.
 | `ccs proxy start [--no-takeover]` | Run the proxy in the foreground, headless (Ctrl-C to stop) | yes, while running |
 | `ccs proxy stop [--timeout N]` | Stop a headless proxy started by `ccs proxy start` / `cc-switch --headless` | no |
 | `ccs usage summary [--days N] [--app APP]` | Request/token/cost totals for the last N days (default 30) | no |
+| `ccs profile list` (alias `ls`) | List projects (profiles) and which one is current per app | no |
+| `ccs profile apply <app> <project>` | Apply a project's saved configuration to one app, by id or exact name (same as the project switcher) | yes |
+| `ccs doctor` | Read-only checks: data directory writable, database present and supported, writer lock, takeover residue, dangling current-provider pointers | no |
 | `ccs export <file>` | Write a SQL backup (same as Settings → Export) | no |
 | `ccs import <file>` | Import a SQL backup and re-sync live files (same as Settings → Import) | yes |
 
