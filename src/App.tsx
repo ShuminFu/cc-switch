@@ -1,4 +1,11 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft } from "lucide-react";
@@ -6,7 +13,8 @@ import { useSettingsQuery } from "@/lib/query";
 import { appHas, getFirstVisibleApp, isAppVisible } from "@/config/apps";
 import { useOpenClawHealth } from "@/hooks/useOpenClaw";
 import { useUsageCacheBridge } from "@/hooks/useUsageCacheBridge";
-import { isTextEditableTarget } from "@/utils/domUtils";
+import { useShortcut } from "@/lib/shortcuts";
+import { ProviderCommandPalette } from "@/components/providers/ProviderCommandPalette";
 import {
   isWindows,
   isLinux,
@@ -38,36 +46,38 @@ const DEFAULT_DRAG_BAR_HEIGHT = isWindows() || isLinux() ? 0 : 28; // px
 const HEADER_HEIGHT = 64; // px
 
 /**
- * Keyboard navigation: Cmd/Ctrl+, opens settings, Escape goes to the parent
- * page unless a dialog or a text field has focus.
+ * Keyboard navigation through the shortcut registry (FE-ARCH-16):
+ * Cmd/Ctrl+, opens settings, Escape goes to the parent page unless a dialog
+ * or a text field has focus.
  */
 function useShellShortcuts() {
+  const { t } = useTranslation();
   const { view, navigate, goBack } = useNavigation();
   const viewRef = useRef<ViewId>(view);
   viewRef.current = view;
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "," && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        navigate("settings");
-        return;
-      }
+  useShortcut(
+    {
+      id: "shell.settings",
+      keys: "mod+,",
+      label: t("palette.openSettings", { defaultValue: "Open settings" }),
+      allowInInput: true,
+    },
+    () => navigate("settings"),
+  );
 
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (document.body.style.overflow === "hidden") return;
-      if (VIEW_PARENT[viewRef.current] === null) return;
-      if (isTextEditableTarget(event.target)) return;
-
-      event.preventDefault();
+  useShortcut(
+    {
+      id: "shell.back",
+      keys: "escape",
+      label: t("palette.goBack", { defaultValue: "Back to the previous page" }),
+    },
+    () => {
+      if (document.body.style.overflow === "hidden") return false;
+      if (VIEW_PARENT[viewRef.current] === null) return false;
       goBack();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [navigate, goBack]);
+    },
+  );
 }
 
 /**
@@ -77,7 +87,8 @@ function useShellShortcuts() {
  */
 function AppShell() {
   const { t } = useTranslation();
-  const { view, activeApp, featureApp, goBack, setActiveApp } = useNavigation();
+  const { view, activeApp, featureApp, goBack, setActiveApp, navigate } =
+    useNavigation();
   const route = ROUTES[view];
   const Page = route.Component;
   const isRootPage = VIEW_PARENT[view] === null;
@@ -98,6 +109,15 @@ function AppShell() {
   useAppEvents();
   useUsageCacheBridge();
   useShellShortcuts();
+
+  const paletteNavigation = useMemo(
+    () => ({
+      activeApp,
+      setActiveApp,
+      openPage: (page: ViewId) => navigate(page),
+    }),
+    [activeApp, setActiveApp, navigate],
+  );
 
   const showHealthBanner =
     appHas(activeApp, "healthBanner") && route.appHealthBanner === true;
@@ -203,6 +223,7 @@ function AppShell() {
 
       <DeepLinkImportDialog />
       <FirstRunWizard />
+      <ProviderCommandPalette navigation={paletteNavigation} />
     </div>
   );
 }

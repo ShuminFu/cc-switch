@@ -33,6 +33,7 @@ import {
 } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
 import { useStableCallback } from "@/hooks/useStableCallback";
+import { useShortcut } from "@/lib/shortcuts";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
@@ -281,28 +282,38 @@ export function ProviderList({
     },
   });
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-
-      const key = event.key.toLowerCase();
-      if ((event.metaKey || event.ctrlKey) && key === "f") {
-        // 正在输入框/可编辑区域中时不抢占 Ctrl+F（例如添加供应商表单里
-        // ProviderPresetSelector 的搜索框），避免与其同名快捷键冲突。
-        if (isTextEditableTarget(document.activeElement)) return;
-        event.preventDefault();
-        setIsSearchOpen(true);
-        return;
-      }
-
-      if (key === "escape") {
-        setIsSearchOpen(false);
-      }
-    };
-
-    globalThis.addEventListener("keydown", handleKeyDown);
-    return () => globalThis.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  // Cmd/Ctrl+F opens the search, Escape closes it (shortcut registry,
+  // FE-ARCH-16). Ctrl+F is left to text fields such as the preset search.
+  useShortcut(
+    {
+      id: "providers.search",
+      keys: "mod+f",
+      label: t("provider.searchShortcut", {
+        defaultValue: "Search providers",
+      }),
+      allowInInput: true,
+    },
+    () => {
+      if (isTextEditableTarget(document.activeElement)) return false;
+      setIsSearchOpen(true);
+    },
+  );
+  useShortcut(
+    {
+      id: "providers.search.close",
+      keys: "escape",
+      label: t("provider.searchCloseShortcut", {
+        defaultValue: "Close provider search",
+      }),
+      allowInInput: true,
+    },
+    () => {
+      setIsSearchOpen(false);
+      // Let other Escape handlers (dialogs, back navigation) run too.
+      return false;
+    },
+    isSearchOpen,
+  );
 
   useEffect(() => {
     if (isSearchOpen) {
@@ -344,7 +355,8 @@ export function ProviderList({
     if (!claudeDesktopStatus.supported) {
       messages.push(
         t("claudeDesktop.statusUnsupported", {
-          defaultValue: "This platform does not support writing Claude Desktop 3P configuration yet.",
+          defaultValue:
+            "This platform does not support writing Claude Desktop 3P configuration yet.",
         }),
       );
       return messages;
