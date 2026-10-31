@@ -153,6 +153,26 @@ fn handle_deeplink_url(
         return true;
     }
 
+    // Navigation / action links (open, switch, profile/apply), PRODUCT-20.
+    if let Some(parsed) = features::deeplink_nav::parse_action(url_str) {
+        match parsed {
+            Ok(action) => {
+                features::deeplink_nav::stash(app, action);
+                if focus_main_window {
+                    features::deeplink_nav::focus_main_window(app);
+                }
+            }
+            Err(e) => emit_or_buffer_deeplink(
+                app,
+                crate::commands::PendingDeepLink::Error {
+                    url: redacted_url,
+                    error: e.to_string(),
+                },
+            ),
+        }
+        return true;
+    }
+
     match crate::deeplink::parse_deeplink_url(url_str) {
         Ok(request) => {
             log::info!(
@@ -979,6 +999,7 @@ pub fn run() {
             commands::parse_deeplink,
             commands::deeplink_frontend_ready,
             features::policy::get_managed_policy_status,
+            features::deeplink_nav::take_deeplink_action,
             features::session_export::save_session_export,
             commands::merge_deeplink_config,
             commands::import_from_deeplink,

@@ -15,6 +15,7 @@ import {
 } from "@/lib/platform";
 import { Button } from "@/components/ui/button";
 import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
+import { DeepLinkActionHandler } from "@/components/deeplink-actions/DeepLinkActionHandler";
 import { FirstRunWizard } from "@/components/onboarding";
 import { CommandPalette } from "@/components/palette/CommandPalette";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
@@ -206,6 +207,7 @@ function AppShell() {
       </PageHeaderSlotsProvider>
 
       <DeepLinkImportDialog />
+      <DeepLinkActionHandler />
       <FirstRunWizard />
       <CommandPalette />
     </div>

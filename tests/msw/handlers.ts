@@ -53,6 +53,7 @@ const secretsVaultStatus = (enabled: boolean) => ({
 
 export const handlers = [
   http.post(`${TAURI_ENDPOINT}/save_session_export`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/take_deeplink_action`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/get_managed_policy_status`, () =>
     success({ state: "none", signed: false, unknownFeatures: [] }),
   ),
