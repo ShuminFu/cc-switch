@@ -1,10 +1,10 @@
-import { cloneElement, isValidElement } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { useUsageSummaryByApp } from "@/lib/query/usage";
 import { cn } from "@/lib/utils";
 import { APP_ICON_MAP } from "@/config/appConfig";
+import { AppIcon } from "@/components/AppIcon";
 import type { AppId } from "@/lib/api/types";
 import {
   Activity,
@@ -143,7 +143,7 @@ function deriveCacheWriteState(appTypes: string[]): CacheWriteState {
 
 /**
  * Hero 标题图标：选中具体应用时显示该应用的品牌图标，"全部"时回退到通用闪电。
- * 复用 APP_ICON_MAP（与侧边栏 / 应用切换器同一套图标），用 cloneElement 放大到
+ * 复用 APP_ICON_MAP（与侧边栏 / 应用切换器同一套图标），通过 AppIcon 放大到
  * 与原闪电一致的 20px；品牌图标自带配色，外层方块仍按 titleTheme 主题色着色。
  */
 function AppGlyph({
@@ -154,10 +154,7 @@ function AppGlyph({
   accentClass: string;
 }) {
   if (appType && appType in APP_ICON_MAP) {
-    const base = APP_ICON_MAP[appType as AppId].icon;
-    if (isValidElement<{ size?: number }>(base)) {
-      return cloneElement(base, { size: 20 });
-    }
+    return <AppIcon app={appType as AppId} size={20} />;
   }
   return <Zap className={cn("h-5 w-5", accentClass)} />;
 }

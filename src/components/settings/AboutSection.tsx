@@ -37,6 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import appIcon from "@/assets/icons/app-icon.png";
 import { APP_ICON_MAP } from "@/config/appConfig";
+import { renderAppIconSpec } from "@/components/AppIcon";
 import type { AppId } from "@/lib/api/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { isWindows } from "@/lib/platform";
@@ -963,7 +964,11 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-background/80 text-muted-foreground">
-                      {appConfig?.icon ?? <Terminal className="h-4 w-4" />}
+                      {appConfig ? (
+                        renderAppIconSpec(appConfig.icon)
+                      ) : (
+                        <Terminal className="h-4 w-4" />
+                      )}
                     </span>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">
