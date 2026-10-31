@@ -254,7 +254,12 @@ fn preview_gemini_sees_its_own_pending_writes_and_equals_saved_bytes() {
 #[test]
 fn preview_hermes_skips_backups_and_equals_saved_bytes() {
     let env = TestEnv::new();
-    let hermes_dir = env.home().join(".hermes");
+    // Windows 上默认目录是 %LOCALAPPDATA%\hermes（由注入的 HOME 派生），不是 ~/.hermes
+    let hermes_dir = cc_switch_lib::hermes_config::get_hermes_dir();
+    assert!(
+        hermes_dir.starts_with(env.home()),
+        "hermes dir escapes test HOME"
+    );
     std::fs::create_dir_all(&hermes_dir).expect("create hermes dir");
     std::fs::write(
         hermes_dir.join("config.yaml"),

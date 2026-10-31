@@ -7,6 +7,7 @@
 //! `HOME`/`CC_SWITCH_TEST_HOME`，多个测试即可并行运行、互不干扰。
 
 use std::cell::RefCell;
+use std::ffi::{OsStr, OsString};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
@@ -16,20 +17,28 @@ use crate::app_config::AppType;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
     home: Option<PathBuf>,
+    /// 原样保存的 `%LOCALAPPDATA%`（仅 Windows 使用）。注入的 [`Paths::with_home`]
+    /// 为 `None`，从而派生为 `<home>\AppData\Local`，测试不会写到真实用户目录。
+    local_app_data: Option<OsString>,
 }
 
 impl Paths {
     /// 以指定目录作为用户主目录
+    ///
+    /// `%LOCALAPPDATA%` 一并派生为 `<home>\AppData\Local`（不读取进程环境变量），
+    /// 使 Windows 上 Claude Desktop / Hermes 的默认目录也落在该主目录内。
     pub fn with_home(home: impl Into<PathBuf>) -> Self {
         Self {
             home: Some(home.into()),
+            local_app_data: None,
         }
     }
 
-    /// 系统默认：等价于 `dirs::home_dir()`
+    /// 系统默认：等价于 `dirs::home_dir()` 与环境变量 `LOCALAPPDATA`
     pub fn system() -> Self {
         Self {
             home: dirs::home_dir(),
+            local_app_data: std::env::var_os("LOCALAPPDATA"),
         }
     }
 
@@ -64,6 +73,19 @@ impl Paths {
         self.home.as_deref()
     }
 
+    /// 原样的 `%LOCALAPPDATA%`（未设置或注入的主目录时为 `None`）
+    pub fn local_app_data(&self) -> Option<&OsStr> {
+        self.local_app_data.as_deref()
+    }
+
+    /// Windows 的 `%LOCALAPPDATA%`；未设置时回退 `<home>\AppData\Local`
+    pub fn local_app_data_dir(&self) -> PathBuf {
+        self.local_app_data
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.home().join("AppData").join("Local"))
+    }
+
     /// 默认应用数据目录 (`~/.cc-switch`)，不考虑 Store 中的覆盖
     pub fn app_config_dir(&self) -> PathBuf {
         self.home().join(".cc-switch")
@@ -85,43 +107,39 @@ impl Paths {
     /// Windows 上的 Claude Desktop 实际目录还会在 `%LOCALAPPDATA%` 下按前缀匹配，
     /// 这里只给出精确名称对应的默认值。
     pub fn default_app_dir(&self, app: &AppType) -> Option<PathBuf> {
-        (app.descriptor().default_dir)(&self.home())
+        (app.descriptor().default_dir)(self)
     }
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn claude_desktop_default_dir(home: &Path) -> Option<PathBuf> {
+pub(crate) fn claude_desktop_default_dir(paths: &Paths) -> Option<PathBuf> {
     Some(
-        home.join("Library")
+        paths
+            .home()
+            .join("Library")
             .join("Application Support")
             .join("Claude-3p"),
     )
 }
 
 #[cfg(windows)]
-pub(crate) fn claude_desktop_default_dir(home: &Path) -> Option<PathBuf> {
-    let local_app_data = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join("AppData").join("Local"));
-    Some(local_app_data.join("Claude-3p"))
+pub(crate) fn claude_desktop_default_dir(paths: &Paths) -> Option<PathBuf> {
+    Some(paths.local_app_data_dir().join("Claude-3p"))
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
-pub(crate) fn claude_desktop_default_dir(_home: &Path) -> Option<PathBuf> {
+pub(crate) fn claude_desktop_default_dir(_paths: &Paths) -> Option<PathBuf> {
     None
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn hermes_default_dir(home: &Path) -> PathBuf {
-    crate::hermes_config::windows_local_hermes_dir(
-        std::env::var_os("LOCALAPPDATA").as_deref(),
-        home,
-    )
+pub(crate) fn hermes_default_dir(paths: &Paths) -> PathBuf {
+    crate::hermes_config::windows_local_hermes_dir(paths.local_app_data(), &paths.home())
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(crate) fn hermes_default_dir(home: &Path) -> PathBuf {
-    home.join(".hermes")
+pub(crate) fn hermes_default_dir(paths: &Paths) -> PathBuf {
+    paths.home().join(".hermes")
 }
 
 thread_local! {
@@ -302,15 +320,38 @@ mod tests {
         let paths = Paths::with_home("/tmp/cc-switch-rooted");
         for app in ALL_APPS.iter() {
             if let Some(dir) = paths.default_app_dir(app) {
-                // Windows 上 Claude Desktop/Hermes 优先使用 LOCALAPPDATA
-                if cfg!(windows) && matches!(app, AppType::ClaudeDesktop | AppType::Hermes) {
-                    continue;
-                }
+                // 包括 Windows 上基于 %LOCALAPPDATA% 的 Claude Desktop/Hermes：注入的主目录
+                // 不读取进程环境变量，否则测试会写到真实用户的 AppData（CCS-001）。
                 assert!(
                     dir.starts_with("/tmp/cc-switch-rooted"),
                     "{app:?} dir {dir:?} should be under injected home"
                 );
             }
         }
+    }
+
+    #[test]
+    #[serial]
+    fn injected_home_ignores_process_localappdata() {
+        let saved = std::env::var_os("LOCALAPPDATA");
+        std::env::set_var("LOCALAPPDATA", "/tmp/cc-switch-real-localappdata");
+        let paths = Paths::with_home("/tmp/cc-switch-injected");
+        let system = Paths::system();
+        match saved {
+            Some(value) => std::env::set_var("LOCALAPPDATA", value),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
+
+        assert_eq!(paths.local_app_data(), None);
+        assert_eq!(
+            paths.local_app_data_dir(),
+            Path::new("/tmp/cc-switch-injected")
+                .join("AppData")
+                .join("Local")
+        );
+        assert_eq!(
+            system.local_app_data_dir(),
+            PathBuf::from("/tmp/cc-switch-real-localappdata")
+        );
     }
 }

@@ -5,7 +5,7 @@
 //! 启动导入、代理接管恢复、托盘分区等调用点都会自动跟随。
 
 use std::ops::BitOr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Serialize;
 
@@ -88,8 +88,8 @@ pub struct AppDescriptor {
     pub input_token_semantics: InputTokenSemantics,
     /// 主页面默认是否显示
     pub default_visible: bool,
-    /// 未配置覆盖目录时的默认配置目录（参数为用户主目录），平台不支持时为 `None`
-    pub default_dir: fn(&Path) -> Option<PathBuf>,
+    /// 未配置覆盖目录时的默认配置目录（由 [`crate::paths::Paths`] 派生），平台不支持时为 `None`
+    pub default_dir: fn(&crate::paths::Paths) -> Option<PathBuf>,
 }
 
 impl AppDescriptor {
@@ -119,7 +119,7 @@ pub static APPS: &[AppDescriptor] = &[
         proxy_route: Some("/claude"),
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
-        default_dir: |home| Some(home.join(".claude")),
+        default_dir: |paths| Some(paths.home().join(".claude")),
     },
     AppDescriptor {
         app: AppType::ClaudeDesktop,
@@ -146,7 +146,7 @@ pub static APPS: &[AppDescriptor] = &[
         proxy_route: Some("/codex"),
         input_token_semantics: InputTokenSemantics::CacheInclusive,
         default_visible: true,
-        default_dir: |home| Some(home.join(".codex")),
+        default_dir: |paths| Some(paths.home().join(".codex")),
     },
     AppDescriptor {
         app: AppType::Gemini,
@@ -159,7 +159,7 @@ pub static APPS: &[AppDescriptor] = &[
         proxy_route: Some("/gemini"),
         input_token_semantics: InputTokenSemantics::CacheInclusive,
         default_visible: true,
-        default_dir: |home| Some(home.join(".gemini")),
+        default_dir: |paths| Some(paths.home().join(".gemini")),
     },
     AppDescriptor {
         app: AppType::GrokBuild,
@@ -172,7 +172,7 @@ pub static APPS: &[AppDescriptor] = &[
         proxy_route: Some("/grokbuild"),
         input_token_semantics: InputTokenSemantics::CacheInclusive,
         default_visible: true,
-        default_dir: |home| Some(home.join(".grok")),
+        default_dir: |paths| Some(paths.home().join(".grok")),
     },
     AppDescriptor {
         app: AppType::OpenCode,
@@ -189,7 +189,7 @@ pub static APPS: &[AppDescriptor] = &[
         proxy_route: Some("/opencode"),
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
-        default_dir: |home| Some(home.join(".config").join("opencode")),
+        default_dir: |paths| Some(paths.home().join(".config").join("opencode")),
     },
     AppDescriptor {
         app: AppType::OpenClaw,
@@ -205,7 +205,7 @@ pub static APPS: &[AppDescriptor] = &[
         proxy_route: Some("/openclaw"),
         input_token_semantics: InputTokenSemantics::Fresh,
         default_visible: true,
-        default_dir: |home| Some(home.join(".openclaw")),
+        default_dir: |paths| Some(paths.home().join(".openclaw")),
     },
     AppDescriptor {
         app: AppType::Hermes,
@@ -221,7 +221,7 @@ pub static APPS: &[AppDescriptor] = &[
         input_token_semantics: InputTokenSemantics::Fresh,
         // 默认不显示，需用户手动启用
         default_visible: false,
-        default_dir: |home| Some(crate::paths::hermes_default_dir(home)),
+        default_dir: |paths| Some(crate::paths::hermes_default_dir(paths)),
     },
 ];
 
