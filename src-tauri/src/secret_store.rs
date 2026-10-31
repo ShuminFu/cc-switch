@@ -783,6 +783,20 @@ mod keyring_live {
         assert_eq!(fresh_get(&key), None);
     }
 
+    /// 与独立客户端互通：读取脚本用 `secret-tool store` 预置的条目，再写入新值，
+    /// 由脚本用 `secret-tool lookup` 校验后清除
+    #[test]
+    #[ignore = "needs a D-Bus session with an unlocked Secret Service (scripts/check-linux-secret-service.sh)"]
+    fn shares_entries_with_secret_tool() {
+        let seed = std::env::var("CC_SWITCH_KEYRING_TEST_SEED")
+            .expect("CC_SWITCH_KEYRING_TEST_SEED is set by scripts/check-linux-secret-service.sh");
+        let key = "test.external";
+        let store = KeyringSecretStore::new(service());
+        assert_eq!(store.get(key).unwrap().as_deref(), Some(seed.as_str()));
+        store.set(key, "written-by-cc-switch").unwrap();
+        assert_eq!(fresh_get(key).as_deref(), Some("written-by-cc-switch"));
+    }
+
     #[test]
     #[ignore = "needs a D-Bus session with an unlocked Secret Service (scripts/check-linux-secret-service.sh)"]
     fn cache_masks_an_out_of_band_delete() {

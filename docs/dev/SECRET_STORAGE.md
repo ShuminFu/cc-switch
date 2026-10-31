@@ -127,6 +127,8 @@ the ignored `secret_store::keyring_live` tests under the service `cc-switch-test
 - `plaintext` mode: the value is written back inline and `release()` deletes the entry;
 - an entry deleted outside the app (Seahorse, `secret-tool clear`) still reads from the
   process cache until restart; a fresh process sees it gone.
+- interop with an independent client: an entry stored with `secret-tool store` is read by
+  the app, and the value the app writes back is confirmed with `secret-tool lookup`.
 
 It then checks that `secret-tool search --all service cc-switch-test-<pid>` finds nothing,
 and runs `probe_fails_without_dbus` with no session bus (`DBUS_SESSION_BUS_ADDRESS` unset,

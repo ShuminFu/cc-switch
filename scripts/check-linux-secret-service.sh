@@ -39,8 +39,19 @@ XDG_DATA_HOME="$WORK/data" XDG_RUNTIME_DIR="$WORK/runtime" \
   dbus-run-session -- bash -c '
     set -euo pipefail
     printf pw | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+    # Seed an entry with an independent client; shares_entries_with_secret_tool
+    # reads it and overwrites it, and the value is checked back with secret-tool.
+    export CC_SWITCH_KEYRING_TEST_SEED="seeded-by-secret-tool"
+    printf %s "$CC_SWITCH_KEYRING_TEST_SEED" |
+      secret-tool store --label="cc-switch test" service "$SERVICE" username test.external
     cargo test --manifest-path "$MANIFEST" --lib secret_store::keyring_live -- \
       --ignored --test-threads=1 --skip probe_fails_without_dbus
+    written="$(secret-tool lookup service "$SERVICE" username test.external)"
+    if [ "$written" != "written-by-cc-switch" ]; then
+      echo "secret-tool lookup returned \"$written\", expected the value written by the test" >&2
+      exit 1
+    fi
+    secret-tool clear service "$SERVICE" username test.external
     leftover="$(secret-tool search --all service "$SERVICE" 2>&1 || true)"
     if [ -n "$leftover" ]; then
       echo "keyring entries left under service $SERVICE:" >&2

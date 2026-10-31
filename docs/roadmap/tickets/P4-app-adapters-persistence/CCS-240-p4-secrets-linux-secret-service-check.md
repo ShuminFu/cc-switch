@@ -62,6 +62,20 @@ Not done: the optional run of the built app binary under `dbus-run-session` + `x
 seeded HOME. The API-level tests cover the same store and policy paths. KWallet and interactive
 unlock prompts are still not covered (see CCS-172).
 
+### Review
+
+Independent review re-ran `scripts/check-linux-secret-service.sh` (exit 0) and checked both
+acceptance criteria, the `select_policy` refactor (same behaviour; `policy_for_dir` keeps the
+`keychain_allowed()` guard) and that keyring 4.2 on Linux uses the zbus Secret Service store
+with `service`/`username` attributes. Gap fixed: the cleanup check alone would also pass if
+no entry ever reached gnome-keyring, and every test talked only to in-process instances. Added
+`shares_entries_with_secret_tool`: the script seeds `test.external` with `secret-tool store`
+(`CC_SWITCH_KEYRING_TEST_SEED`), the test reads it through `KeyringSecretStore` and
+overwrites it, and the script checks the new value with `secret-tool lookup` before clearing
+it. Re-verified: script exit 0 (Secret Service run 5 passed, no entries left; no D-Bus run 1
+passed), `cargo test --lib` 2861 passed / 0 failed / 11 ignored, clippy `-D warnings` (with
+and without `--tests`) clean.
+
 ### Verification
 
 - `apt-get install gnome-keyring libsecret-tools` (gnome-keyring 46.1-2ubuntu0.2, Ubuntu 24.04).
