@@ -10,7 +10,12 @@ export interface EndpointLatencyResult {
   error?: string;
 }
 
-export const vscodeApi = {
+/**
+ * Endpoint management (custom endpoints, latency tests) and live provider
+ * settings. Formerly `vscodeApi` in `vscode.ts`, named after a VS Code
+ * integration that no longer exists (PRODUCT-60).
+ */
+export const endpointsApi = {
   async getLiveProviderSettings(appId: AppId) {
     return await callJson(commands.readLiveProviderSettings(appId));
   },

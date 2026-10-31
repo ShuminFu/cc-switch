@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Zap, Loader2, Plus, X, AlertCircle, Save } from "lucide-react";
 import type { AppId } from "@/lib/api";
-import { vscodeApi } from "@/lib/api/vscode";
+import { endpointsApi } from "@/lib/api/endpoints";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
@@ -124,7 +124,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
       try {
         if (!providerId) return; // 新建模式不加载
 
-        const customEndpoints = await vscodeApi.getCustomEndpoints(
+        const customEndpoints = await endpointsApi.getCustomEndpoints(
           appId,
           providerId,
         );
@@ -329,7 +329,7 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
     );
 
     try {
-      const results = await vscodeApi.testApiEndpoints(urls, {
+      const results = await endpointsApi.testApiEndpoints(urls, {
         timeoutSecs: ENDPOINT_TIMEOUT_SECS[appId],
       });
 
@@ -417,12 +417,12 @@ const EndpointSpeedTest: React.FC<EndpointSpeedTestProps> = ({
 
         // 批量添加
         for (const url of toAdd) {
-          await vscodeApi.addCustomEndpoint(appId, providerId, url);
+          await endpointsApi.addCustomEndpoint(appId, providerId, url);
         }
 
         // 批量删除
         for (const url of toRemove) {
-          await vscodeApi.removeCustomEndpoint(appId, providerId, url);
+          await endpointsApi.removeCustomEndpoint(appId, providerId, url);
         }
 
         // 更新初始端点列表

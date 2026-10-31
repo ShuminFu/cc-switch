@@ -16,7 +16,7 @@ vi.mock("@/lib/api", () => ({
   providersApi: {
     getCurrent: apiMocks.getCurrent,
   },
-  vscodeApi: {
+  endpointsApi: {
     getLiveProviderSettings: apiMocks.getLiveProviderSettings,
   },
   openclawApi: {
