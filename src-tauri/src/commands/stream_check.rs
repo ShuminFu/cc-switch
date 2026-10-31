@@ -24,16 +24,17 @@ pub async fn stream_check_provider(
 ) -> Result<StreamCheckResult, AppError> {
     let config = state.db.get_stream_check_config()?;
 
-    let providers = state.db.get_all_providers(app_type.as_str())?;
-    let provider = providers
-        .get(&provider_id)
+    // One row by id instead of loading the whole provider table (CMD-21).
+    let provider = state
+        .db
+        .get_provider_by_id(&provider_id, app_type.as_str())?
         .ok_or_else(|| AppError::Message(format!("供应商 {provider_id} 不存在")))?;
 
     // Copilot 端点是动态的（随 OAuth token 解析），需预先取出 host 再探测；
     // 其余供应商传 None，由服务层从 settings_config 提取 base_url。无需鉴权。
-    let base_url_override = resolve_copilot_base_url_override(provider, &copilot_state).await?;
+    let base_url_override = resolve_copilot_base_url_override(&provider, &copilot_state).await?;
     let result =
-        StreamCheckService::check_with_retry(&app_type, provider, &config, base_url_override)
+        StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
             .await?;
 
     // 记录日志
@@ -71,45 +72,64 @@ pub async fn stream_check_all_providers(
         None
     };
 
-    let mut results = Vec::new();
-    for (id, provider) in providers {
+    let targets: Vec<_> = providers
+        .into_iter()
         // Official OAuth providers intentionally have no user-configured probe
         // target. Never turn their runtime adapter defaults into unauthenticated
         // network probes against first-party endpoints.
-        if provider.category.as_deref() == Some("official") {
-            continue;
-        }
-        if let Some(ids) = &allowed_ids {
-            if !ids.contains(&id) {
-                continue;
-            }
-        }
+        .filter(|(_, provider)| provider.category.as_deref() != Some("official"))
+        .filter(|(id, _)| allowed_ids.as_ref().is_none_or(|ids| ids.contains(id)))
+        .collect();
 
-        let base_url_override =
-            resolve_copilot_base_url_override(&provider, &copilot_state).await?;
-        let result =
-            StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
-                .await
-                .unwrap_or_else(|e| StreamCheckResult {
-                    status: HealthStatus::Failed,
-                    success: false,
-                    message: e.to_string(),
-                    response_time_ms: None,
-                    http_status: None,
-                    model_used: String::new(),
-                    tested_at: chrono::Utc::now().timestamp(),
-                    retry_count: 0,
-                    error_category: None,
-                });
-
-        let _ = state
-            .db
-            .save_stream_check_log(&id, &provider.name, app_type.as_str(), &result);
-
-        results.push((id, result));
-    }
+    // Probe a few providers at a time instead of one after another: with N
+    // providers the wall time is about ceil(N / 4) single checks (CMD-26).
+    // `buffered` keeps the result order of the provider list.
+    use futures::stream::{self, StreamExt, TryStreamExt};
+    let app_type_ref = &app_type;
+    let config_ref = &config;
+    let copilot_ref = &copilot_state;
+    let results: Vec<(String, StreamCheckResult)> = stream::iter(targets)
+        .map(|(id, provider)| async move {
+            let base_url_override =
+                resolve_copilot_base_url_override(&provider, copilot_ref).await?;
+            let result = StreamCheckService::check_with_retry(
+                app_type_ref,
+                &provider,
+                config_ref,
+                base_url_override,
+            )
+            .await
+            .unwrap_or_else(|e| failed_check_result(e.to_string()));
+            Ok::<_, AppError>((id, provider.name, result))
+        })
+        .buffered(STREAM_CHECK_CONCURRENCY)
+        .map_ok(|(id, name, result)| {
+            let _ = state
+                .db
+                .save_stream_check_log(&id, &name, app_type.as_str(), &result);
+            (id, result)
+        })
+        .try_collect()
+        .await?;
 
     Ok(results)
+}
+
+/// How many providers `stream_check_all_providers` probes at once.
+const STREAM_CHECK_CONCURRENCY: usize = 4;
+
+fn failed_check_result(message: String) -> StreamCheckResult {
+    StreamCheckResult {
+        status: HealthStatus::Failed,
+        success: false,
+        message,
+        response_time_ms: None,
+        http_status: None,
+        model_used: String::new(),
+        tested_at: chrono::Utc::now().timestamp(),
+        retry_count: 0,
+        error_category: None,
+    }
 }
 
 /// 获取连通性检查配置
