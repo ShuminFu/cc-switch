@@ -112,7 +112,8 @@ fn convert_to_hermes_format(spec: &Value) -> Result<Value, AppError> {
 ///
 /// Conversion rules:
 /// - If `command` exists: set `type: "stdio"`, extract `command`, `args`, `env`
-/// - If `url` exists: set `type: "sse"`, extract `url`, `headers`
+/// - If `url` exists: set `type: "http"` (or `"sse"` when Hermes declares
+///   `transport: sse`), extract `url`, `headers`
 /// - Strip Hermes-specific fields: `enabled`, `timeout`, `connect_timeout`, `tools`, `sampling`
 fn convert_from_hermes_format(id: &str, spec: &Value) -> Result<Value, AppError> {
     let obj = spec
@@ -139,8 +140,12 @@ fn convert_from_hermes_format(id: &str, spec: &Value) -> Result<Value, AppError>
             }
         }
     } else if obj.contains_key("url") {
-        // HTTP/SSE type
-        result.insert("type".into(), json!("sse"));
+        // URL-only entries are streamable HTTP unless Hermes says otherwise (CFG-16)
+        let transport = match obj.get("transport").and_then(|v| v.as_str()) {
+            Some(t) if t.eq_ignore_ascii_case("sse") => "sse",
+            _ => "http",
+        };
+        result.insert("type".into(), json!(transport));
 
         if let Some(url) = obj.get("url") {
             result.insert("url".into(), url.clone());
@@ -460,7 +465,7 @@ mod tests {
         });
 
         let result = convert_from_hermes_format("remote-server", &spec).unwrap();
-        assert_eq!(result["type"], "sse");
+        assert_eq!(result["type"], "http");
         assert_eq!(result["url"], "https://example.com/mcp");
         assert_eq!(result["headers"]["Authorization"], "Bearer xxx");
         // Hermes-specific fields should be stripped
@@ -545,7 +550,7 @@ mod tests {
         });
 
         let result = convert_from_hermes_format("remote", &spec).unwrap();
-        assert_eq!(result["type"], "sse");
+        assert_eq!(result["type"], "http");
         assert_eq!(result["url"], "https://mcp.example.com");
         assert!(
             result.get("auth").is_none(),

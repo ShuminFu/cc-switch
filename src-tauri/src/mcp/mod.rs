@@ -19,16 +19,46 @@ mod hermes;
 mod opencode;
 mod validation;
 
+use serde_json::Value;
+use std::collections::HashMap;
+
+use crate::app_config::McpConfig;
+use validation::extract_server_spec;
+
+/// 返回 legacy `McpConfig` 中已启用的 MCP 服务器（过滤 enabled==true），
+/// 供各应用的 `sync_enabled_to_*` 兼容入口共用
+pub(crate) fn collect_enabled_servers(cfg: &McpConfig) -> HashMap<String, Value> {
+    let mut out = HashMap::new();
+    for (id, entry) in cfg.servers.iter() {
+        let enabled = entry
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !enabled {
+            continue;
+        }
+        match extract_server_spec(entry) {
+            Ok(spec) => {
+                out.insert(id.clone(), spec);
+            }
+            Err(err) => {
+                log::warn!("跳过无效的 MCP 条目 '{id}': {err}");
+            }
+        }
+    }
+    out
+}
+
 // 重新导出公共 API
 pub use claude::{
-    import_from_claude, remove_server_from_claude, sync_enabled_to_claude,
+    import_from_claude, project_to_claude, remove_server_from_claude, sync_enabled_to_claude,
     sync_single_server_to_claude,
 };
 pub use codex::{
     import_from_codex, remove_server_from_codex, sync_enabled_to_codex, sync_single_server_to_codex,
 };
 pub use gemini::{
-    import_from_gemini, remove_server_from_gemini, sync_enabled_to_gemini,
+    import_from_gemini, project_to_gemini, remove_server_from_gemini, sync_enabled_to_gemini,
     sync_single_server_to_gemini,
 };
 pub use grokbuild::{

@@ -164,13 +164,10 @@ pub fn remove_server_from_grokbuild(id: &str) -> Result<(), AppError> {
         return Ok(());
     }
     let text = read_config_text()?;
-    let mut doc = match text.parse::<toml_edit::DocumentMut>() {
-        Ok(doc) => doc,
-        Err(error) => {
-            log::warn!("解析 Grok Build config.toml 失败: {error}，跳过删除操作");
-            return Ok(());
-        }
-    };
+    // 解析失败必须报错而不是静默成功（CFG-45）
+    let mut doc = text.parse::<toml_edit::DocumentMut>().map_err(|error| {
+        AppError::McpValidation(format!("解析 Grok Build config.toml 失败: {error}"))
+    })?;
     if let Some(servers) = doc
         .get_mut("mcp_servers")
         .and_then(toml_edit::Item::as_table_mut)

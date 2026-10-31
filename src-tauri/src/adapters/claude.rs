@@ -71,14 +71,19 @@ struct ClaudeMcp;
 
 impl McpProjector for ClaudeMcp {
     fn upsert_server(&self, id: &str, spec: &Value) -> Result<(), AppError> {
-        crate::mcp::sync_single_server_to_claude(&Default::default(), id, spec)
+        self.project(&[(id, spec)], &[])
     }
 
     fn remove_server(&self, id: &str) -> Result<(), AppError> {
-        crate::mcp::remove_server_from_claude(id)
+        self.project(&[], &[id])
     }
 
     fn import_servers(&self, config: &mut MultiAppConfig) -> Result<usize, AppError> {
         crate::mcp::import_from_claude(config)
+    }
+
+    /// One read-modify-write of the whole file per projection (CFG-41).
+    fn project(&self, enabled: &[(&str, &Value)], disabled: &[&str]) -> Result<(), AppError> {
+        crate::mcp::project_to_claude(enabled, disabled)
     }
 }

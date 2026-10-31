@@ -3,38 +3,16 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
-use crate::app_config::{McpApps, McpConfig, McpServer, MultiAppConfig};
+use crate::app_config::{McpApps, McpServer, MultiAppConfig};
 use crate::error::AppError;
 
-use super::validation::{extract_server_spec, validate_server_spec};
+use super::collect_enabled_servers;
+use super::validation::validate_server_spec;
 
 fn should_sync_claude_mcp() -> bool {
     // Claude 未安装/未初始化时：通常 ~/.claude 目录与 ~/.claude.json 都不存在。
     // 按用户偏好：此时跳过写入/删除，不创建任何文件或目录。
     crate::config::get_claude_config_dir().exists() || crate::config::get_claude_mcp_path().exists()
-}
-
-/// 返回已启用的 MCP 服务器（过滤 enabled==true）
-fn collect_enabled_servers(cfg: &McpConfig) -> HashMap<String, Value> {
-    let mut out = HashMap::new();
-    for (id, entry) in cfg.servers.iter() {
-        let enabled = entry
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if !enabled {
-            continue;
-        }
-        match extract_server_spec(entry) {
-            Ok(spec) => {
-                out.insert(id.clone(), spec);
-            }
-            Err(err) => {
-                log::warn!("跳过无效的 MCP 条目 '{id}': {err}");
-            }
-        }
-    }
-    out
 }
 
 /// 将 config.json 中 enabled==true 的项投影写入 ~/.claude.json
@@ -64,7 +42,10 @@ pub fn import_from_claude(config: &mut MultiAppConfig) -> Result<usize, AppError
     let mut changed = 0;
     let mut errors = Vec::new();
 
-    for (id, spec) in map.iter() {
+    for (id, raw_spec) in map.iter() {
+        // cc-switch 在 Windows 上写入时会包装成 `cmd /c npx …`；导入时还原，
+        // 包装只属于 Claude-on-Windows 的投影细节，不应进入 DB（CFG-30）
+        let spec = &crate::claude_mcp::unwrap_windows_command(raw_spec);
         // 校验：单项失败不中止，收集错误继续处理
         if let Err(e) = validate_server_spec(spec) {
             log::warn!("跳过无效 MCP 服务器 '{id}': {e}");
@@ -113,37 +94,25 @@ pub fn import_from_claude(config: &mut MultiAppConfig) -> Result<usize, AppError
     Ok(changed)
 }
 
+/// 一次性把期望状态投影到 ~/.claude.json：`enabled` 写入/覆盖，`disabled` 移除。
+/// 整个批次只做一次读-改-写，内容未变化时不写文件（CFG-41）。
+pub fn project_to_claude(enabled: &[(&str, &Value)], disabled: &[&str]) -> Result<(), AppError> {
+    if !should_sync_claude_mcp() {
+        return Ok(());
+    }
+    crate::claude_mcp::project_mcp_servers(enabled, disabled)
+}
+
 /// 将单个 MCP 服务器同步到 Claude live 配置
 pub fn sync_single_server_to_claude(
     _config: &MultiAppConfig,
     id: &str,
     server_spec: &Value,
 ) -> Result<(), AppError> {
-    if !should_sync_claude_mcp() {
-        return Ok(());
-    }
-    // 读取现有的 MCP 配置
-    let current = crate::claude_mcp::read_mcp_servers_map()?;
-
-    // 创建新的 HashMap，包含现有的所有服务器 + 当前要同步的服务器
-    let mut updated = current;
-    updated.insert(id.to_string(), server_spec.clone());
-
-    // 写回
-    crate::claude_mcp::set_mcp_servers_map(&updated)
+    project_to_claude(&[(id, server_spec)], &[])
 }
 
 /// 从 Claude live 配置中移除单个 MCP 服务器
 pub fn remove_server_from_claude(id: &str) -> Result<(), AppError> {
-    if !should_sync_claude_mcp() {
-        return Ok(());
-    }
-    // 读取现有的 MCP 配置
-    let mut current = crate::claude_mcp::read_mcp_servers_map()?;
-
-    // 移除指定服务器
-    current.remove(id);
-
-    // 写回
-    crate::claude_mcp::set_mcp_servers_map(&current)
+    project_to_claude(&[], &[id])
 }
