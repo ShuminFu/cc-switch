@@ -80,3 +80,16 @@ describe("provider validation messages follow the UI language", () => {
     );
   });
 });
+
+describe("providerSchema required fields (FE-ARCH-14)", () => {
+  it("rejects an empty or whitespace-only name", () => {
+    for (const name of ["", "   "]) {
+      const result = providerSchema.safeParse({ name, settingsConfig: "{}" });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(["name"]);
+    }
+    expect(
+      providerSchema.safeParse({ name: "Relay", settingsConfig: "{}" }).success,
+    ).toBe(true);
+  });
+});

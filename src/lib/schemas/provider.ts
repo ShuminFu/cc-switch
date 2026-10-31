@@ -44,7 +44,14 @@ export function parseJsonError(error: unknown): string {
 }
 
 export const providerSchema = z.object({
-  name: z.string(), // 必填校验移至 handleSubmit 中用 toast 提示
+  // Required (FE-ARCH-14): RHF blocks the submit and shows the message
+  // under the field instead of a soft "save anyway" confirm.
+  name: z.string().refine((value) => value.trim().length > 0, {
+    error: () =>
+      i18n.t("providerForm.fillSupplierName", {
+        defaultValue: "Please fill in provider name",
+      }),
+  }),
   websiteUrl: z
     .string()
     .url({
