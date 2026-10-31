@@ -9,17 +9,20 @@ import {
 import {
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertTriangle, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Provider } from "@/types";
+import type { ProviderHealth } from "@/types/proxy";
 import type { AppId } from "@/lib/api";
 import { providersApi } from "@/lib/api/providers";
 import { useDragSort } from "@/hooks/useDragSort";
@@ -39,6 +42,7 @@ import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
   useAutoFailoverEnabled,
   useFailoverQueue,
+  useProvidersHealth,
   useAddToFailoverQueue,
   useRemoveFromFailoverQueue,
 } from "@/lib/query/failover";
@@ -209,6 +213,21 @@ export function ProviderList({
     [isFailoverModeActive, failoverQueue],
   );
 
+  // One batched health poll for the queued providers instead of one per card
+  // (FE-ARCH-09); the badge only renders for queued cards while proxying.
+  const queuedProviderIds = useMemo(
+    () =>
+      isFailoverModeActive && failoverQueue
+        ? failoverQueue.map((item) => item.providerId)
+        : EMPTY_IDS,
+    [isFailoverModeActive, failoverQueue],
+  );
+  const healthById = useProvidersHealth(
+    appId,
+    queuedProviderIds,
+    isProxyRunning,
+  );
+
   const isFailoverMutationPending =
     addToQueue.isPending || removeFromQueue.isPending;
   const isAnyActionPending = isActionPending || isFailoverMutationPending;
@@ -348,6 +367,33 @@ export function ProviderList({
     [filteredProviders],
   );
 
+  // Long lists (aggregator users with dozens of providers) are virtualised so
+  // only the visible cards mount (FE-ARCH-09). The scroll container is the
+  // nearest scrollable ancestor of the list.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const shouldVirtualize = filteredProviders.length > VIRTUALIZE_THRESHOLD;
+  useLayoutEffect(() => {
+    if (!shouldVirtualize || !listRef.current) return;
+    const scroller = findScrollParent(listRef.current);
+    if (scroller !== scrollElement) setScrollElement(scroller);
+    const margin =
+      listRef.current.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop;
+    if (Math.abs(margin - scrollMargin) > 1) setScrollMargin(margin);
+  }, [shouldVirtualize, scrollElement, scrollMargin, filteredProviders]);
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? filteredProviders.length : 0,
+    getScrollElement: () => scrollElement,
+    estimateSize: () => ESTIMATED_CARD_HEIGHT,
+    overscan: 6,
+    scrollMargin,
+    getItemKey: (index) => filteredProviders[index]?.id ?? index,
+    initialRect: { width: 800, height: 800 },
+  });
+
   const claudeDesktopStatusMessages = useMemo(() => {
     if (appId !== "claude-desktop" || !claudeDesktopStatus) return [];
 
@@ -429,6 +475,64 @@ export function ProviderList({
     );
   }
 
+  const renderCard = (provider: Provider) => {
+    const isOmo = provider.category === "omo";
+    const isOmoSlim = provider.category === "omo-slim";
+    const isOmoCurrent = isOmo && provider.id === (currentOmoId || "");
+    const isOmoSlimCurrent =
+      isOmoSlim && provider.id === (currentOmoSlimId || "");
+    const isHermesCurrent =
+      appId === "hermes" && hermesCurrentProviderId === provider.id;
+    return (
+      <SortableProviderCard
+        key={provider.id}
+        provider={provider}
+        isCurrent={
+          isOmo
+            ? isOmoCurrent
+            : isOmoSlim
+              ? isOmoSlimCurrent
+              : appId === "hermes"
+                ? isHermesCurrent
+                : provider.id === currentProviderId
+        }
+        appId={appId}
+        isInConfig={isProviderInConfig(provider.id)}
+        isConfigStatusLoading={isConfigStatusLoading}
+        isOmo={isOmo}
+        isOmoSlim={isOmoSlim}
+        onSwitch={stableOnSwitch}
+        onEdit={stableOnEdit}
+        onDelete={stableOnDelete}
+        onRemoveFromConfig={stableOnRemoveFromConfig}
+        onDisableOmo={stableOnDisableOmo}
+        onDisableOmoSlim={stableOnDisableOmoSlim}
+        onDuplicate={stableOnDuplicate}
+        onConfigureUsage={stableOnConfigureUsage}
+        onOpenWebsite={stableOnOpenWebsite}
+        onOpenTerminal={stableOnOpenTerminal}
+        onTest={handleTest}
+        isTesting={isChecking(provider.id)}
+        isActionPending={isAnyActionPending}
+        isProxyRunning={isProxyRunning}
+        isProxyTakeover={isProxyTakeover}
+        isAutoFailoverEnabled={isFailoverModeActive}
+        failoverPriority={getFailoverPriority(provider.id)}
+        isInFailoverQueue={isInFailoverQueue(provider.id)}
+        health={healthById.get(provider.id)}
+        onToggleFailover={handleToggleFailover}
+        activeProviderId={activeProviderId}
+        // OpenClaw: default model / Hermes: model.provider === provider.id
+        isDefaultModel={
+          appId === "hermes"
+            ? isHermesCurrent
+            : isProviderDefaultModel(provider.id)
+        }
+        onSetAsDefault={stableOnSetAsDefault}
+      />
+    );
+  };
+
   const renderProviderList = () => (
     <DndContext
       sensors={sensors}
@@ -439,64 +543,38 @@ export function ProviderList({
         items={sortableItems}
         strategy={verticalListSortingStrategy}
       >
-        <div className="space-y-3">
-          {filteredProviders.map((provider) => {
-            const isOmo = provider.category === "omo";
-            const isOmoSlim = provider.category === "omo-slim";
-            const isOmoCurrent = isOmo && provider.id === (currentOmoId || "");
-            const isOmoSlimCurrent =
-              isOmoSlim && provider.id === (currentOmoSlimId || "");
-            const isHermesCurrent =
-              appId === "hermes" && hermesCurrentProviderId === provider.id;
-            return (
-              <SortableProviderCard
-                key={provider.id}
-                provider={provider}
-                isCurrent={
-                  isOmo
-                    ? isOmoCurrent
-                    : isOmoSlim
-                      ? isOmoSlimCurrent
-                      : appId === "hermes"
-                        ? isHermesCurrent
-                        : provider.id === currentProviderId
-                }
-                appId={appId}
-                isInConfig={isProviderInConfig(provider.id)}
-                isConfigStatusLoading={isConfigStatusLoading}
-                isOmo={isOmo}
-                isOmoSlim={isOmoSlim}
-                onSwitch={stableOnSwitch}
-                onEdit={stableOnEdit}
-                onDelete={stableOnDelete}
-                onRemoveFromConfig={stableOnRemoveFromConfig}
-                onDisableOmo={stableOnDisableOmo}
-                onDisableOmoSlim={stableOnDisableOmoSlim}
-                onDuplicate={stableOnDuplicate}
-                onConfigureUsage={stableOnConfigureUsage}
-                onOpenWebsite={stableOnOpenWebsite}
-                onOpenTerminal={stableOnOpenTerminal}
-                onTest={handleTest}
-                isTesting={isChecking(provider.id)}
-                isActionPending={isAnyActionPending}
-                isProxyRunning={isProxyRunning}
-                isProxyTakeover={isProxyTakeover}
-                isAutoFailoverEnabled={isFailoverModeActive}
-                failoverPriority={getFailoverPriority(provider.id)}
-                isInFailoverQueue={isInFailoverQueue(provider.id)}
-                onToggleFailover={handleToggleFailover}
-                activeProviderId={activeProviderId}
-                // OpenClaw: default model / Hermes: model.provider === provider.id
-                isDefaultModel={
-                  appId === "hermes"
-                    ? isHermesCurrent
-                    : isProviderDefaultModel(provider.id)
-                }
-                onSetAsDefault={stableOnSetAsDefault}
-              />
-            );
-          })}
-        </div>
+        {shouldVirtualize ? (
+          <div
+            ref={listRef}
+            data-testid="provider-list-virtual"
+            style={{
+              height: virtualizer.getTotalSize(),
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((item) => {
+              const provider = filteredProviders[item.index];
+              if (!provider) return null;
+              return (
+                <div
+                  key={item.key}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  className="absolute left-0 top-0 w-full pb-3"
+                  style={{
+                    transform: `translateY(${item.start - virtualizer.options.scrollMargin}px)`,
+                  }}
+                >
+                  {renderCard(provider)}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div ref={listRef} className="space-y-3">
+            {filteredProviders.map(renderCard)}
+          </div>
+        )}
       </SortableContext>
     </DndContext>
   );
@@ -595,6 +673,21 @@ export function ProviderList({
   );
 }
 
+const EMPTY_IDS: string[] = [];
+/** Lists longer than this are virtualised. */
+export const VIRTUALIZE_THRESHOLD = 30;
+const ESTIMATED_CARD_HEIGHT = 112;
+
+function findScrollParent(element: HTMLElement): HTMLElement {
+  let node = element.parentElement;
+  while (node) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+    node = node.parentElement;
+  }
+  return (document.scrollingElement as HTMLElement) ?? document.documentElement;
+}
+
 interface SortableProviderCardProps {
   provider: Provider;
   isCurrent: boolean;
@@ -621,6 +714,7 @@ interface SortableProviderCardProps {
   isAutoFailoverEnabled: boolean;
   failoverPriority?: number;
   isInFailoverQueue: boolean;
+  health?: ProviderHealth;
   onToggleFailover: (providerId: string, enabled: boolean) => void;
   activeProviderId?: string;
   // OpenClaw: default model
@@ -656,6 +750,7 @@ const SortableProviderCard = memo(function SortableProviderCard({
   isAutoFailoverEnabled,
   failoverPriority,
   isInFailoverQueue,
+  health,
   onToggleFailover,
   activeProviderId,
   isDefaultModel,
@@ -717,6 +812,7 @@ const SortableProviderCard = memo(function SortableProviderCard({
         isAutoFailoverEnabled={isAutoFailoverEnabled}
         failoverPriority={failoverPriority}
         isInFailoverQueue={isInFailoverQueue}
+        health={health}
         onToggleFailover={handleToggleFailover}
         activeProviderId={activeProviderId}
         // OpenClaw: default model
