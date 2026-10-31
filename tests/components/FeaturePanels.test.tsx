@@ -78,6 +78,79 @@ describe("FailoverQueueManager", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
   });
 
+  it("reorders by swapping sort indices and shows health, last error, test and reset (FE-UI-24)", async () => {
+    const api = mockInvoke({
+      get_auto_failover_enabled: true,
+      get_failover_queue: [
+        { providerId: "p1", providerName: "Primary", sortIndex: 3 },
+        { providerId: "p2", providerName: "Backup", sortIndex: 7 },
+      ],
+      get_available_providers_for_failover: [],
+      get_provider_health: ({ providerId }: Record<string, unknown>) => ({
+        provider_id: providerId,
+        app_type: "claude",
+        is_healthy: providerId !== "p2",
+        consecutive_failures: providerId === "p2" ? 4 : 0,
+        last_success_at: null,
+        last_failure_at: providerId === "p2" ? "2026-01-01T00:00:00Z" : null,
+        last_error: providerId === "p2" ? "HTTP 529 overloaded" : null,
+        updated_at: "2026-01-01T00:00:00Z",
+      }),
+      update_providers_sort_order: true,
+      reset_circuit_breaker: null,
+      stream_check_provider: {
+        status: "operational",
+        success: true,
+        message: "ok",
+        responseTimeMs: 12,
+        testedAt: 0,
+        retryCount: 0,
+      },
+    });
+    renderWithQuery(<FailoverQueueManager appType="claude" />);
+
+    expect(await screen.findByTestId("queue-last-error-p2")).toHaveAttribute(
+      "title",
+      "HTTP 529 overloaded",
+    );
+
+    const moveUps = screen.getAllByRole("button", { name: "Move up" });
+    const moveDowns = screen.getAllByRole("button", { name: "Move down" });
+    expect(moveUps[0]).toBeDisabled();
+    expect(moveDowns[1]).toBeDisabled();
+    fireEvent.click(moveDowns[0]);
+    await waitFor(() =>
+      expect(api.callsTo("update_providers_sort_order")).toHaveLength(1),
+    );
+    expect(api.callsTo("update_providers_sort_order")[0].args).toEqual({
+      app: "claude",
+      updates: [
+        { id: "p1", sortIndex: 7 },
+        { id: "p2", sortIndex: 3 },
+      ],
+    });
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Test connectivity" })[1],
+    );
+    await waitFor(() =>
+      expect(api.callsTo("stream_check_provider")).toHaveLength(1),
+    );
+    expect(api.callsTo("stream_check_provider")[0].args).toMatchObject({
+      providerId: "p2",
+    });
+
+    // Only the failing provider offers a circuit reset.
+    const resets = screen.getAllByRole("button", {
+      name: "Reset circuit breaker",
+    });
+    expect(resets).toHaveLength(1);
+    fireEvent.click(resets[0]);
+    await waitFor(() =>
+      expect(api.callsTo("reset_circuit_breaker")).toHaveLength(1),
+    );
+  });
+
   it("shows the empty state when the queue is empty", async () => {
     mockInvoke({
       get_auto_failover_enabled: false,
