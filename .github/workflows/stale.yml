@@ -3,24 +3,25 @@ name: Close Stale Issues
 on:
   schedule:
     # Run daily at 00:00 UTC
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
   workflow_dispatch: # Allow manual trigger
 
 permissions:
+  contents: read
   issues: write
 
 jobs:
   stale:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v10
+      - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
         with:
           # --- Timing ---
           days-before-stale: 60
           days-before-close: 14
 
           # --- Stale label ---
-          stale-issue-label: 'stale'
+          stale-issue-label: "stale"
 
           # --- Messages (bilingual) ---
           stale-issue-message: |
@@ -35,10 +36,12 @@ jobs:
             This issue has been automatically closed due to inactivity. If the problem persists, feel free to reopen it.
 
           # --- Exemptions ---
-          # Issues with these labels will NEVER be marked stale
-          exempt-issue-labels: 'security,performance'
-          # Issues with 3+ reactions are likely popular requests, exempt them
-          exempt-issue-created-after: '2020-01-01'
+          # Issues with these labels will NEVER be marked stale (CI-31).
+          # actions/stale has no reactions-based exemption; label popular
+          # requests `confirmed` or `enhancement` to keep them open.
+          exempt-issue-labels: "security,performance,confirmed,enhancement,help wanted,good first issue,pinned"
+          # Issues someone is assigned to are being worked on.
+          exempt-all-issue-assignees: true
 
           # --- Processing limits ---
           # Process up to 100 issues per run to avoid API rate limits
