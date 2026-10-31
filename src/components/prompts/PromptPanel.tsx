@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Edit3, FileText, Trash2 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { type AppId, type Prompt } from "@/lib/api";
+import { AlertTriangle, Edit3, FileText, Trash2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { promptsApi, type AppId, type Prompt } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import { usePromptActions } from "@/hooks/usePromptActions";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { queryKeys } from "@/lib/query/keys";
@@ -73,6 +74,36 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
     const promptEntries = useMemo(() => Object.entries(prompts), [prompts]);
     const enabledPrompt = promptEntries.find(([, p]) => p.enabled);
 
+    // FE-UI-46: detect a live prompt file (CLAUDE.md / AGENTS.md / ...) that
+    // was edited outside the app since the enabled prompt was written.
+    const { data: liveContent } = useQuery({
+      queryKey: queryKeys.prompts.currentFile(appId),
+      queryFn: () => promptsApi.getCurrentFileContent(appId),
+      enabled: !!enabledPrompt,
+    });
+    const liveDiffers =
+      !!enabledPrompt &&
+      typeof liveContent === "string" &&
+      liveContent.trim() !== (enabledPrompt[1].content ?? "").trim();
+    const [isImportingLive, setIsImportingLive] = useState(false);
+
+    const importLiveChanges = async () => {
+      if (!enabledPrompt || typeof liveContent !== "string") return;
+      const [id, prompt] = enabledPrompt;
+      setIsImportingLive(true);
+      try {
+        await savePrompt(id, {
+          ...prompt,
+          content: liveContent,
+          updatedAt: Math.floor(Date.now() / 1000),
+        });
+      } catch {
+        // savePrompt already reported the failure.
+      } finally {
+        setIsImportingLive(false);
+      }
+    };
+
     return (
       <ManagedItemsPanel
         items={promptEntries}
@@ -85,6 +116,32 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
             {enabledPrompt
               ? t("prompts.enabledName", { name: enabledPrompt[1].name })
               : t("prompts.noneEnabled")}
+            {liveDiffers && (
+              <div
+                className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+                role="status"
+                data-testid="prompt-live-drift"
+              >
+                <span className="flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  {t("prompts.liveFileDiffers", {
+                    defaultValue:
+                      "The live prompt file was edited outside CC Switch and differs from the enabled prompt. Re-enabling or editing the prompt overwrites those changes.",
+                  })}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={isImportingLive}
+                  onClick={() => void importLiveChanges()}
+                >
+                  {t("prompts.importLiveChanges", {
+                    defaultValue: "Import live changes",
+                  })}
+                </Button>
+              </div>
+            )}
           </>
         }
         renderLeading={([id, prompt]) => (

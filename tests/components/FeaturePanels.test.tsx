@@ -245,6 +245,37 @@ describe("PromptPanel", () => {
     b: { id: "b", name: "Beta", content: "B", enabled: false },
   };
 
+  it("flags a live prompt file edited outside the app and imports it (FE-UI-46)", async () => {
+    const api = mockInvoke({
+      get_prompts: prompts,
+      get_current_prompt_file_content: "A, edited by hand",
+      upsert_prompt: null,
+    });
+    renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
+
+    expect(await screen.findByTestId("prompt-live-drift")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Import live changes" }),
+    );
+    await waitFor(() => expect(api.callsTo("upsert_prompt")).toHaveLength(1));
+    expect(api.callsTo("upsert_prompt")[0].args).toMatchObject({
+      app: "claude",
+      id: "a",
+      prompt: { content: "A, edited by hand", enabled: true },
+    });
+  });
+
+  it("shows no drift notice when the live file matches", async () => {
+    mockInvoke({
+      get_prompts: prompts,
+      get_current_prompt_file_content: "A\n",
+    });
+    renderWithQuery(<PromptPanel open onOpenChange={vi.fn()} appId="claude" />);
+    await screen.findByText("Alpha");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByTestId("prompt-live-drift")).toBeNull();
+  });
+
   it("loads prompts when opened and summarises the enabled one", async () => {
     const api = mockInvoke({
       get_prompts: prompts,
