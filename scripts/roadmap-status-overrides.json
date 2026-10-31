@@ -65,5 +65,217 @@
   "PRODUCT-39": {
     "status": "SKIPPED",
     "note": "a beta updater channel needs a second signed endpoint (beta.json) that cannot be exercised here"
+  },
+  "SVC-09": {
+    "status": "ALREADY-DONE",
+    "note": "usage_stats uses InputTokenSemantics::for_app_type (DB-36, 34fd128); backfill test covers grokbuild"
+  },
+  "SVC-10": {
+    "status": "ALREADY-DONE",
+    "note": "env_manager writes through atomic_write with backups and quoting (b46d67d)"
+  },
+  "SVC-29": {
+    "status": "ALREADY-DONE",
+    "note": "periodic DB backups with rotation: backup.rs periodic_backup_if_needed, run at startup"
+  },
+  "SVC-44": {
+    "status": "ALREADY-DONE",
+    "note": "SQL import runs under import_authorizer in database/backup.rs (d1cd512)"
+  },
+  "SVC-33": {
+    "status": "ALREADY-DONE",
+    "note": "McpService::import_from_app is a single loop (f8f2baa)"
+  },
+  "CMD-05": {
+    "status": "ALREADY-DONE",
+    "note": "terminal launcher uses a 0700 dir, 0600 file and sanitized ids (fb57e0a)"
+  },
+  "CMD-11": {
+    "status": "ALREADY-DONE",
+    "note": "no lock_conn!/rusqlite left in commands/"
+  },
+  "CMD-24": {
+    "status": "ALREADY-DONE",
+    "note": "RunEvent::Opened routed to the deep-link plugin with dedupe (9b91706)"
+  },
+  "CFG-29": {
+    "status": "ALREADY-DONE",
+    "note": "usage_script passes values as JS globals with escaped legacy placeholders (a826c8c)"
+  },
+  "DB-26": {
+    "status": "ALREADY-DONE",
+    "note": "memory() builds the fully migrated schema; fresh-vs-migrated golden tests exist"
+  },
+  "DB-27": {
+    "status": "ALREADY-DONE",
+    "note": "usage invalidations coalesced over 2 s (PERF-14, 8d36da6)"
+  },
+  "DB-38": {
+    "status": "ALREADY-DONE",
+    "note": "update_endpoint_last_used is a tested no-op"
+  },
+  "DB-44": {
+    "status": "ALREADY-DONE",
+    "note": "one sync mutex for WebDAV+S3 and one auto-sync worker (a2c2877, 2766c13)"
+  },
+  "FE-ARCH-38": {
+    "status": "ALREADY-DONE",
+    "note": "vite envPrefix is VITE_ only (CI-40, 4876b03)"
+  },
+  "FE-ARCH-23": {
+    "status": "ALREADY-DONE",
+    "note": "one table-driven settings save pipeline (6bad36e) with settingsSavePipeline tests"
+  },
+  "FE-ARCH-24": {
+    "status": "ALREADY-DONE",
+    "note": "unsaved directory drafts survive a refetch (772be15) with a test"
+  },
+  "FE-UI-06": {
+    "status": "ALREADY-DONE",
+    "note": "zh-TW locale and localeParity test (5997150)"
+  },
+  "PERF-19": {
+    "status": "ALREADY-DONE",
+    "note": "non-English locales lazy-loaded (ae6a5dd)"
+  },
+  "PERF-22": {
+    "status": "ALREADY-DONE",
+    "note": "persistent session index with incremental scan (SESS work); list_sessions on spawn_blocking"
+  },
+  "PERF-24": {
+    "status": "ALREADY-DONE",
+    "note": "maintenance deferred out of Database::init (DB-09, 3780c82)"
+  },
+  "PERF-45": {
+    "status": "ALREADY-DONE",
+    "note": "reqwest default-features=false with rustls only (269d359)"
+  },
+  "PERF-32": {
+    "status": "ALREADY-DONE",
+    "note": "broad invalidations scoped; the remaining key-less invalidations follow full DB replaces"
+  },
+  "PERF-34": {
+    "status": "ALREADY-DONE",
+    "note": "per-connection peek buffer removed; per-request header capture (SEC-25)"
+  },
+  "PERF-35": {
+    "status": "ALREADY-DONE",
+    "note": "usage_events uses tauri::async_runtime::spawn (02a5cdd)"
+  },
+  "PERF-39": {
+    "status": "ALREADY-DONE",
+    "note": "scan_unmanaged_skills async on the blocking pool (d122496)"
+  },
+  "PRODUCT-27": {
+    "status": "ALREADY-DONE",
+    "note": "FirstRunWizard detects tools and explains proxy/failover (e3f4e31)"
+  },
+  "PRODUCT-51": {
+    "status": "ALREADY-DONE",
+    "note": "stream check is a reachability probe resolving base URLs via get_adapter (0603954)"
+  },
+  "PRODUCT-67": {
+    "status": "ALREADY-DONE",
+    "note": "per-kind backup rotation; manual/renamed backups never rotated (d1cd512)"
+  },
+  "PRODUCT-70": {
+    "status": "ALREADY-DONE",
+    "note": "delete_universal refuses while a child is current and reports leftovers (02c26ff)"
+  },
+  "PROXY-15": {
+    "status": "ALREADY-DONE",
+    "note": "hyper timer, header_read_timeout and connection semaphore in server.rs"
+  },
+  "PROXY-43": {
+    "status": "ALREADY-DONE",
+    "note": "per-request header capture via HeaderRecorder (SEC-25)"
+  },
+  "SEC-10": {
+    "status": "ALREADY-DONE",
+    "note": "enclosed_name() and a 256 MB cap in services/skill.rs"
+  },
+  "SEC-11": {
+    "status": "ALREADY-DONE",
+    "note": "env backup paths canonicalized against the backup dir; rc files allow-listed"
+  },
+  "SEC-16": {
+    "status": "ALREADY-DONE",
+    "note": "CSP connect-src limited to self/ipc/models.dev"
+  },
+  "SEC-33": {
+    "status": "ALREADY-DONE",
+    "note": "integrity_check before restore plus post-import sync"
+  },
+  "SEC-34": {
+    "status": "ALREADY-DONE",
+    "note": "BackupKind rotation never touches manual or renamed backups"
+  },
+  "SEC-37": {
+    "status": "ALREADY-DONE",
+    "note": "project_servers_to_app writes each app once"
+  },
+  "SEC-21": {
+    "status": "ALREADY-DONE",
+    "note": "deep-link parser rejects configUrl with a clear error"
+  },
+  "SESS-38": {
+    "status": "ALREADY-DONE",
+    "note": "deep-link 'switch/enable now' choices start unticked (opt-in)"
+  },
+  "CMD-34": {
+    "status": "SKIPPED",
+    "note": "needs a new dependency (tauri-plugin-global-shortcut), a second window and capabilities; not added without a maintainer decision"
+  },
+  "CMD-35": {
+    "status": "SKIPPED",
+    "note": "XL extension API; deferred to a dedicated design wave"
+  },
+  "CFG-35": {
+    "status": "SKIPPED",
+    "note": "XL; covered for now by descriptor-driven custom tools (PRODUCT-43, a60f616)"
+  },
+  "PRODUCT-38": {
+    "status": "SKIPPED",
+    "note": "Flathub publishing needs hosted accounts"
+  },
+  "PRODUCT-47": {
+    "status": "SKIPPED",
+    "note": "needs a hosted crash-report endpoint"
+  },
+  "PRODUCT-46": {
+    "status": "SKIPPED",
+    "note": "new locales (de/ko) need native-speaker review; parity test exists"
+  },
+  "PROV-10": {
+    "status": "SKIPPED",
+    "note": "OS keychain for proxy credentials needs a platform secret service that cannot be verified in CI here"
+  },
+  "PRODUCT-44": {
+    "status": "SKIPPED",
+    "note": "backend crate split; deferred with CI-38 to a solo wave"
+  },
+  "PRODUCT-61": {
+    "status": "PARTIAL",
+    "note": "umbrella theme; its child findings are tracked individually in this table"
+  },
+  "PRODUCT-62": {
+    "status": "PARTIAL",
+    "note": "umbrella theme; its child findings are tracked individually in this table"
+  },
+  "PRODUCT-63": {
+    "status": "PARTIAL",
+    "note": "umbrella theme; its child findings are tracked individually in this table"
+  },
+  "PRODUCT-64": {
+    "status": "PARTIAL",
+    "note": "umbrella theme; its child findings are tracked individually in this table"
+  },
+  "PRODUCT-65": {
+    "status": "PARTIAL",
+    "note": "umbrella theme; its child findings are tracked individually in this table"
+  },
+  "TEST-33": {
+    "status": "PARTIAL",
+    "note": "umbrella theme; its child findings are tracked individually in this table"
   }
 }
