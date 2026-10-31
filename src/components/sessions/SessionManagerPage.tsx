@@ -22,6 +22,7 @@ import {
   ChevronsDownUp,
 } from "lucide-react";
 import { useDeleteSessionMutation, useSessionMessagesQuery } from "@/lib/query";
+import { SessionExportButton } from "@/components/session-export/SessionExportButton";
 import { queryKeys } from "@/lib/query/keys";
 import { sessionsApi } from "@/lib/api";
 import type { SessionMeta } from "@/types";
@@ -1654,6 +1655,11 @@ export function SessionManagerPage({ appId }: { appId: string }) {
 
                       {/* 右侧：操作按钮组 */}
                       <div className="flex items-center gap-2 shrink-0">
+                        <SessionExportButton
+                          session={selectedSession}
+                          messages={messages}
+                          disabled={isLoadingMessages}
+                        />
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button

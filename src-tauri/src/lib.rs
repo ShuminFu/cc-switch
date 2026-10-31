@@ -979,6 +979,7 @@ pub fn run() {
             commands::parse_deeplink,
             commands::deeplink_frontend_ready,
             features::policy::get_managed_policy_status,
+            features::session_export::save_session_export,
             commands::merge_deeplink_config,
             commands::import_from_deeplink,
             commands::import_from_deeplink_unified,
