@@ -5,7 +5,6 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::OnceLock;
 
 use serde_json::Value;
 
@@ -26,9 +25,11 @@ use super::sync_protocol::{
 
 // ─── Sync lock ───────────────────────────────────────────────
 
+/// The sync lock shared by every transport (SEC-35): a WebDAV download and an
+/// S3 upload both rename/zip the skills SSOT dir and replace the DB, so they
+/// must never run concurrently.
 pub fn sync_mutex() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    crate::services::webdav_sync::sync_mutex()
 }
 
 pub async fn run_with_sync_lock<T, Fut>(operation: Fut) -> Result<T, AppError>
@@ -360,6 +361,19 @@ mod tests {
             std::ptr::eq(m1, m2),
             "sync_mutex must return the same instance"
         );
+    }
+
+    /// SEC-35: WebDAV and S3 operations serialise on one lock.
+    #[tokio::test]
+    async fn webdav_and_s3_share_one_sync_lock() {
+        assert!(std::ptr::eq(
+            sync_mutex(),
+            crate::services::webdav_sync::sync_mutex()
+        ));
+        let guard = crate::services::webdav_sync::sync_mutex().lock().await;
+        assert!(sync_mutex().try_lock().is_err(), "S3 must wait for WebDAV");
+        drop(guard);
+        assert!(sync_mutex().try_lock().is_ok());
     }
 
     #[test]
