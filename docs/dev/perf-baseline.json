@@ -1,47 +1,46 @@
 {
   "coverage": {
     "_note": "Report-only baseline (CCS-019). Refresh from the coverage-rust / coverage-frontend CI artifacts (summary-by-dir.json) or locally: `cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lcov --output-path coverage/rust/lcov.info` and `pnpm test:coverage`, then `node scripts/coverage-summary.mjs`. P5 target: proxy/ and database/ lines >= 75%, ratcheted.",
-    "recorded_at": "2026-10-28",
-    "commit": "6330783",
+    "recorded_at": "2026-10-31",
+    "commit": "a64ab58",
     "platform": "linux-x86_64",
     "rust": {
       "tool": "cargo-llvm-cov 0.9.1 (rust 1.95)",
-      "_caveat": "Measured on a working tree that also held uncommitted proxy test changes from a parallel lane; refresh from the first CI artifact.",
       "dirs": {
         "src-tauri/src/proxy": {
-          "files": 57,
-          "lines_pct": 78.6,
-          "lines": [27849, 35430],
-          "functions_pct": 79.36,
-          "functions": [3165, 3988]
+          "files": 136,
+          "lines_pct": 92.27,
+          "lines": [49568, 53723],
+          "functions_pct": 91.44,
+          "functions": [5434, 5943]
         },
         "src-tauri/src/database": {
-          "files": 16,
-          "lines_pct": 78.84,
-          "lines": [5065, 6424],
-          "functions_pct": 42.58,
-          "functions": [284, 667]
+          "files": 32,
+          "lines_pct": 85.7,
+          "lines": [7709, 8995],
+          "functions_pct": 59.21,
+          "functions": [662, 1118]
         },
         "src-tauri/src/services": {
-          "files": 36,
-          "lines_pct": 67.4,
-          "lines": [17200, 25521],
-          "functions_pct": 62.4,
-          "functions": [1512, 2423]
+          "files": 68,
+          "lines_pct": 68.32,
+          "lines": [18330, 26831],
+          "functions_pct": 65.61,
+          "functions": [1820, 2774]
         },
         "src-tauri/src/commands": {
-          "files": 33,
-          "lines_pct": 33.3,
-          "lines": [2575, 7732],
-          "functions_pct": 21.49,
-          "functions": [318, 1480]
+          "files": 37,
+          "lines_pct": 25.15,
+          "lines": [1154, 4589],
+          "functions_pct": 12.58,
+          "functions": [121, 962]
         },
         "total": {
-          "files": 199,
-          "lines_pct": 70.15,
-          "lines": [68587, 97772],
-          "functions_pct": 62.77,
-          "functions": [7046, 11226]
+          "files": 374,
+          "lines_pct": 81.21,
+          "lines": [103668, 127647],
+          "functions_pct": 75.14,
+          "functions": [11377, 15142]
         }
       }
     },
@@ -49,32 +48,32 @@
       "tool": "vitest 2.1.9 + @vitest/coverage-v8 (include: src/**/*.{ts,tsx}, default excludes so colocated src tests are not counted)",
       "dirs": {
         "src/components": {
-          "files": 195,
-          "lines_pct": 40.12,
-          "lines": [16416, 40914],
-          "functions_pct": 40.9,
-          "functions": [337, 824]
+          "files": 218,
+          "lines_pct": 56.3,
+          "lines": [21781, 38690],
+          "functions_pct": 52.48,
+          "functions": [561, 1069]
         },
         "src/hooks": {
-          "files": 26,
-          "lines_pct": 57.14,
-          "lines": [1541, 2697],
-          "functions_pct": 39.42,
-          "functions": [41, 104]
+          "files": 32,
+          "lines_pct": 60.91,
+          "lines": [1948, 3198],
+          "functions_pct": 48.59,
+          "functions": [69, 142]
         },
         "src/lib": {
-          "files": 52,
-          "lines_pct": 33.51,
-          "lines": [1218, 3635],
-          "functions_pct": 22.7,
-          "functions": [96, 423]
+          "files": 57,
+          "lines_pct": 49.83,
+          "lines": [1955, 3923],
+          "functions_pct": 37.2,
+          "functions": [183, 492]
         },
         "total": {
-          "files": 315,
-          "lines_pct": 52.47,
-          "lines": [32750, 62413],
-          "functions_pct": 38.33,
-          "functions": [596, 1555]
+          "files": 424,
+          "lines_pct": 67.25,
+          "lines": [43771, 65086],
+          "functions_pct": 54.65,
+          "functions": [1141, 2088]
         }
       }
     }

@@ -43,9 +43,9 @@ Fix the root cause of bridge drift by expressing every bridge as decode(upstream
     - `capabilities/default.json` grants only the 16 standard domains.
     - The 3 privileged sets are granted only by `capabilities/privileged.json` (`local: true`, main window).
 - [ ] proxy/ and database/ line coverage at least 75%, ratcheted
-  - Audit: unmet, not measured.
-    - The only recorded numbers are the P0 baseline from CCS-019: proxy/ 78.60% and database/ 78.84% of lines. Nobody has measured coverage since P3-P5 added code.
-    - Not re-run here: `cargo llvm-cov` builds a second, instrumented target dir and runs the whole suite. The disk has about 5 GB free and the machine is shared.
+  - Audit: unmet, measured but not ratcheted.
+    - The P0 baseline from CCS-019 was proxy/ 78.60% and database/ 78.84% of lines.
+    - Re-measured by CCS-222 on a clean tree at a64ab58 (`cargo llvm-cov`, 3114 tests passed, 0 failed): proxy/ 92.27% of lines (49568/53723), database/ 85.70% of lines (7709/8995). Both are above the 75% target. Numbers are in `docs/dev/perf-baseline.json`.
     - Nothing is ratcheted yet. The `coverage-rust` CI job is report-only (`continue-on-error`), and `scripts/coverage-summary.mjs` has no thresholds.
 - [ ] Proxy fix commits per release are below the P0 baseline window
   - Audit: cannot be measured yet. The repo has no release tags, v4.0 has not shipped, and no P0 baseline count of proxy fix commits is recorded. The plan (`next-phase-plan.md`) tracks this KPI in release notes.
@@ -97,7 +97,7 @@ Audited 2026-10-30 on `claude/funny-carson-9c7j3e` (c0c770a, after the lane-2 P5
    - The grep criterion also needs a decision about `stream/taps.rs`, `services/session_usage.rs` and `providers/testkit.rs`, which are usage accounting or test data, not conversion code.
 2. **Split `commands/settings.rs`** (criterion 3). It is 1021 lines, 582 of them inline tests. Moving the tests to their own file is a small code change and finishes the criterion.
 3. **Coverage gate** (criterion 5):
-   - Run `cargo llvm-cov` in CI, or on a machine with free disk, to get current proxy/ and database/ numbers.
+   - Current proxy/ and database/ numbers are measured (CCS-222: 92.27% and 85.70% of lines at a64ab58).
    - Then turn the report-only `coverage-rust` job into a ratcheting threshold: add a `--min` option to `coverage-summary.mjs` and drop `continue-on-error`.
 4. **Release KPI** (criterion 6): can only be measured after v4.0 ships. It needs a P0 baseline count of proxy fix commits, plus release tags to count against.
 5. **Partial child tickets that need CI or manual checks.** These do not block a specific exit criterion, but they keep their tickets open:

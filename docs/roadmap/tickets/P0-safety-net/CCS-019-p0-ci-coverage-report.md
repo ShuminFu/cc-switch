@@ -43,6 +43,17 @@ None.
 | Rust total | 70.15% | 62.77% |
 | Frontend `src/` total | 52.47% | 38.33% |
 
+**Re-measured baseline** ([CCS-222](../P0-safety-net/CCS-222-p0-coverage-remeasure-baseline.md), clean tree at a64ab58, Linux x86_64; supersedes the table above in `docs/dev/perf-baseline.json`)
+
+| Area | Lines | Functions |
+| --- | ---: | ---: |
+| `src-tauri/src/proxy/` | 92.27% (49568/53723) | 91.44% |
+| `src-tauri/src/database/` | 85.70% (7709/8995) | 59.21% |
+| `src-tauri/src/services/` | 68.32% | 65.61% |
+| `src-tauri/src/commands/` | 25.15% | 12.58% |
+| Rust total | 81.21% | 75.14% |
+| Frontend `src/` total | 67.25% | 54.65% |
+
 **Commits:** 933c8ef (implementation), plus the follow-up commit recording these notes.
 
 **Verification**
