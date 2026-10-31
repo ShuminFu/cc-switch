@@ -35,6 +35,7 @@ pub mod skill;
 mod stream_check;
 mod subscription;
 mod sync_support;
+mod validation;
 
 mod lightweight;
 mod s3_sync;

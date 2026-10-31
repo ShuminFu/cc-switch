@@ -16,6 +16,13 @@ pub async fn fetch_models_for_config(
     models_url: Option<String>,
     custom_user_agent: Option<String>,
 ) -> Result<Vec<FetchedModel>, String> {
+    // validate the URL that will actually be requested (CMD-23)
+    match models_url.as_deref().map(str::trim) {
+        Some(url) if !url.is_empty() => {
+            super::validation::validate_outbound_url(url).map(|_| ())?
+        }
+        _ => super::validation::validate_optional_outbound_url(Some(&base_url))?,
+    }
     // 与转发 / 检测路径共用 parse_custom_user_agent：非法 UA 静默忽略（不阻断取模型）。
     let user_agent = crate::provider::parse_custom_user_agent(custom_user_agent.as_deref())
         .ok()
