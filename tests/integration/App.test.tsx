@@ -512,22 +512,22 @@ describe("App integration with MSW", { timeout: 20_000 }, () => {
     );
 
     // Toolbar shortcut from the app registry opens the MCP page.
-    fireEvent.click(screen.getByTitle("mcp.title"));
+    fireEvent.click(screen.getByTitle("MCP Management"));
     expect(await screen.findByTestId("mcp-page")).toBeInTheDocument();
-    expect(screen.getByText("mcp.unifiedPanel.title").tagName).toBe("H1");
+    expect(screen.getByText("MCP Server Management").tagName).toBe("H1");
     expect(localStorage.getItem("cc-switch-last-view")).toBe("mcp");
 
     // Header actions are rendered by the page and reach its panel handle.
-    fireEvent.click(await screen.findByText("mcp.addMcp"));
+    fireEvent.click(await screen.findByText("Add MCP"));
     expect(mcpOpenAddMock).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByText("mcp.importExisting"));
+    fireEvent.click(screen.getByText("Import Existing"));
     expect(mcpOpenImportMock).toHaveBeenCalledTimes(1);
 
     // Escape returns to the providers page.
     fireEvent.keyDown(window, { key: "Escape" });
     expect(await screen.findByTestId("provider-list")).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.queryByText("mcp.addMcp")).not.toBeInTheDocument(),
+      expect(screen.queryByText("Add MCP")).not.toBeInTheDocument(),
     );
 
     // The update badge deep-links into the settings "about" tab.

@@ -43,9 +43,7 @@ describe("RequestLogRetentionPanel (PRODUCT-31)", () => {
       screen.getByRole("button", { name: /Delete request logs now/ }),
     );
     expect(pruned).toBe(0);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.confirm" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() => expect(pruned).toBe(1));
     await waitFor(() =>
       expect(toastSuccess).toHaveBeenCalledWith(expect.stringContaining("42")),

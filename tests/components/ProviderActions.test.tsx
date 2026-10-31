@@ -58,12 +58,12 @@ describe("ProviderActions", () => {
     expect(props.onDuplicate).not.toHaveBeenCalled();
     expect(props.onEdit).not.toHaveBeenCalled();
     expect(props.onDelete).not.toHaveBeenCalled();
-    expect(screen.queryByTitle("provider.duplicate")).toBeNull();
+    expect(screen.queryByTitle("Duplicate")).toBeNull();
   });
 
   it("keeps Duplicate enabled for normal providers", () => {
     const props = renderActions();
-    const duplicate = screen.getByTitle("provider.duplicate");
+    const duplicate = screen.getByTitle("Duplicate");
     expect(duplicate).not.toBeDisabled();
     fireEvent.click(duplicate);
     expect(props.onDuplicate).toHaveBeenCalledTimes(1);
@@ -71,7 +71,7 @@ describe("ProviderActions", () => {
 
   it("disables the main button while a provider mutation is pending (FE-PROV-49)", () => {
     const props = renderActions({ isActionPending: true });
-    const main = screen.getByRole("button", { name: /provider.enable/ });
+    const main = screen.getByRole("button", { name: /Enable/ });
     expect(main).toBeDisabled();
     fireEvent.click(main);
     expect(props.onSwitch).not.toHaveBeenCalled();
@@ -79,7 +79,7 @@ describe("ProviderActions", () => {
 
   it("allows switching when nothing is pending", () => {
     const props = renderActions();
-    fireEvent.click(screen.getByRole("button", { name: /provider.enable/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Enable/ }));
     expect(props.onSwitch).toHaveBeenCalledTimes(1);
   });
 });

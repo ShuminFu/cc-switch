@@ -102,7 +102,7 @@ describe("AddProviderDialog", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "common.add",
+        name: "Add",
       }),
     );
 
@@ -138,7 +138,7 @@ describe("AddProviderDialog", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "common.add",
+        name: "Add",
       }),
     );
 
@@ -186,7 +186,7 @@ context_window = 500000
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "common.add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() => expect(handleSubmit).toHaveBeenCalledTimes(1));
 
@@ -213,7 +213,7 @@ context_window = 500000
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "common.add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     const { toast } = await import("sonner");
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
@@ -237,9 +237,7 @@ context_window = 500000
     await user.type(nameInput, "My provider");
     expect(formMountCount.value).toBe(1);
 
-    await user.click(
-      screen.getByRole("tab", { name: /provider.tabUniversal/ }),
-    );
+    await user.click(screen.getByRole("tab", { name: /Universal/ }));
     expect(await screen.findByTestId("universal-panel")).toBeInTheDocument();
 
     await user.click(

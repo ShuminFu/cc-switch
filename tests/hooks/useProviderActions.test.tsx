@@ -200,7 +200,7 @@ describe("useProviderActions", () => {
     expect(settingsApiGetMock).not.toHaveBeenCalled();
     expect(settingsApiApplyMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith(
-      "切换成功，请重启客户端以生效",
+      "Switched successfully. Restart the client to apply changes.",
       { closeButton: true },
     );
   });

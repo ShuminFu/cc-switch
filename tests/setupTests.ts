@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import en from "@/i18n/locales/en.json";
 import { server } from "./msw/server";
 import { resetProviderState } from "./msw/state";
 import "./msw/tauriMocks";
@@ -26,9 +27,10 @@ beforeAll(async () => {
   await i18n.use(initReactI18next).init({
     lng: "en",
     fallbackLng: "en",
+    // Real English strings (TEST-13): tests assert what users see, and a
+    // key that disappears from en.json renders as the raw key and fails.
     resources: {
-      zh: { translation: {} },
-      en: { translation: {} },
+      en: { translation: en },
     },
     interpolation: {
       escapeValue: false,

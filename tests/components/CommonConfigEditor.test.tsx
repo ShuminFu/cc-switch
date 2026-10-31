@@ -64,7 +64,7 @@ function renderEditor(value: string, onChange = vi.fn()) {
 }
 
 const effortCheckbox = () =>
-  screen.getByRole("checkbox", { name: "claudeConfig.effortMax" });
+  screen.getByRole("checkbox", { name: "Max Effort Thinking" });
 
 describe("CommonConfigEditor max effort toggle", () => {
   it("does not treat legacy top-level effortLevel=max as checked", () => {

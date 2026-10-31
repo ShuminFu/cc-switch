@@ -45,13 +45,11 @@ describe("icon button accessibility", () => {
     // No onTest / onConfigureUsage handlers and the current provider cannot
     // be deleted.
     expect(
-      screen.getByRole("button", { name: "Check connectivity" }),
+      screen.getByRole("button", { name: "Connectivity check" }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "provider.configureUsage" }),
+      screen.getByRole("button", { name: "Configure usage query" }),
     ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "common.delete" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
   });
 });
