@@ -732,6 +732,35 @@ export const handlers = [
     });
   }),
   http.post(`${TAURI_ENDPOINT}/apply_project_binding`, () => success(null)),
+  http.post(`${TAURI_ENDPOINT}/get_app_config_dirs`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_mcp_sync_skips`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_import_candidates`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/preview_live_write`, async ({ request }) => {
+    const { app, providerId } = await withJson<{
+      app: AppId;
+      providerId: string;
+    }>(request);
+    return success({ app, providerId, supported: false, files: [] });
+  }),
+  http.post(`${TAURI_ENDPOINT}/get_codex_history_backup_usage`, () =>
+    success({
+      migrationBytes: 0,
+      restoreLedgerBytes: 0,
+      restoreBackupBytes: 0,
+      totalBytes: 0,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/purge_codex_history_backups`, () =>
+    success({
+      migrationBytes: 0,
+      restoreLedgerBytes: 0,
+      restoreBackupBytes: 0,
+      totalBytes: 0,
+    }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_claude_desktop_proxy_dependency`, () =>
+    success(false),
+  ),
   http.post(`${TAURI_ENDPOINT}/get_common_config_snippet`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/auth_get_status`, async ({ request }) => {
     const { authProvider } = await withJson<{ authProvider?: string }>(request);

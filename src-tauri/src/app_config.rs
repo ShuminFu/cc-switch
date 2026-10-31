@@ -5,7 +5,7 @@ use std::str::FromStr;
 use crate::services::skill::SkillStore;
 
 /// MCP 服务器应用状态（标记应用到哪些客户端）
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, specta::Type)]
 pub struct McpApps {
     #[serde(default)]
     pub claude: bool,
@@ -246,7 +246,7 @@ pub struct UnmanagedSkill {
 }
 
 /// MCP 服务器定义（v3.7.0 统一结构）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct McpServer {
     pub id: String,
     pub name: String,
@@ -369,7 +369,7 @@ use crate::prompt_files::prompt_file_path;
 use crate::provider::ProviderManager;
 
 /// 应用类型
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum AppType {
     Claude,

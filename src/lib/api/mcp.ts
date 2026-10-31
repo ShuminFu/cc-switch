@@ -7,10 +7,11 @@ import type {
   McpStatus,
 } from "@/types";
 import type { AppId } from "./types";
+import type { McpSyncSkip } from "@/lib/bindings";
 
 export const mcpApi = {
   async getStatus(): Promise<McpStatus> {
-    return await invoke("get_claude_mcp_status");
+    return await call(commands.getClaudeMcpStatus());
   },
 
   async readConfig(): Promise<string | null> {
@@ -46,9 +47,19 @@ export const mcpApi = {
 
   /**
    * 添加或更新 MCP 服务器（统一结构）
+   * Resolves to the enabled apps whose config directory is missing (nothing
+   * was written for them).
    */
-  async upsertUnifiedServer(server: McpServer): Promise<void> {
-    return await invoke("upsert_mcp_server", { server });
+  async upsertUnifiedServer(server: McpServer): Promise<McpSyncSkip[]> {
+    return (
+      (await invoke<McpSyncSkip[] | null>("upsert_mcp_server", { server })) ??
+      []
+    );
+  },
+
+  /** MCP-capable apps whose config directory is missing (CFG-46). */
+  async getSyncSkips(): Promise<McpSyncSkip[]> {
+    return await call(commands.getMcpSyncSkips());
   },
 
   /**
@@ -65,8 +76,8 @@ export const mcpApi = {
     serverId: string,
     app: AppId,
     enabled: boolean,
-  ): Promise<void> {
-    return await call(commands.toggleMcpApp(serverId, app, enabled));
+  ): Promise<McpSyncSkip[]> {
+    return (await call(commands.toggleMcpApp(serverId, app, enabled))) ?? [];
   },
 
   /**

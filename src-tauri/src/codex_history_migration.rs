@@ -1446,6 +1446,85 @@ fn relative_backup_path(path: &Path, root: &Path) -> PathBuf {
     PathBuf::from("external").join(format!("{hash:016x}-{file_name}"))
 }
 
+/// Disk used by the Codex history migration backups (CFG-44).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexHistoryBackupUsage {
+    /// Third-party bucket and template migration backups; safe to purge.
+    pub migration_bytes: u64,
+    /// Official-history unify ledger, needed to restore when the unify
+    /// switch is turned off; purged only on explicit request.
+    pub restore_ledger_bytes: u64,
+    /// Backups taken by restore operations themselves; safe to purge.
+    pub restore_backup_bytes: u64,
+    pub total_bytes: u64,
+}
+
+fn dir_size_bytes(path: &Path) -> u64 {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if !meta.is_dir() {
+        return meta.len();
+    }
+    fs::read_dir(path)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| dir_size_bytes(&entry.path()))
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+fn codex_history_backup_usage_in(backups_dir: &Path) -> CodexHistoryBackupUsage {
+    let migration_bytes = dir_size_bytes(&backups_dir.join(MIGRATION_NAME));
+    let restore_ledger_bytes = dir_size_bytes(&backups_dir.join(OFFICIAL_UNIFY_MIGRATION_NAME));
+    let restore_backup_bytes =
+        dir_size_bytes(&backups_dir.join(OFFICIAL_UNIFY_RESTORE_BACKUP_NAME));
+    CodexHistoryBackupUsage {
+        migration_bytes,
+        restore_ledger_bytes,
+        restore_backup_bytes,
+        total_bytes: migration_bytes + restore_ledger_bytes + restore_backup_bytes,
+    }
+}
+
+fn purge_codex_history_backups_in(
+    backups_dir: &Path,
+    include_restore_ledger: bool,
+) -> Result<CodexHistoryBackupUsage, AppError> {
+    let mut names = vec![MIGRATION_NAME, OFFICIAL_UNIFY_RESTORE_BACKUP_NAME];
+    if include_restore_ledger {
+        names.push(OFFICIAL_UNIFY_MIGRATION_NAME);
+    }
+    for name in names {
+        let dir = backups_dir.join(name);
+        if dir.exists() {
+            fs::remove_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
+        }
+    }
+    Ok(codex_history_backup_usage_in(backups_dir))
+}
+
+/// Size of the Codex history migration backups under `~/.cc-switch/backups`.
+pub fn codex_history_backup_usage() -> CodexHistoryBackupUsage {
+    codex_history_backup_usage_in(&get_app_config_dir().join("backups"))
+}
+
+/// Delete the Codex history migration backups and return the remaining
+/// usage. The unify restore ledger is kept unless `include_restore_ledger`,
+/// because without it turning the unify switch off cannot restore history.
+pub fn purge_codex_history_backups(
+    include_restore_ledger: bool,
+) -> Result<CodexHistoryBackupUsage, AppError> {
+    let _guard = lock_codex_official_history_op();
+    purge_codex_history_backups_in(
+        &get_app_config_dir().join("backups"),
+        include_restore_ledger,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2164,6 +2243,35 @@ base_url = "https://proxy.example/v1"
         assert_eq!(report.migrated, 1);
         assert!(report.deferred.is_empty());
         assert!(fs::read_to_string(&live).unwrap().contains("\"custom\""));
+    }
+
+    #[test]
+    fn backup_usage_and_purge_keep_restore_ledger_by_default() {
+        let dir = tempdir().expect("tempdir");
+        let write = |name: &str, len: usize| {
+            let gen = dir.path().join(name).join("20260101_000000").join("jsonl");
+            fs::create_dir_all(&gen).unwrap();
+            fs::write(gen.join("a.jsonl"), vec![b'x'; len]).unwrap();
+        };
+        write(MIGRATION_NAME, 10);
+        write(OFFICIAL_UNIFY_MIGRATION_NAME, 20);
+        write(OFFICIAL_UNIFY_RESTORE_BACKUP_NAME, 5);
+        fs::create_dir_all(dir.path().join("unrelated")).unwrap();
+
+        let usage = codex_history_backup_usage_in(dir.path());
+        assert_eq!(usage.migration_bytes, 10);
+        assert_eq!(usage.restore_ledger_bytes, 20);
+        assert_eq!(usage.restore_backup_bytes, 5);
+        assert_eq!(usage.total_bytes, 35);
+
+        let after = purge_codex_history_backups_in(dir.path(), false).unwrap();
+        assert_eq!(after.total_bytes, 20);
+        assert!(dir.path().join(OFFICIAL_UNIFY_MIGRATION_NAME).exists());
+        assert!(dir.path().join("unrelated").exists());
+
+        let after = purge_codex_history_backups_in(dir.path(), true).unwrap();
+        assert_eq!(after, CodexHistoryBackupUsage::default());
+        assert!(dir.path().join("unrelated").exists());
     }
 
     #[test]

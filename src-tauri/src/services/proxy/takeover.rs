@@ -192,7 +192,7 @@ impl ProxyService {
                     {
                         if let Some(handle) = self.app_handle.read().await.as_ref() {
                             let _ = handle.emit(
-                                "proxy-official-warning",
+                                crate::events::PROXY_OFFICIAL_WARNING,
                                 serde_json::json!({
                                     "appType": app_type_str,
                                     "providerName": provider.name,

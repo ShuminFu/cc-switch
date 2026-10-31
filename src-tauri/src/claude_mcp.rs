@@ -288,7 +288,7 @@ pub fn project_mcp_servers(enabled: &[(&str, &Value)], disabled: &[&str]) -> Res
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct McpStatus {
     pub user_config_path: String,

@@ -18,7 +18,7 @@ export const promptsApi = {
   },
 
   async upsertPrompt(app: AppId, id: string, prompt: Prompt): Promise<void> {
-    return await invoke("upsert_prompt", { app, id, prompt });
+    return await call(commands.upsertPrompt(app, id, prompt));
   },
 
   async deletePrompt(app: AppId, id: string): Promise<void> {

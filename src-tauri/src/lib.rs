@@ -29,6 +29,7 @@ mod lightweight;
 mod linux_fix;
 mod main_window;
 mod mcp;
+mod migrations;
 mod model_capabilities;
 mod openclaw_config;
 mod opencode_config;
@@ -853,6 +854,13 @@ pub fn run() {
             commands::get_config_status,
             commands::get_claude_code_config_path,
             commands::get_config_dir,
+            commands::get_app_config_dirs,
+            commands::get_mcp_sync_skips,
+            commands::get_import_candidates,
+            commands::preview_live_write,
+            commands::validate_provider_settings,
+            commands::get_codex_history_backup_usage,
+            commands::purge_codex_history_backups,
             commands::open_config_folder,
             commands::pick_directory,
             commands::open_external,
@@ -1061,6 +1069,7 @@ pub fn run() {
             commands::set_proxy_routing_config,
             commands::list_recent_proxy_requests,
             commands::export_recent_proxy_requests,
+            commands::get_claude_desktop_proxy_dependency,
             commands::set_proxy_takeover_for_app,
             commands::get_proxy_status,
             commands::get_proxy_config,
@@ -1523,62 +1532,16 @@ fn run_startup_imports(
     {
         let db_for_codex_history_migration = app_state.db.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            match crate::codex_history_migration::maybe_migrate_codex_third_party_history_provider_bucket(
-                &db_for_codex_history_migration,
-            ) {
-                Ok(outcome) => {
-                    if let Some(reason) = outcome.skipped_reason {
-                        log::debug!("○ Codex history provider bucket migration skipped: {reason}");
-                    } else {
-                        log::info!(
-                            "✓ Codex history provider bucket migration completed: sources={}, jsonl_files={}, state_rows={}",
-                            outcome.source_provider_ids.len(),
-                            outcome.migrated_jsonl_files,
-                            outcome.migrated_state_rows
-                        );
-                    }
-                }
-                Err(e) => {
-                    log::warn!("✗ Codex history provider bucket migration failed: {e}");
-                }
-            }
+            // Repair a Codex switch interrupted between the auth.json and
+            // config.toml writes before anything reads them.
+            recover_codex_live_journal_at_startup();
 
-            match crate::codex_history_migration::maybe_migrate_codex_provider_template_bucket(
-                &db_for_codex_history_migration,
-            ) {
-                Ok(outcome) => {
-                    if let Some(reason) = outcome.skipped_reason {
-                        log::debug!("○ Codex provider template bucket migration skipped: {reason}");
-                    } else if !outcome.migrated_provider_ids.is_empty() {
-                        log::info!(
-                            "✓ Codex provider template bucket migration completed: providers={}",
-                            outcome.migrated_provider_ids.len()
-                        );
-                    }
-                }
-                Err(e) => {
-                    log::warn!("✗ Codex provider template bucket migration failed: {e}");
-                }
-            }
+            // one-shot data migrations (CFG-10): registry, Codex-active gate
+            crate::migrations::run_pending(&db_for_codex_history_migration);
 
-            // 统一会话开关的官方历史迁移：开关开启但上次未完成（如文件被占用
-            // 中途失败）时在启动期重试；函数内部自门控，开关关闭时直接跳过。
-            match crate::codex_history_migration::maybe_migrate_codex_official_history_to_unified_bucket() {
-                Ok(outcome) => {
-                    if let Some(reason) = outcome.skipped_reason {
-                        log::debug!("○ Codex official history unify migration skipped: {reason}");
-                    } else {
-                        log::info!(
-                            "✓ Codex official history unify migration completed: jsonl_files={}, state_rows={}",
-                            outcome.migrated_jsonl_files,
-                            outcome.migrated_state_rows
-                        );
-                    }
-                }
-                Err(e) => {
-                    log::warn!("✗ Codex official history unify migration failed: {e}");
-                }
-            }
+            // Refresh the Codex CLI model template cache (up to a 5 s probe)
+            // so later switches never wait on it.
+            refresh_codex_cli_template_at_startup();
         });
     }
 
@@ -1787,6 +1750,24 @@ fn run_startup_imports(
 }
 
 /// 发射一次启动进度事件（前端未监听时无副作用），返回原计时以便汇总。
+/// Restore Codex live files from an interrupted switch; runs off the main thread.
+fn recover_codex_live_journal_at_startup() {
+    match crate::codex_config::recover_codex_live_journal() {
+        Ok(true) => log::warn!("Codex live files restored from an interrupted switch journal"),
+        Ok(false) => {}
+        Err(e) => log::warn!("Codex live journal recovery failed: {e}"),
+    }
+}
+
+/// Refresh the cached Codex CLI model template; runs off the main thread.
+fn refresh_codex_cli_template_at_startup() {
+    match crate::codex_config::refresh_codex_cli_template_cache() {
+        Ok(true) => log::debug!("Codex CLI model template cache refreshed"),
+        Ok(false) => log::debug!("Codex CLI not available; template cache unchanged"),
+        Err(e) => log::debug!("Codex CLI template cache refresh failed: {e}"),
+    }
+}
+
 fn emit_startup_progress(
     app: &tauri::AppHandle,
     timing: init_status::StartupPhaseTiming,
@@ -2141,61 +2122,190 @@ fn initialize_common_config_snippets(state: &store::AppState) {
 // 迁移错误对话框辅助函数
 // ============================================================
 
-/// 启动对话框是否使用中文：与托盘同一来源（`settings.language` → 系统区域，
-/// 经 `sys_locale` 读取，Windows/macOS 上同样有效），而不是只看 `LANG`（CMD-17）。
-fn is_chinese_locale() -> bool {
-    tray::backend_language().starts_with("zh")
+/// Texts of a startup error dialog in one language.
+#[derive(Debug, PartialEq, Eq)]
+struct StartupDialogTexts {
+    title: &'static str,
+    message: String,
+    retry: &'static str,
+    exit: &'static str,
+}
+
+/// The startup dialogs follow the tray's language source (`settings.language`
+/// → system locale via `sys_locale`, CMD-17) and support all four UI
+/// languages.
+fn startup_dialog_language() -> String {
+    normalize_dialog_language(&tray::backend_language()).to_string()
+}
+
+fn normalize_dialog_language(language: &str) -> &'static str {
+    match language {
+        "zh-TW" => "zh-TW",
+        "ja" => "ja",
+        other if other.starts_with("zh") => "zh",
+        _ => "en",
+    }
+}
+
+fn retry_exit_labels(language: &str) -> (&'static str, &'static str) {
+    match language {
+        "zh" => ("重试", "退出"),
+        "zh-TW" => ("重試", "退出"),
+        "ja" => ("再試行", "終了"),
+        _ => ("Retry", "Exit"),
+    }
+}
+
+fn migration_error_texts(language: &str, error: &str) -> StartupDialogTexts {
+    let (retry, exit) = retry_exit_labels(language);
+    let (title, message) = match language {
+        "zh" => (
+            "配置迁移失败",
+            format!(
+                "从旧版本迁移配置时发生错误：\n\n{error}\n\n\
+                您的数据尚未丢失，旧配置文件仍然保留。\n\
+                建议回退到旧版本 CC Switch 以保护数据。\n\n\
+                点击「重试」重新尝试迁移\n\
+                点击「退出」关闭程序（可回退版本后重新打开）"
+            ),
+        ),
+        "zh-TW" => (
+            "設定遷移失敗",
+            format!(
+                "從舊版本遷移設定時發生錯誤：\n\n{error}\n\n\
+                您的資料尚未遺失，舊設定檔仍然保留。\n\
+                建議回退到舊版本 CC Switch 以保護資料。\n\n\
+                點擊「重試」重新嘗試遷移\n\
+                點擊「退出」關閉程式（可回退版本後重新開啟）"
+            ),
+        ),
+        "ja" => (
+            "設定の移行に失敗しました",
+            format!(
+                "旧バージョンからの設定移行中にエラーが発生しました：\n\n{error}\n\n\
+                データは失われていません。旧設定ファイルはそのまま残っています。\n\
+                データ保護のため、旧バージョンの CC Switch に戻すことを検討してください。\n\n\
+                「再試行」をクリックすると移行を再試行します\n\
+                「終了」をクリックするとプログラムを閉じます"
+            ),
+        ),
+        _ => (
+            "Migration Failed",
+            format!(
+                "An error occurred while migrating configuration:\n\n{error}\n\n\
+                Your data is NOT lost - the old config file is still preserved.\n\
+                Consider rolling back to an older CC Switch version.\n\n\
+                Click 'Retry' to attempt migration again\n\
+                Click 'Exit' to close the program"
+            ),
+        ),
+    };
+    StartupDialogTexts {
+        title,
+        message,
+        retry,
+        exit,
+    }
+}
+
+fn database_init_error_texts(
+    language: &str,
+    db_path: &std::path::Path,
+    error: &str,
+) -> StartupDialogTexts {
+    let (retry, exit) = retry_exit_labels(language);
+    let db = db_path.display();
+    let (title, message) = match language {
+        "zh" => (
+            "数据库初始化失败",
+            format!(
+                "初始化数据库或迁移数据库结构时发生错误：\n\n{error}\n\n\
+                数据库文件路径：\n{db}\n\n\
+                您的数据尚未丢失，应用不会自动删除数据库文件。\n\
+                常见原因包括：数据库版本过新、文件损坏、权限不足、磁盘空间不足等。\n\n\
+                建议：\n\
+                1) 先备份整个配置目录（包含 cc-switch.db）\n\
+                2) 如果提示“数据库版本过新”，请升级到更新版本\n\
+                3) 如果刚升级出现异常，可回退旧版本导出/备份后再升级\n\n\
+                点击「重试」重新尝试初始化\n\
+                点击「退出」关闭程序"
+            ),
+        ),
+        "zh-TW" => (
+            "資料庫初始化失敗",
+            format!(
+                "初始化資料庫或遷移資料庫結構時發生錯誤：\n\n{error}\n\n\
+                資料庫檔案路徑：\n{db}\n\n\
+                您的資料尚未遺失，應用程式不會自動刪除資料庫檔案。\n\
+                常見原因包括：資料庫版本過新、檔案損毀、權限不足、磁碟空間不足等。\n\n\
+                建議：\n\
+                1) 先備份整個設定目錄（包含 cc-switch.db）\n\
+                2) 如果提示「資料庫版本過新」，請升級到更新版本\n\
+                3) 如果剛升級後出現異常，可回退舊版本匯出/備份後再升級\n\n\
+                點擊「重試」重新嘗試初始化\n\
+                點擊「退出」關閉程式"
+            ),
+        ),
+        "ja" => (
+            "データベースの初期化に失敗しました",
+            format!(
+                "データベースの初期化またはスキーマ移行中にエラーが発生しました：\n\n{error}\n\n\
+                データベースファイルのパス：\n{db}\n\n\
+                データは失われていません。アプリがデータベースファイルを自動的に削除することはありません。\n\
+                主な原因：データベースのバージョンが新しすぎる、ファイルの破損、権限不足、ディスク容量不足など。\n\n\
+                対処方法：\n\
+                1) まず設定ディレクトリ全体（cc-switch.db を含む）をバックアップしてください\n\
+                2) 「データベースのバージョンが新しすぎる」と表示された場合は CC Switch を更新してください\n\
+                3) 更新直後に発生した場合は、旧バージョンに戻してエクスポート/バックアップしてから再度更新してください\n\n\
+                「再試行」をクリックすると初期化を再試行します\n\
+                「終了」をクリックするとプログラムを閉じます"
+            ),
+        ),
+        _ => (
+            "Database Initialization Failed",
+            format!(
+                "An error occurred while initializing or migrating the database:\n\n{error}\n\n\
+                Database file path:\n{db}\n\n\
+                Your data is NOT lost - the app will not delete the database automatically.\n\
+                Common causes include: newer database version, corrupted file, permission issues, or low disk space.\n\n\
+                Suggestions:\n\
+                1) Back up the entire config directory (including cc-switch.db)\n\
+                2) If you see “database version is newer”, please upgrade CC Switch\n\
+                3) If this happened right after upgrading, consider rolling back to export/backup then upgrade again\n\n\
+                Click 'Retry' to attempt initialization again\n\
+                Click 'Exit' to close the program"
+            ),
+        ),
+    };
+    StartupDialogTexts {
+        title,
+        message,
+        retry,
+        exit,
+    }
+}
+
+/// Show a blocking Retry/Exit error dialog; `true` means Retry.
+fn show_retry_exit_dialog(app: &tauri::AppHandle, texts: StartupDialogTexts) -> bool {
+    // OkCancelCustom: 第一个按钮（重试）返回 true，第二个按钮（退出）返回 false
+    app.dialog()
+        .message(&texts.message)
+        .title(texts.title)
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            texts.retry.to_string(),
+            texts.exit.to_string(),
+        ))
+        .blocking_show()
 }
 
 /// 显示迁移错误对话框
 /// 返回 true 表示用户选择重试，false 表示用户选择退出
 fn show_migration_error_dialog(app: &tauri::AppHandle, error: &str) -> bool {
-    let title = if is_chinese_locale() {
-        "配置迁移失败"
-    } else {
-        "Migration Failed"
-    };
-
-    let message = if is_chinese_locale() {
-        format!(
-            "从旧版本迁移配置时发生错误：\n\n{error}\n\n\
-            您的数据尚未丢失，旧配置文件仍然保留。\n\
-            建议回退到旧版本 CC Switch 以保护数据。\n\n\
-            点击「重试」重新尝试迁移\n\
-            点击「退出」关闭程序（可回退版本后重新打开）"
-        )
-    } else {
-        format!(
-            "An error occurred while migrating configuration:\n\n{error}\n\n\
-            Your data is NOT lost - the old config file is still preserved.\n\
-            Consider rolling back to an older CC Switch version.\n\n\
-            Click 'Retry' to attempt migration again\n\
-            Click 'Exit' to close the program"
-        )
-    };
-
-    let retry_text = if is_chinese_locale() {
-        "重试"
-    } else {
-        "Retry"
-    };
-    let exit_text = if is_chinese_locale() {
-        "退出"
-    } else {
-        "Exit"
-    };
-
-    // 使用 blocking_show 同步等待用户响应
-    // OkCancelCustom: 第一个按钮（重试）返回 true，第二个按钮（退出）返回 false
-    app.dialog()
-        .message(&message)
-        .title(title)
-        .kind(MessageDialogKind::Error)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            retry_text.to_string(),
-            exit_text.to_string(),
-        ))
-        .blocking_show()
+    show_retry_exit_dialog(
+        app,
+        migration_error_texts(&startup_dialog_language(), error),
+    )
 }
 
 /// 显示数据库初始化/Schema 迁移失败对话框
@@ -2205,62 +2315,10 @@ fn show_database_init_error_dialog(
     db_path: &std::path::Path,
     error: &str,
 ) -> bool {
-    let title = if is_chinese_locale() {
-        "数据库初始化失败"
-    } else {
-        "Database Initialization Failed"
-    };
-
-    let message = if is_chinese_locale() {
-        format!(
-            "初始化数据库或迁移数据库结构时发生错误：\n\n{error}\n\n\
-            数据库文件路径：\n{db}\n\n\
-            您的数据尚未丢失，应用不会自动删除数据库文件。\n\
-            常见原因包括：数据库版本过新、文件损坏、权限不足、磁盘空间不足等。\n\n\
-            建议：\n\
-            1) 先备份整个配置目录（包含 cc-switch.db）\n\
-            2) 如果提示“数据库版本过新”，请升级到更新版本\n\
-            3) 如果刚升级出现异常，可回退旧版本导出/备份后再升级\n\n\
-            点击「重试」重新尝试初始化\n\
-            点击「退出」关闭程序",
-            db = db_path.display()
-        )
-    } else {
-        format!(
-            "An error occurred while initializing or migrating the database:\n\n{error}\n\n\
-            Database file path:\n{db}\n\n\
-            Your data is NOT lost - the app will not delete the database automatically.\n\
-            Common causes include: newer database version, corrupted file, permission issues, or low disk space.\n\n\
-            Suggestions:\n\
-            1) Back up the entire config directory (including cc-switch.db)\n\
-            2) If you see “database version is newer”, please upgrade CC Switch\n\
-            3) If this happened right after upgrading, consider rolling back to export/backup then upgrade again\n\n\
-            Click 'Retry' to attempt initialization again\n\
-            Click 'Exit' to close the program",
-            db = db_path.display()
-        )
-    };
-
-    let retry_text = if is_chinese_locale() {
-        "重试"
-    } else {
-        "Retry"
-    };
-    let exit_text = if is_chinese_locale() {
-        "退出"
-    } else {
-        "Exit"
-    };
-
-    app.dialog()
-        .message(&message)
-        .title(title)
-        .kind(MessageDialogKind::Error)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            retry_text.to_string(),
-            exit_text.to_string(),
-        ))
-        .blocking_show()
+    show_retry_exit_dialog(
+        app,
+        database_init_error_texts(&startup_dialog_language(), db_path, error),
+    )
 }
 
 // ============================================================
@@ -2420,8 +2478,31 @@ mod tests {
         enabled_proxy_apps_on_startup, keep_previous_run_log, maintenance_due, ExitRequestAction,
         MAINTENANCE_INTERVAL,
     };
+    use super::{database_init_error_texts, migration_error_texts, normalize_dialog_language};
     use crate::database::Database;
     use std::time::{Duration, SystemTime};
+
+    /// Startup dialogs exist in every UI language (CMD-17).
+    #[test]
+    fn startup_dialogs_cover_all_ui_languages() {
+        let db = std::path::Path::new("/tmp/cc-switch.db");
+        let ja = migration_error_texts("ja", "boom");
+        assert_eq!(ja.title, "設定の移行に失敗しました");
+        assert_eq!((ja.retry, ja.exit), ("再試行", "終了"));
+        assert!(ja.message.contains("boom"));
+        let tw = database_init_error_texts("zh-TW", db, "boom");
+        assert_eq!(tw.title, "資料庫初始化失敗");
+        assert_eq!(tw.retry, "重試");
+        assert!(tw.message.contains("/tmp/cc-switch.db"));
+        assert_eq!(migration_error_texts("zh", "e").title, "配置迁移失败");
+        assert_eq!(
+            database_init_error_texts("en", db, "e").title,
+            "Database Initialization Failed"
+        );
+        assert_eq!(normalize_dialog_language("zh-CN"), "zh");
+        assert_eq!(normalize_dialog_language("de"), "en");
+        assert_eq!(normalize_dialog_language("zh-TW"), "zh-TW");
+    }
 
     #[test]
     fn previous_run_log_is_kept_not_deleted() {

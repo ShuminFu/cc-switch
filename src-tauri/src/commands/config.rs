@@ -328,77 +328,150 @@ pub async fn set_common_config_snippet(
     // Validate the webview-supplied app id before it reaches the DAO (CMD-23).
     let app_type = super::canonical_app_type(&app_type)?.as_str().to_string();
     super::run_blocking_with_state(handle, move |state| {
-        let is_cleared = snippet.trim().is_empty();
-        let old_snippet = state
-            .db
-            .get_config_snippet(&app_type)
-            .map_err(|e| e.to_string())?;
+        apply_common_config_snippet(state, &app_type, snippet)
+    })
+    .await
+}
 
-        validate_common_config_snippet(&app_type, &snippet)?;
+/// Save `snippet` for `app_type` and re-project the live files that use it.
+///
+/// The DB steps run first; when a live write then fails, the stored snippet
+/// and its cleared flag are put back so the DB and the live files do not
+/// disagree (CMD-25).
+fn apply_common_config_snippet(
+    state: &crate::store::AppState,
+    app_type: &str,
+    snippet: String,
+) -> Result<(), String> {
+    let is_cleared = snippet.trim().is_empty();
+    let old_snippet = state
+        .db
+        .get_config_snippet(app_type)
+        .map_err(|e| e.to_string())?;
+    let old_cleared = state
+        .db
+        .is_config_snippet_cleared(app_type)
+        .map_err(|e| e.to_string())?;
 
-        let value = if is_cleared { None } else { Some(snippet) };
+    validate_common_config_snippet(app_type, &snippet)?;
 
-        if matches!(app_type.as_str(), "claude" | "codex" | "gemini") {
-            if let Some(legacy_snippet) = old_snippet
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-            {
-                let app = AppType::from_str(&app_type).map_err(|e| e.to_string())?;
-                crate::services::provider::ProviderService::migrate_legacy_common_config_usage(
-                    state,
-                    app,
-                    legacy_snippet,
-                )
-                .map_err(|e| e.to_string())?;
-            }
-        }
+    let value = if is_cleared { None } else { Some(snippet) };
 
-        state
-            .db
-            .set_config_snippet(&app_type, value)
-            .map_err(|e| e.to_string())?;
-        state
-            .db
-            .set_config_snippet_cleared(&app_type, is_cleared)
-            .map_err(|e| e.to_string())?;
-
-        if matches!(app_type.as_str(), "claude" | "codex" | "gemini") {
-            let app = AppType::from_str(&app_type).map_err(|e| e.to_string())?;
-            crate::services::provider::ProviderService::sync_current_provider_for_app(state, app)
-                .map_err(|e| e.to_string())?;
-        }
-
-        if app_type == "omo"
-            && state
-                .db
-                .get_current_omo_provider("opencode", "omo")
-                .map_err(|e| e.to_string())?
-                .is_some()
+    if matches!(app_type, "claude" | "codex" | "gemini") {
+        if let Some(legacy_snippet) = old_snippet
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
         {
-            crate::services::OmoService::write_config_to_file(
+            let app = AppType::from_str(app_type).map_err(|e| e.to_string())?;
+            crate::services::provider::ProviderService::migrate_legacy_common_config_usage(
                 state,
-                &crate::services::omo::STANDARD,
+                app,
+                legacy_snippet,
             )
             .map_err(|e| e.to_string())?;
         }
-        if app_type == "omo-slim"
-            && state
-                .db
-                .get_current_omo_provider("opencode", "omo-slim")
-                .map_err(|e| e.to_string())?
-                .is_some()
-        {
-            crate::services::OmoService::write_config_to_file(state, &crate::services::omo::SLIM)
-                .map_err(|e| e.to_string())?;
+    }
+
+    state
+        .db
+        .set_config_snippet(app_type, value)
+        .map_err(|e| e.to_string())?;
+    state
+        .db
+        .set_config_snippet_cleared(app_type, is_cleared)
+        .map_err(|e| e.to_string())?;
+
+    if let Err(err) = project_common_config_snippet(state, app_type) {
+        let reverted = state
+            .db
+            .set_config_snippet(app_type, old_snippet)
+            .and_then(|_| state.db.set_config_snippet_cleared(app_type, old_cleared));
+        if let Err(revert_err) = reverted {
+            log::warn!("Reverting the {app_type} common config snippet failed: {revert_err}");
         }
-        Ok(())
-    })
-    .await
+        return Err(err);
+    }
+    Ok(())
+}
+
+/// The live writes that follow a snippet change.
+fn project_common_config_snippet(
+    state: &crate::store::AppState,
+    app_type: &str,
+) -> Result<(), String> {
+    if matches!(app_type, "claude" | "codex" | "gemini") {
+        let app = AppType::from_str(app_type).map_err(|e| e.to_string())?;
+        crate::services::provider::ProviderService::sync_current_provider_for_app(state, app)
+            .map_err(|e| e.to_string())?;
+    }
+
+    if app_type == "omo"
+        && state
+            .db
+            .get_current_omo_provider("opencode", "omo")
+            .map_err(|e| e.to_string())?
+            .is_some()
+    {
+        crate::services::OmoService::write_config_to_file(state, &crate::services::omo::STANDARD)
+            .map_err(|e| e.to_string())?;
+    }
+    if app_type == "omo-slim"
+        && state
+            .db
+            .get_current_omo_provider("opencode", "omo-slim")
+            .map_err(|e| e.to_string())?
+            .is_some()
+    {
+        crate::services::OmoService::write_config_to_file(state, &crate::services::omo::SLIM)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{format_error_message, validate_common_config_snippet};
+
+    /// A failed live write leaves the stored snippet unchanged (CMD-25).
+    #[test]
+    fn snippet_is_reverted_when_the_live_write_fails() {
+        use crate::database::Database;
+        use crate::provider::Provider;
+        use crate::store::AppState;
+        use std::sync::Arc;
+
+        let _home = crate::test_support::isolated_home();
+        let db = Arc::new(Database::memory().unwrap());
+        let provider = Provider::with_id(
+            "p1".into(),
+            "P1".into(),
+            serde_json::json!({ "env": { "ANTHROPIC_BASE_URL": "https://example.test" } }),
+            None,
+        );
+        db.save_provider("claude", &provider).unwrap();
+        db.set_current_provider("claude", "p1").unwrap();
+        db.set_config_snippet("claude", Some(r#"{"a":1}"#.to_string()))
+            .unwrap();
+        // settings.json is a directory: the live write fails
+        std::fs::create_dir_all(crate::config::get_claude_settings_path()).unwrap();
+
+        let state = AppState::new(db.clone());
+        let result = super::apply_common_config_snippet(&state, "claude", r#"{"b":2}"#.to_string());
+        assert!(result.is_err());
+        assert_eq!(
+            db.get_config_snippet("claude").unwrap().as_deref(),
+            Some(r#"{"a":1}"#)
+        );
+        assert!(!db.is_config_snippet_cleared("claude").unwrap());
+
+        // with a writable live file the snippet is saved
+        std::fs::remove_dir_all(crate::config::get_claude_settings_path()).unwrap();
+        super::apply_common_config_snippet(&state, "claude", r#"{"b":2}"#.to_string()).unwrap();
+        assert_eq!(
+            db.get_config_snippet("claude").unwrap().as_deref(),
+            Some(r#"{"b":2}"#)
+        );
+    }
 
     #[test]
     fn format_error_message_localizes_and_falls_back_to_english() {

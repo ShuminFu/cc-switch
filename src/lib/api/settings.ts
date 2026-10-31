@@ -434,6 +434,6 @@ export const backupsApi = {
 
   /** Open the backups directory in the system file manager (FE-UI-37). */
   async openBackupsFolder(): Promise<void> {
-    await invoke("open_backups_folder");
+    await call(commands.openBackupsFolder());
   },
 };

@@ -7,6 +7,7 @@ use tauri::State;
 
 use crate::error::AppError;
 
+use crate::adapters::McpSyncSkip;
 use crate::app_config::AppType;
 use crate::claude_mcp;
 use crate::services::McpService;
@@ -14,6 +15,7 @@ use crate::store::AppState;
 
 /// 获取 Claude MCP 状态
 #[tauri::command]
+#[specta::specta]
 pub async fn get_claude_mcp_status() -> Result<claude_mcp::McpStatus, AppError> {
     claude_mcp::get_mcp_status()
 }
@@ -64,12 +66,17 @@ pub async fn get_mcp_servers(
 }
 
 /// 添加或更新 MCP 服务器
+///
+/// Returns the enabled apps whose config directory is missing, where the
+/// sync wrote nothing (CFG-46), so the UI can say so.
 #[tauri::command]
 pub async fn upsert_mcp_server(
     state: State<'_, AppState>,
     server: McpServer,
-) -> Result<(), AppError> {
-    McpService::upsert_server(&state, server)
+) -> Result<Vec<McpSyncSkip>, AppError> {
+    let enabled = server.apps.enabled_apps();
+    McpService::upsert_server(&state, server)?;
+    Ok(crate::adapters::mcp_sync_skips(enabled))
 }
 
 /// 删除 MCP 服务器
@@ -87,9 +94,15 @@ pub async fn toggle_mcp_app(
     server_id: String,
     app: String,
     enabled: bool,
-) -> Result<(), AppError> {
+) -> Result<Vec<McpSyncSkip>, AppError> {
     let app_ty = AppType::from_str(&app)?;
-    McpService::toggle_app(&state, &server_id, app_ty, enabled)
+    McpService::toggle_app(&state, &server_id, app_ty.clone(), enabled)?;
+    // only an enable writes; report it when the app is not installed (CFG-46)
+    Ok(if enabled {
+        crate::adapters::mcp_sync_skips([app_ty])
+    } else {
+        Vec::new()
+    })
 }
 
 /// 从所有应用导入 MCP 服务器（复用已有的导入逻辑）

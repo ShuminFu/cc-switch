@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
+use super::plan::PlannedWrite;
 use super::{AdapterCapabilities, AppAdapter, CommonConfigShape, McpProjector, WriteMode};
 use crate::app_config::{AppType, MultiAppConfig};
 use crate::config::{get_claude_mcp_path, get_claude_settings_path, read_json_file};
@@ -52,6 +53,15 @@ impl AppAdapter for ClaudeAdapter {
         crate::config::write_json_file_secret(&path, &settings)
     }
 
+    fn plan_live(&self, provider: &Provider) -> Result<Option<Vec<PlannedWrite>>, AppError> {
+        // same sanitizer and renderer as `write_live`
+        let path = get_claude_settings_path();
+        let settings =
+            crate::services::provider::sanitize_claude_settings_for_live(&provider.settings_config);
+        let content = crate::config::render_json_file(&path, &settings)?;
+        Ok(Some(vec![PlannedWrite { path, content }]))
+    }
+
     fn backfill(&self, provider: &Provider, live: Value) -> Value {
         crate::services::provider::strip_injected_claude_defaults(live, provider)
     }
@@ -90,5 +100,40 @@ impl McpProjector for ClaudeMcp {
     /// One read-modify-write of the whole file per projection (CFG-41).
     fn project(&self, enabled: &[(&str, &Value)], disabled: &[&str]) -> Result<(), AppError> {
         crate::mcp::project_to_claude(enabled, disabled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The preview is byte-for-byte what the switch writes (CFG-22).
+    #[test]
+    fn plan_live_matches_write_live() {
+        let _home = crate::test_support::isolated_home();
+        let path = get_claude_settings_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{\n    \"permissions\": {},\n    \"env\": {}\n}\n").unwrap();
+        let provider = Provider::with_id(
+            "p1".into(),
+            "P1".into(),
+            json!({ "env": { "ANTHROPIC_BASE_URL": "https://example.test" }, "model": "m" }),
+            None,
+        );
+
+        let plan = ClaudeAdapter.plan_live(&provider).unwrap().unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].path, path);
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert_ne!(plan[0].content, before);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "plan must not write"
+        );
+
+        ClaudeAdapter.write_live(&provider).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), plan[0].content);
     }
 }

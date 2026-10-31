@@ -102,6 +102,176 @@ async getConfigDir(app: string) : Promise<Result<string, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Every tool's config directory and whether it comes from a cc-switch
+ * override, the tool's environment variable or the default (CFG-12).
+ */
+async getAppConfigDirs() : Promise<Result<AppConfigDirInfo[], AppErrorPayload>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_app_config_dirs") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * MCP-capable apps whose config directory is missing; MCP sync writes
+ * nothing for them (CFG-46).
+ */
+async getMcpSyncSkips() : Promise<Result<McpSyncSkip[], AppErrorPayload>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_mcp_sync_skips") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Providers found in `app`'s live config that can be imported (CFG-23).
+ * Candidates carry the provider settings (including credentials) so the
+ * UI can import them; nothing is logged.
+ */
+async getImportCandidates(app: AppType) : Promise<Result<ImportCandidate[], AppErrorPayload>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_import_candidates", { app }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * What switching `app` to `provider_id` would write to its primary live
+ * files, without writing (CFG-22). Common config is applied the same way
+ * as the switch. MCP projection and side files (Codex model catalog, OMO)
+ * are not part of the plan yet; adapters without a planner return
+ * `supported: false`.
+ */
+async previewLiveWrite(app: AppType, providerId: string) : Promise<Result<LiveWritePlan, AppErrorPayload>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("preview_live_write", { app, providerId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Field-level issues in a provider's settings for `app`, with a dotted
+ * path, an i18n key and params for inline editor markers (CFG-24).
+ * Advisory: saving is not blocked.
+ */
+async validateProviderSettings(app: AppType, settings: JsonValue) : Promise<Result<ValidationIssue[], AppErrorPayload>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("validate_provider_settings", { app, settings }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Disk used by the Codex history migration backups (CFG-44).
+ */
+async getCodexHistoryBackupUsage() : Promise<Result<CodexHistoryBackupUsage, AppErrorPayload>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_codex_history_backup_usage") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete the Codex history migration backups. The official-history
+ * restore ledger is kept unless `include_restore_ledger` is true.
+ */
+async purgeCodexHistoryBackups(includeRestoreLedger: boolean) : Promise<Result<CodexHistoryBackupUsage, AppErrorPayload>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("purge_codex_history_backups", { includeRestoreLedger }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Whether Claude Desktop's live profile currently routes through the local
+ * proxy (PROXY-30), read from the live 3P profile file.
+ */
+async getClaudeDesktopProxyDependency() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_claude_desktop_proxy_dependency") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getClaudeDesktopStatus() : Promise<Result<ClaudeDesktopStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_claude_desktop_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getHermesMemory(kind: MemoryKind) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_hermes_memory", { kind }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setHermesMemory(kind: MemoryKind, content: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_hermes_memory", { kind, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getHermesMemoryLimits() : Promise<Result<HermesMemoryLimits, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_hermes_memory_limits") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setHermesMemoryEnabled(kind: MemoryKind, enabled: boolean) : Promise<Result<HermesWriteOutcome, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_hermes_memory_enabled", { kind, enabled }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * 获取 Claude MCP 状态
+ */
+async getClaudeMcpStatus() : Promise<Result<McpStatus, AppErrorPayload>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_claude_mcp_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async upsertPrompt(app: string, id: string, prompt: Prompt) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("upsert_prompt", { app, id, prompt }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Open the directory that holds the database backups in the file manager.
+ */
+async openBackupsFolder() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_backups_folder") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async openConfigFolder(app: string) : Promise<Result<boolean, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("open_config_folder", { app }) };
@@ -590,7 +760,7 @@ async deleteMcpServer(id: string) : Promise<Result<boolean, AppErrorPayload>> {
 /**
  * 切换 MCP 服务器在指定应用的启用状态
  */
-async toggleMcpApp(serverId: string, app: string, enabled: boolean) : Promise<Result<null, AppErrorPayload>> {
+async toggleMcpApp(serverId: string, app: string, enabled: boolean) : Promise<Result<McpSyncSkip[], AppErrorPayload>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("toggle_mcp_app", { serverId, app, enabled }) };
 } catch (e) {
@@ -1633,6 +1803,10 @@ async openWorkspaceDirectory(subdir: string) : Promise<Result<boolean, string>> 
 /** user-defined types **/
 
 /**
+ * One tool's resolved config directory.
+ */
+export type AppConfigDirInfo = { app: AppType; path: string; exists: boolean; source: ConfigDirSource }
+/**
  * Wire shape of an [`AppError`] crossing the Tauri IPC boundary (CMD-12).
  * 
  * - `code` is a stable i18n key (`errors.config`, `sync.conflict.remote_changed`, ...)
@@ -1643,15 +1817,115 @@ async openWorkspaceDirectory(subdir: string) : Promise<Result<boolean, string>> 
  * `zh` and `en` fallbacks so the UI can pick the one matching its language.
  */
 export type AppErrorPayload = { code: string; message: string; params?: Partial<{ [key in string]: string }> | null }
+/**
+ * 应用类型
+ */
+export type AppType = "claude" | "claude-desktop" | "codex" | "gemini" | "grokbuild" | "opencode" | "openclaw" | "hermes"
+/**
+ * 通用认证绑定
+ */
+export type AuthBinding = { 
+/**
+ * 认证来源
+ */
+source?: AuthBindingSource; 
+/**
+ * 托管认证供应商标识（如 github_copilot）
+ */
+authProvider?: string | null; 
+/**
+ * 托管账号 ID；为空表示跟随该认证供应商的默认账号
+ */
+accountId?: string | null }
+/**
+ * 认证绑定来源
+ */
+export type AuthBindingSource = 
+/**
+ * 从 provider 自身配置读取认证信息（默认）
+ */
+"provider_config" | 
+/**
+ * 使用托管账号认证（如 GitHub Copilot OAuth）
+ */
+"managed_account"
+/**
+ * Claude Desktop 3P 写入模式。
+ */
+export type ClaudeDesktopMode = "direct" | "proxy"
+/**
+ * Claude Desktop 本地路由模式下暴露给 Desktop 的安全模型路由。
+ */
+export type ClaudeDesktopModelRoute = { 
+/**
+ * 真实上游模型名，只保存在 CC Switch 内部，不写入 Claude Desktop profile。
+ */
+model: string; 
+/**
+ * Claude Desktop 模型菜单显示名；写入 profile 的 `labelOverride`。
+ */
+labelOverride?: string | null; 
+/**
+ * Claude Desktop 3P 识别的 1M 上下文能力标记。
+ */
+supports1m?: boolean | null }
+export type ClaudeDesktopStatus = { supported: boolean; configured: boolean; appliedId: string | null; profilePath: string | null; configLibraryPath: string | null; mode: ClaudeDesktopMode | null; expectedBaseUrl: string | null; actualBaseUrl: string | null; proxyRunning: boolean; staleRawModels: boolean; missingRouteMappings: boolean; gatewayTokenConfigured: boolean }
+/**
+ * Codex Responses -> Chat Completions 的 reasoning 能力描述。
+ */
+export type CodexChatReasoningConfig = { supportsThinking?: boolean | null; supportsEffort?: boolean | null; thinkingParam?: string | null; effortParam?: string | null; effortValueMode?: string | null; 
+/**
+ * 声明性字段：标注上游 reasoning 的回传位置（reasoning_content / reasoning /
+ * reasoning_details / think_tags）。当前响应侧 `extract_reasoning_field_text`
+ * 靠穷举字段提取、并不读取本字段；保留作文档说明与未来按格式分发（如 think_tags）的预留。
+ */
+outputFormat?: string | null }
+/**
+ * Disk used by the Codex history migration backups (CFG-44).
+ */
+export type CodexHistoryBackupUsage = { 
+/**
+ * Third-party bucket and template migration backups; safe to purge.
+ */
+migrationBytes: number; 
+/**
+ * Official-history unify ledger, needed to restore when the unify
+ * switch is turned off; purged only on explicit request.
+ */
+restoreLedgerBytes: number; 
+/**
+ * Backups taken by restore operations themselves; safe to purge.
+ */
+restoreBackupBytes: number; totalBytes: number }
 export type CodexUnifyHistoryRestoreResult = { restoredJsonlFiles: number; restoredStateRows: number; 
 /**
  * 还原被跳过的原因（如当前目录没有账本），前端据此提示而非报"成功 0 项"。
  */
 skippedReason?: string | null }
 /**
+ * Where a tool's config directory was resolved from (CFG-12).
+ */
+export type ConfigDirSource = 
+/**
+ * The directory configured in cc-switch settings.
+ */
+{ kind: "override" } | 
+/**
+ * The tool's own environment variable (e.g. `CODEX_HOME`).
+ */
+{ kind: "env"; var: string } | 
+/**
+ * The platform default (e.g. `~/.codex`).
+ */
+{ kind: "default" }
+/**
  * 每个分组当前激活的项目 id（未使用项目时为 null）
  */
 export type CurrentProfileIds = { claude: string | null; claudeDesktop: string | null; codex: string | null; gemini: string | null; grokbuild: string | null; opencode: string | null; openclaw: string | null; hermes: string | null }
+/**
+ * 自定义端点配置（历史兼容，实际存储在 provider.meta.custom_endpoints）
+ */
+export type CustomEndpoint = { url: string; addedAt: number; lastUsed?: number | null }
 export type DailyMemoryFileInfo = { filename: string; date: string; sizeBytes: number; modifiedAt: number; preview: string }
 /**
  * Search result for daily memory full-text search.
@@ -1673,6 +1947,34 @@ proxyType: string;
  * 端口
  */
 port: number }
+/**
+ * Character budget + enable flags for the two memory blobs, as configured
+ * in Hermes' `config.yaml`. Defaults mirror `~/.hermes`'s own defaults so
+ * callers get a usable budget bar even before the user edits config.yaml.
+ */
+export type HermesMemoryLimits = { memory: number; user: number; memoryEnabled: boolean; userEnabled: boolean }
+/**
+ * Hermes 写入结果
+ */
+export type HermesWriteOutcome = { backupPath?: string | null }
+/**
+ * One provider found in an app's live config that can be imported (CFG-23).
+ */
+export type ImportCandidate = { 
+/**
+ * Stable id derived from the live config (e.g. the Codex
+ * `model_providers` key); callers may use it as a provider id hint.
+ */
+idHint: string; name: string; 
+/**
+ * Provider `settings_config` to store.
+ */
+settingsConfig: JsonValue; 
+/**
+ * Hash of the endpoint and credential, for de-duplicating against
+ * providers that were already imported. Never contains the secret.
+ */
+fingerprint: string }
 export type InitErrorPayload = { path: string; error: string; 
 /**
  * 错误类别。`Some("db_version_too_new")` 表示数据库版本过新（应用过旧），
@@ -1689,11 +1991,206 @@ db_version?: number | null;
  */
 supported_version?: number | null }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+/**
+ * What a provider switch would write to an app's live files.
+ */
+export type LiveWritePlan = { app: AppType; providerId: string; 
+/**
+ * `false` when the app's adapter cannot preview yet; `files` is empty.
+ */
+supported: boolean; files: PlannedFileChange[] }
+/**
+ * Local proxy request overrides applied after route/protocol transforms.
+ */
+export type LocalProxyRequestOverrides = { headers: Partial<{ [key in string]: string }>; body?: JsonValue | null }
 export type ManagedAuthAccount = { id: string; provider: string; login: string; avatar_url: string | null; authenticated_at: number; is_default: boolean; github_domain: string }
 export type ManagedAuthDeviceCodeResponse = { provider: string; device_code: string; user_code: string; verification_uri: string; expires_in: number; interval: number }
 export type ManagedAuthStatus = { provider: string; authenticated: boolean; default_account_id: string | null; migration_error: string | null; accounts: ManagedAuthAccount[] }
+export type McpStatus = { userConfigPath: string; userConfigExists: boolean; serverCount: number }
+/**
+ * An app whose MCP sync was skipped because its config directory is missing.
+ */
+export type McpSyncSkip = { app: string; missingDir: string }
+/**
+ * Which of Hermes' two memory files to operate on. Tauri deserializes this
+ * directly from the `"memory"` / `"user"` strings the frontend sends, so an
+ * unknown value is rejected at the IPC boundary instead of deep in the stack.
+ */
+export type MemoryKind = "memory" | "user"
+/**
+ * One file of a [`LiveWritePlan`].
+ */
+export type PlannedFileChange = { path: string; 
+/**
+ * Current content; `None` when the file does not exist yet.
+ */
+before: string | null; after: string; changed: boolean; 
+/**
+ * Line diff (`-`/`+`/` ` prefixed lines, unchanged runs collapsed).
+ */
+unifiedDiff: string }
 export type ProfileDto = { id: string; name: string; payload: JsonValue; createdAt?: number | null; updatedAt?: number | null }
 export type ProfilesResponse = { profiles: ProfileDto[]; currentIds: CurrentProfileIds }
+export type Prompt = { id: string; name: string; content: string; description?: string | null; enabled?: boolean; createdAt?: number | null; updatedAt?: number | null }
+/**
+ * 供应商结构体
+ */
+export type Provider = { id: string; name: string; settingsConfig: JsonValue; websiteUrl?: string | null; category?: string | null; createdAt?: number | null; sortIndex?: number | null; 
+/**
+ * 备注信息
+ */
+notes?: string | null; 
+/**
+ * 供应商元数据（不写入 live 配置，仅存于 ~/.cc-switch/config.json）
+ */
+meta?: ProviderMeta | null; 
+/**
+ * 图标名称（如 "openai", "anthropic"）
+ */
+icon?: string | null; 
+/**
+ * 图标颜色（Hex 格式，如 "#00A67E"）
+ */
+iconColor?: string | null; 
+/**
+ * 是否加入故障转移队列
+ */
+inFailoverQueue?: boolean }
+/**
+ * 供应商元数据
+ */
+export type ProviderMeta = { 
+/**
+ * 自定义端点列表（按 URL 去重存储）
+ */
+custom_endpoints: Partial<{ [key in string]: CustomEndpoint }>; 
+/**
+ * 是否在写入 live 时应用通用配置片段
+ */
+commonConfigEnabled?: boolean | null; 
+/**
+ * Claude Desktop 3P 写入模式：direct（直连）或 proxy（预留）
+ */
+claudeDesktopMode?: ClaudeDesktopMode | null; 
+/**
+ * Claude Desktop proxy 模式的模型路由映射：Claude-safe route -> upstream model。
+ */
+claudeDesktopModelRoutes: Partial<{ [key in string]: ClaudeDesktopModelRoute }>; 
+/**
+ * 用量查询脚本配置
+ */
+usage_script?: UsageScript | null; 
+/**
+ * 请求地址管理：测速后自动选择最佳端点
+ */
+endpointAutoSelect?: boolean | null; 
+/**
+ * 合作伙伴标记（前端使用 isPartner，保持字段名一致）
+ */
+isPartner?: boolean | null; 
+/**
+ * 合作伙伴促销 key，用于识别 PackyCode 等特殊供应商
+ */
+partnerPromotionKey?: string | null; 
+/**
+ * 成本倍数（用于计算实际成本）
+ */
+costMultiplier?: string | null; 
+/**
+ * 计费模式来源（response/request）
+ */
+pricingModelSource?: string | null; 
+/**
+ * 每日消费限额（USD）
+ */
+limitDailyUsd?: string | null; 
+/**
+ * 每月消费限额（USD）
+ */
+limitMonthlyUsd?: string | null; 
+/**
+ * Claude API 格式（仅 Claude 供应商使用）
+ * - "anthropic": 原生 Anthropic Messages API，直接透传
+ * - "openai_chat": OpenAI Chat Completions 格式，需要转换
+ * - "openai_responses": OpenAI Responses API 格式，需要转换
+ */
+apiFormat?: string | null; 
+/**
+ * 通用认证绑定（provider_config / managed_account）
+ * 
+ * 新代码应只写入该字段；githubAccountId 仅保留兼容读取。
+ */
+authBinding?: AuthBinding | null; 
+/**
+ * Claude 认证字段名（"ANTHROPIC_AUTH_TOKEN" 或 "ANTHROPIC_API_KEY"）
+ */
+apiKeyField?: string | null; 
+/**
+ * 是否将 base_url 视为完整 API 端点（不拼接 endpoint 路径）
+ */
+isFullUrl?: boolean | null; 
+/**
+ * Prompt cache key for OpenAI Responses-compatible endpoints.
+ * When set, injected into converted Responses requests to improve cache hit rate.
+ * If not set, Claude -> Responses conversions use a client-provided session/thread
+ * identity when available; generated session IDs are not sent upstream.
+ */
+promptCacheKey?: string | null; 
+/**
+ * Session-based prompt-cache routing for Codex Responses -> Chat conversions.
+ * "auto" enables known-compatible upstreams; "enabled" / "disabled" are overrides.
+ */
+promptCacheRouting?: string | null; 
+/**
+ * Codex OAuth FAST mode: inject `service_tier = "priority"` for ChatGPT Codex requests.
+ */
+codexFastMode?: boolean | null; 
+/**
+ * Codex Responses -> Chat Completions reasoning capability metadata.
+ */
+codexChatReasoning?: CodexChatReasoningConfig | null; 
+/**
+ * Codex → Anthropic path: whether to emulate the Claude Code client
+ * (User-Agent / anthropic-beta / x-app + injecting the Claude Code system
+ * prompt first line). Disabled by default; only an explicit `true` enables it.
+ */
+impersonateClaudeCode?: boolean | null; 
+/**
+ * Codex → Anthropic path: override the Anthropic `max_tokens` (output ceiling).
+ * 
+ * Codex does not forward its `model_max_output_tokens` in the Responses
+ * request body, so without this the path falls back to a conservative
+ * default (8192), which truncates long or thinking-heavy responses
+ * (`stop_reason=max_tokens`). When set (>0), this value is injected as the
+ * request's `max_output_tokens` before conversion, taking precedence over
+ * both any request-supplied value and the default. Kept per-provider on
+ * purpose: a global large default would hard-400 on low-output-ceiling
+ * models/gateways (and that error is non-retryable).
+ */
+maxOutputTokens?: number | null; 
+/**
+ * Custom User-Agent for local proxy routing.
+ */
+customUserAgent?: string | null; 
+/**
+ * Local proxy request overrides applied to the transformed upstream request.
+ */
+localProxyRequestOverrides?: LocalProxyRequestOverrides | null; 
+/**
+ * 累加模式应用中，该 provider 是否已写入 live config。
+ * `None` 表示旧数据/未知状态，`Some(false)` 表示明确仅存在于数据库中。
+ */
+liveConfigManaged?: boolean | null; 
+/**
+ * 供应商类型标识（用于特殊供应商检测）
+ * - "github_copilot": GitHub Copilot 供应商
+ */
+providerType?: string | null; 
+/**
+ * GitHub Copilot 关联账号 ID（仅 github_copilot 供应商使用）
+ * 用于多账号支持，关联到特定的 GitHub 账号
+ */
+githubAccountId?: string | null }
 /**
  * 代理测试结果
  */
@@ -1730,6 +2227,78 @@ enabled: boolean;
  * 代理 URL
  */
 proxyUrl: string | null }
+/**
+ * 用量数据
+ */
+export type UsageData = { planName?: string | null; extra?: string | null; isValid?: boolean | null; invalidMessage?: string | null; total?: number | null; used?: number | null; remaining?: number | null; unit?: string | null }
+/**
+ * 用量查询结果（支持多套餐）
+ */
+export type UsageResult = { success: boolean; data?: UsageData[] | null; error?: string | null }
+/**
+ * 用量查询脚本配置
+ */
+export type UsageScript = { enabled: boolean; language: string; code: string; timeout?: number | null; 
+/**
+ * 用量查询专用的 API Key（通用模板使用）
+ */
+apiKey?: string | null; 
+/**
+ * 用量查询专用的 Base URL（通用和 NewAPI 模板使用）
+ */
+baseUrl?: string | null; 
+/**
+ * 访问令牌（用于需要登录的接口，NewAPI 模板使用）
+ */
+accessToken?: string | null; 
+/**
+ * 用户ID（用于需要用户标识的接口，NewAPI 模板使用）
+ */
+userId?: string | null; 
+/**
+ * 模板类型（用于后端判断验证规则）
+ */
+templateType?: string | null; 
+/**
+ * 自动查询间隔（单位：分钟，0 表示禁用自动查询）
+ */
+autoQueryInterval?: number | null; 
+/**
+ * Coding Plan 供应商标识（如 "kimi", "zhipu", "minimax"）
+ */
+codingPlanProvider?: string | null; 
+/**
+ * 火山方舟控制面 OpenAPI 的 AccessKey ID（用量查询签名用，与推理 Key 是两套凭据）
+ */
+accessKeyId?: string | null; 
+/**
+ * 火山方舟控制面 OpenAPI 的 SecretAccessKey（同上）
+ */
+secretAccessKey?: string | null; 
+/**
+ * 智谱团队套餐（Team Plan）的组织 ID（用量查询请求头 bigmodel-organization）
+ */
+teamOrganizationId?: string | null; 
+/**
+ * 智谱团队套餐（Team Plan）的项目 ID（用量查询请求头 bigmodel-project）
+ */
+teamProjectId?: string | null }
+/**
+ * One problem found in a provider's settings.
+ */
+export type ValidationIssue = { 
+/**
+ * Dotted path in the tool's config, e.g. `model_providers.custom.wire_api`.
+ */
+path: string; 
+/**
+ * i18n key, e.g. `validation.codex.wireApi.invalid`.
+ */
+key: string; 
+/**
+ * Interpolation values for the message (`value`, `allowed`, `expected`).
+ */
+params: JsonValue }
 
 /** tauri-specta globals **/
 

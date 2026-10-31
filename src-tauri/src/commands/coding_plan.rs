@@ -12,6 +12,7 @@ pub async fn get_coding_plan_quota(
     team_organization_id: Option<String>,
     team_project_id: Option<String>,
 ) -> Result<SubscriptionQuota, String> {
+    super::validation::validate_optional_outbound_url(Some(&base_url))?;
     crate::services::coding_plan::get_coding_plan_quota(
         &base_url,
         &api_key,

@@ -206,7 +206,7 @@ impl AutoSyncTarget for WebDavTarget {
         "WebDAV"
     }
     fn status_event(&self) -> &'static str {
-        "webdav-sync-status-updated"
+        crate::events::WEBDAV_SYNC_STATUS_UPDATED
     }
     fn is_active(&self) -> bool {
         settings::get_webdav_sync_settings()
@@ -254,7 +254,7 @@ impl AutoSyncTarget for S3Target {
         "S3"
     }
     fn status_event(&self) -> &'static str {
-        "s3-sync-status-updated"
+        crate::events::S3_SYNC_STATUS_UPDATED
     }
     fn is_active(&self) -> bool {
         settings::get_s3_sync_settings()

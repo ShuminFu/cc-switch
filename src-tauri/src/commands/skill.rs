@@ -378,6 +378,7 @@ pub async fn install_skills_from_zip(
     handle: AppHandle,
 ) -> Result<Vec<InstalledSkill>, String> {
     let app_type = parse_app_type(&current_app)?;
+    super::validation::validate_skill_archive_path(std::path::Path::new(&file_path))?;
     run_blocking_with_state(handle, move |state| {
         let path = std::path::Path::new(&file_path);
         SkillService::install_from_zip(&state.db, path, &app_type).map_err(|e| e.to_string())

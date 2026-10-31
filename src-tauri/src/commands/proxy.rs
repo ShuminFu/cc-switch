@@ -26,8 +26,35 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
             "仍有应用处于代理接管状态，请先在设置中关闭对应应用接管后再停止本地路由。".to_string(),
         );
     }
+    // The takeover status counts Claude Desktop when its applied profile uses
+    // this gateway's base URL; also check the live 3P profile itself, which
+    // can point at the proxy's /claude-desktop route (PROXY-30).
+    if claude_desktop_routes_through_proxy(&state).await {
+        return Err(
+            "Claude Desktop 仍通过本地路由访问，请先切换到直连供应商后再停止本地路由。".to_string(),
+        );
+    }
 
     state.proxy_service.stop().await
+}
+
+async fn claude_desktop_routes_through_proxy(state: &AppState) -> bool {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::claude_desktop_config::live_profile_uses_proxy(&db)
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// Whether Claude Desktop's live profile currently routes through the local
+/// proxy (PROXY-30), read from the live 3P profile file.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_claude_desktop_proxy_dependency(
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    Ok(claude_desktop_routes_through_proxy(&state).await)
 }
 
 /// 停止代理服务器（恢复 Live 配置）

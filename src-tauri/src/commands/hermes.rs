@@ -65,11 +65,13 @@ pub async fn get_hermes_model_config() -> Result<Option<hermes_config::HermesMod
 // ============================================================================
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_hermes_memory(kind: hermes_config::MemoryKind) -> Result<String, String> {
     run_blocking(move || hermes_config::read_memory(kind).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_hermes_memory(
     kind: hermes_config::MemoryKind,
     content: String,
@@ -79,11 +81,13 @@ pub async fn set_hermes_memory(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_hermes_memory_limits() -> Result<hermes_config::HermesMemoryLimits, String> {
     run_blocking(move || hermes_config::read_memory_limits().map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_hermes_memory_enabled(
     kind: hermes_config::MemoryKind,
     enabled: bool,
