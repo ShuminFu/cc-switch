@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { History } from "lucide-react";
+import { History, Share2 } from "lucide-react";
 import {
   AccordionContent,
   AccordionItem,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/accordion";
 import { ConfigHistoryPanel } from "./ConfigHistoryPanel";
 import { AuditLogPanel } from "./AuditLogPanel";
+import { ShareBundlePanel } from "./ShareBundlePanel";
 
 function Item({
   value,
@@ -68,6 +69,19 @@ export function WorkbenchAccordionItems() {
           <ConfigHistoryPanel />
           <AuditLogPanel />
         </div>
+      </Item>
+      <Item
+        value="shareBundle"
+        icon={<Share2 className="h-5 w-5 text-teal-500" />}
+        title={t("workbench.bundle.title", {
+          defaultValue: "Share bundle",
+        })}
+        description={t("workbench.bundle.subtitle", {
+          defaultValue:
+            "Share providers, MCP servers and prompts without your keys",
+        })}
+      >
+        <ShareBundlePanel />
       </Item>
     </>
   );
