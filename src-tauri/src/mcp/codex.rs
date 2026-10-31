@@ -8,38 +8,17 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-use crate::app_config::{McpApps, McpConfig, McpServer, MultiAppConfig};
+use crate::adapters::live_file::{write_live_text, WriteOptions};
+use crate::app_config::{McpApps, McpServer, MultiAppConfig};
 use crate::error::AppError;
 
-use super::validation::{extract_server_spec, validate_server_spec};
+use super::collect_enabled_servers;
+use super::validation::validate_server_spec;
 
 fn should_sync_codex_mcp() -> bool {
     // Codex 未安装/未初始化时：~/.codex 目录不存在。
     // 按用户偏好：目录缺失时跳过写入/删除，不创建任何文件或目录。
     crate::codex_config::get_codex_config_dir().exists()
-}
-
-/// 返回已启用的 MCP 服务器（过滤 enabled==true）
-fn collect_enabled_servers(cfg: &McpConfig) -> HashMap<String, Value> {
-    let mut out = HashMap::new();
-    for (id, entry) in cfg.servers.iter() {
-        let enabled = entry
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if !enabled {
-            continue;
-        }
-        match extract_server_spec(entry) {
-            Ok(spec) => {
-                out.insert(id.clone(), spec);
-            }
-            Err(err) => {
-                log::warn!("跳过无效的 MCP 条目 '{id}': {err}");
-            }
-        }
-    }
-    out
 }
 
 /// 从 ~/.codex/config.toml 导入 MCP 到统一结构（v3.7.0+）
@@ -204,7 +183,7 @@ pub fn import_from_codex(config: &mut MultiAppConfig) -> Result<usize, AppError>
 
                 if let Some(val) = json_val {
                     spec.insert(key.clone(), val);
-                    log::debug!("导入扩展字段 '{key}' = {toml_val:?}");
+                    log::debug!("导入扩展字段 '{key}'");
                 }
             }
 
@@ -392,9 +371,13 @@ pub fn sync_single_server_to_codex(
     // 使用唯一正确的格式：[mcp_servers]
     doc["mcp_servers"][id] = Item::Table(toml_table);
 
-    // 写回文件
+    // 写回文件（内容未变化时不写；先备份；config.toml 可能含密钥）
     let new_text = doc.to_string();
-    crate::config::write_text_file(&config_path, &new_text)?;
+    write_live_text(
+        &config_path,
+        &new_text,
+        WriteOptions::backup("codex").secret(),
+    )?;
 
     Ok(())
 }
@@ -414,14 +397,10 @@ pub fn remove_server_from_codex(id: &str) -> Result<(), AppError> {
     let content =
         std::fs::read_to_string(&config_path).map_err(|e| AppError::io(&config_path, e))?;
 
-    // 尝试解析现有配置，如果失败则直接返回（无法删除不存在的内容）
-    let mut doc = match content.parse::<toml_edit::DocumentMut>() {
-        Ok(doc) => doc,
-        Err(e) => {
-            log::warn!("解析 Codex config.toml 失败: {e}，跳过删除操作");
-            return Ok(());
-        }
-    };
+    // 解析失败必须报错：静默成功会让 UI 显示已禁用，而 Codex 仍在启动该服务器（CFG-45）
+    let mut doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| AppError::McpValidation(format!("解析 config.toml 失败: {e}")))?;
 
     // 从正确的位置删除：[mcp_servers]
     if let Some(mcp_servers) = doc.get_mut("mcp_servers").and_then(|s| s.as_table_mut()) {
@@ -439,7 +418,11 @@ pub fn remove_server_from_codex(id: &str) -> Result<(), AppError> {
 
     // 写回文件
     let new_text = doc.to_string();
-    crate::config::write_text_file(&config_path, &new_text)?;
+    write_live_text(
+        &config_path,
+        &new_text,
+        WriteOptions::backup("codex").secret(),
+    )?;
 
     Ok(())
 }
@@ -447,6 +430,16 @@ pub fn remove_server_from_codex(id: &str) -> Result<(), AppError> {
 // ============================================================================
 // TOML 转换辅助函数
 // ============================================================================
+
+/// args/env/headers 中的标量统一转成字符串（数字/布尔不再被静默丢弃，CFG-17）
+pub(super) fn scalar_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
 
 /// 通用 JSON 值到 TOML 值转换器（支持简单类型和浅层嵌套）
 ///
@@ -607,8 +600,13 @@ pub(super) fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table
 
             if let Some(args) = spec.get("args").and_then(|v| v.as_array()) {
                 let mut arr_v = Array::default();
-                for a in args.iter().filter_map(|x| x.as_str()) {
-                    arr_v.push(a);
+                for a in args.iter() {
+                    match scalar_to_string(a) {
+                        Some(arg) => arr_v.push(arg),
+                        None => {
+                            log::warn!("MCP args 中的非标量元素已跳过（Codex 只接受字符串参数）")
+                        }
+                    }
                 }
                 if !arr_v.is_empty() {
                     t["args"] = Item::Value(toml_edit::Value::Array(arr_v));
@@ -624,7 +622,7 @@ pub(super) fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table
             if let Some(env) = spec.get("env").and_then(|v| v.as_object()) {
                 let mut env_tbl = Table::new();
                 for (k, v) in env.iter() {
-                    if let Some(s) = v.as_str() {
+                    if let Some(s) = scalar_to_string(v) {
                         env_tbl[&k[..]] = toml_edit::value(s);
                     }
                 }
@@ -640,7 +638,7 @@ pub(super) fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table
             if let Some(headers) = spec.get("headers").and_then(|v| v.as_object()) {
                 let mut h_tbl = Table::new();
                 for (k, v) in headers.iter() {
-                    if let Some(s) = v.as_str() {
+                    if let Some(s) = scalar_to_string(v) {
                         h_tbl[&k[..]] = toml_edit::value(s);
                     }
                 }
@@ -665,10 +663,11 @@ pub(super) fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table
                 t[&key[..]] = toml_item;
 
                 // 记录扩展字段的处理
+                // 只记录字段名：值可能携带 token/密钥（CFG-20）
                 if extended_fields.contains(&key.as_str()) {
-                    log::debug!("已转换扩展字段 '{key}' = {value:?}");
+                    log::debug!("已转换扩展字段 '{key}'");
                 } else {
-                    log::info!("已转换自定义字段 '{key}' = {value:?}");
+                    log::debug!("已转换自定义字段 '{key}'");
                 }
             }
         }

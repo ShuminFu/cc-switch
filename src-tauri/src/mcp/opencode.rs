@@ -111,7 +111,8 @@ pub fn convert_to_opencode_format(spec: &Value) -> Result<Value, AppError> {
 ///
 /// Conversion rules:
 /// - `local` → `stdio`, command array → command+args, environment → env
-/// - `remote` → `sse`, url preserved
+/// - `remote` → `http` (streamable HTTP, the current MCP transport; OpenCode
+///   falls back to SSE itself), url preserved
 pub fn convert_from_opencode_format(spec: &Value) -> Result<Value, AppError> {
     let obj = spec
         .as_object()
@@ -150,8 +151,9 @@ pub fn convert_from_opencode_format(spec: &Value) -> Result<Value, AppError> {
             }
         }
         "remote" => {
-            // Convert to "sse" type (default remote protocol)
-            result.insert("type".into(), json!("sse"));
+            // Streamable HTTP is the current MCP remote transport (SSE is
+            // deprecated); importing as "sse" broke such servers in Claude/Codex (CFG-16)
+            result.insert("type".into(), json!("http"));
 
             // Preserve url
             if let Some(url) = obj.get("url") {
@@ -349,7 +351,7 @@ mod tests {
         });
 
         let result = convert_from_opencode_format(&spec).unwrap();
-        assert_eq!(result["type"], "sse");
+        assert_eq!(result["type"], "http");
         assert_eq!(result["url"], "https://example.com/mcp");
         assert_eq!(result["headers"]["Authorization"], "Bearer xxx");
     }

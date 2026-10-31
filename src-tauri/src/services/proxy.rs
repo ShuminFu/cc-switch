@@ -502,7 +502,7 @@ impl ProxyService {
 
     /// 设置 AppHandle（在应用初始化时调用）
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
-        futures::executor::block_on(async {
+        crate::services::provider::block_on_async(async {
             *self.app_handle.write().await = Some(handle);
         });
     }
@@ -926,29 +926,34 @@ impl ProxyService {
         let app_type_str = app_type.as_str();
 
         // 1) 恢复原始 Live 配置（备份 → SSOT → 清理占位符 三层兜底）
-        futures::executor::block_on(self.restore_live_config_for_app_with_fallback_inner(app_type))
-            .map_err(|e| format!("恢复 {app_type_str} Live 配置失败: {e}"))?;
+        crate::services::provider::block_on_async(
+            self.restore_live_config_for_app_with_fallback_inner(app_type),
+        )
+        .map_err(|e| format!("恢复 {app_type_str} Live 配置失败: {e}"))?;
 
         // 2) 删除该 app 的备份
-        futures::executor::block_on(self.db.delete_live_backup(app_type_str))
+        crate::services::provider::block_on_async(self.db.delete_live_backup(app_type_str))
             .map_err(|e| format!("删除 {app_type_str} Live 备份失败: {e}"))?;
 
         // 3) 设置 proxy_config.enabled = false
-        let mut config =
-            futures::executor::block_on(self.db.get_proxy_config_for_app(app_type_str))
-                .map_err(|e| format!("获取 {app_type_str} 配置失败: {e}"))?;
+        let mut config = crate::services::provider::block_on_async(
+            self.db.get_proxy_config_for_app(app_type_str),
+        )
+        .map_err(|e| format!("获取 {app_type_str} 配置失败: {e}"))?;
         if config.enabled {
             config.enabled = false;
-            futures::executor::block_on(self.db.update_proxy_config_for_app(config))
+            crate::services::provider::block_on_async(self.db.update_proxy_config_for_app(config))
                 .map_err(|e| format!("清除 {app_type_str} enabled 状态失败: {e}"))?;
         }
 
         // 4) 清除该应用的健康状态
-        futures::executor::block_on(self.db.clear_provider_health_for_app(app_type_str))
-            .map_err(|e| format!("清除 {app_type_str} 健康状态失败: {e}"))?;
+        crate::services::provider::block_on_async(
+            self.db.clear_provider_health_for_app(app_type_str),
+        )
+        .map_err(|e| format!("清除 {app_type_str} 健康状态失败: {e}"))?;
 
         // 5) 清旧标志
-        let _ = futures::executor::block_on(self.db.set_live_takeover_active(false));
+        let _ = crate::services::provider::block_on_async(self.db.set_live_takeover_active(false));
 
         Ok(())
     }
@@ -1370,64 +1375,26 @@ impl ProxyService {
 
     /// 备份各应用的 Live 配置
     async fn backup_live_configs(&self) -> Result<(), String> {
-        // Claude
-        if let Ok(config) = self.read_claude_live() {
+        for adapter in crate::adapters::takeover_adapters() {
+            let app_type = adapter.app();
+            let app_type_str = app_type.as_str();
+            let Ok(config) = self.read_live_config_for_app(&app_type) else {
+                continue;
+            };
             // 跳过已被代理接管的 Live：避免把代理占位符当作"原始 Live"存进备份槽。
             // 否则下次 start_with_takeover 在异常历史状态下（Live 已是占位符）再次
             // 调用本函数，会用代理配置覆盖一个原本正常的备份；之后 stop 恢复时
             // 即便走到备份路径也会把代理占位符再写回 Live，永久卡在 127.0.0.1:15721。
-            if Self::live_has_proxy_placeholder_for_app(&AppType::Claude, &config) {
-                log::warn!("claude Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live");
-            } else {
-                let json_str = serde_json::to_string(&config)
-                    .map_err(|e| format!("序列化 Claude 配置失败: {e}"))?;
-                self.db
-                    .save_live_backup("claude", &json_str)
-                    .await
-                    .map_err(|e| format!("备份 Claude 配置失败: {e}"))?;
+            if Self::live_has_proxy_placeholder_for_app(&app_type, &config) {
+                log::warn!("{app_type_str} Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live");
+                continue;
             }
-        }
-
-        // Codex
-        if let Ok(config) = self.read_codex_live() {
-            if Self::live_has_proxy_placeholder_for_app(&AppType::Codex, &config) {
-                log::warn!("codex Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live");
-            } else {
-                let json_str = serde_json::to_string(&config)
-                    .map_err(|e| format!("序列化 Codex 配置失败: {e}"))?;
-                self.db
-                    .save_live_backup("codex", &json_str)
-                    .await
-                    .map_err(|e| format!("备份 Codex 配置失败: {e}"))?;
-            }
-        }
-
-        // Gemini
-        if let Ok(config) = self.read_gemini_live() {
-            if Self::live_has_proxy_placeholder_for_app(&AppType::Gemini, &config) {
-                log::warn!("gemini Live 已被代理接管，不备份（避免把代理配置固化进备份槽）；下次 stop 会从 SSOT 重建 Live");
-            } else {
-                let json_str = serde_json::to_string(&config)
-                    .map_err(|e| format!("序列化 Gemini 配置失败: {e}"))?;
-                self.db
-                    .save_live_backup("gemini", &json_str)
-                    .await
-                    .map_err(|e| format!("备份 Gemini 配置失败: {e}"))?;
-            }
-        }
-
-        // Grok Build
-        if let Ok(config) = self.read_grok_live() {
-            if Self::live_has_proxy_placeholder_for_app(&AppType::GrokBuild, &config) {
-                log::warn!("grokbuild Live 已被代理接管，不备份；下次 stop 会从 SSOT 重建 Live");
-            } else {
-                let json_str = serde_json::to_string(&config)
-                    .map_err(|e| format!("序列化 Grok Build 配置失败: {e}"))?;
-                self.db
-                    .save_live_backup("grokbuild", &json_str)
-                    .await
-                    .map_err(|e| format!("备份 Grok Build 配置失败: {e}"))?;
-            }
+            let json_str = serde_json::to_string(&config)
+                .map_err(|e| format!("序列化 {app_type_str} 配置失败: {e}"))?;
+            self.db
+                .save_live_backup(app_type_str, &json_str)
+                .await
+                .map_err(|e| format!("备份 {app_type_str} 配置失败: {e}"))?;
         }
 
         log::info!("已备份所有应用的 Live 配置");
@@ -1436,13 +1403,8 @@ impl ProxyService {
 
     /// 备份指定应用的 Live 配置（严格模式：目标配置不存在则返回错误）
     async fn backup_live_config_strict(&self, app_type: &AppType) -> Result<(), String> {
-        let (app_type_str, config) = match app_type {
-            AppType::Claude => ("claude", self.read_claude_live()?),
-            AppType::Codex => ("codex", self.read_codex_live()?),
-            AppType::Gemini => ("gemini", self.read_gemini_live()?),
-            AppType::GrokBuild => ("grokbuild", self.read_grok_live()?),
-            _ => return Err("该应用不支持代理功能".to_string()),
-        };
+        let app_type_str = app_type.as_str();
+        let config = self.read_live_config_for_app(app_type)?;
 
         // 跳过已被代理接管的 Live：避免把代理占位符当作"原始 Live"存进备份槽
         // （见 backup_live_configs 中的注释）。
@@ -1716,40 +1678,18 @@ impl ProxyService {
     }
 
     async fn restore_live_config_for_app_inner(&self, app_type: &AppType) -> Result<(), String> {
-        match app_type {
-            AppType::Claude => {
-                if let Ok(Some(backup)) = self.db.get_live_backup("claude").await {
-                    let config: Value = serde_json::from_str(&backup.original_config)
-                        .map_err(|e| format!("解析 Claude 备份失败: {e}"))?;
-                    self.write_claude_live(&config)?;
-                    log::info!("Claude Live 配置已恢复");
-                }
-            }
-            AppType::Codex => {
-                if let Ok(Some(backup)) = self.db.get_live_backup("codex").await {
-                    let config: Value = serde_json::from_str(&backup.original_config)
-                        .map_err(|e| format!("解析 Codex 备份失败: {e}"))?;
-                    self.write_codex_live(&config)?;
-                    log::info!("Codex Live 配置已恢复");
-                }
-            }
-            AppType::Gemini => {
-                if let Ok(Some(backup)) = self.db.get_live_backup("gemini").await {
-                    let config: Value = serde_json::from_str(&backup.original_config)
-                        .map_err(|e| format!("解析 Gemini 备份失败: {e}"))?;
-                    self.write_gemini_live(&config)?;
-                    log::info!("Gemini Live 配置已恢复");
-                }
-            }
-            AppType::GrokBuild => {
-                if let Ok(Some(backup)) = self.db.get_live_backup("grokbuild").await {
-                    let config: Value = serde_json::from_str(&backup.original_config)
-                        .map_err(|e| format!("解析 Grok Build 备份失败: {e}"))?;
-                    self.write_grok_live(&config)?;
-                    log::info!("Grok Build Live 配置已恢复");
-                }
-            }
-            _ => {}
+        if !crate::adapters::adapter_for(app_type)
+            .capabilities()
+            .proxy_takeover
+        {
+            return Ok(());
+        }
+        let app_type_str = app_type.as_str();
+        if let Ok(Some(backup)) = self.db.get_live_backup(app_type_str).await {
+            let config: Value = serde_json::from_str(&backup.original_config)
+                .map_err(|e| format!("解析 {app_type_str} 备份失败: {e}"))?;
+            self.write_live_config_for_app(app_type, &config)?;
+            log::info!("{app_type_str} Live 配置已恢复");
         }
 
         Ok(())
@@ -1759,14 +1699,9 @@ impl ProxyService {
     async fn restore_live_configs(&self) -> Result<(), String> {
         let mut errors = Vec::new();
 
-        for app_type in [
-            AppType::Claude,
-            AppType::Codex,
-            AppType::Gemini,
-            AppType::GrokBuild,
-        ] {
+        for adapter in crate::adapters::takeover_adapters() {
             if let Err(e) = self
-                .restore_live_config_for_app_with_fallback(&app_type)
+                .restore_live_config_for_app_with_fallback(&adapter.app())
                 .await
             {
                 errors.push(e);
@@ -1858,25 +1793,21 @@ impl ProxyService {
         }
     }
 
-    pub fn detect_takeover_in_live_config_for_app(&self, app_type: &AppType) -> bool {
+    /// 读取代理接管所备份/恢复的原始 Live 快照（每个支持接管的应用一处分派）。
+    fn read_live_config_for_app(&self, app_type: &AppType) -> Result<Value, String> {
         match app_type {
-            AppType::Claude => match self.read_claude_live() {
-                Ok(config) => Self::is_claude_live_taken_over(&config),
-                Err(_) => false,
-            },
-            AppType::Codex => match self.read_codex_live() {
-                Ok(config) => Self::is_codex_live_taken_over(&config),
-                Err(_) => false,
-            },
-            AppType::Gemini => match self.read_gemini_live() {
-                Ok(config) => Self::is_gemini_live_taken_over(&config),
-                Err(_) => false,
-            },
-            AppType::GrokBuild => match self.read_grok_live() {
-                Ok(config) => Self::is_grok_live_taken_over(&config),
-                Err(_) => false,
-            },
-            _ => false,
+            AppType::Claude => self.read_claude_live(),
+            AppType::Codex => self.read_codex_live(),
+            AppType::Gemini => self.read_gemini_live(),
+            AppType::GrokBuild => self.read_grok_live(),
+            _ => Err("该应用不支持代理功能".to_string()),
+        }
+    }
+
+    pub fn detect_takeover_in_live_config_for_app(&self, app_type: &AppType) -> bool {
+        match self.read_live_config_for_app(app_type) {
+            Ok(config) => Self::live_has_proxy_placeholder_for_app(app_type, &config),
+            Err(_) => false,
         }
     }
 
@@ -2174,31 +2105,8 @@ impl ProxyService {
     /// 用于兜底处理：当数据库备份缺失但 Live 文件已经写成代理占位符时，
     /// 启动流程可以据此触发恢复逻辑。
     pub fn detect_takeover_in_live_configs(&self) -> bool {
-        if let Ok(config) = self.read_claude_live() {
-            if Self::is_claude_live_taken_over(&config) {
-                return true;
-            }
-        }
-
-        if let Ok(config) = self.read_codex_live() {
-            if Self::is_codex_live_taken_over(&config) {
-                return true;
-            }
-        }
-
-        if let Ok(config) = self.read_gemini_live() {
-            if Self::is_gemini_live_taken_over(&config) {
-                return true;
-            }
-        }
-
-        if let Ok(config) = self.read_grok_live() {
-            if Self::is_grok_live_taken_over(&config) {
-                return true;
-            }
-        }
-
-        false
+        crate::adapters::takeover_adapters()
+            .any(|adapter| self.detect_takeover_in_live_config_for_app(&adapter.app()))
     }
 
     fn is_claude_live_taken_over(config: &Value) -> bool {

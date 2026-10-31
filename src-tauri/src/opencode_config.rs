@@ -1,4 +1,7 @@
-use crate::config::write_json_file;
+use crate::adapters::json5_doc::Json5Doc;
+use crate::adapters::live_file::{
+    read_text_lenient, to_json_string, write_live_text, JsonStyle, WriteOptions,
+};
 use crate::error::AppError;
 use crate::provider::OpenCodeProviderConfig;
 use crate::settings::get_opencode_override_dir;
@@ -80,22 +83,16 @@ fn get_opencode_data_dir() -> PathBuf {
         .join("opencode")
 }
 
-#[allow(dead_code)]
-pub fn get_opencode_env_path() -> PathBuf {
-    get_opencode_dir().join(".env")
-}
-
 pub fn read_opencode_config() -> Result<Value, AppError> {
     let path = get_opencode_config_path();
 
-    if !path.exists() {
+    let Some(live) = read_text_lenient(&path)? else {
         return Ok(json!({
             "$schema": "https://opencode.ai/config.json"
         }));
-    }
+    };
 
-    let content = std::fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
-    json5::from_str(&content).map_err(|e| {
+    json5::from_str(&live.text).map_err(|e| {
         AppError::Config(format!(
             "Failed to parse OpenCode config: {}: {e}",
             path.display()
@@ -103,9 +100,32 @@ pub fn read_opencode_config() -> Result<Value, AppError> {
     })
 }
 
+/// Write the full OpenCode config.
+///
+/// `opencode.json(c)` is user-maintained JSONC: instead of re-serialising the
+/// whole value (which used to drop every comment and alphabetise all keys),
+/// the existing document is patched so that only the keys that actually
+/// changed are rewritten (CFG-07). The previous file is backed up first and
+/// nothing is written when the content is unchanged.
 pub fn write_opencode_config(config: &Value) -> Result<(), AppError> {
     let path = get_opencode_config_path();
-    write_json_file(&path, config)?;
+    let content = match read_text_lenient(&path)? {
+        Some(live) => match Json5Doc::parse(&live.text) {
+            Ok(mut doc) => {
+                doc.apply(config)?;
+                live.style.apply(&doc.render())
+            }
+            Err(err) => {
+                // The round-trip parser is stricter than the reader; fall back
+                // to a plain rewrite (the old content is backed up below).
+                log::warn!("OpenCode config could not be edited in place ({err}); rewriting it");
+                to_json_string(config, &JsonStyle::detect(&live.text))?
+            }
+        },
+        None => to_json_string(config, &JsonStyle::default())?,
+    };
+
+    write_live_text(&path, &content, WriteOptions::backup("opencode").secret())?;
 
     log::debug!("OpenCode config written to {path:?}");
     Ok(())

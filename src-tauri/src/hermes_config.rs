@@ -291,6 +291,26 @@ fn find_yaml_section_range(raw: &str, section_key: &str) -> Option<(usize, usize
     section_start.map(|start| (start, raw.len()))
 }
 
+/// Find the byte range of a top-level section's *content*.
+///
+/// Like [`find_yaml_section_range`], but blank lines and comments after the
+/// section's last content line are left out: they belong to whatever follows
+/// (typically a comment describing the next section), so replacing this
+/// section must not delete them (CFG-08).
+fn find_yaml_section_content_range(raw: &str, section_key: &str) -> Option<(usize, usize)> {
+    let (start, end) = find_yaml_section_range(raw, section_key)?;
+    let mut content_end = start;
+    let mut offset = start;
+    for (i, line) in raw[start..end].split_inclusive('\n').enumerate() {
+        offset += line.len();
+        let trimmed = line.trim();
+        if i == 0 || !(trimmed.is_empty() || trimmed.starts_with('#')) {
+            content_end = offset;
+        }
+    }
+    Some((start, content_end))
+}
+
 /// Serialize a section key + value into a YAML fragment like:
 ///
 /// ```yaml
@@ -322,38 +342,316 @@ fn remove_all_sections(raw: &str, section_key: &str) -> String {
 }
 
 /// Replace a YAML section in raw text, or append it if not found.
+///
+/// Format preservation (CFG-08):
+/// - comments/blank lines after the section (usually describing the next
+///   section) are kept, see [`find_yaml_section_content_range`];
+/// - for mapping and sequence sections only the child entries that changed
+///   are re-serialised; untouched entries keep their comments, quoting and
+///   anchors byte-for-byte (see [`splice_yaml_section`]);
+/// - newly generated text uses the file's line ending (CRLF files stay CRLF).
 fn replace_yaml_section(
     raw: &str,
     section_key: &str,
     value: &serde_yaml::Value,
 ) -> Result<String, AppError> {
-    let serialized = serialize_yaml_section(section_key, value)?;
+    let eol = crate::adapters::live_file::TextStyle::detect(raw).eol();
 
-    if let Some((start, end)) = find_yaml_section_range(raw, section_key) {
-        let mut result = String::with_capacity(raw.len());
+    if let Some((start, end)) = find_yaml_section_content_range(raw, section_key) {
+        let rendered = splice_yaml_section(&raw[start..end], section_key, value, eol)?;
+        let mut result = String::with_capacity(raw.len() + rendered.len());
         result.push_str(&raw[..start]);
-        result.push_str(&serialized);
+        result.push_str(&rendered);
         // Drop duplicate sections of this key from the remainder — configs
         // written before the CRLF fix may carry several appended copies.
         let remainder = remove_all_sections(&raw[end..], section_key);
         // Ensure proper separation between sections
-        if !serialized.ends_with('\n') && !remainder.is_empty() && !remainder.starts_with('\n') {
-            result.push('\n');
+        if !rendered.ends_with('\n')
+            && !remainder.is_empty()
+            && !remainder.starts_with(['\n', '\r'])
+        {
+            result.push_str(eol);
         }
         result.push_str(&remainder);
         Ok(result)
     } else {
         // Section not found — append at end
+        let serialized = crate::adapters::live_file::normalize_eol(
+            &serialize_yaml_section(section_key, value)?,
+            eol,
+        );
         let mut result = raw.to_string();
         if !result.is_empty() && !result.ends_with('\n') {
-            result.push('\n');
+            result.push_str(eol);
         }
         result.push_str(&serialized);
         if !result.ends_with('\n') {
-            result.push('\n');
+            result.push_str(eol);
         }
         Ok(result)
     }
+}
+
+/// Render `section_key: value` reusing as much of `raw_section` as possible.
+///
+/// `raw_section` runs from the section's key line to its last content line.
+/// When the section is a block mapping or block sequence whose entries can be
+/// parsed one by one, entries that did not change are copied verbatim
+/// (including the comments directly above them) and only changed/new entries
+/// are serialised. Anything more exotic falls back to re-serialising the
+/// whole section.
+fn splice_yaml_section(
+    raw_section: &str,
+    section_key: &str,
+    value: &serde_yaml::Value,
+    eol: &str,
+) -> Result<String, AppError> {
+    use crate::adapters::live_file::normalize_eol;
+
+    let old = serde_yaml::from_str::<serde_yaml::Mapping>(raw_section)
+        .ok()
+        .and_then(|m| {
+            m.get(serde_yaml::Value::String(section_key.to_string()))
+                .cloned()
+        });
+    if old.as_ref() == Some(value) {
+        return Ok(raw_section.to_string());
+    }
+    if let Some(old) = old {
+        if let Some(spliced) = splice_yaml_children(raw_section, section_key, &old, value, eol) {
+            return Ok(spliced);
+        }
+    }
+    Ok(normalize_eol(
+        &serialize_yaml_section(section_key, value)?,
+        eol,
+    ))
+}
+
+/// One child entry of a block mapping/sequence section.
+struct YamlChildBlock<'a> {
+    /// Comment/blank lines directly above the entry.
+    comments: Vec<&'a str>,
+    /// The entry's own lines (anchor line + continuation lines).
+    body: Vec<&'a str>,
+    value: serde_yaml::Value,
+}
+
+fn yaml_is_comment_or_blank(line: &str) -> bool {
+    let t = line.trim();
+    t.is_empty() || t.starts_with('#')
+}
+
+fn yaml_indent_of(line: &str) -> usize {
+    line.len() - line.trim_start_matches([' ', '\t']).len()
+}
+
+fn splice_yaml_children(
+    raw_section: &str,
+    section_key: &str,
+    old: &serde_yaml::Value,
+    new: &serde_yaml::Value,
+    eol: &str,
+) -> Option<String> {
+    use crate::adapters::live_file::normalize_eol;
+
+    let is_sequence = match (old, new) {
+        (serde_yaml::Value::Mapping(o), serde_yaml::Value::Mapping(n))
+            if !o.is_empty() && !n.is_empty() =>
+        {
+            false
+        }
+        (serde_yaml::Value::Sequence(o), serde_yaml::Value::Sequence(n))
+            if !o.is_empty() && !n.is_empty() =>
+        {
+            true
+        }
+        _ => return None,
+    };
+
+    let lines: Vec<&str> = raw_section.split_inclusive('\n').collect();
+    let (header, body) = lines.split_first()?;
+    // Only block style headers (`key:` optionally followed by a comment).
+    let after_key = header.strip_prefix(section_key)?.strip_prefix(':')?.trim();
+    if !(after_key.is_empty() || after_key.starts_with('#')) {
+        return None;
+    }
+
+    let first_content = body.iter().find(|l| !yaml_is_comment_or_blank(l))?;
+    let child_indent = &first_content[..yaml_indent_of(first_content)];
+    let is_anchor = |line: &str| {
+        if yaml_is_comment_or_blank(line) || yaml_indent_of(line) != child_indent.len() {
+            return false;
+        }
+        let content = line.trim_start_matches([' ', '\t']);
+        content.starts_with('-') == is_sequence
+    };
+
+    // Split the body into blocks: leading comments + anchor + continuation.
+    let mut blocks: Vec<(Vec<&str>, Vec<&str>)> = Vec::new();
+    let mut pending: Vec<&str> = Vec::new();
+    for line in body {
+        if is_anchor(line) {
+            blocks.push((std::mem::take(&mut pending), vec![*line]));
+        } else if yaml_is_comment_or_blank(line) {
+            pending.push(line);
+        } else if let Some((_, block_body)) = blocks.last_mut() {
+            // continuation line: comments seen in between belong to the entry
+            block_body.append(&mut pending);
+            block_body.push(line);
+        } else {
+            return None;
+        }
+    }
+    // the content range never ends with comments, but stay safe
+    if let Some((_, block_body)) = blocks.last_mut() {
+        block_body.append(&mut pending);
+    }
+
+    let dedent = |lines: &[&str]| -> String {
+        lines
+            .iter()
+            .map(|l| l.strip_prefix(child_indent).unwrap_or(l.trim_start()))
+            .collect::<String>()
+    };
+    let mut parsed: Vec<YamlChildBlock> = Vec::with_capacity(blocks.len());
+    for (comments, body) in blocks {
+        let text = dedent(&body);
+        let value = if is_sequence {
+            let seq: serde_yaml::Sequence = serde_yaml::from_str(&text).ok()?;
+            if seq.len() != 1 {
+                return None;
+            }
+            seq.into_iter().next()?
+        } else {
+            let map: serde_yaml::Mapping = serde_yaml::from_str(&text).ok()?;
+            if map.len() != 1 {
+                return None;
+            }
+            serde_yaml::Value::Mapping(map)
+        };
+        parsed.push(YamlChildBlock {
+            comments,
+            body,
+            value,
+        });
+    }
+
+    // The blocks must describe exactly the old value, otherwise we do not
+    // understand the layout well enough to splice it.
+    let reconstructed = if is_sequence {
+        serde_yaml::Value::Sequence(parsed.iter().map(|b| b.value.clone()).collect())
+    } else {
+        let mut map = serde_yaml::Mapping::new();
+        for b in &parsed {
+            if let serde_yaml::Value::Mapping(m) = &b.value {
+                for (k, v) in m {
+                    map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        serde_yaml::Value::Mapping(map)
+    };
+    if &reconstructed != old {
+        return None;
+    }
+
+    let render = |entry: serde_yaml::Value| -> Option<String> {
+        let text = serde_yaml::to_string(&entry).ok()?;
+        let mut out = String::new();
+        for line in text.split_inclusive('\n') {
+            out.push_str(child_indent);
+            out.push_str(line);
+        }
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        Some(normalize_eol(&out, eol))
+    };
+    let push_lines = |out: &mut String, lines: &[&str]| {
+        for line in lines {
+            out.push_str(line);
+        }
+        if !lines.is_empty() && !out.ends_with('\n') {
+            out.push_str(eol);
+        }
+    };
+
+    let mut out = String::with_capacity(raw_section.len());
+    out.push_str(header);
+    if !out.ends_with('\n') {
+        out.push_str(eol);
+    }
+
+    if is_sequence {
+        let new_items = new.as_sequence()?;
+        let mut used = vec![false; parsed.len()];
+        for item in new_items {
+            let exact = (0..parsed.len()).find(|&i| !used[i] && parsed[i].value == *item);
+            if let Some(i) = exact {
+                used[i] = true;
+                push_lines(&mut out, &parsed[i].comments);
+                push_lines(&mut out, &parsed[i].body);
+                continue;
+            }
+            // Same `name` → edited entry: keep the comments above it.
+            let same_name = item.get("name").and_then(|name| {
+                (0..parsed.len()).find(|&i| !used[i] && parsed[i].value.get("name") == Some(name))
+            });
+            if let Some(i) = same_name {
+                used[i] = true;
+                push_lines(&mut out, &parsed[i].comments);
+            }
+            out.push_str(&render(serde_yaml::Value::Sequence(vec![item.clone()]))?);
+        }
+    } else {
+        let new_map = new.as_mapping()?;
+        let mut emitted = std::collections::HashSet::new();
+        for block in &parsed {
+            let serde_yaml::Value::Mapping(m) = &block.value else {
+                return None;
+            };
+            let (key, old_value) = m.iter().next()?;
+            match new_map.get(key) {
+                Some(new_value) if new_value == old_value => {
+                    push_lines(&mut out, &block.comments);
+                    push_lines(&mut out, &block.body);
+                }
+                Some(new_value) => {
+                    push_lines(&mut out, &block.comments);
+                    let mut entry = serde_yaml::Mapping::new();
+                    entry.insert(key.clone(), new_value.clone());
+                    out.push_str(&render(serde_yaml::Value::Mapping(entry))?);
+                }
+                None => continue,
+            }
+            emitted.insert(key.clone());
+        }
+        for (key, value) in new_map {
+            if emitted.contains(key) {
+                continue;
+            }
+            let mut entry = serde_yaml::Mapping::new();
+            entry.insert(key.clone(), value.clone());
+            out.push_str(&render(serde_yaml::Value::Mapping(entry))?);
+        }
+    }
+
+    // The rendered section must parse back to exactly the requested value.
+    let check: serde_yaml::Mapping = serde_yaml::from_str(&out).ok()?;
+    if check.get(serde_yaml::Value::String(section_key.to_string())) != Some(new) {
+        return None;
+    }
+    // Keep "no trailing newline at EOF" files that way.
+    if !raw_section.ends_with('\n') {
+        while out.ends_with('\n') {
+            out.pop();
+            if out.ends_with('\r') {
+                out.pop();
+            }
+        }
+    }
+    Some(out)
 }
 
 // ============================================================================
@@ -1562,6 +1860,130 @@ model:
         assert!(result.contains("gpt-4"));
         assert!(result.contains("agent:"));
         assert!(result.contains("max_turns: 50"));
+    }
+
+    // ---- CFG-08: comment / line-ending preservation ----
+
+    const COMMENTED_HERMES: &str = "\
+# Hermes config maintained by hand
+model:
+  default: gpt-4 # the default model
+  provider: openai
+
+# providers used by the team
+custom_providers:
+  # primary gateway
+  - name: alpha
+    base_url: https://alpha.example/v1
+    api_key: sk-alpha # rotate monthly
+  # backup gateway
+  - name: beta
+    base_url: https://beta.example/v1
+
+# MCP servers
+mcp_servers:
+  # filesystem access
+  fs:
+    command: npx
+    args: [\"-y\", \"@mcp/fs\"]
+  # web search
+  search:
+    url: https://search.example/mcp
+
+# This is a comment about the agent section
+defaults: &defaults
+  max_turns: 10
+agent:
+  <<: *defaults
+";
+
+    fn yaml(text: &str) -> serde_yaml::Value {
+        serde_yaml::from_str(text).unwrap()
+    }
+
+    #[test]
+    fn replace_keeps_comment_preceding_next_section() {
+        let new_model = yaml("default: claude\nprovider: anthropic\n");
+        let result = replace_yaml_section(COMMENTED_HERMES, "model", &new_model).unwrap();
+        assert!(result.contains("# providers used by the team"), "{result}");
+        assert!(result.contains("# This is a comment about the agent section"));
+        assert!(result.contains("default: claude"));
+        // the untouched anchor/merge-key sections are byte-identical
+        assert!(result.ends_with("defaults: &defaults\n  max_turns: 10\nagent:\n  <<: *defaults\n"));
+    }
+
+    #[test]
+    fn replace_sequence_section_keeps_unchanged_items_and_comments() {
+        let mut providers = yaml(COMMENTED_HERMES)["custom_providers"].clone();
+        let seq = providers.as_sequence_mut().unwrap();
+        seq[1]["base_url"] = serde_yaml::Value::String("https://beta2.example/v1".into());
+        let result =
+            replace_yaml_section(COMMENTED_HERMES, "custom_providers", &providers).unwrap();
+        // untouched entry verbatim, including inline comment
+        assert!(result.contains("  # primary gateway\n  - name: alpha\n    base_url: https://alpha.example/v1\n    api_key: sk-alpha # rotate monthly\n"), "{result}");
+        // edited entry keeps the comment above it
+        assert!(
+            result.contains("  # backup gateway\n  - name: beta\n"),
+            "{result}"
+        );
+        assert!(result.contains("https://beta2.example/v1"));
+        assert!(result.contains("# MCP servers\nmcp_servers:"));
+        let parsed = yaml(&result);
+        assert_eq!(parsed["custom_providers"], providers);
+    }
+
+    #[test]
+    fn replace_mapping_section_only_touches_changed_servers() {
+        let mut servers = yaml(COMMENTED_HERMES)["mcp_servers"].clone();
+        let map = servers.as_mapping_mut().unwrap();
+        map.remove("search");
+        map.insert(
+            serde_yaml::Value::String("git".into()),
+            yaml("command: uvx\nargs: [mcp-git]\n"),
+        );
+        let result = replace_yaml_section(COMMENTED_HERMES, "mcp_servers", &servers).unwrap();
+        assert!(
+            result.contains(
+                "  # filesystem access\n  fs:\n    command: npx\n    args: [\"-y\", \"@mcp/fs\"]\n"
+            ),
+            "{result}"
+        );
+        assert!(!result.contains("search"));
+        assert!(!result.contains("# web search"));
+        assert!(result.contains("  git:\n"));
+        assert!(result.contains("# This is a comment about the agent section"));
+        assert_eq!(yaml(&result)["mcp_servers"], servers);
+    }
+
+    #[test]
+    fn replace_unchanged_section_is_identity() {
+        let current = yaml(COMMENTED_HERMES);
+        for key in ["model", "custom_providers", "mcp_servers"] {
+            let result = replace_yaml_section(COMMENTED_HERMES, key, &current[key]).unwrap();
+            assert_eq!(result, COMMENTED_HERMES, "section {key}");
+        }
+    }
+
+    #[test]
+    fn replace_in_crlf_file_keeps_crlf() {
+        let crlf = COMMENTED_HERMES.replace('\n', "\r\n");
+        let mut servers = yaml(&crlf)["mcp_servers"].clone();
+        servers.as_mapping_mut().unwrap().insert(
+            serde_yaml::Value::String("git".into()),
+            yaml("command: uvx\n"),
+        );
+        let result = replace_yaml_section(&crlf, "mcp_servers", &servers).unwrap();
+        assert!(
+            !result.replace("\r\n", "").contains('\n'),
+            "mixed line endings: {result:?}"
+        );
+        assert!(result.contains("  git:\r\n    command: uvx\r\n"));
+
+        let new_model = yaml("default: claude\n");
+        let result = replace_yaml_section(&crlf, "model", &new_model).unwrap();
+        assert!(!result.replace("\r\n", "").contains('\n'), "{result:?}");
+        let appended = replace_yaml_section(&crlf, "memory", &yaml("enabled: true\n")).unwrap();
+        assert!(!appended.replace("\r\n", "").contains('\n'), "{appended:?}");
     }
 
     #[test]

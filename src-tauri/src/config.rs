@@ -243,17 +243,17 @@ pub fn get_provider_config_path(provider_id: &str, provider_name: Option<&str>) 
 }
 
 /// 读取 JSON 配置文件
+///
+/// 容忍 UTF-8/UTF-16 BOM（Windows 记事本/PowerShell 常见），见 CFG-14。
 pub fn read_json_file<T: for<'a> Deserialize<'a>>(path: &Path) -> Result<T, AppError> {
-    if !path.exists() {
+    let Some(live) = crate::adapters::live_file::read_text_lenient(path)? else {
         return Err(AppError::Config(format!("文件不存在: {}", path.display())));
-    }
+    };
 
-    let content = fs::read_to_string(path).map_err(|e| AppError::io(path, e))?;
-
-    serde_json::from_str(&content).map_err(|e| AppError::json(path, e))
+    serde_json::from_str(&live.text).map_err(|e| AppError::json(path, e))
 }
 
-/// 递归排序 JSON 对象的键（按字母顺序），确保序列化输出是确定性的
+/// 递归排序 JSON 对象的键（按字母顺序），确保新建文件的输出是确定性的
 fn sort_json_keys(value: &Value) -> Value {
     match value {
         Value::Object(map) => {
@@ -270,7 +270,10 @@ fn sort_json_keys(value: &Value) -> Value {
     }
 }
 
-/// 写入 JSON 配置文件（键按字母排序，确保确定性输出）
+/// 写入 JSON 配置文件
+///
+/// 已有文件：保留键的插入顺序（读入文件的顺序 / 结构体字段顺序），沿用已有文件的缩进、
+/// 结尾换行、BOM 与换行符风格；新文件按键排序、两空格缩进并以换行结尾（CFG-28）。
 pub fn write_json_file<T: Serialize>(path: &Path, data: &T) -> Result<(), AppError> {
     write_json_file_with_mode(path, data, NewFileMode::Default)
 }
@@ -290,10 +293,19 @@ fn write_json_file_with_mode<T: Serialize>(
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
 
-    let value = serde_json::to_value(data).map_err(|e| AppError::JsonSerialize { source: e })?;
-    let sorted_value = sort_json_keys(&value);
-    let json = serde_json::to_string_pretty(&sorted_value)
-        .map_err(|e| AppError::JsonSerialize { source: e })?;
+    let json = if path.exists() {
+        // 已有文件：保留调用方给出的键顺序（通常就是从该文件读入的顺序）与文件风格
+        let style = crate::adapters::live_file::JsonStyle::of_file(path);
+        crate::adapters::live_file::to_json_string(data, &style)?
+    } else {
+        // 新文件：键按字母排序，保证同一逻辑配置的输出确定
+        let value =
+            serde_json::to_value(data).map_err(|e| AppError::JsonSerialize { source: e })?;
+        crate::adapters::live_file::to_json_string(
+            &sort_json_keys(&value),
+            &crate::adapters::live_file::JsonStyle::default(),
+        )?
+    };
 
     atomic_write_with_mode(path, json.as_bytes(), mode)
 }
