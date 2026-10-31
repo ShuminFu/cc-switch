@@ -26,11 +26,9 @@ describe("isTransientUsageError", () => {
   it("网络类失败 → 瞬时（true）", () => {
     expect(isTransientUsageError(fail("Network error: timed out"))).toBe(true);
     expect(isTransientUsageError(fail("Request failed: timed out"))).toBe(true);
-    expect(isTransientUsageError(fail("请求失败: 连接超时"))).toBe(true);
     expect(isTransientUsageError(fail("Failed to read response: eof"))).toBe(
       true,
     );
-    expect(isTransientUsageError(fail("读取响应失败: eof"))).toBe(true);
   });
 
   it("确定性失败 → 非瞬时（false），必须立即透出", () => {

@@ -136,10 +136,12 @@ export const KEEP_LAST_GOOD_MS = 10 * 60 * 1000; // 10 分钟
  * 未知供应商、4xx、脚本/解析错误等）必须立即透出——用户改/删凭据后要马上看到，
  * 否则会一直显示过期额度直到窗口结束。
  *
- * 注：后端已把纯传输层失败（send 失败/超时/读体中断）转成 Err → invoke reject，
- * 不再折叠进 `Ok(success:false)`，到不了这里——那类失败由 [`resolveDisplayUsage`]
- * 的 `rejected` 分支按同一窗口处理。本白名单主要兜仍以 `success:false` 返回的
- * **HTTP 5xx/429**，网络类文案匹配仅作兼容冗余。
+ * 注：JS 脚本 usage_script 的纯传输层失败（send 失败/超时/读体中断）由后端按
+ * i18nKey（`usage_script.request_failed` / `usage_script.read_response_failed`）
+ * 转成 Err → invoke reject，不再折叠进 `Ok(success:false)`，到不了这里——那类失败由
+ * [`resolveDisplayUsage`] 的 `rejected` 分支按同一窗口处理，因此这里不匹配其本地化
+ * （中文）文案。本白名单主要兜仍以 `success:false` 返回的 **HTTP 5xx/429** 与原生路径
+ * 的英文网络类文案；`request failed` 仅作防御性兜底。
  *
  * 采用**白名单**，失败安全——任何未识别的错误一律按"非瞬时"立即透出，绝不误掩盖
  * 确定性失败。需与后端错误文案保持同步：
@@ -157,10 +159,8 @@ export function isTransientUsageError(result: UsageLikeResult): boolean {
   // 网络类（send 失败/超时/读取响应失败）
   if (
     e.includes("network error") || // 原生路径
-    e.includes("request failed") || // JS 脚本 (en)
-    e.includes("请求失败") || // JS 脚本 (zh)
-    e.includes("failed to read response") || // JS 脚本 (en)
-    e.includes("读取响应失败") // JS 脚本 (zh)
+    e.includes("request failed") || // 防御性兜底（脚本路径已改为 reject）
+    e.includes("failed to read response") // 原生 balance/coding_plan 读体失败
   ) {
     return true;
   }
