@@ -28,6 +28,13 @@ pub const UNIVERSAL_PROVIDER_SYNCED: &str = "universal-provider-synced";
 pub const UPDATE_DOWNLOAD_PROGRESS: &str = "update-download-progress";
 /// Restoring a proxy takeover at startup failed (after one retry).
 pub const PROXY_RESTORE_FAILED: &str = "proxy-restore-failed";
+/// Proxy takeover was enabled while an official provider that cannot be
+/// proxied is current: `{ appType, providerName }`.
+pub const PROXY_OFFICIAL_WARNING: &str = "proxy-official-warning";
+/// A WebDAV auto-sync run finished: `{ source: "auto", status, error?, conflict? }`.
+pub const WEBDAV_SYNC_STATUS_UPDATED: &str = "webdav-sync-status-updated";
+/// An S3 auto-sync run finished; same payload as [`WEBDAV_SYNC_STATUS_UPDATED`].
+pub const S3_SYNC_STATUS_UPDATED: &str = "s3-sync-status-updated";
 
 #[cfg(test)]
 mod tests {
@@ -45,11 +52,46 @@ mod tests {
             UNIVERSAL_PROVIDER_SYNCED,
             UPDATE_DOWNLOAD_PROGRESS,
             PROXY_RESTORE_FAILED,
+            PROXY_OFFICIAL_WARNING,
+            WEBDAV_SYNC_STATUS_UPDATED,
+            S3_SYNC_STATUS_UPDATED,
+            crate::usage_events::EVENT_USAGE_LOG_RECORDED,
         ];
         let mut seen = std::collections::HashSet::new();
         for name in names {
             assert!(seen.insert(name), "duplicate event name {name}");
-            assert!(name.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
+            assert!(name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
         }
+    }
+
+    /// No emitter passes an event-name string literal (CMD-14).
+    #[test]
+    fn no_emit_with_string_literal() {
+        fn visit(dir: &std::path::Path, hits: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    visit(&path, hits);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    // built at runtime so this file does not match itself
+                    let needle = [".emit", "("].concat();
+                    for (idx, _) in text.match_indices(needle.as_str()) {
+                        let rest = text[idx + needle.len()..].trim_start();
+                        if rest.starts_with('"') {
+                            hits.push(path.display().to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let mut hits = Vec::new();
+        visit(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut hits,
+        );
+        assert!(hits.is_empty(), "literal event names in: {hits:?}");
     }
 }
