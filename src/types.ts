@@ -168,68 +168,81 @@ export interface LocalProxyRequestOverrides {
   body?: Record<string, unknown>;
 }
 
-// 供应商元数据（字段名与后端一致，保持 snake_case）
+/**
+ * Per-provider metadata stored next to `settingsConfig` (FE-PROV-38). Field
+ * names match the backend (`ProviderMeta` in Rust); a few keep snake_case.
+ * "Apps" lists where a field is meaningful; the provider form only persists
+ * a field for those apps (see `src/components/providers/forms/adapters`).
+ * 字段名与后端一致；仅在列出的应用中有意义。
+ */
 export interface ProviderMeta {
-  // 自定义端点：以 URL 为键，值为端点信息
+  /** Custom endpoints keyed by URL (all apps; endpoint speed test). 自定义端点 */
   custom_endpoints?: Record<string, CustomEndpoint>;
-  // 是否在切换/同步到 live 时应用通用配置片段
+  /** Apply the shared common-config snippet on switch/live sync (Claude, Codex, Gemini). 通用配置 */
   commonConfigEnabled?: boolean;
-  // Claude Desktop 3P 配置写入模式
+  /** Claude Desktop 3P write mode: write the config directly or via the local proxy. */
   claudeDesktopMode?: "direct" | "proxy";
-  // Claude Desktop 本地路由模式：Claude-safe route -> upstream model
+  /** Claude Desktop proxy mode: Claude-safe route name -> upstream model. */
   claudeDesktopModelRoutes?: Record<string, ClaudeDesktopModelRoute>;
-  // 用量查询脚本配置
+  /** Usage/quota query script (all apps). 用量查询脚本 */
   usage_script?: UsageScript;
-  // 请求地址管理：测速后自动选择最佳端点
+  /** Pick the fastest endpoint after a speed test (all apps). 自动选择端点 */
   endpointAutoSelect?: boolean;
-  // 是否为官方合作伙伴
+  /** Created from a sponsored preset; not copied on duplicate. 合作伙伴 */
   isPartner?: boolean;
-  // 合作伙伴促销 key（用于后端识别 PackyCode 等）
+  /** Sponsor promotion key from the preset; not copied on duplicate. */
   partnerPromotionKey?: string;
-  // 供应商成本倍率
+  /** Cost multiplier applied to usage pricing (string decimal). 成本倍率 */
   costMultiplier?: string;
-  // 供应商计费模式来源
+  /** Which model name prices requests (`request` / `response` ...). 计费模型来源 */
   pricingModelSource?: string;
-  // API 格式（Claude / Codex 供应商使用）
-  // - "anthropic": 原生 Anthropic Messages API 格式，直接透传
-  // - "openai_chat": OpenAI Chat Completions 格式，需要格式转换
-  // - "openai_responses": OpenAI Responses API 格式，需要格式转换
-  // - "gemini_native": Gemini Native generateContent API 格式，需要格式转换
+  /**
+   * Upstream API format for proxy conversion (Claude, Codex):
+   * - `anthropic`: native Messages API, passed through
+   * - `openai_chat`: OpenAI Chat Completions, converted
+   * - `openai_responses`: OpenAI Responses, converted
+   * - `gemini_native`: Gemini generateContent, converted
+   */
   apiFormat?:
     | "anthropic"
     | "openai_chat"
     | "openai_responses"
     | "gemini_native";
-  // 通用认证绑定
+  /** Managed account binding (GitHub Copilot / Codex OAuth). 认证绑定 */
   authBinding?: AuthBinding;
-  // Claude 认证字段名
+  /**
+   * Env variable that holds the Claude API key. Persisted only when it is not
+   * the default `ANTHROPIC_AUTH_TOKEN`; reads/writes prefer it (FE-ARCH-47).
+   */
   apiKeyField?: ClaudeApiKeyField;
-  // 是否将 base_url 视为完整 API 端点（代理直接使用此 URL，不拼接路径）
+  /** Treat `base_url` as the full endpoint; the proxy appends no path. */
   isFullUrl?: boolean;
-  // Prompt cache key for OpenAI Responses-compatible endpoints (improves cache hit rate)
+  /** Prompt-cache key for OpenAI Responses-compatible endpoints; not copied on duplicate. */
   promptCacheKey?: string;
-  // Session-based prompt-cache routing for Codex Responses -> Chat conversions.
-  // auto enables only for known-compatible upstreams; enabled/disabled are user overrides.
+  /**
+   * Session-based prompt-cache routing for Codex Responses -> Chat
+   * conversions. `auto` enables it only for known-compatible upstreams.
+   */
   promptCacheRouting?: PromptCacheRoutingMode;
-  // Codex OAuth FAST mode: injects service_tier="priority" on ChatGPT Codex requests
+  /** Codex OAuth FAST mode: injects `service_tier="priority"`. */
   codexFastMode?: boolean;
-  // Codex Responses -> Chat Completions reasoning capability metadata
+  /** Codex Responses -> Chat Completions reasoning capability metadata. */
   codexChatReasoning?: CodexChatReasoning;
-  // Codex → Anthropic path: emulate the Claude Code client (disabled by default; only an explicit true enables it)
+  /** Codex -> Anthropic path: emulate the Claude Code client (only an explicit `true` enables it). */
   impersonateClaudeCode?: boolean;
-  // Codex → Anthropic path: override the Anthropic max_tokens (output ceiling).
-  // Codex does not forward model_max_output_tokens in the request body; without
-  // this the path falls back to a conservative 8192 default, which can truncate
-  // long/thinking-heavy responses. When set (>0) it takes precedence over the
-  // request value and the default.
+  /**
+   * Codex -> Anthropic path: Anthropic `max_tokens` override. Codex does not
+   * forward `model_max_output_tokens`; without this the path falls back to a
+   * conservative 8192. When set (>0) it wins over the request and default.
+   */
   maxOutputTokens?: number;
-  // Custom User-Agent for local proxy routing. Only applied by the local proxy.
+  /** Custom User-Agent, applied by the local proxy only. */
   customUserAgent?: string;
-  // Local proxy request overrides. Only applied by the local proxy after route transforms.
+  /** Header/body overrides, applied by the local proxy after route transforms. */
   localProxyRequestOverrides?: LocalProxyRequestOverrides;
-  // 供应商类型（用于识别 Copilot 等特殊供应商）
+  /** Special provider kind (`github_copilot`, `codex_oauth`, ...). 供应商类型 */
   providerType?: string;
-  // GitHub Copilot 关联账号 ID（旧字段，保留兼容读取）
+  /** @deprecated Legacy GitHub Copilot account id; read for compatibility, use `authBinding`. */
   githubAccountId?: string;
 }
 
