@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { showError } from "@/lib/errors/showError";
 
 interface EnvWarningBannerProps {
   conflicts: EnvConflict[];
@@ -154,9 +155,7 @@ export function EnvWarningBanner({
       onDeleted();
     } catch (error) {
       console.error("删除环境变量失败:", error);
-      toast.error(t("env.delete.error"), {
-        description: String(error),
-      });
+      showError({ title: t("env.delete.error"), error });
     } finally {
       setIsDeleting(false);
     }

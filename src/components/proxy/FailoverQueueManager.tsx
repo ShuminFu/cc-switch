@@ -49,6 +49,7 @@ import {
   useProvidersHealthMap,
   useResetCircuitBreaker,
 } from "@/lib/query/failover";
+import { showError } from "@/lib/errors/showError";
 
 interface FailoverQueueManagerProps {
   appType: AppId;
@@ -149,8 +150,9 @@ export function FailoverQueueManager({
         { closeButton: true },
       );
     } catch (error) {
-      toast.error(t("proxy.failoverQueue.addFailed", "添加失败"), {
-        description: String(error),
+      showError({
+        title: t("proxy.failoverQueue.addFailed", "添加失败"),
+        error,
       });
     }
   };
@@ -164,8 +166,9 @@ export function FailoverQueueManager({
         { closeButton: true },
       );
     } catch (error) {
-      toast.error(t("proxy.failoverQueue.removeFailed", "移除失败"), {
-        description: String(error),
+      showError({
+        title: t("proxy.failoverQueue.removeFailed", "移除失败"),
+        error,
       });
     }
   };

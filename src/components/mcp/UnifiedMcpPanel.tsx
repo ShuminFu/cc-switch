@@ -19,6 +19,7 @@ import { ManagedItemsPanel } from "@/components/common/ManagedItemsPanel";
 import { useConfirm } from "@/components/common/useConfirm";
 import { McpSyncSkipBadges } from "./McpSyncSkipBadges";
 import { useMcpSyncSkips } from "@/lib/query/adapters";
+import { showError } from "@/lib/errors/showError";
 
 interface UnifiedMcpPanelProps {
   onOpenChange: (open: boolean) => void;
@@ -57,7 +58,7 @@ const UnifiedMcpPanel = React.forwardRef<
     try {
       await toggleAppMutation.mutateAsync({ serverId, app, enabled });
     } catch (error) {
-      toast.error(t("common.error"), { description: String(error) });
+      showError({ title: t("common.error"), error });
     }
   };
 
@@ -84,7 +85,7 @@ const UnifiedMcpPanel = React.forwardRef<
         });
       }
     } catch (error) {
-      toast.error(t("common.error"), { description: String(error) });
+      showError({ title: t("common.error"), error });
     }
   };
 
@@ -102,7 +103,7 @@ const UnifiedMcpPanel = React.forwardRef<
           await deleteServerMutation.mutateAsync(id);
           toast.success(t("common.success"), { closeButton: true });
         } catch (error) {
-          toast.error(t("common.error"), { description: String(error) });
+          showError({ title: t("common.error"), error });
           throw error;
         }
       },

@@ -12,6 +12,7 @@ import {
   validateAutoFailoverForm,
   type AutoFailoverNumericField,
 } from "./autoFailoverSchema";
+import { showError } from "@/lib/errors/showError";
 
 export interface AutoFailoverConfigPanelProps {
   appType: string;
@@ -143,8 +144,9 @@ export function AutoFailoverConfigPanel({
         { closeButton: true },
       );
     } catch (e) {
-      toast.error(t("proxy.autoFailover.configSaveFailed", "保存失败"), {
-        description: String(e),
+      showError({
+        title: t("proxy.autoFailover.configSaveFailed", "保存失败"),
+        error: e,
       });
     }
   };
