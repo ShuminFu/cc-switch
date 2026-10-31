@@ -17,7 +17,13 @@ import {
   type DetectedProxy,
 } from "@/hooks/useGlobalProxy";
 
-/** 从完整 URL 提取认证信息 */
+const SCHEME_AND_REST = /^([a-z][a-z0-9+.-]*:\/\/)(.*)$/i;
+
+/**
+ * 从完整 URL 提取认证信息。The rest of the URL is kept exactly as typed
+ * (no `URL.toString()` normalisation such as an added trailing slash), so a
+ * saved `http://host:7890` reloads identically (FE-UI-43).
+ */
 function extractAuth(url: string): {
   baseUrl: string;
   username: string;
@@ -25,20 +31,33 @@ function extractAuth(url: string): {
 } {
   if (!url.trim()) return { baseUrl: "", username: "", password: "" };
 
-  try {
-    const parsed = new URL(url);
-    const username = decodeURIComponent(parsed.username || "");
-    const password = decodeURIComponent(parsed.password || "");
-    // 移除认证信息，获取基础 URL
-    parsed.username = "";
-    parsed.password = "";
-    return { baseUrl: parsed.toString(), username, password };
-  } catch {
-    return { baseUrl: url, username: "", password: "" };
-  }
+  const match = url.match(SCHEME_AND_REST);
+  if (!match) return { baseUrl: url, username: "", password: "" };
+  const [, scheme, rest] = match;
+  const authorityEnd = rest.search(/[/?#]/);
+  const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
+  const at = authority.lastIndexOf("@");
+  if (at === -1) return { baseUrl: url, username: "", password: "" };
+
+  const userInfo = authority.slice(0, at);
+  const colon = userInfo.indexOf(":");
+  const rawUser = colon === -1 ? userInfo : userInfo.slice(0, colon);
+  const rawPass = colon === -1 ? "" : userInfo.slice(colon + 1);
+  const decode = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+  return {
+    baseUrl: `${scheme}${rest.slice(at + 1)}`,
+    username: decode(rawUser),
+    password: decode(rawPass),
+  };
 }
 
-/** 将认证信息合并到 URL */
+/** 将认证信息合并到 URL（不改动 URL 其余部分） */
 function mergeAuth(
   baseUrl: string,
   username: string,
@@ -47,26 +66,12 @@ function mergeAuth(
   if (!baseUrl.trim()) return "";
   if (!username.trim()) return baseUrl;
 
-  try {
-    const parsed = new URL(baseUrl);
-    // URL 对象的 username/password setter 会自动进行 percent-encoding
-    // 不要使用 encodeURIComponent，否则会导致双重编码
-    parsed.username = username.trim();
-    if (password) {
-      parsed.password = password;
-    }
-    return parsed.toString();
-  } catch {
-    // URL 解析失败，尝试手动插入（此时需要手动编码）
-    const match = baseUrl.match(/^(\w+:\/\/)(.+)$/);
-    if (match) {
-      const auth = password
-        ? `${encodeURIComponent(username.trim())}:${encodeURIComponent(password)}@`
-        : `${encodeURIComponent(username.trim())}@`;
-      return `${match[1]}${auth}${match[2]}`;
-    }
-    return baseUrl;
-  }
+  const match = baseUrl.match(SCHEME_AND_REST);
+  if (!match) return baseUrl;
+  const auth = password
+    ? `${encodeURIComponent(username.trim())}:${encodeURIComponent(password)}@`
+    : `${encodeURIComponent(username.trim())}@`;
+  return `${match[1]}${auth}${match[2]}`;
 }
 
 export function GlobalProxySettings() {
@@ -101,8 +106,12 @@ export function GlobalProxySettings() {
   }, [savedUrl]);
 
   const handleSave = async () => {
-    await setMutation.mutateAsync(fullUrl);
-    setDirty(false);
+    try {
+      await setMutation.mutateAsync(fullUrl);
+      setDirty(false);
+    } catch {
+      // The mutation reports the error itself; keep the edits dirty.
+    }
   };
 
   const handleTest = async () => {
@@ -157,6 +166,9 @@ export function GlobalProxySettings() {
       {/* 代理地址输入框和按钮 */}
       <div className="flex gap-2">
         <Input
+          aria-label={t("settings.globalProxy.urlLabel", {
+            defaultValue: "Proxy URL",
+          })}
           placeholder="http://127.0.0.1:7890 / socks5://127.0.0.1:1080"
           value={url}
           onChange={(e) => {
@@ -216,6 +228,7 @@ export function GlobalProxySettings() {
       {/* 认证信息：用户名 + 密码（可选） */}
       <div className="flex gap-2">
         <Input
+          aria-label={t("settings.globalProxy.username")}
           placeholder={t("settings.globalProxy.username")}
           value={username}
           onChange={(e) => {
@@ -228,6 +241,7 @@ export function GlobalProxySettings() {
         <div className="relative flex-1">
           <Input
             type={showPassword ? "text" : "password"}
+            aria-label={t("settings.globalProxy.password")}
             placeholder={t("settings.globalProxy.password")}
             value={password}
             onChange={(e) => {
@@ -243,7 +257,16 @@ export function GlobalProxySettings() {
             size="icon"
             className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
             onClick={() => setShowPassword(!showPassword)}
-            tabIndex={-1}
+            aria-label={
+              showPassword
+                ? t("settings.globalProxy.hidePassword", {
+                    defaultValue: "Hide password",
+                  })
+                : t("settings.globalProxy.showPassword", {
+                    defaultValue: "Show password",
+                  })
+            }
+            aria-pressed={showPassword}
           >
             {showPassword ? (
               <EyeOff className="h-4 w-4 text-muted-foreground" />
