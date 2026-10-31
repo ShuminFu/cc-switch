@@ -9,6 +9,10 @@ import {
   updateCodexExperimentalBearerToken,
 } from "@/utils/providerConfigUtils";
 import type { CodexCatalogModel } from "@/types";
+import { settingsConfigFor } from "@/types/providerSettings";
+
+/** One raw model-catalog row as stored (camelCase) or read back from live (snake_case). */
+type CatalogItem = Record<string, unknown> | null | undefined;
 
 interface UseCodexConfigStateProps {
   initialData?: {
@@ -51,26 +55,23 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
   useEffect(() => {
     if (!initialData) return;
 
-    const config = initialData.settingsConfig;
-    if (typeof config === "object" && config !== null) {
+    const raw = initialData.settingsConfig;
+    if (typeof raw === "object" && raw !== null) {
+      const config = settingsConfigFor("codex", raw);
       // 设置 auth.json
-      const auth = (config as any).auth || {};
+      const auth = config.auth ?? {};
       setCodexAuthState(JSON.stringify(auth, null, 2));
 
       // 设置 config.toml
-      const configStr =
-        typeof (config as any).config === "string"
-          ? (config as any).config
-          : "";
+      const configStr = config.config ?? "";
       setCodexConfigState(configStr);
 
-      const modelCatalog = (config as any).modelCatalog;
-      const rawCatalogModels = Array.isArray(modelCatalog?.models)
-        ? modelCatalog.models
+      const rawCatalogModels = Array.isArray(config.modelCatalog?.models)
+        ? (config.modelCatalog.models as CatalogItem[])
         : [];
       setCodexCatalogModels(
         rawCatalogModels
-          .map((item: any) => {
+          .map((item) => {
             // 隐藏字段（原生 Responses profile 用）不在行 UI 暴露，但必须 load→save
             // 原样保留，否则编辑保存 MiMo/MiniMax 等会丢官方 base_instructions、
             // 并行工具、图像模态。DB SSOT 为 camelCase、live 反解兜底可能为 snake_case，
@@ -115,7 +116,7 @@ export function useCodexConfigState({ initialData }: UseCodexConfigStateProps) {
               ...(baseInstructions ? { baseInstructions } : {}),
             };
           })
-          .filter((item: CodexCatalogModel) => item.model.trim()),
+          .filter((item) => item.model.trim()),
       );
 
       // 提取 Base URL

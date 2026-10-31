@@ -92,7 +92,7 @@ export function useOpenclawFormState({
   });
 
   const updateOpenclawConfig = useCallback(
-    (updater: (config: Record<string, any>) => void) => {
+    (updater: (config: Record<string, unknown>) => void) => {
       try {
         const config = JSON.parse(
           getSettingsConfig() || OPENCLAW_DEFAULT_CONFIG,

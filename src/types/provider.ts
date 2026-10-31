@@ -13,7 +13,7 @@ export type ProviderCategory =
 export interface Provider {
   id: string;
   name: string;
-  settingsConfig: Record<string, any>; // 应用配置对象：Claude 为 settings.json；Codex 为 { auth, config }
+  settingsConfig: Record<string, unknown>; // 应用配置对象：Claude 为 settings.json；Codex 为 { auth, config }
   websiteUrl?: string;
   // 新增：供应商分类（用于差异化提示/能力开关）
   category?: ProviderCategory;
@@ -74,7 +74,7 @@ export interface UsageScript {
     url?: string; // 请求 URL
     method?: string; // HTTP 方法
     headers?: Record<string, string>; // 请求头
-    body?: any; // 请求体
+    body?: unknown; // 请求体
   };
 }
 

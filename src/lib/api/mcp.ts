@@ -1,5 +1,5 @@
 import { invoke, call } from "./invoke";
-import { commands } from "@/lib/bindings";
+import { commands, type JsonValue } from "@/lib/bindings";
 import type {
   McpServer,
   McpServerSpec,
@@ -19,9 +19,10 @@ export const mcpApi = {
 
   async upsertServer(
     id: string,
-    spec: McpServerSpec | Record<string, any>,
+    spec: McpServerSpec | Record<string, unknown>,
   ): Promise<boolean> {
-    return await call(commands.upsertClaudeMcpServer(id, spec));
+    // The spec is plain JSON from the MCP form (FE-ARCH-28).
+    return await call(commands.upsertClaudeMcpServer(id, spec as JsonValue));
   },
 
   async deleteServer(id: string): Promise<boolean> {

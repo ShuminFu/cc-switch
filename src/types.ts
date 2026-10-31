@@ -8,3 +8,4 @@ export * from "./types/universal";
 export * from "./types/opencode";
 export * from "./types/openclaw";
 export * from "./types/hermes";
+export * from "./types/providerSettings";
