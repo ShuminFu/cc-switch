@@ -63,6 +63,11 @@ impl AppAdapter for GrokAdapter {
 struct GrokMcp;
 
 impl McpProjector for GrokMcp {
+    fn missing_config_dir(&self) -> Option<std::path::PathBuf> {
+        let dir = crate::grok_config::get_grok_config_dir();
+        (!dir.exists()).then_some(dir)
+    }
+
     fn upsert_server(&self, id: &str, spec: &Value) -> Result<(), AppError> {
         crate::mcp::sync_single_server_to_grokbuild(&Default::default(), id, spec)
     }

@@ -85,6 +85,11 @@ impl AppAdapter for GeminiAdapter {
 struct GeminiMcp;
 
 impl McpProjector for GeminiMcp {
+    fn missing_config_dir(&self) -> Option<std::path::PathBuf> {
+        let dir = crate::gemini_config::get_gemini_dir();
+        (!dir.exists()).then_some(dir)
+    }
+
     fn upsert_server(&self, id: &str, spec: &Value) -> Result<(), AppError> {
         self.project(&[(id, spec)], &[])
     }
