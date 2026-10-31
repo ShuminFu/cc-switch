@@ -44,15 +44,20 @@ fn merge_settings_for_save(
         }
         _ => {}
     }
-    // signed_sync 是防降级标记（CCS-173），只由同步成功和清除同步密钥改变：
+    // signed_sync 是防降级标记（CCS-173），last_signed_manifest_created_at 是防回滚基线
+    // （CCS-239），都只由同步成功和清除同步密钥改变：
     // 前端缓存的旧 status 或缺少该字段的整体保存不能把它复位。
     if let (Some(incoming_sync), Some(existing_sync)) =
         (&mut incoming.webdav_sync, &existing.webdav_sync)
     {
         incoming_sync.status.signed_sync = existing_sync.status.signed_sync;
+        incoming_sync.status.last_signed_manifest_created_at =
+            existing_sync.status.last_signed_manifest_created_at.clone();
     }
     if let (Some(incoming_s3), Some(existing_s3)) = (&mut incoming.s3_sync, &existing.s3_sync) {
         incoming_s3.status.signed_sync = existing_s3.status.signed_sync;
+        incoming_s3.status.last_signed_manifest_created_at =
+            existing_s3.status.last_signed_manifest_created_at.clone();
     }
     // local_migrations 是纯后端状态（迁移完成标记），前端没有合法的修改场景，
     // 无条件取现有值。若按 incoming 透传：后端清掉 marker（如关闭统一会话
@@ -513,6 +518,19 @@ mod tests {
         };
         existing.webdav_sync.as_mut().unwrap().status.signed_sync = true;
         existing.s3_sync.as_mut().unwrap().status.signed_sync = true;
+        let floor = Some("2026-03-02T10:00:00Z".to_string());
+        existing
+            .webdav_sync
+            .as_mut()
+            .unwrap()
+            .status
+            .last_signed_manifest_created_at = floor.clone();
+        existing
+            .s3_sync
+            .as_mut()
+            .unwrap()
+            .status
+            .last_signed_manifest_created_at = floor.clone();
 
         // A stale frontend copy without the flag must not lift the downgrade guard.
         let incoming = AppSettings {
@@ -527,8 +545,13 @@ mod tests {
             ..AppSettings::default()
         };
         let merged = merge_settings_for_save(incoming, &existing);
-        assert!(merged.webdav_sync.unwrap().status.signed_sync);
-        assert!(merged.s3_sync.unwrap().status.signed_sync);
+        let webdav_status = merged.webdav_sync.unwrap().status;
+        let s3_status = merged.s3_sync.unwrap().status;
+        assert!(webdav_status.signed_sync);
+        assert!(s3_status.signed_sync);
+        // Nor reset the rollback floor (CCS-239).
+        assert_eq!(webdav_status.last_signed_manifest_created_at, floor);
+        assert_eq!(s3_status.last_signed_manifest_created_at, floor);
     }
 
     /// Regression test: frontend always receives empty password from

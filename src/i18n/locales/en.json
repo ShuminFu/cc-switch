@@ -692,7 +692,8 @@
           "manifestSignatureInvalid": "The remote snapshot signature is invalid; it may have been tampered with and was not imported.",
           "manifestSignatureUnsupported": "The remote snapshot uses an unsupported signature algorithm. Update CC Switch on this device.",
           "manifestUnsigned": "The remote snapshot is unsigned (uploaded by an older version). Confirm it is trusted to import it once; later uploads will be signed.",
-          "manifestUnsignedRejected": "The remote snapshot is unsigned, but this device already synced signed snapshots. It may be a downgrade attack and was not imported."
+          "manifestUnsignedRejected": "The remote snapshot is unsigned, but this device already synced signed snapshots. It may be a downgrade attack and was not imported.",
+          "manifestRollbackRejected": "The remote snapshot is older than the signed snapshot this device last imported. It may be a rollback attack and was not imported."
         }
       }
     },

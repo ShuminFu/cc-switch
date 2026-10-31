@@ -967,6 +967,31 @@ describe("WebdavSyncSection", () => {
         expectNoDownload();
       });
 
+      it("localizes a rollback rejection returned by the download command", async () => {
+        syncKeyStatus = { configured: true, keyId: "a1b2c3d4" };
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("valid"));
+        downloadError = {
+          code: "LOCALIZED",
+          message: "远端快照早于本设备上次导入的签名快照",
+          details: { zh: "远端快照早于本设备上次导入的签名快照", en: "older" },
+          i18nKey: "sync.manifest_rollback_rejected",
+        };
+        backend.render(true);
+
+        clickDownload();
+        fireEvent.click(
+          await screen.findByRole("button", { name: backend.confirmButton }),
+        );
+
+        await waitFor(() => {
+          expect(toastErrorMock).toHaveBeenCalledWith(backend.downloadFailed);
+        });
+        expect(translateMock).toHaveBeenCalledWith(backend.downloadFailed, {
+          error:
+            "settings.webdavSync.signature.errors.manifestRollbackRejected",
+        });
+      });
+
       it("localizes sync.* errors returned by the download command", async () => {
         syncKeyStatus = { configured: true, keyId: "a1b2c3d4" };
         backend.fetchInfo.mockResolvedValueOnce(remoteInfo("valid"));

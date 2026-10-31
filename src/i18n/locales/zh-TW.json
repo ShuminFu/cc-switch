@@ -692,7 +692,8 @@
           "manifestSignatureInvalid": "遠端快照簽章驗證失敗，快照可能遭到竄改，已拒絕匯入。",
           "manifestSignatureUnsupported": "遠端快照的簽章演算法不受支援，請更新本裝置上的 CC Switch。",
           "manifestUnsigned": "遠端快照未簽章（由舊版本上傳）。確認來源可信後可一次性匯入，之後上傳將帶有簽章。",
-          "manifestUnsignedRejected": "遠端快照未簽章，而本裝置先前已同步過簽章快照，可能遭到降級攻擊，已拒絕匯入。"
+          "manifestUnsignedRejected": "遠端快照未簽章，而本裝置先前已同步過簽章快照，可能遭到降級攻擊，已拒絕匯入。",
+          "manifestRollbackRejected": "遠端快照早於本裝置上次匯入的簽章快照，可能遭到回滾攻擊，已拒絕匯入。"
         }
       }
     },

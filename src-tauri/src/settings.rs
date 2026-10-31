@@ -257,6 +257,9 @@ pub struct WebDavSyncStatus {
     /// 已与该远端同步过签名快照：之后拒绝未签名的快照（防降级），清除同步密钥时复位
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub signed_sync: bool,
+    /// 上次导入的签名快照的 `createdAt`：之后拒绝更早的签名快照（防回滚），清除同步密钥时复位
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_signed_manifest_created_at: Option<String>,
 }
 
 fn default_remote_root() -> String {
@@ -1618,7 +1621,7 @@ pub(crate) fn get_sync_snapshot_key() -> Result<Option<SyncKey>, AppError> {
 }
 
 /// 设置或清除快照签名密钥，返回新密钥的指纹。
-/// 清除时同时复位 WebDAV/S3 的 `signed_sync`，即用户主动退出签名校验。
+/// 清除时同时复位 WebDAV/S3 的 `signed_sync` 与回滚基线，即用户主动退出签名校验。
 pub(crate) fn set_sync_snapshot_key(passphrase: Option<&str>) -> Result<Option<String>, AppError> {
     let path = AppSettings::settings_path()
         .ok_or_else(|| AppError::Config("无法获取用户主目录".to_string()))?;
@@ -1636,9 +1639,11 @@ pub(crate) fn set_sync_snapshot_key(passphrase: Option<&str>) -> Result<Option<S
             mutate_settings(|current| {
                 if let Some(sync) = current.webdav_sync.as_mut() {
                     sync.status.signed_sync = false;
+                    sync.status.last_signed_manifest_created_at = None;
                 }
                 if let Some(s3) = current.s3_sync.as_mut() {
                     s3.status.signed_sync = false;
+                    s3.status.last_signed_manifest_created_at = None;
                 }
             })?;
             Ok(None)
@@ -2207,11 +2212,13 @@ mod tests {
 
             update_webdav_sync_status(WebDavSyncStatus {
                 signed_sync: true,
+                last_signed_manifest_created_at: Some("2026-03-02T10:00:00Z".to_string()),
                 ..Default::default()
             })
             .unwrap();
             update_s3_sync_status(WebDavSyncStatus {
                 signed_sync: true,
+                last_signed_manifest_created_at: Some("2026-03-02T10:00:00Z".to_string()),
                 ..Default::default()
             })
             .unwrap();
@@ -2224,6 +2231,20 @@ mod tests {
             assert_eq!(get_sync_snapshot_key().unwrap(), None);
             assert!(!get_webdav_sync_settings().unwrap().status.signed_sync);
             assert!(!get_s3_sync_settings().unwrap().status.signed_sync);
+            assert_eq!(
+                get_webdav_sync_settings()
+                    .unwrap()
+                    .status
+                    .last_signed_manifest_created_at,
+                None
+            );
+            assert_eq!(
+                get_s3_sync_settings()
+                    .unwrap()
+                    .status
+                    .last_signed_manifest_created_at,
+                None
+            );
         }
 
         #[test]

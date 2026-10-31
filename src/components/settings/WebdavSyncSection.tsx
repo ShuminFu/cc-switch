@@ -177,6 +177,8 @@ const SYNC_ERROR_KEYS: Record<string, TranslationKey> = {
     "settings.webdavSync.signature.errors.manifestUnsigned",
   "sync.manifest_unsigned_rejected":
     "settings.webdavSync.signature.errors.manifestUnsignedRejected",
+  "sync.manifest_rollback_rejected":
+    "settings.webdavSync.signature.errors.manifestRollbackRejected",
 };
 
 /** 同步错误文案：已知的 `sync.*` i18nKey 走本地化，其余保留后端原文 */

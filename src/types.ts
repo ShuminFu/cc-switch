@@ -296,6 +296,8 @@ export interface WebDavSyncStatus {
   lastRemoteManifestHash?: string | null;
   /** 已与远端同步过签名快照；清除同步密钥时复位 */
   signedSync?: boolean;
+  /** 上次导入的签名快照的 createdAt（防回滚基线）；清除同步密钥时复位 */
+  lastSignedManifestCreatedAt?: string | null;
 }
 
 // WebDAV 同步配置

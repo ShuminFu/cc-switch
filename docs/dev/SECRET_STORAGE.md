@@ -30,7 +30,14 @@ salt) of the passphrase; only the derived key is stored. With a key configured:
   (the one-time migration confirmation);
 - after the first signed upload/download (or the confirmed migration import) the
   transport's `status.signedSync` is set and unsigned remotes are refused for good
-  (`sync.manifest_unsigned_rejected`); clearing the key resets it.
+  (`sync.manifest_unsigned_rejected`); clearing the key resets it;
+- after a signed download is applied, its `createdAt` is kept as the transport's
+  `status.lastSignedManifestCreatedAt`, and a later signed manifest with an older
+  `createdAt` is refused (`sync.manifest_rollback_rejected`), so a re-uploaded old
+  snapshot signed with the same key cannot roll the device back. Equal or newer
+  timestamps are accepted. Only devices that have applied a signed snapshot are
+  protected (uploads do not set the floor), the check relies on the uploading
+  devices' clocks, and clearing the key resets the floor.
 
 Without a key and before any signed sync, sync behaves as before (unsigned).
 The remote-info payload reports `signature`: `valid`, `invalid`, `unsigned` or `keyMissing`.

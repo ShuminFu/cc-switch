@@ -6,13 +6,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::process::Command;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
 use crate::error::AppError;
+use crate::settings::WebDavSyncStatus;
 
 // Re-export archive functions for use by transport layers.
 pub(crate) use super::webdav_sync::archive::{
@@ -421,11 +422,83 @@ pub(crate) struct SignaturePolicy {
     pub signed_sync: bool,
     /// The user confirmed the one-time import of an unsigned (pre-signing) remote.
     pub allow_unsigned: bool,
+    /// `createdAt` of the last signed manifest this device applied; an older
+    /// signed manifest is a rollback and is refused.
+    pub last_signed_created_at: Option<DateTime<Utc>>,
+}
+
+impl SignaturePolicy {
+    /// Policy from a transport's persisted sync status.
+    pub(crate) fn for_status(status: &WebDavSyncStatus, allow_unsigned: bool) -> Self {
+        Self {
+            signed_sync: status.signed_sync,
+            allow_unsigned,
+            last_signed_created_at: status.last_signed_manifest_created_at.as_deref().and_then(
+                |value| {
+                    let parsed = parse_manifest_created_at(value);
+                    if parsed.is_none() {
+                        log::warn!(
+                            "[Sync] Ignoring unreadable lastSignedManifestCreatedAt: {value}"
+                        );
+                    }
+                    parsed
+                },
+            ),
+        }
+    }
+}
+
+fn parse_manifest_created_at(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value.trim())
+        .ok()
+        .map(|time| time.with_timezone(&Utc))
+}
+
+/// Remember an applied signed manifest's `createdAt` as the rollback floor.
+/// Unsigned imports and unreadable timestamps leave the floor unchanged.
+pub(crate) fn record_applied_manifest(
+    status: &mut WebDavSyncStatus,
+    manifest: &SyncManifest,
+    trust: ManifestTrust,
+) {
+    if trust == ManifestTrust::Signed && parse_manifest_created_at(&manifest.created_at).is_some() {
+        status.last_signed_manifest_created_at = Some(manifest.created_at.clone());
+    }
+}
+
+/// Refuse a signed manifest created before the last one this device applied:
+/// an attacker who can write the remote could otherwise re-upload an older
+/// snapshot signed with the same key. Equal timestamps (re-downloading the same
+/// snapshot) are accepted.
+fn check_manifest_rollback(
+    manifest: &SyncManifest,
+    floor: Option<DateTime<Utc>>,
+) -> Result<(), AppError> {
+    let Some(floor) = floor else {
+        return Ok(());
+    };
+    match parse_manifest_created_at(&manifest.created_at) {
+        Some(created_at) if created_at >= floor => Ok(()),
+        _ => Err(localized(
+            "sync.manifest_rollback_rejected",
+            format!(
+                "远端快照 ({}) 早于本设备上次导入的签名快照 ({})，可能遭到回滚攻击，已拒绝导入",
+                manifest.created_at,
+                floor.to_rfc3339()
+            ),
+            format!(
+                "Remote snapshot ({}) is older than the signed snapshot this device last imported ({}); it may be a rollback attack and was not imported.",
+                manifest.created_at,
+                floor.to_rfc3339()
+            ),
+        )),
+    }
 }
 
 /// Decide whether a remote manifest may be imported.
 ///
-/// - signed: verified with the local key; missing key, other key or a bad MAC is refused;
+/// - signed: verified with the local key; missing key, other key or a bad MAC is refused,
+///   and so is a manifest older than the last applied signed one (rollback);
 /// - unsigned, after a signed sync: refused (no override);
 /// - unsigned, sync key configured: refused with `sync.manifest_unsigned` unless the
 ///   user confirmed the one-time migration (`allow_unsigned`);
@@ -438,6 +511,7 @@ pub(crate) fn authorize_manifest(
     if manifest.signature.is_some() {
         let key = key.ok_or_else(sync_key_missing_error)?;
         verify_manifest_signature(manifest, key)?;
+        check_manifest_rollback(manifest, policy.last_signed_created_at)?;
         return Ok(ManifestTrust::Signed);
     }
     match key {
@@ -1046,6 +1120,7 @@ mod tests {
         let strict = SignaturePolicy {
             signed_sync: true,
             allow_unsigned: false,
+            ..Default::default()
         };
         assert_eq!(
             authorize_manifest(&manifest, Some(&key), strict).unwrap(),
@@ -1185,6 +1260,7 @@ mod tests {
         let confirmed = SignaturePolicy {
             signed_sync: false,
             allow_unsigned: true,
+            ..Default::default()
         };
         assert_eq!(
             authorize_manifest(&manifest, Some(&key), confirmed).unwrap(),
@@ -1201,6 +1277,7 @@ mod tests {
         let policy = SignaturePolicy {
             signed_sync: true,
             allow_unsigned: true,
+            ..Default::default()
         };
         assert_eq!(
             authorize_err_key(&manifest, Some(&key), policy),
@@ -1245,6 +1322,145 @@ mod tests {
             Err(AppError::Localized { key, .. }) => assert_eq!(key, "sync.key_missing"),
             other => panic!("expected key_missing, got {other:?}"),
         }
+    }
+
+    fn signed_manifest_created_at(key: &SyncKey, created_at: &str) -> SyncManifest {
+        let mut manifest =
+            manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(DB_COMPAT_VERSION));
+        manifest.created_at = created_at.to_string();
+        sign_manifest(&mut manifest, key).expect("sign");
+        parse(&serde_json::to_vec(&manifest).expect("serialize"))
+    }
+
+    fn status_after_applying(manifest: &SyncManifest) -> WebDavSyncStatus {
+        let mut status = WebDavSyncStatus {
+            signed_sync: true,
+            ..Default::default()
+        };
+        record_applied_manifest(&mut status, manifest, ManifestTrust::Signed);
+        status
+    }
+
+    #[test]
+    fn older_signed_manifest_is_rejected_as_rollback() {
+        let key = test_key(5);
+        let applied = signed_manifest_created_at(&key, "2026-03-02T10:00:00+00:00");
+        let status = status_after_applying(&applied);
+        assert_eq!(
+            status.last_signed_manifest_created_at.as_deref(),
+            Some("2026-03-02T10:00:00+00:00")
+        );
+
+        // A validly signed but older snapshot re-uploaded by an attacker.
+        let older = signed_manifest_created_at(&key, "2026-03-01T10:00:00+00:00");
+        assert_eq!(manifest_signature_status(&older, Some(&key)), "valid");
+        let policy = SignaturePolicy::for_status(&status, false);
+        assert_eq!(
+            authorize_err_key(&older, Some(&key), policy),
+            "sync.manifest_rollback_rejected"
+        );
+        // One second earlier in another time zone is still older.
+        let older_offset = signed_manifest_created_at(&key, "2026-03-02T11:59:59+02:00");
+        assert_eq!(
+            authorize_err_key(&older_offset, Some(&key), policy),
+            "sync.manifest_rollback_rejected"
+        );
+        // The migration override does not lift the rollback guard.
+        assert_eq!(
+            authorize_err_key(
+                &older,
+                Some(&key),
+                SignaturePolicy::for_status(&status, true)
+            ),
+            "sync.manifest_rollback_rejected"
+        );
+    }
+
+    #[test]
+    fn equal_or_newer_signed_manifest_is_accepted() {
+        let key = test_key(5);
+        let applied = signed_manifest_created_at(&key, "2026-03-02T10:00:00+00:00");
+        let policy = SignaturePolicy::for_status(&status_after_applying(&applied), false);
+
+        assert_eq!(
+            authorize_manifest(&applied, Some(&key), policy).unwrap(),
+            ManifestTrust::Signed,
+            "re-downloading the same snapshot is allowed"
+        );
+        let same_instant = signed_manifest_created_at(&key, "2026-03-02T12:00:00+02:00");
+        assert_eq!(
+            authorize_manifest(&same_instant, Some(&key), policy).unwrap(),
+            ManifestTrust::Signed
+        );
+        let newer = signed_manifest_created_at(&key, "2026-03-02T10:00:01Z");
+        assert_eq!(
+            authorize_manifest(&newer, Some(&key), policy).unwrap(),
+            ManifestTrust::Signed
+        );
+    }
+
+    #[test]
+    fn signed_manifest_with_unreadable_created_at_is_rejected_once_a_floor_exists() {
+        let key = test_key(5);
+        let applied = signed_manifest_created_at(&key, "2026-03-02T10:00:00Z");
+        let policy = SignaturePolicy::for_status(&status_after_applying(&applied), false);
+        let garbled = signed_manifest_created_at(&key, "not a timestamp");
+        assert_eq!(
+            authorize_err_key(&garbled, Some(&key), policy),
+            "sync.manifest_rollback_rejected"
+        );
+        // Without a floor it is accepted, and it does not become the floor.
+        assert_eq!(
+            authorize_manifest(&garbled, Some(&key), SignaturePolicy::default()).unwrap(),
+            ManifestTrust::Signed
+        );
+        let mut status = WebDavSyncStatus::default();
+        record_applied_manifest(&mut status, &garbled, ManifestTrust::Signed);
+        assert_eq!(status.last_signed_manifest_created_at, None);
+    }
+
+    #[test]
+    fn unsigned_import_does_not_set_the_rollback_floor() {
+        let manifest = manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(DB_COMPAT_VERSION));
+        let mut status = WebDavSyncStatus::default();
+        record_applied_manifest(&mut status, &manifest, ManifestTrust::Unsigned);
+        assert_eq!(status.last_signed_manifest_created_at, None);
+    }
+
+    #[test]
+    fn clearing_the_rollback_floor_accepts_older_signed_manifests_again() {
+        let key = test_key(5);
+        let applied = signed_manifest_created_at(&key, "2026-03-02T10:00:00Z");
+        let older = signed_manifest_created_at(&key, "2026-03-01T10:00:00Z");
+        let mut status = status_after_applying(&applied);
+        assert_eq!(
+            authorize_err_key(
+                &older,
+                Some(&key),
+                SignaturePolicy::for_status(&status, false)
+            ),
+            "sync.manifest_rollback_rejected"
+        );
+
+        // What clearing the sync key does to the transport status.
+        status.signed_sync = false;
+        status.last_signed_manifest_created_at = None;
+        assert_eq!(
+            authorize_manifest(
+                &older,
+                Some(&key),
+                SignaturePolicy::for_status(&status, false)
+            )
+            .unwrap(),
+            ManifestTrust::Signed
+        );
+
+        // An unreadable stored floor is ignored rather than blocking every download.
+        status.last_signed_manifest_created_at = Some("garbage".to_string());
+        assert_eq!(
+            SignaturePolicy::for_status(&status, false).last_signed_created_at,
+            None
+        );
     }
 
     #[test]

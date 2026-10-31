@@ -363,7 +363,7 @@ export const getSyncSnapshotKeyStatus = () => ({
   keyId: syncSnapshotKeyId,
 });
 
-/** 与后端一致：空值清除密钥并复位 WebDAV/S3 的 signedSync */
+/** 与后端一致：空值清除密钥并复位 WebDAV/S3 的 signedSync 与回滚基线 */
 export const setSyncSnapshotKeyState = (key: string | null) => {
   if (key) {
     let hash = 0;
@@ -376,7 +376,14 @@ export const setSyncSnapshotKeyState = (key: string | null) => {
       if (sync?.status) {
         settingsState = {
           ...settingsState,
-          [field]: { ...sync, status: { ...sync.status, signedSync: false } },
+          [field]: {
+            ...sync,
+            status: {
+              ...sync.status,
+              signedSync: false,
+              lastSignedManifestCreatedAt: undefined,
+            },
+          },
         };
       }
     }

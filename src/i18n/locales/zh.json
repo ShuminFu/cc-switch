@@ -692,7 +692,8 @@
           "manifestSignatureInvalid": "远端快照签名校验失败，快照可能被篡改，已拒绝导入。",
           "manifestSignatureUnsupported": "远端快照的签名算法不受支持，请升级本设备上的 CC Switch。",
           "manifestUnsigned": "远端快照未签名（由旧版本上传）。确认来源可信后可一次性导入，之后上传将带签名。",
-          "manifestUnsignedRejected": "远端快照未签名，而本设备此前已同步过签名快照，可能遭到降级攻击，已拒绝导入。"
+          "manifestUnsignedRejected": "远端快照未签名，而本设备此前已同步过签名快照，可能遭到降级攻击，已拒绝导入。",
+          "manifestRollbackRejected": "远端快照早于本设备上次导入的签名快照，可能遭到回滚攻击，已拒绝导入。"
         }
       }
     },
