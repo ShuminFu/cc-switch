@@ -11,11 +11,11 @@ Make one decision per attempt that drives both request encoding and response dec
 
 ## Exit criteria
 
-- [ ] Every golden fixture, including upstream_request.expected, is byte-identical after normalization, or the diff is a documented fix; proxy_e2e is green on 3 OSes — _Audit 2026-10-30: fixture half met (only documented changes: CCS-135 renamed the Gemini drift fixture to a parity fixture with an empty diff; CCS-186/187 only add fixtures; `proxy_golden` 18/18 and `proxy_e2e` 37/37 pass on Linux). Unmet: no recorded green run on macOS/Windows. `ci.yml` `backend` runs `cargo test` on ubuntu/windows/macos, but GitHub has no ci.yml run on the default branch yet._
-- [ ] forwarder.rs is 600 lines or fewer; no function in pipeline/ exceeds 150 lines; handlers.rs is 1200 lines or fewer; forward() has exactly one call site — _Audit: forwarder.rs is **627** lines (CCS-130 left it at 556; CCS-139 took it to 599, CCS-142 to 616, CCS-143 to 625, CCS-187 to 627), so this is unmet. The other parts are met: the longest function in pipeline/ is 113 lines (`validate_responses_stream_start`); handlers.rs is 1050; `.forward(` has one production call site (forwarder.rs:394), plus a test shim in forwarder/tests.rs. `forward()` itself, still in forwarder.rs, is 158 lines._
-- [x] Failover from a Copilot (openai_responses) provider to an Anthropic provider decodes with the plan's format (E2E) — _`proxy_e2e::failover_from_copilot_responses_to_anthropic_decodes_with_the_anthropic_plan` passes, along with the two reverse/Responses failover tests (CCS-126). The harness has no Copilot token source, so the Copilot attempt fails before it sends anything; the decode format still comes from the plan._
-- [x] Zero DB reads on the hot path (proxy_e2e counter); p50 overhead is no worse than the P0 baseline; UsageTap memory does not grow with the event count — _Audit: zero DB reads is met (`perf_baseline_non_streaming_request` gives `db_reads_per_request: 0.0` and enforces it as a gate). The UsageTap part is met (`stream::taps::tests::usage_tap_memory_is_constant_in_event_count` uses 100k events and passes). p50 is met since CCS-231 (2026-10-31, debug, linux-x86_64, 4 CPUs, interleaved A/B against fc90858, 7 pairs per batch): before the fix HEAD's median p50 was 3.04 ms against 2.58 ms for fc90858 (load ~3.5). CCS-231 cached the request-log INSERT (it recompiled the superseded_by triggers on every request) and skipped regex redaction of plain header values in the always-on trace. After it, three batches gave HEAD/fc90858 median p50 of 2.48/2.83 ms (load 3.4–3.8), 2.51/2.60 ms (load 6.8–6.9) and 2.63/2.82 ms (load 6.9–7.1). allocations_per_request went from 815 to 733 (fc90858: 593; gate 3x the recorded 582)._
-- [x] Cache-token arithmetic lives only in UsageIR::from**; stream and non-stream paths return the same stop_reason for each bridge — *The only cache subtraction outside tests is in `usage/ir.rs` (`from_total_input`, which `from*_`uses). The other matches are comments and test pins. Every bridge has a`parity\__`fixture (CCS-135), and no fixture pins a stop_reason diff. The single remaining non-empty`expected_diff` is a content-block layout diff.\*
+- [ ] Every golden fixture, including `upstream_request.expected`, is byte-identical after normalization, or the diff is a documented fix; `proxy_e2e` is green on 3 OSes — _Re-audit 2026-10-31 (673be73): fixture half met. Changes since the P3 baseline are all documented: CCS-135 renamed the Gemini drift fixture to a parity fixture with an empty diff; CCS-186/187 only add fixtures; CCS-246 (codecEngine defaults to `ir`) regenerated `forwarder/upstream_request.expected`, whose only diff is that `codex_to_anthropic_impersonating_claude_code` no longer forwards `"stream": false` (content-length 333 to 318), a documented IR-engine difference (CCS-178). `proxy_e2e` 37/37 passes on Linux today; `proxy_golden` 18/18 per CCS-246's full run. Unmet: no recorded green run on macOS/Windows. `ci.yml` `backend` runs `cargo test` on ubuntu-22.04/windows-latest/macos-latest, but `gh run list --workflow ci.yml` still returns 404 (ci.yml is not on the default branch)._
+- [x] forwarder.rs is 600 lines or fewer; no function in pipeline/ exceeds 150 lines; handlers.rs is 1200 lines or fewer; forward() has exactly one call site — _Re-audit 2026-10-31: met since CCS-230. forwarder.rs is **596** lines (per-attempt trace recording moved to `pipeline/trace_attempt.rs`, `log_outbound_request` to `pipeline/transport.rs`); the longest function in pipeline/ is still `validate_responses_stream_start` at 113 lines (validate.rs:221-333); handlers.rs is 1055; `.forward(` has one production call site (forwarder.rs:381) plus the test shim in forwarder/tests.rs. `forward()` itself stays in forwarder.rs at 158 lines, which the criterion does not limit._
+- [x] Failover from a Copilot (`openai_responses`) provider to an Anthropic provider decodes with the plan's format (E2E) — _`proxy_e2e::failover_from_copilot_responses_to_anthropic_decodes_with_the_anthropic_plan` passes (re-run 2026-10-31), along with the two reverse/Responses failover tests (CCS-126). The harness has no Copilot token source, so the Copilot attempt fails before it sends anything; the decode format still comes from the plan._
+- [x] Zero DB reads on the hot path (`proxy_e2e` counter); p50 overhead is no worse than the P0 baseline; UsageTap memory does not grow with the event count — _Zero DB reads: `perf_baseline_non_streaming_request` gives `db_reads_per_request: 0.0` and gates on it (passes in today's `proxy_e2e` run). UsageTap: `stream::taps::tests::usage_tap_memory_is_constant_in_event_count` (100k events) passes. p50: met since CCS-231 (2026-10-31, debug, linux-x86_64, 4 CPUs, interleaved A/B against fc90858, 7 pairs per batch). Before the fix HEAD's median p50 was 3.04 ms against 2.58 ms for fc90858. CCS-231 cached the request-log INSERT and skipped regex redaction of plain header values in the always-on trace; after it, three batches gave HEAD/fc90858 median p50 of 2.48/2.83, 2.51/2.60 and 2.63/2.82 ms. `allocations_per_request` went from 815 to 733 (fc90858: 593; gate 3x the recorded 582)._
+- [x] Cache-token arithmetic lives only in `UsageIR::from*`; stream and non-stream paths return the same `stop_reason` for each bridge — _The only cache subtraction outside tests is in `usage/ir.rs` (`from_total_input`, which the `UsageIR` constructors use); CCS-243/244 moved the usage token-name literals out of the taps and added a check for them. Every bridge has a parity fixture (CCS-135), and no fixture pins a `stop_reason` diff. The one non-empty `expected_diff` is a content-block layout diff._
 - [x] Exported captures contain no keys (redaction corpus test) — _`proxy::capture::tests::capture_export_has_zero_key_hits` passes. Its corpus covers sk-, sk-ant-, AIza, ghu\_, Bearer, x-api-key and cookies (CCS-138)._
 
 ## Child tickets
@@ -24,43 +24,40 @@ p3-endpoint-table, p3-runtime-config-snapshot, p3-router-lock-db-read, p3-route-
 
 ## Epic closure audit
 
-Audited 2026-10-30 on `claude/funny-carson-9c7j3e` (c0c770a, after the P4/P5 and lane-2 merges). The audit changed no code.
+Re-audited 2026-10-31 on `claude/funny-carson-9c7j3e` (673be73, after the follow-up wave and the lane-2 merge). The audit changed no code. Measured with read-only commands plus one `cargo test --test proxy_e2e` run (37/37).
 
-| Ticket  | Key                        | Status |
-| ------- | -------------------------- | ------ |
-| CCS-123 | p3-endpoint-table          | Done   |
-| CCS-124 | p3-runtime-config-snapshot | Done   |
-| CCS-125 | p3-router-lock-db-read     | Done   |
-| CCS-126 | p3-route-plan              | Done   |
-| CCS-127 | p3-attempt-recorder        | Done   |
-| CCS-128 | p3-failover-flapping       | Done   |
-| CCS-129 | p3-recovery-strategy       | Done   |
-| CCS-130 | p3-request-pipeline-stages | Done   |
-| CCS-131 | p3-header-hop-by-hop       | Done   |
-| CCS-132 | p3-header-case-per-request | Done   |
-| CCS-133 | p3-breaker-sliding-window  | Done   |
-| CCS-134 | p3-usage-ir                | Done   |
-| CCS-135 | p3-stop-reason-table       | Done   |
-| CCS-136 | p3-sse-decoder             | Done   |
-| CCS-137 | p3-stream-traits-taps      | Done   |
-| CCS-138 | p3-bug-report-capture      | Done   |
-| CCS-139 | p3-trace-inspector         | Done   |
-| CCS-140 | p3-usage-parity-badge      | Done   |
-| CCS-141 | p3-breaker-ui-probe        | Done   |
-| CCS-142 | p3-retry-after-cooldown    | Done   |
-| CCS-143 | p3-session-sticky-routing  | Done   |
-| CCS-144 | p3-deps-dedupe-http        | Done   |
+| Ticket  | Key                                      | Status |
+| ------- | ---------------------------------------- | ------ |
+| CCS-123 | p3-endpoint-table                        | Done   |
+| CCS-124 | p3-runtime-config-snapshot               | Done   |
+| CCS-125 | p3-router-lock-db-read                   | Done   |
+| CCS-126 | p3-route-plan                            | Done   |
+| CCS-127 | p3-attempt-recorder                      | Done   |
+| CCS-128 | p3-failover-flapping                     | Done   |
+| CCS-129 | p3-recovery-strategy                     | Done   |
+| CCS-130 | p3-request-pipeline-stages               | Done   |
+| CCS-131 | p3-header-hop-by-hop                     | Done   |
+| CCS-132 | p3-header-case-per-request               | Done   |
+| CCS-133 | p3-breaker-sliding-window                | Done   |
+| CCS-134 | p3-usage-ir                              | Done   |
+| CCS-135 | p3-stop-reason-table                     | Done   |
+| CCS-136 | p3-sse-decoder                           | Done   |
+| CCS-137 | p3-stream-traits-taps                    | Done   |
+| CCS-138 | p3-bug-report-capture                    | Done   |
+| CCS-139 | p3-trace-inspector                       | Done   |
+| CCS-140 | p3-usage-parity-badge                    | Done   |
+| CCS-141 | p3-breaker-ui-probe                      | Done   |
+| CCS-142 | p3-retry-after-cooldown                  | Done   |
+| CCS-143 | p3-session-sticky-routing                | Done   |
+| CCS-144 | p3-deps-dedupe-http                      | Done   |
+| CCS-230 | p3-proxy-forwarder-under-600 (follow-up) | Done   |
+| CCS-231 | p3-proxy-p50-remeasure (follow-up)       | Done   |
 
-**Done.** All 22 child tickets are Done. The request path now runs from the ClientEndpoint table (CCS-123) to a single RoutePlan per attempt (CCS-126), then through the pipeline/ stages (CCS-130) with a RecoveryStrategy list in place of nested forward() calls (CCS-129). Runtime config comes from an ArcSwap snapshot, so a warm request does 0 DB reads (CCS-124). Cache arithmetic lives in UsageIR (CCS-134) and stop-reason mapping in one table (CCS-135). Stream taps use constant memory (CCS-137). Bug-report capture redacts keys (CCS-138). Measured today: `proxy_e2e` 37/37 and `proxy_golden` 18/18 on Linux, handlers.rs 1050 lines, the longest pipeline/ function 113 lines, one production `forward()` call site, and the redaction and UsageTap tests both pass. Three exit criteria are met.
+Related follow-ups outside this epic that touched the proxy path, all Done: CCS-227 (IPv6 guard for proxy tests), CCS-243/244 (usage token names), CCS-245 (legacy proxy re-exports repointed), CCS-246 (codecEngine defaults to `ir`; regenerated the forwarder wire golden, documented above).
+
+**Done.** All 22 child tickets and both P3 follow-ups are Done. The request path runs from the ClientEndpoint table (CCS-123) to one RoutePlan per attempt (CCS-126), then through the pipeline/ stages (CCS-130) with a RecoveryStrategy list instead of nested forward() calls (CCS-129). Runtime config comes from an ArcSwap snapshot, so a warm request does 0 DB reads (CCS-124). Cache arithmetic lives in UsageIR (CCS-134) and stop-reason mapping in one table (CCS-135). Stream taps use constant memory (CCS-137), and bug-report capture redacts keys (CCS-138). CCS-230 brought forwarder.rs to 596 lines, and CCS-231 brought p50 back to or below the P0 baseline. Five of six exit criteria are met.
 
 **Remaining.**
 
-1. **forwarder.rs is 627 lines; the limit is 600.** Feature tickets added after CCS-130 pushed it back over: the trace inspector (CCS-139), Retry-After cooldown (CCS-142), sticky sessions (CCS-143) and the Gemini CLI bridge (CCS-187). To fix it, move about 30 lines out of forwarder.rs into `pipeline/`, for example the Retry-After/cooldown and sticky-session bookkeeping in `forward_with_retry_inner`/`send_with_recovery`, or the per-attempt trace recording. If `forward()` (158 lines) ever moves into `pipeline/`, it must first be split below 150. This needs a small code ticket.
-2. **proxy_e2e on 3 OSes.** CI covers this: the `ci.yml` `backend` matrix runs `cargo test` on ubuntu-22.04, windows-latest and macos-latest. No green macOS/Windows run is on record because GitHub has no ci.yml run on the default branch yet. Closing this needs one green CI run on macOS and Windows after merge.
-3. **p50 versus the P0 baseline.** Done in CCS-231: HEAD's median p50 is at or below fc90858's in three interleaved A/B batches (see the exit criterion above).
-
-### Remaining after triage
-
-- Blocked: proxy_e2e and the golden suite green on macOS and Windows. Needs a windows-latest/macos-latest run of the ci.yml backend matrix, or real machines (cross-compiling to windows-gnu/apple fails on aws-lc-sys).
-- Follow-up [CCS-230](../P3-proxy-request-path/CCS-230-p3-proxy-forwarder-under-600.md): Shrink proxy/forwarder.rs to 600 lines or fewer.
-- Follow-up [CCS-231](../P3-proxy-request-path/CCS-231-p3-proxy-p50-remeasure.md): Re-measure p50 proxy overhead against the P0 baseline and trim hot-path allocations if it regressed.
+1. **proxy_e2e and proxy_golden green on macOS and Windows.** This needs CI on GitHub: one green run of the `ci.yml` `backend` matrix (windows-latest, macos-latest) after ci.yml lands on the default branch (today `gh run list --workflow ci.yml` returns 404), or a run on real macOS/Windows machines. Cross-compiling here does not work (aws-lc-sys fails for windows-gnu/apple targets). Once that run is green, tick the first criterion and set Status to Done.
+2. **PR-time maintainer steps from the follow-ups (do not block the criteria).** CCS-230 needs the `no-fixture-needed` label (CCS-034). CCS-246 carries a fixture change and is held until a maintainer schedules the release that starts the IR soak.

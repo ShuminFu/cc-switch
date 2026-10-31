@@ -13,7 +13,7 @@ Close the concrete security holes and data-integrity bugs before any refactor ma
 - [x] No HalfOpen permit leak, no double send on post-write errors, and a failed proxy reconfiguration rolls back. *Evidence: RAII `HalfOpenPermit` (`circuit_breaker.rs`, `test_dropped_half_open_permit_frees_the_probe_slot`, `forwarder/tests.rs::cancelled_half_open_probe_releases_the_permit`, `tests/proxy_e2e.rs::client_abort_during_half_open_probe_releases_the_probe_slot`); `hyper_client.rs::raw_path_does_not_resend_after_request_was_written`; rollback survives the CCS-153 split in `services/proxy/tests.rs::update_config_to_{occupied_port_keeps_original_server_and_config,invalid_address_restores_previous_server}`. All pass.*
 - [x] Usage scripts run with interrupt, memory and stack limits off the tokio workers; deeplink scripts arrive disabled. *Evidence: `usage_script.rs` runs QuickJS in `spawn_blocking` with `set_memory_limit`/`set_max_stack_size`/`set_interrupt_handler` (tests `usage_script_infinite_loop_is_interrupted_near_deadline`, `usage_script_looping_scripts_do_not_starve_runtime_workers` pass); `deeplink/provider.rs` forces `enabled = false` (`test_deeplink_usage_script_is_stored_disabled`).*
 - [x] No #[tauri::command] accepts a free-form shell string; listed path-taking commands reject paths outside allowed roots. *Evidence: scan of all 302 `#[tauri::command]`s: the only string params named like commands are `validate_mcp_command(cmd)` (PATH lookup, never executed) and `test_usage_script(script_code)` (sandboxed JS, criterion 3); `launch_session_terminal` takes only `{providerId, sessionId}` and builds the resume command from a fixed template (`'abc;rm -rf ~'` quoting tests in `session_manager/mod.rs`). Path checks: `picked_paths.rs` registry + per-command reject/accept tests (CCS-075), session roots (CCS-076).*
-- [ ] atomic_write fsyncs, creates new secret files 0600, follows symlinks and never deletes the target first; zero non-test std::fs::write. *Met in code and on Linux: `config.rs` `write_and_sync` (`sync_all`) + `sync_dir`, `create_new` temp at 0600 / `atomic_write_secret`, symlink resolution (4 `atomic_write_follows_*`/dangling/loop tests), `rename_replace` has no `remove_file` (Windows retries instead); `clippy.toml` bans `std::fs::write` and a scan finds 0 non-test call sites (the 3 outside `mod tests` are in `#[cfg(test)]` modules `bindings.rs`, `wire_golden.rs`, `lifecycle_run.rs` tests); `tests/write_lint.rs` 3/3. Not ticked: the Windows rename-without-delete path (CCS-079) and the owner-only DACL test (CCS-083/084) have only been type-checked, never executed on Windows.*
+- [ ] atomic_write fsyncs, creates new secret files 0600, follows symlinks and never deletes the target first; zero non-test std::fs::write. *Met in code and on Linux: `config.rs` `write_and_sync` (`sync_all`) + `sync_dir`, `create_new` temp at 0600 / `atomic_write_secret`, symlink resolution (4 `atomic_write_follows_*`/dangling/loop tests), `rename_replace` has no `remove_file` (Windows retries instead); `clippy.toml` bans `std::fs::write` and a scan finds 0 non-test call sites (the 3 outside `mod tests` are in `#[cfg(test)]` modules `bindings.rs`, `wire_golden.rs`, `lifecycle_run.rs` tests); `tests/write_lint.rs` 3/3. Not ticked: the Windows rename-without-delete path (CCS-079) and the owner-only DACL test `config::tests::atomic_write_secret_sets_owner_only_acl` (CCS-083/084) have never run on a real Windows host. CCS-228 ran the verbatim `#[cfg(windows)]` code under Wine 9.0 (overwrite without `remove_file`, sharing-violation retry, DACL applied), which is interim evidence only. The `windows-latest` leg of `.github/workflows/ci.yml` runs `cargo test` and would cover both.*
 - [x] SQL import cannot ATTACH or VACUUM INTO; restore validates in a temp DB before touching the main DB. *Evidence: `database/backup.rs` sets `SQLITE_LIMIT_ATTACHED=0` + an authorizer on the temp import connection (`sql_import_rejects_attach_vacuum_into_and_unsafe_statements`); `database/tests.rs::restore_from_backup_{rejects_invalid_backup_and_keeps_main_db,replaces_main_db_after_temp_validation}`. All pass.*
 - [x] Cost golden table fully green, including the grokbuild backfill; a deleted built-in price stays deleted. *Evidence: `proxy/usage/cost_golden.rs` has no ignored/known-bad rows; all 7 `cost_golden_*` tests pass, including `cost_golden_backfill_path_grokbuild_cache_rows`; `database/tests.rs::deleted_builtin_model_pricing_stays_deleted_after_restart` passes.*
 - [x] Startup reports journal_mode=wal on local paths; pre-migration backup is consistent and also taken for v0/JSON upgrades. *Evidence: `database/journal.rs` logs `Database journal_mode={mode}` (WAL locally, DELETE in cloud-synced dirs; `init_uses_wal_with_busy_timeout_on_local_dir`, `configure_file_connection_uses_wal_locally_and_delete_in_cloud_dirs`); `tests/migrations.rs::{v0_database_gets_premigration_backup, premigration_backup_includes_uncheckpointed_wal_writes, premigration_backup_survives_minimum_retention}` and `backup_legacy_config_json` (called from `app_shell/bootstrap.rs`) for JSON upgrades. All pass.*
@@ -25,7 +25,7 @@ p1-proxy-inbound-auth, p1-proxy-body-limit, p1-proxy-halfopen-permit, p1-proxy-r
 
 ## Epic closure audit
 
-Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e` (HEAD `c0c770a`, after the P5 command-layer merge and the CCS-152/153/154/163/168/212 proxy changes). Targeted runs: `cargo test --lib` filtered to the criterion tests (83 passed, 0 failed), `--test migrations` premigration/v0/legacy-JSON (5 passed), `--test write_lint` (3 passed), `vitest tests/lint/csp.test.ts tests/lint/assetProtocol.test.ts` (7 passed). Full suites were not re-run here.
+Re-audited 2026-10-31 against branch `claude/funny-carson-9c7j3e` (HEAD `673be73`, after the first follow-up wave CCS-214..246 and the lane-2 merge CCS-213..253). Targeted runs on this tree: `cargo test --lib` filtered to the criterion tests (inbound_auth, half_open, raw_path, update_config_to_, usage_script, deeplink, atomic_write, sql_import, restore_from_backup, cost_golden, pricing, WAL, newer-schema compat, powershell quoting, picked_paths, hyper_client: 89 passed, 0 failed), `--test migrations` premigration/v0/legacy-JSON (5 passed), `--test write_lint` (3 passed), and `vitest` on `tests/lint/csp.test.ts`, `tests/lint/assetProtocol.test.ts`, `tests/components/SettingsLoadFailureNotice.test.tsx`, `tests/components/DatabaseUpgrade.test.tsx` (14 passed). A `std::fs::write` scan still finds no call site outside `#[cfg(test)]` code. Full suites were not re-run here.
 
 ### Child tickets
 
@@ -66,7 +66,7 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e` (HEAD `c0c770a`, 
 | CCS-081 | `p1-atomic-write-symlink` | Done |
 | CCS-082 | `p1-route-writes-atomic-lint` | Done |
 | CCS-083 | `p1-oauth-token-store-hardening` | Partial |
-| CCS-084 | `p1-settings-atomic-save` | Partial |
+| CCS-084 | `p1-settings-atomic-save` | Done |
 | CCS-085 | `p1-settings-save-race` | Done |
 | CCS-086 | `p1-sql-import-sandbox` | Done |
 | CCS-087 | `p1-restore-backup-temp-first` | Done |
@@ -93,28 +93,29 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e` (HEAD `c0c770a`, 
 | CCS-108 | `p1-fe-mcp-stdio-validation` | Done |
 | CCS-109 | `p1-fe-skills-cache-dedupe` | Done |
 
-54 Done, 7 Partial, 0 Open (61 tickets).
+57 Done, 4 Partial, 0 Open (61 tickets).
+
+### Follow-up tickets
+
+| Ticket | Title | Status |
+|---|---|---|
+| [CCS-225](CCS-225-p1-settings-load-failure-notice.md) | Startup notice and confirm flow when settings.json failed to load | Done |
+| [CCS-226](CCS-226-p1-e2e-csp-icons-runtime.md) | Headless WebKitGTK check of the tightened CSP and asset-protocol removal | Done |
+| [CCS-227](CCS-227-p1-proxy-require-ipv6-guard.md) | `[::1]` proxy tests fail instead of skipping when `CCS_REQUIRE_IPV6` is set | Done |
+| [CCS-228](CCS-228-p1-config-atomic-write-wine.md) | Windows `rename_replace` / `atomic_write` path run under Wine as interim evidence | Done |
+
+4 Done, 0 open.
 
 ### What is done
-- 9 of 10 exit criteria are met and ticked above, each with a passing test on the current tree. That covers proxy inbound auth, proxy correctness, the usage-script sandbox, deeplink scripts arriving disabled, IPC shell/path hardening, SQL import and restore, cost golden plus pricing, WAL and pre-migration backups, the DB compatibility policy, and a regression test per fix.
-- The P1 fixes survived the later refactors: rollback tests now live in `services/proxy/tests.rs` after CCS-153; `commands/misc.rs` is gone after CCS-179, and its PowerShell quoting and terminal launch now sit in `platform/shell.rs` and `platform/terminal/`; inbound-token handling is shared with the takeover engine (CCS-154/163).
-- Every Partial child ticket has its code and Linux tests merged. Each is waiting only on a check this headless Linux sandbox cannot run, except CCS-084, which also still needs its UI notice.
+- 9 of 10 exit criteria are met and ticked above, each re-checked against a passing test on the current tree: proxy inbound auth, proxy correctness, the usage-script sandbox, deeplink scripts arriving disabled, IPC shell/path hardening, SQL import and restore, cost golden plus pricing, WAL and pre-migration backups, the DB compatibility policy, and a regression test per fix. The follow-up refactors did not move or break any of them.
+- CCS-084 is closed: CCS-225 added `SettingsLoadFailureNotice` (`src/components/app-shell/AppConfirmDialogs.tsx`, mounted in `App.tsx`) with i18n in all four locales and 4 component tests.
+- CCS-077 and CCS-078 are closed: CCS-226's `e2e/specs/csp.e2e.mjs` checks the served policy, the blocked arbitrary fetch, the models.dev and avatar hosts, and that icons render without `asset://`, in the shipped debug build under WebKitGTK, with negative controls.
+- CCS-061 is CI-ready: with CCS-227, the Linux and macOS backend legs set `CCS_REQUIRE_IPV6=1`, so the `[::1]` tests fail instead of silently skipping there.
+- Criterion 5 has interim Windows evidence: CCS-228 ran the verbatim `#[cfg(windows)]` `rename_replace` and `owner_only_acl` code under Wine, and all checks passed, with negative controls.
 
 ### What remains (why the epic is Partial)
-- **Criterion 5, Windows execution (CCS-079, CCS-083, CCS-084).** `rename_replace` without a pre-delete, with retry on sharing violations, and the owner-only DACL in `atomic_write_secret` were only type-checked for `x86_64-pc-windows-gnu`. They need one green `windows-latest` run of `.github/workflows/ci.yml` (`cargo test`, including `config::tests::atomic_write_secret_sets_owner_only_acl`). Tick criterion 5 and close CCS-079/083 when that run passes.
-- **CCS-084 UI (not an exit criterion, but the ticket is open).** The backend `get_settings_load_failure` / `acknowledge_settings_load_failure` commands and the TS wrapper (`src/lib/api/settings.ts`) exist. No component calls them yet. It still needs a startup notice that shows the backup path, or a confirm action that unblocks saves when no backup could be made, plus i18n strings.
-- **CCS-061 (IPv6 CONNECT).** The two `[::1]`-listener tests skip here because the kernel has no IPv6 (`EAFNOSUPPORT`). They need one run on a host or CI runner with IPv6 loopback.
-- **CCS-077 / CCS-078 (CSP, asset protocol).** These need a manual `pnpm tauri dev` check with devtools open: the models.dev picker loads, the Copilot avatar and URL icons render with no CSP violations, `fetch('https://example.com')` is blocked, and icons still render without `asset://`. Static guards (`tests/lint/csp.test.ts`, `tests/lint/assetProtocol.test.ts`) already pass.
-- **CCS-100 (keychain off main thread).** Needs `cargo clippy` on the macOS CI runner, plus a manual check on macOS that other commands keep responding while a keychain prompt is open and that the quota falls back to the credentials file after 20 s.
-
-Once the Windows CI run passes, tick criterion 5 and set this epic to Done. The other items are child-ticket closures and do not block any exit criterion.
-
-### Remaining after triage
-
-- Blocked: Exit criterion 5 / CCS-079 / CCS-083 / CCS-084 Windows parts (rename_replace without pre-delete, owner-only DACL test). Need a Windows machine or a green windows-latest CI job.
-- Blocked: CCS-061 [::1]-listener tests. Need a host or CI runner with IPv6 loopback (this container has none).
-- Blocked: CCS-100 macOS clippy and keychain-prompt responsiveness check. Need a macOS machine or the macos-latest CI job.
-- Blocked: CCS-077 real Copilot avatar / models.dev data load. Need outbound access and a signed-in Copilot account (CCS-226 checks the CSP side).
-- Follow-up [CCS-225](../P1-trust-release/CCS-225-p1-settings-load-failure-notice.md): Show a startup notice and confirm flow when settings.json failed to load.
-- Follow-up [CCS-226](../P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md): Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec.
-- Follow-up [CCS-228](../P1-trust-release/CCS-228-p1-config-atomic-write-wine.md): Run the Windows rename_replace / atomic_write path under Wine as interim evidence.
+Only checks that need CI or a real machine remain. No code work is open.
+- **Criterion 5 / CCS-079 / CCS-083 (Windows).** Needs one green `windows-latest` leg of the Backend Checks job in `.github/workflows/ci.yml` on GitHub (`cargo clippy --all-targets -D warnings` and `cargo test`, which runs `config::tests::atomic_write_secret_sets_owner_only_acl` and the rename tests). When it passes, tick criterion 5, set CCS-079 and CCS-083 to Done, and set this epic to Done.
+- **CCS-061 (IPv6 CONNECT).** Needs one green `ubuntu-22.04` or `macos-latest` Backend Checks run on GitHub. `CCS_REQUIRE_IPV6=1` makes the two `[::1]` tests run for real there. This does not block an exit criterion.
+- **CCS-100 (keychain off main thread).** Needs the `macos-latest` clippy leg on GitHub CI, plus a human check on a macOS machine: other commands keep responding while a keychain prompt is open, and the quota falls back to the credentials file after 20 s. This does not block an exit criterion.
+- Optional, not blocking: loading a real logged-in Copilot avatar (needs Copilot OAuth in a GUI session). CCS-226 already covers the same https host.
