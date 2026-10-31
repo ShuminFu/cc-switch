@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { SegmentedControl } from "@/components/common/SegmentedControl";
 import { skillsApi, type MigrationResult } from "@/lib/api/skills";
 import type { SkillStorageLocation } from "@/types";
 import { queryKeys } from "@/lib/query/keys";
@@ -101,25 +101,26 @@ export function SkillStorageLocationSettings({
           {t("settings.skillStorage.description")}
         </p>
       </header>
-      <div className="inline-flex gap-1 rounded-md border border-border-default bg-background p-1">
-        <StorageButton
-          active={value === "cc_switch"}
-          disabled={isMigrating}
-          onClick={() => handleSelect("cc_switch")}
-        >
-          {t("settings.skillStorage.ccSwitch")}
-        </StorageButton>
-        <StorageButton
-          active={value === "unified"}
-          disabled={isMigrating}
-          onClick={() => handleSelect("unified")}
-        >
-          {isMigrating && value !== "unified" ? (
-            <Loader2 size={14} className="mr-1 animate-spin" />
-          ) : null}
-          {t("settings.skillStorage.unified")}
-        </StorageButton>
-      </div>
+      <SegmentedControl
+        ariaLabel={t("settings.skillStorage.title")}
+        value={value}
+        disabled={isMigrating}
+        onChange={(next) => handleSelect(next)}
+        options={[
+          { value: "cc_switch", label: t("settings.skillStorage.ccSwitch") },
+          {
+            value: "unified",
+            label: (
+              <>
+                {isMigrating && value !== "unified" ? (
+                  <Loader2 size={14} className="mr-1 animate-spin" />
+                ) : null}
+                {t("settings.skillStorage.unified")}
+              </>
+            ),
+          },
+        ]}
+      />
       <p className="text-xs text-muted-foreground">
         {value === "unified"
           ? t("settings.skillStorage.unifiedHint")
@@ -176,37 +177,5 @@ export function SkillStorageLocationSettings({
         </DialogContent>
       </Dialog>
     </section>
-  );
-}
-
-interface StorageButtonProps {
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}
-
-function StorageButton({
-  active,
-  disabled,
-  onClick,
-  children,
-}: StorageButtonProps) {
-  return (
-    <Button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      size="sm"
-      variant={active ? "default" : "ghost"}
-      className={cn(
-        "min-w-[96px]",
-        active
-          ? "shadow-sm"
-          : "text-muted-foreground hover:text-foreground hover:bg-muted",
-      )}
-    >
-      {children}
-    </Button>
   );
 }

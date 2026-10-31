@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { SegmentedControl } from "@/components/common/SegmentedControl";
 import type { SkillSyncMethod } from "@/types";
 
 export interface SkillSyncMethodSettingsProps {
@@ -25,54 +24,20 @@ export function SkillSyncMethodSettings({
           {t("settings.skillSync.description")}
         </p>
       </header>
-      <div className="inline-flex gap-1 rounded-md border border-border-default bg-background p-1">
-        <SyncMethodButton
-          active={displayValue === "symlink"}
-          onClick={() => onChange("symlink")}
-        >
-          {t("settings.skillSync.symlink")}
-        </SyncMethodButton>
-        <SyncMethodButton
-          active={displayValue === "copy"}
-          onClick={() => onChange("copy")}
-        >
-          {t("settings.skillSync.copy")}
-        </SyncMethodButton>
-      </div>
+      <SegmentedControl
+        ariaLabel={t("settings.skillSync.title")}
+        value={displayValue}
+        onChange={(next) => onChange(next)}
+        options={[
+          { value: "symlink", label: t("settings.skillSync.symlink") },
+          { value: "copy", label: t("settings.skillSync.copy") },
+        ]}
+      />
       {displayValue === "symlink" && (
         <p className="text-xs text-muted-foreground">
           {t("settings.skillSync.symlinkHint")}
         </p>
       )}
     </section>
-  );
-}
-
-interface SyncMethodButtonProps {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}
-
-function SyncMethodButton({
-  active,
-  onClick,
-  children,
-}: SyncMethodButtonProps) {
-  return (
-    <Button
-      type="button"
-      onClick={onClick}
-      size="sm"
-      variant={active ? "default" : "ghost"}
-      className={cn(
-        "min-w-[96px]",
-        active
-          ? "shadow-sm"
-          : "text-muted-foreground hover:text-foreground hover:bg-muted",
-      )}
-    >
-      {children}
-    </Button>
   );
 }

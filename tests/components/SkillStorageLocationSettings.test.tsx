@@ -36,7 +36,7 @@ describe("SkillStorageLocationSettings (FE-UI-58)", () => {
     );
 
     fireEvent.click(
-      screen.getByRole("button", { name: /settings.skillStorage.unified/ }),
+      screen.getByRole("radio", { name: /settings.skillStorage.unified/ }),
     );
 
     const list = await screen.findByTestId("skill-migration-errors");
