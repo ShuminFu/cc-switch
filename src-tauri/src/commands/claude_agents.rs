@@ -138,7 +138,7 @@ fn list_in(dir: &Path) -> Result<Vec<ClaudeAgentInfo>, AppError> {
         let text = std::fs::read_to_string(&path).map_err(|e| AppError::io(&path, e))?;
         agents.push(parse_agent(&path, &text));
     }
-    agents.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    agents.sort_by_key(|a| a.name.to_lowercase());
     Ok(agents)
 }
 
