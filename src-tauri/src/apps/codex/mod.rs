@@ -27,7 +27,7 @@ use self::config::{
 };
 use super::adapter::{
     AppAdapter, CommonSnippet, Credentials, McpProjector, ProxyTakeover, SessionSource,
-    TakeoverProviderNeed,
+    TakeoverProviderNeed, UpstreamProtocol,
 };
 use crate::app_config::AppType;
 use crate::config::get_home_dir;
@@ -228,6 +228,10 @@ impl AppAdapter for CodexAdapter {
             .and_then(config::extract_codex_base_url)
             .unwrap_or_default();
         (base_url, api_key)
+    }
+
+    fn upstream_protocol(&self) -> UpstreamProtocol {
+        UpstreamProtocol::OpenAiResponses
     }
 
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {

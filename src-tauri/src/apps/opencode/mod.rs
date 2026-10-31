@@ -158,6 +158,38 @@ impl AppAdapter for OpenCodeAdapter {
         )
     }
 
+    /// OpenCode: `{ npm, options: { baseURL, apiKey }, ... }`
+    ///
+    /// 用户未显式填 `options.baseURL` 时，按 `npm`（AI SDK 包）回退到包自带默认端点。
+    /// `@ai-sdk/openai-compatible` 无默认端点，必须显式填。
+    fn probe_base_url(&self, provider: &Provider) -> Option<Result<String, AppError>> {
+        let settings = &provider.settings_config;
+        let non_empty = |value: Option<&Value>| {
+            value
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
+        if let Some(explicit) = non_empty(settings.get("options").and_then(|v| v.get("baseURL"))) {
+            return Some(Ok(explicit));
+        }
+
+        let fallback = match non_empty(settings.get("npm")).as_deref() {
+            Some("@ai-sdk/openai") => Some("https://api.openai.com/v1"),
+            Some("@ai-sdk/anthropic") => Some("https://api.anthropic.com"),
+            Some("@ai-sdk/google") => Some("https://generativelanguage.googleapis.com"),
+            _ => None,
+        };
+
+        Some(fallback.map(|s| s.to_string()).ok_or_else(|| {
+            AppError::localized(
+                "opencode_base_url_missing",
+                "OpenCode 供应商缺少 options.baseURL，且当前 SDK 包没有默认端点",
+                "OpenCode provider is missing `options.baseURL` and the SDK package has no default endpoint",
+            )
+        }))
+    }
+
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {
         // OpenCode uses options.apiKey and options.baseURL
         let options = provider

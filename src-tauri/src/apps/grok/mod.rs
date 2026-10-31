@@ -11,7 +11,9 @@ use self::config::{
     get_grok_config_dir, read_grok_live_settings, strip_grok_mcp_servers_from_settings,
     validate_config_toml, write_grok_provider_live,
 };
-use super::adapter::{AppAdapter, Credentials, McpProjector, ProxyTakeover, SessionSource};
+use super::adapter::{
+    AppAdapter, Credentials, McpProjector, ProxyTakeover, SessionSource, UpstreamProtocol,
+};
 use crate::app_config::AppType;
 use crate::config::get_home_dir;
 use crate::database::Database;
@@ -80,6 +82,10 @@ impl AppAdapter for GrokAdapter {
             .and_then(Value::as_str)
             .and_then(config::extract_credentials)
             .unwrap_or_default()
+    }
+
+    fn upstream_protocol(&self) -> UpstreamProtocol {
+        UpstreamProtocol::OpenAiResponses
     }
 
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {

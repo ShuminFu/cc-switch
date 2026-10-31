@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use super::adapter::{AppAdapter, Credentials};
+use super::adapter::{AppAdapter, Credentials, UpstreamProtocol};
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
@@ -80,6 +80,14 @@ impl AppAdapter for ClaudeDesktopAdapter {
     /// Anthropic 风格的 env，保留 JS 脚本路径依赖的 OpenRouter / Google key 兜底
     fn usage_credentials(&self, settings: &Value) -> (String, String) {
         super::claude::anthropic_usage_credentials(settings)
+    }
+
+    fn upstream_protocol(&self) -> UpstreamProtocol {
+        UpstreamProtocol::Anthropic
+    }
+
+    fn env_base_url_key(&self) -> Option<&'static str> {
+        Some("ANTHROPIC_BASE_URL")
     }
 
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {

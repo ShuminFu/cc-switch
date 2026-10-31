@@ -13,7 +13,7 @@ use serde_json::Value;
 pub(crate) use self::common_config::{extract_common_config, normalize_models_in_value};
 use super::adapter::{
     env_url_matches, AppAdapter, CommonSnippet, Credentials, McpProjector, ProxyTakeover,
-    SessionSource, TakeoverProviderNeed,
+    SessionSource, TakeoverProviderNeed, UpstreamProtocol,
 };
 use super::{json_deep_merge, json_deep_remove, json_is_subset};
 use crate::app_config::AppType;
@@ -103,6 +103,14 @@ impl AppAdapter for ClaudeAdapter {
     /// Anthropic 风格的 env，保留 JS 脚本路径依赖的 OpenRouter / Google key 兜底
     fn usage_credentials(&self, settings: &Value) -> (String, String) {
         anthropic_usage_credentials(settings)
+    }
+
+    fn upstream_protocol(&self) -> UpstreamProtocol {
+        UpstreamProtocol::Anthropic
+    }
+
+    fn env_base_url_key(&self) -> Option<&'static str> {
+        Some("ANTHROPIC_BASE_URL")
     }
 
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {

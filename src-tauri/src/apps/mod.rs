@@ -205,8 +205,11 @@ mod tests {
     /// 深链接预览改走注册表 / 适配器后为 25 处；CCS-234 把接管的按应用分派（读写 / 清理 live、
     /// 凭据回写、当前供应商依赖、代理地址比对、热切换刷新、备份投影、快照文件）收进
     /// `ProxyTakeover` 后为 15 处，达到 P4 目标；CCS-235 把 app_config.rs 的旧分应用槽位访问
-    /// （MCP / Prompt / v3.6 迁移）与 services/profile.rs 的分组映射改为键控访问后为 8 处。
-    const MATCH_APP_SITE_BUDGET: usize = 8;
+    /// （MCP / Prompt / v3.6 迁移）与 services/profile.rs 的分组映射改为键控访问后为 8 处；
+    /// CCS-236 把连通性检查的 base_url 提取（`AppAdapter::probe_base_url`）、终端的 base_url
+    /// 环境变量名（`AppAdapter::env_base_url_key`）与代理上游适配器选择
+    ///（`AppAdapter::upstream_protocol`）收进适配器后为 4 处（其中 2 处在 takeover/legacy.rs）。
+    const MATCH_APP_SITE_BUDGET: usize = 4;
 
     #[test]
     fn match_app_sites_outside_apps_stay_within_budget() {
@@ -238,6 +241,9 @@ mod tests {
             "services/proxy/hot_switch.rs",
             "services/proxy/backup.rs",
             "services/takeover_snapshot.rs",
+            "services/stream_check.rs",
+            "commands/terminal.rs",
+            "proxy/providers/mod.rs",
         ] {
             assert!(
                 sites.iter().all(|(site_file, _)| site_file != file),

@@ -50,6 +50,20 @@ pub(crate) fn first_non_empty_str(env: Option<&Value>, keys: &[&str]) -> String 
     String::new()
 }
 
+/// 本地代理把请求转发给上游时使用的协议适配器
+///（[`crate::proxy::providers::get_adapter`] 按它选 `ProviderAdapter`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpstreamProtocol {
+    /// Anthropic Messages（`ClaudeAdapter`）
+    Anthropic,
+    /// OpenAI Responses（`CodexAdapter`）
+    OpenAiResponses,
+    /// Google Gemini（`GeminiAdapter`）
+    Gemini,
+    /// 按应用自己的 live 条目形状取凭据，说 OpenAI 兼容协议（`AdditiveAppAdapter`）
+    AppEntries,
+}
+
 /// 单个应用的 live 配置适配器
 pub trait AppAdapter: Debug + Sync {
     /// 应用配置目录（已考虑 settings.json 中的目录覆盖）
@@ -156,6 +170,25 @@ pub trait AppAdapter: Debug + Sync {
     /// 与 [`AppAdapter::credentials`] 不同，这里从不报错，并与前端
     /// `UsageScriptModal.tsx` 的 `getProviderCredentials` 保持一致。
     fn usage_credentials(&self, settings: &Value) -> (String, String);
+
+    /// 本地代理转发该应用请求时使用的上游协议；默认按应用条目取凭据的 OpenAI 兼容协议
+    fn upstream_protocol(&self) -> UpstreamProtocol {
+        UpstreamProtocol::AppEntries
+    }
+
+    /// 连通性检查（`StreamCheckService`）探测的 base_url。
+    ///
+    /// `None` 表示沿用 [`Self::upstream_protocol`] 对应上游适配器的 `extract_base_url`；
+    /// settings_config 形状与上游适配器约定不同、需要自行提取（或按 SDK 包回退默认端点）
+    /// 的应用返回 `Some`。
+    fn probe_base_url(&self, _provider: &Provider) -> Option<Result<String, AppError>> {
+        None
+    }
+
+    /// 在终端里启动应用时，从供应商 `env` 透传的 base_url 环境变量名；不透传的应用返回 `None`
+    fn env_base_url_key(&self) -> Option<&'static str> {
+        None
+    }
 
     /// 通用配置片段支持；不支持的应用返回 `None`
     fn common_snippet(&self) -> Option<&dyn CommonSnippet> {

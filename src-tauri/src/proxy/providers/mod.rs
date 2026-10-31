@@ -39,6 +39,7 @@ pub mod transform_gemini;
 pub mod transform_responses;
 
 use crate::app_config::AppType;
+use crate::apps::adapter::UpstreamProtocol;
 use crate::provider::Provider;
 use serde::{Deserialize, Serialize};
 
@@ -92,8 +93,8 @@ impl ProviderType {
     ///
     /// 根据配置中的 base_url、auth_mode、api_key 格式等信息推断具体的供应商类型
     pub fn from_app_type_and_config(app_type: &AppType, provider: &Provider) -> Self {
-        match app_type {
-            AppType::Claude | AppType::ClaudeDesktop => {
+        match crate::apps::adapter(app_type).upstream_protocol() {
+            UpstreamProtocol::Anthropic => {
                 if get_claude_api_format(provider)
                     == crate::proxy::protocol::ClaudeApiFormat::GeminiNative
                 {
@@ -148,8 +149,7 @@ impl ProviderType {
                 }
                 ProviderType::Claude
             }
-            AppType::Codex => ProviderType::Codex,
-            AppType::Gemini => {
+            UpstreamProtocol::Gemini => {
                 // 检测是否为 CLI 模式（OAuth）
                 let adapter = GeminiAdapter::new();
                 if let Some(auth) = adapter.extract_auth(provider) {
@@ -165,8 +165,8 @@ impl ProviderType {
                 }
                 ProviderType::Gemini
             }
-            AppType::GrokBuild => ProviderType::Codex,
-            AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => ProviderType::Codex,
+            // OpenAI Responses 与按应用条目取凭据的 OpenAI 兼容上游都按 Codex 处理
+            UpstreamProtocol::OpenAiResponses | UpstreamProtocol::AppEntries => ProviderType::Codex,
         }
     }
 
@@ -211,16 +211,13 @@ impl std::str::FromStr for ProviderType {
     }
 }
 
-/// 根据 AppType 获取对应的适配器
+/// 根据 AppType 获取对应的适配器（按应用声明的 [`UpstreamProtocol`] 选择）
 pub fn get_adapter(app_type: &AppType) -> Box<dyn ProviderAdapter> {
-    match app_type {
-        AppType::Claude | AppType::ClaudeDesktop => Box::new(ClaudeAdapter::new()),
-        AppType::Codex => Box::new(CodexAdapter::new()),
-        AppType::Gemini => Box::new(GeminiAdapter::new()),
-        AppType::GrokBuild => Box::new(CodexAdapter::new()),
-        AppType::OpenCode | AppType::OpenClaw | AppType::Hermes => {
-            Box::new(AdditiveAppAdapter::new(app_type.clone()))
-        }
+    match crate::apps::adapter(app_type).upstream_protocol() {
+        UpstreamProtocol::Anthropic => Box::new(ClaudeAdapter::new()),
+        UpstreamProtocol::OpenAiResponses => Box::new(CodexAdapter::new()),
+        UpstreamProtocol::Gemini => Box::new(GeminiAdapter::new()),
+        UpstreamProtocol::AppEntries => Box::new(AdditiveAppAdapter::new(app_type.clone())),
     }
 }
 
@@ -323,6 +320,47 @@ mod tests {
 
         let deserialized: ProviderType = serde_json::from_str("\"gemini_cli\"").unwrap();
         assert_eq!(deserialized, ProviderType::GeminiCli);
+    }
+
+    /// 按 `AppAdapter::upstream_protocol` 选择上游适配器，与 CCS-236 前的 match 分支一致
+    #[test]
+    fn get_adapter_follows_app_upstream_protocol() {
+        let expected = [
+            (AppType::Claude, "Claude"),
+            (AppType::ClaudeDesktop, "Claude"),
+            (AppType::Codex, "Codex"),
+            (AppType::Gemini, "Gemini"),
+            (AppType::GrokBuild, "Codex"),
+            (AppType::OpenCode, "OpenCode"),
+            (AppType::OpenClaw, "OpenClaw"),
+            (AppType::Hermes, "Hermes"),
+        ];
+        assert_eq!(expected.len(), AppType::all().count());
+        for (app_type, name) in expected {
+            assert_eq!(get_adapter(&app_type).name(), name, "{app_type:?}");
+        }
+    }
+
+    #[test]
+    fn test_from_app_type_openai_compatible_apps_are_codex() {
+        let provider = create_provider(json!({ "env": {} }));
+        for app_type in [
+            AppType::Codex,
+            AppType::GrokBuild,
+            AppType::OpenCode,
+            AppType::OpenClaw,
+            AppType::Hermes,
+        ] {
+            assert_eq!(
+                ProviderType::from_app_type_and_config(&app_type, &provider),
+                ProviderType::Codex,
+                "{app_type:?}"
+            );
+        }
+        assert_eq!(
+            ProviderType::from_app_type_and_config(&AppType::ClaudeDesktop, &provider),
+            ProviderType::Claude
+        );
     }
 
     #[test]

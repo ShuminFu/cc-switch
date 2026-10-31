@@ -61,13 +61,7 @@ fn extract_env_vars_from_config(
         }
 
         // 处理 base_url: 根据应用类型添加对应的环境变量
-        let base_url_key = match app_type {
-            AppType::Claude | AppType::ClaudeDesktop => Some("ANTHROPIC_BASE_URL"),
-            AppType::Gemini => Some("GOOGLE_GEMINI_BASE_URL"),
-            _ => None,
-        };
-
-        if let Some(key) = base_url_key {
+        if let Some(key) = crate::apps::adapter(app_type).env_base_url_key() {
             if let Some(url_str) = env.get(key).and_then(|v| v.as_str()) {
                 env_vars.push((key.to_string(), url_str.to_string()));
             }
@@ -89,4 +83,58 @@ fn extract_env_vars_from_config(
     }
 
     env_vars
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn base_url_entries(app_type: &AppType) -> Vec<String> {
+        let config = json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": "https://anthropic.example",
+                "GOOGLE_GEMINI_BASE_URL": "https://gemini.example"
+            }
+        });
+        extract_env_vars_from_config(&config, app_type)
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect()
+    }
+
+    /// env 原样透传后，按应用适配器声明的 base_url 键再追加一次（与 CCS-236 前的 match 一致）
+    #[test]
+    fn base_url_key_follows_app_adapter() {
+        let all_env = vec![
+            "ANTHROPIC_BASE_URL".to_string(),
+            "GOOGLE_GEMINI_BASE_URL".to_string(),
+        ];
+        for app_type in AppType::all() {
+            let mut expected = all_env.clone();
+            match app_type {
+                AppType::Claude | AppType::ClaudeDesktop => {
+                    expected.push("ANTHROPIC_BASE_URL".to_string())
+                }
+                AppType::Gemini => expected.push("GOOGLE_GEMINI_BASE_URL".to_string()),
+                _ => {}
+            }
+            assert_eq!(base_url_entries(&app_type), expected, "{app_type:?}");
+        }
+    }
+
+    #[test]
+    fn codex_and_gemini_credentials_become_api_key_env() {
+        let codex = extract_env_vars_from_config(&json!({ "auth": "sk-codex" }), &AppType::Codex);
+        assert_eq!(
+            codex,
+            vec![("OPENAI_API_KEY".to_string(), "sk-codex".to_string())]
+        );
+
+        let gemini = extract_env_vars_from_config(&json!({ "api_key": "g-key" }), &AppType::Gemini);
+        assert_eq!(
+            gemini,
+            vec![("GEMINI_API_KEY".to_string(), "g-key".to_string())]
+        );
+    }
 }

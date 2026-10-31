@@ -104,6 +104,24 @@ impl AppAdapter for HermesAdapter {
         )
     }
 
+    /// Hermes: `{ base_url, api_key, api_mode }`（snake_case）
+    fn probe_base_url(&self, provider: &Provider) -> Option<Result<String, AppError>> {
+        let base_url = provider
+            .settings_config
+            .get("base_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                AppError::localized(
+                    "hermes_base_url_missing",
+                    "Hermes 供应商缺少 base_url",
+                    "Hermes provider is missing `base_url`",
+                )
+            });
+        Some(base_url)
+    }
+
     /// 与 [`Self::usage_credentials`] 一致读 snake_case；旧版 DeepLink 导入的
     /// camelCase 记录（写 live 时才会被 `sanitize_hermes_provider_keys` 改名）兜底
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {

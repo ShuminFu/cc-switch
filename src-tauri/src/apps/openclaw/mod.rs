@@ -134,6 +134,24 @@ impl AppAdapter for OpenClawAdapter {
         )
     }
 
+    /// OpenClaw: `{ baseUrl, apiKey, api, ... }`（camelCase）
+    fn probe_base_url(&self, provider: &Provider) -> Option<Result<String, AppError>> {
+        let base_url = provider
+            .settings_config
+            .get("baseUrl")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                AppError::localized(
+                    "openclaw_base_url_missing",
+                    "OpenClaw 供应商缺少 baseUrl",
+                    "OpenClaw provider is missing `baseUrl`",
+                )
+            });
+        Some(base_url)
+    }
+
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {
         flat_credentials(provider)
     }

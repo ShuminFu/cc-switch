@@ -16,7 +16,7 @@ use self::config::{
 };
 use super::adapter::{
     env_url_matches, first_non_empty_str, str_or_empty, AppAdapter, CommonSnippet, Credentials,
-    McpProjector, ProxyTakeover, SessionSource,
+    McpProjector, ProxyTakeover, SessionSource, UpstreamProtocol,
 };
 use super::{json_deep_merge, json_deep_remove, json_is_subset};
 use crate::app_config::AppType;
@@ -89,6 +89,14 @@ impl AppAdapter for GeminiAdapter {
         let base_url = str_or_empty(env.and_then(|e| e.get("GOOGLE_GEMINI_BASE_URL")));
         let api_key = first_non_empty_str(env, &["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
         (base_url, api_key)
+    }
+
+    fn upstream_protocol(&self) -> UpstreamProtocol {
+        UpstreamProtocol::Gemini
+    }
+
+    fn env_base_url_key(&self) -> Option<&'static str> {
+        Some("GOOGLE_GEMINI_BASE_URL")
     }
 
     fn credentials(&self, provider: &Provider) -> Result<Credentials, AppError> {
