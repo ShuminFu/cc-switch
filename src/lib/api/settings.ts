@@ -405,6 +405,21 @@ export const backupsApi = {
     return await call(commands.restoreDbBackup(filename));
   },
 
+  /**
+   * Restore a backup; `keepUsageHistory = false` brings back the backup's own
+   * usage logs and statistics instead of keeping this device's (DB-42).
+   */
+  async restoreDbBackupWithOptions(
+    filename: string,
+    keepUsageHistory: boolean,
+  ): Promise<string> {
+    if (keepUsageHistory) return await backupsApi.restoreDbBackup(filename);
+    return await invoke("restore_db_backup_with_options", {
+      filename,
+      keepUsageHistory,
+    });
+  },
+
   async renameDbBackup(oldFilename: string, newName: string): Promise<string> {
     return await call(commands.renameDbBackup(oldFilename, newName));
   },

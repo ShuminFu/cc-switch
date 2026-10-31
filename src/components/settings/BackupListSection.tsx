@@ -79,10 +79,13 @@ export function BackupListSection({
   const [editingFilename, setEditingFilename] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  const handleRestore = async () => {
+  const handleRestore = async (keepUsageHistory: boolean) => {
     if (!confirmFilename) return;
     try {
-      const safetyId = await restore(confirmFilename);
+      const safetyId = await restore({
+        filename: confirmFilename,
+        keepUsageHistory,
+      });
       setConfirmFilename(null);
       toast.success(
         t("settings.backupManager.restoreSuccess", {
@@ -453,8 +456,13 @@ export function BackupListSection({
               })
             : t("settings.backupManager.restore", { defaultValue: "Restore" })
         }
-        onConfirm={() => {
-          if (!isRestoring) void handleRestore();
+        checkboxLabel={t("settings.backupManager.keepUsageHistory", {
+          defaultValue:
+            "Keep usage history recorded on this device since the backup",
+        })}
+        checkboxDefaultChecked
+        onConfirm={(keepUsageHistory) => {
+          if (!isRestoring) void handleRestore(keepUsageHistory);
         }}
         onCancel={() => {
           if (!isRestoring) setConfirmFilename(null);

@@ -62,6 +62,22 @@ export const handlers = [
     },
   ),
   http.post(`${TAURI_ENDPOINT}/prune_request_logs_now`, () => success(0)),
+  http.post(`${TAURI_ENDPOINT}/get_stream_check_retention`, () =>
+    success({ retentionDays: 7 }),
+  ),
+  http.post(
+    `${TAURI_ENDPOINT}/set_stream_check_retention`,
+    async ({ request }) => {
+      const { days } = await withJson<{ days: number }>(request);
+      return success({ retentionDays: days });
+    },
+  ),
+  http.post(`${TAURI_ENDPOINT}/restore_db_backup_with_options`, () =>
+    success("safety-backup"),
+  ),
+  http.post(`${TAURI_ENDPOINT}/render_provider_env_profile`, () =>
+    success("export ANTHROPIC_BASE_URL='https://example.invalid'\n"),
+  ),
   http.post(`${TAURI_ENDPOINT}/get_managed_policy_status`, () =>
     success({ state: "none", signed: false, unknownFeatures: [] }),
   ),
