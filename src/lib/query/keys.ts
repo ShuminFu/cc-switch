@@ -179,6 +179,11 @@ export const queryKeys = {
     all: ["profiles"] as const,
   },
 
+  /** Universal (multi-app) providers (FE-PROV-37). */
+  universalProviders: {
+    all: ["universalProviders"] as const,
+  },
+
   /** Claude Code subagents in ~/.claude/agents, PRODUCT-42. */
   claudeAgents: {
     all: ["claudeAgents"] as const,
