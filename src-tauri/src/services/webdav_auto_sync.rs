@@ -268,13 +268,6 @@ mod tests {
         assert!(should_run_auto_sync(Some(&enabled)));
     }
 
-    #[test]
-    fn service_layer_does_not_depend_on_commands_layer() {
-        let source = include_str!("webdav_auto_sync.rs");
-        let needle = ["crate", "commands", ""].join("::");
-        assert!(
-            !source.contains(&needle),
-            "services layer should not depend on commands layer"
-        );
-    }
+    // Layering (no dependency on crate::commands) is enforced for every
+    // service/proxy/database file by src-tauri/tests/architecture.rs (TEST-30).
 }
