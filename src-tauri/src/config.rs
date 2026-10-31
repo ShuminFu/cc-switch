@@ -33,13 +33,77 @@ pub fn get_home_dir() -> PathBuf {
     })
 }
 
-/// 获取 Claude Code 配置目录路径
-pub fn get_claude_config_dir() -> PathBuf {
-    if let Some(custom) = crate::settings::get_claude_override_dir() {
-        return custom;
-    }
+/// Where a tool's config directory was resolved from (CFG-12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "var")]
+pub enum ConfigDirSource {
+    /// The directory configured in cc-switch settings.
+    Override,
+    /// The tool's own environment variable (e.g. `CODEX_HOME`).
+    Env(&'static str),
+    /// The platform default (e.g. `~/.codex`).
+    Default,
+}
 
-    get_home_dir().join(".claude")
+/// Read a tool-native directory environment variable (`CODEX_HOME`,
+/// `CLAUDE_CONFIG_DIR`, …). Empty values are ignored and a leading `~` is
+/// expanded. Ignored while `CC_SWITCH_TEST_HOME` isolates the process, so a
+/// developer's own environment can never redirect test writes.
+pub fn tool_env_dir(var: &str) -> Option<PathBuf> {
+    if std::env::var_os("CC_SWITCH_TEST_HOME").is_some_and(|v| !v.is_empty()) {
+        return None;
+    }
+    let raw = std::env::var_os(var)?;
+    let value = raw.to_string_lossy();
+    expand_tool_env_value(value.trim())
+}
+
+fn expand_tool_env_value(value: &str) -> Option<PathBuf> {
+    if value.is_empty() {
+        return None;
+    }
+    if value == "~" {
+        return Some(get_home_dir());
+    }
+    if let Some(rest) = value
+        .strip_prefix("~/")
+        .or_else(|| value.strip_prefix("~\\"))
+    {
+        return Some(get_home_dir().join(rest));
+    }
+    Some(PathBuf::from(value))
+}
+
+/// Shared resolution order for every adapter: cc-switch override → the
+/// tool's own environment variable → platform default.
+pub fn resolve_tool_dir(
+    override_dir: Option<PathBuf>,
+    env: Option<(&'static str, PathBuf)>,
+    default: impl FnOnce() -> PathBuf,
+) -> (PathBuf, ConfigDirSource) {
+    if let Some(dir) = override_dir {
+        return (dir, ConfigDirSource::Override);
+    }
+    if let Some((var, dir)) = env {
+        return (dir, ConfigDirSource::Env(var));
+    }
+    (default(), ConfigDirSource::Default)
+}
+
+/// Claude Code config directory and where it came from.
+pub fn resolve_claude_config_dir() -> (PathBuf, ConfigDirSource) {
+    resolve_tool_dir(
+        crate::settings::get_claude_override_dir(),
+        tool_env_dir("CLAUDE_CONFIG_DIR").map(|dir| ("CLAUDE_CONFIG_DIR", dir)),
+        || get_home_dir().join(".claude"),
+    )
+}
+
+/// 获取 Claude Code 配置目录路径
+///
+/// cc-switch 设置覆盖 → `CLAUDE_CONFIG_DIR` → `~/.claude`。
+pub fn get_claude_config_dir() -> PathBuf {
+    resolve_claude_config_dir().0
 }
 
 /// 默认 Claude MCP 配置文件路径 (~/.claude.json)
@@ -153,14 +217,18 @@ fn derive_mcp_path_from_override(dir: &Path) -> PathBuf {
 }
 
 /// 获取 Claude MCP 配置文件路径
+///
+/// Claude Code keeps `.claude.json` inside `CLAUDE_CONFIG_DIR` when that
+/// variable is set, so an env-resolved directory is treated like an override.
 pub fn get_claude_mcp_path() -> PathBuf {
-    if let Some(custom_dir) = crate::settings::get_claude_override_dir() {
-        if let Some(path) = default_mcp_path_for_config_dir(&custom_dir) {
-            return path;
-        }
-        return derive_mcp_path_from_override(&custom_dir);
+    let (custom_dir, source) = resolve_claude_config_dir();
+    if source == ConfigDirSource::Default {
+        return get_default_claude_mcp_path();
     }
-    get_default_claude_mcp_path()
+    if let Some(path) = default_mcp_path_for_config_dir(&custom_dir) {
+        return path;
+    }
+    derive_mcp_path_from_override(&custom_dir)
 }
 
 /// 获取 Claude Code 主配置文件路径
@@ -717,6 +785,40 @@ pub(crate) fn backup_file_into_dir(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn resolve_tool_dir_prefers_override_then_env_then_default() {
+        let default = || PathBuf::from("/home/u/.codex");
+        assert_eq!(
+            resolve_tool_dir(
+                Some(PathBuf::from("/o")),
+                Some(("CODEX_HOME", PathBuf::from("/e"))),
+                default
+            ),
+            (PathBuf::from("/o"), ConfigDirSource::Override)
+        );
+        assert_eq!(
+            resolve_tool_dir(None, Some(("CODEX_HOME", PathBuf::from("/e"))), default),
+            (PathBuf::from("/e"), ConfigDirSource::Env("CODEX_HOME"))
+        );
+        assert_eq!(
+            resolve_tool_dir(None, None, default),
+            (PathBuf::from("/home/u/.codex"), ConfigDirSource::Default)
+        );
+    }
+
+    #[test]
+    fn tool_env_values_ignore_blank_and_expand_tilde() {
+        assert_eq!(expand_tool_env_value(""), None);
+        assert_eq!(
+            expand_tool_env_value("/work/.codex"),
+            Some(PathBuf::from("/work/.codex"))
+        );
+        assert_eq!(
+            expand_tool_env_value("~/work/.codex"),
+            Some(get_home_dir().join("work/.codex"))
+        );
+    }
+
     use super::*;
 
     #[test]

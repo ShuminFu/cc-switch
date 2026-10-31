@@ -151,13 +151,20 @@ const CODEX_RESERVED_MODEL_PROVIDER_IDS: &[&str] = &[
     "ollama-chat",
 ];
 
-/// 获取 Codex 配置目录路径
-pub fn get_codex_config_dir() -> PathBuf {
-    if let Some(custom) = crate::settings::get_codex_override_dir() {
-        return custom;
-    }
+/// Codex config directory and where it came from (CFG-12).
+pub fn resolve_codex_config_dir() -> (PathBuf, crate::config::ConfigDirSource) {
+    crate::config::resolve_tool_dir(
+        crate::settings::get_codex_override_dir(),
+        crate::config::tool_env_dir("CODEX_HOME").map(|dir| ("CODEX_HOME", dir)),
+        || get_home_dir().join(".codex"),
+    )
+}
 
-    get_home_dir().join(".codex")
+/// 获取 Codex 配置目录路径
+///
+/// cc-switch 设置覆盖 → `CODEX_HOME` → `~/.codex`（与 Codex CLI 自身一致）。
+pub fn get_codex_config_dir() -> PathBuf {
+    resolve_codex_config_dir().0
 }
 
 /// 获取 Codex auth.json 路径

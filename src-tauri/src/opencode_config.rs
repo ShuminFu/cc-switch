@@ -35,14 +35,25 @@ fn canonicalize_plugin_name(plugin_name: &str) -> String {
     plugin_name.to_string()
 }
 
-pub fn get_opencode_dir() -> PathBuf {
-    if let Some(override_dir) = get_opencode_override_dir() {
-        return override_dir;
-    }
+/// OpenCode config directory and where it came from (CFG-12).
+///
+/// cc-switch override → `$XDG_CONFIG_HOME/opencode` (OpenCode resolves its
+/// global config with xdg-basedir on every platform) → `~/.config/opencode`.
+pub fn resolve_opencode_dir() -> (PathBuf, crate::config::ConfigDirSource) {
+    crate::config::resolve_tool_dir(
+        get_opencode_override_dir(),
+        crate::config::tool_env_dir("XDG_CONFIG_HOME")
+            .map(|dir| ("XDG_CONFIG_HOME", dir.join("opencode"))),
+        || {
+            crate::config::get_home_dir()
+                .join(".config")
+                .join("opencode")
+        },
+    )
+}
 
-    crate::config::get_home_dir()
-        .join(".config")
-        .join("opencode")
+pub fn get_opencode_dir() -> PathBuf {
+    resolve_opencode_dir().0
 }
 
 pub fn get_opencode_config_path() -> PathBuf {
