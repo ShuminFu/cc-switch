@@ -1,6 +1,6 @@
 # CCS-249: [terminal] Run the generated Windows resume .bat under Wine cmd
 
-**Status:** Open · **Kind:** chore · **Labels:** `chore`, `phase:P5`, `p3-low`, `area:terminal`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P5`, `p3-low`, `area:terminal`
 
 > **Ticket key:** `p5-terminal-resume-bat-wine` · **Phase:** P5 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -15,8 +15,33 @@ The Windows resume batch (`build_windows_resume_batch`, `src-tauri/src/platform/
 - Record in CCS-184 that this covers the .bat content only, not how cmd/wt/PowerShell launch it.
 
 ## Acceptance criteria / verification
-- [ ] The Wine run passes all four assertions.
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal` still passes.
+- [x] The Wine run passes all four assertions.
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal` still passes.
 
 ## Dependencies
 None.
+
+## Implementation notes
+
+**Change.** The ignored test `platform::terminal::resume::tests::windows_resume_batch_runs_under_wine_cmd` in `src-tauri/src/platform/terminal/resume.rs` builds the resume batch on Linux. It uses argv `claude --resume 0199a1b2-c3d4.e5_f6` and the cwd `Z:\tmp\.tmpXXXX\proj (1)&x\100%`, which has a space, parentheses, `&` and `%`. The batch is written next to a fake `claude.cmd` shim, which is on `WINEPATH`. The shim uses delayed expansion to write `CD=[!CD!]` and `ARGS=[%*]` to a marker file. The test runs `wine cmd /c <bat>` and then `wine cmd /K <bat>` with stdin closed, each in a fresh temp dir, and asserts the following:
+1. `cd /d` entered the quoted dir (the marker CD matches the session dir exactly);
+2. the shim got exactly `--resume <id>`;
+3. the batch kept going after `call`;
+4. `del "%~f0"` removed the batch, which also proves item 3.
+
+For `/K`, it also asserts that cmd stays on a prompt in the session dir.
+
+**Wine 9.0 caveat.** Wine 9.0's cmd sets no return code for builtins. Here `cd /d Z:\tmp || echo FAIL`, `pushd ... ||`, `echo x ||` and `ver ||` all take the `||` branch, and `&&` runs even after a failed `cd`. So the unmodified batch exits at `cd /d "..." || exit /b 1` even when the cd succeeds. The test probes for this with `wine cmd /c "cd /d Z:\ || exit /b 7"`. When the probe fails, it strips ` || exit /b 1` before running, and every other line stays verbatim. The test first asserts that the generated batch does contain the guard. The cd-failure branch is still covered only by the exact-content unit tests, and real Windows honours `||` for builtins. The production batch was not changed to work around the Wine bug.
+
+**Scope.** This checks the `.bat` content only, not how cmd, Windows Terminal or PowerShell launch it. That is recorded in CCS-184, and the manual Windows desktop check stays open there.
+
+**Files.** `src-tauri/src/platform/terminal/resume.rs` (test only) and `docs/roadmap/tickets/P5-protocol-ir-commands/CCS-184-p5-session-resume-cross-platform.md`.
+
+**Commits.** 56c7822 has the test and the CCS-184 note. The next commit, a docs commit, records this ticket.
+
+**Verification** (wine-9.0, Ubuntu package, default prefix):
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib under_wine -- --ignored`: 1 passed in about 8s.
+- Mutation check: changing `call {command}` to `{command}` in `build_windows_resume_batch` makes the test fail with "batch should continue after `call` and delete itself under /c". The change was then reverted.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal`: 36 passed, 0 failed, 3 ignored.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 2869 passed, 0 failed, 12 ignored.
+- `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo clippy --tests -- -D warnings` are clean.
