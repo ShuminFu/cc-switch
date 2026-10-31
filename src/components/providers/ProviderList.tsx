@@ -41,6 +41,7 @@ import { useStableCallback } from "@/hooks/useStableCallback";
 import { useShortcut } from "@/lib/shortcuts";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
+import { ProviderHealthPanel } from "@/components/providers/ProviderHealthPanel";
 import {
   ImportCandidatesDialog,
   supportsImportPicker,
@@ -252,6 +253,7 @@ export function ProviderList({
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isImportPickerOpen, setIsImportPickerOpen] = useState(false);
+  const [isHealthOpen, setIsHealthOpen] = useState(false);
   const canPickImport = supportsImportPicker(appId);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -796,8 +798,16 @@ export function ProviderList({
         renderProviderList()
       )}
 
-      {canPickImport && (
-        <div className="flex justify-center">
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-xs text-muted-foreground"
+          onClick={() => setIsHealthOpen(true)}
+        >
+          {t("provider.health.open", { defaultValue: "Provider health…" })}
+        </Button>
+        {canPickImport && (
           <Button
             variant="ghost"
             size="sm"
@@ -808,9 +818,17 @@ export function ProviderList({
               defaultValue: "Choose providers from the live config…",
             })}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
       {importPicker}
+      {isHealthOpen && (
+        <ProviderHealthPanel
+          open={isHealthOpen}
+          appId={appId}
+          providers={sortedProviders}
+          onOpenChange={setIsHealthOpen}
+        />
+      )}
     </div>
   );
 }
