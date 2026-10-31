@@ -83,6 +83,17 @@ impl SseBlockBuffer {
     pub(crate) fn remaining(&self) -> &[u8] {
         &self.buf
     }
+
+    /// Number of bytes buffered after the last complete block.
+    pub(crate) fn pending_len(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Drop everything buffered (used when inspection is abandoned).
+    pub(crate) fn clear(&mut self) {
+        self.buf.clear();
+        self.scan_from = 0;
+    }
 }
 
 /// Append raw bytes to a UTF-8 `String` buffer, correctly handling multi-byte

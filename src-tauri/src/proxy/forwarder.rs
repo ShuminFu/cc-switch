@@ -375,11 +375,21 @@ impl RequestForwarder {
     ) -> Result<ForwardResult, ForwardError> {
         let mut guard = ActiveConnectionGuard::acquire(self.metrics.clone());
         self.metrics.record_request_start();
-        let result = self
-            .forward_with_retry_inner(
+        // PROXY-20: one span per client request with one child span per
+        // attempt. No-ops unless a tracing subscriber is installed.
+        let request_span = tracing::debug_span!(
+            "proxy_request",
+            app = app_type.as_str(),
+            endpoint = endpoint,
+            providers = providers.len(),
+        );
+        let result = tracing::Instrument::instrument(
+            self.forward_with_retry_inner(
                 app_type, method, endpoint, body, headers, extensions, providers,
-            )
-            .await;
+            ),
+            request_span,
+        )
+        .await;
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
         result.map(|mut fr| {
             guard.stream_health = fr.stream_health.take();
@@ -477,8 +487,15 @@ impl RequestForwarder {
             self.metrics
                 .record_attempt_target(&provider.id, &provider.name);
 
-            let outcome = self
-                .attempt_provider(
+            let attempt_started = std::time::Instant::now();
+            let attempt_span = tracing::debug_span!(
+                "proxy_attempt",
+                app = app_type_str,
+                provider_id = %provider.id,
+                attempt = attempted_providers,
+            );
+            let outcome = tracing::Instrument::instrument(
+                self.attempt_provider(
                     &request,
                     provider,
                     provider_body,
@@ -486,8 +503,17 @@ impl RequestForwarder {
                     provider_specific_body,
                     &mut half_open_permit,
                     (attempted_providers, providers.len()),
-                )
-                .await;
+                ),
+                attempt_span,
+            )
+            .await;
+            self.metrics.record_attempt_result(
+                app_type_str,
+                &provider.id,
+                &provider.name,
+                matches!(outcome, AttemptOutcome::Served { .. }),
+                attempt_started.elapsed(),
+            );
             match outcome {
                 AttemptOutcome::Served {
                     response,

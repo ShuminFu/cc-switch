@@ -8,11 +8,30 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 const MAX_CACHED_RESPONSES: usize = 512;
+/// Approximate byte budget across all cached call items (PERF-38): large tool
+/// payloads must not let the cache grow to hundreds of MB.
+const MAX_CACHED_BYTES: usize = 32 * 1024 * 1024;
+/// Entries older than this are evicted (PERF-38).
+const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct CachedResponse {
     calls_by_id: HashMap<String, Value>,
     call_order: Vec<String>,
+    /// Approximate serialized size of `calls_by_id` values.
+    bytes: usize,
+    inserted_at: std::time::Instant,
+}
+
+impl Default for CachedResponse {
+    fn default() -> Self {
+        Self {
+            calls_by_id: HashMap::new(),
+            call_order: Vec::new(),
+            bytes: 0,
+            inserted_at: std::time::Instant::now(),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -20,6 +39,19 @@ struct CodexChatHistoryInner {
     responses: HashMap<String, CachedResponse>,
     response_order: VecDeque<String>,
     call_index: HashMap<String, VecDeque<String>>,
+    total_bytes: usize,
+}
+
+/// Size of the Codex chat history cache, for monitoring (`/status`, `/metrics`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexChatHistoryStats {
+    pub responses: usize,
+    pub bytes: usize,
+}
+
+fn approx_value_bytes(value: &Value) -> usize {
+    serde_json::to_vec(value).map(|v| v.len()).unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -45,6 +77,15 @@ pub struct CodexChatHistoryStore {
 }
 
 impl CodexChatHistoryStore {
+    /// Current number of cached responses and their approximate byte size.
+    pub async fn stats(&self) -> CodexChatHistoryStats {
+        let inner = self.inner.read().await;
+        CodexChatHistoryStats {
+            responses: inner.responses.len(),
+            bytes: inner.total_bytes,
+        }
+    }
+
     pub async fn record_response(&self, response: &Value) -> usize {
         let Some(response_id) = response
             .get("id")
@@ -215,10 +256,17 @@ impl CodexChatHistoryInner {
         let mut inserted_or_updated = 0usize;
         let mut indexed_call_ids = Vec::new();
         for (call_id, item) in calls {
-            if !cached_response.calls_by_id.contains_key(&call_id) {
-                cached_response.call_order.push(call_id.clone());
+            let new_bytes = approx_value_bytes(&item);
+            match cached_response.calls_by_id.insert(call_id.clone(), item) {
+                Some(old) => {
+                    let old_bytes = approx_value_bytes(&old);
+                    cached_response.bytes = cached_response.bytes.saturating_sub(old_bytes);
+                    self.total_bytes = self.total_bytes.saturating_sub(old_bytes);
+                }
+                None => cached_response.call_order.push(call_id.clone()),
             }
-            cached_response.calls_by_id.insert(call_id.clone(), item);
+            cached_response.bytes += new_bytes;
+            self.total_bytes += new_bytes;
             indexed_call_ids.push(call_id);
             inserted_or_updated += 1;
         }
@@ -231,13 +279,33 @@ impl CodexChatHistoryInner {
     }
 
     fn prune(&mut self) {
-        while self.response_order.len() > MAX_CACHED_RESPONSES {
+        self.prune_with(MAX_CACHED_RESPONSES, MAX_CACHED_BYTES, CACHE_TTL);
+    }
+
+    /// Evict oldest entries while over the count or byte budget, and any entry
+    /// older than `ttl`. The newest entry is kept even if it alone exceeds the
+    /// byte budget, so the very next request can still be enriched.
+    fn prune_with(&mut self, max_responses: usize, max_bytes: usize, ttl: std::time::Duration) {
+        loop {
+            let Some(oldest_id) = self.response_order.front() else {
+                break;
+            };
+            let expired = self
+                .responses
+                .get(oldest_id)
+                .is_some_and(|r| r.inserted_at.elapsed() > ttl);
+            let over_count = self.response_order.len() > max_responses;
+            let over_bytes = self.total_bytes > max_bytes && self.response_order.len() > 1;
+            if !(expired || over_count || over_bytes) {
+                break;
+            }
             let Some(response_id) = self.response_order.pop_front() else {
                 break;
             };
             // PROV-30: only touch the index entries of the evicted response's
             // own calls instead of scanning the whole call index.
             if let Some(evicted) = self.responses.remove(&response_id) {
+                self.total_bytes = self.total_bytes.saturating_sub(evicted.bytes);
                 self.remove_response_from_call_index(&response_id, &evicted.call_order);
             }
         }
@@ -505,6 +573,40 @@ fn enrich_call_item_from_cache(item: &mut Value, cached: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prune_enforces_byte_budget_and_ttl() {
+        let mut inner = CodexChatHistoryInner::default();
+        let big = "x".repeat(1000);
+        for n in 0..10 {
+            inner.insert_calls(
+                &format!("resp_{n}"),
+                vec![(format!("call_{n}"), serde_json::json!({ "arguments": big }))],
+            );
+        }
+        let per_entry = inner.total_bytes / 10;
+        inner.prune_with(512, per_entry * 3, CACHE_TTL);
+        assert_eq!(inner.responses.len(), 3);
+        assert!(inner.total_bytes <= per_entry * 3);
+        assert!(inner.responses.contains_key("resp_9"));
+        assert!(!inner.call_index.contains_key("call_0"));
+
+        // Re-inserting the same call does not double count its size.
+        let before = inner.total_bytes;
+        inner.insert_calls(
+            "resp_9",
+            vec![(
+                "call_9".to_string(),
+                serde_json::json!({ "arguments": big }),
+            )],
+        );
+        assert_eq!(inner.total_bytes, before);
+
+        inner.prune_with(512, usize::MAX, std::time::Duration::ZERO);
+        assert!(inner.responses.is_empty());
+        assert_eq!(inner.total_bytes, 0);
+        assert!(inner.call_index.is_empty());
+    }
 
     #[test]
     fn prune_drops_only_evicted_call_index_entries() {

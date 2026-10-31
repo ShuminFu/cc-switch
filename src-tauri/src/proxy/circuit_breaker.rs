@@ -657,6 +657,52 @@ pub struct CircuitBreakerStats {
 mod tests {
     use super::*;
 
+    /// PROXY-36: concurrent failures from many tasks keep counters consistent.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_record_failure_keeps_counters_consistent() {
+        let breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 1_000,
+            error_rate_threshold: 1.1,
+            ..Default::default()
+        }));
+        let mut tasks = Vec::new();
+        for _ in 0..100 {
+            let b = breaker.clone();
+            tasks.push(tokio::spawn(async move { b.record_failure(false).await }));
+        }
+        for t in tasks {
+            t.await.unwrap();
+        }
+        let stats = breaker.get_stats().await;
+        assert_eq!(stats.consecutive_failures, 100);
+        assert_eq!(stats.failed_requests, 100);
+        assert_eq!(stats.total_requests, 100);
+        assert_eq!(stats.state, CircuitState::Closed);
+    }
+
+    /// PROXY-36: hot-updating `timeout_seconds` applies to an already open breaker.
+    #[tokio::test]
+    async fn hot_update_of_timeout_applies_to_open_breaker() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 1,
+            timeout_seconds: 3_600,
+            ..Default::default()
+        });
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+        assert!(!breaker.is_available().await);
+
+        breaker
+            .update_config(CircuitBreakerConfig {
+                failure_threshold: 1,
+                timeout_seconds: 0,
+                ..Default::default()
+            })
+            .await;
+        assert!(breaker.is_available().await);
+        assert_eq!(breaker.get_state().await, CircuitState::HalfOpen);
+    }
+
     #[tokio::test]
     async fn test_circuit_breaker_closed_to_open() {
         let config = CircuitBreakerConfig {
