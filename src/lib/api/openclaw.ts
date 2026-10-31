@@ -1,4 +1,5 @@
-import { invoke } from "./invoke";
+import { invoke, callJson } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type {
   OpenClawDefaultModel,
   OpenClawModelCatalogEntry,
@@ -116,6 +117,6 @@ export const openclawApi = {
   async getLiveProvider(
     providerId: string,
   ): Promise<Record<string, unknown> | null> {
-    return await invoke("get_openclaw_live_provider", { providerId });
+    return await callJson(commands.getOpenclawLiveProvider(providerId));
   },
 };

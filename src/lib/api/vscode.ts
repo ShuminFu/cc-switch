@@ -1,4 +1,5 @@
-import { invoke } from "./invoke";
+import { invoke, call, callJson } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type { CustomEndpoint } from "@/types";
 import type { AppId } from "./types";
 
@@ -11,7 +12,7 @@ export interface EndpointLatencyResult {
 
 export const vscodeApi = {
   async getLiveProviderSettings(appId: AppId) {
-    return await invoke("read_live_provider_settings", { app: appId });
+    return await callJson(commands.readLiveProviderSettings(appId));
   },
 
   async testApiEndpoints(
@@ -39,11 +40,7 @@ export const vscodeApi = {
     providerId: string,
     url: string,
   ): Promise<void> {
-    await invoke("add_custom_endpoint", {
-      app: appId,
-      providerId: providerId,
-      url,
-    });
+    await call(commands.addCustomEndpoint(appId, providerId, url));
   },
 
   async removeCustomEndpoint(
@@ -51,11 +48,7 @@ export const vscodeApi = {
     providerId: string,
     url: string,
   ): Promise<void> {
-    await invoke("remove_custom_endpoint", {
-      app: appId,
-      providerId: providerId,
-      url,
-    });
+    await call(commands.removeCustomEndpoint(appId, providerId, url));
   },
 
   async updateEndpointLastUsed(
@@ -63,23 +56,15 @@ export const vscodeApi = {
     providerId: string,
     url: string,
   ): Promise<void> {
-    await invoke("update_endpoint_last_used", {
-      app: appId,
-      providerId: providerId,
-      url,
-    });
+    await call(commands.updateEndpointLastUsed(appId, providerId, url));
   },
 
   async exportConfigToFile(filePath: string) {
-    return await invoke("export_config_to_file", {
-      filePath,
-    });
+    return await callJson(commands.exportConfigToFile(filePath));
   },
 
   async importConfigFromFile(filePath: string) {
-    return await invoke("import_config_from_file", {
-      filePath,
-    });
+    return await callJson(commands.importConfigFromFile(filePath));
   },
 
   async saveFileDialog(defaultName: string): Promise<string | null> {

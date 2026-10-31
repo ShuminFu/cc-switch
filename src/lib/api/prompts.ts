@@ -1,4 +1,5 @@
-import { invoke } from "./invoke";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type { AppId } from "./types";
 
 export interface Prompt {
@@ -21,18 +22,18 @@ export const promptsApi = {
   },
 
   async deletePrompt(app: AppId, id: string): Promise<void> {
-    return await invoke("delete_prompt", { app, id });
+    return await call(commands.deletePrompt(app, id));
   },
 
   async enablePrompt(app: AppId, id: string): Promise<void> {
-    return await invoke("enable_prompt", { app, id });
+    return await call(commands.enablePrompt(app, id));
   },
 
   async importFromFile(app: AppId): Promise<string> {
-    return await invoke("import_prompt_from_file", { app });
+    return await call(commands.importPromptFromFile(app));
   },
 
   async getCurrentFileContent(app: AppId): Promise<string | null> {
-    return await invoke("get_current_prompt_file_content", { app });
+    return await call(commands.getCurrentPromptFileContent(app));
   },
 };

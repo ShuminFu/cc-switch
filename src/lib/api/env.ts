@@ -1,4 +1,5 @@
-import { invoke } from "./invoke";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type { EnvConflict, BackupInfo } from "@/types/env";
 
 /**
@@ -32,7 +33,7 @@ export async function deleteEnvVars(
  * @param backupPath 备份文件路径
  */
 export async function restoreEnvBackup(backupPath: string): Promise<void> {
-  return invoke<void>("restore_env_backup", { backupPath });
+  return call(commands.restoreEnvBackup(backupPath));
 }
 
 /**

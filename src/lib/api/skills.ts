@@ -1,4 +1,5 @@
-import { invoke } from "./invoke";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 
 import type { AppId } from "@/lib/api/types";
 
@@ -150,7 +151,7 @@ export const skillsApi = {
 
   /** 删除 Skill 备份 */
   async deleteBackup(backupId: string): Promise<boolean> {
-    return await invoke("delete_skill_backup", { backupId });
+    return await call(commands.deleteSkillBackup(backupId));
   },
 
   /** 安装 Skill（统一安装） */
@@ -176,7 +177,7 @@ export const skillsApi = {
 
   /** 切换 Skill 的应用启用状态 */
   async toggleApp(id: string, app: AppId, enabled: boolean): Promise<boolean> {
-    return await invoke("toggle_skill_app", { id, app, enabled });
+    return await call(commands.toggleSkillApp(id, app, enabled));
   },
 
   /** 扫描未管理的 Skills */
@@ -235,9 +236,9 @@ export const skillsApi = {
   /** 安装技能（兼容旧 API） */
   async install(directory: string, app: AppId = "claude"): Promise<boolean> {
     if (app === "claude") {
-      return await invoke("install_skill", { directory });
+      return await call(commands.installSkill(directory));
     }
-    return await invoke("install_skill_for_app", { app, directory });
+    return await call(commands.installSkillForApp(app, directory));
   },
 
   /** 卸载技能（兼容旧 API） */
@@ -265,7 +266,7 @@ export const skillsApi = {
 
   /** 删除仓库 */
   async removeRepo(owner: string, name: string): Promise<boolean> {
-    return await invoke("remove_skill_repo", { owner, name });
+    return await call(commands.removeSkillRepo(owner, name));
   },
 
   // ========== ZIP 安装 ==========

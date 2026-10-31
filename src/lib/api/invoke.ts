@@ -21,19 +21,33 @@ type BindingResult<T, E> =
   | { status: "ok"; data: T }
   | { status: "error"; error: E };
 
+/** Rust `()` is exported as `null`; the wrappers expose it as `void`. */
+type Unit<T> = [T] extends [null] ? void : T;
+
 /**
  * Unwrap a result from the generated `commands.*` bindings (`src/lib/bindings.ts`):
  * return the data, or throw the error exactly as a raw `invoke` would have
  * (structured errors become a `BackendError`).
  */
-export function unwrap<T, E>(result: BindingResult<T, E>): T {
-  if (result.status === "ok") return result.data;
+export function unwrap<T, E>(result: BindingResult<T, E>): Unit<T> {
+  if (result.status === "ok") return result.data as Unit<T>;
   throw toBackendError(result.error);
 }
 
 /** Await a generated binding call and unwrap it. */
 export async function call<T, E>(
   pending: Promise<BindingResult<T, E>>,
-): Promise<T> {
+): Promise<Unit<T>> {
   return unwrap(await pending);
+}
+
+/**
+ * Like `call`, for commands whose Rust return type is still an untyped
+ * `serde_json::Value` (`JsonValue` in the bindings): the wrapper's declared
+ * return type documents the shape until the command gets a typed DTO.
+ */
+export async function callJson<T>(
+  pending: Promise<BindingResult<unknown, unknown>>,
+): Promise<T> {
+  return unwrap(await pending) as T;
 }

@@ -1,4 +1,5 @@
-import { invoke } from "./invoke";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 import type {
   ProviderHealth,
   CircuitBreakerConfig,
@@ -36,7 +37,7 @@ export const failoverApi = {
     providerId: string,
     appType: string,
   ): Promise<void> {
-    return invoke("reset_circuit_breaker", { providerId, appType });
+    return call(commands.resetCircuitBreaker(providerId, appType));
   },
 
   // 获取熔断器配置
@@ -73,7 +74,7 @@ export const failoverApi = {
 
   // 添加供应商到故障转移队列
   async addToFailoverQueue(appType: string, providerId: string): Promise<void> {
-    return invoke("add_to_failover_queue", { appType, providerId });
+    return call(commands.addToFailoverQueue(appType, providerId));
   },
 
   // 从故障转移队列移除供应商
@@ -81,12 +82,12 @@ export const failoverApi = {
     appType: string,
     providerId: string,
   ): Promise<void> {
-    return invoke("remove_from_failover_queue", { appType, providerId });
+    return call(commands.removeFromFailoverQueue(appType, providerId));
   },
 
   // 获取指定应用的自动故障转移开关状态
   async getAutoFailoverEnabled(appType: string): Promise<boolean> {
-    return invoke("get_auto_failover_enabled", { appType });
+    return call(commands.getAutoFailoverEnabled(appType));
   },
 
   // 设置指定应用的自动故障转移开关状态
@@ -94,6 +95,6 @@ export const failoverApi = {
     appType: string,
     enabled: boolean,
   ): Promise<void> {
-    return invoke("set_auto_failover_enabled", { appType, enabled });
+    return call(commands.setAutoFailoverEnabled(appType, enabled));
   },
 };

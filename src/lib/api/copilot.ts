@@ -5,7 +5,8 @@
  * 支持多账号管理。
  */
 
-import { invoke } from "./invoke";
+import { invoke, call } from "./invoke";
+import { commands } from "@/lib/bindings";
 
 /**
  * GitHub 设备码响应
@@ -70,9 +71,7 @@ export async function copilotStartDeviceFlow(): Promise<CopilotDeviceCodeRespons
  * @returns true 表示认证成功，false 表示仍在等待用户授权
  */
 export async function copilotPollForAuth(deviceCode: string): Promise<boolean> {
-  return invoke<boolean>("copilot_poll_for_auth", {
-    deviceCode,
-  });
+  return call(commands.copilotPollForAuth(deviceCode, null));
 }
 
 /**
@@ -88,7 +87,7 @@ export async function copilotGetAuthStatus(): Promise<CopilotAuthStatus> {
  * 注销 Copilot 认证
  */
 export async function copilotLogout(): Promise<void> {
-  return invoke("copilot_logout");
+  return call(commands.copilotLogout());
 }
 
 /**
@@ -97,7 +96,7 @@ export async function copilotLogout(): Promise<void> {
  * @returns true 表示已认证
  */
 export async function copilotIsAuthenticated(): Promise<boolean> {
-  return invoke<boolean>("copilot_is_authenticated");
+  return call(commands.copilotIsAuthenticated());
 }
 
 /**
@@ -190,7 +189,7 @@ export async function copilotPollForAccount(
  * @param accountId - GitHub 用户 ID
  */
 export async function copilotRemoveAccount(accountId: string): Promise<void> {
-  return invoke("copilot_remove_account", { accountId });
+  return call(commands.copilotRemoveAccount(accountId));
 }
 
 /**
@@ -201,7 +200,7 @@ export async function copilotRemoveAccount(accountId: string): Promise<void> {
 export async function copilotSetDefaultAccount(
   accountId: string,
 ): Promise<void> {
-  return invoke("copilot_set_default_account", { accountId });
+  return call(commands.copilotSetDefaultAccount(accountId));
 }
 
 /**

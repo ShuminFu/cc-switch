@@ -1,4 +1,5 @@
-import { invoke } from "./invoke";
+import { invoke, call } from "./invoke";
+import { commands, type JsonValue } from "@/lib/bindings";
 import type {
   McpConfigResponse,
   McpServer,
@@ -14,22 +15,22 @@ export const mcpApi = {
   },
 
   async readConfig(): Promise<string | null> {
-    return await invoke("read_claude_mcp_config");
+    return await call(commands.readClaudeMcpConfig());
   },
 
   async upsertServer(
     id: string,
     spec: McpServerSpec | Record<string, any>,
   ): Promise<boolean> {
-    return await invoke("upsert_claude_mcp_server", { id, spec });
+    return await call(commands.upsertClaudeMcpServer(id, spec));
   },
 
   async deleteServer(id: string): Promise<boolean> {
-    return await invoke("delete_claude_mcp_server", { id });
+    return await call(commands.deleteClaudeMcpServer(id));
   },
 
   async validateCommand(cmd: string): Promise<boolean> {
-    return await invoke("validate_mcp_command", { cmd });
+    return await call(commands.validateMcpCommand(cmd));
   },
 
   /**
@@ -48,15 +49,14 @@ export const mcpApi = {
     spec: McpServer,
     options?: { syncOtherSide?: boolean },
   ): Promise<boolean> {
-    const payload = {
-      app,
-      id,
-      spec,
-      ...(options?.syncOtherSide !== undefined
-        ? { syncOtherSide: options.syncOtherSide }
-        : {}),
-    };
-    return await invoke("upsert_mcp_server_in_config", payload);
+    return await call(
+      commands.upsertMcpServerInConfig(
+        app,
+        id,
+        spec as unknown as JsonValue,
+        options?.syncOtherSide ?? null,
+      ),
+    );
   },
 
   /**
@@ -67,14 +67,10 @@ export const mcpApi = {
     id: string,
     options?: { syncOtherSide?: boolean },
   ): Promise<boolean> {
-    const payload = {
-      app,
-      id,
-      ...(options?.syncOtherSide !== undefined
-        ? { syncOtherSide: options.syncOtherSide }
-        : {}),
-    };
-    return await invoke("delete_mcp_server_in_config", payload);
+    // The backend deletes the server from every app; `syncOtherSide` is kept
+    // in the signature for callers but has no effect.
+    void options;
+    return await call(commands.deleteMcpServerInConfig(app, id));
   },
 
   /**
@@ -106,7 +102,7 @@ export const mcpApi = {
    * 删除 MCP 服务器
    */
   async deleteUnifiedServer(id: string): Promise<boolean> {
-    return await invoke("delete_mcp_server", { id });
+    return await call(commands.deleteMcpServer(id));
   },
 
   /**
@@ -117,13 +113,13 @@ export const mcpApi = {
     app: AppId,
     enabled: boolean,
   ): Promise<void> {
-    return await invoke("toggle_mcp_app", { serverId, app, enabled });
+    return await call(commands.toggleMcpApp(serverId, app, enabled));
   },
 
   /**
    * 从所有应用导入 MCP 服务器
    */
   async importFromApps(): Promise<number> {
-    return await invoke("import_mcp_from_apps");
+    return await call(commands.importMcpFromApps());
   },
 };
