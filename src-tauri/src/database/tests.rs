@@ -1807,6 +1807,20 @@ fn drop_columns(conn: &Connection, table: &str, columns: &[&str]) {
 /// `create_tables` stay in place, as they did in real installations).
 fn undo_migration(conn: &Connection, version: i32) {
     match version {
+        26 => {
+            conn.execute_batch(
+                "DROP INDEX idx_request_logs_zero_cost_nanos;
+                 DROP TRIGGER trg_proxy_request_logs_cost_nanos_insert;
+                 DROP TRIGGER trg_proxy_request_logs_cost_nanos_update;
+                 DROP TRIGGER trg_usage_daily_rollups_cost_nanos_insert;
+                 DROP TRIGGER trg_usage_daily_rollups_cost_nanos_update;
+                 ALTER TABLE proxy_request_logs DROP COLUMN total_cost_nanos;
+                 ALTER TABLE usage_daily_rollups DROP COLUMN total_cost_nanos;
+                 CREATE INDEX idx_request_logs_zero_cost ON proxy_request_logs(created_at)
+                     WHERE CAST(total_cost_usd AS REAL) <= 0;",
+            )
+            .expect("undo v26");
+        }
         25 => drop_columns(conn, "model_pricing", &["currency"]),
         24 => drop_columns(conn, "model_pricing", &["input_modalities"]),
         23 => conn
@@ -2217,7 +2231,7 @@ fn baseline_schema_checksum_is_pinned() {
     // later migrations (v18 added session_log_sync.byte_offset / prefix_hash; v19-v22
     // added the endpoint unique index, pricing source, CHECK-free proxy_config and row versions;
     // v23 dropped the unused status_code request-log index; v24/v25 added the
-    // model_pricing catalog columns).
+    // model_pricing catalog columns; v26 the integer cost columns and index).
     let conn = Connection::open_in_memory().expect("open memory db");
     Database::create_tables_on_conn(&conn).expect("create fresh schema");
     let objects = query_strings(
@@ -2233,7 +2247,7 @@ fn baseline_schema_checksum_is_pinned() {
     let checksum = format!("{:x}", Sha256::digest(text.as_bytes()));
     assert_eq!(
         checksum,
-        "a78d0ed82f3811c668eee740a0871a940f222279817c0c36bd25e7fb9329463e",
+        "ccd4179c6daba8a51300c928fb28e64fe9748f0155e5dee37465454a6d0773f3",
         "baseline schema changed; it is frozen at v{}:\n{text}",
         schema::BASELINE_SCHEMA_VERSION
     );

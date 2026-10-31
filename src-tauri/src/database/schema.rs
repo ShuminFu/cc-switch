@@ -239,6 +239,13 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         breaks_sync: false,
         up: Database::migrate_v24_to_v25,
     },
+    Migration {
+        version: 26,
+        name: "integer_cost_nanos",
+        checksum: "76d0f759b1d393145367068f65ea1bae67fb51be5308bb47cb79e461fdf9773c",
+        breaks_sync: false,
+        up: Database::migrate_v25_to_v26,
+    },
 ];
 
 /// 注册表中最新的 schema 版本（即 `SCHEMA_VERSION`）。
@@ -550,6 +557,9 @@ impl Database {
             return Self::in_savepoint(conn, "create_schema", || Self::create_fresh_schema(conn));
         }
         Self::create_request_logs_dedup_triggers_if_supported(conn)?;
+        // DB-14: cost triggers are not exported either; recreating them also
+        // recomputes the integer cost column of imported rows.
+        super::cost_nanos::ensure_cost_nanos_triggers(conn)?;
         // DB-20: the device-local tombstone table is not part of SQL exports and
         // the triggers are dropped on import; recreate both (no-op otherwise).
         if Self::get_user_version(conn)? >= super::sync_rows::SYNC_ROWS_SCHEMA_VERSION {
@@ -2063,6 +2073,34 @@ impl Database {
         Ok(())
     }
 
+    /// v25 → v26 (DB-14): exact integer costs. `total_cost_nanos INTEGER`
+    /// (USD × 10⁹) on `proxy_request_logs` and `usage_daily_rollups`, kept in
+    /// step with the decimal TEXT by app-owned triggers (recreated after SQL
+    /// imports like the dedup triggers) and backfilled once, so aggregates sum
+    /// integers instead of floats. The zero-cost backfill index moves to the
+    /// new column. Plain nullable column: both tables are device-local (their
+    /// rows are not in the sync data) and older clients ignore it.
+    fn migrate_v25_to_v26(conn: &Connection) -> Result<(), AppError> {
+        for table in super::cost_nanos::COST_NANOS_TABLES {
+            if Self::table_exists(conn, table)? && Self::has_column(conn, table, "total_cost_usd")?
+            {
+                Self::add_column_if_missing(conn, table, "total_cost_nanos", "INTEGER")?;
+            }
+        }
+        super::cost_nanos::ensure_cost_nanos_triggers(conn)?;
+        if Self::table_exists(conn, "proxy_request_logs")?
+            && Self::has_column(conn, "proxy_request_logs", "total_cost_nanos")?
+        {
+            conn.execute_batch(
+                "DROP INDEX IF EXISTS idx_request_logs_zero_cost;
+                 CREATE INDEX IF NOT EXISTS idx_request_logs_zero_cost_nanos
+                     ON proxy_request_logs(created_at) WHERE total_cost_nanos <= 0;",
+            )
+            .map_err(db_err("重建零成本用量索引失败"))?;
+        }
+        Ok(())
+    }
+
     /// v21 → v22 (DB-20, first increment): per-row `sync_rev` /
     /// `sync_updated_at` (Unix ms) on the synced entity tables and a local
     /// `sync_tombstones` table recording deletions, maintained by the app's
@@ -2555,7 +2593,7 @@ mod tests {
                 SCHEMA_VERSION,
                 crate::services::sync_protocol::DB_COMPAT_VERSION
             ),
-            (25, 6),
+            (26, 6),
             "SCHEMA_VERSION changed without reviewing DB_COMPAT_VERSION (or vice versa)"
         );
         assert_eq!(
@@ -2718,7 +2756,7 @@ mod tests {
         "idx_request_logs_dedup_lookup_expr",
         "idx_request_logs_provider_created_at",
         "idx_request_logs_session",
-        "idx_request_logs_zero_cost",
+        "idx_request_logs_zero_cost_nanos",
     ];
 
     /// PRODUCT-14 regression: per-session cost totals look rows up by
@@ -2777,7 +2815,8 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(triggers, 2);
+        // Two dedup triggers plus the two DB-14 cost triggers.
+        assert_eq!(triggers, 4);
         Ok(())
     }
 
@@ -2818,7 +2857,7 @@ mod tests {
             "DROP TRIGGER trg_request_logs_dedup_session_insert;
              DROP TRIGGER trg_request_logs_dedup_proxy_insert;
              DROP INDEX idx_request_logs_provider_created_at;
-             DROP INDEX idx_request_logs_zero_cost;
+             DROP INDEX idx_request_logs_zero_cost_nanos;
              ALTER TABLE proxy_request_logs DROP COLUMN dedup_hidden;
              CREATE INDEX idx_request_logs_provider ON proxy_request_logs(provider_id, app_type);
              CREATE INDEX idx_request_logs_model ON proxy_request_logs(model);",

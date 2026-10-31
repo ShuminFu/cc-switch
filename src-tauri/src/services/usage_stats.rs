@@ -690,7 +690,7 @@ impl Database {
             FROM
                 (SELECT
                     COUNT(*) as total_requests,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost,
                     COALESCE(SUM({fresh_input_detail}), 0) as total_input_tokens,
                     COALESCE(SUM(l.output_tokens), 0) as total_output_tokens,
                     COALESCE(SUM(l.cache_creation_tokens), 0) as total_cache_creation_tokens,
@@ -699,7 +699,7 @@ impl Database {
                  FROM proxy_request_logs l {detail_join} {where_clause}) d,
                 (SELECT
                     COALESCE(SUM(r.request_count), 0) as total_requests,
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0) as total_cost,
+                    (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9) as total_cost,
                     COALESCE(SUM({fresh_input_rollup}), 0) as total_input_tokens,
                     COALESCE(SUM(r.output_tokens), 0) as total_output_tokens,
                     COALESCE(SUM(r.cache_creation_tokens), 0) as total_cache_creation_tokens,
@@ -836,7 +836,7 @@ impl Database {
             FROM (
                 SELECT {detail_app_type} as app_type,
                     COUNT(*) as req_count,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as cost,
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as cost,
                     COALESCE(SUM({fresh_input_detail}), 0) as input_t,
                     COALESCE(SUM(l.output_tokens), 0) as output_t,
                     COALESCE(SUM(l.cache_creation_tokens), 0) as cache_create_t,
@@ -847,7 +847,7 @@ impl Database {
                 UNION ALL
                 SELECT {rollup_app_type} as app_type,
                     COALESCE(SUM(r.request_count), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                    (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9),
                     COALESCE(SUM({fresh_input_rollup}), 0),
                     COALESCE(SUM(r.output_tokens), 0),
                     COALESCE(SUM(r.cache_creation_tokens), 0),
@@ -980,7 +980,7 @@ impl Database {
                 "SELECT
                     CAST((l.created_at - ?1) / ?3 AS INTEGER) as bucket_idx,
                     COUNT(*) as request_count,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost,
                     COALESCE(SUM({fresh_input} + l.output_tokens), 0) as total_tokens,
                     COALESCE(SUM({fresh_input}), 0) as total_input_tokens,
                     COALESCE(SUM(l.output_tokens), 0) as total_output_tokens,
@@ -1093,7 +1093,7 @@ impl Database {
             "SELECT
                 date(l.created_at, 'unixepoch', 'localtime') as bucket_date,
                 COUNT(*) as request_count,
-                COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
+                (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost,
                 COALESCE(SUM({fresh_input} + l.output_tokens), 0) as total_tokens,
                 COALESCE(SUM({fresh_input}), 0) as total_input_tokens,
                 COALESCE(SUM(l.output_tokens), 0) as total_output_tokens,
@@ -1176,7 +1176,7 @@ impl Database {
             "SELECT
                 r.date,
                 COALESCE(SUM(r.request_count), 0),
-                COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9),
                 COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
                 COALESCE(SUM({fresh_input_rollup}), 0),
                 COALESCE(SUM(r.output_tokens), 0),
@@ -1344,7 +1344,7 @@ impl Database {
                     {detail_pname} as provider_name,
                     COUNT(*) as request_count,
                     COALESCE(SUM({fresh_input_detail} + l.output_tokens), 0) as total_tokens,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost,
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost,
                     COALESCE(SUM(CASE WHEN l.status_code >= 200 AND l.status_code < 300 THEN 1 ELSE 0 END), 0) as success_count,
                     COALESCE(SUM(l.latency_ms), 0) as latency_sum
                 FROM proxy_request_logs l
@@ -1356,7 +1356,7 @@ impl Database {
                     {rollup_pname} as provider_name,
                     COALESCE(SUM(r.request_count), 0),
                     COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0),
+                    (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9),
                     COALESCE(SUM(r.success_count), 0),
                     COALESCE(SUM(r.avg_latency_ms * r.request_count), 0)
                 FROM usage_daily_rollups r
@@ -1498,7 +1498,7 @@ impl Database {
                 SELECT {detail_model} as model,
                     COUNT(*) as request_count,
                     COALESCE(SUM({fresh_input_detail} + l.output_tokens), 0) as total_tokens,
-                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0) as total_cost
+                    (COALESCE(SUM(l.total_cost_nanos), 0) / 1e9) as total_cost
                 FROM proxy_request_logs l
                 {detail_join}
                 {detail_where}
@@ -1507,7 +1507,7 @@ impl Database {
                 SELECT {rollup_model},
                     COALESCE(SUM(r.request_count), 0),
                     COALESCE(SUM({fresh_input_rollup} + r.output_tokens), 0),
-                    COALESCE(SUM(CAST(r.total_cost_usd AS REAL)), 0)
+                    (COALESCE(SUM(r.total_cost_nanos), 0) / 1e9)
                 FROM usage_daily_rollups r
                 {rollup_join}
                 {rollup_where}
@@ -1816,8 +1816,9 @@ pub struct ProviderLimitStatus {
     pub monthly_exceeded: bool,
 }
 
-/// 成本回填候选行。`CAST(total_cost_usd AS REAL) <= 0` 与部分索引
-/// `idx_request_logs_zero_cost` 的 WHERE 完全一致，使查询只扫描零成本行而非全表（DB-09）。
+/// 成本回填候选行。`total_cost_nanos <= 0` 与部分索引
+/// `idx_request_logs_zero_cost_nanos` 的 WHERE 完全一致，使查询只扫描零成本行而非全表
+/// （DB-09；DB-14 起基于精确的整数成本列）。
 pub(crate) const BACKFILL_ZERO_COST_CANDIDATES_SQL: &str =
     "SELECT request_id, provider_id, NULL AS provider_name, app_type, model, request_model,
                         cost_multiplier,
@@ -1827,31 +1828,31 @@ pub(crate) const BACKFILL_ZERO_COST_CANDIDATES_SQL: &str =
                         first_token_ms, duration_ms, status_code, error_message, created_at,
                         data_source, pricing_model, input_token_semantics
              FROM proxy_request_logs
-             WHERE CAST(total_cost_usd AS REAL) <= 0
+             WHERE total_cost_nanos <= 0
                AND (input_tokens > 0 OR output_tokens > 0
                     OR cache_read_tokens > 0 OR cache_creation_tokens > 0)";
 
 /// 某 provider 今日用量：?1 provider_id, ?2 app_type, ?3/?4 今日 [起, 止) 时间戳, ?5 今日日期。
-const PROVIDER_DAILY_USAGE_SQL: &str = "SELECT COALESCE(SUM(cost), 0) FROM (
-        SELECT CAST(total_cost_usd AS REAL) as cost
+const PROVIDER_DAILY_USAGE_SQL: &str = "SELECT COALESCE(SUM(cost), 0) / 1e9 FROM (
+        SELECT total_cost_nanos as cost
         FROM proxy_request_logs
         WHERE provider_id = ?1 AND app_type = ?2
           AND created_at >= ?3 AND created_at < ?4
         UNION ALL
-        SELECT CAST(total_cost_usd AS REAL)
+        SELECT total_cost_nanos
         FROM usage_daily_rollups
         WHERE provider_id = ?1 AND app_type = ?2
           AND date = ?5
     )";
 
 /// 某 provider 本月用量：?3/?4 本月 [起, 止) 时间戳, ?5/?6 本月 [首日, 下月首日) 日期。
-const PROVIDER_MONTHLY_USAGE_SQL: &str = "SELECT COALESCE(SUM(cost), 0) FROM (
-        SELECT CAST(total_cost_usd AS REAL) as cost
+const PROVIDER_MONTHLY_USAGE_SQL: &str = "SELECT COALESCE(SUM(cost), 0) / 1e9 FROM (
+        SELECT total_cost_nanos as cost
         FROM proxy_request_logs
         WHERE provider_id = ?1 AND app_type = ?2
           AND created_at >= ?3 AND created_at < ?4
         UNION ALL
-        SELECT CAST(total_cost_usd AS REAL)
+        SELECT total_cost_nanos
         FROM usage_daily_rollups
         WHERE provider_id = ?1 AND app_type = ?2
           AND date >= ?5 AND date < ?6

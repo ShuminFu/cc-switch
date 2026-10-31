@@ -32,6 +32,7 @@
 //! ```
 
 pub(crate) mod backup;
+pub(crate) mod cost_nanos;
 mod dao;
 mod migration;
 pub(crate) mod model_catalog;

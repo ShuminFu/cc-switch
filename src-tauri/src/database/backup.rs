@@ -2189,7 +2189,8 @@ mod tests {
                 query_i64(
                     &target,
                     "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('trigger', 'view') \
-                     AND name NOT LIKE 'trg_request_logs_dedup_%' AND name NOT LIKE 'trg_sync_%'"
+                     AND name NOT LIKE 'trg_request_logs_dedup_%' AND name NOT LIKE 'trg_sync_%' \
+                     AND name NOT LIKE 'trg_%_cost_nanos_%'"
                 ),
                 0,
                 "only the app's own dedup triggers may exist"
