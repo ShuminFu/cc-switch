@@ -17,6 +17,13 @@ import {
 import { cn } from "@/lib/utils";
 import { getUsageRangePresetLabel, resolveUsageRange } from "@/lib/usageRange";
 import { getLocaleFromLanguage } from "./format";
+import {
+  MAX_CUSTOM_RANGE_DAYS,
+  exceedsMaxRange,
+  getCalendarDays,
+  getFirstDayOfWeek,
+  getWeekdayLabels,
+} from "./calendarLocale";
 import type { UsageRangePreset, UsageRangeSelection } from "@/types/usage";
 
 type DraftField = "start" | "end";
@@ -91,17 +98,6 @@ function setDateKeepTime(ts: number, day: Date): number {
   );
 }
 
-function getCalendarDays(month: Date): Date[] {
-  const first = new Date(month.getFullYear(), month.getMonth(), 1);
-  const gridStart = new Date(first);
-  gridStart.setDate(first.getDate() - first.getDay());
-  return Array.from({ length: 42 }, (_, i) => {
-    const d = new Date(gridStart);
-    d.setDate(gridStart.getDate() + i);
-    return d;
-  });
-}
-
 /* ── component ── */
 
 export function UsageDateRangePicker({
@@ -159,23 +155,21 @@ export function UsageDateRangePicker({
     if (!open || !draftLiveEnd) return;
     const tick = () => setDraftEnd(Math.floor(Date.now() / 1000));
     tick();
-    const id = setInterval(tick, 1000);
+    // The end time is shown to the minute; a 30 s tick is enough (FE-UI-27).
+    const id = setInterval(tick, 30_000);
     return () => clearInterval(id);
   }, [open, draftLiveEnd]);
 
+  // Week layout follows the locale (Monday-first for zh-CN, FE-UI-27).
+  const firstDayOfWeek = useMemo(() => getFirstDayOfWeek(locale), [locale]);
   const calendarDays = useMemo(
-    () => getCalendarDays(displayMonth),
-    [displayMonth],
+    () => getCalendarDays(displayMonth, firstDayOfWeek),
+    [displayMonth, firstDayOfWeek],
   );
 
   const weekdayLabels = useMemo(
-    () =>
-      Array.from({ length: 7 }, (_, i) =>
-        new Intl.DateTimeFormat(locale, { weekday: "narrow" }).format(
-          new Date(2024, 0, 7 + i),
-        ),
-      ),
-    [locale],
+    () => getWeekdayLabels(locale, firstDayOfWeek),
+    [locale, firstDayOfWeek],
   );
 
   const startDay = fromTs(draftStart);
@@ -229,6 +223,15 @@ export function UsageDateRangePicker({
     setError(null);
     if (draftStart > draftEnd) {
       setError(t("usage.invalidTimeRangeOrder", "开始时间不能晚于结束时间"));
+      return;
+    }
+    if (exceedsMaxRange(draftStart, draftEnd)) {
+      setError(
+        t("usage.rangeTooLong", {
+          defaultValue: "The range can be at most {{days}} days.",
+          days: MAX_CUSTOM_RANGE_DAYS,
+        }),
+      );
       return;
     }
     onApply({
@@ -357,7 +360,10 @@ export function UsageDateRangePicker({
           {/* Left: date fields */}
           <div className="usage-range-fields space-y-2">
             <p className="text-xs text-muted-foreground">
-              {t("usage.customRangeHint", "支持日期与时间，最长 30 天")}
+              {t("usage.customRangeMaxHint", {
+                defaultValue: "Dates and times supported, up to {{days}} days",
+                days: MAX_CUSTOM_RANGE_DAYS,
+              })}
             </p>
             {renderField("start")}
             {renderField("end")}
