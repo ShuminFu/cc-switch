@@ -630,6 +630,8 @@ mod tests {
     }
 
     #[test]
+    // Provider writes update the process-wide settings cache.
+    #[serial_test::serial]
     fn rollback_restores_the_version_and_keeps_the_current_key() {
         let _home = crate::test_support::isolated_home();
         let state = state();
@@ -690,6 +692,8 @@ mod tests {
     }
 
     #[test]
+    // Provider writes update the process-wide settings cache.
+    #[serial_test::serial]
     fn restoring_a_deleted_provider_recreates_it_and_reports_the_missing_key() {
         let _home = crate::test_support::isolated_home();
         let state = state();

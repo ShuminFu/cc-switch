@@ -434,6 +434,8 @@ mod tests {
 
     /// A failed live write leaves the stored snippet unchanged (CMD-25).
     #[test]
+    // Provider writes update the process-wide settings cache.
+    #[serial_test::serial]
     fn snippet_is_reverted_when_the_live_write_fails() {
         use crate::database::Database;
         use crate::provider::Provider;

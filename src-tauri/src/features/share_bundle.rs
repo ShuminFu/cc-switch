@@ -680,6 +680,8 @@ mod tests {
     }
 
     #[test]
+    // Provider writes update the process-wide settings cache.
+    #[serial_test::serial]
     fn conflicts_are_skipped_unless_overwrite_and_keep_local_keys() {
         let _home = crate::test_support::isolated_home();
         let target = state();
