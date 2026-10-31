@@ -45,6 +45,10 @@ enum Reply {
     /// `text/event-stream` that sends the given bytes and then drops the connection
     /// without terminating the chunked body.
     SseThenDisconnect(String),
+    /// `text/event-stream` that sends the given bytes and then goes silent forever.
+    SseThenHang(String),
+    /// One reply per request, in order; the last one repeats.
+    Sequence(Vec<Reply>),
 }
 
 #[derive(Clone, Debug)]
@@ -114,14 +118,17 @@ async fn mock_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    state.hits.fetch_add(1, Ordering::SeqCst);
+    let hit = state.hits.fetch_add(1, Ordering::SeqCst);
     let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     state.requests.lock().unwrap().push(Recorded {
         path: uri.path().to_string(),
         headers,
         body,
     });
-    let reply = state.reply.lock().unwrap().clone();
+    let mut reply = state.reply.lock().unwrap().clone();
+    if let Reply::Sequence(replies) = reply {
+        reply = replies[hit.min(replies.len() - 1)].clone();
+    }
     match reply {
         Reply::Json(status, value) => (
             StatusCode::from_u16(status).unwrap(),
@@ -154,6 +161,17 @@ async fn mock_handler(
                 .body(Body::from_stream(stream))
                 .unwrap()
         }
+        Reply::SseThenHang(text) => {
+            let stream =
+                futures::stream::once(async move { Ok::<_, std::io::Error>(Bytes::from(text)) })
+                    .chain(futures::stream::pending());
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from_stream(stream))
+                .unwrap()
+        }
+        Reply::Sequence(_) => unreachable!("nested sequences are not supported"),
     }
 }
 
@@ -213,6 +231,24 @@ fn claude_provider(id: &str, base_url: &str, api_format: Option<&str>) -> Provid
 /// Seed an in-memory database with Claude providers (in failover-queue order), enable
 /// failover when there is more than one, and start the proxy on an ephemeral port.
 async fn start_proxy(providers: &[Provider], circuit_failure_threshold: u32) -> Harness {
+    start_proxy_with(providers, circuit_failure_threshold, Overrides::default()).await
+}
+
+/// Per-app proxy config overrides for [`start_proxy_with`].
+#[derive(Default)]
+struct Overrides {
+    /// Enable failover (and queue every provider) even with a single provider.
+    failover: bool,
+    streaming_first_byte_timeout: Option<u32>,
+    streaming_idle_timeout: Option<u32>,
+}
+
+/// [`start_proxy`] with per-app config overrides.
+async fn start_proxy_with(
+    providers: &[Provider],
+    circuit_failure_threshold: u32,
+    overrides: Overrides,
+) -> Harness {
     support::ensure_test_home();
     let db = Arc::new(Database::memory().expect("memory db"));
     for provider in providers {
@@ -229,10 +265,18 @@ async fn start_proxy(providers: &[Provider], circuit_failure_threshold: u32) -> 
     app_config.auto_failover_enabled = providers.len() > 1;
     app_config.circuit_failure_threshold = circuit_failure_threshold;
     app_config.circuit_timeout_seconds = 600;
+    app_config.auto_failover_enabled |= overrides.failover;
+    if let Some(v) = overrides.streaming_first_byte_timeout {
+        app_config.streaming_first_byte_timeout = v;
+    }
+    if let Some(v) = overrides.streaming_idle_timeout {
+        app_config.streaming_idle_timeout = v;
+    }
+    let failover = app_config.auto_failover_enabled;
     db.update_proxy_config_for_app(app_config)
         .await
         .expect("update app proxy config");
-    if providers.len() > 1 {
+    if failover {
         for provider in providers {
             db.add_to_failover_queue("claude", &provider.id)
                 .expect("add to failover queue");
@@ -703,5 +747,172 @@ async fn mid_stream_upstream_disconnect_chat_bridge() {
         "expected a terminal error event: {types:?}"
     );
     assert!(!types.contains(&"message_stop".to_string()));
+    harness.stop().await;
+}
+
+/// A 429 (rate limit) on the first provider is provider-specific: fail over.
+#[tokio::test]
+async fn upstream_429_fails_over_to_second_provider() {
+    let _guard = serial().lock().await;
+    let limited = MockUpstream::start(Reply::Json(
+        429,
+        json!({"type": "error", "error": {"type": "rate_limit_error", "message": "slow down"}}),
+    ))
+    .await;
+    let healthy = MockUpstream::start(Reply::Json(200, anthropic_message("from B"))).await;
+    let harness = start_proxy(
+        &[
+            claude_provider("a", &limited.base_url(), None),
+            claude_provider("b", &healthy.base_url(), None),
+        ],
+        5,
+    )
+    .await;
+
+    let response = harness.post("/v1/messages", &simple_request(false)).await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.expect("json response");
+    assert_eq!(body, anthropic_message("from B"));
+    assert_eq!(
+        limited.hits(),
+        1,
+        "a 429 is not retried on the same provider"
+    );
+    assert_eq!(healthy.hits(), 1);
+    harness.stop().await;
+}
+
+fn request_with_thinking_history() -> Value {
+    json!({
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 256,
+        "stream": false,
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "hmm", "signature": "sig-from-another-provider"},
+                {"type": "text", "text": "hello"}
+            ]},
+            {"role": "user", "content": "again"}
+        ]
+    })
+}
+
+fn has_thinking_block(body: &Value) -> bool {
+    body["messages"].as_array().is_some_and(|messages| {
+        messages.iter().any(|m| {
+            m["content"].as_array().is_some_and(|blocks| {
+                blocks
+                    .iter()
+                    .any(|b| b["type"] == "thinking" || b.get("signature").is_some())
+            })
+        })
+    })
+}
+
+fn signature_error() -> Reply {
+    Reply::Json(
+        400,
+        json!({"type": "error", "error": {
+            "type": "invalid_request_error",
+            "message": "messages.1.content.0: Invalid `signature` in `thinking` block"
+        }}),
+    )
+}
+
+/// The thinking-signature rectifier rewrites the body and retries the same
+/// provider once; the client sees the retry's success.
+#[tokio::test]
+async fn signature_rectifier_retries_the_same_provider() {
+    let _guard = serial().lock().await;
+    let upstream = MockUpstream::start(Reply::Sequence(vec![
+        signature_error(),
+        Reply::Json(200, anthropic_message("rectified")),
+    ]))
+    .await;
+    let harness = start_proxy(&[claude_provider("a", &upstream.base_url(), None)], 3).await;
+
+    let response = harness
+        .post("/v1/messages", &request_with_thinking_history())
+        .await;
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.expect("json response");
+    assert_eq!(body, anthropic_message("rectified"));
+    assert_eq!(upstream.hits(), 2, "original + one rectified retry");
+    let requests = upstream.state.requests.lock().unwrap().clone();
+    assert!(has_thinking_block(&requests[0].body));
+    assert!(!has_thinking_block(&requests[1].body));
+    harness.stop().await;
+}
+
+/// PROXY-42 + PROXY-24: after the rectifier fired, a 429 on the retry still fails
+/// over, and the next provider receives the rectified body on its first call.
+#[tokio::test]
+async fn rectifier_retry_rate_limit_fails_over_with_the_rectified_body() {
+    let _guard = serial().lock().await;
+    let first = MockUpstream::start(Reply::Sequence(vec![
+        signature_error(),
+        Reply::Json(
+            429,
+            json!({"type": "error", "error": {"type": "rate_limit_error", "message": "slow down"}}),
+        ),
+    ]))
+    .await;
+    let second = MockUpstream::start(Reply::Json(200, anthropic_message("from B"))).await;
+    let harness = start_proxy(
+        &[
+            claude_provider("a", &first.base_url(), None),
+            claude_provider("b", &second.base_url(), None),
+        ],
+        5,
+    )
+    .await;
+
+    let response = harness
+        .post("/v1/messages", &request_with_thinking_history())
+        .await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(first.hits(), 2);
+    assert_eq!(second.hits(), 1, "B must succeed on its first call");
+    assert!(!has_thinking_block(&second.last_request().body));
+    harness.stop().await;
+}
+
+/// A stream that sends `message_start` and then goes silent is ended by the idle
+/// timeout with a protocol error event instead of hanging the client.
+#[tokio::test]
+async fn stream_idle_timeout_ends_the_stream_with_an_error_event() {
+    let _guard = serial().lock().await;
+    let upstream = MockUpstream::start(Reply::SseThenHang(
+        "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n"
+            .to_string(),
+    ))
+    .await;
+    let harness = start_proxy_with(
+        &[claude_provider("a", &upstream.base_url(), None)],
+        3,
+        Overrides {
+            failover: true,
+            streaming_first_byte_timeout: Some(5),
+            streaming_idle_timeout: Some(1),
+        },
+    )
+    .await;
+
+    let started = std::time::Instant::now();
+    let response = harness.post("/v1/messages", &simple_request(true)).await;
+    assert_eq!(response.status(), 200);
+    let text = tokio::time::timeout(Duration::from_secs(15), response.text())
+        .await
+        .expect("client stream hung despite the idle timeout")
+        .unwrap_or_default();
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let types = event_types(&sse_events(&text));
+    assert_eq!(types.first().map(String::as_str), Some("message_start"));
+    assert_eq!(
+        types.last().map(String::as_str),
+        Some("error"),
+        "expected a terminal error event: {types:?}"
+    );
     harness.stop().await;
 }
