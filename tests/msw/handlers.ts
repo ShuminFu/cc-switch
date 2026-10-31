@@ -75,6 +75,11 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/restore_db_backup_with_options`, () =>
     success("safety-backup"),
   ),
+  // Proxy request inspector (FE-UI-39) reads the request log while running.
+  http.post(`${TAURI_ENDPOINT}/get_request_logs`, () =>
+    success({ data: [], total: 0, page: 0, pageSize: 10 }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_request_detail`, () => success(null)),
   http.post(`${TAURI_ENDPOINT}/render_provider_env_profile`, () =>
     success("export ANTHROPIC_BASE_URL='https://example.invalid'\n"),
   ),

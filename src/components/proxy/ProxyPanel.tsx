@@ -34,6 +34,7 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 import { PROXY_CAPABLE_APPS, getAppLabel } from "@/config/proxyApps";
 import { copyText } from "@/lib/clipboard";
 import { formatUptime } from "./formatUptime";
+import { RecentRequestsPanel } from "./RecentRequestsPanel";
 import { isLoopbackListenAddress } from "./listenAddress";
 
 interface LanExposureNoticeProps {
@@ -691,6 +692,8 @@ export function ProxyPanel({
                 value={formatUptime(status.uptime_seconds, i18n.language)}
               />
             </div>
+
+            <RecentRequestsPanel status={status} />
 
             {basicSettings}
           </div>
