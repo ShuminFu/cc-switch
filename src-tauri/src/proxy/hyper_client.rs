@@ -72,13 +72,9 @@ pub(crate) const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::fro
 fn global_tls_config() -> &'static rustls::ClientConfig {
     static CONFIG: OnceLock<rustls::ClientConfig> = OnceLock::new();
     CONFIG.get_or_init(|| {
-        let mut root_store = rustls::RootCertStore::empty();
-        // Baseline: Mozilla/webpki roots
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        // Native system certs (includes user-installed proxy CAs)
-        let native = rustls_native_certs::load_native_certs();
-        let (added, _errors) = root_store.add_parsable_certificates(native.certs);
-        log::debug!("[HyperClient] TLS root store: webpki + {added} native certs");
+        // webpki + native system certs (includes user-installed proxy CAs) +
+        // the optional extra CA bundle; shared with reqwest (PROXY-40).
+        let root_store = super::tls_roots::root_store();
         rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth()
@@ -337,10 +333,11 @@ pub async fn send_request(
     method: http::Method,
     headers: http::HeaderMap,
     original_extensions: http::Extensions,
-    body: Vec<u8>,
+    body: impl Into<Bytes>,
     timeout: std::time::Duration,
     proxy_url: Option<&str>,
 ) -> Result<ProxyResponse, ProxyError> {
+    let body: Bytes = body.into();
     // Extract our own OriginalHeaderCases if available
     let original_cases = original_extensions.get::<OriginalHeaderCases>().cloned();
     let has_cases = original_cases
@@ -405,7 +402,7 @@ pub async fn send_request(
     let mut req = http::Request::builder()
         .method(method)
         .uri(&uri)
-        .body(http_body_util::Full::new(Bytes::from(body)))
+        .body(http_body_util::Full::new(body))
         .map_err(|e| ProxyError::ForwardFailed(format!("Failed to build request: {e}")))?;
 
     *req.headers_mut() = headers;

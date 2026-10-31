@@ -313,6 +313,9 @@ fn build_client_with(
         .no_brotli()
         .no_deflate()
         .no_zstd();
+    // Same trust recipe as the hyper paths: webpki + native (reqwest features)
+    // plus the optional extra CA bundle (PROXY-40).
+    builder = super::tls_roots::apply_to_reqwest(builder);
 
     // 有代理地址则使用代理，否则跟随系统代理
     if let Some(url) = proxy_url {

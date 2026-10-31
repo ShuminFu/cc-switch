@@ -9,6 +9,7 @@ use crate::provider::Provider;
 use crate::proxy::circuit_breaker::{
     AllowResult, CircuitBreaker, CircuitBreakerConfig, HalfOpenPermit,
 };
+use crate::proxy::routing::RoutingState;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -20,6 +21,8 @@ pub struct ProviderRouter {
     db: Arc<Database>,
     /// 熔断器管理器 - key 格式: "app_type:provider_id"
     circuit_breakers: Arc<RwLock<HashMap<String, Arc<CircuitBreaker>>>>,
+    /// Sticky sessions / strategy / concurrency state (PROXY-19).
+    routing: Arc<RoutingState>,
 }
 
 impl ProviderRouter {
@@ -33,7 +36,13 @@ impl ProviderRouter {
         Self {
             db,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
+            routing: Arc::new(RoutingState::new()),
         }
+    }
+
+    /// Routing state shared across requests (PROXY-19).
+    pub fn routing(&self) -> &Arc<RoutingState> {
+        &self.routing
     }
 
     /// 选择可用的供应商（支持故障转移）

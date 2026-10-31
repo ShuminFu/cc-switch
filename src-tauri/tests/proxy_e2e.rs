@@ -49,6 +49,8 @@ enum Reply {
     SseThenHang(String),
     /// One reply per request, in order; the last one repeats.
     Sequence(Vec<Reply>),
+    /// 200 JSON body gzip-compressed with `content-encoding: gzip`.
+    GzipJson(Value),
 }
 
 #[derive(Clone, Debug)]
@@ -56,6 +58,8 @@ struct Recorded {
     path: String,
     headers: HeaderMap,
     body: Value,
+    /// The exact bytes the upstream received.
+    raw: Bytes,
 }
 
 struct MockState {
@@ -119,11 +123,13 @@ async fn mock_handler(
     body: Bytes,
 ) -> Response {
     let hit = state.hits.fetch_add(1, Ordering::SeqCst);
+    let raw = body.clone();
     let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     state.requests.lock().unwrap().push(Recorded {
         path: uri.path().to_string(),
         headers,
         body,
+        raw,
     });
     let mut reply = state.reply.lock().unwrap().clone();
     if let Reply::Sequence(replies) = reply {
@@ -171,8 +177,24 @@ async fn mock_handler(
                 .body(Body::from_stream(stream))
                 .unwrap()
         }
+        Reply::GzipJson(value) => (
+            StatusCode::OK,
+            [
+                ("content-type", "application/json"),
+                ("content-encoding", "gzip"),
+            ],
+            gzip(value.to_string().as_bytes()),
+        )
+            .into_response(),
         Reply::Sequence(_) => unreachable!("nested sequences are not supported"),
     }
+}
+
+fn gzip(data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(data).unwrap();
+    encoder.finish().unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +222,18 @@ impl Harness {
             .send()
             .await
             .expect("send request through proxy")
+    }
+
+    async fn post_raw(&self, path: &str, body: &'static str) -> reqwest::Response {
+        self.client
+            .post(self.url(path))
+            .header("content-type", "application/json")
+            .header("anthropic-version", "2023-06-01")
+            .header("x-api-key", "client-placeholder-key")
+            .body(body)
+            .send()
+            .await
+            .expect("send raw request through proxy")
     }
 
     async fn stop(self) {
@@ -241,6 +275,8 @@ struct Overrides {
     failover: bool,
     streaming_first_byte_timeout: Option<u32>,
     streaming_idle_timeout: Option<u32>,
+    /// Routing config for the Claude app (PROXY-19), stored in the settings table.
+    routing: Option<Value>,
 }
 
 /// [`start_proxy`] with per-app config overrides.
@@ -281,6 +317,14 @@ async fn start_proxy_with(
             db.add_to_failover_queue("claude", &provider.id)
                 .expect("add to failover queue");
         }
+    }
+
+    if let Some(routing) = overrides.routing {
+        db.set_setting(
+            "proxy_routing_config",
+            &json!({ "claude": routing }).to_string(),
+        )
+        .expect("store routing config");
     }
 
     let mut proxy_config = db.get_proxy_config().await.expect("proxy config");
@@ -592,6 +636,186 @@ async fn upstream_500_fails_over_to_second_provider() {
     harness.stop().await;
 }
 
+fn session_request(session: &str) -> Value {
+    let mut body = simple_request(false);
+    body["metadata"] = json!({ "session_id": session });
+    body
+}
+
+/// Runs: P1 fails once (request 1 is served by P2), then P1 recovers. Returns
+/// (P1 hits, P2 hits) after a second request on the same session and a third
+/// on a new session.
+async fn run_recovery_scenario(routing: Option<Value>) -> (usize, usize, Value, Value) {
+    let p1 = MockUpstream::start(Reply::Json(
+        500,
+        json!({"type": "error", "error": {"type": "api_error", "message": "boom"}}),
+    ))
+    .await;
+    let p2 = MockUpstream::start(Reply::Json(200, anthropic_message("from P2"))).await;
+    let harness = start_proxy_with(
+        &[
+            claude_provider("p1", &p1.base_url(), None),
+            claude_provider("p2", &p2.base_url(), None),
+        ],
+        // High threshold: P1's breaker stays closed, so it is selectable again.
+        50,
+        Overrides {
+            routing,
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let first = harness
+        .post("/v1/messages", &session_request("sess-a"))
+        .await;
+    assert_eq!(first.status(), 200);
+    assert_eq!(p2.hits(), 1, "request 1 fails over to P2");
+
+    p1.set_reply(Reply::Json(200, anthropic_message("from P1")));
+    let p1_before = p1.hits();
+    let second: Value = harness
+        .post("/v1/messages", &session_request("sess-a"))
+        .await
+        .json()
+        .await
+        .expect("json");
+    let third: Value = harness
+        .post("/v1/messages", &session_request("sess-b"))
+        .await
+        .json()
+        .await
+        .expect("json");
+    let result = (p1.hits() - p1_before, p2.hits(), second, third);
+    harness.stop().await;
+    result
+}
+
+/// PROXY-17: a passthrough body nobody changed reaches the upstream with the
+/// client's exact bytes (key order and whitespace kept, no re-serialization).
+#[tokio::test]
+async fn passthrough_body_is_byte_identical_on_the_wire() {
+    let _guard = serial().lock().await;
+    let upstream = MockUpstream::start(Reply::Json(200, anthropic_message("ok"))).await;
+    let harness = start_proxy(&[claude_provider("a", &upstream.base_url(), None)], 5).await;
+
+    const CLIENT_BODY: &str = "{\"stream\": false, \"model\":\"claude-sonnet-4-5\",\n  \"max_tokens\":256,\"messages\":[{\"role\":\"user\",\"content\":\"Say hello\"}]}";
+    let response = harness.post_raw("/v1/messages", CLIENT_BODY).await;
+    assert_eq!(response.status(), 200);
+    let recorded = upstream.last_request();
+    assert_eq!(
+        std::str::from_utf8(&recorded.raw).unwrap(),
+        CLIENT_BODY,
+        "unchanged passthrough body must not be re-serialized"
+    );
+
+    // A body the proxy does change (private `_` key stripped) is re-serialized.
+    let response = harness
+        .post_raw(
+            "/v1/messages",
+            "{\"model\":\"claude-sonnet-4-5\",\"max_tokens\":256,\"_private\":1,\"messages\":[{\"role\":\"user\",\"content\":\"Say hello\"}]}",
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let recorded = upstream.last_request();
+    assert!(recorded.body.get("_private").is_none());
+    assert!(!std::str::from_utf8(&recorded.raw)
+        .unwrap()
+        .contains("_private"));
+    harness.stop().await;
+}
+
+/// PERF-37: a compressed non-streaming passthrough response reaches the client
+/// as the upstream sent it (no proxy-side decompression into a larger body).
+#[tokio::test]
+async fn compressed_non_stream_response_is_passed_through() {
+    let _guard = serial().lock().await;
+    let message = anthropic_message("zipped");
+    let upstream = MockUpstream::start(Reply::GzipJson(message.clone())).await;
+    let harness = start_proxy(&[claude_provider("a", &upstream.base_url(), None)], 5).await;
+
+    let response = harness
+        .client
+        .post(harness.url("/v1/messages"))
+        .header("content-type", "application/json")
+        .header("anthropic-version", "2023-06-01")
+        .header("x-api-key", "client-placeholder-key")
+        .header("accept-encoding", "gzip")
+        .json(&simple_request(false))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-encoding")
+            .and_then(|v| v.to_str().ok()),
+        Some("gzip")
+    );
+    let raw = response.bytes().await.expect("body");
+    assert_eq!(
+        raw.as_ref(),
+        gzip(message.to_string().as_bytes()).as_slice()
+    );
+    let mut plain = String::new();
+    std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(raw.as_ref()), &mut plain)
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&plain).unwrap(), message);
+    harness.stop().await;
+}
+
+/// PROXY-19: without a routing config, a recovered P1 takes the session back.
+#[tokio::test]
+async fn default_routing_returns_to_recovered_priority_provider() {
+    let _guard = serial().lock().await;
+    let (p1_hits, p2_hits, second, third) = run_recovery_scenario(None).await;
+    assert_eq!(second, anthropic_message("from P1"));
+    assert_eq!(third, anthropic_message("from P1"));
+    assert_eq!((p1_hits, p2_hits), (2, 1));
+}
+
+/// PROXY-19: with sticky sessions the session stays on P2 after P1 recovers;
+/// a new session still starts on P1.
+#[tokio::test]
+async fn sticky_session_stays_on_failover_provider_after_recovery() {
+    let _guard = serial().lock().await;
+    let (p1_hits, p2_hits, second, third) = run_recovery_scenario(Some(json!({
+        "stickySessions": true,
+        "stickyTtlSecs": 600
+    })))
+    .await;
+    assert_eq!(second, anthropic_message("from P2"), "sticky to P2");
+    assert_eq!(third, anthropic_message("from P1"), "new session on P1");
+    assert_eq!((p1_hits, p2_hits), (1, 2));
+}
+
+/// PROXY-19: round-robin spreads consecutive requests over both providers.
+#[tokio::test]
+async fn round_robin_alternates_providers() {
+    let _guard = serial().lock().await;
+    let a = MockUpstream::start(Reply::Json(200, anthropic_message("from A"))).await;
+    let b = MockUpstream::start(Reply::Json(200, anthropic_message("from B"))).await;
+    let harness = start_proxy_with(
+        &[
+            claude_provider("a", &a.base_url(), None),
+            claude_provider("b", &b.base_url(), None),
+        ],
+        5,
+        Overrides {
+            routing: Some(json!({ "strategy": "roundRobin" })),
+            ..Default::default()
+        },
+    )
+    .await;
+    for _ in 0..4 {
+        let response = harness.post("/v1/messages", &simple_request(false)).await;
+        assert_eq!(response.status(), 200);
+    }
+    assert_eq!((a.hits(), b.hits()), (2, 2));
+    harness.stop().await;
+}
+
 /// A 4xx client error is not retried on another provider.
 #[tokio::test]
 async fn upstream_400_is_not_failed_over() {
@@ -895,6 +1119,7 @@ async fn stream_idle_timeout_ends_the_stream_with_an_error_event() {
             failover: true,
             streaming_first_byte_timeout: Some(5),
             streaming_idle_timeout: Some(1),
+            ..Default::default()
         },
     )
     .await;

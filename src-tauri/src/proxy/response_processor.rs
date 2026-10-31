@@ -86,7 +86,21 @@ pub(crate) async fn read_decoded_body(
     tag: &str,
     body_timeout: Duration,
 ) -> Result<(HeaderMap, http::StatusCode, Bytes), ProxyError> {
-    let mut headers = response.headers().clone();
+    let (mut headers, status, raw_bytes) = read_raw_body(response, tag, body_timeout).await?;
+    let (body_bytes, decoded) = decode_body_bytes(&headers, &raw_bytes, tag);
+    if decoded {
+        strip_entity_headers_for_rebuilt_body(&mut headers);
+    }
+    Ok((headers, status, body_bytes))
+}
+
+/// Read the whole body as the upstream sent it (no decompression).
+async fn read_raw_body(
+    response: ProxyResponse,
+    tag: &str,
+    body_timeout: Duration,
+) -> Result<(HeaderMap, http::StatusCode, Bytes), ProxyError> {
+    let headers = response.headers().clone();
     let status = response.status();
     let raw_bytes = if body_timeout.is_zero() {
         response.bytes().await?
@@ -108,30 +122,27 @@ pub(crate) async fn read_decoded_body(
         format_headers(&headers)
     );
 
-    let mut body_bytes = raw_bytes.clone();
-    let mut decoded = false;
+    Ok((headers, status, raw_bytes))
+}
 
-    if let Some(encoding) = get_content_encoding(&headers) {
-        log::debug!("[{tag}] 解压非流式响应: content-encoding={encoding}");
-        match decompress_body(&encoding, &raw_bytes) {
-            Ok(Some(decompressed)) => {
-                body_bytes = Bytes::from(decompressed);
-                decoded = true;
-            }
-            // 不支持的编码：原样透传且保留 content-encoding 头，
-            // 让下游诊断/客户端知道这仍是压缩字节
-            Ok(None) => {}
-            Err(e) => {
-                log::warn!("[{tag}] 解压失败 ({encoding}): {e}，使用原始数据");
-            }
+/// Decompress `raw` per its `content-encoding`. Returns the plaintext (or the
+/// raw bytes when there is no / an unsupported / a broken encoding) and
+/// whether it was decoded.
+pub(crate) fn decode_body_bytes(headers: &HeaderMap, raw: &Bytes, tag: &str) -> (Bytes, bool) {
+    let Some(encoding) = get_content_encoding(headers) else {
+        return (raw.clone(), false);
+    };
+    log::debug!("[{tag}] 解压非流式响应: content-encoding={encoding}");
+    match decompress_body(&encoding, raw) {
+        Ok(Some(decompressed)) => (Bytes::from(decompressed), true),
+        // 不支持的编码：原样透传且保留 content-encoding 头，
+        // 让下游诊断/客户端知道这仍是压缩字节
+        Ok(None) => (raw.clone(), false),
+        Err(e) => {
+            log::warn!("[{tag}] 解压失败 ({encoding}): {e}，使用原始数据");
+            (raw.clone(), false)
         }
     }
-
-    if decoded {
-        strip_entity_headers_for_rebuilt_body(&mut headers);
-    }
-
-    Ok((headers, status, body_bytes))
 }
 
 // ============================================================================
@@ -223,20 +234,29 @@ pub async fn handle_non_streaming(
         } else {
             Duration::ZERO
         };
+    // PERF-37: the client gets the upstream bytes as sent (keeping their
+    // content-encoding, which the client itself asked for). Plaintext is only
+    // produced when usage parsing or trace logging needs it, and dropped after.
     let (mut response_headers, status, body_bytes) =
-        read_decoded_body(response, ctx.tag, body_timeout).await?;
+        read_raw_body(response, ctx.tag, body_timeout).await?;
     strip_hop_by_hop_response_headers(&mut response_headers);
+    let logging = usage_logging_enabled(state);
+    let plaintext = (logging || log::log_enabled!(log::Level::Trace))
+        .then(|| decode_body_bytes(&response_headers, &body_bytes, ctx.tag).0);
 
-    log::trace!(
-        "[{}] 上游响应体内容: {}",
-        ctx.tag,
-        super::http_client::log_body_excerpt(&String::from_utf8_lossy(&body_bytes))
-    );
+    if let Some(plaintext) = plaintext.as_ref() {
+        log::trace!(
+            "[{}] 上游响应体内容: {}",
+            ctx.tag,
+            super::http_client::log_body_excerpt(&String::from_utf8_lossy(plaintext))
+        );
+    }
 
     // 解析并记录使用量。关闭 usage logging 时直接跳过，避免非流式响应整包 JSON parse。
-    if usage_logging_enabled(state) {
+    if let Some(plaintext) = plaintext.as_ref().filter(|_| logging) {
+        let body_bytes = plaintext;
         let target = UsageLogTarget::from_ctx(state, ctx, UsageSource::Passthrough);
-        let record = match serde_json::from_slice::<Value>(&body_bytes) {
+        let record = match serde_json::from_slice::<Value>(body_bytes) {
             Ok(json_value) => {
                 target.usage_from_response(parser_config.response_parser, &json_value)
             }
@@ -253,9 +273,10 @@ pub async fn handle_non_streaming(
         if let Some((usage, model)) = record {
             target.spawn(usage, model, None, false, status.as_u16());
         }
-    } else {
+    } else if !logging {
         log::debug!("[{}] usage logging 已关闭，跳过非流式 usage 解析", ctx.tag);
     }
+    drop(plaintext);
 
     // 构建响应
     let mut builder = axum::response::Response::builder().status(status);

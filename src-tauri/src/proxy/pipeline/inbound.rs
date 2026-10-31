@@ -34,6 +34,12 @@ impl BodyPolicy {
     };
 }
 
+/// The client's (decoded) request body bytes, kept in the request extensions
+/// so an unchanged body is forwarded verbatim (PROXY-17). `Bytes` is
+/// reference-counted: every attempt shares the one buffer.
+#[derive(Debug, Clone)]
+pub struct ClientBodyBytes(pub Bytes);
+
 /// A parsed client request.
 pub struct InboundRequest {
     pub method: Method,
@@ -77,11 +83,13 @@ pub async fn read_inbound(
         bytes
     };
     let body = parse_body(&bytes, policy.allow_empty)?;
+    let mut extensions = parts.extensions;
+    extensions.insert(ClientBodyBytes(bytes));
     Ok(InboundRequest {
         method: parts.method,
         uri: parts.uri,
         headers,
-        extensions: parts.extensions,
+        extensions,
         body,
     })
 }
