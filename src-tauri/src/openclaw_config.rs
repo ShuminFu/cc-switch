@@ -504,6 +504,27 @@ pub fn remove_provider(id: &str) -> Result<OpenClawWriteOutcome, AppError> {
     let mut config = read_openclaw_config()?;
     let mut removed = false;
 
+    // PRODUCT-71: refuse to strand `agents.defaults.model.primary` on a
+    // provider that is about to disappear from `models.providers`.
+    let provider_exists = config
+        .get("models")
+        .and_then(|models| models.get("providers"))
+        .and_then(Value::as_object)
+        .is_some_and(|providers| providers.contains_key(id));
+    if provider_exists {
+        if let Some(primary) = default_model_primary_for_provider(&config, id) {
+            return Err(AppError::localized(
+                "openclaw.providerBacksDefaultModel",
+                format!(
+                    "供应商 '{id}' 是当前默认模型 '{primary}' 的来源，请先将其他供应商设为默认再移除"
+                ),
+                format!(
+                    "Provider '{id}' backs the default model '{primary}'. Set another provider as default before removing it."
+                ),
+            ));
+        }
+    }
+
     if let Some(providers) = config
         .get_mut("models")
         .and_then(|models| models.get_mut("providers"))
@@ -523,6 +544,19 @@ pub fn remove_provider(id: &str) -> Result<OpenClawWriteOutcome, AppError> {
         })
     });
     write_root_section("models", &models_value)
+}
+
+/// `agents.defaults.model.primary` when it points at provider `id`
+/// (`"<id>/<model>"`).
+fn default_model_primary_for_provider(config: &Value, id: &str) -> Option<String> {
+    let primary = config
+        .get("agents")
+        .and_then(|agents| agents.get("defaults"))
+        .and_then(|defaults| defaults.get("model"))
+        .and_then(|model| model.get("primary"))
+        .and_then(Value::as_str)?;
+    let (provider, _) = primary.split_once('/')?;
+    (provider == id).then(|| primary.to_string())
 }
 
 // ============================================================================
@@ -905,6 +939,25 @@ mod tests {
             let written = fs::read_to_string(get_openclaw_config_path()).unwrap();
             // the key keeps the document's identifier style
             assert!(written.contains("providers: {}"), "{written}");
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn remove_provider_refuses_the_default_models_provider() {
+        let source = r#"{
+  models: { mode: 'merge', providers: { p: { api: 'openai-completions' }, q: { api: 'openai-completions' } } },
+  agents: { defaults: { model: { primary: 'p/m1', fallbacks: ['q/m2'] } } },
+}
+"#;
+        with_test_paths(source, |_| {
+            let err = remove_provider("p").expect_err("default model provider is protected");
+            assert!(err.to_string().contains("p/m1"), "{err}");
+            assert!(get_providers().unwrap().contains_key("p"));
+
+            // A provider that is not the primary can still be removed.
+            remove_provider("q").unwrap();
+            assert!(!get_providers().unwrap().contains_key("q"));
         });
     }
 }
