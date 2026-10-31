@@ -6,7 +6,8 @@ use crate::app_config::AppType;
 use crate::provider::Provider;
 use crate::proxy::{
     extract_session_id,
-    forwarder::RequestForwarder,
+    forwarder::{ForwarderSettings, RequestForwarder},
+    pipeline::timeout::TimeoutPolicy,
     server::ProxyState,
     types::{AppProxyConfig, CopilotOptimizerConfig, OptimizerConfig, RectifierConfig},
     ProxyError,
@@ -64,6 +65,8 @@ pub struct RequestContext {
     pub session_id: String,
     /// Session ID 是否由客户端提供。生成的 UUID 不能作为上游缓存 key，否则每个请求都会换 key。
     pub session_client_provided: bool,
+    /// The client's own session id (sent in upstream session headers, PROXY-44).
+    pub upstream_session_id: String,
     /// 整流器配置
     pub rectifier_config: RectifierConfig,
     /// 优化器配置
@@ -171,6 +174,7 @@ impl RequestContext {
             app_type,
             session_id,
             session_client_provided: session_result.client_provided,
+            upstream_session_id: session_result.upstream_session_id().to_string(),
             rectifier_config,
             optimizer_config,
             copilot_optimizer_config,
@@ -200,49 +204,42 @@ impl RequestContext {
     /// - 故障转移开启：超时配置正常生效（0 表示禁用超时）
     /// - 故障转移关闭：超时配置不生效（全部传入 0）
     pub fn create_forwarder(&self, state: &ProxyState) -> RequestForwarder {
-        let (non_streaming_timeout, first_byte_timeout, idle_timeout) =
-            if self.app_config.auto_failover_enabled {
-                // 故障转移开启：使用配置的值（0 = 禁用超时）
-                (
-                    self.app_config.non_streaming_timeout as u64,
-                    self.app_config.streaming_first_byte_timeout as u64,
-                    self.app_config.streaming_idle_timeout as u64,
-                )
-            } else {
-                // 故障转移关闭：不启用超时配置
-                log::debug!(
-                    "[{}] Failover disabled, timeout configs are bypassed",
-                    self.tag
-                );
-                (0, 0, 0)
-            };
-
         // 故障转移关闭时强制 max_retries=0（仅尝试 1 个 provider），与「不超时 + 不切换」语义一致。
         let max_retries = if self.app_config.auto_failover_enabled {
             self.app_config.max_retries
         } else {
+            log::debug!(
+                "[{}] Failover disabled, timeout configs are bypassed",
+                self.tag
+            );
             0
         };
 
         RequestForwarder::new(
             state.provider_router.clone(),
-            non_streaming_timeout,
-            state.status.clone(),
+            state.metrics.clone(),
             state.current_providers.clone(),
             state.gemini_shadow.clone(),
             state.codex_chat_history.clone(),
             state.failover_manager.clone(),
             state.app_handle.clone(),
-            self.current_provider_id.clone(),
-            self.session_id.clone(),
-            self.session_client_provided,
-            first_byte_timeout,
-            idle_timeout,
-            self.rectifier_config.clone(),
-            self.optimizer_config.clone(),
-            self.copilot_optimizer_config.clone(),
-            max_retries,
+            ForwarderSettings {
+                timeouts: self.timeout_policy(),
+                max_retries,
+                current_provider_id_at_start: self.current_provider_id.clone(),
+                session_id: self.session_id.clone(),
+                upstream_session_id: self.upstream_session_id.clone(),
+                session_client_provided: self.session_client_provided,
+                rectifier_config: self.rectifier_config.clone(),
+                optimizer_config: self.optimizer_config.clone(),
+                copilot_optimizer_config: self.copilot_optimizer_config.clone(),
+            },
         )
+    }
+
+    /// The request's timeout policy (PROXY-08), resolved once from the app config.
+    pub fn timeout_policy(&self) -> TimeoutPolicy {
+        TimeoutPolicy::from_app_config(&self.app_config)
     }
 
     /// 获取 Provider 列表（用于故障转移）
@@ -265,19 +262,13 @@ impl RequestContext {
     /// - 故障转移关闭：返回 0（禁用超时检查）
     #[inline]
     pub fn streaming_timeout_config(&self) -> StreamingTimeoutConfig {
-        if self.app_config.auto_failover_enabled {
-            // 故障转移开启：使用配置的值（0 = 禁用超时）
-            StreamingTimeoutConfig {
-                first_byte_timeout: self.app_config.streaming_first_byte_timeout as u64,
-                idle_timeout: self.app_config.streaming_idle_timeout as u64,
-            }
-        } else {
-            // 故障转移关闭：禁用流式超时检查
-            StreamingTimeoutConfig {
-                first_byte_timeout: 0,
-                idle_timeout: 0,
-            }
-        }
+        self.timeout_policy().streaming_config()
+    }
+
+    /// Body read limit for response handlers (zero = none); see [`TimeoutPolicy`].
+    #[inline]
+    pub fn body_read_timeout(&self) -> std::time::Duration {
+        self.timeout_policy().body_read_timeout()
     }
 }
 

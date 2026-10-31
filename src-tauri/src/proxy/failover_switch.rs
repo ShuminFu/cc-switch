@@ -57,10 +57,16 @@ impl FailoverSwitchManager {
             pending.insert(switch_key.clone());
         }
 
-        // 执行切换（确保最后清理 pending 标记）
-        let result = self
-            .do_switch(app_handle, app_type, provider_id, provider_name)
-            .await;
+        // PROXY-27: a burst of requests served by the same provider must not
+        // rewrite the live config / tray once per request. Checked inside the
+        // dedup section, so concurrent and sequential repeats are both no-ops.
+        let result = if is_current_provider(app_type, provider_id) {
+            log::debug!("[Failover] {app_type} 已是 {provider_id}，跳过切换");
+            Ok(false)
+        } else {
+            self.do_switch(app_handle, app_type, provider_id, provider_name)
+                .await
+        };
 
         // 清理 pending 标记
         {
@@ -69,6 +75,11 @@ impl FailoverSwitchManager {
         }
 
         result
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn pending_count(&self) -> usize {
+        self.pending_switches.read().await.len()
     }
 
     async fn do_switch(
@@ -137,5 +148,37 @@ impl FailoverSwitchManager {
         }
 
         Ok(switched)
+    }
+}
+
+/// Whether the device's current provider for `app_type` already is `provider_id`.
+fn is_current_provider(app_type: &str, provider_id: &str) -> bool {
+    app_type
+        .parse::<crate::app_config::AppType>()
+        .ok()
+        .and_then(|app| crate::settings::get_current_provider(&app))
+        .is_some_and(|current| current == provider_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_apps_are_never_current() {
+        assert!(!is_current_provider("not-an-app", "p1"));
+    }
+
+    #[tokio::test]
+    async fn concurrent_switches_to_the_same_target_leave_no_pending_state() {
+        let db = Arc::new(Database::memory().expect("db"));
+        let manager = FailoverSwitchManager::new(db);
+        let results = futures::future::join_all(
+            (0..5).map(|_| manager.try_switch(None, "claude", "p-b", "B")),
+        )
+        .await;
+        // No app handle: nothing is switched, and nothing stays marked pending.
+        assert!(results.iter().all(|r| matches!(r, Ok(false))));
+        assert_eq!(manager.pending_count().await, 0);
     }
 }

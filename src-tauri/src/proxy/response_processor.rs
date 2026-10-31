@@ -830,7 +830,7 @@ pub fn create_logged_passthrough_stream(
                             // 超时：计入 provider 健康度，并给客户端补一个协议内的终止错误事件，
                             // 而不是直接截断 chunked body（PROXY-09）
                             let message = if is_first_chunk {
-                                format!("流式响应首字节超时: {}秒无数据", duration.as_secs())
+                                format!("stream first byte timeout: no data for {}s", duration.as_secs())
                             } else {
                                 ProxyError::StreamIdleTimeout(duration.as_secs()).to_string()
                             };
@@ -906,7 +906,7 @@ pub fn create_logged_passthrough_stream(
                 }
                 Some(Err(e)) => {
                     log::error!("[{tag}] 流错误: {e}");
-                    let message = format!("上游流式响应中断: {e}");
+                    let message = format!("upstream stream interrupted: {e}");
                     if let Some(guard) = conn_guard.as_mut() {
                         guard.report_stream_failure(&message);
                     }
@@ -1109,6 +1109,7 @@ pub(crate) mod tests {
             db: db.clone(),
             config: Arc::new(RwLock::new(ProxyConfig::default())),
             status: Arc::new(RwLock::new(ProxyStatus::default())),
+            metrics: crate::proxy::pipeline::metrics::ProxyMetrics::new(),
             start_time: Arc::new(RwLock::new(None)),
             current_providers: Arc::new(RwLock::new(HashMap::new())),
             provider_router: Arc::new(ProviderRouter::new(db.clone())),

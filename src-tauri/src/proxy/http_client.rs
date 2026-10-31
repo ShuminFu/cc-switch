@@ -274,7 +274,7 @@ fn build_client_with(
     let mut builder = Client::builder()
         .redirect(redirect)
         .timeout(Duration::from_secs(600))
-        .connect_timeout(Duration::from_secs(30))
+        .connect_timeout(crate::proxy::pipeline::timeout::CONNECT_TIMEOUT)
         .pool_max_idle_per_host(10)
         .tcp_keepalive(Duration::from_secs(60))
         // 禁用 reqwest 自动解压：防止 reqwest 覆盖客户端原始 accept-encoding header。

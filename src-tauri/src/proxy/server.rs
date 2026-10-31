@@ -40,13 +40,20 @@ use tokio::task::JoinHandle;
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Maximum number of simultaneously open client connections. SEC-14.
 const MAX_CONCURRENT_CONNECTIONS: usize = 1024;
+/// How long `stop()` lets in-flight requests finish before aborting them (PROXY-14).
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(4);
+/// Upper bound for the whole stop sequence (drain + task shutdown).
+const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 代理服务器状态（共享）
 #[derive(Clone)]
 pub struct ProxyState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<ProxyConfig>>,
+    /// Server-level status (running, address, port).
     pub status: Arc<RwLock<ProxyStatus>>,
+    /// Request counters (PROXY-34), merged into the status on read.
+    pub metrics: Arc<super::pipeline::metrics::ProxyMetrics>,
     pub start_time: Arc<RwLock<Option<std::time::Instant>>>,
     /// 每个应用类型当前使用的 provider (app_type -> (provider_id, provider_name))
     pub current_providers: Arc<RwLock<std::collections::HashMap<String, (String, String)>>>,
@@ -60,6 +67,15 @@ pub struct ProxyState {
     pub app_handle: Option<tauri::AppHandle>,
     /// 故障转移切换管理器
     pub failover_manager: Arc<FailoverSwitchManager>,
+}
+
+impl ProxyState {
+    /// Server status with the request counters filled in.
+    pub async fn status_snapshot(&self) -> ProxyStatus {
+        let mut status = self.status.read().await.clone();
+        self.metrics.apply_to(&mut status);
+        status
+    }
 }
 
 /// 代理HTTP服务器
@@ -86,6 +102,7 @@ impl ProxyServer {
             db,
             config: Arc::new(RwLock::new(config.clone())),
             status: Arc::new(RwLock::new(ProxyStatus::default())),
+            metrics: super::pipeline::metrics::ProxyMetrics::new(),
             start_time: Arc::new(RwLock::new(None)),
             current_providers: Arc::new(RwLock::new(std::collections::HashMap::new())),
             provider_router,
@@ -166,8 +183,12 @@ impl ProxyServer {
         let connection_slots = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
         let handle = tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
+            // PROXY-14: connection tasks are tracked so stop() can drain them.
+            let mut connections = tokio::task::JoinSet::new();
+            let (drain_tx, drain_rx) = tokio::sync::watch::channel(false);
             loop {
                 tokio::select! {
+                    Some(_) = connections.join_next(), if !connections.is_empty() => {}
                     result = listener.accept() => {
                         let (stream, remote_addr) = match result {
                             Ok(v) => v,
@@ -193,7 +214,8 @@ impl ProxyServer {
                         };
 
                         let app = app.clone();
-                        tokio::spawn(async move {
+                        let mut drain_rx = drain_rx.clone();
+                        connections.spawn(async move {
                             let _permit = permit;
                             // Wait (bounded by the header timeout) for the client to
                             // send something so silent connections cannot park here.
@@ -233,16 +255,28 @@ impl ProxyServer {
                                 }
                             });
 
-                            if let Err(e) = hyper::server::conn::http1::Builder::new()
-                                .preserve_header_case(true)
-                                .timer(TokioTimer::new())
-                                .header_read_timeout(HEADER_READ_TIMEOUT)
-                                .serve_connection(
-                                    TokioIo::new(header_capture::RecordingIo::new(stream, recorder_io)),
-                                    service,
-                                )
-                                .await
-                            {
+                            let builder = {
+                                let mut builder = hyper::server::conn::http1::Builder::new();
+                                builder
+                                    .preserve_header_case(true)
+                                    .timer(TokioTimer::new())
+                                    .header_read_timeout(HEADER_READ_TIMEOUT);
+                                builder
+                            };
+                            let conn = builder.serve_connection(
+                                TokioIo::new(header_capture::RecordingIo::new(stream, recorder_io)),
+                                service,
+                            );
+                            tokio::pin!(conn);
+                            let served = tokio::select! {
+                                result = conn.as_mut() => result,
+                                _ = drain_rx.changed() => {
+                                    // Finish the in-flight request, then close.
+                                    conn.as_mut().graceful_shutdown();
+                                    conn.as_mut().await
+                                }
+                            };
+                            if let Err(e) = served {
                                 // Connection reset / broken pipe 等在代理场景下很常见，debug 级别
                                 log::debug!("[{SRV}] connection error: {e}", SRV = log_srv::CONN_ERR);
                             }
@@ -251,6 +285,32 @@ impl ProxyServer {
                     _ = &mut shutdown_rx => {
                         break;
                     }
+                }
+            }
+
+            // Stop accepting (frees the port), then drain open connections.
+            drop(listener);
+            let open = connections.len();
+            let _ = drain_tx.send(true);
+            if open > 0 {
+                log::info!(
+                    "[{}] 等待 {open} 个连接完成（最多 {}s）",
+                    log_srv::STOPPED,
+                    DRAIN_TIMEOUT.as_secs()
+                );
+                let drained = tokio::time::timeout(DRAIN_TIMEOUT, async {
+                    while connections.join_next().await.is_some() {}
+                })
+                .await;
+                if drained.is_err() {
+                    log::warn!(
+                        "[{}] {} 个连接未在 {}s 内结束，已中断",
+                        log_srv::STOP_TIMEOUT,
+                        connections.len(),
+                        DRAIN_TIMEOUT.as_secs()
+                    );
+                    connections.abort_all();
+                    while connections.join_next().await.is_some() {}
                 }
             }
 
@@ -269,6 +329,12 @@ impl ProxyServer {
         })
     }
 
+    /// Stop the server: close the listener at once, let in-flight requests finish
+    /// for up to [`DRAIN_TIMEOUT`], then abort the rest (PROXY-14).
+    ///
+    /// A drain that overruns is not an error: the listener is already closed and
+    /// the remaining connections are aborted, so callers (config updates, restarts)
+    /// can proceed.
     pub async fn stop(&self) -> Result<(), ProxyError> {
         // 1. 发送关闭信号
         if let Some(tx) = self.shutdown_tx.write().await.take() {
@@ -277,32 +343,36 @@ impl ProxyServer {
             return Err(ProxyError::NotRunning);
         }
 
-        // 2. 等待服务器任务结束（带 5 秒超时保护）
-        if let Some(handle) = self.server_handle.write().await.take() {
-            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
-                Ok(Ok(())) => {
-                    log::info!("[{}] 代理服务器已完全停止", log_srv::STOPPED);
-                    Ok(())
-                }
-                Ok(Err(e)) => {
-                    log::warn!("[{}] 代理服务器任务异常终止: {e}", log_srv::TASK_ERROR);
-                    Err(ProxyError::StopFailed(e.to_string()))
-                }
-                Err(_) => {
-                    log::warn!(
-                        "[{}] 代理服务器停止超时（5秒），强制继续",
-                        log_srv::STOP_TIMEOUT
-                    );
-                    Err(ProxyError::StopTimeout)
-                }
+        // 2. 等待 accept 循环与连接排空
+        let Some(mut handle) = self.server_handle.write().await.take() else {
+            return Ok(());
+        };
+        match tokio::time::timeout(STOP_TIMEOUT, &mut handle).await {
+            Ok(Ok(())) => {
+                log::info!("[{}] 代理服务器已完全停止", log_srv::STOPPED);
+                Ok(())
             }
-        } else {
-            Ok(())
+            Ok(Err(e)) => {
+                log::warn!("[{}] 代理服务器任务异常终止: {e}", log_srv::TASK_ERROR);
+                Err(ProxyError::StopFailed(e.to_string()))
+            }
+            Err(_) => {
+                log::warn!(
+                    "[{}] 代理服务器停止超时（{}秒），已强制中断",
+                    log_srv::STOP_TIMEOUT,
+                    STOP_TIMEOUT.as_secs()
+                );
+                handle.abort();
+                let _ = handle.await;
+                self.state.status.write().await.running = false;
+                *self.state.start_time.write().await = None;
+                Ok(())
+            }
         }
     }
 
     pub async fn get_status(&self) -> ProxyStatus {
-        let mut status = self.state.status.read().await.clone();
+        let mut status = self.state.status_snapshot().await;
 
         // 计算运行时间
         if let Some(start) = *self.state.start_time.read().await {
@@ -456,6 +526,18 @@ impl ProxyServer {
     }
 }
 
+impl Drop for ProxyServer {
+    /// A server dropped without `stop()` still releases its port: signal the
+    /// accept loop, which closes the listener and drains connections (PROXY-14).
+    fn drop(&mut self) {
+        if let Ok(mut tx) = self.shutdown_tx.try_write() {
+            if let Some(tx) = tx.take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+}
+
 /// `/status`: full details (provider names/ids, last error) only for requests that
 /// presented the access token; everyone else gets liveness information only. SEC-15.
 async fn status_endpoint(
@@ -502,5 +584,56 @@ mod tests {
         let value = public_status(&status);
         assert_eq!(value, serde_json::json!({"running": true, "port": 15721}));
         assert!(!value.to_string().contains("My Relay"));
+    }
+
+    fn test_server() -> ProxyServer {
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let config = ProxyConfig {
+            listen_address: "127.0.0.1".into(),
+            listen_port: 0,
+            ..ProxyConfig::default()
+        };
+        ProxyServer::new(config, db, None)
+    }
+
+    async fn wait_until_port_is_free(port: u16) -> bool {
+        for _ in 0..50 {
+            if tokio::net::TcpListener::bind(("127.0.0.1", port))
+                .await
+                .is_ok()
+            {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn stop_closes_the_listener_and_aborts_hanging_connections_within_budget() {
+        let server = test_server();
+        let info = server.start().await.expect("start");
+        // An idle client connection that never sends a request.
+        let _idle = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .expect("connect");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let started = std::time::Instant::now();
+        server
+            .stop()
+            .await
+            .expect("stop is not an error even when draining");
+        assert!(started.elapsed() < STOP_TIMEOUT + Duration::from_secs(1));
+        assert!(wait_until_port_is_free(info.port).await, "port still bound");
+        assert!(!server.get_status().await.running);
+    }
+
+    #[tokio::test]
+    async fn dropping_a_running_server_frees_its_port() {
+        let server = test_server();
+        let info = server.start().await.expect("start");
+        drop(server);
+        assert!(wait_until_port_is_free(info.port).await, "port still bound");
     }
 }
