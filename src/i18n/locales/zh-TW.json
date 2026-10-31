@@ -350,6 +350,16 @@
   },
   "settings": {
     "title": "設定",
+    "loadFailure": {
+      "backedUp": "settings.json 載入失敗，目前使用預設設定",
+      "backedUpDescription": "檔案：{{path}}\n原內容已備份至：{{backupPath}}\n錯誤：{{error}}",
+      "blocked": "settings.json 載入失敗",
+      "blockedDescription": "該檔案無法讀取或解析，且未能備份，為避免覆寫其中的資料已禁止儲存設定。目前使用預設設定。\n\n檔案：{{path}}\n錯誤：{{error}}\n\n可修復或移走該檔案後重新啟動，或確認允許以目前設定覆寫它（原內容將遺失）。",
+      "confirm": "允許覆寫",
+      "keepBlocked": "保持禁止",
+      "acknowledged": "已允許儲存設定",
+      "acknowledgeFailed": "確認重設設定失敗"
+    },
     "general": "通用",
     "tabGeneral": "通用",
     "tabAuth": "驗證",
@@ -645,6 +655,46 @@
         "warning": "將覆寫雲端已有的同步資料",
         "legacyNotice": "檢測到舊版雲端路徑資料。本次上傳將寫入新路徑 v2/db-v6，不會覆寫舊路徑。",
         "confirm": "確認上傳"
+      },
+      "syncKey": {
+        "title": "快照簽章金鑰",
+        "description": "WebDAV 與 S3 共用。上傳時簽章、下載時驗證；每台裝置需輸入相同的金鑰。",
+        "statusLoading": "正在讀取金鑰狀態...",
+        "statusFailed": "讀取金鑰狀態失敗：{{error}}",
+        "statusConfigured": "已設定，金鑰 ID：",
+        "statusNotSet": "未設定：快照將以未簽章方式上傳",
+        "placeholder": "同步金鑰（至少 {{min}} 個字元）",
+        "tooShort": "同步金鑰至少需要 {{min}} 個字元",
+        "set": "設定金鑰",
+        "setSuccess": "同步金鑰已儲存",
+        "setFailed": "設定同步金鑰失敗：{{error}}",
+        "clear": "清除金鑰",
+        "clearSuccess": "同步金鑰已清除",
+        "clearFailed": "清除同步金鑰失敗：{{error}}",
+        "clearConfirm": {
+          "title": "清除同步金鑰",
+          "message": "清除後上傳將不再簽章，也無法驗證已簽章的遠端快照。同時會重設 WebDAV 與 S3 的簽章同步狀態，之後將重新接受未簽章的遠端快照。",
+          "confirm": "清除金鑰"
+        }
+      },
+      "signature": {
+        "invalid": "遠端快照簽章驗證失敗：快照可能遭到竄改，或由其他同步金鑰簽章。已阻止下載。",
+        "keyMissing": "遠端快照已簽章，但本裝置未設定同步金鑰。請先在上方輸入與上傳裝置相同的同步金鑰，再重試。",
+        "unsignedHint": "此快照未簽章。在每台裝置上設定相同的同步金鑰後，快照將帶有簽章並於下載時驗證。",
+        "migrate": {
+          "title": "匯入未簽章快照",
+          "message": "此遠端快照未簽章（由舊版本或未設定同步金鑰的裝置上傳）。僅在確認來源可信時一次性匯入；之後本裝置的上傳將帶有簽章。",
+          "confirm": "一次性匯入"
+        },
+        "errors": {
+          "keyMissing": "未設定同步金鑰，無法驗證或簽署快照；請在每台裝置上輸入相同的同步金鑰。",
+          "manifestKeyMismatch": "遠端快照由其他同步金鑰簽章，請在本裝置輸入相同的同步金鑰。",
+          "manifestSignatureInvalid": "遠端快照簽章驗證失敗，快照可能遭到竄改，已拒絕匯入。",
+          "manifestSignatureUnsupported": "遠端快照的簽章演算法不受支援，請更新本裝置上的 CC Switch。",
+          "manifestUnsigned": "遠端快照未簽章（由舊版本上傳）。確認來源可信後可一次性匯入，之後上傳將帶有簽章。",
+          "manifestUnsignedRejected": "遠端快照未簽章，而本裝置先前已同步過簽章快照，可能遭到降級攻擊，已拒絕匯入。",
+          "manifestRollbackRejected": "遠端快照早於本裝置上次匯入的簽章快照，可能遭到回滾攻擊，已拒絕匯入。"
+        }
       }
     },
     "syncType": {

@@ -1,6 +1,6 @@
 # CCS-084: [settings] Save settings.json atomically and back up a corrupt file instead of silently resetting
 
-**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p1-high`, `area:settings`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:P1`, `p1-high`, `area:settings`
 
 > **Ticket key:** `p1-settings-atomic-save` · **Phase:** P1 · **Priority:** p1-high · **Effort:** S · **Depends on:** `p1-atomic-write-perms`
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -57,3 +57,4 @@ p1-atomic-write-perms
 
 - Blocked: Windows owner-only DACL path of atomic_write_secret. Needs a Windows machine or Windows CI run.
 - Follow-up [CCS-225](../P1-trust-release/CCS-225-p1-settings-load-failure-notice.md): Show a startup notice and confirm flow when settings.json failed to load.
+- Done in CCS-225: the frontend now shows the load failure on startup (`SettingsLoadFailureNotice` in `src/components/app-shell/AppConfirmDialogs.tsx`): a persistent warning with the backup path, or a confirm dialog that calls `acknowledge_settings_load_failure` when saving is blocked. Marked Done; the only open item is the Windows owner-only DACL check above, which still needs a Windows runner.

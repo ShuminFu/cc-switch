@@ -82,6 +82,10 @@ separate commit.
   the baseline table. Run in this shallow clone, it exits 1 with a "fetch
   tags" hint.
 - No Rust files changed, so cargo fmt, clippy and test were not needed.
+- actionlint v1.7.12 with shellcheck 0.11.0 on PATH (CCS-217): `actionlint .github/workflows/*.yml` → exit 0 with the committed `.github/actionlint.yaml`
+  (covers proxy-fixture.yml, including the `toJSON(...labels.*.name)`
+  expression, and labeler.yml: no findings); `shellcheck
+  scripts/kpi-fix-commits.sh` → exit 0.
 
 **Remaining (needs a human or GitHub settings).**
 - Make **Proxy fixture required** a required status check in the branch
@@ -89,13 +93,10 @@ separate commit.
   merging.
 - Create the `no-fixture-needed` and `fixtures` labels in the repository.
   The labeler creates `fixtures` on first use.
-- actionlint was not run. It is not installed, and installing it from the
-  network was not permitted in this session. The workflow was only
-  validated as YAML and by the text checks in the test.
 
 ### Remaining after triage
 
 - Blocked: Make 'Proxy fixture required' a required check on main. Needs a repo admin (branch protection).
 - Blocked: Create the `no-fixture-needed` and `fixtures` labels. Needs repo write access and a human decision.
 - Blocked: See the proxy-fixture workflow pass/fail on a real PR. Needs a real GitHub Actions run (CI triggers only on main/PRs; the repo has no Actions history) (the 13-case local test stands in).
-- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.

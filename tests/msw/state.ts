@@ -102,6 +102,8 @@ let settingsState: Settings = {
   language: "zh",
 };
 let appConfigDirOverride: string | null = null;
+/** 快照签名密钥指纹；null 表示未设置 */
+let syncSnapshotKeyId: string | null = null;
 const sessionMessageKey = (providerId: string, sourcePath: string) =>
   `${providerId}:${sourcePath}`;
 
@@ -221,6 +223,7 @@ export const resetProviderState = () => {
     language: "zh",
   };
   appConfigDirOverride = null;
+  syncSnapshotKeyId = null;
   mcpConfigs = {
     claude: {
       sample: {
@@ -353,6 +356,39 @@ export const getAppConfigDirOverride = () => appConfigDirOverride;
 
 export const setAppConfigDirOverrideState = (value: string | null) => {
   appConfigDirOverride = value;
+};
+
+export const getSyncSnapshotKeyStatus = () => ({
+  configured: syncSnapshotKeyId !== null,
+  keyId: syncSnapshotKeyId,
+});
+
+/** 与后端一致：空值清除密钥并复位 WebDAV/S3 的 signedSync 与回滚基线 */
+export const setSyncSnapshotKeyState = (key: string | null) => {
+  if (key) {
+    let hash = 0;
+    for (const ch of key) hash = (hash * 31 + ch.codePointAt(0)!) >>> 0;
+    syncSnapshotKeyId = hash.toString(16).padStart(8, "0");
+  } else {
+    syncSnapshotKeyId = null;
+    for (const field of ["webdavSync", "s3Sync"] as const) {
+      const sync = settingsState[field];
+      if (sync?.status) {
+        settingsState = {
+          ...settingsState,
+          [field]: {
+            ...sync,
+            status: {
+              ...sync.status,
+              signedSync: false,
+              lastSignedManifestCreatedAt: undefined,
+            },
+          },
+        };
+      }
+    }
+  }
+  return getSyncSnapshotKeyStatus();
 };
 
 export const getMcpConfig = (appType: AppId) => {

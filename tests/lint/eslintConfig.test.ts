@@ -9,8 +9,8 @@ import { ALL_APP_IDS } from "@/entities/app/registry";
 // 并且基线文件 eslint-suppressions.json 不会屏蔽任何 rules-of-hooks 违规。
 const ROOT = path.resolve(__dirname, "../..");
 
-// 基线中 app-id 字面量比较的总数上限：只能下降，修掉后请同步调低。
-const APP_LITERAL_BUDGET = 142;
+// 基线中 app-id 字面量比较的总数：只能下降，修掉后请同步调低（须与基线一致）。
+const APP_LITERAL_BUDGET = 27;
 // 现有直接 import invoke 的文件；不允许新增。
 const RAW_INVOKE_BASELINE = [
   "src/components/DatabaseUpgrade.tsx",
@@ -236,8 +236,9 @@ describe("eslint config", { timeout: 30_000 }, () => {
         sum + (rules["cc-switch/no-app-literal-comparison"]?.count ?? 0),
       0,
     );
-    expect(total).toBeLessThanOrEqual(APP_LITERAL_BUDGET);
-    expect(APP_LITERAL_BUDGET).toBeLessThanOrEqual(200);
+    expect(total).toBe(APP_LITERAL_BUDGET);
+    // Track F 目标（CCS-007）：不超过 40
+    expect(APP_LITERAL_BUDGET).toBeLessThanOrEqual(40);
   });
 
   it("lints files cleaned up by CCS-211 without suppressions", async () => {

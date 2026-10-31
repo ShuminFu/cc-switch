@@ -33,6 +33,12 @@ jobs:
         with:
           node-version-file: .node-version
 
+      - name: Check resolved Node version
+        shell: bash
+        run: |
+          node --version
+          test "$(node --version)" = "v$(tr -d '[:space:]' < .node-version)"
+
       - name: Check proxy changes come with a fixture
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

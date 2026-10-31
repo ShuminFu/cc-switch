@@ -1,6 +1,6 @@
 # CCS-038: [usage] Move session-log sync off tokio workers and off the main thread
 
-**Status:** Partial · **Kind:** bug · **Labels:** `bug`, `phase:P0`, `p1-high`, `area:usage`
+**Status:** Done · **Kind:** bug · **Labels:** `bug`, `phase:P0`, `p1-high`, `area:usage`
 
 > **Ticket key:** `p0-hotfix-session-sync-blocking` · **Phase:** P0 · **Priority:** p1-high · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -16,9 +16,9 @@ Verified finding backend-session-sync-blocking. The 60 s periodic sync runs bloc
 - Make sync_session_usage `async` with spawn_blocking on a cloned Arc<Database>.
 
 ## Acceptance criteria / verification
-- [ ] `cargo check` and `cargo test --manifest-path src-tauri/Cargo.toml session_usage`
-- [ ] A debug log shows the command no longer runs on the `main` thread
-- [ ] Manual: with many large .jsonl files, the window stays responsive during a manual sync
+- [x] `cargo check` and `cargo test --manifest-path src-tauri/Cargo.toml session_usage`
+- [x] A debug log shows the command no longer runs on the `main` thread
+- [x] Manual: with many large .jsonl files, the window stays responsive during a manual sync (automated by CCS-224: `e2e/specs/session-sync-responsiveness.e2e.mjs`)
 
 ## Dependencies
 None.
@@ -76,3 +76,31 @@ and has not been run here.
 - Blocked: nothing; every remaining item is codable.
 - Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
 - Follow-up [CCS-224](../P0-safety-net/CCS-224-p0-usage-session-sync-responsiveness.md): Prove the UI stays responsive during a large session-log sync with a headless e2e spec.
+
+### Evidence refresh (CCS-221)
+
+The 60 s loop moved out of `lib.rs`: it is now `session_usage_sync_loop` in
+`src-tauri/src/app_shell/bootstrap.rs` (lines 1069-1152 at f13a403; the
+periodic `loop` starts at line 1125). Each step still goes through
+`services::session_usage::run_sync_blocking`, whose
+`[SESSION-SYNC] {label} running on thread {:?}` debug log is at
+`services/session_usage.rs:841`. The `sync_session_usage` command is now in
+`commands/usage.rs:204` (still `async`).
+
+Re-run on the lane2/followups tree at f13a403 (Linux):
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib session_usage` → 56
+  passed, 0 failed, including `test_run_sync_blocking_runs_off_caller_thread`
+  (this also proves the build, so it covers `cargo check`).
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+  → clean.
+- The test box and the debug-log box are ticked. The manual responsiveness check
+  stays open (CCS-224 covers it headlessly).
+
+### Responsiveness check automated (CCS-224)
+
+`e2e/specs/session-sync-responsiveness.e2e.mjs` covers the manual box. It runs
+`sync_session_usage` over 300 session logs (~206 MB) in the real debug build
+under tauri-driver/xvfb. During the ~12 s sync, WebDriver round trips stayed
+at or below 72 ms and frame gaps at or below 81 ms; the limit for both is
+250 ms. When the command was made synchronous in a scratch build, the spec
+failed with an 11.4 s stall. See the CCS-224 implementation notes for details.

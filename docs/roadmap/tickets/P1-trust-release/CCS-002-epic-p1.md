@@ -59,8 +59,8 @@ Audited 2026-10-30 against branch `claude/funny-carson-9c7j3e` (HEAD `c0c770a`, 
 | CCS-074 | `p1-ipc-session-terminal` | Done |
 | CCS-075 | `p1-ipc-path-validation` | Done |
 | CCS-076 | `p1-session-load-messages-roots` | Done |
-| CCS-077 | `p1-csp-tighten` | Partial |
-| CCS-078 | `p1-asset-protocol-remove` | Partial |
+| CCS-077 | `p1-csp-tighten` | Done |
+| CCS-078 | `p1-asset-protocol-remove` | Done |
 | CCS-079 | `p1-atomic-write-durable` | Partial |
 | CCS-080 | `p1-atomic-write-perms` | Done |
 | CCS-081 | `p1-atomic-write-symlink` | Done |

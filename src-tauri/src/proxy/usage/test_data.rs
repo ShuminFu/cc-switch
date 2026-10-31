@@ -28,6 +28,16 @@ pub fn responses_usage(input: u64, output: u64, cached: u64, cache_write: Option
     })
 }
 
+/// Anthropic Messages usage（缓存读写与 `input_tokens` 分开计数）
+pub fn anthropic_usage(input: u64, output: u64, cache_read: u64, cache_creation: u64) -> Value {
+    json!({
+        "input_tokens": input,
+        "output_tokens": output,
+        "cache_read_input_tokens": cache_read,
+        "cache_creation_input_tokens": cache_creation
+    })
+}
+
 /// Claude Code 会话日志中的一行 assistant 消息（JSONL）
 ///
 /// `tokens` 依次为 input、output、cache read、cache creation。

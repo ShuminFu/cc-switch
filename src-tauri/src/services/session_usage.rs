@@ -145,7 +145,15 @@ pub(crate) fn sync_claude_session_logs_with_mode(
     db: &Database,
     mode: SyncMode,
 ) -> Result<SessionSyncResult, AppError> {
-    let projects_dir = get_claude_config_dir().join("projects");
+    sync_claude_projects_dir(db, &get_claude_config_dir().join("projects"), mode)
+}
+
+/// 同步 `projects_dir`（Claude 的 `~/.claude/projects`）下的全部会话日志
+fn sync_claude_projects_dir(
+    db: &Database,
+    projects_dir: &Path,
+    mode: SyncMode,
+) -> Result<SessionSyncResult, AppError> {
     if !projects_dir.exists() {
         return Ok(SessionSyncResult {
             imported: 0,
@@ -163,7 +171,7 @@ pub(crate) fn sync_claude_session_logs_with_mode(
     };
 
     // 收集所有 .jsonl 文件
-    let jsonl_files = collect_jsonl_files(&projects_dir);
+    let jsonl_files = collect_jsonl_files(projects_dir);
 
     for file_path in &jsonl_files {
         result.files_scanned += 1;
@@ -858,7 +866,7 @@ pub async fn rescan_all_session_usage_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proxy::usage::test_data::claude_session_line;
+    use crate::proxy::usage::test_data::{anthropic_usage, claude_session_line};
 
     #[test]
     fn test_parse_usage_from_jsonl_line() {
@@ -1290,6 +1298,106 @@ mod tests {
         }))
         .unwrap_err();
         assert!(err.to_string().contains("boom"));
+    }
+
+    /// 写入 `files` 个约 `bytes_per_file` 字节的 Claude 会话日志，返回 assistant 消息总数。
+    ///
+    /// 行的形状与真实 transcript 一致：user / assistant 交替，assistant 行带
+    /// `message.usage`、`model` 与 `requestId`，正文用大段文本填充。
+    fn write_large_session_logs(projects_dir: &Path, files: usize, bytes_per_file: usize) -> u32 {
+        let project = projects_dir.join("-home-user-load-test");
+        fs::create_dir_all(&project).unwrap();
+        let padding = "lorem ipsum dolor sit amet ".repeat(300);
+        let mut messages = 0;
+        for file_index in 0..files {
+            let session_id = format!("session-load-{file_index}");
+            let mut body = String::with_capacity(bytes_per_file + 16 * 1024);
+            let mut turn = 0;
+            while body.len() < bytes_per_file {
+                let user = serde_json::json!({
+                    "type": "user",
+                    "sessionId": session_id,
+                    "timestamp": "2026-06-07T13:01:22Z",
+                    "message": {"role": "user", "content": padding},
+                });
+                let assistant = serde_json::json!({
+                    "type": "assistant",
+                    "sessionId": session_id,
+                    "requestId": format!("req_load_{file_index}_{turn}"),
+                    "timestamp": "2026-06-07T13:01:23Z",
+                    "message": {
+                        "id": format!("msg_load_{file_index}_{turn}"),
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "claude-sonnet-4-5",
+                        "content": [{"type": "text", "text": padding}],
+                        "stop_reason": "end_turn",
+                        "usage": anthropic_usage(12, 340, 4096, 512),
+                    },
+                });
+                body.push_str(&format!("{user}\n{assistant}\n"));
+                turn += 1;
+            }
+            fs::write(project.join(format!("{session_id}.jsonl")), body).unwrap();
+            messages += turn;
+        }
+        messages
+    }
+
+    #[test]
+    fn test_large_session_sync_does_not_stall_async_runtime() -> Result<(), AppError> {
+        // CCS-224：大批量会话日志同步期间，调用方运行时（Tauri 的 async 命令所在）
+        // 必须持续可调度。在单线程运行时里与 10 ms 定时器并行运行同步，
+        // 同步若回到调用线程上执行，定时器会在整个同步期间停摆。
+        const FILES: usize = 48;
+        const BYTES_PER_FILE: usize = 1024 * 1024;
+        const TICK: std::time::Duration = std::time::Duration::from_millis(10);
+        const MAX_GAP: std::time::Duration = std::time::Duration::from_millis(100);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let projects_dir = tmp.path().join("projects");
+        let messages = write_large_session_logs(&projects_dir, FILES, BYTES_PER_FILE);
+        let db = Arc::new(Database::memory()?);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .map_err(|e| AppError::Message(e.to_string()))?;
+        let sync_db = db.clone();
+        let (result, max_gap, ticks, elapsed) = rt.block_on(async move {
+            let started = std::time::Instant::now();
+            let sync = run_sync_blocking("Session usage load test", move || {
+                sync_claude_projects_dir(&sync_db, &projects_dir, SyncMode::Incremental)
+            });
+            tokio::pin!(sync);
+            let mut ticker = tokio::time::interval(TICK);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut last = std::time::Instant::now();
+            let mut max_gap = std::time::Duration::ZERO;
+            let mut ticks = 0u32;
+            let result = loop {
+                tokio::select! {
+                    result = &mut sync => break result,
+                    _ = ticker.tick() => {
+                        max_gap = max_gap.max(last.elapsed());
+                        last = std::time::Instant::now();
+                        ticks += 1;
+                    }
+                }
+            };
+            max_gap = max_gap.max(last.elapsed());
+            (result, max_gap, ticks, started.elapsed())
+        });
+
+        let result = result?;
+        assert_eq!(result.files_scanned, FILES as u32);
+        assert_eq!(result.imported, messages);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert!(
+            max_gap < MAX_GAP,
+            "async runtime stalled for {max_gap:?} during a {elapsed:?} sync ({ticks} ticks)"
+        );
+        Ok(())
     }
 
     #[test]

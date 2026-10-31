@@ -7,6 +7,7 @@ import type {
 } from "@dnd-kit/core";
 import type { Provider } from "@/types";
 import type { AppId } from "@/lib/api";
+import type { TranslationKey } from "@/i18n/keys";
 import { cn } from "@/lib/utils";
 import { ProviderActions } from "@/components/providers/ProviderActions";
 import { ProviderIcon } from "@/components/ProviderIcon";
@@ -20,7 +21,6 @@ import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge"
 import { FailoverPriorityBadge } from "@/components/providers/FailoverPriorityBadge";
 import {
   extractCodexBaseUrl,
-  extractCodexExperimentalBearerToken,
   extractCodexWireApi,
   isCodexAnthropicWireApi,
   isCodexChatWireApi,
@@ -30,6 +30,10 @@ import { useProviderHealth } from "@/lib/query/failover";
 import { useUsageQuery } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
 import { appCaps } from "@/entities/app/registry";
+import {
+  isOfficialLoginConfig,
+  supportsOfficialLogin,
+} from "@/entities/provider/settingsConfig";
 
 interface DragHandleProps {
   attributes: DraggableAttributes;
@@ -73,38 +77,84 @@ interface ProviderCardProps {
 
 /** 判断是否为官方供应商（无自定义 base URL / API key，直连官方 API） */
 function isOfficialProvider(provider: Provider, appId: AppId): boolean {
-  if (provider.category === "official") {
-    return true;
-  }
-
-  const config = provider.settingsConfig as Record<string, any>;
-  if (appId === "claude") {
-    const baseUrl = config?.env?.ANTHROPIC_BASE_URL;
-    return !baseUrl || (typeof baseUrl === "string" && baseUrl.trim() === "");
-  }
-  if (appId === "codex") {
-    // 无 OPENAI_API_KEY → 使用 Codex CLI 内置 OAuth（官方）
-    const apiKey = config?.auth?.OPENAI_API_KEY;
-    const bearerToken =
-      typeof config?.config === "string"
-        ? extractCodexExperimentalBearerToken(config.config)
-        : undefined;
-    return (
-      !bearerToken &&
-      (!apiKey || (typeof apiKey === "string" && apiKey.trim() === ""))
-    );
-  }
-  if (appId === "gemini") {
-    // 无 GEMINI_API_KEY 且无 GOOGLE_GEMINI_BASE_URL → Google OAuth 官方模式
-    const apiKey = config?.env?.GEMINI_API_KEY;
-    const baseUrl = config?.env?.GOOGLE_GEMINI_BASE_URL;
-    return (
-      (!apiKey || (typeof apiKey === "string" && apiKey.trim() === "")) &&
-      (!baseUrl || (typeof baseUrl === "string" && baseUrl.trim() === ""))
-    );
-  }
-  return false;
+  return (
+    provider.category === "official" ||
+    isOfficialLoginConfig(appId, provider.settingsConfig)
+  );
 }
+
+/** Codex 供应商使用 Chat / Anthropic 协议时需要本地路由转换 */
+function codexNeedsRouting(provider: Provider): boolean {
+  if (
+    provider.meta?.apiFormat === "openai_chat" ||
+    provider.meta?.apiFormat === "anthropic"
+  )
+    return true;
+  const config = (provider.settingsConfig as Record<string, any>)?.config;
+  return (
+    typeof config === "string" &&
+    (isCodexChatWireApi(extractCodexWireApi(config)) ||
+      isCodexAnthropicWireApi(extractCodexWireApi(config)))
+  );
+}
+
+interface RoutingBadge {
+  labelKey: TranslationKey;
+  /** routing：需要 / 支持本地路由；unsupported：官方供应商不支持路由 */
+  tone: "routing" | "unsupported";
+}
+
+interface RoutingBadgeContext {
+  supportsOfficialRouting: boolean;
+  isProxyTakeover: boolean;
+}
+
+/** 供应商卡片上的路由提示徽标（每个应用至多显示一个） */
+const ROUTING_BADGES: Partial<
+  Record<
+    AppId,
+    (provider: Provider, context: RoutingBadgeContext) => RoutingBadge | null
+  >
+> = {
+  "claude-desktop": (provider) =>
+    provider.category !== "official" &&
+    provider.meta?.claudeDesktopMode === "proxy"
+      ? { labelKey: "claudeDesktop.modeProxy", tone: "routing" }
+      : null,
+  claude: (provider) => {
+    if (provider.category === "official") {
+      return { labelKey: "claudeCode.noRoutingSupport", tone: "unsupported" };
+    }
+    return provider.meta?.apiFormat && provider.meta.apiFormat !== "anthropic"
+      ? { labelKey: "claudeCode.needsRouting", tone: "routing" }
+      : null;
+  },
+  codex: (provider, { supportsOfficialRouting, isProxyTakeover }) => {
+    if (supportsOfficialRouting) {
+      return {
+        labelKey: isProxyTakeover
+          ? "codex.officialRouting"
+          : "codex.nativeLogin",
+        tone: "routing",
+      };
+    }
+    if (provider.category === "official") {
+      return { labelKey: "codex.noRoutingSupport", tone: "unsupported" };
+    }
+    return codexNeedsRouting(provider)
+      ? { labelKey: "codex.needsRouting", tone: "routing" }
+      : null;
+  },
+};
+
+/** 由应用自身管理、在 CC Switch 中只读的供应商 */
+const READ_ONLY_PROVIDER_CHECKS: Partial<
+  Record<AppId, (settingsConfig: unknown) => boolean>
+> = {
+  // Hermes v12+ overlay entries live under the `providers:` dict and are
+  // read-only here — writes have to go through Hermes Web UI.
+  hermes: isHermesReadOnlyProvider,
+};
 
 const extractApiUrl = (provider: Provider, fallbackText: string) => {
   if (provider.notes?.trim()) {
@@ -176,7 +226,10 @@ export function ProviderCard({
   // OMO and OMO Slim share the same card behavior
   const isAnyOmo = isOmo || isOmoSlim;
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
-  const isAdditiveMode = appId === "opencode" && !isAnyOmo;
+  const caps = appCaps(appId);
+  // 累加模式且无默认供应商（OpenCode）：没有"当前"概念，已加入配置即高亮
+  const hasNoCurrentProvider = caps.additive && !caps.setDefault;
+  const isAdditiveMode = hasNoCurrentProvider && !isAnyOmo;
 
   const { data: health } = useProviderHealth(provider.id, appId);
 
@@ -199,7 +252,7 @@ export function ProviderCard({
   const usageEnabled = provider.meta?.usage_script?.enabled ?? false;
   const isOfficial = isOfficialProvider(provider, appId);
   const supportsOfficialSubscription =
-    isOfficial && ["claude", "codex", "gemini"].includes(appId);
+    isOfficial && supportsOfficialLogin(appId);
   const isOfficialSubscriptionUsage =
     provider.meta?.usage_script?.templateType ===
     TEMPLATE_TYPES.OFFICIAL_SUBSCRIPTION;
@@ -224,34 +277,18 @@ export function ProviderCard({
   const isCopilot =
     provider.meta?.providerType === PROVIDER_TYPES.GITHUB_COPILOT ||
     provider.meta?.usage_script?.templateType === "github_copilot";
-  // Hermes v12+ overlay entries live under the `providers:` dict and are
-  // read-only here — writes have to go through Hermes Web UI.
   const isHermesReadOnly =
-    appId === "hermes" && isHermesReadOnlyProvider(provider.settingsConfig);
+    READ_ONLY_PROVIDER_CHECKS[appId]?.(provider.settingsConfig) ?? false;
   const isCodexOauth =
     provider.meta?.providerType === PROVIDER_TYPES.CODEX_OAUTH;
-  const codexNeedsRouting = useMemo(() => {
-    if (appId !== "codex" || provider.category === "official") return false;
-    if (
-      provider.meta?.apiFormat === "openai_chat" ||
-      provider.meta?.apiFormat === "anthropic"
-    )
-      return true;
-    const config = (provider.settingsConfig as Record<string, any>)?.config;
-    return (
-      typeof config === "string" &&
-      (isCodexChatWireApi(extractCodexWireApi(config)) ||
-        isCodexAnthropicWireApi(extractCodexWireApi(config)))
-    );
-  }, [
-    appId,
-    provider.category,
-    provider.meta?.apiFormat,
-    (provider.settingsConfig as Record<string, any>)?.config,
-  ]);
+  const routingBadge =
+    ROUTING_BADGES[appId]?.(provider, {
+      supportsOfficialRouting,
+      isProxyTakeover,
+    }) ?? null;
   // 获取用量数据以判断是否有多套餐
   // 累加模式应用（OpenCode/OpenClaw/Hermes）：使用 isInConfig 代替 isCurrent
-  const shouldAutoQuery = appCaps(appId).additive ? isInConfig : isCurrent;
+  const shouldAutoQuery = caps.additive ? isInConfig : isCurrent;
   const autoQueryInterval = shouldAutoQuery
     ? provider.meta?.usage_script?.autoQueryInterval || 0
     : 0;
@@ -289,9 +326,9 @@ export function ProviderCard({
   // - 普通模式：isCurrent
   const isActiveProvider = isAnyOmo
     ? isCurrent
-    : appId === "openclaw"
+    : caps.defaultModel
       ? Boolean(isDefaultModel)
-      : appId === "opencode"
+      : hasNoCurrentProvider
         ? false
         : isAutoFailoverEnabled
           ? activeProviderId === provider.id
@@ -382,50 +419,18 @@ export function ProviderCard({
                 </span>
               )}
 
-              {appId === "claude-desktop" &&
-                provider.category !== "official" &&
-                provider.meta?.claudeDesktopMode === "proxy" && (
-                  <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                    {t("claudeDesktop.modeProxy")}
-                  </span>
-                )}
-
-              {appId === "claude" &&
-                provider.category !== "official" &&
-                provider.meta?.apiFormat &&
-                provider.meta.apiFormat !== "anthropic" && (
-                  <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                    {t("claudeCode.needsRouting")}
-                  </span>
-                )}
-
-              {codexNeedsRouting && (
-                <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                  {t("codex.needsRouting")}
+              {routingBadge && (
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
+                    routingBadge.tone === "routing"
+                      ? "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+                      : "bg-slate-200 text-slate-700 dark:bg-slate-700/60 dark:text-slate-200",
+                  )}
+                >
+                  {t(routingBadge.labelKey)}
                 </span>
               )}
-
-              {appId === "claude" && provider.category === "official" && (
-                <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
-                  {t("claudeCode.noRoutingSupport")}
-                </span>
-              )}
-
-              {appId === "codex" && supportsOfficialRouting && (
-                <span className="inline-flex items-center rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-                  {isProxyTakeover
-                    ? t("codex.officialRouting")
-                    : t("codex.nativeLogin")}
-                </span>
-              )}
-
-              {appId === "codex" &&
-                provider.category === "official" &&
-                !supportsOfficialRouting && (
-                  <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
-                    {t("codex.noRoutingSupport")}
-                  </span>
-                )}
 
               {isProxyRunning && isInFailoverQueue && health && (
                 <ProviderHealthBadge

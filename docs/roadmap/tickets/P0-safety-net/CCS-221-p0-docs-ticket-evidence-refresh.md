@@ -1,6 +1,6 @@
 # CCS-221: [docs] Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets
 
-**Status:** Open · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:docs`
+**Status:** Done · **Kind:** chore · **Labels:** `chore`, `phase:P0`, `p3-low`, `area:docs`
 
 > **Ticket key:** `p0-docs-ticket-evidence-refresh` · **Phase:** P0 · **Priority:** p3-low · **Effort:** S
 > Plan: [next-phase-plan.md](../../next-phase-plan.md)
@@ -23,11 +23,51 @@ Several Partial tickets have boxes that are met in the current code but still `[
 - Fix the hermesProviderSource.ts comment.
 
 ## Acceptance criteria / verification
-- [ ] `node scripts/check-versions.mjs v3.18.0` exits 1; `node scripts/check-versions.mjs` exits 0; `npx vitest run tests/ci/releaseHygiene.test.ts tests/scripts/checkVersions.test.ts` passes.
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal` and `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` pass.
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --lib session_usage` passes, including `test_run_sync_blocking_runs_off_caller_thread`.
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --test takeover_crash` reports 10 passed.
-- [ ] `pnpm typecheck` passes.
+- [x] `node scripts/check-versions.mjs v3.18.0` exits 1; `node scripts/check-versions.mjs` exits 0; `npx vitest run tests/ci/releaseHygiene.test.ts tests/scripts/checkVersions.test.ts` passes.
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal` and `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` pass.
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --lib session_usage` passes, including `test_run_sync_blocking_runs_off_caller_thread`.
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml --test takeover_crash` reports 10 passed.
+- [x] `pnpm typecheck` passes.
 
 ## Dependencies
 None.
+
+## Implementation notes
+
+**Summary.** Re-ran every command from the acceptance list on the
+lane2/followups tree at f13a403; all passed, so the boxes below and in the
+source tickets were ticked and stale evidence was refreshed. No Rust code
+changed.
+- CCS-033: AC1 ticked; the "actions unpinned" Remaining bullet now records the
+  CCS-028 SHA pins (`Swatinem/rust-cache@d1527c8f… # v2.9.3` at `ci.yml`
+  130/208/276/413 and `release.yml` 118; `actions/attest-build-provenance@977bb373… # v3.0.0`
+  at `release.yml` 738). AC2 stays Blocked.
+- CCS-036: criterion command changed to `--lib platform::terminal`; the old
+  `commands/misc.rs` evidence is marked historical and the current
+  `platform/terminal/{tempfiles,posix,linux,mod}.rs` locations are listed;
+  unit-test and test+clippy boxes ticked.
+- CCS-038: test box and debug-log box ticked; the 60 s loop is now
+  `session_usage_sync_loop` at `app_shell/bootstrap.rs:1069-1152` (the ticket's
+  1068-1095 had already drifted; periodic `loop` at 1125).
+- CCS-152: `takeover_crash` box ticked with 10 passed; the Known limitation now
+  points at CCS-212 (`failed_hot_switch_keeps_the_takeover_snapshot`). Status
+  stays Partial (3-OS item).
+- CCS-149: the follow-up about the Hermes doc comment is marked fixed.
+- `src/config/hermesProviderSource.ts`: doc comment now references
+  `apps/hermes/config.rs::get_providers`.
+
+**Files.** `src/config/hermesProviderSource.ts`,
+`docs/roadmap/tickets/P0-safety-net/{CCS-033-p0-ci-release-hygiene,CCS-036-p0-hotfix-terminal-tempfiles,CCS-038-p0-hotfix-session-sync-blocking,CCS-221-p0-docs-ticket-evidence-refresh}.md`,
+`docs/roadmap/tickets/P4-app-adapters-persistence/{CCS-149-p4-adapter-additive,CCS-152-p4-takeover-crash-e2e}.md`.
+
+**Commits.** `1f543c6` (ticket evidence refresh + Hermes doc comment); this SHA is recorded in a follow-up commit.
+
+**Verification (Linux).**
+- `node scripts/check-versions.mjs v3.18.0` → exit 1; `node scripts/check-versions.mjs` → exit 0.
+- `npx vitest run tests/ci/releaseHygiene.test.ts tests/scripts/checkVersions.test.ts` → 2 files, 22 tests passed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib platform::terminal` → 24 passed, 0 failed.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib session_usage` → 56 passed, 0 failed, including `test_run_sync_blocking_runs_off_caller_thread`.
+- `cargo test --manifest-path src-tauri/Cargo.toml --test takeover_crash` → 10 passed, 0 failed, including `failed_hot_switch_keeps_the_takeover_snapshot`.
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` → clean.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` → 2850 passed, 0 failed, 3 ignored.
+- `pnpm typecheck` → clean; `pnpm test:unit` → 171 files, 1624 tests passed; `pnpm format:check` → clean.

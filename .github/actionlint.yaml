@@ -1,0 +1,8 @@
+# actionlint configuration (run: actionlint .github/workflows/*.yml with
+# shellcheck on PATH). `windows-11-arm` is a GitHub-hosted runner, but
+# actionlint v1.7.7 and older do not know the label; listing it here keeps
+# them from reporting a false "label is unknown" error. Verified with
+# actionlint v1.7.12 and shellcheck 0.11.0.
+self-hosted-runner:
+  labels:
+    - windows-11-arm

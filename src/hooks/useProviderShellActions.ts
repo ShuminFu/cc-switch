@@ -1,17 +1,16 @@
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Provider } from "@/types";
 import { providersApi, settingsApi, type AppId } from "@/lib/api";
 import type { useProviderActions } from "@/hooks/useProviderActions";
-import { openclawKeys } from "@/hooks/useOpenClaw";
-import { hermesKeys } from "@/hooks/useHermes";
 import {
   useDisableCurrentOmo,
   useDisableCurrentOmoSlim,
 } from "@/lib/query/omo";
 import { useAppCaps } from "@/entities/app/registry";
 import { providerKeys } from "@/entities/provider/keys";
+import { liveProviderIdsQuery } from "@/entities/provider/liveIds";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { deepClone } from "@/utils/deepClone";
 
@@ -37,24 +36,6 @@ export function generateUniqueProviderCopyKey(
   }
   return `${baseKey}-${counter}`;
 }
-
-/** 累加模式应用读取 live 配置中已有供应商 ID 的查询 */
-const LIVE_PROVIDER_IDS_QUERIES: Partial<
-  Record<AppId, { queryKey: QueryKey; queryFn: () => Promise<string[]> }>
-> = {
-  opencode: {
-    queryKey: providerKeys.opencodeLiveIds,
-    queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-  },
-  openclaw: {
-    queryKey: openclawKeys.liveProviderIds,
-    queryFn: () => providersApi.getOpenClawLiveProviderIds(),
-  },
-  hermes: {
-    queryKey: hermesKeys.liveProviderIds,
-    queryFn: () => providersApi.getHermesLiveProviderIds(),
-  },
-};
 
 interface ProviderShellActionsOptions {
   activeApp: AppId;
@@ -108,7 +89,7 @@ export function useProviderShellActions({
   };
 
   const loadLiveProviderIds = (): Promise<string[]> => {
-    const query = LIVE_PROVIDER_IDS_QUERIES[activeApp];
+    const query = liveProviderIdsQuery(activeApp);
     return query
       ? queryClient.ensureQueryData(query)
       : Promise.resolve<string[]>([]);

@@ -21,11 +21,11 @@ use crate::settings::{
 
 use super::sync_protocol::{
     apply_snapshot, authorize_manifest, build_local_snapshot, effective_db_compat_version,
-    localized, manifest_signature_status, persist_sync_success_best_effort, sha256_hex,
-    upload_signing_key, validate_artifact_size_limit, validate_manifest_compat, verify_artifact,
-    ArtifactMeta, ManifestTrust, RemoteLayout, SignaturePolicy, SyncManifest, DB_COMPAT_VERSION,
-    MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST,
-    REMOTE_SKILLS_ZIP,
+    localized, manifest_signature_status, persist_sync_success_best_effort,
+    record_applied_manifest, sha256_hex, upload_signing_key, validate_artifact_size_limit,
+    validate_manifest_compat, verify_artifact, ArtifactMeta, ManifestTrust, RemoteLayout,
+    SignaturePolicy, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES,
+    PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
 };
 
 pub(crate) mod archive;
@@ -140,10 +140,7 @@ pub async fn download(
     let trust = authorize_manifest(
         &snapshot.manifest,
         key.as_ref(),
-        SignaturePolicy {
-            signed_sync: settings.status.signed_sync,
-            allow_unsigned,
-        },
+        SignaturePolicy::for_status(&settings.status, allow_unsigned),
     )?;
     validate_manifest_compat(&snapshot.manifest, snapshot.layout)?;
 
@@ -173,6 +170,7 @@ pub async fn download(
     if key.is_some() {
         settings.status.signed_sync = true;
     }
+    record_applied_manifest(&mut settings.status, &snapshot.manifest, trust);
     let manifest_hash = sha256_hex(&snapshot.manifest_bytes);
     let _persisted = persist_sync_success_best_effort(
         settings,
@@ -239,6 +237,7 @@ fn persist_sync_success(
         last_remote_manifest_hash: Some(manifest_hash),
         last_remote_etag: etag,
         signed_sync: settings.status.signed_sync,
+        last_signed_manifest_created_at: settings.status.last_signed_manifest_created_at.clone(),
     };
     settings.status = status.clone();
     update_webdav_sync_status(status)

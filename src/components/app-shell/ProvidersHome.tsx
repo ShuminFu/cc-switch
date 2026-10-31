@@ -60,24 +60,24 @@ export function ProvidersHome({
                   : undefined
               }
               onDisableOmo={
-                activeApp === "opencode" ? shellActions.disableOmo : undefined
+                activeAppCaps.omo ? shellActions.disableOmo : undefined
               }
               onDisableOmoSlim={
-                activeApp === "opencode"
-                  ? shellActions.disableOmoSlim
-                  : undefined
+                activeAppCaps.omo ? shellActions.disableOmoSlim : undefined
               }
               onDuplicate={shellActions.duplicateProvider}
               onOpenWebsite={shellActions.openWebsite}
               onOpenTerminal={
-                activeApp === "claude" ? shellActions.openTerminal : undefined
+                activeAppCaps.providerTerminal
+                  ? shellActions.openTerminal
+                  : undefined
               }
               onSetAsDefault={
-                activeApp === "openclaw"
-                  ? onSetAsDefaultModel
-                  : activeApp === "hermes"
+                activeAppCaps.setDefault
+                  ? activeAppCaps.defaultIsSwitch
                     ? onSwitch
-                    : undefined
+                    : onSetAsDefaultModel
+                  : undefined
               }
             />
           </motion.div>

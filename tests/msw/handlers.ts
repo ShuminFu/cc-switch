@@ -19,6 +19,8 @@ import {
   setSettings,
   getAppConfigDirOverride,
   setAppConfigDirOverrideState,
+  getSyncSnapshotKeyStatus,
+  setSyncSnapshotKeyState,
   getMcpConfig,
   setMcpServerEnabled,
   upsertMcpServer,
@@ -61,6 +63,8 @@ export const handlers = [
   command("get_migration_result", () => false),
   command("get_skills_migration_result", () => null),
   command("get_startup_report", () => ({ steps: [] })),
+  command("get_settings_load_failure", () => null),
+  command("acknowledge_settings_load_failure", () => true),
   command("get_providers", async (request) => {
     const { app } = await withJson<{ app: AppId }>(request);
     // 后端 `inFailoverQueue` 为 `#[serde(default)] bool`，序列化时总会带上
@@ -245,6 +249,24 @@ export const handlers = [
   }),
 
   command("get_app_config_dir_override", () => getAppConfigDirOverride()),
+
+  command("get_sync_snapshot_key_status", () => getSyncSnapshotKeyStatus()),
+
+  command("set_sync_snapshot_key", async (request) => {
+    const { key } = await withJson<{ key: string | null }>(request);
+    if (key && Array.from(key.trim()).length < 8) {
+      return HttpResponse.json(
+        {
+          code: "LOCALIZED",
+          message: "The sync key must be at least 8 characters.",
+          details: null,
+          i18nKey: "sync.key_too_short",
+        },
+        { status: 400 },
+      );
+    }
+    return setSyncSnapshotKeyState(key ?? null);
+  }),
 
   command("apply_claude_plugin_config", async (request) => {
     const { official } = await withJson<{ official: boolean }>(request);

@@ -30,7 +30,14 @@ salt) of the passphrase; only the derived key is stored. With a key configured:
   (the one-time migration confirmation);
 - after the first signed upload/download (or the confirmed migration import) the
   transport's `status.signedSync` is set and unsigned remotes are refused for good
-  (`sync.manifest_unsigned_rejected`); clearing the key resets it.
+  (`sync.manifest_unsigned_rejected`); clearing the key resets it;
+- after a signed download is applied, its `createdAt` is kept as the transport's
+  `status.lastSignedManifestCreatedAt`, and a later signed manifest with an older
+  `createdAt` is refused (`sync.manifest_rollback_rejected`), so a re-uploaded old
+  snapshot signed with the same key cannot roll the device back. Equal or newer
+  timestamps are accepted. Only devices that have applied a signed snapshot are
+  protected (uploads do not set the floor), the check relies on the uploading
+  devices' clocks, and clearing the key resets the floor.
 
 Without a key and before any signed sync, sync behaves as before (unsigned).
 The remote-info payload reports `signature`: `valid`, `invalid`, `unsigned` or `keyMissing`.
@@ -106,3 +113,25 @@ Run this on each of macOS, Windows and Linux (desktop, plus headless Linux for t
 4. Headless Linux (no D-Bus session): secrets land in `~/.cc-switch/secrets.json` (mode 0600).
 5. Run the downgrade path above. The plaintext values reappear in the JSON files and the
    keychain entries are removed.
+
+### Linux Secret Service (automated)
+
+`scripts/check-linux-secret-service.sh` covers steps 2-5 at the API level for the
+freedesktop Secret Service (GNOME Keyring). It needs `dbus`, `gnome-keyring` and
+`libsecret-tools` (`secret-tool`). It starts a private D-Bus session with an unlocked
+gnome-keyring in a temporary data directory (the login keyring is not touched) and runs
+the ignored `secret_store::keyring_live` tests under the service `cc-switch-test-<pid>`:
+
+- probe, set/get/delete round trip;
+- `SecretPolicy` externalize/hydrate of the WebDAV password and a Copilot token, `forget()`;
+- `plaintext` mode: the value is written back inline and `release()` deletes the entry;
+- an entry deleted outside the app (Seahorse, `secret-tool clear`) still reads from the
+  process cache until restart; a fresh process sees it gone.
+- interop with an independent client: an entry stored with `secret-tool store` is read by
+  the app, and the value the app writes back is confirmed with `secret-tool lookup`.
+
+It then checks that `secret-tool search --all service cc-switch-test-<pid>` finds nothing,
+and runs `probe_fails_without_dbus` with no session bus (`DBUS_SESSION_BUS_ADDRESS` unset,
+`XDG_RUNTIME_DIR` pointed at an empty directory): the probe fails and the secret lands in a
+0600 `secrets.json`. Last run: passed on Ubuntu 24.04 with gnome-keyring 46.1 (CCS-240).
+KWallet and interactive unlock prompts are not covered.

@@ -46,13 +46,20 @@ jobs:
         with:
           node-version-file: .node-version
 
+      - name: Check resolved Node version
+        shell: bash
+        run: |
+          node --version
+          test "$(node --version)" = "v$(tr -d '[:space:]' < .node-version)"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           version: 10.12.3
           run_install: false
 
-      # Reads pnpm-lock.yaml; accepted advisories live in
-      # pnpm-workspace.yaml under auditConfig.ignoreGhsas.
+      # Reads pnpm-lock.yaml. No advisories are ignored; if one ever has to be
+      # accepted, list it with a reason in pnpm-workspace.yaml under
+      # auditConfig.ignoreGhsas.
       - name: pnpm audit
         run: pnpm audit --audit-level=high

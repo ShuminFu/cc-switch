@@ -88,3 +88,4 @@ p1-powershell-quote, p0-hotfix-terminal-tempfiles
 
 - Blocked: 'Terminal unit tests pass on 3 OSes' still needs a native macOS run. Needs the macos-latest CI leg or a Mac.
 - Follow-up [CCS-247](../P5-protocol-ir-commands/CCS-247-p5-terminal-applescript-builders-neutral.md): Move the macOS AppleScript builders into an OS-neutral module so their tests run on Linux.
+  - Done in CCS-247 (98337e0). The macOS AppleScript and `sh -c` builder logic now lives in `platform/terminal/applescript.rs`, and its 8 tests run on Linux. The 3-OS box still needs a native macOS run for the `osascript` / `open` launchers in `macos.rs`.

@@ -14,7 +14,7 @@ From the CI review ideas: the release job rebuilds from scratch on 5 runners; no
 - Add actions/attest-build-provenance and publish SHA256SUMS.
 
 ## Acceptance criteria / verification
-- [ ] A mismatched version fails `node scripts/check-versions.mjs v3.18.0`
+- [x] A mismatched version fails `node scripts/check-versions.mjs v3.18.0`
 - [ ] Release assets include SHA256SUMS; `gh attestation verify` passes on a fork
 
 ## Dependencies
@@ -67,6 +67,9 @@ separate commit.
   `pnpm format:check` clean; `bash -n scripts/generate-sha256sums.sh` ok.
 - YAML: `python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))"` passes
   for ci.yml and release.yml. actionlint and shellcheck are not installed here.
+- actionlint v1.7.12 with shellcheck 0.11.0 on PATH (CCS-217): `actionlint .github/workflows/*.yml` → exit 0 with the committed `.github/actionlint.yaml`
+  (after quoting `$GITHUB_OUTPUT` in the pnpm-store steps, SC2086);
+  `shellcheck scripts/generate-sha256sums.sh` → exit 0, no findings.
 
 **Remaining (Partial).**
 - "Release assets include SHA256SUMS; `gh attestation verify` passes on a
@@ -76,15 +79,28 @@ separate commit.
   `gh attestation verify <asset> --repo <owner>/<repo>`. Attestations require
   a public repository (or GitHub Enterprise Cloud for a private fork); on a
   private fork without it the attest step fails and blocks publishing.
-- The dependency p0-ci-pin-actions (CCS-028) is still Open, so the new actions
-  (`Swatinem/rust-cache@v2`, `actions/attest-build-provenance@v3`) use tags
-  like the rest of the workflows; CCS-028 should pin them to SHAs with the
-  others. The action major versions could not be checked against GitHub from
-  this environment.
+- Done in CCS-028 (p0-ci-pin-actions): both new actions are pinned to
+  commit SHAs. `Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3`
+  at `ci.yml` lines 130, 208, 276 and 413 and `release.yml` line 118;
+  `actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0`
+  at `release.yml` line 738 (line numbers at f13a403).
 
 ### Remaining after triage
 
 - Blocked: AC2: SHA256SUMS in the release assets and `gh attestation verify` passing. Needs a signed tag run on a public fork (OIDC provenance cannot be produced locally).
-- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.
 - Follow-up [CCS-218](../P0-safety-net/CCS-218-p0-ci-release-regression-tests.md): Add executable regression tests for the release gate, signing-key validation and SHA256SUMS.
 - Follow-up [CCS-221](../P0-safety-net/CCS-221-p0-docs-ticket-evidence-refresh.md): Tick already-verified acceptance boxes and refresh stale evidence in Partial tickets.
+
+### Evidence refresh (CCS-221)
+
+Re-run on the lane2/followups tree at f13a403:
+- `node scripts/check-versions.mjs v3.18.0` → exit 1 (tag does not match
+  3.17.0 in package.json, Cargo.toml and tauri.conf.json);
+  `node scripts/check-versions.mjs` → exit 0 ("version 3.17.0 is consistent").
+  AC1 ticked.
+- `npx vitest run tests/ci/releaseHygiene.test.ts tests/scripts/checkVersions.test.ts`
+  → 2 files, 22 tests passed.
+- `grep -n "rust-cache\|attest-build-provenance" .github/workflows/*.yml`
+  confirms the SHA pins listed above; no tag-only reference is left.
+- AC2 stays open (Blocked, needs a signed tag run on a public fork).

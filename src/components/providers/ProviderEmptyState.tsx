@@ -2,6 +2,12 @@ import { Download, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { AppId } from "@/lib/api/types";
+import { appCaps } from "@/entities/app/registry";
+
+// 从其他应用导入供应商的应用，导入按钮显示来源；其余应用导入自身当前配置
+const IMPORT_LABEL_KEYS: Partial<Record<AppId, "provider.importFromClaude">> = {
+  "claude-desktop": "provider.importFromClaude",
+};
 
 interface ProviderEmptyStateProps {
   appId: AppId;
@@ -15,8 +21,7 @@ export function ProviderEmptyState({
   onImport,
 }: ProviderEmptyStateProps) {
   const { t } = useTranslation();
-  const showSnippetHint =
-    appId === "claude" || appId === "codex" || appId === "gemini";
+  const showSnippetHint = appCaps(appId).commonConfigSnippet;
 
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border p-10 text-center">
@@ -36,9 +41,7 @@ export function ProviderEmptyState({
         {onImport && (
           <Button onClick={onImport}>
             <Download className="mr-2 h-4 w-4" />
-            {appId === "claude-desktop"
-              ? t("provider.importFromClaude")
-              : t("provider.importCurrent")}
+            {t(IMPORT_LABEL_KEYS[appId] ?? "provider.importCurrent")}
           </Button>
         )}
         {onCreate && (

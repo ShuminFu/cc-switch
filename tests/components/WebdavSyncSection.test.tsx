@@ -4,7 +4,11 @@ import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { WebdavSyncSection } from "@/components/settings/WebdavSyncSection";
-import type { WebDavSyncSettings } from "@/types";
+import type {
+  RemoteSnapshotInfo,
+  S3SyncSettings,
+  WebDavSyncSettings,
+} from "@/types";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -20,9 +24,13 @@ vi.mock("sonner", () => ({
   },
 }));
 
+const { translateMock } = vi.hoisted(() => ({
+  translateMock: vi.fn((key: string, _options?: unknown) => key),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: unknown) => translateMock(key, options),
   }),
 }));
 
@@ -74,19 +82,39 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogTitle: ({ children }: any) => <h2>{children}</h2>,
 }));
 
-const { settingsApiMock } = vi.hoisted(() => ({
+const { settingsApiMock, invokeMock } = vi.hoisted(() => ({
   settingsApiMock: {
     webdavTestConnection: vi.fn(),
     webdavSyncSaveSettings: vi.fn(),
     webdavSyncFetchRemoteInfo: vi.fn(),
     webdavSyncUpload: vi.fn(),
     webdavSyncDownload: vi.fn(),
+    s3SyncFetchRemoteInfo: vi.fn(),
+    s3SyncDownload: vi.fn(),
   },
+  invokeMock: vi.fn(),
 }));
 
-vi.mock("@/lib/api", () => ({
-  settingsApi: settingsApiMock,
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
 }));
+
+// 同步密钥字段走真实的 settingsApi 包装，断言实际发出的 invoke 命令与参数
+vi.mock("@/lib/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/api/settings")>(
+      "@/lib/api/settings",
+    );
+  return {
+    settingsApi: {
+      ...settingsApiMock,
+      getSyncSnapshotKeyStatus: actual.settingsApi.getSyncSnapshotKeyStatus,
+      setSyncSnapshotKey: actual.settingsApi.setSyncSnapshotKey,
+    },
+  };
+});
+
+let syncKeyStatus: { configured: boolean; keyId: string | null };
 
 const baseConfig: WebDavSyncSettings = {
   enabled: true,
@@ -99,7 +127,19 @@ const baseConfig: WebDavSyncSettings = {
   status: {},
 };
 
-function renderSection(config?: WebDavSyncSettings) {
+const baseS3Config: S3SyncSettings = {
+  enabled: true,
+  region: "us-east-1",
+  bucket: "my-bucket",
+  accessKeyId: "AKIA",
+  secretAccessKey: "secret",
+  remoteRoot: "cc-switch-sync",
+  profile: "default",
+  autoSync: false,
+  status: {},
+};
+
+function renderSection(config?: WebDavSyncSettings, s3Config?: S3SyncSettings) {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -108,7 +148,7 @@ function renderSection(config?: WebDavSyncSettings) {
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <WebdavSyncSection config={config} />
+      <WebdavSyncSection config={config} s3Config={s3Config} />
     </QueryClientProvider>,
   );
   return { ...view, client };
@@ -120,6 +160,7 @@ describe("WebdavSyncSection", () => {
     toastErrorMock.mockReset();
     toastWarningMock.mockReset();
     toastInfoMock.mockReset();
+    translateMock.mockClear();
     settingsApiMock.webdavTestConnection.mockReset();
     settingsApiMock.webdavSyncSaveSettings.mockReset();
     settingsApiMock.webdavSyncFetchRemoteInfo.mockReset();
@@ -143,6 +184,21 @@ describe("WebdavSyncSection", () => {
     settingsApiMock.webdavSyncDownload.mockResolvedValue({
       status: "downloaded",
     });
+
+    syncKeyStatus = { configured: false, keyId: null };
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(
+      async (command: string, args?: { key?: string | null }) => {
+        if (command === "get_sync_snapshot_key_status") return syncKeyStatus;
+        if (command === "set_sync_snapshot_key") {
+          syncKeyStatus = args?.key
+            ? { configured: true, keyId: "a1b2c3d4" }
+            : { configured: false, keyId: null };
+          return syncKeyStatus;
+        }
+        throw new Error(`unexpected invoke: ${command}`);
+      },
+    );
   });
 
   it("shows auto sync error callout when last auto sync failed", () => {
@@ -587,6 +643,379 @@ describe("WebdavSyncSection", () => {
       expect(toastErrorMock).toHaveBeenCalledWith(
         "settings.webdavSync.downloadFailed",
       );
+    });
+  });
+
+  describe("sync snapshot key field (CCS-237)", () => {
+    it("renders the not-set status", async () => {
+      renderSection(baseConfig);
+
+      expect(
+        await screen.findByText("settings.webdavSync.syncKey.statusNotSet"),
+      ).toBeInTheDocument();
+      expect(invokeMock).toHaveBeenCalledWith("get_sync_snapshot_key_status");
+      expect(
+        screen.getByRole("button", {
+          name: "settings.webdavSync.syncKey.clear",
+        }),
+      ).toBeDisabled();
+    });
+
+    it("renders the configured status with the key id", async () => {
+      syncKeyStatus = { configured: true, keyId: "deadbeef" };
+      renderSection(baseConfig);
+
+      expect(
+        await screen.findByText("settings.webdavSync.syncKey.statusConfigured"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("deadbeef")).toBeInTheDocument();
+    });
+
+    it("rejects keys shorter than 8 characters without invoking", async () => {
+      renderSection(baseConfig);
+      await screen.findByText("settings.webdavSync.syncKey.statusNotSet");
+
+      fireEvent.change(
+        screen.getByLabelText("settings.webdavSync.syncKey.title"),
+        { target: { value: "short" } },
+      );
+
+      expect(
+        screen.getByText("settings.webdavSync.syncKey.tooShort"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "settings.webdavSync.syncKey.set" }),
+      ).toBeDisabled();
+      expect(invokeMock).not.toHaveBeenCalledWith(
+        "set_sync_snapshot_key",
+        expect.anything(),
+      );
+    });
+
+    it("sets the key via set_sync_snapshot_key", async () => {
+      renderSection(baseConfig);
+      await screen.findByText("settings.webdavSync.syncKey.statusNotSet");
+
+      fireEvent.change(
+        screen.getByLabelText("settings.webdavSync.syncKey.title"),
+        { target: { value: "correct horse battery" } },
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "settings.webdavSync.syncKey.set" }),
+      );
+
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("set_sync_snapshot_key", {
+          key: "correct horse battery",
+        });
+      });
+      expect(await screen.findByText("a1b2c3d4")).toBeInTheDocument();
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        "settings.webdavSync.syncKey.setSuccess",
+      );
+      expect(
+        screen.getByLabelText("settings.webdavSync.syncKey.title"),
+      ).toHaveValue("");
+    });
+
+    it("clears the key with null after confirmation", async () => {
+      syncKeyStatus = { configured: true, keyId: "deadbeef" };
+      renderSection(baseConfig);
+      await screen.findByText("deadbeef");
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "settings.webdavSync.syncKey.clear",
+        }),
+      );
+      expect(
+        screen.getByText("settings.webdavSync.syncKey.clearConfirm.message"),
+      ).toBeInTheDocument();
+      expect(invokeMock).not.toHaveBeenCalledWith(
+        "set_sync_snapshot_key",
+        expect.anything(),
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "settings.webdavSync.syncKey.clearConfirm.confirm",
+        }),
+      );
+
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("set_sync_snapshot_key", {
+          key: null,
+        });
+      });
+      expect(
+        await screen.findByText("settings.webdavSync.syncKey.statusNotSet"),
+      ).toBeInTheDocument();
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        "settings.webdavSync.syncKey.clearSuccess",
+      );
+    });
+  });
+  describe("remote snapshot signature (CCS-238)", () => {
+    const remoteInfo = (
+      signature: RemoteSnapshotInfo["signature"],
+    ): RemoteSnapshotInfo => ({
+      deviceName: "Old Laptop",
+      createdAt: "2026-02-01T10:00:00Z",
+      snapshotId: "snapshot-1",
+      version: 2,
+      protocolVersion: 2,
+      dbCompatVersion: 6,
+      compatible: true,
+      signature,
+      artifacts: ["db.sql", "skills.zip"],
+      layout: "current",
+      remotePath: "/cc-switch-sync/v2/db-v6/default",
+    });
+
+    const backends = [
+      {
+        name: "webdav",
+        render: (signedSync = false) =>
+          renderSection({ ...baseConfig, status: { signedSync } }),
+        fetchInfo: settingsApiMock.webdavSyncFetchRemoteInfo,
+        downloadMock: settingsApiMock.webdavSyncDownload,
+        downloadCommand: "webdav_sync_download",
+        downloadButton: "settings.webdavSync.download",
+        confirmButton: "settings.webdavSync.confirmDownload.confirm",
+        downloadFailed: "settings.webdavSync.downloadFailed",
+      },
+      {
+        name: "s3",
+        render: (signedSync = false) =>
+          renderSection(baseConfig, {
+            ...baseS3Config,
+            status: { signedSync },
+          }),
+        fetchInfo: settingsApiMock.s3SyncFetchRemoteInfo,
+        downloadMock: settingsApiMock.s3SyncDownload,
+        downloadCommand: "s3_sync_download",
+        downloadButton: "settings.s3Sync.download",
+        confirmButton: "settings.s3Sync.confirmDownload.confirm",
+        downloadFailed: "settings.s3Sync.downloadFailed",
+      },
+    ] as const;
+
+    let downloadError: unknown;
+
+    beforeEach(async () => {
+      const actual =
+        await vi.importActual<typeof import("@/lib/api/settings")>(
+          "@/lib/api/settings",
+        );
+      // 下载走真实的 settingsApi 包装，断言实际发出的 invoke 命令与参数
+      settingsApiMock.webdavSyncDownload.mockImplementation(
+        actual.settingsApi.webdavSyncDownload,
+      );
+      settingsApiMock.s3SyncFetchRemoteInfo.mockReset();
+      settingsApiMock.s3SyncDownload.mockReset();
+      settingsApiMock.s3SyncDownload.mockImplementation(
+        actual.settingsApi.s3SyncDownload,
+      );
+      downloadError = undefined;
+
+      const baseInvoke = invokeMock.getMockImplementation()!;
+      invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+        if (
+          command === "webdav_sync_download" ||
+          command === "s3_sync_download"
+        ) {
+          if (downloadError) throw downloadError;
+          return { status: "downloaded", signed: false };
+        }
+        return baseInvoke(command, args);
+      });
+    });
+
+    describe.each(backends)("$name", (backend) => {
+      const clickDownload = () =>
+        fireEvent.click(
+          screen.getByRole("button", { name: backend.downloadButton }),
+        );
+      const expectNoDownload = () => {
+        expect(invokeMock).not.toHaveBeenCalledWith(
+          backend.downloadCommand,
+          expect.anything(),
+        );
+        expect(
+          screen.queryByRole("button", { name: backend.confirmButton }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", {
+            name: "settings.webdavSync.signature.migrate.confirm",
+          }),
+        ).not.toBeInTheDocument();
+      };
+
+      it("downloads a valid signed snapshot normally", async () => {
+        syncKeyStatus = { configured: true, keyId: "a1b2c3d4" };
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("valid"));
+        backend.render();
+
+        clickDownload();
+        fireEvent.click(
+          await screen.findByRole("button", { name: backend.confirmButton }),
+        );
+
+        await waitFor(() => {
+          expect(invokeMock).toHaveBeenCalledWith(backend.downloadCommand, {
+            allowUnsigned: false,
+          });
+        });
+        expect(
+          screen.queryByText("settings.webdavSync.signature.unsignedHint"),
+        ).not.toBeInTheDocument();
+      });
+
+      it("blocks a tampered snapshot with an error toast", async () => {
+        syncKeyStatus = { configured: true, keyId: "a1b2c3d4" };
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("invalid"));
+        backend.render();
+
+        clickDownload();
+
+        await waitFor(() => {
+          expect(toastErrorMock).toHaveBeenCalledWith(
+            "settings.webdavSync.signature.invalid",
+          );
+        });
+        expectNoDownload();
+      });
+
+      it("asks for the sync key when the snapshot is signed but no key is set", async () => {
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("keyMissing"));
+        backend.render();
+
+        clickDownload();
+
+        await waitFor(() => {
+          expect(toastWarningMock).toHaveBeenCalledWith(
+            "settings.webdavSync.signature.keyMissing",
+          );
+        });
+        expectNoDownload();
+      });
+
+      it("shows the unsigned hint in the normal dialog when no key is set", async () => {
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("unsigned"));
+        backend.render();
+
+        clickDownload();
+
+        expect(
+          await screen.findByText("settings.webdavSync.signature.unsignedHint"),
+        ).toBeInTheDocument();
+        fireEvent.click(
+          screen.getByRole("button", { name: backend.confirmButton }),
+        );
+        await waitFor(() => {
+          expect(invokeMock).toHaveBeenCalledWith(backend.downloadCommand, {
+            allowUnsigned: false,
+          });
+        });
+      });
+
+      it("offers a one-time migration for an unsigned snapshot once a key is set", async () => {
+        syncKeyStatus = { configured: true, keyId: "a1b2c3d4" };
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("unsigned"));
+        backend.render();
+
+        clickDownload();
+
+        expect(
+          await screen.findByText(
+            "settings.webdavSync.signature.migrate.message",
+          ),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByText("settings.webdavSync.signature.migrate.title"),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: backend.confirmButton }),
+        ).not.toBeInTheDocument();
+
+        fireEvent.click(
+          screen.getByRole("button", {
+            name: "settings.webdavSync.signature.migrate.confirm",
+          }),
+        );
+
+        await waitFor(() => {
+          expect(invokeMock).toHaveBeenCalledWith(backend.downloadCommand, {
+            allowUnsigned: true,
+          });
+        });
+        expect(toastSuccessMock).toHaveBeenCalled();
+      });
+
+      it("refuses an unsigned snapshot after a signed sync (downgrade)", async () => {
+        syncKeyStatus = { configured: true, keyId: "a1b2c3d4" };
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("unsigned"));
+        backend.render(true);
+
+        clickDownload();
+
+        await waitFor(() => {
+          expect(toastErrorMock).toHaveBeenCalledWith(
+            "settings.webdavSync.signature.errors.manifestUnsignedRejected",
+          );
+        });
+        expectNoDownload();
+      });
+
+      it("localizes a rollback rejection returned by the download command", async () => {
+        syncKeyStatus = { configured: true, keyId: "a1b2c3d4" };
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("valid"));
+        downloadError = {
+          code: "LOCALIZED",
+          message: "远端快照早于本设备上次导入的签名快照",
+          details: { zh: "远端快照早于本设备上次导入的签名快照", en: "older" },
+          i18nKey: "sync.manifest_rollback_rejected",
+        };
+        backend.render(true);
+
+        clickDownload();
+        fireEvent.click(
+          await screen.findByRole("button", { name: backend.confirmButton }),
+        );
+
+        await waitFor(() => {
+          expect(toastErrorMock).toHaveBeenCalledWith(backend.downloadFailed);
+        });
+        expect(translateMock).toHaveBeenCalledWith(backend.downloadFailed, {
+          error:
+            "settings.webdavSync.signature.errors.manifestRollbackRejected",
+        });
+      });
+
+      it("localizes sync.* errors returned by the download command", async () => {
+        syncKeyStatus = { configured: true, keyId: "a1b2c3d4" };
+        backend.fetchInfo.mockResolvedValueOnce(remoteInfo("valid"));
+        downloadError = {
+          code: "LOCALIZED",
+          message: "远端 manifest 签名校验失败",
+          details: { zh: "远端 manifest 签名校验失败", en: "invalid" },
+          i18nKey: "sync.manifest_signature_invalid",
+        };
+        backend.render();
+
+        clickDownload();
+        fireEvent.click(
+          await screen.findByRole("button", { name: backend.confirmButton }),
+        );
+
+        await waitFor(() => {
+          expect(toastErrorMock).toHaveBeenCalledWith(backend.downloadFailed);
+        });
+        expect(translateMock).toHaveBeenCalledWith(backend.downloadFailed, {
+          error:
+            "settings.webdavSync.signature.errors.manifestSignatureInvalid",
+        });
+      });
     });
   });
 });

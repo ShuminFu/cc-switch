@@ -5,10 +5,15 @@
  * 取代散落在各组件中的 `VALID_APPS` 列表与 `app === "x" || ...` 能力判断链。
  * 图标与配色仍在 `src/config/appConfig.tsx` 中（需要 JSX）。
  *
- * 后端 `get_app_registry` IPC 落地后，`useAppRegistry()` 是唯一需要改为
- * 读取后端数据的位置；其余调用方（`useAppCaps` / `appLabel` / `isAppId`）保持不变。
+ * `useAppRegistry()` 查询后端 `get_app_registry`，按 id 合并到下方静态表：
+ * 顺序、名称、别名、`mcp` / `skills` / `proxyTakeover` 与 `additive`（`syncMode`）以后端为准，
+ * 其余仅前端使用的能力与 `featureHost` 保留在 TS 中。加载中或查询失败时回退到静态表；
+ * 同步函数（`appLabel` / `isAppId` / `appCaps` 等）始终读取静态表。
  */
 
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { appsApi, type BackendAppDescriptor } from "@/lib/api/apps";
 import type { AppId } from "@/lib/api/types";
 
 export interface AppCaps {
@@ -28,6 +33,20 @@ export interface AppCaps {
   setDefault: boolean;
   /** 「设为默认」即切换当前供应商，显示为「启用 / 使用中」 */
   defaultIsSwitch: boolean;
+  /** 默认供应商由 live 配置的默认模型决定；预设附带的建议模型会注册到模型目录（OpenClaw） */
+  defaultModel: boolean;
+  /** 可添加统一供应商（一份配置同步到多个应用） */
+  universalProviders: boolean;
+  /** 支持 OMO / OMO Slim 插件供应商 */
+  omo: boolean;
+  /** 供应商列表上方显示 live 配置状态检查（Claude Desktop 路由映射 / 网关令牌等） */
+  configStatus: boolean;
+  /** 切换供应商后按设置同步 Claude 插件配置 */
+  pluginSync: boolean;
+  /** 供应商卡片可用该供应商配置打开终端 */
+  providerTerminal: boolean;
+  /** API Key 与端点以外的设置保存到通用配置片段，在供应商之间共享 */
+  commonConfigSnippet: boolean;
 }
 
 export interface AppDescriptor {
@@ -49,12 +68,28 @@ const caps = (overrides: Partial<AppCaps> = {}): AppCaps => ({
   healthCheck: false,
   setDefault: false,
   defaultIsSwitch: false,
+  defaultModel: false,
+  universalProviders: false,
+  omo: false,
+  configStatus: false,
+  pluginSync: false,
+  providerTerminal: false,
+  commonConfigSnippet: false,
   ...overrides,
 });
 
 /** 注册表顺序即界面中的应用顺序 */
 export const APP_REGISTRY: readonly AppDescriptor[] = [
-  { id: "claude", label: "Claude", caps: caps() },
+  {
+    id: "claude",
+    label: "Claude",
+    caps: caps({
+      universalProviders: true,
+      pluginSync: true,
+      providerTerminal: true,
+      commonConfigSnippet: true,
+    }),
+  },
   {
     id: "claude-desktop",
     label: "Claude Desktop",
@@ -63,12 +98,21 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
       skills: false,
       mcp: false,
       proxyTakeover: false,
+      configStatus: true,
     }),
     featureHost: "claude",
     aliases: ["claude_desktop", "claudedesktop"],
   },
-  { id: "codex", label: "Codex", caps: caps() },
-  { id: "gemini", label: "Gemini", caps: caps() },
+  {
+    id: "codex",
+    label: "Codex",
+    caps: caps({ universalProviders: true, commonConfigSnippet: true }),
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    caps: caps({ universalProviders: true, commonConfigSnippet: true }),
+  },
   {
     id: "grokbuild",
     label: "Grok Build",
@@ -78,7 +122,7 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
   {
     id: "opencode",
     label: "OpenCode",
-    caps: caps({ additive: true }),
+    caps: caps({ additive: true, omo: true }),
   },
   {
     id: "openclaw",
@@ -89,6 +133,7 @@ export const APP_REGISTRY: readonly AppDescriptor[] = [
       additive: true,
       healthCheck: true,
       setDefault: true,
+      defaultModel: true,
     }),
   },
   {
@@ -115,6 +160,13 @@ const NO_CAPS: AppCaps = {
   healthCheck: false,
   setDefault: false,
   defaultIsSwitch: false,
+  defaultModel: false,
+  universalProviders: false,
+  omo: false,
+  configStatus: false,
+  pluginSync: false,
+  providerTerminal: false,
+  commonConfigSnippet: false,
 };
 
 /** 全部应用 ID（按注册表顺序） */
@@ -167,12 +219,53 @@ export function appsWithCap(cap: keyof AppCaps): AppId[] {
   return APP_REGISTRY.filter((app) => app.caps[cap]).map((app) => app.id);
 }
 
+/** 后端注册表查询键（与设置页能力矩阵共用缓存） */
+export const appRegistryQueryKey = ["appRegistry"] as const;
+
 /**
- * 应用注册表数据源。
- * 目前为静态数据；接入 `get_app_registry` 后在此处改为查询后端。
+ * 把后端注册表按 id 合并到静态表：顺序、名称、别名、`mcp` / `skills` /
+ * `proxyTakeover` 与 `additive` 取自后端；仅前端使用的能力与 `featureHost` 保留静态值。
+ * 后端未知的应用忽略；后端缺失的应用按静态顺序追加在末尾。
+ */
+export function mergeAppRegistry(
+  backend: readonly BackendAppDescriptor[],
+): readonly AppDescriptor[] {
+  const merged: AppDescriptor[] = [];
+  const seen = new Set<string>();
+  for (const remote of backend) {
+    const local = BY_ID.get(remote.id);
+    if (!local || seen.has(remote.id)) continue;
+    seen.add(remote.id);
+    merged.push({
+      ...local,
+      label: remote.displayName,
+      aliases: remote.aliases,
+      caps: {
+        ...local.caps,
+        mcp: remote.caps.mcp,
+        skills: remote.caps.skills,
+        proxyTakeover: remote.caps.proxyTakeover,
+        additive: remote.syncMode === "additive",
+      },
+    });
+  }
+  for (const local of APP_REGISTRY) {
+    if (!seen.has(local.id)) merged.push(local);
+  }
+  return merged;
+}
+
+/**
+ * 应用注册表数据源：后端 `get_app_registry` 合并静态表；
+ * 加载中或查询失败时返回静态 `APP_REGISTRY`。
  */
 export function useAppRegistry(): readonly AppDescriptor[] {
-  return APP_REGISTRY;
+  const { data } = useQuery({
+    queryKey: appRegistryQueryKey,
+    queryFn: () => appsApi.getRegistry(),
+    staleTime: Infinity,
+  });
+  return useMemo(() => (data ? mergeAppRegistry(data) : APP_REGISTRY), [data]);
 }
 
 /** 读取某个应用的能力 */

@@ -31,6 +31,12 @@ jobs:
         with:
           node-version-file: .node-version
 
+      - name: Check resolved Node version
+        shell: bash
+        run: |
+          node --version
+          test "$(node --version)" = "v$(tr -d '[:space:]' < .node-version)"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
@@ -40,7 +46,7 @@ jobs:
       - name: Get pnpm store directory
         id: pnpm-store
         shell: bash
-        run: echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -172,6 +178,17 @@ jobs:
           CCS_REQUIRE_IPV6: ${{ runner.os != 'Windows' && '1' || '' }}
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      # tests/proxy_e2e.rs::perf_baseline_non_streaming_request writes its
+      # per-OS measurement to CARGO_TARGET_TMPDIR (CCS-014); keep it even when
+      # a test fails so the numbers can be compared across the matrix (CCS-213).
+      - name: Upload proxy e2e perf artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: proxy-e2e-perf-${{ matrix.os }}
+          path: src-tauri/target/tmp/proxy-e2e-perf.json
+          if-no-files-found: warn
+
   # Proves the declared rust-version in src-tauri/Cargo.toml is real: the
   # lockfile must still build on the MSRV, not only on the pinned channel
   # (CCS-025). Keep the version here in sync with `rust-version`.
@@ -225,6 +242,12 @@ jobs:
         with:
           node-version-file: .node-version
 
+      - name: Check resolved Node version
+        shell: bash
+        run: |
+          node --version
+          test "$(node --version)" = "v$(tr -d '[:space:]' < .node-version)"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
@@ -234,7 +257,7 @@ jobs:
       - name: Get pnpm store directory
         id: pnpm-store
         shell: bash
-        run: echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -279,10 +302,11 @@ jobs:
       # E2E smoke (CCS-201): drive the debug binary through tauri-driver +
       # WebdriverIO under xvfb: first run, add a preset, switch providers and
       # check ~/.claude/settings.json, proxy takeover on and restore. The app
-      # runs with a temp HOME. release.yml runs the same spec on the AppImage.
+      # runs with a temp HOME. release.yml runs the same specs on the AppImage.
+      # xterm is the terminal the session-resume spec (CCS-248) launches.
       - name: Install E2E system deps
         run: |
-          sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb
+          sudo apt-get install -y --no-install-recommends webkit2gtk-driver xvfb xterm
           cargo install tauri-driver --version 2.1.0 --locked
 
       - name: Install E2E dependencies
@@ -316,6 +340,12 @@ jobs:
         with:
           node-version-file: .node-version
 
+      - name: Check resolved Node version
+        shell: bash
+        run: |
+          node --version
+          test "$(node --version)" = "v$(tr -d '[:space:]' < .node-version)"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
@@ -325,7 +355,7 @@ jobs:
       - name: Get pnpm store directory
         id: pnpm-store
         shell: bash
-        run: echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0

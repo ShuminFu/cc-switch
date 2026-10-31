@@ -350,6 +350,16 @@
   },
   "settings": {
     "title": "Settings",
+    "loadFailure": {
+      "backedUp": "settings.json could not be loaded; defaults are in use",
+      "backedUpDescription": "File: {{path}}\nThe original content was backed up to: {{backupPath}}\nError: {{error}}",
+      "blocked": "settings.json could not be loaded",
+      "blockedDescription": "The file could not be read or parsed and no backup could be made, so saving settings is blocked to avoid overwriting it. Defaults are in use for now.\n\nFile: {{path}}\nError: {{error}}\n\nFix or move the file and restart, or confirm to allow saving the current settings over it (its contents will be lost).",
+      "confirm": "Allow overwrite",
+      "keepBlocked": "Keep blocked",
+      "acknowledged": "Saving settings is allowed again",
+      "acknowledgeFailed": "Failed to confirm the settings reset"
+    },
     "general": "General",
     "tabGeneral": "General",
     "tabAuth": "Auth",
@@ -645,6 +655,46 @@
         "warning": "This will overwrite existing sync data on the remote server",
         "legacyNotice": "Legacy remote data was detected. This upload will write to the new v2/db-v6 path and will not overwrite the legacy path.",
         "confirm": "Confirm Upload"
+      },
+      "syncKey": {
+        "title": "Snapshot signing key",
+        "description": "Shared by WebDAV and S3. Uploads are signed and downloads are verified; enter the same key on every device.",
+        "statusLoading": "Loading key status...",
+        "statusFailed": "Failed to read key status: {{error}}",
+        "statusConfigured": "Configured, key ID:",
+        "statusNotSet": "Not set: snapshots are uploaded unsigned",
+        "placeholder": "Sync key (at least {{min}} characters)",
+        "tooShort": "The sync key must be at least {{min}} characters",
+        "set": "Set key",
+        "setSuccess": "Sync key saved",
+        "setFailed": "Failed to set sync key: {{error}}",
+        "clear": "Clear key",
+        "clearSuccess": "Sync key cleared",
+        "clearFailed": "Failed to clear sync key: {{error}}",
+        "clearConfirm": {
+          "title": "Clear sync key",
+          "message": "After clearing, uploads are no longer signed and signed remote snapshots cannot be verified. This also resets the signed-sync state of WebDAV and S3, so unsigned remote snapshots will be accepted again.",
+          "confirm": "Clear key"
+        }
+      },
+      "signature": {
+        "invalid": "The remote snapshot's signature could not be verified: it may have been tampered with, or it was signed with a different sync key. The download was blocked.",
+        "keyMissing": "The remote snapshot is signed, but this device has no sync key. Enter the same sync key as the uploading device above, then try again.",
+        "unsignedHint": "This snapshot is unsigned. Set the same sync key on every device so snapshots are signed and verified.",
+        "migrate": {
+          "title": "Import unsigned snapshot",
+          "message": "This remote snapshot is unsigned (uploaded by an older version or by a device without a sync key). Import it once only if you trust its source; uploads from this device will be signed afterwards.",
+          "confirm": "Import once"
+        },
+        "errors": {
+          "keyMissing": "No sync key is configured, so snapshots cannot be verified or signed. Enter the same sync key on each device.",
+          "manifestKeyMismatch": "The remote snapshot was signed with a different sync key. Enter the same sync key on this device.",
+          "manifestSignatureInvalid": "The remote snapshot signature is invalid; it may have been tampered with and was not imported.",
+          "manifestSignatureUnsupported": "The remote snapshot uses an unsupported signature algorithm. Update CC Switch on this device.",
+          "manifestUnsigned": "The remote snapshot is unsigned (uploaded by an older version). Confirm it is trusted to import it once; later uploads will be signed.",
+          "manifestUnsignedRejected": "The remote snapshot is unsigned, but this device already synced signed snapshots. It may be a downgrade attack and was not imported.",
+          "manifestRollbackRejected": "The remote snapshot is older than the signed snapshot this device last imported. It may be a rollback attack and was not imported."
+        }
       }
     },
     "syncType": {

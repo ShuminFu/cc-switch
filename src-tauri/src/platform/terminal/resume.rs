@@ -575,6 +575,109 @@ mod tests {
         assert!(build_windows_resume_batch(&[], None).is_err());
     }
 
+    /// Linux 上把 Unix 绝对路径映射为 Wine 默认 `Z:` 盘下的 Windows 路径。
+    #[cfg(unix)]
+    fn wine_z_path(path: &Path) -> String {
+        format!("Z:{}", path.to_string_lossy().replace('/', "\\"))
+    }
+
+    #[cfg(unix)]
+    fn run_wine_cmd(args: &[&str], dir: &Path, wine_path: Option<&str>) -> std::process::Output {
+        let mut command = Command::new("wine");
+        command
+            .arg("cmd")
+            .args(args)
+            .env("WINEDEBUG", "-all")
+            .current_dir(dir)
+            .stdin(std::process::Stdio::null());
+        if let Some(wine_path) = wine_path {
+            command.env("WINEPATH", wine_path);
+        }
+        command.output().expect("wine should be installed")
+    }
+
+    /// 在 Wine 的 cmd 中真正执行生成的 `.bat`（CCS-249）：会话目录含空格、括号、`&`、`^` 与 `%`，
+    /// 假的 `claude.cmd` shim 记录 `%CD%` 与 `%*`。断言 `cd /d` 进入了带引号的目录、shim 恰好收到
+    /// `--resume <id>`、`call` 返回后继续执行、`del "%~f0"` 删除了批处理自身；`/c` 与 `/K`（stdin 关闭）各跑一次。
+    /// 只覆盖批处理内容本身，不覆盖 cmd / Windows Terminal / PowerShell 如何启动它。
+    ///
+    /// Wine 9.0 的 cmd 不为内建命令设置返回码，`cd ... || exit /b 1` 在成功时也会走 `||` 分支；
+    /// 探测到该缺陷时去掉 ` || exit /b 1` 再执行（其余行逐字不变），真实 Windows 上该分支只在 cd 失败时触发。
+    ///
+    /// 运行：`cargo test --manifest-path src-tauri/Cargo.toml --lib under_wine -- --ignored`
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "needs wine; run with --ignored"]
+    fn windows_resume_batch_runs_under_wine_cmd() {
+        let probe_dir = tempfile::tempdir().expect("temp dir should be created");
+        let probe = run_wine_cmd(&["/c", "cd /d Z:\\ || exit /b 7"], probe_dir.path(), None);
+        let wine_honours_builtin_status = probe.status.code() == Some(0);
+
+        for mode in ["/c", "/K"] {
+            let temp = tempfile::tempdir().expect("temp dir should be created");
+            let bin_dir = temp.path().join("bin");
+            let project_dir = temp.path().join("proj (1)&x^y").join("100%");
+            std::fs::create_dir_all(&bin_dir).expect("bin dir should be created");
+            std::fs::create_dir_all(&project_dir).expect("project dir should be created");
+
+            let marker = temp.path().join("marker.txt");
+            // 延迟展开在解析之后才替换 `!CD!`，目录名里的 `&`、`(` 不会被当作命令分隔符。
+            std::fs::write(
+                bin_dir.join("claude.cmd"),
+                format!(
+                    "@echo off\r\nsetlocal EnableDelayedExpansion\r\n>>\"{m}\" echo CD=[!CD!]\r\n>>\"{m}\" echo ARGS=[%*]\r\nexit /b 0\r\n",
+                    m = wine_z_path(&marker)
+                ),
+            )
+            .expect("fake claude shim should be written");
+
+            let session_cwd = wine_z_path(&project_dir);
+            let mut batch = build_windows_resume_batch(
+                &argv(&["claude", "--resume", "0199a1b2-c3d4.e5_f6"]),
+                Some(&session_cwd),
+            )
+            .expect("plain argv should build");
+            assert!(
+                batch.contains("cd /d \"") && batch.contains("100%%\" || exit /b 1\r\n"),
+                "{batch}"
+            );
+            if !wine_honours_builtin_status {
+                batch = batch.replace(" || exit /b 1\r\n", "\r\n");
+            }
+            let batch_file = bin_dir.join("cc_switch_resume.bat");
+            std::fs::write(&batch_file, &batch).expect("batch should be written");
+
+            let output = run_wine_cmd(
+                &[mode, &wine_z_path(&batch_file)],
+                temp.path(),
+                Some(&wine_z_path(&bin_dir)),
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "wine cmd {mode} failed: {:?}\nstdout: {stdout}\nstderr: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+
+            let recorded = std::fs::read_to_string(&marker)
+                .unwrap_or_else(|e| panic!("shim should run under {mode}: {e}\n{stdout}"));
+            assert_eq!(
+                recorded,
+                format!("CD=[{session_cwd}]\r\nARGS=[--resume 0199a1b2-c3d4.e5_f6]\r\n"),
+                "mode {mode}"
+            );
+            assert!(
+                !batch_file.exists(),
+                "batch should continue after `call` and delete itself under {mode}"
+            );
+            if mode == "/K" {
+                // `/K` 在批处理结束后停在会话目录的交互提示符上，stdin 关闭后退出。
+                assert!(stdout.contains(&format!("{session_cwd}>")), "{stdout}");
+            }
+        }
+    }
+
     #[test]
     fn build_shell_command_keeps_command_without_cwd_prefix_when_not_provided() {
         assert_eq!(

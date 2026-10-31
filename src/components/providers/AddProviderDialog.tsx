@@ -18,12 +18,57 @@ import { claudePresetLoader } from "@/features/providers/forms/claude/presets";
 import { codexPresetLoader } from "@/features/providers/forms/codex/presets";
 import { geminiPresetLoader } from "@/features/providers/forms/gemini/presets";
 import { claudeDesktopPresetLoader } from "@/features/providers/forms/claude-desktop/presets";
-import { extractCodexBaseUrl } from "@/utils/providerConfigUtils";
-import { extractGrokBuildBaseUrl } from "@/utils/grokBuildConfig";
+import type { PresetLoader } from "@/features/providers/forms/lazyPresets";
+import type { BasePreset } from "@/features/providers/forms/basePreset";
 import { appCaps } from "@/entities/app/registry";
+import { extractProviderCredentials } from "@/entities/provider/settingsConfig";
 import { useUnsavedChangesGuard } from "@/features/providers/forms/useUnsavedChangesGuard";
 import type { OpenClawSuggestedDefaults } from "@/config/openclawProviderPresets";
 import type { UniversalProviderPreset } from "@/config/universalProviderPresets";
+
+type OfficialSeedFlag =
+  | "ensureClaudeDesktopOfficialSeed"
+  | "ensureCodexOfficialSeed";
+
+interface PresetSource {
+  loader: PresetLoader<readonly BasePreset[]>;
+  /** 预设 ID 前缀（`<prefix><index>`） */
+  idPrefix: string;
+  /** 预设本身携带的请求地址（候选地址之外） */
+  presetUrls?: (preset: BasePreset) => Array<string | undefined>;
+  /** 选中官方预设时需要后端补齐官方种子供应商的标记 */
+  officialSeedFlag?: OfficialSeedFlag;
+}
+
+/** 提交时需要回查预设（候选地址 / 官方种子）的应用 */
+const PRESET_SOURCES: Partial<Record<AppId, PresetSource>> = {
+  claude: { loader: claudePresetLoader, idPrefix: "claude-" },
+  codex: {
+    loader: codexPresetLoader,
+    idPrefix: "codex-",
+    officialSeedFlag: "ensureCodexOfficialSeed",
+  },
+  gemini: { loader: geminiPresetLoader, idPrefix: "gemini-" },
+  "claude-desktop": {
+    loader: claudeDesktopPresetLoader,
+    idPrefix: "claude-desktop-",
+    presetUrls: (preset) => [(preset as { baseUrl?: string }).baseUrl],
+    officialSeedFlag: "ensureClaudeDesktopOfficialSeed",
+  },
+};
+
+/** 按预设 ID 查找预设；ID 无效或越界时返回 undefined */
+async function resolvePreset(
+  source: PresetSource,
+  presetId: string,
+): Promise<BasePreset | undefined> {
+  const presets = await source.loader.load();
+  const presetIndex = parseInt(presetId.replace(source.idPrefix, ""));
+  if (isNaN(presetIndex) || presetIndex < 0 || presetIndex >= presets.length) {
+    return undefined;
+  }
+  return presets[presetIndex];
+}
 
 interface AddProviderDialogProps {
   open: boolean;
@@ -46,13 +91,7 @@ export function AddProviderDialog({
   onSubmit,
 }: AddProviderDialogProps) {
   const { t } = useTranslation();
-  // OpenCode and OpenClaw don't support universal providers
-  const showUniversalTab =
-    appId !== "opencode" &&
-    appId !== "openclaw" &&
-    appId !== "hermes" &&
-    appId !== "grokbuild" &&
-    appId !== "claude-desktop";
+  const showUniversalTab = appCaps(appId).universalProviders;
   const [activeTab, setActiveTab] = useState<"app-specific" | "universal">(
     "app-specific",
   );
@@ -124,20 +163,10 @@ export function AddProviderDialog({
         ...(values.meta ? { meta: values.meta } : {}),
       };
 
-      if (appId === "claude-desktop" && values.presetId) {
-        const presetIndex = parseInt(
-          values.presetId.replace("claude-desktop-", ""),
-        );
-        const preset = (await claudeDesktopPresetLoader.load())[presetIndex];
-        providerData.ensureClaudeDesktopOfficialSeed =
-          values.presetCategory === "official" &&
-          preset?.category === "official";
-      }
-
-      if (appId === "codex" && values.presetId) {
-        const presetIndex = parseInt(values.presetId.replace("codex-", ""));
-        const preset = (await codexPresetLoader.load())[presetIndex];
-        providerData.ensureCodexOfficialSeed =
+      const presetSource = PRESET_SOURCES[appId];
+      if (presetSource?.officialSeedFlag && values.presetId) {
+        const preset = await resolvePreset(presetSource, values.presetId);
+        providerData[presetSource.officialSeedFlag] =
           values.presetCategory === "official" &&
           preset?.category === "official";
       }
@@ -161,114 +190,15 @@ export function AddProviderDialog({
           }
         };
 
-        if (values.presetId) {
-          if (appId === "claude") {
-            const presets = await claudePresetLoader.load();
-            const presetIndex = parseInt(
-              values.presetId.replace("claude-", ""),
-            );
-            if (
-              !isNaN(presetIndex) &&
-              presetIndex >= 0 &&
-              presetIndex < presets.length
-            ) {
-              const preset = presets[presetIndex];
-              if (preset?.endpointCandidates) {
-                preset.endpointCandidates.forEach(addUrl);
-              }
-            }
-          } else if (appId === "codex") {
-            const presets = await codexPresetLoader.load();
-            const presetIndex = parseInt(values.presetId.replace("codex-", ""));
-            if (
-              !isNaN(presetIndex) &&
-              presetIndex >= 0 &&
-              presetIndex < presets.length
-            ) {
-              const preset = presets[presetIndex];
-              if (Array.isArray(preset.endpointCandidates)) {
-                preset.endpointCandidates.forEach(addUrl);
-              }
-            }
-          } else if (appId === "gemini") {
-            const presets = await geminiPresetLoader.load();
-            const presetIndex = parseInt(
-              values.presetId.replace("gemini-", ""),
-            );
-            if (
-              !isNaN(presetIndex) &&
-              presetIndex >= 0 &&
-              presetIndex < presets.length
-            ) {
-              const preset = presets[presetIndex];
-              if (Array.isArray(preset.endpointCandidates)) {
-                preset.endpointCandidates.forEach(addUrl);
-              }
-            }
-          } else if (appId === "claude-desktop") {
-            const presets = await claudeDesktopPresetLoader.load();
-            const presetIndex = parseInt(
-              values.presetId.replace("claude-desktop-", ""),
-            );
-            if (
-              !isNaN(presetIndex) &&
-              presetIndex >= 0 &&
-              presetIndex < presets.length
-            ) {
-              const preset = presets[presetIndex];
-              if (Array.isArray(preset.endpointCandidates)) {
-                preset.endpointCandidates.forEach(addUrl);
-              }
-              addUrl(preset.baseUrl);
-            }
+        if (values.presetId && presetSource) {
+          const preset = await resolvePreset(presetSource, values.presetId);
+          if (preset) {
+            preset.endpointCandidates?.forEach(addUrl);
+            presetSource.presetUrls?.(preset).forEach(addUrl);
           }
         }
 
-        if (appId === "claude") {
-          const env = parsedConfig.env as Record<string, any> | undefined;
-          if (env?.ANTHROPIC_BASE_URL) {
-            addUrl(env.ANTHROPIC_BASE_URL);
-          }
-        } else if (appId === "claude-desktop") {
-          const env = parsedConfig.env as Record<string, any> | undefined;
-          if (env?.ANTHROPIC_BASE_URL) {
-            addUrl(env.ANTHROPIC_BASE_URL);
-          }
-        } else if (appId === "codex") {
-          const config = parsedConfig.config as string | undefined;
-          if (config) {
-            const extractedBaseUrl = extractCodexBaseUrl(config);
-            if (extractedBaseUrl) {
-              addUrl(extractedBaseUrl);
-            }
-          }
-        } else if (appId === "gemini") {
-          const env = parsedConfig.env as Record<string, any> | undefined;
-          if (env?.GOOGLE_GEMINI_BASE_URL) {
-            addUrl(env.GOOGLE_GEMINI_BASE_URL);
-          }
-        } else if (appId === "grokbuild") {
-          const config = parsedConfig.config as string | undefined;
-          if (config) {
-            addUrl(extractGrokBuildBaseUrl(config));
-          }
-        } else if (appId === "opencode") {
-          const options = parsedConfig.options as
-            | Record<string, any>
-            | undefined;
-          if (options?.baseURL) {
-            addUrl(options.baseURL);
-          }
-        } else if (appId === "openclaw") {
-          // OpenClaw uses baseUrl directly
-          if (parsedConfig.baseUrl) {
-            addUrl(parsedConfig.baseUrl as string);
-          }
-        } else if (appId === "hermes") {
-          if (parsedConfig.base_url) {
-            addUrl(parsedConfig.base_url as string);
-          }
-        }
+        addUrl(extractProviderCredentials(appId, parsedConfig).baseUrl);
 
         const urls = Array.from(urlSet);
         if (urls.length > 0) {
@@ -290,7 +220,7 @@ export function AddProviderDialog({
       }
 
       // OpenClaw: pass suggestedDefaults for model registration
-      if (appId === "openclaw" && values.suggestedDefaults) {
+      if (appCaps(appId).defaultModel && values.suggestedDefaults) {
         providerData.suggestedDefaults = values.suggestedDefaults;
       }
 

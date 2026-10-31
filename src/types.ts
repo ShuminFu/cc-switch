@@ -294,6 +294,10 @@ export interface WebDavSyncStatus {
   lastRemoteEtag?: string | null;
   lastLocalManifestHash?: string | null;
   lastRemoteManifestHash?: string | null;
+  /** 已与远端同步过签名快照；清除同步密钥时复位 */
+  signedSync?: boolean;
+  /** 上次导入的签名快照的 createdAt（防回滚基线）；清除同步密钥时复位 */
+  lastSignedManifestCreatedAt?: string | null;
 }
 
 // WebDAV 同步配置
@@ -324,6 +328,16 @@ export interface S3SyncSettings {
 
 export type RemoteSnapshotLayout = "current" | "legacy";
 
+/**
+ * 远端 manifest 的签名状态（后端 `manifest_signature_status`）：
+ * keyMissing 表示远端已签名但本机未设置同步密钥，无法校验。
+ */
+export type RemoteSnapshotSignature =
+  | "valid"
+  | "invalid"
+  | "unsigned"
+  | "keyMissing";
+
 // 远端快照信息（下载前预览）
 export interface RemoteSnapshotInfo {
   deviceName: string;
@@ -333,6 +347,7 @@ export interface RemoteSnapshotInfo {
   protocolVersion: number;
   dbCompatVersion?: number | null;
   compatible: boolean;
+  signature: RemoteSnapshotSignature;
   artifacts: string[];
   layout: RemoteSnapshotLayout;
   remotePath: string;

@@ -21,10 +21,7 @@
   },
   "src/components/UsageScriptModal.tsx": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 15
-    },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 11
+      "count": 4
     }
   },
   "src/components/agents/AgentsPanel.tsx": {
@@ -42,11 +39,6 @@
       "count": 1
     }
   },
-  "src/components/app-shell/ProvidersHome.tsx": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 5
-    }
-  },
   "src/components/mcp/McpFormModal.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
@@ -62,41 +54,14 @@
       "count": 4
     }
   },
-  "src/components/providers/AddProviderDialog.tsx": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 20
-    }
-  },
   "src/components/providers/EditProviderDialog.tsx": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 5
-    },
     "react-hooks/exhaustive-deps": {
       "count": 2
     }
   },
   "src/components/providers/ProviderCard.tsx": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
-    },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 13
-    },
-    "react-hooks/exhaustive-deps": {
-      "count": 2
-    }
-  },
-  "src/components/providers/ProviderEmptyState.tsx": {
-    "cc-switch/no-app-literal-comparison": {
       "count": 4
-    }
-  },
-  "src/components/providers/ProviderList.tsx": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 20
     }
   },
   "src/components/providers/forms/OmoFormFields.tsx": {
@@ -117,11 +82,6 @@
   "src/components/providers/forms/hooks/useApiKeyState.ts": {
     "react-hooks/exhaustive-deps": {
       "count": 1
-    }
-  },
-  "src/components/providers/forms/hooks/useBaseUrlState.ts": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 4
     }
   },
   "src/components/providers/forms/hooks/useCodexConfigState.ts": {
@@ -174,11 +134,6 @@
       "count": 1
     }
   },
-  "src/components/providers/forms/hooks/useSpeedTestEndpoints.ts": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 4
-    }
-  },
   "src/components/providers/forms/hooks/useTemplateValues.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
@@ -200,11 +155,6 @@
     },
     "react-hooks/exhaustive-deps": {
       "count": 3
-    }
-  },
-  "src/components/sessions/utils.ts": {
-    "cc-switch/no-app-literal-comparison": {
-      "count": 5
     }
   },
   "src/components/theme-provider.tsx": {
@@ -242,10 +192,7 @@
   },
   "src/hooks/useProviderActions.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 18
+      "count": 1
     }
   },
   "src/hooks/useProxyConfig.ts": {
@@ -335,9 +282,6 @@
     "@typescript-eslint/no-explicit-any": {
       "count": 22
     },
-    "cc-switch/no-app-literal-comparison": {
-      "count": 6
-    },
     "no-control-regex": {
       "count": 1
     }
@@ -409,7 +353,7 @@
   },
   "tests/hooks/useSettingsForm.test.tsx": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 6
+      "count": 4
     }
   },
   "tests/integration/App.test.tsx": {

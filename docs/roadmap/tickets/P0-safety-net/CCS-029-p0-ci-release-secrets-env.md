@@ -51,7 +51,19 @@ p0-ci-pin-actions (same file; land in sequence).
 
 ### Remaining after triage
 
-- Blocked: A fork test tag produces .sig files on all 3 OSes. Needs a release.yml run with macOS/Windows runners and the signing secrets.
+- Blocked: A fork test tag produces .sig files on all 3 OSes. Needs a release.yml run with macOS/Windows runners and the signing secrets. The Linux leg was verified locally in CCS-220 (see below); macOS and Windows stay blocked.
 - Blocked: Confirm the TAURI_SIGNING_PRIVATE_KEY secret is in canonical single-line base64 .key form. Needs a human with repo secrets access.
 - Follow-up [CCS-218](../P0-safety-net/CCS-218-p0-ci-release-regression-tests.md): Add executable regression tests for the release gate, signing-key validation and SHA256SUMS.
 - Follow-up [CCS-220](../P0-safety-net/CCS-220-p0-release-linux-sig-local.md): Verify locally that a signed Linux build still produces a valid updater .sig.
+
+### Linux leg verified locally (CCS-220)
+
+The Linux half of "a fork test tag still produces .sig files" was exercised at `845ff96` with throwaway keys; the release secrets were not used.
+
+- Keys: `pnpm tauri signer generate --ci -p testpw -w enc.key` (encrypted) and `pnpm tauri signer generate --ci -w plain.key` (empty password).
+- The `Validate Tauri signing key` and `Build Tauri App (Linux)` `run:` blocks were pulled out of `release.yml` with PyYAML and run unchanged with `bash`. Validation passed for both keys (`✅ Tauri signing key format OK`).
+- Build 1: `TAURI_SIGNING_PRIVATE_KEY="$(cat enc.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=testpw` → `pnpm tauri build --bundles appimage,deb,rpm` exit 0, `Finished 3 updater signatures`: `bundle/appimage/CC Switch_3.17.0_amd64.AppImage.sig`, `bundle/deb/CC Switch_3.17.0_amd64.deb.sig`, `bundle/rpm/CC Switch-3.17.0-1.x86_64.rpm.sig`.
+- Build 2: `TAURI_SIGNING_PRIVATE_KEY="$(cat plain.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=` → the `bash -x` trace shows `+ unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, then the same 3 bundles and 3 `.sig` files, exit 0. The bundle dir was deleted before this build, so these are new signatures.
+- After each build, `minisign -V -p <decoded .key.pub> -m <artifact> -x <decoded .sig>` (minisign 0.11) printed `Signature and comment signature verified` for all 3 artifacts. With the other throwaway pubkey it failed on a key id mismatch. After one byte was appended to the `.deb` it printed `Signature verification failed`.
+- Expected warning, seen in both builds: `The updater secret key from TAURI_SIGNING_PRIVATE_KEY does not match the public key from plugins > updater > pubkey` (throwaway key).
+

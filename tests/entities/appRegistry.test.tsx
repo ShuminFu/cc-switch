@@ -1,19 +1,40 @@
-import { renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
+import { HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
+import type { BackendAppDescriptor } from "@/lib/api/apps";
 import type { AppId } from "@/lib/api/types";
 import {
   ALL_APP_IDS,
   APP_REGISTRY,
   appCaps,
   appLabel,
+  appRegistryQueryKey,
   appsWithCap,
   isAppId,
+  mergeAppRegistry,
   resolveAppId,
   sharedFeatureAppOf,
   useAppCaps,
+  useAppRegistry,
 } from "@/entities/app/registry";
 import { APP_ICON_MAP, MCP_APP_IDS, SKILLS_APP_IDS } from "@/config/appConfig";
 import { APP_STORAGE_KEY, getInitialApp } from "@/components/app-shell/views";
+import registryFixture from "../fixtures/app-registry.json";
+import { command } from "../msw/handlers";
+import { server } from "../msw/server";
+import { createTestQueryClient } from "../utils/testQueryClient";
+
+// 与 src-tauri/src/apps/registry.rs 的 registry_dto_matches_shared_fixture 共用同一份快照
+const fixture = registryFixture as BackendAppDescriptor[];
+
+const wrapper = () => {
+  const client = createTestQueryClient();
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+};
 
 const EXPECTED_LABELS: Record<AppId, string> = {
   claude: "Claude",
@@ -132,6 +153,21 @@ describe("app registry", () => {
     }
   });
 
+  // 这些能力取代了供应商列表 / 表单中的 app-id 字面量判断，保持原先的应用集合
+  it.each([
+    ["universalProviders", ["claude", "codex", "gemini"]],
+    ["defaultModel", ["openclaw"]],
+    ["omo", ["opencode"]],
+    ["configStatus", ["claude-desktop"]],
+    ["pluginSync", ["claude"]],
+    ["providerTerminal", ["claude"]],
+    ["commonConfigSnippet", ["claude", "codex", "gemini"]],
+    ["setDefault", ["openclaw", "hermes"]],
+    ["defaultIsSwitch", ["hermes"]],
+  ] as const)("only %s apps have that capability", (cap, apps) => {
+    expect(appsWithCap(cap)).toEqual(apps);
+  });
+
   it("treats unknown apps as having no capabilities", () => {
     expect(appCaps("unknown")).toEqual({
       sessions: false,
@@ -142,13 +178,121 @@ describe("app registry", () => {
       healthCheck: false,
       setDefault: false,
       defaultIsSwitch: false,
+      defaultModel: false,
+      universalProviders: false,
+      omo: false,
+      configStatus: false,
+      pluginSync: false,
+      providerTerminal: false,
+      commonConfigSnippet: false,
     });
   });
 
-  it("useAppCaps returns the registry caps", () => {
-    const { result } = renderHook(() => useAppCaps("openclaw"));
+  it("useAppCaps returns the registry caps", async () => {
+    const { result } = renderHook(() => useAppCaps("openclaw"), {
+      wrapper: wrapper(),
+    });
     expect(result.current).toEqual(appCaps("openclaw"));
+    await waitFor(() => expect(result.current).toEqual(appCaps("openclaw")));
     expect(result.current.skills).toBe(false);
     expect(result.current.sessions).toBe(true);
+  });
+});
+
+describe("static registry vs backend get_app_registry fixture", () => {
+  it("lists the same apps in the same order", () => {
+    expect(fixture.map((app) => app.id)).toEqual([...ALL_APP_IDS]);
+  });
+
+  it.each(APP_REGISTRY.map((app, index) => [app.id, app, index] as const))(
+    "%s matches the backend descriptor",
+    (id, app, index) => {
+      const remote = fixture[index];
+      expect(remote.id).toBe(id);
+      expect(app.label).toBe(remote.displayName);
+      expect(app.aliases ?? []).toEqual(remote.aliases);
+      expect(app.caps.mcp).toBe(remote.caps.mcp);
+      expect(app.caps.skills).toBe(remote.caps.skills);
+      expect(app.caps.proxyTakeover).toBe(remote.caps.proxyTakeover);
+      expect(app.caps.additive).toBe(remote.syncMode === "additive");
+    },
+  );
+
+  it("merging the fixture reproduces the static table", () => {
+    expect(mergeAppRegistry(fixture)).toEqual(
+      APP_REGISTRY.map((app) => ({ ...app, aliases: app.aliases ?? [] })),
+    );
+  });
+
+  it("takes order, label and backend caps from the backend and keeps FE-only fields", () => {
+    const codex = fixture.find((app) => app.id === "codex")!;
+    const desktop = fixture.find((app) => app.id === "claude-desktop")!;
+    const merged = mergeAppRegistry([
+      { ...codex, displayName: "Codex CLI", syncMode: "additive" },
+      { ...desktop, aliases: ["cd"] },
+      { ...codex, id: "unknown-app" as AppId },
+    ]);
+    expect(merged.map((app) => app.id)).toEqual([
+      "codex",
+      "claude-desktop",
+      ...ALL_APP_IDS.filter((id) => id !== "codex" && id !== "claude-desktop"),
+    ]);
+    expect(merged[0].label).toBe("Codex CLI");
+    expect(merged[0].caps.additive).toBe(true);
+    expect(merged[0].caps.sessions).toBe(true);
+    expect(merged[1].aliases).toEqual(["cd"]);
+    expect(merged[1].featureHost).toBe("claude");
+  });
+});
+
+describe("useAppRegistry", () => {
+  it("shows static caps before the backend resolves and backend caps after", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      command("get_app_registry", async () => {
+        await gate;
+        return fixture.map((app) =>
+          app.id === "codex"
+            ? { ...app, caps: { ...app.caps, mcp: false } }
+            : app,
+        );
+      }),
+    );
+
+    const { result } = renderHook(
+      () => ({ caps: useAppCaps("codex"), registry: useAppRegistry() }),
+      { wrapper: wrapper() },
+    );
+    expect(result.current.registry).toBe(APP_REGISTRY);
+    expect(result.current.caps.mcp).toBe(true);
+
+    release();
+    await waitFor(() => expect(result.current.caps.mcp).toBe(false));
+    expect(result.current.caps.sessions).toBe(true);
+    expect(result.current.registry).not.toBe(APP_REGISTRY);
+    // 同步函数仍读取静态表
+    expect(appCaps("codex").mcp).toBe(true);
+  });
+
+  it("falls back to the static table when the backend query fails", async () => {
+    server.use(
+      command("get_app_registry", () =>
+        HttpResponse.json({ message: "boom" }, { status: 500 }),
+      ),
+    );
+    const client = createTestQueryClient();
+
+    const { result } = renderHook(() => useAppRegistry(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    await waitFor(() =>
+      expect(client.getQueryState(appRegistryQueryKey)?.status).toBe("error"),
+    );
+    expect(result.current).toBe(APP_REGISTRY);
   });
 });

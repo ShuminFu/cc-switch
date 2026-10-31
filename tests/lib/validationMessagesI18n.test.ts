@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import i18next, { type TFunction } from "i18next";
 import { afterEach, describe, expect, it } from "vitest";
 import en from "@/i18n/locales/en.json";
@@ -135,5 +137,40 @@ describe("static schemas follow the global language", () => {
     expect(() => tomlToMcpServer('type = "stdio"')).toThrow(
       "An stdio MCP server must include the command field",
     );
+  });
+});
+
+// CCS-253：被扫描目录的 .ts 源码里，CJK 只允许出现在注释中（不能是字符串字面量或
+// 文案匹配器）。
+describe("CJK-free source outside comments", () => {
+  const ROOT = path.resolve(__dirname, "..", "..");
+  const SCANNED = [
+    "src/lib",
+    "src/utils",
+    "src/components/providers/forms/hooks",
+  ];
+  const tsFiles = (dir: string): string[] =>
+    fs
+      .readdirSync(dir, { withFileTypes: true })
+      .flatMap((e) =>
+        e.isDirectory()
+          ? tsFiles(path.join(dir, e.name))
+          : e.name.endsWith(".ts")
+            ? [path.join(dir, e.name)]
+            : [],
+      );
+  const stripComments = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  it("has no CJK in code in src/lib, src/utils and provider form hooks", () => {
+    const offenders = SCANNED.flatMap((dir) =>
+      tsFiles(path.join(ROOT, dir)),
+    ).flatMap((file) =>
+      stripComments(fs.readFileSync(file, "utf8"))
+        .split("\n")
+        .filter((line) => CJK.test(line))
+        .map((line) => `${path.relative(ROOT, file)}: ${line.trim()}`),
+    );
+    expect(offenders).toEqual([]);
   });
 });

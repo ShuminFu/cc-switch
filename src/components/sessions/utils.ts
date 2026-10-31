@@ -3,6 +3,8 @@ import type { TranslationKey } from "@/i18n/keys";
 import type { ReactNode } from "react";
 import { createElement } from "react";
 import { SessionMeta } from "@/types";
+import type { AppId } from "@/lib/api/types";
+import { isAppId } from "@/entities/app/registry";
 
 const CODEX_IDE_CONTEXT_PREFIX = "# Context from my IDE setup:";
 const CODEX_REQUEST_MARKER = "my request for codex";
@@ -114,15 +116,16 @@ export const getProviderLabel = (providerId: string, t: TFunction) => {
   return translated === key ? providerId : translated;
 };
 
-// 根据 providerId 获取对应的图标名称
-export const getProviderIconName = (providerId: string) => {
-  if (providerId === "codex") return "openai";
-  if (providerId === "grokbuild") return "grok";
-  if (providerId === "claude") return "claude";
-  if (providerId === "opencode") return "opencode";
-  if (providerId === "openclaw") return "openclaw";
-  return providerId;
+// 图标名称与应用 ID 不同的应用；其余应用直接以 ID 作为图标名称
+const SESSION_ICON_NAMES: Partial<Record<AppId, string>> = {
+  codex: "openai",
+  grokbuild: "grok",
 };
+
+// 根据 providerId 获取对应的图标名称
+export const getProviderIconName = (providerId: string) =>
+  (isAppId(providerId) ? SESSION_ICON_NAMES[providerId] : undefined) ??
+  providerId;
 
 export const getRoleTone = (role: string) => {
   const normalized = role.toLowerCase();

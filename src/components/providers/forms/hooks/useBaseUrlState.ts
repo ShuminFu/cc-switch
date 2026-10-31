@@ -6,6 +6,19 @@ import {
 import type { ProviderCategory } from "@/types";
 import type { AppId } from "@/lib/api";
 
+/**
+ * 各应用 Base URL 在配置中的位置：settingsConfig.env 中的 ANTHROPIC_BASE_URL /
+ * GOOGLE_GEMINI_BASE_URL，或 Codex config.toml 的 base_url；未列出的应用不回填
+ */
+const BASE_URL_SOURCE: Partial<
+  Record<AppId, "anthropicEnv" | "codexToml" | "geminiEnv">
+> = {
+  claude: "anthropicEnv",
+  "claude-desktop": "anthropicEnv",
+  codex: "codexToml",
+  gemini: "geminiEnv",
+};
+
 interface UseBaseUrlStateProps {
   appType: AppId;
   category: ProviderCategory | undefined;
@@ -31,10 +44,11 @@ export function useBaseUrlState({
   const [codexBaseUrl, setCodexBaseUrl] = useState("");
   const [geminiBaseUrl, setGeminiBaseUrl] = useState("");
   const isUpdatingRef = useRef(false);
+  const baseUrlSource = BASE_URL_SOURCE[appType];
 
   // 从配置同步到 state（Claude / Claude Desktop）
   useEffect(() => {
-    if (appType !== "claude" && appType !== "claude-desktop") return;
+    if (baseUrlSource !== "anthropicEnv") return;
     // 只有 official 类别不显示 Base URL 输入框，其他类别都需要回填
     if (category === "official") return;
     if (isUpdatingRef.current) return;
@@ -49,11 +63,11 @@ export function useBaseUrlState({
     } catch {
       // ignore
     }
-  }, [appType, category, settingsConfig, baseUrl]);
+  }, [baseUrlSource, category, settingsConfig, baseUrl]);
 
   // 从配置同步到 state（Codex）
   useEffect(() => {
-    if (appType !== "codex") return;
+    if (baseUrlSource !== "codexToml") return;
     // 只有 official 类别不显示 Base URL 输入框，其他类别都需要回填
     if (category === "official") return;
     if (isUpdatingRef.current) return;
@@ -61,11 +75,11 @@ export function useBaseUrlState({
 
     const extracted = extractCodexBaseUrl(codexConfig) || "";
     setCodexBaseUrl((prev) => (prev === extracted ? prev : extracted));
-  }, [appType, category, codexConfig]);
+  }, [baseUrlSource, category, codexConfig]);
 
   // 从Claude配置同步到 state（Gemini）
   useEffect(() => {
-    if (appType !== "gemini") return;
+    if (baseUrlSource !== "geminiEnv") return;
     // 只有 official 类别不显示 Base URL 输入框，其他类别都需要回填
     if (category === "official") return;
     if (isUpdatingRef.current) return;
@@ -81,7 +95,7 @@ export function useBaseUrlState({
     } catch {
       // ignore
     }
-  }, [appType, category, settingsConfig, geminiBaseUrl]);
+  }, [baseUrlSource, category, settingsConfig, geminiBaseUrl]);
 
   // 处理 Claude Base URL 变化
   const handleClaudeBaseUrlChange = useCallback(

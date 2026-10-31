@@ -67,3 +67,11 @@ p0-config-writer-snapshots
 
 - Blocked: On Windows CI, overwrite works without remove_file. Needs a windows-latest Actions run; CCS-228 adds Wine evidence only.
 - Follow-up [CCS-228](../P1-trust-release/CCS-228-p1-config-atomic-write-wine.md): Run the Windows rename_replace / atomic_write path under Wine as interim evidence.
+
+### Wine evidence (CCS-228)
+
+- The `#[cfg(windows)]` code was run under Wine 9.0. Verbatim copies of `write_and_sync`, `TempFileGuard`, `rename_replace` and `owner_only_acl` (config.rs 432-634 at 742b36c), plus `atomic_write_impl` without the preview-capture and symlink preamble, were built for `x86_64-pc-windows-gnu` with windows-sys 0.61.2. The run exits 0.
+- Overwrite works without `remove_file` (1 + 50 overwrites, no `*.tmp.*` left). Rename onto a non-empty directory fails with os error 5 after the full retry budget (about 207 ms), the temp file is removed and the directory is intact.
+- Target held with `share_mode(0)`: Wine returns os error 5 for the rename. If the target is released after 50 ms, the retry succeeds (about 65 ms). If it is held for 1.5 s, the write gives up after about 208 ms, keeps the old content and leaves no temp file. `atomic_write_secret`, including `owner_only_acl::apply`, creates and overwrites the file.
+- Negative controls: without the retries, or without `TempFileGuard` removing the temp file, the harness fails (exit 101).
+- Details are in [CCS-228](../P1-trust-release/CCS-228-p1-config-atomic-write-wine.md). The "On Windows CI" box stays unchecked until a real windows-latest run.

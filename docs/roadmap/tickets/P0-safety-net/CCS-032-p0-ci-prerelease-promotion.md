@@ -71,6 +71,8 @@ needs a GitHub fork with a published release and cannot run in this sandbox.
   files, 596 tests passed.
 - YAML: `python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))"` passes for
   promote-release.yml and release.yml. actionlint / shellcheck not installed.
+- actionlint v1.7.12 with shellcheck 0.11.0 on PATH (CCS-217): `actionlint .github/workflows/*.yml` → exit 0 with the committed `.github/actionlint.yaml`;
+  `shellcheck scripts/promote-release.sh` → exit 0, no findings.
 - Redirect check validated against upstream: `curl -sSIL
   https://github.com/farion1231/cc-switch/releases/latest/download/latest.json`
   first `Location:` is `.../releases/download/v4.0.21/latest.json`, matching the
@@ -100,4 +102,4 @@ the wiring test were updated. Status stays Partial (fork check still manual).
 ### Remaining after triage
 
 - Blocked: AC2: after promotion, `curl -sIL .../releases/latest/download/latest.json` redirects to the new tag. Needs a fork with a published release and a manual promote-release.yml run.
-- Follow-up [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): Run actionlint with shellcheck on every workflow and release script, and commit its config.
+- Done in [CCS-217](../P0-safety-net/CCS-217-p0-ci-actionlint-shellcheck.md): actionlint with shellcheck passes and its config is committed.

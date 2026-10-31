@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Provider } from "@/types";
-import { providersApi, type AppId } from "@/lib/api";
+import { providersApi, settingsApi, type AppId } from "@/lib/api";
+import type { SettingsLoadFailure } from "@/lib/api/settings";
 import { hermesApi } from "@/lib/api/hermes";
 import { invalidateProviderGraph } from "@/entities/provider/invalidate";
 import { extractErrorMessage } from "@/utils/errorUtils";
@@ -121,6 +122,83 @@ export function HermesLaunchConfirmDialog({
         void launch();
       }}
       onCancel={onClose}
+    />
+  );
+}
+
+/**
+ * settings.json 加载失败的启动提示（CCS-225）：
+ * 已备份时给出带备份路径的常驻警告；未能备份（保存被后端拒绝）时弹出确认框，
+ * 确认后清除失败记录，允许以当前设置覆盖该文件。
+ */
+export function SettingsLoadFailureNotice() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [blocked, setBlocked] = useState<SettingsLoadFailure | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const checkSettingsLoadFailure = async () => {
+      try {
+        const failure = await settingsApi.getLoadFailure();
+        if (!active || !failure) return;
+        if (failure.backupPath) {
+          toast.warning(t("settings.loadFailure.backedUp"), {
+            // 固定 id：StrictMode 下重复执行 effect 不会叠加两条提示
+            id: "settings-load-failure",
+            description: t("settings.loadFailure.backedUpDescription", {
+              path: failure.path,
+              backupPath: failure.backupPath,
+              error: failure.error,
+            }),
+            // 描述按行列出文件、备份路径与错误，需保留换行
+            descriptionClassName: "whitespace-pre-line",
+            closeButton: true,
+            duration: Infinity,
+          });
+        } else {
+          setBlocked(failure);
+        }
+      } catch (error) {
+        console.error("[App] Failed to check settings load failure:", error);
+      }
+    };
+
+    void checkSettingsLoadFailure();
+    return () => {
+      active = false;
+    };
+  }, [t]);
+
+  const acknowledge = async () => {
+    setBlocked(null);
+    try {
+      await settingsApi.acknowledgeLoadFailure();
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      toast.success(t("settings.loadFailure.acknowledged"));
+    } catch (error) {
+      toast.error(t("settings.loadFailure.acknowledgeFailed"), {
+        description: extractErrorMessage(error) || undefined,
+      });
+    }
+  };
+
+  return (
+    <ConfirmDialog
+      isOpen={Boolean(blocked)}
+      title={t("settings.loadFailure.blocked")}
+      message={
+        blocked
+          ? t("settings.loadFailure.blockedDescription", {
+              path: blocked.path,
+              error: blocked.error,
+            })
+          : ""
+      }
+      confirmText={t("settings.loadFailure.confirm")}
+      cancelText={t("settings.loadFailure.keepBlocked")}
+      onConfirm={() => void acknowledge()}
+      onCancel={() => setBlocked(null)}
     />
   );
 }

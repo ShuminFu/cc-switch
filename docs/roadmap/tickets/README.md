@@ -94,8 +94,8 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-074](P1-trust-release/CCS-074-p1-ipc-session-terminal.md) | security | p1 | S | [ipc] Make launch_session_terminal build its resume command on the backend |  | Done |
 | [CCS-075](P1-trust-release/CCS-075-p1-ipc-path-validation.md) | security | p1 | M | [ipc] Validate path arguments of privileged commands against allowed roots or dialog-issued tokens |  | Done |
 | [CCS-076](P1-trust-release/CCS-076-p1-session-load-messages-roots.md) | security | p3 | S | [sessions] Apply the provider-root check to load_messages and the sqlite delete paths |  | Done |
-| [CCS-077](P1-trust-release/CCS-077-p1-csp-tighten.md) | security | p3 | S | [security] Narrow the CSP connect-src and img-src |  | Partial |
-| [CCS-078](P1-trust-release/CCS-078-p1-asset-protocol-remove.md) | security | p3 | S | [security] Remove the unused asset protocol and protocol-asset feature |  | Partial |
+| [CCS-077](P1-trust-release/CCS-077-p1-csp-tighten.md) | security | p3 | S | [security] Narrow the CSP connect-src and img-src |  | Done |
+| [CCS-078](P1-trust-release/CCS-078-p1-asset-protocol-remove.md) | security | p3 | S | [security] Remove the unused asset protocol and protocol-asset feature |  | Done |
 | [CCS-079](P1-trust-release/CCS-079-p1-atomic-write-durable.md) | bug | p1 | S | [config] Make atomic_write durable, Windows-safe and free of leftover temp files | CCS-012 | Partial |
 | [CCS-080](P1-trust-release/CCS-080-p1-atomic-write-perms.md) | security | p1 | S | [config] Create new files written by atomic_write with 0600 permissions | CCS-079 | Done |
 | [CCS-081](P1-trust-release/CCS-081-p1-atomic-write-symlink.md) | bug | p2 | S | [config] Write through symlinked config files instead of replacing the link | CCS-079 | Done |
@@ -128,7 +128,7 @@ Status values: `Open`, `In progress`, `Done`, `Blocked` (with reason).
 | [CCS-108](P1-trust-release/CCS-108-p1-fe-mcp-stdio-validation.md) | bug | p3 | S | [mcp] Treat a missing type as stdio when validating MCP server specs, in the UI and the backend |  | Done |
 | [CCS-109](P1-trust-release/CCS-109-p1-fe-skills-cache-dedupe.md) | bug | p3 | S | [skills] Dedupe the installed-skills cache by id and skip same-name folders in one ZIP |  | Done |
 | [CCS-225](P1-trust-release/CCS-225-p1-settings-load-failure-notice.md) | bug | p2 | M | [settings-ui] Show a startup notice and confirm flow when settings.json failed to load |  | Open |
-| [CCS-226](P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md) | security | p2 | M | [e2e] Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec |  | Open |
+| [CCS-226](P1-trust-release/CCS-226-p1-e2e-csp-icons-runtime.md) | security | p2 | M | [e2e] Check the tightened CSP and asset-protocol removal at runtime with a headless WebKitGTK spec |  | Done |
 | [CCS-227](P1-trust-release/CCS-227-p1-proxy-require-ipv6-guard.md) | chore | p3 | S | [proxy-tests] Fail the [::1] proxy tests instead of skipping when CCS_REQUIRE_IPV6 is set |  | Open |
 | [CCS-228](P1-trust-release/CCS-228-p1-config-atomic-write-wine.md) | chore | p3 | S | [config] Run the Windows rename_replace / atomic_write path under Wine as interim evidence |  | Open |
 
