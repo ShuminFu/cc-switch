@@ -12,20 +12,20 @@ use serde_json::Value;
 use crate::error::AppError;
 use crate::services::webdav::{
     auth_from_credentials, build_remote_url, ensure_remote_directories, get_bytes, head_etag,
-    path_segments, put_bytes, put_bytes_if_match, test_connection, PutOutcome, WebDavAuth,
+    path_segments, put_bytes_if_match, test_connection, PutOutcome, WebDavAuth,
 };
 use crate::settings::{update_webdav_sync_status, WebDavSyncSettings};
 
+use super::sync_transport::{self, PutResult, SyncTransport, TransportKeys, UploadOutcome};
+
 use super::sync_protocol::{
-    apply_snapshot, build_snapshot, capture_local_fingerprint, download_passphrase,
-    effective_db_compat_version, ensure_local_unchanged, ensure_no_encryption_downgrade,
-    evaluate_upload_precondition, is_insecure_remote_url, localized, open_artifact,
-    persist_sync_success_best_effort, remote_changed_error, remote_encryption_info, sha256_hex,
-    sync_status_from_baseline, unlock_remote, upload_key, upload_passphrase,
-    validate_artifact_size_limit, validate_manifest_compat, verify_artifact, warn_if_insecure,
-    ArtifactMeta, RemoteLayout, RemoteManifestView, SyncBaseline, SyncManifest, DB_COMPAT_VERSION,
-    MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST,
-    REMOTE_SKILLS_ZIP,
+    apply_snapshot, capture_local_fingerprint, download_passphrase, effective_db_compat_version,
+    ensure_local_unchanged, evaluate_upload_precondition, is_insecure_remote_url, localized,
+    open_artifact, persist_sync_success_best_effort, remote_encryption_info, sha256_hex,
+    sync_status_from_baseline, unlock_remote, validate_artifact_size_limit,
+    validate_manifest_compat, verify_artifact, warn_if_insecure, ArtifactMeta, RemoteLayout,
+    RemoteManifestView, SyncBaseline, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES,
+    MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
 };
 
 pub(crate) mod archive;
@@ -104,81 +104,79 @@ async fn upload_inner(
         &settings.profile,
     )?;
     let insecure = warn_if_insecure("WebDAV", &settings.base_url);
-    let auth = auth_for(settings);
-    let dir_segs = remote_dir_segments(settings, RemoteLayout::Current);
-    ensure_remote_directories(&settings.base_url, &dir_segs, &auth).await?;
-
-    // SEC-06 / SVC-04: encrypt the artifacts when sync encryption is enabled.
-    let encryption = upload_passphrase()?
-        .map(|passphrase| upload_key(&passphrase))
-        .transpose()?;
-    let snapshot = build_snapshot(db, encryption.as_ref())?;
-    let local_fingerprint = snapshot.local_fingerprint.clone();
-    if skip_if_unchanged
-        && crate::services::sync_protocol::local_unchanged_since_sync(
-            &settings.status,
-            &local_fingerprint,
-        )
-    {
-        log::debug!("[WebDAV] Local content unchanged since last sync; skipping upload");
-        return Ok(serde_json::json!({ "status": "unchanged" }));
-    }
-
-    // Precondition: the remote must still be what this device last synced.
-    let manifest_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_MANIFEST)?;
-    let remote = get_bytes(&manifest_url, &auth, MAX_MANIFEST_BYTES).await?;
-    let if_match = {
-        let parsed = remote
-            .as_ref()
-            .and_then(|(bytes, _)| serde_json::from_slice::<SyncManifest>(bytes).ok());
-        let view = remote.as_ref().map(|(bytes, etag)| RemoteManifestView {
-            bytes,
-            etag: etag.as_deref(),
-            manifest: parsed.as_ref(),
-        });
-        ensure_no_encryption_downgrade(parsed.as_ref(), encryption.is_some(), force)?;
-        evaluate_upload_precondition(&settings.status, view.as_ref(), force)?
+    let transport = WebDavTransport::new(settings);
+    let outcome =
+        sync_transport::upload(&transport, db, &settings.status, force, skip_if_unchanged).await?;
+    let baseline = match outcome {
+        UploadOutcome::Unchanged => return Ok(serde_json::json!({ "status": "unchanged" })),
+        UploadOutcome::Uploaded(baseline) => baseline,
     };
-
-    // Upload order: artifacts first, manifest last (best-effort consistency)
-    let db_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_DB_SQL)?;
-    put_bytes(&db_url, &auth, snapshot.db_sql, "application/sql").await?;
-
-    let skills_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_SKILLS_ZIP)?;
-    put_bytes(&skills_url, &auth, snapshot.skills_zip, "application/zip").await?;
-
-    let outcome = put_bytes_if_match(
-        &manifest_url,
-        &auth,
-        snapshot.manifest_bytes,
-        "application/json",
-        if_match.as_deref(),
-    )
-    .await?;
-    if outcome == PutOutcome::PreconditionFailed {
-        log::warn!("[WebDAV] Manifest changed during upload (412); refusing to overwrite");
-        return Err(remote_changed_error(None));
-    }
-
-    // Fetch etag (best-effort, don't fail the upload)
-    let etag = match head_etag(&manifest_url, &auth).await {
-        Ok(e) => e,
-        Err(e) => {
-            log::debug!("[WebDAV] Failed to fetch ETag after upload: {e}");
-            None
-        }
-    };
-
-    let _persisted = persist_sync_success_best_effort(
-        settings,
-        SyncBaseline {
-            manifest_hash: snapshot.manifest_hash,
-            etag,
-            local_fingerprint: Some(local_fingerprint),
-        },
-        persist_sync_success,
-    );
+    let _persisted = persist_sync_success_best_effort(settings, baseline, persist_sync_success);
     Ok(serde_json::json!({ "status": "uploaded", "insecureTransport": insecure }))
+}
+
+// ─── Transport ───────────────────────────────────────────────
+
+static WEBDAV_KEYS: TransportKeys = TransportKeys {
+    remote_empty: "webdav.sync.remote_empty",
+    manifest_missing_artifact: "webdav.sync.manifest_missing_artifact",
+    remote_missing_artifact: "webdav.sync.remote_missing_artifact",
+};
+
+/// WebDAV implementation of the shared sync engine's transport for the
+/// current layout (SVC-19). Downloads keep their own path because they also
+/// read the legacy layout.
+struct WebDavTransport<'a> {
+    settings: &'a WebDavSyncSettings,
+    auth: WebDavAuth,
+}
+
+impl<'a> WebDavTransport<'a> {
+    fn new(settings: &'a WebDavSyncSettings) -> Self {
+        Self {
+            settings,
+            auth: auth_for(settings),
+        }
+    }
+
+    fn url(&self, name: &str) -> Result<String, AppError> {
+        remote_file_url(self.settings, RemoteLayout::Current, name)
+    }
+}
+
+impl SyncTransport for WebDavTransport<'_> {
+    fn label(&self) -> &'static str {
+        "WebDAV"
+    }
+    fn keys(&self) -> &'static TransportKeys {
+        &WEBDAV_KEYS
+    }
+    async fn ensure_root(&self) -> Result<(), AppError> {
+        let dir_segs = remote_dir_segments(self.settings, RemoteLayout::Current);
+        ensure_remote_directories(&self.settings.base_url, &dir_segs, &self.auth).await
+    }
+    async fn get(&self, name: &str, max_bytes: usize) -> Result<sync_transport::Fetched, AppError> {
+        get_bytes(&self.url(name)?, &self.auth, max_bytes).await
+    }
+    async fn put(
+        &self,
+        name: &str,
+        bytes: Vec<u8>,
+        content_type: &str,
+        if_match: Option<&str>,
+    ) -> Result<PutResult, AppError> {
+        Ok(
+            match put_bytes_if_match(&self.url(name)?, &self.auth, bytes, content_type, if_match)
+                .await?
+            {
+                PutOutcome::Stored => PutResult::Stored,
+                PutOutcome::PreconditionFailed => PutResult::PreconditionFailed,
+            },
+        )
+    }
+    async fn head(&self, name: &str) -> Result<Option<String>, AppError> {
+        head_etag(&self.url(name)?, &self.auth).await
+    }
 }
 
 /// Download remote snapshot and apply to local database + skills.
@@ -581,7 +579,7 @@ mod tests {
         let (base_url, store) = fake_server::start().await;
         let url = format!("{base_url}file.json");
         let auth = auth_from_credentials("alice", "secret");
-        put_bytes(&url, &auth, b"one".to_vec(), "application/json")
+        put_bytes_if_match(&url, &auth, b"one".to_vec(), "application/json", None)
             .await
             .unwrap();
         let outcome = put_bytes_if_match(
