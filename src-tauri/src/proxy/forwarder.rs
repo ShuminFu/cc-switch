@@ -430,7 +430,8 @@ impl RequestForwarder {
         let mut last_error = None;
         let mut last_provider = None;
         let mut attempted_providers = 0usize;
-        // 单 Provider 场景下跳过熔断器检查（故障转移关闭时），避免熔断器阻塞所有请求
+        // 单 Provider 场景下跳过熔断器检查（故障转移关闭，或队列只有一家时；与
+        // ProviderRouter 的选择规则一致，PROXY-11），避免熔断器阻塞所有请求
         let bypass_circuit_breaker = providers.len() == 1;
         // 跨 provider 携带的请求体：thinking 签名 / budget 整流生效后替换为整流后的
         // body，让下一家 provider 首次请求就用整流后的内容（PROXY-24）。
@@ -876,7 +877,18 @@ impl RequestForwarder {
                 needs_transform,
             )
             .await?;
-        let request_body = transformed.body;
+        let mut request_body = transformed.body;
+        // PROV-23: Mistral / Ollama Chat quirks, detected from the upstream URL.
+        let url_path = target.url.split('?').next().unwrap_or_default();
+        if url_path
+            .trim_end_matches('/')
+            .ends_with("/chat/completions")
+        {
+            super::providers::upstream_compat::apply_chat_body_compat(
+                super::providers::upstream_compat::UpstreamFlavor::detect(&target.url),
+                &mut request_body,
+            );
+        }
         if let Some(model) = model_of(&request_body) {
             outbound_model = Some(model);
         }
@@ -994,6 +1006,11 @@ impl RequestForwarder {
     ) -> Result<http::HeaderMap, ProxyError> {
         let auth = resolve_auth(request.adapter, provider, self.app_handle.as_ref()).await?;
         let mut auth_headers = auth.headers;
+        // PROV-23: Azure OpenAI keys travel in `api-key`.
+        super::providers::upstream_compat::apply_auth_header_compat(
+            super::providers::upstream_compat::UpstreamFlavor::detect(url),
+            &mut auth_headers,
+        );
         if let Some(hints) = copilot_hints {
             apply_copilot_hint_headers(&mut auth_headers, hints, &self.copilot_optimizer_config);
         }
