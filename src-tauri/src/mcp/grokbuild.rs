@@ -151,8 +151,13 @@ pub fn sync_single_server_to_grokbuild(
     if !doc.contains_key("mcp_servers") {
         doc["mcp_servers"] = toml_edit::table();
     }
-    doc["mcp_servers"][id] = Item::Table(json_server_to_grokbuild_toml_table(server_spec)?);
-    crate::config::write_text_file(&path, &doc.to_string())
+    // keep Grok-native keys of an existing entry (CFG-42)
+    let merged = super::merge::merge_live_toml_table(
+        doc["mcp_servers"].get(id).and_then(Item::as_table),
+        json_server_to_grokbuild_toml_table(server_spec)?,
+    );
+    doc["mcp_servers"][id] = Item::Table(merged);
+    crate::config::write_text_file_secret(&path, &doc.to_string())
 }
 
 pub fn remove_server_from_grokbuild(id: &str) -> Result<(), AppError> {
@@ -174,7 +179,7 @@ pub fn remove_server_from_grokbuild(id: &str) -> Result<(), AppError> {
     {
         servers.remove(id);
     }
-    crate::config::write_text_file(&path, &doc.to_string())
+    crate::config::write_text_file_secret(&path, &doc.to_string())
 }
 
 #[cfg(test)]

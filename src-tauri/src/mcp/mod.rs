@@ -16,6 +16,7 @@ mod codex;
 mod gemini;
 mod grokbuild;
 mod hermes;
+pub(crate) mod merge;
 mod opencode;
 mod validation;
 

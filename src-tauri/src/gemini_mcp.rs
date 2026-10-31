@@ -16,13 +16,13 @@ fn read_json_value(path: &Path) -> Result<Value, AppError> {
 }
 
 fn write_json_value(path: &Path, value: &Value) -> Result<(), AppError> {
-    use crate::adapters::live_file::{to_json_string, write_live_text, JsonStyle, WriteOptions};
+    use crate::adapters::live_file::{write_json_preserving, WriteOptions};
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
-    // keep the file's key order/indent/newline; no-op when unchanged; backup first
-    let json = to_json_string(value, &JsonStyle::of_file(path))?;
-    write_live_text(path, &json, WriteOptions::backup("gemini"))?;
+    // settings.json may be JSONC: keep comments, key order, indent and newline;
+    // no-op when unchanged; backup first
+    write_json_preserving(path, value, WriteOptions::backup("gemini"))?;
     Ok(())
 }
 
@@ -170,7 +170,9 @@ pub fn project_mcp_servers(enabled: &[(&str, &Value)], disabled: &[&str]) -> Res
             AppError::Config("~/.gemini/settings.json 的 mcpServers 必须是对象".into())
         })?;
         for (id, native) in natives {
-            map.insert(id, native);
+            // keep Gemini-native keys (trust, includeTools, …) of an existing entry (CFG-42)
+            let merged = crate::mcp::merge::merge_live_json_entry(map.get(&id), native);
+            map.insert(id, merged);
         }
         for id in disabled {
             map.shift_remove(*id);
