@@ -33,6 +33,8 @@ vi.mock("@/components/providers/ProviderList", () => ({
     onConfigureUsage,
     onOpenWebsite,
     onCreate,
+    onDelete,
+    onRemoveFromConfig,
   }: any) => (
     <div>
       <div data-testid="provider-list">{JSON.stringify(providers)}</div>
@@ -51,6 +53,14 @@ vi.mock("@/components/providers/ProviderList", () => ({
         open-website
       </button>
       <button onClick={() => onCreate?.()}>create</button>
+      <button onClick={() => onDelete?.(providers[currentProviderId])}>
+        delete
+      </button>
+      <button
+        onClick={() => onRemoveFromConfig?.(providers[currentProviderId])}
+      >
+        remove-from-config
+      </button>
     </div>
   ),
 }));
@@ -388,6 +398,76 @@ describe("App integration with MSW", { timeout: 20_000 }, () => {
     );
 
     liveIdsSpy.mockRestore();
+  });
+
+  it("closes the confirm dialog and toasts when remove-from-config fails (PRODUCT-73)", async () => {
+    setProviders("openclaw", {
+      deepseek: {
+        id: "deepseek",
+        name: "DeepSeek",
+        settingsConfig: { baseUrl: "https://api.deepseek.com", models: [] },
+        category: "custom",
+        sortIndex: 0,
+        createdAt: Date.now(),
+      },
+    });
+    setCurrentProviderId("openclaw", "deepseek");
+    const removeSpy = vi
+      .spyOn(providersApi, "removeFromLiveConfig")
+      .mockRejectedValueOnce(new Error("unparsable openclaw.json"));
+
+    const { default: App } = await import("@/App");
+    renderApp(App);
+    fireEvent.click(screen.getByText("switch-openclaw"));
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "deepseek",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("remove-from-config"));
+    expect(await screen.findByTestId("confirm-dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("confirm-delete"));
+    // A second click while the first call is pending is ignored.
+    fireEvent.click(screen.getByText("confirm-delete"));
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        expect.stringContaining("unparsable openclaw.json"),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument(),
+    );
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    removeSpy.mockRestore();
+  });
+
+  it("closes the confirm dialog when deleting a provider fails (PRODUCT-73)", async () => {
+    server.use(
+      http.post("http://tauri.local/delete_provider", () =>
+        HttpResponse.json("cannot delete current provider", { status: 400 }),
+      ),
+    );
+    const { default: App } = await import("@/App");
+    renderApp(App);
+    await waitFor(() =>
+      expect(screen.getByTestId("provider-list").textContent).toContain(
+        "claude-1",
+      ),
+    );
+
+    fireEvent.click(screen.getByText("delete"));
+    expect(await screen.findByTestId("confirm-dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("confirm-delete"));
+
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByTestId("confirm-dialog")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("provider-list").textContent).toContain(
+      "claude-1",
+    );
   });
 
   it("shows an error state with retry, not the empty list, when get_providers fails", async () => {
