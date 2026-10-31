@@ -2,18 +2,35 @@
 
 This directory contains the Flatpak manifest (`com.ccswitch.desktop`) for CC Switch, used to convert the generated `.deb` artifact into an installable `.flatpak` package via CI or local builds.
 
+## Status
+
+The Flatpak is **community-maintained and not part of the official release
+assets** (CI-23). `.github/workflows/flatpak.yml` builds it monthly (and on
+demand) from a freshly built `.deb` so the manifest does not rot, and uploads the
+bundle as a workflow artifact.
+
+Known limitations inside the sandbox:
+
+- **Host CLIs and terminals.** CLI version detection and "open in terminal" run
+  host programs directly, which the sandbox hides (`/usr/bin` is the GNOME
+  runtime). The manifest already grants `--talk-name=org.freedesktop.Flatpak`
+  so the app can switch to `flatpak-spawn --host`, but the app does not do that
+  yet (CI-44), so those two features report "not installed" / "no terminal".
+- **Deep links** (`ccswitch://`) work: the desktop file declares
+  `MimeType=x-scheme-handler/ccswitch;` and passes the URL with `%U`.
+
 ## Dependencies
 
 - `flatpak`
 - `flatpak-builder`
-- Flathub remote (for installing `org.gnome.Platform//46` runtime)
+- Flathub remote (for installing `org.gnome.Platform//48` runtime)
 
 For Ubuntu/Debian:
 
 ```bash
 sudo apt install flatpak flatpak-builder
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install -y --user flathub org.gnome.Platform//46 org.gnome.Sdk//46
+flatpak install -y --user flathub org.gnome.Platform//48 org.gnome.Sdk//48
 ```
 
 ## Local Build (Generate .flatpak from .deb)

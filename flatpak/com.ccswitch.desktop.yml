@@ -1,7 +1,8 @@
 id: com.ccswitch.desktop
 
 runtime: org.gnome.Platform
-runtime-version: '46'
+# GNOME 46 is end-of-life on Flathub (CI-23).
+runtime-version: '48'
 sdk: org.gnome.Sdk
 
 command: cc-switch
@@ -15,6 +16,10 @@ finish-args:
   # Tray icon permissions (required by Tauri tray-icon)
   - --talk-name=org.kde.StatusNotifierWatcher
   - --filesystem=xdg-run/tray-icon:create
+  # Lets the app run host programs via `flatpak-spawn --host` (CLI version
+  # detection, opening a terminal). The app does not use it yet (CI-44): until
+  # then, tool detection and "open terminal" do not work inside the sandbox.
+  - --talk-name=org.freedesktop.Flatpak
   # GitHub Releases scenario: Users download and install manually.
   # For "download and run" convenience (needs read/write access to ~/.cc-switch, ~/.claude, ~/.claude.json, ~/.codex, ~/.gemini,
   # and supports custom directory overrides), we grant full Home access by default.
@@ -40,6 +45,8 @@ modules:
       - type: git
         url: https://github.com/AyatanaIndicators/ayatana-ido.git
         tag: 0.10.4
+        # Tags are mutable: pin the commit the tag pointed at (CI-23).
+        commit: f968079b09e2310fefc3fc307359025f1c74b3eb
 
   - name: libdbusmenu-gtk3
     buildsystem: autotools
@@ -64,6 +71,8 @@ modules:
       - type: git
         url: https://github.com/AyatanaIndicators/libayatana-indicator.git
         tag: 0.9.4
+        # Tags are mutable: pin the commit the tag pointed at (CI-23).
+        commit: 611bb384b73fa6311777ba4c41381a06f5b99dad
 
   - name: libayatana-appindicator
     buildsystem: cmake-ninja
@@ -74,6 +83,8 @@ modules:
       - type: git
         url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
         tag: 0.5.93
+        # Tags are mutable: pin the commit the tag pointed at (CI-23).
+        commit: 238c8b02718fa5b4af95ede72beeed762094f4cc
 
   - name: cc-switch
     buildsystem: simple
