@@ -220,8 +220,8 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 23,
-        name: "drop_unused_request_log_indexes",
-        checksum: "fdae083415f5ef63c63cac6382c2ee821631388d240757ede64392b7f6938ba7",
+        name: "drop_unused_request_log_status_index",
+        checksum: "60a11752ebeed4841a2af6fc7a39c7d05a98f69b0ddf03f4f804a6215a775489",
         breaks_sync: false,
         up: Database::migrate_v22_to_v23,
     },
@@ -2000,17 +2000,18 @@ impl Database {
         Ok(())
     }
 
-    /// v22 → v23 (PERF-36): drop the single-column `session_id` and
-    /// `status_code` indexes on the append-only `proxy_request_logs` table.
-    /// No query filters on `session_id`, and the request-log status filter
+    /// v22 → v23 (PERF-36): drop the single-column `status_code` index on the
+    /// append-only `proxy_request_logs` table. The request-log status filter
     /// always runs with the `(app_type, created_at)` / `created_at` ordering
-    /// indexes, so both only cost a B-tree update per insert. Indexes are not
-    /// part of the sync dump, so this does not affect sync compatibility.
+    /// indexes, so it only costs a B-tree update per insert. The `session_id`
+    /// index stays: per-session cost totals (PRODUCT-14) look rows up by it.
+    /// Indexes are not part of the sync dump, so this does not affect sync
+    /// compatibility.
     fn migrate_v22_to_v23(conn: &Connection) -> Result<(), AppError> {
-        for index in ["idx_request_logs_session", "idx_request_logs_status"] {
-            conn.execute(&format!("DROP INDEX IF EXISTS {index}"), [])
-                .map_err(|e| AppError::Database(format!("删除索引 {index} 失败: {e}")))?;
-        }
+        conn.execute("DROP INDEX IF EXISTS idx_request_logs_status", [])
+            .map_err(|e| {
+                AppError::Database(format!("删除索引 idx_request_logs_status 失败: {e}"))
+            })?;
         Ok(())
     }
 
@@ -2638,14 +2639,38 @@ mod tests {
         Ok(names)
     }
 
-    /// PERF-36: `idx_request_logs_session` / `_status` are dropped by v23.
-    const EXPECTED_REQUEST_LOG_INDEXES: [&str; 5] = [
+    /// PERF-36: `idx_request_logs_status` is dropped by v23; the `session_id`
+    /// index is kept for per-session cost lookups (PRODUCT-14).
+    const EXPECTED_REQUEST_LOG_INDEXES: [&str; 6] = [
         "idx_request_logs_app_created_at",
         "idx_request_logs_created_at",
         "idx_request_logs_dedup_lookup_expr",
         "idx_request_logs_provider_created_at",
+        "idx_request_logs_session",
         "idx_request_logs_zero_cost",
     ];
+
+    /// PRODUCT-14 regression: per-session cost totals look rows up by
+    /// `session_id`, so v23 must keep that index (a full scan otherwise).
+    #[test]
+    fn session_cost_lookup_uses_the_session_index_after_v23() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        Database::create_tables_on_conn(&conn)?;
+        Database::apply_schema_migrations_on_conn(&conn)?;
+        let plan: Vec<String> = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM proxy_request_logs
+                 WHERE dedup_hidden = 0 AND session_id = 's1'",
+            )?
+            .query_map([], |row| row.get::<_, String>(3))?
+            .collect::<Result<_, _>>()?;
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("idx_request_logs_session")),
+            "{plan:?}"
+        );
+        Ok(())
+    }
 
     /// PERF-36: the status-filtered request-log list still reads through an
     /// index after the single-column status index is gone.
