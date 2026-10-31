@@ -17,9 +17,6 @@ pub enum ProxyError {
     #[error("failed to bind the listen address: {0}")]
     BindFailed(String),
 
-    #[error("timed out waiting for the proxy server to stop")]
-    StopTimeout,
-
     #[error("failed to stop the proxy server: {0}")]
     StopFailed(String),
 
@@ -94,7 +91,6 @@ impl ProxyError {
             ProxyError::AlreadyRunning
             | ProxyError::NotRunning
             | ProxyError::BindFailed(_)
-            | ProxyError::StopTimeout
             | ProxyError::StopFailed(_) => "cc_switch_proxy_error",
         }
     }
@@ -213,7 +209,6 @@ mod tests {
             ProxyError::AlreadyRunning,
             ProxyError::NotRunning,
             ProxyError::BindFailed("x".into()),
-            ProxyError::StopTimeout,
             ProxyError::StopFailed("x".into()),
             ProxyError::ForwardFailed("x".into()),
             ProxyError::NoAvailableProvider,
