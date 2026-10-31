@@ -1291,10 +1291,20 @@ fn log_outbound_request(tag: &str, url: &str, body: &Value, body_bytes: &[u8]) {
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("<none>");
-    log::info!("[{tag}] >>> 请求 URL: {url} (model={request_model})");
+    let log_url = super::gemini_url::redact_url_query_for_log(url);
+    log::info!("[{tag}] >>> 请求 URL: {log_url} (model={request_model})");
+    // SEC-13 / PERF-28: debug only records the body's *shape* (size, top-level
+    // keys, array lengths); a bounded excerpt of the content is written only at
+    // trace level.
     if log::log_enabled!(log::Level::Debug) {
-        let body_str = String::from_utf8_lossy(body_bytes);
         log::debug!(
+            "[{tag}] >>> 请求体: {}",
+            super::http_client::describe_body_shape(body, body_bytes.len())
+        );
+    }
+    if log::log_enabled!(log::Level::Trace) {
+        let body_str = String::from_utf8_lossy(body_bytes);
+        log::trace!(
             "[{tag}] >>> 请求体内容 ({}字节): {}",
             body_bytes.len(),
             super::http_client::log_body_excerpt(&body_str)

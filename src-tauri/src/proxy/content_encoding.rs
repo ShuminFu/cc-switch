@@ -27,42 +27,76 @@ fn is_single_supported(coding: &str) -> bool {
     )
 }
 
+/// Hard ceiling on the decompressed size of a single body (SEC-13): a
+/// hostile upstream (or client) could otherwise send a tiny decompression
+/// bomb that expands to gigabytes in memory.
+pub(crate) const MAX_DECOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(Debug)]
+struct DecompressedTooLarge(u64);
+
+impl std::fmt::Display for DecompressedTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "decompressed body exceeds {} bytes", self.0)
+    }
+}
+
+impl std::error::Error for DecompressedTooLarge {}
+
+fn is_too_large(err: &std::io::Error) -> bool {
+    err.get_ref()
+        .is_some_and(|inner| inner.is::<DecompressedTooLarge>())
+}
+
+/// Read `reader` to the end, failing once more than `limit` bytes come out.
+fn read_bounded(reader: impl Read, limit: u64) -> Result<Vec<u8>, std::io::Error> {
+    let mut out = Vec::new();
+    reader.take(limit + 1).read_to_end(&mut out)?;
+    if out.len() as u64 > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            DecompressedTooLarge(limit),
+        ));
+    }
+    Ok(out)
+}
+
 /// 解压单个 content-coding。未知编码返回 `Ok(None)`。
-fn decompress_single(coding: &str, body: &[u8]) -> Result<Option<Vec<u8>>, std::io::Error> {
+fn decompress_single(
+    coding: &str,
+    body: &[u8],
+    limit: u64,
+) -> Result<Option<Vec<u8>>, std::io::Error> {
     match coding {
-        "gzip" | "x-gzip" => {
-            let mut decoder = flate2::read::GzDecoder::new(body);
-            let mut decompressed = Vec::new();
-            decoder.read_to_end(&mut decompressed)?;
-            Ok(Some(decompressed))
-        }
+        "gzip" | "x-gzip" => Ok(Some(read_bounded(
+            flate2::read::GzDecoder::new(body),
+            limit,
+        )?)),
         "deflate" => {
             // RFC 9110: deflate 指 zlib 包裹格式；但部分上游 / 客户端发 raw deflate 流。
             // 先按规范尝试 zlib，失败再回退 raw —— 否则合规来源必然解压失败，
             // 原始压缩字节会被 fail-open 透传给 JSON 解析（#2234 形态 C 之一）。
-            let mut decompressed = Vec::new();
-            let mut zlib = flate2::read::ZlibDecoder::new(body);
-            match zlib.read_to_end(&mut decompressed) {
-                Ok(_) => Ok(Some(decompressed)),
-                Err(zlib_err) => {
+            match read_bounded(flate2::read::ZlibDecoder::new(body), limit) {
+                Ok(decompressed) => Ok(Some(decompressed)),
+                Err(zlib_err) if !is_too_large(&zlib_err) => {
                     log::debug!("deflate 按 zlib 解压失败（{zlib_err}），回退 raw deflate");
-                    let mut decompressed = Vec::new();
-                    let mut raw = flate2::read::DeflateDecoder::new(body);
-                    raw.read_to_end(&mut decompressed)?;
-                    Ok(Some(decompressed))
+                    Ok(Some(read_bounded(
+                        flate2::read::DeflateDecoder::new(body),
+                        limit,
+                    )?))
                 }
+                Err(too_large) => Err(too_large),
             }
         }
-        "br" => {
-            let mut decompressed = Vec::new();
-            brotli::BrotliDecompress(&mut std::io::Cursor::new(body), &mut decompressed)?;
-            Ok(Some(decompressed))
-        }
-        "zstd" | "zst" => {
-            // Codex 登录态对请求体启用 zstd（Compression::Zstd）；上游也可能 zstd 压缩响应。
-            let decompressed = zstd::stream::decode_all(std::io::Cursor::new(body))?;
-            Ok(Some(decompressed))
-        }
+        "br" => Ok(Some(read_bounded(
+            brotli::Decompressor::new(body, 4096),
+            limit,
+        )?)),
+        // Codex 登录态对请求体启用 zstd（Compression::Zstd）；上游也可能 zstd 压缩响应。
+        "zstd" | "zst" => Ok(Some(read_bounded(
+            zstd::stream::read::Decoder::new(body)?,
+            limit,
+        )?)),
         _ => Ok(None),
     }
 }
@@ -75,6 +109,15 @@ fn decompress_single(coding: &str, body: &[u8]) -> Result<Option<Vec<u8>>, std::
 pub(crate) fn decompress_body(
     content_encoding: &str,
     body: &[u8],
+) -> Result<Option<Vec<u8>>, std::io::Error> {
+    decompress_body_bounded(content_encoding, body, MAX_DECOMPRESSED_BYTES)
+}
+
+/// [`decompress_body`] with an explicit output-size ceiling per coding.
+pub(crate) fn decompress_body_bounded(
+    content_encoding: &str,
+    body: &[u8],
+    limit: u64,
 ) -> Result<Option<Vec<u8>>, std::io::Error> {
     let codings = split_codings(content_encoding);
     if codings.is_empty() {
@@ -90,7 +133,7 @@ pub(crate) fn decompress_body(
     let mut data: Option<Vec<u8>> = None;
     for coding in codings.iter().rev() {
         let input = data.as_deref().unwrap_or(body);
-        match decompress_single(coding, input)? {
+        match decompress_single(coding, input, limit)? {
             Some(decompressed) => data = Some(decompressed),
             // 上面 is_single_supported 已校验，理论不会发生；防御性兜底。
             None => return Ok(None),
@@ -129,6 +172,50 @@ pub(crate) fn get_content_encoding(headers: &HeaderMap) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn decompression_bomb_is_rejected() {
+        use flate2::{write::GzEncoder, Compression};
+        use std::io::Write;
+        // 4 MiB of zeros compresses to a few KB; with a 1 MiB ceiling it must
+        // be rejected instead of being expanded in memory.
+        let mut enc = GzEncoder::new(Vec::new(), Compression::best());
+        enc.write_all(&vec![0u8; 4 * 1024 * 1024]).unwrap();
+        let bomb = enc.finish().unwrap();
+        assert!(bomb.len() < 64 * 1024);
+        let err = super::decompress_body_bounded("gzip", &bomb, 1024 * 1024).unwrap_err();
+        assert!(err.to_string().contains("exceeds"), "{err}");
+        for coding in ["deflate", "br", "zstd"] {
+            let data = vec![0u8; 2 * 1024 * 1024];
+            let compressed = match coding {
+                "deflate" => {
+                    let mut e = flate2::write::ZlibEncoder::new(Vec::new(), Compression::best());
+                    e.write_all(&data).unwrap();
+                    e.finish().unwrap()
+                }
+                "br" => {
+                    let mut out = Vec::new();
+                    brotli::BrotliCompress(
+                        &mut std::io::Cursor::new(&data),
+                        &mut out,
+                        &Default::default(),
+                    )
+                    .unwrap();
+                    out
+                }
+                _ => zstd::stream::encode_all(std::io::Cursor::new(&data), 3).unwrap(),
+            };
+            assert!(
+                super::decompress_body_bounded(coding, &compressed, 1024 * 1024).is_err(),
+                "{coding} bomb not rejected"
+            );
+            // Within the limit it still decodes.
+            let ok = super::decompress_body_bounded(coding, &compressed, 4 * 1024 * 1024)
+                .unwrap()
+                .unwrap();
+            assert_eq!(ok.len(), data.len(), "{coding}");
+        }
+    }
+
     use super::*;
     use axum::http::HeaderValue;
 
