@@ -15,7 +15,6 @@ pub struct GeminiAdapter;
 
 /// OAuth 凭证结构
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct OAuthCredentials {
     pub access_token: String,
     pub refresh_token: Option<String>,
@@ -23,7 +22,6 @@ pub struct OAuthCredentials {
     pub client_secret: Option<String>,
 }
 
-#[allow(dead_code)]
 impl OAuthCredentials {
     /// 检查是否需要刷新 token（有 refresh_token 但没有有效的 access_token）
     pub fn needs_refresh(&self) -> bool {
@@ -71,8 +69,8 @@ pub(crate) fn google_oauth_bearer_token(auth: &AuthInfo) -> Result<String, Proxy
         .unwrap_or_else(|| auth.api_key.trim());
     if token.is_empty() || token.starts_with('{') {
         return Err(ProxyError::AuthError(
-            "Gemini OAuth access_token is missing or expired (CC Switch cannot refresh it yet). \
-             Run the gemini CLI to log in again, then paste the refreshed \
+            "Gemini OAuth access_token is missing or expired and the credential has no \
+             refresh_token/client_id/client_secret to refresh it with. Run the gemini CLI to log in again, then paste the refreshed \
              ~/.gemini/oauth_creds.json into the provider's API key."
                 .to_string(),
         ));

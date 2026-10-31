@@ -338,7 +338,17 @@ impl CopilotToken {
         let now = chrono::Utc::now().timestamp();
         self.expires_at - now < TOKEN_REFRESH_BUFFER_SECONDS
     }
+
+    /// The token has actually expired (no refresh buffer).
+    pub fn is_expired(&self) -> bool {
+        chrono::Utc::now().timestamp() >= self.expires_at
+    }
 }
+
+/// Per-request timeout for token refresh calls (PERF-44): the global client
+/// allows 600 s, which would park every request of the account behind a
+/// blackholed auth endpoint.
+pub(crate) const TOKEN_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Copilot Token API 响应
 #[derive(Debug, Deserialize)]
@@ -824,9 +834,25 @@ impl CopilotAuthManager {
                     account_id.to_string(),
                     (github_token.clone(), std::time::Instant::now()),
                 );
+                if let Some(token) = self.cached_unexpired_token(account_id).await {
+                    log::warn!(
+                        "[CopilotAuth] 账号 {account_id} 刷新被拒绝，沿用尚未过期的缓存 Token"
+                    );
+                    return Ok(token);
+                }
                 return Err(CopilotAuthError::GitHubTokenInvalid);
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                // PERF-44: a transient refresh failure inside the refresh
+                // buffer must not reject requests the cached token can serve.
+                if let Some(token) = self.cached_unexpired_token(account_id).await {
+                    log::warn!(
+                        "[CopilotAuth] 账号 {account_id} 刷新失败（{error}），沿用尚未过期的缓存 Token"
+                    );
+                    return Ok(token);
+                }
+                return Err(error);
+            }
         }
 
         // 返回新 token
@@ -834,6 +860,16 @@ impl CopilotAuthManager {
         tokens.get(account_id).map(|t| t.token.clone()).ok_or(
             CopilotAuthError::CopilotTokenFetchFailed("刷新后仍无令牌".to_string()),
         )
+    }
+
+    /// Cached Copilot token for `account_id` if it has not actually expired yet.
+    async fn cached_unexpired_token(&self, account_id: &str) -> Option<String> {
+        self.copilot_tokens
+            .read()
+            .await
+            .get(account_id)
+            .filter(|t| !t.is_expired())
+            .map(|t| t.token.clone())
     }
 
     /// 获取有效的 Copilot Token（向后兼容：使用第一个账号）
@@ -1460,6 +1496,7 @@ impl CopilotAuthManager {
             .header("User-Agent", COPILOT_USER_AGENT)
             .header("Editor-Version", COPILOT_EDITOR_VERSION)
             .header("Editor-Plugin-Version", COPILOT_PLUGIN_VERSION)
+            .timeout(TOKEN_REFRESH_TIMEOUT)
             .send()
             .await?;
 
