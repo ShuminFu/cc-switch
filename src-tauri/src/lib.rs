@@ -2578,6 +2578,25 @@ mod tests {
         crate::import_live_mcp_servers(&state);
         assert!(db.get_all_mcp_servers().unwrap()["ctx7"].apps.codex);
 
+        // A second launch with unchanged live configs writes nothing: the
+        // row's sync_rev stays put, so startup does not trigger a sync upload.
+        let rev = || -> i64 {
+            let conn = db.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT sync_rev FROM mcp_servers WHERE id = 'ctx7'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let before = rev();
+        assert!(!crate::import_live_mcp_servers(&state));
+        assert_eq!(
+            rev(),
+            before,
+            "an unchanged startup import must not rewrite rows"
+        );
+
         crate::services::mcp::McpService::sync_enabled_for_app(
             &state,
             &crate::app_config::AppType::Codex,

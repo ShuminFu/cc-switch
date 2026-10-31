@@ -243,6 +243,14 @@ impl McpService {
                 let mut existing = state.db.get_all_mcp_servers()?;
                 for server in servers.values() {
                     let to_save = if let Some(existing_server) = existing.get(&server.id) {
+                        // Already known and enabled for this app: nothing to
+                        // write. Startup imports from every live config
+                        // (CFG-40), and a no-op save would still bump the
+                        // row's sync_rev and trigger an auto-sync upload on
+                        // every launch.
+                        if existing_server.apps.is_enabled_for(app) {
+                            continue;
+                        }
                         let mut merged = existing_server.clone();
                         merged.apps.set_enabled_for(app, true);
                         merged
