@@ -75,9 +75,7 @@ describe("ConfigHistoryPanel (PRODUCT-21)", () => {
     });
     expect(restoreButtons).toHaveLength(1);
     fireEvent.click(restoreButtons[0]);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.confirm" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
     await waitFor(() =>
       expect(restored).toEqual([{ app: "claude", id: "p1", versionId: "1-0" }]),
     );

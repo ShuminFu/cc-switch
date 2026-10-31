@@ -56,15 +56,17 @@ describe("CommonConfigModal (FE-PROV-18)", () => {
         onSave={onSave}
       />,
     );
-    expect(screen.getByText("commonConfig.emptyTitle")).toBeInTheDocument();
+    expect(
+      screen.getByText("No common config snippet yet"),
+    ).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("editor-toml"), {
       target: { value: "model = 'x'" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith("model = 'x'"));
     expect(onClose).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
@@ -85,7 +87,7 @@ describe("CommonConfigModal (FE-PROV-18)", () => {
     fireEvent.change(screen.getByLabelText("editor-json"), {
       target: { value: "{}" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onSave).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
@@ -111,7 +113,7 @@ describe("CommonConfigModal (FE-PROV-18)", () => {
     });
     expect(onChange).toHaveBeenCalledWith('{"env":{}}');
     expect(screen.getByRole("button", { name: "Extract" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onClose).toHaveBeenCalled();
   });
 });

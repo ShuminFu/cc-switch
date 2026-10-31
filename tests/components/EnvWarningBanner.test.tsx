@@ -107,10 +107,10 @@ describe("EnvWarningBanner", () => {
         onDeleted={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByText("env.actions.expand"));
+    fireEvent.click(screen.getByText("View Details"));
     fireEvent.click(screen.getByLabelText("ANTHROPIC_API_KEY"));
-    fireEvent.click(screen.getByText("env.actions.deleteSelected"));
-    fireEvent.click(await screen.findByText("env.confirm.confirm"));
+    fireEvent.click(screen.getByText(/^Delete Selected \(\d+\)$/));
+    fireEvent.click(await screen.findByText("Confirm Delete"));
 
     await waitFor(() => expect(toastMock.warning).toHaveBeenCalledTimes(1));
     expect(toastMock.warning.mock.calls[0][0]).toContain(
@@ -129,10 +129,10 @@ describe("EnvWarningBanner", () => {
         onDeleted={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByText("env.actions.expand"));
+    fireEvent.click(screen.getByText("View Details"));
     fireEvent.click(screen.getByLabelText("ANTHROPIC_API_KEY"));
-    fireEvent.click(screen.getByText("env.actions.deleteSelected"));
-    fireEvent.click(await screen.findByText("env.confirm.confirm"));
+    fireEvent.click(screen.getByText(/^Delete Selected \(\d+\)$/));
+    fireEvent.click(await screen.findByText("Confirm Delete"));
     await waitFor(() => expect(toastMock.success).toHaveBeenCalled());
     expect(toastMock.warning).not.toHaveBeenCalled();
   });

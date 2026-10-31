@@ -61,7 +61,7 @@ describe("EndpointSpeedTest in edit mode (FE-PROV-10)", () => {
       );
     expect(removeStored).toBeDefined();
     fireEvent.click(removeStored!);
-    fireEvent.click(screen.getByRole("button", { name: /common\.save/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
 
     expect(onClose).toHaveBeenCalled();
     expect(api.addCustomEndpoint).not.toHaveBeenCalled();
@@ -82,7 +82,7 @@ describe("EndpointSpeedTest in edit mode (FE-PROV-10)", () => {
   it("Cancel neither writes nor reports anything", async () => {
     const { onCustomEndpointsChange } = renderPanel();
     await screen.findByText("https://stored.example");
-    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCustomEndpointsChange).not.toHaveBeenCalled();
     expect(api.addCustomEndpoint).not.toHaveBeenCalled();
     expect(api.removeCustomEndpoint).not.toHaveBeenCalled();

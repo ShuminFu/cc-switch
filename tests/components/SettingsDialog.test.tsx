@@ -285,7 +285,7 @@ describe("SettingsPage Component", () => {
     renderSettingsPage();
     expect(screen.queryByTestId("tab-advanced")).not.toBeInTheDocument();
     const box = screen.getByRole("combobox", {
-      name: "settings.search.label",
+      name: "Search settings",
     });
     fireEvent.change(box, { target: { value: "webdav" } });
     fireEvent.keyDown(box, { key: "Enter" });

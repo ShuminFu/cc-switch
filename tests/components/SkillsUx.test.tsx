@@ -125,10 +125,8 @@ describe("Skill uninstall warnings and unmanaged conflicts (SVC-38, SVC-45)", ()
       </QueryClientProvider>,
     );
     await screen.findByText("Alpha");
-    fireEvent.click(screen.getByText("skills.checkUpdates"));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "skills.uninstall" }),
-    );
+    fireEvent.click(screen.getByText("Check Updates"));
+    fireEvent.click(await screen.findByRole("button", { name: "Uninstall" }));
     const dialog = await screen.findByRole("dialog");
     const buttons = Array.from(dialog.querySelectorAll("button"));
     fireEvent.click(buttons[buttons.length - 1]);

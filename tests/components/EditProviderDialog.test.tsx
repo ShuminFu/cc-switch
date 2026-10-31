@@ -343,15 +343,13 @@ describe("EditProviderDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "panel-back" }));
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(
-      await screen.findByText("common.unsavedChangesTitle"),
+      await screen.findByText("Discard unsaved changes?"),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onOpenChange).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "panel-back" }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.discard" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
