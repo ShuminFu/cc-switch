@@ -130,3 +130,21 @@ pub async fn delete_sessions(
         .await
         .map_err(|e| format!("Failed to delete sessions: {e}"))
 }
+
+/// Recently deleted (trashed) file-based sessions, newest first (SESS-41).
+#[tauri::command]
+pub async fn list_session_trash() -> Result<Vec<session_manager::trash::TrashEntry>, String> {
+    tauri::async_runtime::spawn_blocking(session_manager::trash::list)
+        .await
+        .map_err(|e| format!("Failed to list session trash: {e}"))
+}
+
+/// Move a trashed session back to where it was deleted from (SESS-41).
+#[tauri::command]
+pub async fn restore_session_from_trash(
+    id: String,
+) -> Result<session_manager::trash::TrashEntry, String> {
+    tauri::async_runtime::spawn_blocking(move || session_manager::trash::restore(&id))
+        .await
+        .map_err(|e| format!("Failed to restore session: {e}"))?
+}

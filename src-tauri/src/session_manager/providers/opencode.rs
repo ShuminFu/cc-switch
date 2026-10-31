@@ -362,45 +362,25 @@ pub fn delete_session(storage: &Path, path: &Path, session_id: &str) -> Result<b
         }
     }
 
+    // SESS-41: everything belonging to the session moves to the trash as one
+    // restorable entry instead of being deleted.
     let part_root = storage.join("part");
-    for message_id in &message_ids {
-        let part_dir = part_root.join(message_id);
-        if part_dir.parent() != Some(part_root.as_path()) {
-            continue;
-        }
-        remove_dir_all_if_exists(&part_dir).map_err(|e| {
-            format!(
-                "Failed to delete OpenCode part directory {}: {e}",
-                part_dir.display()
-            )
-        })?;
-    }
-
-    let session_diff_path = storage
-        .join("session_diff")
-        .join(format!("{session_id}.json"));
-    remove_file_if_exists(&session_diff_path).map_err(|e| {
-        format!(
-            "Failed to delete OpenCode session diff {}: {e}",
-            session_diff_path.display()
-        )
-    })?;
-
-    remove_dir_all_if_exists(path).map_err(|e| {
-        format!(
-            "Failed to delete OpenCode message directory {}: {e}",
-            path.display()
-        )
-    })?;
-
+    let mut doomed: Vec<std::path::PathBuf> = message_ids
+        .iter()
+        .map(|message_id| part_root.join(message_id))
+        .filter(|part_dir| part_dir.parent() == Some(part_root.as_path()))
+        .collect();
+    doomed.push(
+        storage
+            .join("session_diff")
+            .join(format!("{session_id}.json")),
+    );
+    doomed.push(path.to_path_buf());
     if let Some(session_file) = find_session_file(storage, session_id) {
-        remove_file_if_exists(&session_file).map_err(|e| {
-            format!(
-                "Failed to delete OpenCode session file {}: {e}",
-                session_file.display()
-            )
-        })?;
+        doomed.push(session_file);
     }
+    let refs: Vec<&Path> = doomed.iter().map(|p| p.as_path()).collect();
+    crate::session_manager::trash::move_to_trash("opencode", session_id, &refs)?;
 
     Ok(true)
 }
@@ -646,22 +626,6 @@ fn find_session_file(storage: &Path, session_id: &str) -> Option<PathBuf> {
     files
         .into_iter()
         .find(|path| path.file_name().and_then(|name| name.to_str()) == Some(expected.as_str()))
-}
-
-fn remove_file_if_exists(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
-}
-
-fn remove_dir_all_if_exists(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
 }
 
 #[cfg(test)]

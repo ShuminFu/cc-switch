@@ -132,12 +132,8 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
         ));
     }
 
-    std::fs::remove_file(path).map_err(|e| {
-        format!(
-            "Failed to delete Gemini session file {}: {e}",
-            path.display()
-        )
-    })?;
+    // SESS-41: move to the restorable session trash instead of deleting.
+    crate::session_manager::trash::move_to_trash("gemini", session_id, &[path])?;
 
     Ok(true)
 }

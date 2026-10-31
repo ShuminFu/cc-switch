@@ -126,12 +126,8 @@ pub fn delete_session(root: &Path, path: &Path, session_id: &str) -> Result<bool
             session_dir.display()
         ));
     }
-    std::fs::remove_dir_all(session_dir).map_err(|e| {
-        format!(
-            "Failed to delete Grok Build session directory {}: {e}",
-            session_dir.display()
-        )
-    })?;
+    // SESS-41: move to the restorable session trash instead of deleting.
+    crate::session_manager::trash::move_to_trash("grokbuild", session_id, &[session_dir])?;
     Ok(true)
 }
 

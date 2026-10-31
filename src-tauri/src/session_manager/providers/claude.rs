@@ -98,22 +98,17 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
         ));
     }
 
-    if let Some(stem) = path.file_stem() {
-        let sibling = path.parent().unwrap_or_else(|| Path::new("")).join(stem);
-        remove_path_if_exists(&sibling).map_err(|e| {
-            format!(
-                "Failed to delete Claude session sidecar {}: {e}",
-                sibling.display()
-            )
-        })?;
+    // SESS-41: the transcript and its sidecar dir (subagents, tool results)
+    // move to the session trash as one restorable entry.
+    let sibling = path
+        .file_stem()
+        .map(|stem| path.parent().unwrap_or_else(|| Path::new("")).join(stem));
+    let mut doomed: Vec<&Path> = Vec::new();
+    if let Some(sibling) = sibling.as_deref() {
+        doomed.push(sibling);
     }
-
-    std::fs::remove_file(path).map_err(|e| {
-        format!(
-            "Failed to delete Claude session file {}: {e}",
-            path.display()
-        )
-    })?;
+    doomed.push(path);
+    crate::session_manager::trash::move_to_trash("claude", session_id, &doomed)?;
 
     Ok(true)
 }
@@ -345,20 +340,6 @@ fn looks_like_uuid(value: &str) -> bool {
             8 | 13 | 18 | 23 => c == '-',
             _ => c.is_ascii_hexdigit(),
         })
-}
-
-fn remove_path_if_exists(path: &Path) -> std::io::Result<()> {
-    match std::fs::metadata(path) {
-        Ok(meta) => {
-            if meta.is_dir() {
-                std::fs::remove_dir_all(path)
-            } else {
-                std::fs::remove_file(path)
-            }
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
 }
 
 #[cfg(test)]

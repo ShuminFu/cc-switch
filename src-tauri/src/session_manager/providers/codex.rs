@@ -286,12 +286,8 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
         ));
     }
 
-    std::fs::remove_file(path).map_err(|e| {
-        format!(
-            "Failed to delete Codex session file {}: {e}",
-            path.display()
-        )
-    })?;
+    // SESS-41: move to the restorable session trash instead of deleting.
+    crate::session_manager::trash::move_to_trash("codex", session_id, &[path])?;
 
     // Keep Codex's own resume picker in sync. The `threads` table in the state
     // DB is owned by Codex and left untouched.
