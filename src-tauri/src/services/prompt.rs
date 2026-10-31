@@ -17,7 +17,50 @@ fn get_unix_timestamp() -> Result<i64, AppError> {
 
 pub struct PromptService;
 
+/// Settings key holding the SHA-256 of the prompt file content cc-switch last
+/// wrote for an app (SVC-39). Used to tell an external edit of the live file
+/// (which should be backfilled) from content cc-switch put there itself.
+fn live_hash_key(app: &AppType) -> String {
+    format!("prompt_live_written_hash_{}", app.as_str())
+}
+
+fn content_hash(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(content.as_bytes()))
+}
+
 impl PromptService {
+    /// Write the live prompt file and remember what was written.
+    fn write_live(state: &AppState, app: &AppType, content: &str) -> Result<(), AppError> {
+        let target_path = prompt_file_path(app)?;
+        write_text_file(&target_path, content)?;
+        if let Err(e) = state
+            .db
+            .set_setting(&live_hash_key(app), &content_hash(content))
+        {
+            log::warn!(
+                "Failed to record prompt live hash for {}: {e}",
+                app.as_str()
+            );
+        }
+        Ok(())
+    }
+
+    /// Whether `live` was changed outside cc-switch since cc-switch last wrote
+    /// it. Without a recorded hash (older versions), fall back to comparing
+    /// with the enabled prompt's content.
+    fn live_edited_externally(
+        state: &AppState,
+        app: &AppType,
+        live: &str,
+        enabled: Option<&Prompt>,
+    ) -> bool {
+        match state.db.get_setting(&live_hash_key(app)).ok().flatten() {
+            Some(hash) if !hash.is_empty() => hash != content_hash(live),
+            _ => enabled.is_none_or(|p| p.content.trim() != live.trim()),
+        }
+    }
+
     pub fn get_prompts(
         state: &AppState,
         app: AppType,
@@ -43,13 +86,16 @@ impl PromptService {
             .get(&prompt.id)
             .is_some_and(|p| p.enabled);
 
+        if is_enabled {
+            // 启用提示词：先写文件再保存 DB，文件写入失败时 DB 不变 (SVC-39)
+            Self::write_live(state, &app, &prompt.content)?;
+            state.db.save_prompt(app.as_str(), &prompt)?;
+            return Ok(());
+        }
+
         state.db.save_prompt(app.as_str(), &prompt)?;
 
-        if is_enabled {
-            // 启用提示词：写入内容到文件
-            let target_path = prompt_file_path(&app)?;
-            write_text_file(&target_path, &prompt.content)?;
-        } else if was_enabled {
+        if was_enabled {
             // 禁用提示词：检查是否还有其他已启用的提示词
             let prompts = state.db.get_prompts(app.as_str())?;
             let any_enabled = prompts.values().any(|p| p.enabled);
@@ -58,7 +104,7 @@ impl PromptService {
                 // 所有提示词都已禁用，清空文件
                 let target_path = prompt_file_path(&app)?;
                 if target_path.exists() {
-                    write_text_file(&target_path, "")?;
+                    Self::write_live(state, &app, "")?;
                 }
             }
         }
@@ -84,9 +130,17 @@ impl PromptService {
         let target_path = prompt_file_path(&app)?;
         if target_path.exists() {
             if let Ok(live_content) = std::fs::read_to_string(&target_path) {
-                if !live_content.trim().is_empty() {
-                    let mut prompts = state.db.get_prompts(app.as_str())?;
-
+                let mut prompts = state.db.get_prompts(app.as_str())?;
+                let externally_edited = Self::live_edited_externally(
+                    state,
+                    &app,
+                    &live_content,
+                    prompts.values().find(|p| p.enabled),
+                );
+                // Only backfill an external edit: content cc-switch wrote
+                // itself must not overwrite a newer UI edit, nor spawn backup
+                // prompts on every toggle (SVC-39).
+                if externally_edited && !live_content.trim().is_empty() {
                     // 尝试回填到当前已启用的提示词
                     if let Some((enabled_id, enabled_prompt)) = prompts
                         .iter_mut()
@@ -130,23 +184,37 @@ impl PromptService {
         }
 
         // 启用目标提示词并写入文件
-        let mut prompts = state.db.get_prompts(app.as_str())?;
-
-        for prompt in prompts.values_mut() {
-            prompt.enabled = false;
-        }
-
-        if let Some(prompt) = prompts.get_mut(id) {
-            prompt.enabled = true;
-            write_text_file(&target_path, &prompt.content)?; // 原子写入
-            state.db.save_prompt(app.as_str(), prompt)?;
-        } else {
+        let prompts = state.db.get_prompts(app.as_str())?;
+        let Some(target) = prompts.get(id).cloned() else {
             return Err(AppError::InvalidInput(format!("提示词 {id} 不存在")));
-        }
+        };
+        let previous_live = std::fs::read_to_string(&target_path).ok();
 
-        // Save all prompts to disable others
-        for (_, prompt) in prompts.iter() {
-            state.db.save_prompt(app.as_str(), prompt)?;
+        Self::write_live(state, &app, &target.content)?; // 原子写入
+
+        // Disable the others first, then enable the target: a failure part
+        // way leaves at most one enabled prompt, never two. Only rows whose
+        // flag changes are saved.
+        let result = (|| {
+            for prompt in prompts.values().filter(|p| p.enabled && p.id != id) {
+                let mut disabled = prompt.clone();
+                disabled.enabled = false;
+                state.db.save_prompt(app.as_str(), &disabled)?;
+            }
+            if !target.enabled {
+                let mut enabled = target.clone();
+                enabled.enabled = true;
+                state.db.save_prompt(app.as_str(), &enabled)?;
+            }
+            Ok::<(), AppError>(())
+        })();
+        if let Err(err) = result {
+            if let Some(previous) = previous_live {
+                if let Err(e) = Self::write_live(state, &app, &previous) {
+                    log::warn!("Failed to restore prompt file after DB error: {e}");
+                }
+            }
+            return Err(err);
         }
 
         Ok(())
