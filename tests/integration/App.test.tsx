@@ -515,6 +515,10 @@ describe("App integration with MSW", { timeout: 20_000 }, () => {
     fireEvent.click(screen.getByTitle("MCP Management"));
     expect(await screen.findByTestId("mcp-page")).toBeInTheDocument();
     expect(screen.getByText("MCP Server Management").tagName).toBe("H1");
+    // Sub-page headers link to their manual page (DOCS-16).
+    expect(
+      screen.getByRole("button", { name: "Open the manual", hidden: true }),
+    ).toBeInTheDocument();
     expect(localStorage.getItem("cc-switch-last-view")).toBe("mcp");
 
     // Header actions are rendered by the page and reach its panel handle.

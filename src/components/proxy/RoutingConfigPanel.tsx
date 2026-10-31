@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/common/SegmentedControl";
+import { HelpLink } from "@/components/common/HelpLink";
 import { useRoutingConfig, useSetRoutingConfig } from "@/lib/query/proxy";
 import { useFailoverQueue } from "@/lib/query/failover";
 import { showError } from "@/lib/errors/showError";
@@ -102,6 +103,7 @@ export function RoutingConfigPanel({
         <h4 className="flex items-center gap-2 text-sm font-semibold">
           <Shuffle className="h-4 w-4" />
           {t("proxy.routing.title", { defaultValue: "Routing" })}
+          <HelpLink topic="proxy.routing" />
         </h4>
         <p className="text-xs text-muted-foreground">
           {t("proxy.routing.description", {

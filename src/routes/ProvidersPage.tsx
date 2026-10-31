@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useRef, useState } from "react";
+import { HelpLink } from "@/components/common/HelpLink";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -359,6 +360,7 @@ export default function ProvidersPage() {
             <Settings className="w-4 h-4" />
           </Button>
           <UpdateBadge onClick={() => navigate("settings", { tab: "about" })} />
+          <HelpLink topic="providers.switch" />
           {isCurrentAppTakeoverActive && (
             <Button
               variant="ghost"
