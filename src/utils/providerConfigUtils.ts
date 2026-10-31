@@ -11,13 +11,35 @@ const isPlainObject = (value: unknown): value is Record<string, any> => {
   return Object.prototype.toString.call(value) === "[object Object]";
 };
 
+/**
+ * Keys that must never be walked or assigned when merging untrusted JSON
+ * (common-config snippets come from the DB, sync and SQL import). Writing
+ * through them would mutate `Object.prototype` (FE-ARCH-40).
+ */
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+const safeEntries = (source: Record<string, any>): [string, any][] =>
+  Object.entries(source).filter(([key]) => !UNSAFE_KEYS.has(key));
+
+const hasOwn = (target: object, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(target, key);
+
+/** True when a parsed JSON value contains a prototype-polluting key anywhere. */
+export const containsUnsafeKeys = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.some(containsUnsafeKeys);
+  if (!isPlainObject(value)) return false;
+  return Object.keys(value).some(
+    (key) => UNSAFE_KEYS.has(key) || containsUnsafeKeys(value[key]),
+  );
+};
+
 const deepMerge = (
   target: Record<string, any>,
   source: Record<string, any>,
 ): Record<string, any> => {
-  Object.entries(source).forEach(([key, value]) => {
+  safeEntries(source).forEach(([key, value]) => {
     if (isPlainObject(value)) {
-      if (!isPlainObject(target[key])) {
+      if (!hasOwn(target, key) || !isPlainObject(target[key])) {
         target[key] = {};
       }
       deepMerge(target[key], value);
@@ -33,8 +55,8 @@ const deepRemove = (
   target: Record<string, any>,
   source: Record<string, any>,
 ) => {
-  Object.entries(source).forEach(([key, value]) => {
-    if (!(key in target)) return;
+  safeEntries(source).forEach(([key, value]) => {
+    if (!hasOwn(target, key)) return;
 
     if (isPlainObject(value) && isPlainObject(target[key])) {
       // 只移除完全匹配的嵌套属性
@@ -52,8 +74,8 @@ const deepRemove = (
 const isSubset = (target: any, source: any): boolean => {
   if (isPlainObject(source)) {
     if (!isPlainObject(target)) return false;
-    return Object.entries(source).every(([key, value]) =>
-      isSubset(target[key], value),
+    return safeEntries(source).every(([key, value]) =>
+      isSubset(hasOwn(target, key) ? target[key] : undefined, value),
     );
   }
 
@@ -87,6 +109,13 @@ export const validateJsonConfig = (
       return i18n.t("providerForm.validation.fieldMustBeObject", {
         field,
         defaultValue: "{{field}} must be a JSON object",
+      });
+    }
+    if (containsUnsafeKeys(parsed)) {
+      return i18n.t("providerForm.validation.fieldUnsafeKey", {
+        field,
+        defaultValue:
+          "{{field}} must not contain __proto__, constructor or prototype keys",
       });
     }
     return "";
