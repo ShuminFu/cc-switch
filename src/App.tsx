@@ -29,6 +29,8 @@ import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
 import { ErrorBoundary } from "@/app/ErrorBoundary";
 import { EnvConflictBanner } from "@/app/EnvConflictBanner";
 import { ManagedPolicyBanner } from "@/components/policy/ManagedPolicyBanner";
+import { StartupWarningsNotifier } from "@/components/notifications/StartupWarningsNotifier";
+import { KeyboardShortcutsDialog } from "@/components/common/KeyboardShortcutsDialog";
 import {
   NavigationProvider,
   VIEW_PARENT,
@@ -156,6 +158,8 @@ function AppShell() {
       />
       <EnvConflictBanner activeApp={activeApp} />
       <ManagedPolicyBanner />
+      <StartupWarningsNotifier />
+      <KeyboardShortcutsDialog />
 
       <PageHeaderSlotsProvider value={slots}>
         <header

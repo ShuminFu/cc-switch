@@ -134,6 +134,21 @@ const UnifiedSkillsPanel = React.forwardRef<
               : undefined,
             closeButton: true,
           });
+          // Leftover app-directory entries that could not be removed (SVC-38).
+          const warnings = result.warnings ?? [];
+          if (warnings.length > 0) {
+            toast.warning(
+              t("skills.uninstallWarnings", {
+                defaultValue:
+                  "Some files could not be removed; delete them manually",
+              }),
+              {
+                description: warnings.join("\n"),
+                duration: 15000,
+                closeButton: true,
+              },
+            );
+          }
         } catch (error) {
           toast.error(t("common.error"), { description: String(error) });
           throw error;
@@ -524,6 +539,7 @@ interface ImportSkillsDialogProps {
     description?: string;
     foundIn: string[];
     path: string;
+    conflict?: boolean;
   }>;
   isImporting: boolean;
   onImport: (imports: ImportSkillSelection[]) => void;
@@ -744,6 +760,21 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
                   >
                     {skill.name}
                   </label>
+                  {skill.conflict && (
+                    <Badge
+                      variant="outline"
+                      className="ml-2 border-amber-500/50 text-amber-600 dark:text-amber-400"
+                      title={t("skills.unmanagedConflictHint", {
+                        defaultValue:
+                          "A managed skill named {{name}} exists but is not enabled for this app, and this folder is not a CC Switch copy. Check which version you want before importing.",
+                        name: skill.directory,
+                      })}
+                    >
+                      {t("skills.unmanagedConflict", {
+                        defaultValue: "Name conflict",
+                      })}
+                    </Badge>
+                  )}
                   {skill.description && (
                     <div className="text-sm text-muted-foreground line-clamp-1">
                       {skill.description}

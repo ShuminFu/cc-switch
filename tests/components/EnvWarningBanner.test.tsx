@@ -29,6 +29,7 @@ const conflict: EnvConflict = {
 beforeEach(() => {
   toastMock.success.mockReset();
   toastMock.error.mockReset();
+  toastMock.warning.mockReset();
 });
 
 describe("maskEnvValue", () => {
@@ -88,5 +89,58 @@ describe("EnvWarningBanner", () => {
       backupPath: "/backups/env-1.json",
     });
     await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(2));
+  });
+
+  it("warns about process-environment variables the delete skipped (SVC-48)", async () => {
+    mockInvoke({
+      delete_env_vars: {
+        backupPath: "/backups/env-2.json",
+        timestamp: "t",
+        conflicts: [],
+        skipped: [
+          {
+            varName: "ANTHROPIC_API_KEY",
+            sourceType: "system",
+            sourcePath: "process",
+            reason: "process_environment_unsupported",
+          },
+        ],
+      },
+    });
+    render(
+      <EnvWarningBanner
+        conflicts={[conflict]}
+        onDismiss={vi.fn()}
+        onDeleted={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText("env.actions.expand"));
+    fireEvent.click(screen.getByLabelText("ANTHROPIC_API_KEY"));
+    fireEvent.click(screen.getByText("env.actions.deleteSelected"));
+    fireEvent.click(await screen.findByText("env.confirm.confirm"));
+
+    await waitFor(() => expect(toastMock.warning).toHaveBeenCalledTimes(1));
+    expect(toastMock.warning.mock.calls[0][0]).toContain(
+      "could not be removed",
+    );
+  });
+
+  it("shows no skipped warning when every variable was removed", async () => {
+    mockInvoke({
+      delete_env_vars: { backupPath: "/b.json", timestamp: "t", conflicts: [] },
+    });
+    render(
+      <EnvWarningBanner
+        conflicts={[conflict]}
+        onDismiss={vi.fn()}
+        onDeleted={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText("env.actions.expand"));
+    fireEvent.click(screen.getByLabelText("ANTHROPIC_API_KEY"));
+    fireEvent.click(screen.getByText("env.actions.deleteSelected"));
+    fireEvent.click(await screen.findByText("env.confirm.confirm"));
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled());
+    expect(toastMock.warning).not.toHaveBeenCalled();
   });
 });

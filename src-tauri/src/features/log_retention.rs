@@ -88,6 +88,43 @@ pub fn set_request_log_retention(days: u32) -> Result<RequestLogRetention, Strin
     Ok(status())
 }
 
+/// Stream-check (connectivity probe) log retention in days; `0` keeps them
+/// forever. Stored in the device-local settings table (DB-25).
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamCheckRetention {
+    pub retention_days: i64,
+}
+
+fn get_stream_check(db: &crate::database::Database) -> StreamCheckRetention {
+    StreamCheckRetention {
+        retention_days: db.usage_retention().stream_check_days,
+    }
+}
+
+fn set_stream_check(
+    db: &crate::database::Database,
+    days: i64,
+) -> Result<StreamCheckRetention, AppError> {
+    let mut retention = db.usage_retention();
+    retention.stream_check_days = days;
+    db.set_usage_retention(retention)?;
+    Ok(get_stream_check(db))
+}
+
+#[tauri::command]
+pub fn get_stream_check_retention(state: State<'_, AppState>) -> StreamCheckRetention {
+    get_stream_check(&state.db)
+}
+
+#[tauri::command]
+pub fn set_stream_check_retention(
+    state: State<'_, AppState>,
+    days: i64,
+) -> Result<StreamCheckRetention, String> {
+    set_stream_check(&state.db, days).map_err(|e| e.to_string())
+}
+
 /// Roll up and delete every per-request row now. Returns the rows deleted.
 #[tauri::command]
 pub fn prune_request_logs_now(state: State<'_, AppState>) -> Result<u64, String> {
@@ -204,6 +241,19 @@ mod tests {
         assert_eq!(prune_now(&db).unwrap(), 1);
         assert_eq!(counts(&db).unwrap(), (0, 2));
         crate::settings::update_settings(crate::settings::AppSettings::default()).unwrap();
+    }
+
+    #[test]
+    fn stream_check_retention_round_trips_and_rejects_out_of_range() {
+        let db = crate::database::Database::memory().unwrap();
+        assert_eq!(get_stream_check(&db).retention_days, 7);
+        assert_eq!(set_stream_check(&db, 30).unwrap().retention_days, 30);
+        assert_eq!(set_stream_check(&db, 0).unwrap().retention_days, 0);
+        assert!(set_stream_check(&db, -1).is_err());
+        assert!(set_stream_check(&db, 99_999).is_err());
+        assert_eq!(get_stream_check(&db).retention_days, 0);
+        // The request-log window stored alongside is left untouched.
+        assert_eq!(db.usage_retention().request_log_days, 30);
     }
 
     #[test]

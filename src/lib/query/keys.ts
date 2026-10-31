@@ -179,6 +179,11 @@ export const queryKeys = {
     all: ["profiles"] as const,
   },
 
+  /** Claude Code subagents in ~/.claude/agents, PRODUCT-42. */
+  claudeAgents: {
+    all: ["claudeAgents"] as const,
+  },
+
   /** Managed (team) policy file state, PRODUCT-24. */
   policy: {
     status: ["managedPolicyStatus"] as const,
@@ -187,6 +192,8 @@ export const queryKeys = {
   /** Request-log retention window, PRODUCT-31. */
   logRetention: {
     status: ["requestLogRetention"] as const,
+    /** Stream-check (connectivity probe) log retention, DB-25. */
+    streamCheck: ["streamCheckRetention"] as const,
   },
 
   proxy: {

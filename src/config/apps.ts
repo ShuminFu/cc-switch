@@ -26,7 +26,8 @@ export type AppToolbarFeature =
   | "openclawTools"
   | "openclawAgents"
   | "hermesMemory"
-  | "hermesWebUI";
+  | "hermesWebUI"
+  | "agents";
 
 /**
  * Which provider form adapter renders an app's Add/Edit provider form
@@ -188,6 +189,8 @@ export const APP_REGISTRY: Readonly<Record<AppId, AppDefinition>> = {
     label: "Claude",
     switcherLabel: "Claude Code",
     iconName: "claude",
+    // Claude Code subagents (~/.claude/agents, PRODUCT-42) after the defaults.
+    toolbar: [...DEFAULT_TOOLBAR, "agents"],
     capabilities: {
       ...CLAUDE_FEATURES,
       proxy: true,

@@ -17,6 +17,7 @@ import {
   Shield,
   Wrench,
   type LucideIcon,
+  Bot,
 } from "lucide-react";
 import type { Provider } from "@/types";
 import { providersApi, settingsApi, type AppId } from "@/lib/api";
@@ -123,6 +124,7 @@ const TOOLBAR_ITEMS: Record<AppToolbarFeature, ToolbarItem> = {
     icon: LayoutDashboard,
     target: "hermesWebUI",
   },
+  agents: { titleKey: "agents.title", icon: Bot, target: "agents" },
 };
 
 /** Root page: the provider list of the active app. */

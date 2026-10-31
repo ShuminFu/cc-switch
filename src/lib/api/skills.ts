@@ -43,6 +43,8 @@ export interface InstalledSkill {
 
 export interface SkillUninstallResult {
   backupPath?: string;
+  /** Non-fatal cleanup failures, one message per path (SVC-38). */
+  warnings?: string[];
 }
 
 export interface SkillBackupEntry {
@@ -71,6 +73,11 @@ export interface UnmanagedSkill {
   description?: string;
   foundIn: string[];
   path: string;
+  /**
+   * A managed skill with the same directory name exists but is not enabled
+   * for that app, and this directory is not a cc-switch copy (SVC-45).
+   */
+  conflict?: boolean;
 }
 
 /** 导入已有 Skill 时提交的应用启用状态 */

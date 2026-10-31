@@ -183,6 +183,27 @@ pub async fn restore_db_backup(app: tauri::AppHandle, filename: String) -> Resul
     .map_err(|e: AppError| format!("Restore failed: {e}"))
 }
 
+/// Restore a database backup; `keep_usage_history = false` restores the
+/// backup's own usage logs and statistics instead of keeping this device's.
+#[tauri::command]
+pub async fn restore_db_backup_with_options(
+    app: tauri::AppHandle,
+    filename: String,
+    #[allow(non_snake_case)] keepUsageHistory: bool,
+) -> Result<String, String> {
+    run_blocking_with_state(app, move |state: &AppState| {
+        let safety_id = state
+            .db
+            .restore_from_backup_with_options(&filename, keepUsageHistory)?;
+        if let Some(msg) = post_sync_warning_from_result(Ok(run_post_import_sync(state))) {
+            log::warn!("[Restore] post-restore sync warning: {msg}");
+        }
+        Ok::<_, AppError>(safety_id)
+    })
+    .await
+    .map_err(|e: AppError| format!("Restore failed: {e}"))
+}
+
 /// Rename a database backup file
 #[tauri::command]
 #[specta::specta]

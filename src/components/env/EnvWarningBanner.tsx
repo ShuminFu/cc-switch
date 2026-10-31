@@ -127,6 +127,28 @@ export function EnvWarningBanner({
         },
       });
 
+      // Process-environment variables cannot be removed by cc-switch (SVC-48):
+      // say which ones are left and where to remove them.
+      const skipped = backupInfo.skipped ?? [];
+      if (skipped.length > 0) {
+        toast.warning(
+          t("env.delete.skippedTitle", {
+            defaultValue:
+              "{{count}} variable(s) could not be removed by CC Switch",
+            count: skipped.length,
+          }),
+          {
+            description: t("env.delete.skippedDescription", {
+              defaultValue:
+                "{{names}} come from the process environment (launchd, systemd, ~/.zshenv or the parent shell). Remove them where they are set, then restart CC Switch.",
+              names: skipped.map((s) => s.varName).join(", "),
+            }),
+            duration: 15000,
+            closeButton: true,
+          },
+        );
+      }
+
       // 清空选择并通知父组件
       setSelectedConflicts(new Set());
       onDeleted();

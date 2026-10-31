@@ -62,6 +62,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { SettingsFormState } from "@/hooks/useSettings";
 import { RequestLogRetentionPanel } from "@/components/log-retention/RequestLogRetentionPanel";
+import { SettingsSearch } from "./SettingsSearch";
+import {
+  settingsEntryTitle,
+  type SettingsSearchEntry,
+} from "./settingsSearchIndex";
+import { focusSettingByTitle } from "./focusSetting";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -145,6 +151,44 @@ export function SettingsPage({
   const [activeTab, setActiveTab] = useState<string>("general");
   const [showRestartPrompt, setShowRestartPrompt] = useState(false);
   const tabScrollContainerRef = useRef<HTMLDivElement>(null);
+  // Settings search (FE-UI-38): open accordion sections and the pending
+  // control to focus once the tab and section have rendered.
+  const [advancedSections, setAdvancedSections] = useState<string[]>([]);
+  const [proxySection, setProxySection] = useState<{
+    section: string;
+    nonce: number;
+  } | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<{
+    title: string;
+    nonce: number;
+  } | null>(null);
+
+  const handleSearchSelect = useCallback(
+    (entry: SettingsSearchEntry) => {
+      const nonce = Date.now();
+      setActiveTab(entry.tab);
+      if (entry.section && entry.tab === "advanced") {
+        const section = entry.section;
+        setAdvancedSections((prev) =>
+          prev.includes(section) ? prev : [...prev, section],
+        );
+      }
+      if (entry.section && entry.tab === "proxy") {
+        setProxySection({ section: entry.section, nonce });
+      }
+      setPendingFocus({ title: settingsEntryTitle(entry, t), nonce });
+    },
+    [t],
+  );
+
+  useEffect(() => {
+    if (!pendingFocus) return;
+    // Wait for the tab switch and the accordion/motion enter animation.
+    const timer = setTimeout(() => {
+      focusSettingByTitle(tabScrollContainerRef.current, pendingFocus.title);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [pendingFocus]);
 
   useEffect(() => {
     if (open) {
@@ -256,6 +300,7 @@ export function SettingsPage({
           onValueChange={setActiveTab}
           className="flex flex-col h-full"
         >
+          <SettingsSearch onSelect={handleSearchSelect} />
           <TabsList className="grid w-full grid-cols-6 mb-6 glass rounded-lg">
             <TabsTrigger value="general">
               {t("settings.tabGeneral")}
@@ -333,6 +378,7 @@ export function SettingsPage({
                   <ProxyTabContent
                     settings={settings}
                     onAutoSave={handleAutoSave}
+                    expandSection={proxySection}
                   />
                 ) : null}
               </TabsContent>
@@ -358,7 +404,8 @@ export function SettingsPage({
                   >
                     <Accordion
                       type="multiple"
-                      defaultValue={[]}
+                      value={advancedSections}
+                      onValueChange={setAdvancedSections}
                       className="w-full space-y-4"
                     >
                       <AccordionItem

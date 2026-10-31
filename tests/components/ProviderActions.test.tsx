@@ -19,6 +19,24 @@ function renderActions(
 }
 
 describe("ProviderActions", () => {
+  it("offers 'copy as shell profile' only when the provider id is known", () => {
+    renderActions({ providerId: "p1" });
+    expect(
+      screen.getByRole("button", {
+        name: /env\.profile\.copy|Copy as shell profile/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides 'copy as shell profile' without a provider id", () => {
+    renderActions();
+    expect(
+      screen.queryByRole("button", {
+        name: /env\.profile\.copy|Copy as shell profile/,
+      }),
+    ).toBeNull();
+  });
+
   it("shows a disabled pending button instead of Add while live ids load (FE-PROV-51)", () => {
     const props = renderActions({
       appId: "openclaw",

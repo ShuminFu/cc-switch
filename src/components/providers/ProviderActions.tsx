@@ -1,3 +1,4 @@
+import { CopyEnvProfileMenu } from "@/components/env/CopyEnvProfileMenu";
 import {
   Activity,
   BarChart3,
@@ -20,6 +21,8 @@ import type { AppId } from "@/lib/api";
 
 interface ProviderActionsProps {
   appId?: AppId;
+  /** Enables the "copy as shell profile" menu (SVC-35). */
+  providerId?: string;
   isCurrent: boolean;
   isInConfig?: boolean;
   /** Additive apps: live config ids not loaded yet (FE-PROV-51). */
@@ -65,6 +68,7 @@ interface MainButtonState {
 
 export function ProviderActions({
   appId,
+  providerId,
   isCurrent,
   isInConfig = false,
   isConfigStatusLoading = false,
@@ -373,6 +377,10 @@ export function ProviderActions({
         >
           <BarChart3 className="h-4 w-4" />
         </Button>
+
+        {appId && providerId && (
+          <CopyEnvProfileMenu appId={appId} providerId={providerId} iconOnly />
+        )}
 
         {onShare && (
           <Button

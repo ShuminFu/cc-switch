@@ -230,7 +230,6 @@ impl Database {
     }
 
     /// Store the retention windows (`0` = never prune).
-    #[allow(dead_code)]
     pub fn set_usage_retention(&self, retention: UsageRetention) -> Result<(), AppError> {
         for (key, days) in [
             (USAGE_RETENTION_DAYS_KEY, retention.request_log_days),

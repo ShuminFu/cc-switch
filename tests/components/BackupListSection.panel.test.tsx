@@ -103,6 +103,35 @@ describe("BackupListSection", () => {
     );
   });
 
+  it("restores the backup's own usage history when the box is unchecked", async () => {
+    const api = mockInvoke({
+      list_db_backups: backups,
+      restore_db_backup_with_options: "safety-456",
+    });
+    renderWithQuery(<BackupListSection onSettingsChange={vi.fn()} />);
+
+    await screen.findByText("before-upgrade");
+    fireEvent.click(screen.getAllByRole("button", { name: /Restore/ })[1]);
+    const dialog = await screen.findByRole("dialog");
+    const keep = screen.getByRole("checkbox", { name: /Keep usage history/ });
+    expect(keep).toBeChecked();
+    fireEvent.click(keep);
+    fireEvent.click(
+      Array.from(dialog.querySelectorAll("button")).find(
+        (b) => b.textContent === "Restore",
+      )!,
+    );
+
+    await waitFor(() =>
+      expect(api.callsTo("restore_db_backup_with_options")).toHaveLength(1),
+    );
+    expect(api.callsTo("restore_db_backup_with_options")[0].args).toEqual({
+      filename: "before-upgrade.db",
+      keepUsageHistory: false,
+    });
+    expect(api.callsTo("restore_db_backup")).toHaveLength(0);
+  });
+
   it("shows the backend error when a restore fails", async () => {
     mockInvoke({
       list_db_backups: backups,

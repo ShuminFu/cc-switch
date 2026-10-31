@@ -20,20 +20,21 @@ import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { toast } from "sonner";
 import { useFailoverQueue } from "@/lib/query/failover";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
-import { useProviderHealth } from "@/lib/query/failover";
+import { useProvidersHealthMap } from "@/lib/query/failover";
 import {
   useProxyTakeoverStatus,
   useSetProxyTakeoverForApp,
   useGlobalProxyConfig,
   useUpdateGlobalProxyConfig,
 } from "@/lib/query/proxy";
-import type { ProxyStatus } from "@/types/proxy";
+import type { ProviderHealth, ProxyStatus } from "@/types/proxy";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { PROXY_CAPABLE_APPS, getAppLabel } from "@/config/proxyApps";
 import { copyText } from "@/lib/clipboard";
 import { formatUptime } from "./formatUptime";
+import { RecentRequestsPanel } from "./RecentRequestsPanel";
 import { isLoopbackListenAddress } from "./listenAddress";
 
 interface LanExposureNoticeProps {
@@ -692,6 +693,8 @@ export function ProxyPanel({
               />
             </div>
 
+            <RecentRequestsPanel status={status} />
+
             {basicSettings}
           </div>
         ) : (
@@ -768,6 +771,10 @@ function ProviderQueueGroup({
   const activeTarget = status.active_targets?.find(
     (t) => t.app_type === appType,
   );
+  const { data: healthMap } = useProvidersHealthMap(
+    appType,
+    targets.map((target) => target.id),
+  );
 
   return (
     <div className="space-y-2">
@@ -786,7 +793,7 @@ function ProviderQueueGroup({
             key={target.id}
             provider={target}
             priority={index + 1}
-            appType={appType}
+            health={healthMap?.[target.id]}
             isCurrent={activeTarget?.provider_id === target.id}
           />
         ))}
@@ -801,18 +808,17 @@ interface ProviderQueueItemProps {
     name: string;
   };
   priority: number;
-  appType: string;
+  health?: ProviderHealth;
   isCurrent: boolean;
 }
 
 function ProviderQueueItem({
   provider,
   priority,
-  appType,
+  health,
   isCurrent,
 }: ProviderQueueItemProps) {
   const { t } = useTranslation();
-  const { data: health } = useProviderHealth(provider.id, appType);
 
   return (
     <div

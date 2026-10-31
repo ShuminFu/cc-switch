@@ -1,6 +1,6 @@
 import { invoke, call } from "./invoke";
 import { commands } from "@/lib/bindings";
-import type { EnvConflict, BackupInfo } from "@/types/env";
+import type { EnvConflict, BackupInfo, EnvShell } from "@/types/env";
 
 /**
  * 环境变量管理 API
@@ -58,4 +58,20 @@ export async function checkAllEnvConflicts(): Promise<
   );
 
   return results;
+}
+
+/**
+ * Render a provider's settings as shell environment variables (SVC-35), e.g.
+ * `export ANTHROPIC_BASE_URL='...'` for bash. The text contains the API key.
+ */
+export async function renderProviderEnvProfile(
+  app: string,
+  providerId: string,
+  shell: EnvShell,
+): Promise<string> {
+  return invoke<string>("render_provider_env_profile", {
+    app,
+    providerId,
+    shell,
+  });
 }

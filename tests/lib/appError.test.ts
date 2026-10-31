@@ -213,3 +213,45 @@ describe("Rust AppError codes", () => {
     expect(Object.keys(APP_ERROR_DEFAULTS).sort()).toEqual([...codes].sort());
   });
 });
+
+describe("localized backend errors without locale entries", () => {
+  // Emitted via `AppError::localized` (zh/en travel in `params`), so they
+  // render without an `errors.*` template or a locale key.
+  const KEYS = [
+    "proxy.port_unavailable",
+    "provider.universal_child_in_use",
+    "provider.live_sync_partial",
+    "sync.remote_path.invalid",
+    "s3.header.invalid",
+    "env_profile.no_variables",
+    "env_profile.unsupported_app",
+  ];
+
+  it("are still emitted by the backend", () => {
+    const sources = [
+      "src-tauri/src/services/proxy/mod.rs",
+      "src-tauri/src/services/provider/mod.rs",
+      "src-tauri/src/services/provider/live.rs",
+      "src-tauri/src/services/sync_protocol.rs",
+      "src-tauri/src/services/s3.rs",
+      "src-tauri/src/services/env_profile.rs",
+    ]
+      .map((p) => fs.readFileSync(path.join(ROOT, p), "utf8"))
+      .join("\n");
+    for (const key of KEYS) expect(sources, key).toContain(`"${key}"`);
+  });
+
+  it("render the English half in an English UI and the Chinese half in zh", async () => {
+    for (const code of KEYS) {
+      const payload = {
+        code,
+        message: "中文 (English text)",
+        params: { zh: "中文", en: "English text" },
+      };
+      await i18n.changeLanguage("en");
+      expect(localizeAppError(payload), code).toBe("English text");
+      await i18n.changeLanguage("zh");
+      expect(localizeAppError(payload), code).toBe("中文");
+    }
+  });
+});

@@ -68,6 +68,36 @@ export function useProvidersHealth(
   return data ?? EMPTY_HEALTH;
 }
 
+function healthRecord(
+  entries: ProviderHealth[],
+): Record<string, ProviderHealth> {
+  return Object.fromEntries(entries.map((entry) => [entry.provider_id, entry]));
+}
+
+/**
+ * Same batched query as {@link useProvidersHealth} (one shared cache entry per
+ * app and id set), exposed as a query result whose data is a record keyed by
+ * provider id, for the failover queue views (FE-UI-22). Keeps the previous
+ * data while the id set changes.
+ */
+export function useProvidersHealthMap(
+  appType: string,
+  providerIds: readonly string[],
+) {
+  const proxyRunning = useCachedProxyRunning();
+  const ids = useMemo(() => [...providerIds].sort(), [providerIds]);
+  return useQuery({
+    queryKey: queryKeys.failover.providersHealth(appType, ids),
+    queryFn: () => failoverApi.getProvidersHealth(appType, ids),
+    enabled: !!appType && ids.length > 0,
+    refetchInterval: proxyRunning ? HEALTH_REFETCH_MS : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+    select: healthRecord,
+    placeholderData: (previousData) => previousData,
+  });
+}
+
 // ========== 故障转移队列 Hooks（新） ==========
 
 /**

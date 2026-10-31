@@ -577,6 +577,7 @@ function ProviderCardImpl({
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <ProviderActions
               appId={appId}
+              providerId={provider.id}
               isCurrent={isCurrent}
               isInConfig={isInConfig}
               isConfigStatusLoading={isConfigStatusLoading}
