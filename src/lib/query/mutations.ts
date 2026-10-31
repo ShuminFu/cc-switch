@@ -221,15 +221,43 @@ export const useUpdateProviderMutation = (appId: AppId) => {
   });
 };
 
+interface ProvidersCache {
+  providers: Record<string, Provider>;
+  currentProviderId: string;
+}
+
+/**
+ * Re-create a deleted provider from its snapshot (same id, settingsConfig,
+ * meta and sortIndex). Only offered for apps whose providers live in the
+ * database alone; additive apps also edit their live config on delete.
+ */
+const canUndoDelete = (appId: AppId) => !appHas(appId, "additiveLiveConfig");
+
 export const useDeleteProviderMutation = (appId: AppId) => {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
+  const cacheKey = queryKeys.providers.byApp(appId);
 
   return useMutation({
     mutationFn: async (providerId: string) => {
       await providersApi.delete(providerId, appId);
     },
-    onSuccess: async () => {
+    // Optimistic: drop the card at once, put it back if the delete fails
+    // (FE-ARCH-18).
+    onMutate: async (providerId: string) => {
+      await queryClient.cancelQueries({ queryKey: cacheKey });
+      const previous = queryClient.getQueryData<ProvidersCache>(cacheKey);
+      if (previous?.providers?.[providerId]) {
+        const { [providerId]: _removed, ...rest } = previous.providers;
+        void _removed;
+        queryClient.setQueryData<ProvidersCache>(cacheKey, {
+          ...previous,
+          providers: rest,
+        });
+      }
+      return { previous, deleted: previous?.providers?.[providerId] };
+    },
+    onSuccess: async (_data, _providerId, context) => {
       await invalidateProviderCaches(queryClient, appId, "membership");
 
       try {
@@ -241,16 +269,51 @@ export const useDeleteProviderMutation = (appId: AppId) => {
         );
       }
 
+      const deleted = context?.deleted;
       toast.success(
         t("notifications.deleteSuccess", {
           defaultValue: "Provider deleted",
         }),
         {
           closeButton: true,
+          // Undo re-adds the exact snapshot (FE-ARCH-17, first increment).
+          ...(deleted && canUndoDelete(appId)
+            ? {
+                duration: 8000,
+                action: {
+                  label: t("common.undo", { defaultValue: "Undo" }),
+                  onClick: () => {
+                    void (async () => {
+                      try {
+                        await providersApi.add(deleted, appId, false);
+                        await invalidateProviderCaches(
+                          queryClient,
+                          appId,
+                          "membership",
+                        );
+                        await providersApi.updateTrayMenu().catch(() => false);
+                      } catch (error) {
+                        toast.error(
+                          t("notifications.undoDeleteFailed", {
+                            defaultValue:
+                              "Could not restore the provider: {{error}}",
+                            error: extractErrorMessage(error),
+                          }),
+                        );
+                      }
+                    })();
+                  },
+                },
+              }
+            : {}),
         },
       );
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, _providerId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(cacheKey, context.previous);
+      }
+      void queryClient.invalidateQueries({ queryKey: cacheKey });
       const detail = extractErrorMessage(error) || t("common.unknown");
       toast.error(
         t("notifications.deleteFailed", {
@@ -270,6 +333,22 @@ export const useSwitchProviderMutation = (appId: AppId) => {
     mutationFn: async (providerId: string): Promise<SwitchResult> => {
       return await providersApi.switch(providerId, appId);
     },
+    // Optimistic: highlight the new current provider immediately and roll
+    // back on failure (FE-ARCH-18). Additive apps add to the live config
+    // instead of changing a single current provider, so they keep waiting.
+    onMutate: async (providerId: string) => {
+      if (appHas(appId, "additiveLiveConfig")) return { previous: undefined };
+      const cacheKey = queryKeys.providers.byApp(appId);
+      await queryClient.cancelQueries({ queryKey: cacheKey });
+      const previous = queryClient.getQueryData<ProvidersCache>(cacheKey);
+      if (previous) {
+        queryClient.setQueryData<ProvidersCache>(cacheKey, {
+          ...previous,
+          currentProviderId: providerId,
+        });
+      }
+      return { previous };
+    },
     onSuccess: async () => {
       await invalidateProviderCaches(queryClient, appId, "switch");
 
@@ -282,7 +361,13 @@ export const useSwitchProviderMutation = (appId: AppId) => {
         );
       }
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, _providerId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(
+          queryKeys.providers.byApp(appId),
+          context.previous,
+        );
+      }
       const detail = extractErrorMessage(error) || t("common.unknown");
 
       toast.error(
