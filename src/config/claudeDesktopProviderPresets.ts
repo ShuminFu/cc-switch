@@ -8,7 +8,7 @@
  *
  * 翻译来源：src/config/claudeProviderPresets.ts（排除 OAuth 与不兼容预设）
  */
-import { ProviderCategory } from "../types";
+import type { ProviderCategory } from "../types";
 import type { PresetTheme } from "./claudeProviderPresets";
 import { registerPresetCatalog } from "./presetCatalog";
 

@@ -1,6 +1,6 @@
 import { stringify as stringifyToml } from "smol-toml";
 import { parseTomlLenient } from "@/utils/textNormalization";
-import { McpServerSpec } from "../types";
+import type { McpServerSpec } from "../types";
 
 /** The parts of a parsed MCP TOML snippet this module reads. */
 type McpTomlDoc = {

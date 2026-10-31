@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useId, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { DeepLinkImportRequest, deeplinkApi } from "@/lib/api/deeplink";
+import { type DeepLinkImportRequest, deeplinkApi } from "@/lib/api/deeplink";
 import {
   Dialog,
   DialogContent,
