@@ -27,6 +27,12 @@ export type RequestLogsKey = {
   providerName?: string;
   model?: string;
   statusCode?: number;
+  /**
+   * Upper bound frozen while paging (FE-ARCH-41): pages after the first use
+   * the window captured when the user left page 0, so new rows do not shift
+   * later pages.
+   */
+  frozenEndDate?: number;
 };
 
 // Query keys
@@ -133,6 +139,7 @@ export const usageKeys = {
       key.providerName ?? "",
       key.model ?? "",
       key.statusCode ?? -1,
+      key.frozenEndDate ?? 0,
       page,
       pageSize,
     ] as const,
