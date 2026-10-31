@@ -11,6 +11,7 @@ import type { DeleteSessionOptions } from "@/lib/api/sessions";
 import type { SwitchResult } from "@/lib/api/providers";
 import type { Provider, SessionMeta, Settings } from "@/types";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { redactSecrets } from "@/utils/redact";
 import { generateUUID } from "@/utils/uuid";
 import { invalidateHermesProviderCaches } from "./hermes";
 import { queryKeys } from "./keys";
@@ -381,7 +382,9 @@ export const useSwitchProviderMutation = (appId: AppId) => {
           action: {
             label: t("common.copy", { defaultValue: "Copy" }),
             onClick: () => {
-              navigator.clipboard?.writeText(detail).catch(() => undefined);
+              navigator.clipboard
+                ?.writeText(redactSecrets(detail))
+                .catch(() => undefined);
             },
           },
         },

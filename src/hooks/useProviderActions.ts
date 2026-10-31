@@ -287,15 +287,16 @@ export function useProviderActions(
         const result = await switchProviderMutation.mutateAsync(provider.id);
         await syncClaudePlugin(provider);
 
-        // Show backfill warning if present
-        if (result?.warnings?.length) {
-          toast.warning(
-            t("notifications.backfillWarning", {
+        // A backfill warning is folded into the success toast so one switch
+        // shows one toast (FE-ARCH-36).
+        const backfillWarning = result?.warnings?.length
+          ? t("notifications.backfillWarning", {
               defaultValue:
                 "Switched successfully, but failed to save changes back to the previous provider",
-            }),
-            { duration: 5000 },
-          );
+            })
+          : undefined;
+        if (backfillWarning && proxyRequiredReason) {
+          toast.warning(backfillWarning, { duration: 5000 });
         }
 
         // 若已弹过 proxyRequired 警告则不再弹 success
@@ -321,9 +322,17 @@ export function useProviderActions(
             messageKey = "notifications.addToConfigSuccess";
             defaultMessage = "已添加到配置";
           }
-          toast.success(t(messageKey, { defaultValue: defaultMessage }), {
-            closeButton: true,
-          });
+          if (backfillWarning) {
+            toast.warning(t(messageKey, { defaultValue: defaultMessage }), {
+              description: backfillWarning,
+              duration: 5000,
+              closeButton: true,
+            });
+          } else {
+            toast.success(t(messageKey, { defaultValue: defaultMessage }), {
+              closeButton: true,
+            });
+          }
         }
       } catch {
         // 错误提示由 mutation 处理
