@@ -146,14 +146,8 @@ export function useImportExport(
       const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
       const defaultName = `cc-switch-export-${stamp}.sql`;
       const destination = await settingsApi.saveFileDialog(defaultName);
-      if (!destination) {
-        toast.error(
-          t("settings.selectFileFailed", {
-            defaultValue: "请选择 SQL 备份保存路径",
-          }),
-        );
-        return;
-      }
+      // Cancelling the native dialog is not an error (FE-UI-08).
+      if (!destination) return;
 
       const result = await settingsApi.exportConfigToFile(destination);
       if (result.success) {
