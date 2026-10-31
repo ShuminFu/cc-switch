@@ -237,13 +237,6 @@ impl<'a> UsageLogger<'a> {
         self.log_request(&log)
     }
 
-    /// 获取模型定价（同步查询主连接；请求路径请勿调用，计价已在写线程上完成）
-    #[allow(dead_code)]
-    pub fn get_model_pricing(&self, model_id: &str) -> Result<Option<ModelPricing>, AppError> {
-        let conn = crate::database::lock_conn!(self.db.conn);
-        model_pricing_on_conn(&conn, model_id)
-    }
-
     /// 获取有效的倍率与计费模式来源（供应商优先，未配置则回退全局默认）
     pub async fn resolve_pricing_config(
         &self,

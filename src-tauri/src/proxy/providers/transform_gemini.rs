@@ -138,22 +138,10 @@ pub fn gemini_to_anthropic_with_shadow_and_hints(
     session_id: Option<&str>,
     tool_schema_hints: Option<&AnthropicToolSchemaHints>,
 ) -> Result<Value, ProxyError> {
-    if let Some(block_reason) = body
-        .get("promptFeedback")
-        .and_then(|value| value.get("blockReason"))
-        .and_then(|value| value.as_str())
-    {
-        let text = format!("Request blocked by Gemini safety filters: {block_reason}");
-        return Ok(json!({
-            "id": super::transform::anthropic_message_id(body.get("responseId").and_then(|value| value.as_str())),
-            "type": "message",
-            "role": "assistant",
-            "content": [{ "type": "text", "text": text }],
-            "model": body.get("modelVersion").and_then(|value| value.as_str()).unwrap_or(""),
-            "stop_reason": "refusal",
-            "stop_sequence": Value::Null,
-            "usage": build_anthropic_usage(body.get("usageMetadata"))
-        }));
+    if body.pointer("/promptFeedback/blockReason").is_some() {
+        return super::ir::anthropic::encode_response(&super::ir::gemini::decode_response(
+            &body, None,
+        ));
     }
 
     let candidate = body
@@ -202,69 +190,10 @@ pub fn gemini_to_anthropic_with_shadow_and_hints(
         }
     }
 
-    let mut content = Vec::new();
-    let mut has_tool_use = false;
-
-    for part in &rectified_parts {
-        if part.get("thought").and_then(|value| value.as_bool()) == Some(true) {
-            // PROV-06: surface Gemini thought summaries as Anthropic thinking
-            // blocks (unsigned; they are dropped again on replay and the
-            // Gemini thoughtSignature keeps travelling via the shadow store).
-            if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
-                if !text.is_empty() {
-                    content.push(json!({
-                        "type": "thinking",
-                        "thinking": text
-                    }));
-                }
-            }
-            continue;
-        }
-
-        if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
-            if !text.is_empty() {
-                content.push(json!({
-                    "type": "text",
-                    "text": text
-                }));
-            }
-            continue;
-        }
-
-        if let Some(function_call) = part.get("functionCall") {
-            has_tool_use = true;
-            let id = function_call
-                .get("id")
-                .and_then(|value| value.as_str())
-                .filter(|s| !s.is_empty())
-                .map(ToString::to_string)
-                .unwrap_or_else(synthesize_tool_call_id);
-            content.push(json!({
-                "type": "tool_use",
-                "id": id,
-                "name": function_call.get("name").and_then(|value| value.as_str()).unwrap_or(""),
-                "input": function_call.get("args").cloned().unwrap_or_else(|| json!({}))
-            }));
-        }
-    }
-
-    let stop_reason = map_finish_reason(
-        candidate
-            .get("finishReason")
-            .and_then(|value| value.as_str()),
-        has_tool_use,
-    );
-
-    let anthropic_response = json!({
-        "id": super::transform::anthropic_message_id(body.get("responseId").and_then(|value| value.as_str())),
-        "type": "message",
-        "role": "assistant",
-        "content": content,
-        "model": body.get("modelVersion").and_then(|value| value.as_str()).unwrap_or(""),
-        "stop_reason": stop_reason,
-        "stop_sequence": Value::Null,
-        "usage": build_anthropic_usage(body.get("usageMetadata"))
-    });
+    // PROV-19: candidate parts → IR → Anthropic message.
+    let anthropic_response = super::ir::anthropic::encode_response(
+        &super::ir::gemini::decode_response(&body, Some(&rectified_parts)),
+    )?;
 
     if let (Some(store), Some(provider_id), Some(session_id), Some(content)) = (
         shadow_store,
@@ -475,6 +404,9 @@ fn convert_messages_to_contents(
                         .or_insert_with(|| name.to_string());
                 }
             }
+            // PROV-11: restore thoughtSignatures carried in the stateless
+            // envelope; the shadow store (when it still has the turn) wins.
+            merge_thought_signatures_from_envelope(blocks, &mut thought_signature_by_id);
         }
     }
 
@@ -548,6 +480,47 @@ fn convert_messages_to_contents(
     }
 
     Ok(contents)
+}
+
+/// Decode `ccswitch-gemini-thought-v1` envelopes in an assistant message and map
+/// each signature onto the `tool_use` id at its recorded ordinal (names must
+/// match, so a reordered or edited message cannot misroute a signature).
+fn merge_thought_signatures_from_envelope(
+    blocks: &[Value],
+    thought_signature_by_id: &mut HashMap<String, String>,
+) {
+    let tool_uses: Vec<(&str, &str)> = blocks
+        .iter()
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+        .map(|b| {
+            (
+                b.get("id").and_then(Value::as_str).unwrap_or(""),
+                b.get("name").and_then(Value::as_str).unwrap_or(""),
+            )
+        })
+        .collect();
+    for block in blocks {
+        let data = match block.get("type").and_then(Value::as_str) {
+            Some("redacted_thinking") => block.get("data"),
+            Some("thinking") => block.get("signature"),
+            _ => None,
+        };
+        let Some(signatures) = data
+            .and_then(Value::as_str)
+            .and_then(super::ir::gemini::decode_thought_envelope)
+        else {
+            continue;
+        };
+        for signature in signatures {
+            if let Some((id, name)) = tool_uses.get(signature.ordinal) {
+                if !id.is_empty() && *name == signature.name {
+                    thought_signature_by_id
+                        .entry((*id).to_string())
+                        .or_insert(signature.signature);
+                }
+            }
+        }
+    }
 }
 
 fn find_matching_shadow_turn_for_assistant_message(
@@ -743,11 +716,13 @@ fn convert_message_content_to_parts(
                 // on every functionCall in a multi-turn tool-use exchange.
                 // Without replaying the stored signature the upstream may
                 // reject with "missing a `thought_signature`".
+                // `thoughtSignature` is a Part-level field, a sibling of
+                // `functionCall` (matching the shadow-replay shape).
+                let mut part = json!({ "functionCall": function_call });
                 if let Some(sig) = thought_signature_by_id.get(id) {
-                    function_call["thoughtSignature"] = json!(sig);
+                    part["thoughtSignature"] = json!(sig);
                 }
-
-                parts.push(json!({ "functionCall": function_call }));
+                parts.push(part);
             }
             "tool_result" => {
                 let tool_use_id = block
@@ -778,7 +753,8 @@ fn convert_message_content_to_parts(
                     })?;
 
                 // See `tool_use` above: synthesized ids must not leak upstream.
-                let mut response = normalize_tool_result_response(block.get("content"));
+                let (mut response, media_parts) =
+                    normalize_tool_result_response(block.get("content"));
                 // PROV-15: keep the error signal. Gemini's convention is an
                 // `error` key in `functionResponse.response`.
                 if block.get("is_error").and_then(|value| value.as_bool()) == Some(true) {
@@ -797,6 +773,10 @@ fn convert_message_content_to_parts(
                 }
 
                 parts.push(json!({ "functionResponse": function_response }));
+                // PROV-15: images/PDFs a tool returned travel as inline media
+                // parts right after the response instead of being dropped or
+                // serialized as base64 JSON text.
+                parts.extend(media_parts);
             }
             "thinking" | "redacted_thinking" => {}
             _ => {}
@@ -806,24 +786,70 @@ fn convert_message_content_to_parts(
     Ok(parts)
 }
 
-fn normalize_tool_result_response(content: Option<&Value>) -> Value {
-    match content {
-        Some(Value::String(text)) => json!({ "content": text }),
-        Some(Value::Array(blocks)) => {
-            let texts: Vec<&str> = blocks
-                .iter()
-                .filter(|block| block.get("type").and_then(|value| value.as_str()) == Some("text"))
-                .filter_map(|block| block.get("text").and_then(|value| value.as_str()))
-                .collect();
-
-            if texts.is_empty() {
-                json!({ "content": Value::Array(blocks.clone()) })
+/// Media block inside a `tool_result` → Gemini `inlineData` part (base64
+/// only; URL sources become a text reference).
+fn tool_result_media_part(block: &Value) -> Option<Result<Value, String>> {
+    let block_type = block.get("type").and_then(Value::as_str)?;
+    if block_type != "image" && block_type != "document" {
+        return None;
+    }
+    let source = block.get("source")?;
+    match source.get("type").and_then(Value::as_str) {
+        Some("base64") => {
+            let default_mime = if block_type == "image" {
+                "image/png"
             } else {
-                json!({ "content": texts.join("\n") })
+                "application/pdf"
+            };
+            Some(Ok(json!({
+                "inlineData": {
+                    "mimeType": source.get("media_type").and_then(Value::as_str).unwrap_or(default_mime),
+                    "data": source.get("data").and_then(Value::as_str).unwrap_or("")
+                }
+            })))
+        }
+        Some("url") => source
+            .get("url")
+            .and_then(Value::as_str)
+            .map(|url| Err(format!("[{block_type}: {url}]"))),
+        _ => None,
+    }
+}
+
+/// Anthropic `tool_result.content` → (`functionResponse.response`, media parts).
+fn normalize_tool_result_response(content: Option<&Value>) -> (Value, Vec<Value>) {
+    match content {
+        Some(Value::String(text)) => (json!({ "content": text }), Vec::new()),
+        Some(Value::Array(blocks)) => {
+            let mut texts: Vec<String> = Vec::new();
+            let mut media = Vec::new();
+            for block in blocks {
+                if block.get("type").and_then(Value::as_str) == Some("text") {
+                    if let Some(text) = block.get("text").and_then(Value::as_str) {
+                        texts.push(text.to_string());
+                    }
+                    continue;
+                }
+                match tool_result_media_part(block) {
+                    Some(Ok(part)) => media.push(part),
+                    Some(Err(reference)) => texts.push(reference),
+                    None => {}
+                }
+            }
+
+            if !texts.is_empty() {
+                (json!({ "content": texts.join("\n") }), media)
+            } else if !media.is_empty() {
+                (
+                    json!({ "content": "[tool returned media; see the following parts]" }),
+                    media,
+                )
+            } else {
+                (json!({ "content": Value::Array(blocks.clone()) }), media)
             }
         }
-        Some(value) => json!({ "content": value.clone() }),
-        None => json!({ "content": "" }),
+        Some(value) => (json!({ "content": value.clone() }), Vec::new()),
+        None => (json!({ "content": "" }), Vec::new()),
     }
 }
 
@@ -1182,74 +1208,11 @@ fn map_tool_choice(tool_choice: Option<&Value>) -> Result<Option<Value>, ProxyEr
 }
 
 /// Convert a Gemini `usageMetadata` object into an Anthropic-style `usage`
-/// object. Used by both the streaming SSE converter and the non-streaming
-/// transform path so the two emit identical shapes.
+/// object: `ir::gemini::decode_usage` → `ir::anthropic::encode_usage`. Used by
+/// both the streaming SSE converter and the non-streaming transform path so the
+/// two emit identical shapes.
 pub(crate) fn build_anthropic_usage(usage: Option<&Value>) -> Value {
-    let Some(usage) = usage else {
-        return json!({
-            "input_tokens": 0,
-            "output_tokens": 0
-        });
-    };
-
-    let prompt_tokens = usage
-        .get("promptTokenCount")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let total_tokens = usage
-        .get("totalTokenCount")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let cached_tokens = usage
-        .get("cachedContentTokenCount")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    // Gemini 的 promptTokenCount 含缓存命中（cachedContentTokenCount）；而 Anthropic
-    // 语义下 input_tokens 必须是不含 cache 的 fresh input、cache_read 单列。本路径转成
-    // Anthropic 后以 app_type=claude 记账，calculator 对 claude 设 input_includes_cache_read
-    // =false 不再从 input 扣 cache，因此这里必须先扣减，否则缓存 token 会被双重计费
-    // （一次按完整 input 价、一次按 cache_read 价）。output 仍按 total-prompt 计算
-    // （prompt 是总输入，扣减只作用于 input/cache 的拆分，不影响 output）。
-    let input_tokens = prompt_tokens.saturating_sub(cached_tokens);
-    let output_tokens = total_tokens.saturating_sub(prompt_tokens);
-
-    let mut result = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens
-    });
-
-    if cached_tokens > 0 {
-        result["cache_read_input_tokens"] = json!(cached_tokens);
-    }
-
-    result
-}
-
-fn map_finish_reason(reason: Option<&str>, has_tool_use: bool) -> Value {
-    let mapped = match reason {
-        Some("MAX_TOKENS") => Some("max_tokens"),
-        Some("STOP") | Some("FINISH_REASON_UNSPECIFIED") | None => {
-            if has_tool_use {
-                Some("tool_use")
-            } else {
-                Some("end_turn")
-            }
-        }
-        Some("SAFETY")
-        | Some("RECITATION")
-        | Some("SPII")
-        | Some("BLOCKLIST")
-        | Some("PROHIBITED_CONTENT") => Some("refusal"),
-        Some(other) => {
-            log::warn!("[Claude/Gemini] Unknown Gemini finishReason `{other}`, using end_turn");
-            Some("end_turn")
-        }
-    };
-
-    match mapped {
-        Some(value) => json!(value),
-        None => Value::Null,
-    }
+    super::ir::anthropic::encode_usage(&super::ir::gemini::decode_usage(usage))
 }
 
 #[cfg(test)]
@@ -2512,5 +2475,127 @@ mod tests {
                 .is_none(),
             "functionResponse.id must also be omitted for synthesized ids"
         );
+    }
+
+    /// PROV-11: with no shadow store at all (proxy restart / eviction), a
+    /// Gemini tool turn replayed by the client keeps its `thoughtSignature`s and
+    /// real `functionCall.id`s through the stateless envelope.
+    #[test]
+    fn thought_signatures_round_trip_without_shadow_store() {
+        let gemini = json!({
+            "responseId": "r1",
+            "modelVersion": "gemini-3-pro",
+            "candidates": [{
+                "content": {"role": "model", "parts": [
+                    {"text": "Checking."},
+                    {"functionCall": {"id": "fc_paris", "name": "get_weather", "args": {"city": "Paris"}},
+                     "thoughtSignature": "sig-paris"},
+                    {"functionCall": {"name": "get_weather", "args": {"city": "Rome"}},
+                     "thoughtSignature": "sig-rome"},
+                    {"functionCall": {"name": "noop", "args": {}}}
+                ]},
+                "finishReason": "STOP"
+            }]
+        });
+        let anthropic = gemini_to_anthropic(gemini).unwrap();
+        let content = anthropic["content"].as_array().unwrap();
+        assert_eq!(content[1]["type"], "redacted_thinking");
+        assert!(content[1]["data"]
+            .as_str()
+            .unwrap()
+            .starts_with(super::super::ir::gemini::THOUGHT_ENVELOPE_PREFIX));
+        let tool_ids: Vec<String> = content
+            .iter()
+            .filter(|b| b["type"] == "tool_use")
+            .map(|b| b["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(tool_ids[0], "fc_paris");
+
+        let request = json!({
+            "model": "gemini-3-pro",
+            "messages": [
+                {"role": "user", "content": "weather?"},
+                {"role": "assistant", "content": anthropic["content"].clone()},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": tool_ids[0], "content": "sunny"},
+                    {"type": "tool_result", "tool_use_id": tool_ids[1], "content": "rainy"},
+                    {"type": "tool_result", "tool_use_id": tool_ids[2], "content": "ok"}
+                ]}
+            ]
+        });
+        let result = anthropic_to_gemini_with_shadow(request, None, None, None).unwrap();
+        let parts = result["contents"][1]["parts"].as_array().unwrap();
+        let calls: Vec<&Value> = parts
+            .iter()
+            .filter(|p| p.get("functionCall").is_some())
+            .collect();
+        assert_eq!(
+            calls.len(),
+            3,
+            "envelope must not become a Gemini part: {parts:?}"
+        );
+        assert_eq!(calls[0]["functionCall"]["id"], "fc_paris");
+        assert_eq!(calls[0]["thoughtSignature"], "sig-paris");
+        assert!(
+            calls[1]["functionCall"].get("id").is_none(),
+            "synthesized id leaked"
+        );
+        assert_eq!(calls[1]["thoughtSignature"], "sig-rome");
+        assert!(calls[2].get("thoughtSignature").is_none());
+    }
+
+    /// PROV-15: images returned by a tool reach Gemini as inline media parts
+    /// next to the functionResponse instead of base64 JSON text, and the
+    /// error signal survives.
+    #[test]
+    fn tool_result_media_becomes_inline_parts() {
+        let request = json!({
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "call_1", "name": "screenshot", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_1", "is_error": true, "content": [
+                        {"type": "text", "text": "partial capture"},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"}},
+                        {"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}}
+                    ]}
+                ]}
+            ]
+        });
+        let result = anthropic_to_gemini_with_shadow(request, None, None, None).unwrap();
+        let parts = result["contents"][1]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2, "{parts:?}");
+        assert_eq!(
+            parts[0]["functionResponse"]["response"]["error"],
+            "partial capture\n[image: https://example.com/a.png]"
+        );
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/jpeg");
+        assert_eq!(parts[1]["inlineData"]["data"], "QUJD");
+    }
+
+    #[test]
+    fn thought_envelope_ignores_mismatched_tool_names() {
+        let envelope = super::super::ir::gemini::encode_thought_envelope(&[
+            super::super::ir::gemini::ThoughtSignature {
+                ordinal: 0,
+                name: "other".into(),
+                signature: "sig".into(),
+            },
+        ])
+        .unwrap();
+        let request = json!({
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "redacted_thinking", "data": envelope},
+                    {"type": "tool_use", "id": "call_1", "name": "lookup", "input": {}}
+                ]},
+                {"role": "user", "content": "ack"}
+            ]
+        });
+        let result = anthropic_to_gemini_with_shadow(request, None, None, None).unwrap();
+        assert!(result["contents"][0]["parts"][0]
+            .get("thoughtSignature")
+            .is_none());
     }
 }

@@ -10,17 +10,14 @@
 //! - `transform_responses.rs`: Anthropic request → Responses request, Responses response → Anthropic response
 //! - this module:               Responses request → Anthropic request, Anthropic response → Responses response
 
-use super::transform_codex_chat::{
-    build_codex_tool_context_from_request, response_tool_call_item_from_chat_name,
-    response_tool_call_item_id_from_chat_name, CodexToolContext,
-};
+use super::transform_codex_chat::{build_codex_tool_context_from_request, CodexToolContext};
 use super::transform_responses::{sanitize_anthropic_tool_use_input, TOOL_RESULT_ERROR_MARKER};
 use crate::proxy::error::ProxyError;
 use crate::proxy::json_canonical::canonical_json_string;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 pub(crate) const ANTHROPIC_THINKING_ENCRYPTED_PREFIX: &str = "ccswitch-anthropic-thinking-v1:";
 /// Envelope for *unsigned* `thinking` blocks (DeepSeek / Kimi / GLM / MiniMax
@@ -154,86 +151,24 @@ pub(crate) fn responses_reasoning_item_from_anthropic_block(
     }))
 }
 
-/// Anthropic's stop_reason → Responses' (status, incomplete_details.reason)
+/// Anthropic's stop_reason → Responses' (status, incomplete_details.reason),
+/// via the shared IR codecs.
 pub(crate) fn map_anthropic_stop_reason_to_status(
     stop_reason: Option<&str>,
 ) -> (&'static str, Option<&'static str>) {
-    match stop_reason {
-        Some("max_tokens") => ("incomplete", Some("max_output_tokens")),
-        // Safety refusal: report as incomplete to avoid Codex treating it as a normally-completed empty reply.
-        Some("refusal") => ("incomplete", Some("content_filter")),
-        Some("model_context_window_exceeded") => ("incomplete", Some("max_output_tokens")),
-        // pause_turn is unreachable on this path (Codex requests do not declare Anthropic server-side tools);
-        // if it does occur, log a warning and treat it as completed.
-        Some("pause_turn") => {
-            log::warn!("[Codex] Received unexpected Anthropic stop_reason=pause_turn, treating it as completed");
-            ("completed", None)
-        }
-        _ => ("completed", None),
-    }
+    super::ir::responses::encode_stop(stop_reason.map(super::ir::anthropic::decode_stop).as_ref())
 }
 
-/// Builds Responses usage from Anthropic usage.
+/// Builds Responses usage from Anthropic usage (`ir::anthropic::decode_usage` →
+/// `ir::responses::encode_usage`).
 ///
 /// Anthropic's `input_tokens` is the cache-excluded fresh input. OpenAI Responses
 /// reports total input and exposes cache reads/writes as subsets:
 ///   input_tokens = fresh + cache_read + cache_creation
 ///   input_tokens_details.cached_tokens = cache_read
 ///   input_tokens_details.cache_write_tokens = cache_creation
-///
-/// The internal billing parser subtracts both subsets before charging the normal
-/// input rate, then prices cache reads and writes separately.
 pub(crate) fn build_responses_usage_from_anthropic(usage: Option<&Value>) -> Value {
-    let u = match usage {
-        Some(v) if v.is_object() => v,
-        _ => {
-            return json!({
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": 0,
-                "output_tokens_details": { "reasoning_tokens": 0 }
-            })
-        }
-    };
-
-    let fresh_input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-    let reasoning = u
-        .pointer("/output_tokens_details/thinking_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_read = u
-        .get("cache_read_input_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let cache_creation = u
-        .get("cache_creation_input_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-
-    let input_tokens = fresh_input
-        .saturating_add(cache_read)
-        .saturating_add(cache_creation);
-    let total_tokens = input_tokens.saturating_add(output);
-
-    let mut result = json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output,
-        "total_tokens": total_tokens,
-        "output_tokens_details": { "reasoning_tokens": reasoning }
-    });
-    if cache_read > 0 || cache_creation > 0 {
-        result["input_tokens_details"] = json!({
-            "cached_tokens": cache_read,
-            "cache_write_tokens": cache_creation
-        });
-    }
-    // Keep the legacy top-level alias for one compatibility window. New code reads
-    // the official nested cache_write_tokens field first.
-    if cache_creation > 0 {
-        result["cache_creation_input_tokens"] = json!(cache_creation);
-    }
-    result
+    super::ir::responses::encode_usage(&super::ir::anthropic::decode_usage(usage))
 }
 
 /// OpenAI Responses request → Anthropic Messages request
@@ -1205,96 +1140,18 @@ pub(crate) fn anthropic_response_to_responses_with_context(
         )));
     }
 
-    let id = body.get("id").and_then(|i| i.as_str()).unwrap_or("");
-    let response_id = if id.is_empty() {
-        "resp_ccswitch".to_string()
-    } else if id.starts_with("resp_") {
-        id.to_string()
-    } else {
-        format!("resp_{id}")
-    };
-    let model = body.get("model").and_then(|m| m.as_str()).unwrap_or("");
-
-    let mut output: Vec<Value> = Vec::new();
-    let mut text_parts: Vec<Value> = Vec::new();
-
-    let flush_text = |output: &mut Vec<Value>, text_parts: &mut Vec<Value>| {
-        if !text_parts.is_empty() {
-            let idx = output.len();
-            output.push(json!({
-                "id": format!("{response_id}_msg_{idx}"),
-                "type": "message",
-                "status": "completed",
-                "role": "assistant",
-                "content": std::mem::take(text_parts)
-            }));
-        }
-    };
-
-    if let Some(blocks) = body.get("content").and_then(|c| c.as_array()) {
-        for block in blocks {
-            match block.get("type").and_then(|t| t.as_str()).unwrap_or("") {
-                "text" => {
-                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                        text_parts.push(json!({
-                            "type": "output_text",
-                            "text": text,
-                            "annotations": []
-                        }));
-                    }
-                }
-                "tool_use" => {
-                    flush_text(&mut output, &mut text_parts);
-                    let call_id = block.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                    let input = block.get("input").cloned().unwrap_or(json!({}));
-                    let input = sanitize_anthropic_tool_use_input(name, input);
-                    let item_id =
-                        response_tool_call_item_id_from_chat_name(call_id, name, tool_context);
-                    output.push(response_tool_call_item_from_chat_name(
-                        &item_id,
-                        "completed",
-                        call_id,
-                        name,
-                        &canonical_json_string(&input),
-                        None,
-                        tool_context,
-                    ));
-                }
-                "thinking" | "redacted_thinking" => {
-                    flush_text(&mut output, &mut text_parts);
-                    let idx = output.len();
-                    if let Some(item) = responses_reasoning_item_from_anthropic_block(
-                        &format!("rs_{response_id}_{idx}"),
-                        block,
-                    ) {
-                        output.push(item);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    flush_text(&mut output, &mut text_parts);
-
-    let (status, incomplete_reason) =
-        map_anthropic_stop_reason_to_status(body.get("stop_reason").and_then(|s| s.as_str()));
-    let usage = build_responses_usage_from_anthropic(body.get("usage"));
-
-    let mut result = json!({
-        "id": response_id,
-        "object": "response",
-        "created_at": 0,
-        "status": status,
-        "model": model,
-        "output": output,
-        "usage": usage
-    });
-    if let Some(reason) = incomplete_reason {
-        result["incomplete_details"] = json!({ "reason": reason });
-    }
-
-    Ok(result)
+    // PROV-19/21: Anthropic message → IR → Responses (content-ordered layout).
+    use super::bridge::{Bridge, BridgePolicy, WireProtocol};
+    Bridge::new(
+        WireProtocol::OpenAiResponses,
+        WireProtocol::AnthropicMessages,
+    )
+    .response_to_client(
+        body,
+        BridgePolicy {
+            tool_context: Some(tool_context),
+        },
+    )
 }
 
 /// Aggregates an Anthropic Messages **SSE stream** (with no Content-Type marker)
@@ -1309,23 +1166,10 @@ pub(crate) fn anthropic_response_to_responses_with_context(
 /// stream): after looping over complete event blocks, it processes the residual
 /// buffer as the last event.
 pub fn anthropic_sse_to_message_value(body: &str) -> Result<Value, ProxyError> {
-    let mut message: Option<Value> = None;
-    // Collect blocks by content index along with the partial_json accumulator for their tool_use.
-    let mut blocks: BTreeMap<u64, Value> = BTreeMap::new();
-    let mut json_accum: BTreeMap<u64, String> = BTreeMap::new();
-    let mut stop_reason: Option<String> = None;
-    let mut delta_output_tokens: Option<u64> = None;
-    let mut saw_message_stop = false;
-
+    use super::ir::stream::{CollectError, Collector};
+    let mut collector = Collector::default();
     let mut buffer = body.to_string();
-    let process_block = |block: &str,
-                         message: &mut Option<Value>,
-                         blocks: &mut BTreeMap<u64, Value>,
-                         json_accum: &mut BTreeMap<u64, String>,
-                         stop_reason: &mut Option<String>,
-                         delta_output_tokens: &mut Option<u64>,
-                         saw_message_stop: &mut bool|
-     -> Result<(), ProxyError> {
+    let mut process_block = |block: &str| {
         let mut data = String::new();
         for line in block.lines() {
             if let Some(chunk) = strip_sse_field(line, "data") {
@@ -1335,168 +1179,41 @@ pub fn anthropic_sse_to_message_value(body: &str) -> Result<Value, ProxyError> {
                 data.push_str(chunk);
             }
         }
-        if data.trim().is_empty() || data.trim() == "[DONE]" {
-            return Ok(());
+        let data = data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            return;
         }
-        let value: Value = match serde_json::from_str(data.trim()) {
-            Ok(v) => v,
-            Err(_) => return Ok(()), // Skip events that cannot be parsed (ping, etc.)
-        };
-        match value.get("type").and_then(|t| t.as_str()).unwrap_or("") {
-            "message_start" => {
-                if let Some(msg) = value.get("message") {
-                    *message = Some(msg.clone());
-                }
-            }
-            "content_block_start" => {
-                if let Some(index) = value.get("index").and_then(|v| v.as_u64()) {
-                    let block = value.get("content_block").cloned().unwrap_or(json!({}));
-                    blocks.insert(index, block);
-                    json_accum.entry(index).or_default();
-                }
-            }
-            "content_block_delta" => {
-                if let Some(index) = value.get("index").and_then(|v| v.as_u64()) {
-                    let delta = value.get("delta").cloned().unwrap_or(json!({}));
-                    match delta.get("type").and_then(|t| t.as_str()).unwrap_or("") {
-                        "text_delta" => {
-                            if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                                append_str_field(
-                                    blocks.entry(index).or_insert(json!({})),
-                                    "text",
-                                    text,
-                                );
-                            }
-                        }
-                        "thinking_delta" => {
-                            if let Some(text) = delta.get("thinking").and_then(|t| t.as_str()) {
-                                append_str_field(
-                                    blocks.entry(index).or_insert(json!({})),
-                                    "thinking",
-                                    text,
-                                );
-                            }
-                        }
-                        "signature_delta" => {
-                            if let Some(sig) = delta.get("signature").and_then(|t| t.as_str()) {
-                                blocks.entry(index).or_insert(json!({}))["signature"] = json!(sig);
-                            }
-                        }
-                        "input_json_delta" => {
-                            if let Some(partial) =
-                                delta.get("partial_json").and_then(|t| t.as_str())
-                            {
-                                json_accum.entry(index).or_default().push_str(partial);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            "content_block_stop" => {
-                if let Some(index) = value.get("index").and_then(|v| v.as_u64()) {
-                    if let Some(accum) = json_accum.get(&index) {
-                        if !accum.trim().is_empty() {
-                            let parsed: Value =
-                                serde_json::from_str(accum).unwrap_or_else(|_| json!({}));
-                            if let Some(block) = blocks.get_mut(&index) {
-                                block["input"] = parsed;
-                            }
-                        }
-                    }
-                }
-            }
-            "message_delta" => {
-                if let Some(reason) = value.pointer("/delta/stop_reason").and_then(|v| v.as_str()) {
-                    *stop_reason = Some(reason.to_string());
-                }
-                if let Some(output) = value
-                    .pointer("/usage/output_tokens")
-                    .and_then(|v| v.as_u64())
-                {
-                    *delta_output_tokens = Some(output);
-                }
-            }
-            "message_stop" => *saw_message_stop = true,
-            "error" => {
-                let msg = value
-                    .pointer("/error/message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("upstream anthropic SSE error");
-                return Err(ProxyError::TransformError(format!(
-                    "anthropic SSE error event: {msg}"
-                )));
-            }
-            _ => {}
+        // Events that cannot be parsed (ping, comments) are skipped.
+        if let Some(event) = serde_json::from_str::<Value>(data)
+            .ok()
+            .as_ref()
+            .and_then(super::ir::anthropic::decode_stream_event)
+        {
+            collector.push(event);
         }
-        Ok(())
     };
-
     while let Some(block) = take_sse_block(&mut buffer) {
-        process_block(
-            &block,
-            &mut message,
-            &mut blocks,
-            &mut json_accum,
-            &mut stop_reason,
-            &mut delta_output_tokens,
-            &mut saw_message_stop,
-        )?;
+        process_block(&block);
     }
     // Tolerate the last event missing a trailing blank line (truncated stream).
     if !buffer.trim().is_empty() {
-        process_block(
-            &buffer.clone(),
-            &mut message,
-            &mut blocks,
-            &mut json_accum,
-            &mut stop_reason,
-            &mut delta_output_tokens,
-            &mut saw_message_stop,
-        )?;
+        process_block(&buffer);
     }
 
-    let mut message = message.ok_or_else(|| {
-        ProxyError::TransformError(
-            "anthropic SSE aggregation: missing message_start event".to_string(),
-        )
+    let response = collector.finish().map_err(|error| {
+        ProxyError::TransformError(match error {
+            CollectError::Upstream { message, .. } => {
+                format!("anthropic SSE error event: {message}")
+            }
+            CollectError::MissingStart => {
+                "anthropic SSE aggregation: missing message_start event".to_string()
+            }
+            CollectError::EndedEarly => {
+                "anthropic SSE aggregation: stream ended before message_stop".to_string()
+            }
+        })
     })?;
-
-    if !saw_message_stop && stop_reason.is_none() {
-        if blocks.is_empty() {
-            return Err(ProxyError::TransformError(
-                "anthropic SSE aggregation: stream ended before message_stop".to_string(),
-            ));
-        }
-        // Preserve partial content but make the truncation visible to Codex instead
-        // of returning a normal completed response.
-        stop_reason = Some("max_tokens".to_string());
-    }
-
-    // Merge in the content blocks (ordered by index), stop_reason, and the cumulative output_tokens.
-    let content: Vec<Value> = blocks.into_values().collect();
-    message["content"] = json!(content);
-    if let Some(reason) = stop_reason {
-        message["stop_reason"] = json!(reason);
-    }
-    if let Some(output) = delta_output_tokens {
-        // message_delta's usage.output_tokens is a cumulative value, overriding the 0 from message_start.
-        if let Some(usage) = message.get_mut("usage").and_then(|u| u.as_object_mut()) {
-            usage.insert("output_tokens".to_string(), json!(output));
-        }
-    }
-
-    Ok(message)
-}
-
-/// Appends content to a string field of a JSON object (creating it if absent).
-fn append_str_field(block: &mut Value, field: &str, text: &str) {
-    let existing = block
-        .get(field)
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    block[field] = json!(format!("{existing}{text}"));
+    super::ir::anthropic::encode_response(&response)
 }
 
 #[cfg(test)]

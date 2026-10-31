@@ -8,6 +8,10 @@
       "text": "Checking both cities."
     },
     {
+      "type": "redacted_thinking",
+      "data": "ccswitch-gemini-thought-v1:eyJjYWxscyI6W3siaSI6MCwibmFtZSI6ImdldF93ZWF0aGVyIiwic2lnIjoiYzJsblgzQmhjbWx6In1dfQ"
+    },
+    {
       "type": "tool_use",
       "id": "gemini_synth_<1>",
       "name": "get_weather",

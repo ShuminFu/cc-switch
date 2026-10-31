@@ -413,6 +413,7 @@ pub(crate) mod golden {
         anthropic_chat_response_error_envelope => "anthropic_chat", Response, "error_envelope";
         anthropic_chat_response_length_truncated => "anthropic_chat", Response, "length_truncated";
         anthropic_chat_response_reasoning_content => "anthropic_chat", Response, "reasoning_content";
+        anthropic_chat_response_reasoning_field => "anthropic_chat", Response, "reasoning_field";
         anthropic_chat_response_text => "anthropic_chat", Response, "text";
         anthropic_chat_response_tool_calls => "anthropic_chat", Response, "tool_calls";
         anthropic_chat_stream_double_finish_reason => "anthropic_chat", Stream, "double_finish_reason";

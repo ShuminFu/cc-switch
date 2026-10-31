@@ -10,7 +10,7 @@
 
 use super::reasoning_bridge::{encode_openai_reasoning_item, reasoning_summary_text};
 use super::transform_responses::{
-    build_anthropic_usage_from_responses, map_responses_stop_reason, responses_to_anthropic,
+    build_anthropic_usage_from_responses, map_responses_stop_reason,
     sanitize_anthropic_tool_use_input_json,
 };
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
@@ -63,141 +63,19 @@ fn anthropic_error_sse(message: &str, error_type: &str) -> Bytes {
 /// Convert a compatible gateway's non-streaming Responses JSON into a complete
 /// Anthropic SSE lifecycle. This is used when the client requested streaming but
 /// the upstream ignored `stream:true` and returned `application/json`.
+///
+/// PROV-18/19: `ir::responses::decode_response` → `ir::stream::events_from_response`
+/// → Anthropic SSE framing, so it shares every mapping rule with
+/// [`responses_to_anthropic`](super::transform_responses::responses_to_anthropic).
 fn responses_json_to_anthropic_sse(body: Value) -> Vec<Bytes> {
-    let message = match responses_to_anthropic(body) {
-        Ok(message) => message,
-        Err(error) => {
-            return vec![anthropic_error_sse(
+    super::ir::responses::decode_response(&body)
+        .and_then(|response| super::ir::anthropic::encode_response_as_stream(&response))
+        .unwrap_or_else(|error| {
+            vec![anthropic_error_sse(
                 &error.to_string(),
                 "response_transform_error",
             )]
-        }
-    };
-
-    let usage = message.get("usage").cloned().unwrap_or_else(|| json!({}));
-    let mut start_usage = usage.clone();
-    start_usage["output_tokens"] = json!(0);
-    let mut events = vec![anthropic_sse(
-        "message_start",
-        &json!({
-            "type": "message_start",
-            "message": {
-                "id": message.get("id").cloned().unwrap_or_else(|| json!("")),
-                "type": "message",
-                "role": "assistant",
-                "model": message.get("model").cloned().unwrap_or_else(|| json!("")),
-                "usage": start_usage
-            }
-        }),
-    )];
-
-    if let Some(content) = message.get("content").and_then(Value::as_array) {
-        for (index, block) in content.iter().enumerate() {
-            let index = index as u64;
-            match block.get("type").and_then(Value::as_str) {
-                Some("text") => {
-                    events.push(anthropic_sse(
-                        "content_block_start",
-                        &json!({"type":"content_block_start","index":index,"content_block":{"type":"text","text":""}}),
-                    ));
-                    if let Some(text) = block.get("text").and_then(Value::as_str) {
-                        if !text.is_empty() {
-                            events.push(anthropic_sse(
-                                "content_block_delta",
-                                &json!({"type":"content_block_delta","index":index,"delta":{"type":"text_delta","text":text}}),
-                            ));
-                        }
-                    }
-                    events.push(anthropic_sse(
-                        "content_block_stop",
-                        &json!({"type":"content_block_stop","index":index}),
-                    ));
-                }
-                Some("tool_use") => {
-                    events.push(anthropic_sse(
-                        "content_block_start",
-                        &json!({
-                            "type":"content_block_start",
-                            "index":index,
-                            "content_block":{
-                                "type":"tool_use",
-                                "id":block.get("id").cloned().unwrap_or_else(|| json!("")),
-                                "name":block.get("name").cloned().unwrap_or_else(|| json!("")),
-                                "input":{}
-                            }
-                        }),
-                    ));
-                    let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
-                    events.push(anthropic_sse(
-                        "content_block_delta",
-                        &json!({
-                            "type":"content_block_delta",
-                            "index":index,
-                            "delta":{"type":"input_json_delta","partial_json":serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string())}
-                        }),
-                    ));
-                    events.push(anthropic_sse(
-                        "content_block_stop",
-                        &json!({"type":"content_block_stop","index":index}),
-                    ));
-                }
-                Some("thinking") => {
-                    events.push(anthropic_sse(
-                        "content_block_start",
-                        &json!({"type":"content_block_start","index":index,"content_block":{"type":"thinking","thinking":""}}),
-                    ));
-                    if let Some(thinking) = block.get("thinking").and_then(Value::as_str) {
-                        if !thinking.is_empty() {
-                            events.push(anthropic_sse(
-                                "content_block_delta",
-                                &json!({"type":"content_block_delta","index":index,"delta":{"type":"thinking_delta","thinking":thinking}}),
-                            ));
-                        }
-                    }
-                    if let Some(signature) = block.get("signature").and_then(Value::as_str) {
-                        if !signature.is_empty() {
-                            events.push(anthropic_sse(
-                                "content_block_delta",
-                                &json!({"type":"content_block_delta","index":index,"delta":{"type":"signature_delta","signature":signature}}),
-                            ));
-                        }
-                    }
-                    events.push(anthropic_sse(
-                        "content_block_stop",
-                        &json!({"type":"content_block_stop","index":index}),
-                    ));
-                }
-                Some("redacted_thinking") => {
-                    events.push(anthropic_sse(
-                        "content_block_start",
-                        &json!({"type":"content_block_start","index":index,"content_block":block}),
-                    ));
-                    events.push(anthropic_sse(
-                        "content_block_stop",
-                        &json!({"type":"content_block_stop","index":index}),
-                    ));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    events.push(anthropic_sse(
-        "message_delta",
-        &json!({
-            "type":"message_delta",
-            "delta":{
-                "stop_reason":message.get("stop_reason").cloned().unwrap_or(Value::Null),
-                "stop_sequence":null
-            },
-            "usage":usage
-        }),
-    ));
-    events.push(anthropic_sse(
-        "message_stop",
-        &json!({"type":"message_stop"}),
-    ));
-    events
+        })
 }
 
 #[inline]

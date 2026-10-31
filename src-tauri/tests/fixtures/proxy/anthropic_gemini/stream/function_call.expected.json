@@ -50,6 +50,24 @@
       "type": "content_block_start",
       "index": 1,
       "content_block": {
+        "type": "redacted_thinking",
+        "data": "ccswitch-gemini-thought-v1:eyJjYWxscyI6W3siaSI6MCwibmFtZSI6ImdldF93ZWF0aGVyIiwic2lnIjoiYzJsblgzQmhjbWx6In1dfQ"
+      }
+    }
+  },
+  {
+    "event": "content_block_stop",
+    "data": {
+      "type": "content_block_stop",
+      "index": 1
+    }
+  },
+  {
+    "event": "content_block_start",
+    "data": {
+      "type": "content_block_start",
+      "index": 2,
+      "content_block": {
         "type": "tool_use",
         "id": "gemini_synth_<1>",
         "name": "get_weather"
@@ -60,7 +78,7 @@
     "event": "content_block_delta",
     "data": {
       "type": "content_block_delta",
-      "index": 1,
+      "index": 2,
       "delta": {
         "type": "input_json_delta",
         "partial_json": "{\"city\":\"Paris\"}"
@@ -71,7 +89,7 @@
     "event": "content_block_stop",
     "data": {
       "type": "content_block_stop",
-      "index": 1
+      "index": 2
     }
   },
   {

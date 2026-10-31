@@ -15,19 +15,14 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// Gemini `finishReason` → Anthropic `stop_reason` via the shared IR codec
+/// (one mapping for streaming and non-streaming, PROV-19/PROV-24).
 fn map_finish_reason(reason: Option<&str>, has_tool_use: bool, blocked: bool) -> &'static str {
-    if blocked {
-        return "refusal";
-    }
-
-    match reason {
-        Some("MAX_TOKENS") => "max_tokens",
-        Some("SAFETY")
-        | Some("RECITATION")
-        | Some("SPII")
-        | Some("BLOCKLIST")
-        | Some("PROHIBITED_CONTENT") => "refusal",
-        _ if has_tool_use => "tool_use",
+    use super::ir::StopReason;
+    match super::ir::gemini::decode_finish_reason(reason, has_tool_use, blocked) {
+        StopReason::MaxTokens => "max_tokens",
+        StopReason::Refusal => "refusal",
+        StopReason::ToolUse => "tool_use",
         _ => "end_turn",
     }
 }
@@ -913,6 +908,31 @@ pub fn create_anthropic_sse_stream_from_gemini_with_text_mode<
         // tool-call boundaries, and flush in original order.
         // ------------------------------------------------------------------
         let tool_calls = tool_call_snapshots;
+        // PROV-11: carry the calls' thoughtSignatures statelessly so a tool
+        // loop survives a proxy restart or shadow-store eviction.
+        let signatures: Vec<super::ir::gemini::ThoughtSignature> = tool_calls
+            .iter()
+            .enumerate()
+            .filter_map(|(ordinal, call)| {
+                Some(super::ir::gemini::ThoughtSignature {
+                    ordinal,
+                    name: call.name.clone(),
+                    signature: call.thought_signature.clone().filter(|s| !s.is_empty())?,
+                })
+            })
+            .collect();
+        if let Some(data) = super::ir::gemini::encode_thought_envelope(&signatures) {
+            let index = next_content_index;
+            next_content_index += 1;
+            let start_event = json!({
+                "type": "content_block_start",
+                "index": index,
+                "content_block": { "type": "redacted_thinking", "data": data }
+            });
+            yield Ok(encode_sse("content_block_start", &start_event));
+            let stop_event = json!({ "type": "content_block_stop", "index": index });
+            yield Ok(encode_sse("content_block_stop", &stop_event));
+        }
         for tool_call in &tool_calls {
             let index = next_content_index;
             next_content_index += 1;

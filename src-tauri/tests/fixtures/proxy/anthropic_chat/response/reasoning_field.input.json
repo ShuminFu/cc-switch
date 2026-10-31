@@ -1,0 +1,25 @@
+{
+  "id": "chatcmpl-or-1",
+  "object": "chat.completion",
+  "created": 1730000000,
+  "model": "openrouter/reasoner",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "reasoning": "The user wants a greeting.",
+        "content": "Hello!"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 9,
+    "total_tokens": 21,
+    "completion_tokens_details": {
+      "reasoning_tokens": 5
+    }
+  }
+}

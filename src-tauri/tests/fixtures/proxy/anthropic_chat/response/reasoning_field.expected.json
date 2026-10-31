@@ -1,0 +1,22 @@
+{
+  "id": "chatcmpl-or-1",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "The user wants a greeting."
+    },
+    {
+      "type": "text",
+      "text": "Hello!"
+    }
+  ],
+  "model": "openrouter/reasoner",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 9
+  }
+}

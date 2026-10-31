@@ -14,6 +14,7 @@
 //! - **OpenRouter**: 已支持 Claude Code 兼容接口，默认透传
 //! - **GitHubCopilot**: GitHub Copilot (OAuth + Copilot Token)
 
+use super::bridge::WireProtocol;
 use super::{AuthInfo, AuthStrategy, ProviderAdapter, ProviderType};
 use crate::provider::Provider;
 use crate::proxy::error::ProxyError;
@@ -72,19 +73,14 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
     // 0) Codex OAuth 强制使用 openai_responses（不可被覆盖）
     if let Some(meta) = provider.meta.as_ref() {
         if meta.provider_type.as_deref() == Some("codex_oauth") {
-            return "openai_responses";
+            return WireProtocol::OpenAiResponses.api_format();
         }
     }
 
     // 1) Preferred: meta.apiFormat (SSOT, never written to Claude Code config)
     if let Some(meta) = provider.meta.as_ref() {
         if let Some(api_format) = meta.api_format.as_deref() {
-            return match api_format {
-                "openai_chat" => "openai_chat",
-                "openai_responses" => "openai_responses",
-                "gemini_native" => "gemini_native",
-                _ => "anthropic",
-            };
+            return WireProtocol::from_api_format(api_format).api_format();
         }
     }
 
@@ -94,12 +90,7 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
         .get("api_format")
         .and_then(|v| v.as_str())
     {
-        return match api_format {
-            "openai_chat" => "openai_chat",
-            "openai_responses" => "openai_responses",
-            "gemini_native" => "gemini_native",
-            _ => "anthropic",
-        };
+        return WireProtocol::from_api_format(api_format).api_format();
     }
 
     // 3) Backward compatibility: legacy openrouter_compat_mode (bool/number/string)
@@ -115,17 +106,14 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
     };
 
     if enabled {
-        "openai_chat"
+        WireProtocol::OpenAiChat.api_format()
     } else {
-        "anthropic"
+        WireProtocol::AnthropicMessages.api_format()
     }
 }
 
 pub fn claude_api_format_needs_transform(api_format: &str) -> bool {
-    matches!(
-        api_format,
-        "openai_chat" | "openai_responses" | "gemini_native"
-    )
+    super::bridge::Bridge::for_claude_api_format(api_format).needs_transform()
 }
 
 fn is_reasoning_vendor_identifier(value: &str) -> bool {
@@ -140,7 +128,7 @@ fn should_normalize_anthropic_tool_thinking_history(
     body: &Value,
     api_format: &str,
 ) -> bool {
-    if api_format.trim() != "anthropic" {
+    if WireProtocol::parse(api_format.trim()) != Some(WireProtocol::AnthropicMessages) {
         return false;
     }
 
@@ -261,7 +249,7 @@ pub fn normalize_anthropic_messages_for_provider(
     provider: &Provider,
     api_format: &str,
 ) -> bool {
-    if api_format.trim() != "anthropic" {
+    if WireProtocol::parse(api_format.trim()) != Some(WireProtocol::AnthropicMessages) {
         return false;
     }
 
@@ -473,8 +461,8 @@ pub fn transform_claude_request_for_api_format(
     } else {
         (None, "none")
     };
-    match api_format {
-        "openai_responses" => {
+    match WireProtocol::parse(api_format) {
+        Some(WireProtocol::OpenAiResponses) => {
             log::debug!(
                 "[Cache] OpenAI Responses prompt_cache_key source={cache_key_source}, provider={}, codex_oauth={is_codex_oauth}, has_key={}",
                 provider.id,
@@ -492,7 +480,7 @@ pub fn transform_claude_request_for_api_format(
             apply_responses_reasoning_summary_override(&mut result, provider);
             Ok(result)
         }
-        "openai_chat" => {
+        Some(WireProtocol::OpenAiChat) => {
             let preserve_reasoning_content =
                 should_preserve_reasoning_content_for_openai_chat(provider, &body);
             // PROV-04: reuse the per-vendor Chat reasoning capability model that the
@@ -540,13 +528,15 @@ pub fn transform_claude_request_for_api_format(
             super::transform::inject_openai_stream_include_usage(&mut result);
             Ok(result)
         }
-        "gemini_native" => super::transform_gemini::anthropic_to_gemini_with_shadow(
-            body,
-            shadow_store,
-            Some(&provider.id),
-            session_id,
-        ),
-        _ => Ok(body),
+        Some(WireProtocol::GeminiNative) => {
+            super::transform_gemini::anthropic_to_gemini_with_shadow(
+                body,
+                shadow_store,
+                Some(&provider.id),
+                session_id,
+            )
+        }
+        Some(WireProtocol::AnthropicMessages) | None => Ok(body),
     }
 }
 
@@ -568,7 +558,7 @@ impl ClaudeAdapter {
     /// - Claude: 默认 Anthropic 官方
     pub fn provider_type(&self, provider: &Provider) -> ProviderType {
         // 检测 Gemini Native 格式
-        if self.get_api_format(provider) == "gemini_native" {
+        if WireProtocol::parse(self.get_api_format(provider)) == Some(WireProtocol::GeminiNative) {
             return match self.extract_key(provider) {
                 Some(key) if key.starts_with("ya29.") || key.starts_with('{') => {
                     ProviderType::GeminiCli
@@ -1021,10 +1011,7 @@ impl ProviderAdapter for ClaudeAdapter {
         // - "anthropic" (默认): 直接透传，无需转换
         // - "openai_chat": 需要 Anthropic ↔ OpenAI Chat Completions 格式转换
         // - "openai_responses": 需要 Anthropic ↔ OpenAI Responses API 格式转换
-        matches!(
-            self.get_api_format(provider),
-            "openai_chat" | "openai_responses" | "gemini_native"
-        )
+        claude_api_format_needs_transform(self.get_api_format(provider))
     }
 
     fn transform_request(
@@ -1039,21 +1026,6 @@ impl ProviderAdapter for ClaudeAdapter {
             None,
             None,
         )
-    }
-
-    fn transform_response(&self, body: serde_json::Value) -> Result<serde_json::Value, ProxyError> {
-        // Heuristic: detect response format by presence of top-level fields.
-        // The ProviderAdapter trait's transform_response doesn't receive the Provider
-        // config, so we can't check api_format here. Instead we rely on the fact that
-        // Responses API always returns "output" while Chat Completions returns "choices".
-        // This is safe because the two formats are structurally disjoint.
-        if body.get("candidates").is_some() || body.get("promptFeedback").is_some() {
-            super::transform_gemini::gemini_to_anthropic(body)
-        } else if body.get("output").is_some() {
-            super::transform_responses::responses_to_anthropic(body)
-        } else {
-            super::transform::openai_to_anthropic(body)
-        }
     }
 }
 
