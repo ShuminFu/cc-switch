@@ -1524,8 +1524,15 @@ impl SkillService {
 
     #[cfg(windows)]
     fn create_symlink(src: &Path, dest: &Path) -> Result<()> {
-        std::os::windows::fs::symlink_dir(src, dest)
-            .with_context(|| format!("创建符号链接失败: {} -> {}", src.display(), dest.display()))
+        std::os::windows::fs::symlink_dir(src, dest).with_context(|| {
+            format!("创建符号链接失败: {} -> {}", src.display(), dest.display())
+        })?;
+        // CreateSymbolicLinkW 可能"成功"却未创建任何东西（例如 Wine 中它是返回 TRUE 的 stub）。
+        // 视为失败，让 Auto 模式回退到复制，而不是静默留下缺失的 Skill 目录。
+        if !Self::is_symlink(dest) {
+            anyhow::bail!("符号链接未创建: {} -> {}", src.display(), dest.display());
+        }
+        Ok(())
     }
 
     /// 检查路径是否为符号链接
