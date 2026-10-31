@@ -9,6 +9,7 @@ import {
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageDashboard } from "@/components/usage/UsageDashboard";
+import { resetDashboardViewState } from "@/components/usage/dashboardViewState";
 
 const useProviderStatsMock = vi.hoisted(() => vi.fn());
 const useModelStatsMock = vi.hoisted(() => vi.fn());
@@ -70,6 +71,12 @@ vi.mock("@/components/usage/PricingConfigPanel", () => ({
   PricingConfigPanel: () => <div data-testid="pricing-config-panel" />,
 }));
 
+vi.mock("@/components/usage/UsageExportButton", () => ({
+  UsageExportButton: ({ appType }: { appType?: string }) => (
+    <div data-testid="usage-export">{appType}</div>
+  ),
+}));
+
 vi.mock("@/components/usage/BudgetLimitsPanel", () => ({
   BudgetLimitsPanel: () => <div data-testid="budget-limits-panel" />,
 }));
@@ -112,6 +119,7 @@ const renderDashboard = (props: ComponentProps<typeof UsageDashboard> = {}) => {
 
 describe("UsageDashboard", () => {
   beforeEach(() => {
+    resetDashboardViewState();
     useProviderStatsMock.mockReset();
     useModelStatsMock.mockReset();
     useProviderStatsMock.mockReturnValue({ data: [] });
@@ -156,5 +164,17 @@ describe("UsageDashboard", () => {
     await waitFor(() =>
       expect(screen.getByTestId("select-30000")).toBeInTheDocument(),
     );
+  });
+
+  it("keeps the app filter after the dashboard remounts (FE-UI-31)", () => {
+    const first = renderDashboard();
+    fireEvent.click(
+      screen.getByRole("button", { name: "usage.appFilter.codex" }),
+    );
+    expect(screen.getByTestId("usage-export")).toHaveTextContent("codex");
+    first.unmount();
+
+    renderDashboard();
+    expect(screen.getByTestId("usage-export")).toHaveTextContent("codex");
   });
 });

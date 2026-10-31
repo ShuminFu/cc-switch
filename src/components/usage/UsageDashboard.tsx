@@ -46,6 +46,12 @@ import { getLocaleFromLanguage } from "./format";
 import { getUsageRangePresetLabel, resolveUsageRange } from "@/lib/usageRange";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UsageExportButton } from "./UsageExportButton";
+import {
+  getDashboardViewState,
+  saveDashboardViewState,
+  type UsageDashboardViewState,
+} from "./dashboardViewState";
 
 const APP_FILTER_OPTIONS: AppTypeFilter[] = ["all", ...KNOWN_APP_TYPES];
 
@@ -88,12 +94,28 @@ export function UsageDashboard({
 }: UsageDashboardProps = {}) {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
-  const [range, setRange] = useState<UsageRangeSelection>({ preset: "today" });
-  const [appType, setAppType] = useState<AppTypeFilter>("all");
+  // Restored from the in-memory view state so switching Settings tabs
+  // keeps range, filters and the active sub-tab (FE-UI-31).
+  const [initialView] = useState(getDashboardViewState);
+  const [range, setRange] = useState<UsageRangeSelection>(initialView.range);
+  const [appType, setAppType] = useState<AppTypeFilter>(initialView.appType);
   const [providerName, setProviderName] = useState<string | undefined>(
-    undefined,
+    initialView.providerName,
   );
-  const [model, setModel] = useState<string | undefined>(undefined);
+  const [model, setModel] = useState<string | undefined>(initialView.model);
+  const [activeTab, setActiveTab] = useState<UsageDashboardViewState["tab"]>(
+    initialView.tab,
+  );
+
+  useEffect(() => {
+    saveDashboardViewState({
+      range,
+      appType,
+      providerName,
+      model,
+      tab: activeTab,
+    });
+  }, [range, appType, providerName, model, activeTab]);
   const [refreshIntervalMs, setRefreshIntervalMs] = useState(() =>
     normalizeRefreshInterval(savedRefreshIntervalMs),
   );
@@ -330,6 +352,13 @@ export function UsageDashboard({
               triggerLabel={rangeLabel}
               onApply={(nextRange) => setRange(nextRange)}
             />
+
+            <UsageExportButton
+              range={range}
+              appType={appType}
+              providerName={providerName}
+              model={model}
+            />
           </div>
         </div>
       </div>
@@ -352,7 +381,13 @@ export function UsageDashboard({
       />
 
       <div className="space-y-4">
-        <Tabs defaultValue="logs" className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) =>
+            setActiveTab(v as UsageDashboardViewState["tab"])
+          }
+          className="w-full"
+        >
           <div className="flex items-center justify-between mb-4">
             <TabsList className="bg-muted/50">
               <TabsTrigger value="logs" className="gap-2">
