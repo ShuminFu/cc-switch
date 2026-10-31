@@ -7,6 +7,7 @@ pub mod coding_plan;
 pub mod config;
 pub mod env_checker;
 pub mod env_manager;
+pub mod env_profile;
 pub mod mcp;
 pub mod model_fetch;
 pub mod notifications;

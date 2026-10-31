@@ -42,6 +42,10 @@ fn get_keywords_for_app(app: &str) -> Vec<&str> {
         "claude" => vec!["ANTHROPIC"],
         "codex" => vec!["OPENAI"],
         "gemini" => vec!["GEMINI", "GOOGLE_GEMINI"],
+        "grokbuild" => vec!["XAI_", "GROK_"],
+        "opencode" => vec!["OPENCODE_"],
+        "openclaw" => vec!["OPENCLAW_"],
+        "hermes" => vec!["HERMES_"],
         _ => vec![],
     }
 }
@@ -118,8 +122,15 @@ pub(crate) fn shell_config_files() -> Vec<String> {
         format!("{}/.zshrc", home),
         format!("{}/.zprofile", home),
         format!("{}/.profile", home),
+        // zsh reads these for every shell (including non-interactive ones),
+        // so a variable set here shadows the live config too (SVC-48).
+        format!("{}/.zshenv", home),
+        format!("{}/.config/fish/config.fish", home),
         "/etc/profile".to_string(),
         "/etc/bashrc".to_string(),
+        "/etc/zshrc".to_string(),
+        "/etc/zprofile".to_string(),
+        "/etc/zshenv".to_string(),
     ]
 }
 
@@ -131,12 +142,40 @@ pub(crate) fn parse_assignment(line: &str) -> Option<(&str, &str)> {
     if trimmed.starts_with('#') {
         return None;
     }
+    if trimmed.starts_with("set ") {
+        return parse_fish_set(trimmed);
+    }
     let export_line = trimmed.strip_prefix("export ").unwrap_or(trimmed);
     let eq_pos = export_line.find('=')?;
     Some((
         export_line[..eq_pos].trim(),
         export_line[eq_pos + 1..].trim(),
     ))
+}
+
+/// fish: `set -gx NAME value` / `set -x NAME value` / `set -Ux NAME value`.
+/// Only exported (`x`) variables count.
+#[cfg(not(target_os = "windows"))]
+fn parse_fish_set(trimmed: &str) -> Option<(&str, &str)> {
+    let mut rest = trimmed.strip_prefix("set ")?.trim_start();
+    let mut exported = false;
+    while let Some(flag) = rest.strip_prefix('-') {
+        let end = flag.find(char::is_whitespace)?;
+        let flag_name = &flag[..end];
+        if flag_name == "-export" || (!flag_name.starts_with('-') && flag_name.contains('x')) {
+            exported = true;
+        }
+        rest = flag[end..].trim_start();
+    }
+    if !exported {
+        return None;
+    }
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let name = &rest[..end];
+    if name.is_empty() || name.contains('=') {
+        return None;
+    }
+    Some((name, rest[end..].trim()))
 }
 
 /// Scan one rc file's content for assignments whose name contains a keyword.
@@ -193,6 +232,32 @@ mod tests {
             vec!["GEMINI", "GOOGLE_GEMINI"]
         );
         assert_eq!(get_keywords_for_app("unknown"), Vec::<&str>::new());
+        // SVC-35: every app with env-driven config is covered.
+        for app in crate::app_config::AppType::all() {
+            if matches!(app, crate::app_config::AppType::ClaudeDesktop) {
+                continue;
+            }
+            assert!(
+                !get_keywords_for_app(app.as_str()).is_empty(),
+                "no env keywords for {}",
+                app.as_str()
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn fish_exports_are_detected() {
+        assert_eq!(
+            parse_assignment("set -gx ANTHROPIC_API_KEY 'a b'"),
+            Some(("ANTHROPIC_API_KEY", "'a b'"))
+        );
+        assert_eq!(
+            parse_assignment("set -x OPENAI_API_KEY sk"),
+            Some(("OPENAI_API_KEY", "sk"))
+        );
+        assert_eq!(parse_assignment("set -l LOCAL_ONLY 1"), None);
+        assert!(shell_config_files().iter().any(|p| p.ends_with("/.zshenv")));
     }
 
     #[cfg(not(target_os = "windows"))]
