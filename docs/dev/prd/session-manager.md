@@ -1,3 +1,9 @@
+> **Status: historical design document (v1 PRD), kept for reference.** The shipped Session
+> Manager works on Windows, macOS and Linux and covers more tools than this draft; for current
+> behaviour see the user manual, [3.4 Session Manager](../../user-manual/en/3-extensions/3.4-sessions.md).
+>
+> **状态：历史设计文档（v1 PRD），仅供参考。** 已发布的会话管理器支持 Windows、macOS 与 Linux，覆盖的工具也比本草案更多；当前行为请以用户手册 [3.4 会话管理](../../user-manual/zh/3-extensions/3.4-sessions.md) 为准。
+
 # 会话管理（Session Manager）需求文档（PRD / Markdown）
 
 > 目标：对 **Codex / Claude Code** 的本地会话记录进行可视化管理，并提供“一键复制 / 一键终端恢复”能力。

@@ -204,7 +204,7 @@ TeamoRouter 还提供企业级功能，包括集中账单、团队管理、BYOK�
 - **告别手动编辑** — 50+ 供应商预设，包括 AWS Bedrock、NVIDIA NIM 和社区中转服务；一键即可切换
 - **统一 MCP, SKILLS 管理** — 一个面板管理 Claude、Codex、Gemini、Grok Build、OpenCode 和 Hermes 的 MCP, SKILLS, 支持双向同步
 - **系统托盘快速切换** — 从托盘菜单即时切换供应商，无需打开完整应用
-- **云同步** — 通过 Dropbox、OneDrive、iCloud 或 WebDAV 服务器在不同设备之间同步供应商数据
+- **云同步** — 通过 Dropbox、OneDrive、iCloud、WebDAV 服务器或 S3 兼容存储（AWS S3、Cloudflare R2、阿里云 OSS 等）在不同设备之间同步供应商数据
 - **跨平台** — 基于 Tauri 2 构建的原生桌面应用，支持 Windows、macOS 和 Linux
 - **小工具** - 内置了多种小工具：跳过 Claude Code 首次运行确认、通过通用配置片段关闭 Claude Code 提交中的 `Co-Authored-By` 署名、代理模式下自动修复 thinking 签名错误（Thinking 签名整流）、将供应商同步到 Claude Code VS Code 插件等
 
@@ -246,7 +246,7 @@ TeamoRouter 还提供企业级功能，包括集中账单、团队管理、BYOK�
 
 ### 系统与平台
 
-- **云同步** — 自定义配置目录（Dropbox、OneDrive、iCloud、坚果云、NAS）及 WebDAV 服务器同步
+- **云同步** — 自定义配置目录（Dropbox、OneDrive、iCloud、坚果云、NAS）、WebDAV 服务器同步及 S3 兼容对象存储同步，可选端到端加密
 - **Deep Link** (`ccswitch://`) — 通过 URL 一键导入供应商、MCP 服务器、提示词和技能
 - 深色 / 浅色 / 跟随系统主题、开机自启、自动更新、原子写入、自动备份、国际化（简中/繁中/英/日）
 
@@ -328,6 +328,11 @@ CC_SWITCH_GDK_BACKEND=wayland ./CC-Switch-*.AppImage
 - **[深度链接规范](docs/deeplink-spec.md)**（英文）— 面向链接制作者的 `ccswitch://` 导入协议
 - **[发布说明](docs/release-notes/README.md)** — 各版本的中英日发布说明
 - **[赞助商政策（提案）](docs/sponsor-policy.md)**（英文）— 赞助预设的收录、审核与下架规则
+- **[使用指南](docs/guides/README.md)** — 分步骤的实操指南（Codex 路由到 Claude / Kimi / DeepSeek、保留官方登录、统一会话历史）
+- **[故障排查](docs/user-manual/zh/5-faq/5.6-troubleshooting.md)** — 各系统的常见问题以及日志、崩溃日志的位置
+- **[安全模型](docs/security/model.md)**（英文）— 数据存放位置、本地代理暴露了什么、更新如何签名
+- **[深度链接生成器](https://farion1231.github.io/cc-switch/deplink.html)** — 在浏览器中生成 `ccswitch://` 导入链接
+- **[开发者文档](docs/dev/architecture.md)**（英文）— 架构、模块地图、测试与[发版流程](RELEASING.md)
 
 ## 快速开始
 
@@ -353,13 +358,18 @@ CC_SWITCH_GDK_BACKEND=wayland ./CC-Switch-*.AppImage
 
 ### 系统要求
 
-- **Windows**：Windows 10 及以上
-- **macOS**：macOS 12 (Monterey) 及以上
-- **Linux**：Ubuntu 22.04+ / Debian 11+ / Fedora 34+ 等主流发行版
+- **Windows**：Windows 10 及以上，x64 或 ARM64
+- **macOS**：macOS 12 (Monterey) 及以上，Apple Silicon 或 Intel（通用版）
+- **Linux**：x86_64 或 ARM64，需要 glibc 2.35+ 和 WebKitGTK 4.1，例如 Ubuntu 22.04+、Debian 12+、Fedora 36+（Linux 安装包在 Ubuntu 22.04 上构建，Debian 11 等更旧的发行版无法运行）
 
 ### Windows 用户
 
-从 [Releases](../../releases) 页面下载最新版本的 `CC-Switch-v{版本号}-Windows.msi` 安装包或 `CC-Switch-v{版本号}-Windows-Portable.zip` 绿色版。
+从 [Releases 页面](https://github.com/farion1231/cc-switch/releases/latest) 下载：
+
+- `CC-Switch-v{版本号}-Windows.msi`（安装版）或 `CC-Switch-v{版本号}-Windows-Portable.zip`（绿色版），适用于 x64
+- `CC-Switch-v{版本号}-Windows-arm64.msi` 或 `CC-Switch-v{版本号}-Windows-arm64-Portable.zip`，原生 ARM64 版本
+
+> **注意**：Windows 版本目前可能还没有 Authenticode 签名，SmartScreen 可能提示"Windows 已保护你的电脑"，点击"更多信息"→"仍要运行"即可。运行前可以先用 `SHA256SUMS` 校验下载文件，参见[校验下载文件](SECURITY.md#verifying-a-download)（英文）。
 
 ### macOS 用户
 
@@ -377,7 +387,7 @@ brew upgrade --cask cc-switch
 
 **方式二：手动下载**
 
-从 [Releases](../../releases) 页面下载 `CC-Switch-v{版本号}-macOS.dmg`（推荐）或 `.zip`。
+从 [Releases 页面](https://github.com/farion1231/cc-switch/releases/latest) 下载 `CC-Switch-v{版本号}-macOS.dmg`（推荐）或 `CC-Switch-v{版本号}-macOS.zip`。这是同时支持 Apple Silicon 与 Intel 的通用版本。
 
 > **注意**：CC Switch macOS 版本已通过 Apple 代码签名和公证，可直接安装打开。
 
@@ -391,193 +401,17 @@ paru -S cc-switch-bin
 
 ### Linux 用户
 
-从 [Releases](../../releases) 页面下载最新版本的 Linux 安装包：
+从 [Releases 页面](https://github.com/farion1231/cc-switch/releases/latest) 下载与你的架构（`x86_64` 或 `arm64`）对应的 Linux 安装包：
 
-- `CC-Switch-v{版本号}-Linux.deb`（Debian/Ubuntu）
-- `CC-Switch-v{版本号}-Linux.rpm`（Fedora/RHEL/openSUSE）
-- `CC-Switch-v{版本号}-Linux.AppImage`（通用）
+- `CC-Switch-v{版本号}-Linux-x86_64.deb` / `CC-Switch-v{版本号}-Linux-arm64.deb`（Debian/Ubuntu）
+- `CC-Switch-v{版本号}-Linux-x86_64.rpm` / `CC-Switch-v{版本号}-Linux-arm64.rpm`（Fedora/RHEL/openSUSE）
+- `CC-Switch-v{版本号}-Linux-x86_64.AppImage` / `CC-Switch-v{版本号}-Linux-arm64.AppImage`（通用；也是应用内更新唯一支持的 Linux 格式）
 
-> **Flatpak**：官方 Release 不包含 Flatpak 包。如需使用，可从 `.deb` 自行构建 — 参见 [`flatpak/README.md`](flatpak/README.md)。
+> **Flatpak**：官方 Release 不包含 Flatpak 包。如需使用，可从 `.deb` 自行构建 — 参见 [`flatpak/README.md`](flatpak/README.md)（含已知限制）。
 
-<details>
-<summary><strong>架构总览</strong></summary>
+如果应用无法启动或表现异常，请参阅[故障排查](docs/user-manual/zh/5-faq/5.6-troubleshooting.md)（各系统的日志位置、如何收集崩溃日志）。
 
-### 设计原则
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    前端 (React + TS)                         │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │ Components  │  │    Hooks     │  │  TanStack Query  │    │
-│  │   （UI）     │──│ （业务逻辑）   │──│   （缓存/同步）    │    │
-│  └─────────────┘  └──────────────┘  └──────────────────┘    │
-└────────────────────────┬────────────────────────────────────┘
-                         │ Tauri IPC
-┌────────────────────────▼────────────────────────────────────┐
-│                  后端 (Tauri + Rust)                         │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
-│  │  Commands   │  │   Services   │  │  Models/Config   │    │
-│  │ （API 层）   │──│  （业务层）    │──│    （数据）       │    │
-│  └─────────────┘  └──────────────┘  └──────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**核心设计模式**
-
-- **SSOT**（单一事实源）：所有数据存储在 `~/.cc-switch/cc-switch.db`（SQLite）
-- **双层存储**：SQLite 存储可同步数据，JSON 存储设备级设置
-- **双向同步**：切换时写入 live 文件，编辑当前供应商时从 live 回填
-- **原子写入**：临时文件 + 重命名模式防止配置损坏
-- **并发安全**：Mutex 保护的数据库连接避免竞态条件
-- **分层架构**：清晰分离（Commands → Services → DAO → Database）
-
-**核心组件**
-
-- **ProviderService**：供应商增删改查、切换、回填、排序
-- **McpService**：MCP 服务器管理、导入导出、live 文件同步
-- **ProxyService**：本地 Proxy 模式，支持热切换和格式转换
-- **SessionManager**：全应用会话历史浏览
-- **ConfigService**：配置导入导出、备份轮换
-- **SpeedtestService**：API 端点延迟测量
-
-</details>
-
-<details>
-<summary><strong>开发指南</strong></summary>
-
-### 环境要求
-
-- Node.js `^20.19.0` 或 `>=22.12.0`（`.node-version` 固定为 22.12.0）
-- pnpm 10（CI 使用 10.12.3）
-- Rust：由 rustup 根据 `rust-toolchain.toml`（1.95）自动安装
-- Tauri CLI 2.8+（已作为开发依赖提供）
-
-### 开发命令
-
-```bash
-# 安装依赖
-pnpm install
-
-# 开发模式（热重载）
-pnpm dev
-
-# 类型检查
-pnpm typecheck
-
-# 代码检查（ESLint）
-pnpm lint
-
-# 代码格式化
-pnpm format
-
-# 检查代码格式
-pnpm format:check
-
-# 运行前端单元测试
-pnpm test:unit
-
-# 监听模式运行测试（推荐开发时使用）
-pnpm test:unit:watch
-
-# 构建应用
-pnpm build
-
-# 构建调试版本
-pnpm tauri build --debug
-```
-
-### Rust 后端开发
-
-```bash
-cd src-tauri
-
-# 格式化 Rust 代码
-cargo fmt
-
-# 运行 clippy 检查
-cargo clippy
-
-# 运行后端测试
-cargo test
-
-# 运行特定测试
-cargo test test_name
-
-# 运行带测试 hooks 的测试
-cargo test --features test-hooks
-```
-
-### 测试说明
-
-**前端测试**：
-
-- 使用 **vitest** 作为测试框架
-- 使用 **MSW (Mock Service Worker)** 模拟 Tauri API 调用
-- 使用 **@testing-library/react** 进行组件测试
-
-**运行测试**：
-
-```bash
-# 运行所有测试
-pnpm test:unit
-
-# 监听模式（自动重跑）
-pnpm test:unit:watch
-
-# 带覆盖率报告
-pnpm test:unit --coverage
-```
-
-### 技术栈
-
-**前端**：React 18 · TypeScript · Vite · TailwindCSS 3.4 · TanStack Query v5 · react-i18next · react-hook-form · zod · shadcn/ui · @dnd-kit
-
-**后端**：Tauri 2.8 · Rust · serde · tokio · thiserror · tauri-plugin-updater/process/dialog/store/log
-
-**测试**：vitest · MSW · @testing-library/react
-
-</details>
-
-<details>
-<summary><strong>项目结构</strong></summary>
-
-```
-├── src/                        # 前端 (React + TypeScript)
-│   ├── components/
-│   │   ├── providers/          # 供应商管理
-│   │   ├── mcp/                # MCP 面板
-│   │   ├── prompts/            # Prompts 管理
-│   │   ├── skills/             # Skills 管理
-│   │   ├── sessions/           # 会话管理器
-│   │   ├── proxy/              # Proxy 模式面板
-│   │   ├── openclaw/           # OpenClaw 配置面板
-│   │   ├── settings/           # 设置（终端/备份/关于）
-│   │   ├── deeplink/           # Deep Link 导入
-│   │   ├── env/                # 环境变量管理
-│   │   ├── universal/          # 跨应用配置
-│   │   ├── usage/              # 用量统计
-│   │   └── ui/                 # shadcn/ui 组件库
-│   ├── hooks/                  # 自定义 hooks（业务逻辑）
-│   ├── lib/
-│   │   ├── api/                # Tauri API 封装（类型安全）
-│   │   └── query/              # TanStack Query 配置
-│   ├── i18n/locales/           # 翻译 (en/zh/zh-TW/ja)
-│   ├── config/                 # 预设 (providers/mcp)
-│   └── types/                  # TypeScript 类型定义
-├── src-tauri/                  # 后端 (Rust)
-│   └── src/
-│       ├── commands/           # Tauri 命令层（按领域）
-│       ├── services/           # 业务逻辑层
-│       ├── database/           # SQLite DAO 层
-│       ├── proxy/              # Proxy 模块
-│       ├── session_manager/    # 会话管理
-│       ├── deeplink/           # Deep Link 处理
-│       └── mcp/                # MCP 同步模块
-├── tests/                      # 前端测试
-└── assets/                     # 截图 & 合作商资源
-```
-
-</details>
+**开发者**：架构总览、模块地图以及每次改动都必须遵守的约束见 [docs/dev/architecture.md](docs/dev/architecture.md)（英文）；开发环境、常用命令以及 CI 实际执行的检查见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/dev/testing.md](docs/dev/testing.md)（英文）；发版流程见 [RELEASING.md](RELEASING.md)（英文）。
 
 ## 贡献
 
